@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  verify:
+    name: Verify (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      # Install the channel from rust-toolchain.toml with fmt/clippy components.
+      # Using @stable alone leaves 1.96.0 (from rust-toolchain.toml) without rustfmt.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@1.96.0
+        with:
+          components: rustfmt, clippy
+
+      - name: Verify
+        run: |
+          cargo fmt --check
+          cargo clippy --all-targets -- -D warnings
+          cargo test
+          cargo build --release
+
+      # Frame-time bench is ignored in the main `cargo test` run (debug builds are too
+      # slow for the thresholds). Scope to this test only: a bare `--ignored` would also
+      # rewrite golden fixtures. Retry once for shared-runner noise.
+      - name: Performance bench
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          bench() { cargo test --release --test queue_board_bench -- --ignored --test-threads=1; }
+          bench || {
+            echo "::warning::bench failed on attempt 1; retrying once (shared-runner timing noise)"
+            bench
+          }

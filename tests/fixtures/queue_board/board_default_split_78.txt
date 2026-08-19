@@ -1,0 +1,26 @@
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                                                               all projects ▾ │
+│                                                                              │
+│ IN MOTION ─────────────────────────────────────────────────────────────────2 │
+│                                                                              │
+│  ▸ Smoke-test worktree dispatch                             herdr-tasks · 3m │
+│  ▸ Edit target binding pin                                       herdr · 12m │
+│                                                                              │
+│ herdr-tasks ───────────────────────────────────────────────────────────────2 │
+│                                                                              │
+│  ○ Prototype the queue-style board UI                                     1h │
+│  ○ Cut rust-toolchain pin into CI docs                                    1d │
+│                                                                              │
+│ herdr ─────────────────────────────────────────────────────────────────────2 │
+│                                                                              │
+│  ■ Wire dispatch cleanup receipts                                        41m │
+│  ▲ Docs refresh pass after F9 ships                                       3h │
+│                                                                              │
+│ global ────────────────────────────────────────────────────────────────────1 │
+│                                                                              │
+│  ○ Global backlog note                                                    2d │
+│                                                                              │
+│──────────────────────────────────────────────────────────────────────────────│
+│ 2 done                                                                       │
+│ enter open · alt+d done · alt+b block · : palette · ? help                   │
+└──────────────────────────────────────────────────────────────────────────────┘

@@ -1,0 +1,136 @@
+# herdr-tasks
+
+A [herdr](https://herdr.dev) plugin: a queue board for capturing work and moving it
+through human status. Park, resume, attention, linking, and dispatch-start are not
+board actions. Dispatch recovery can still open if a persisted attempt is already
+in the store.
+
+## Requirements
+
+- herdr 0.7.5 or newer
+- Rust 1.96.0 (pinned in `rust-toolchain.toml`)
+- Linux or macOS
+
+## Install
+
+The plugin pane runs `./target/release/herdr-tasks`, so build before you link:
+
+```bash
+git clone git@github.com:smarzban/herdr-tasks.git
+cd herdr-tasks
+cargo build --release
+herdr plugin link "$PWD"
+```
+
+`herdr plugin list` should show `herdr-tasks` enabled against that path. Rebuild
+after you pull.
+
+## Open the board
+
+From herdr, pick **Open Tasks board**, or:
+
+```bash
+herdr plugin action invoke open-board --plugin herdr-tasks
+```
+
+It opens a **Tasks** split beside the current pane. Invoking it again focuses the
+board you already have.
+
+**Quick capture** opens the capture form without the board:
+
+```bash
+herdr plugin action invoke quick-capture --plugin herdr-tasks
+```
+
+State lives under `HERDR_PLUGIN_STATE_DIR`. Config (including the verb modifier)
+lives under `HERDR_PLUGIN_CONFIG_DIR`.
+
+## Pane size
+
+| Pane | What you get |
+| --- | --- |
+| at least 78×24 | standard board: section headers, row meta, full verb legend |
+| smaller | compact: glyph and title only; help, palette, and the task page take the full pane |
+
+The board stays operable down to 40×10. A typical herdr split is 78 columns, which
+is the standard board.
+
+## Sections
+
+One urgency-ordered list. Sections are computed, not navigated.
+
+- **IN MOTION**: work you have started
+- When showing all projects: one group per project, global last
+- When scoped to one project: **ON DECK** for that project
+- **z** opens the done drawer
+
+## Keys
+
+Mutating keys need **Alt** (or **Ctrl**, if you flip it in the palette). Bare
+letters do nothing, so typing in a focused board cannot complete or delete work.
+
+| Key | Does |
+| --- | --- |
+| `j` `k` or `↑` `↓` | move (the wheel does too) |
+| `alt+space` | start the selected task, or reopen it if it is done |
+| `alt+d` | done |
+| `alt+o` | reopen |
+| `alt+b` | toggle blocked |
+| `Enter` | open the task page |
+| `→` `←` | peek notes under the row (up to five lines) |
+| `alt+a` | capture |
+| `alt+e` | edit title |
+| `alt+x` or `alt+Delete` | delete (`alt+u` undoes) |
+| `z` | done drawer |
+| `:` | command palette |
+| `?` | help |
+| `P` | project scope |
+| `Esc` | close the open surface |
+| `alt+q` | quit |
+
+Click a row to peek. Click it again to close. A fast double-click opens the page.
+
+`Esc` closes one layer at a time. In the palette, `q` types into the query; leave
+with `Esc`.
+
+## The task page
+
+`Enter` opens the selected task full height. It is view-first: nothing is in edit
+mode until you ask. `alt+e` edits the title, `alt+n` edits notes, `Tab` moves
+between fields. The scope footer does nothing until an edit has started.
+`Ctrl+Enter` or `Alt+Enter` saves from any field. Field `Esc` cancels that field.
+Page `Esc` closes the page.
+
+## Capture and edit
+
+| Key | Does |
+| --- | --- |
+| `Tab` / `Shift+Tab` | Title, Notes, Scope |
+| `Enter` in Title | save |
+| `Enter` in Notes | new line |
+| `Ctrl+Enter` or `Alt+Enter` | save from any field |
+| `Esc` | cancel |
+
+Title is required. Scope defaults to the repo the board was opened from, or Global
+if there is no repo.
+
+Notes are multiline, so `Enter` inserts a line. `Ctrl+Enter` saves when the
+terminal reports it; `Alt+Enter` saves everywhere else. Both save. Neither inserts
+a line.
+
+## Delete and undo
+
+`alt+x` removes the selected task. The status line offers undo:
+
+```
+Deleted "Draft the quickstart" · u Undo
+```
+
+`alt+u` restores it. Undo also reverses the last done. It is refused if the task
+changed in between.
+
+## Verify
+
+```bash
+cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && cargo build --release
+```

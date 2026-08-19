@@ -1,0 +1,19 @@
+[package]
+name = "herdr-tasks"
+version = "0.1.0"
+edition = "2021"
+description = "herdr plugin: Tasks board and capture"
+license = "MIT"
+publish = false
+
+[[bin]]
+name = "herdr-tasks"
+path = "src/main.rs"
+
+[dependencies]
+crossterm = "0.29.0"
+fs2 = "0.4.3"
+ratatui = "0.30.2"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0.151"
+uuid = { version = "1.24", features = ["v4", "serde"] }

@@ -1,0 +1,102 @@
+{
+  "tasks": [
+    {
+      "id": "11111111-1111-4111-8111-111111111111",
+      "revision": "22222222-2222-4222-8222-222222222222",
+      "title": "Prepare V1 baseline",
+      "notes": "Keep the interrupted dispatch recoverable.",
+      "status": "todo",
+      "scope": {
+        "project": {
+          "path": "/work/herdr-tasks"
+        }
+      },
+      "capsule": {
+        "repo_path": "/work/herdr-tasks",
+        "worktree_path": "/work/herdr-tasks/.worktrees/baseline",
+        "branch": "feat/v1-stabilize",
+        "cwd": "/work/herdr-tasks/.worktrees/baseline",
+        "source_pane_id": "workspace-1:pane-4",
+        "file": "docs/specs/v1-stabilize.md",
+        "line": 243
+      },
+      "agent_meta": {
+        "agent_id": "grok-baseline",
+        "pane_id": "workspace-1:pane-4",
+        "agent_session": {
+          "source": "herdr:grok",
+          "value": "baseline-session"
+        }
+      },
+      "last_observed": "working",
+      "provenance": "capture",
+      "history": [
+        {
+          "kind": "created",
+          "at": [1723852800, 0]
+        },
+        {
+          "kind": "parked",
+          "at": [1723852860, 0]
+        }
+      ],
+      "soft_deleted": false,
+      "created_at": [1723852800, 0],
+      "updated_at": [1723852860, 0]
+    }
+  ],
+  "active_attempts": [
+    {
+      "id": "33333333-3333-4333-8333-333333333333",
+      "task_id": "11111111-1111-4111-8111-111111111111",
+      "mode": "new_worktree",
+      "kind": "grok",
+      "steps": [
+        {
+          "step": "create_worktree",
+          "completed": true
+        },
+        {
+          "step": "open_pane",
+          "completed": true
+        },
+        {
+          "step": "start_agent",
+          "completed": true
+        },
+        {
+          "step": "send_prompt",
+          "completed": false
+        }
+      ],
+      "owned_resources": [
+        {
+          "worktree": {
+            "path": "/work/herdr-tasks/.worktrees/baseline",
+            "workspace_id": "workspace-3"
+          }
+        },
+        {
+          "pane": {
+            "pane_id": "workspace-3:pane-9"
+          }
+        },
+        {
+          "agent": {
+            "pane_id": "workspace-3:pane-9",
+            "display_name": "grok-baseline",
+            "agent_session": {
+              "source": "herdr:grok",
+              "value": "baseline-session"
+            }
+          }
+        }
+      ],
+      "phase": "failed",
+      "last_error": "agent exited before the initial prompt",
+      "revision": "44444444-4444-4444-8444-444444444444",
+      "updated_at": [1723852900, 0]
+    }
+  ],
+  "undo_stack": []
+}
