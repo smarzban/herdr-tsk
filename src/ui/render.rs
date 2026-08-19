@@ -431,6 +431,12 @@ pub enum QueueHitTarget {
     /// One painted row of the open project-scope dropdown, indexed exactly as
     /// `BoardModel::project_options()` orders them.
     ProjectOption(usize),
+    /// One ON DECK project-group header in the all-projects view, indexed into
+    /// `QueueFrameModel::view.sections`. A double-click narrows the session deck scope to
+    /// that header's own project: the same session-only jump choosing it in the project
+    /// selector dropdown performs. Never pushed for IN MOTION, DONE, the global group,
+    /// or any header while the board is already scoped to one project.
+    SectionProject(usize),
     /// The open help card: painted full-frame so any click inside it closes it, matching
     /// the keyboard's "any key closes".
     HelpDismiss,
@@ -570,10 +576,27 @@ pub fn draw_queue_frame(
             let y = top + offset as u16;
             match list_row {
                 ListRow::Blank => put_line(frame, y, width, Line::from("")),
-                ListRow::Header(kind, line) => {
+                ListRow::Header(kind, section_idx, line) => {
                     put_line(frame, y, width, line);
                     if kind == SectionKind::Done && base_list_interactive {
                         hits.push(QueueHitTarget::Drawer, Rect::new(0, y, width, 1));
+                    }
+                    // An all-projects ON DECK group header names the project it groups;
+                    // offer the row as that project's own scope control. Scoped views
+                    // title the section plain ON DECK, so no target is pushed there.
+                    if kind == SectionKind::OnDeck
+                        && base_list_interactive
+                        && model.scope_label == "all projects"
+                        && model
+                            .view
+                            .sections
+                            .get(section_idx)
+                            .is_some_and(|section| section.project_label.is_some())
+                    {
+                        hits.push(
+                            QueueHitTarget::SectionProject(section_idx),
+                            Rect::new(0, y, width, 1),
+                        );
                     }
                 }
                 ListRow::Hint(line) => put_line(frame, y, width, line),
@@ -1636,9 +1659,11 @@ fn paint_scope_dropdown(
 
 enum ListRow {
     Blank,
-    /// Section header row, carrying its section kind so the paint loop can offer the
-    /// DONE header as the drawer's own toggle control.
-    Header(SectionKind, Line<'static>),
+    /// Section header row, carrying its section kind plus its index into
+    /// `QueueFrameModel::view.sections`, so the paint loop can offer the DONE header as
+    /// the drawer's own toggle control and an all-projects group header as that
+    /// project's own scope control.
+    Header(SectionKind, usize, Line<'static>),
     Hint(Line<'static>),
     Task {
         id: Uuid,
@@ -1865,7 +1890,7 @@ fn build_list_rows(
     };
 
     let mut capture_inserted = false;
-    for section in &model.view.sections {
+    for (section_idx, section) in model.view.sections.iter().enumerate() {
         // A preceding section with no content already ends in its required below-header blank
         // row, which doubles as this heading's above-header row. Otherwise add one list row.
         if !matches!(out.last(), Some(&ListRow::Blank)) {
@@ -1873,6 +1898,7 @@ fn build_list_rows(
         }
         out.push(ListRow::Header(
             section.kind,
+            section_idx,
             paint_section_header(section, geo.row_width, model.scope_label == "all projects"),
         ));
         // every kind, in either tier, gets its below-header spacer before first

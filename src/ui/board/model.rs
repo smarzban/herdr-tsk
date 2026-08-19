@@ -388,6 +388,10 @@ pub struct BoardModel {
     /// The last task-row click (time + id), kept only to detect a double-click that opens
     /// the task page. Presentation-only, never persisted.
     pub(super) last_row_click: Option<(Instant, Uuid)>,
+    /// The last all-projects group-header click (time + project path), kept only to detect
+    /// a double-click that narrows the board to that project. Presentation-only, never
+    /// persisted.
+    pub(super) last_project_header_click: Option<(Instant, PathBuf)>,
     pub(super) input_mode: BoardInputMode,
     /// The one active board form. It is present for inline capture and task editing alike;
     /// task identity or invocation context are held inside it and never rebound after open.
@@ -451,6 +455,7 @@ impl BoardModel {
             detail_open: None,
             selection_id: None,
             last_row_click: None,
+            last_project_header_click: None,
             input_mode: BoardInputMode::Normal,
             form: None,
             message: None,
