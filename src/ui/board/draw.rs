@@ -408,6 +408,7 @@ fn draw_board_impl(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap
         view: &queue_view,
         selection_id: model.selection_id,
         scope_label: &scope_label,
+        all_projects_scope: matches!(&model.deck_scope, OwnedDeckScope::All),
         status_message: status_owned.as_deref(),
         status_undo_offset,
         verb_items: &verbs,

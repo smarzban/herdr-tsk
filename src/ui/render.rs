@@ -388,6 +388,10 @@ pub struct QueueFrameModel<'a> {
     pub selection_id: Option<Uuid>,
     /// Project chip label (`all projects` or a project name).
     pub scope_label: &'a str,
+    /// Whether the session deck scope is structurally the all-projects scope. Kept
+    /// separate from `scope_label`, which is display text and can collide with a real
+    /// project name.
+    pub all_projects_scope: bool,
     /// Optional status-line notice; replaces the default counts when set.
     pub status_message: Option<&'a str>,
     /// Column offset of the delete-notice `u Undo` control inside `status_message`, when
@@ -586,7 +590,7 @@ pub fn draw_queue_frame(
                     // title the section plain ON DECK, so no target is pushed there.
                     if kind == SectionKind::OnDeck
                         && base_list_interactive
-                        && model.scope_label == "all projects"
+                        && model.all_projects_scope
                         && model
                             .view
                             .sections
@@ -1899,7 +1903,7 @@ fn build_list_rows(
         out.push(ListRow::Header(
             section.kind,
             section_idx,
-            paint_section_header(section, geo.row_width, model.scope_label == "all projects"),
+            paint_section_header(section, geo.row_width, model.all_projects_scope),
         ));
         // every kind, in either tier, gets its below-header spacer before first
         // content. It is a `ListRow`, not chrome, and therefore scrolls normally.

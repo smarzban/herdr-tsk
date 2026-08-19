@@ -317,6 +317,33 @@ fn all_projects_group_header_double_click_scopes_the_board_to_that_project() {
     );
 }
 
+#[test]
+fn scoped_project_named_all_projects_has_no_group_header_hit_target() {
+    const COLLIDING_REPO: &str = "/repos/all projects";
+    let mut domain = DomainState::new();
+    domain
+        .create(
+            "name collision",
+            None,
+            project(COLLIDING_REPO),
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("create task");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(COLLIDING_REPO)));
+    model.set_selected_project(Some(PathBuf::from(COLLIDING_REPO)));
+
+    let hits = board_hit_map(STANDARD, &model);
+    assert!(
+        !hits
+            .regions
+            .iter()
+            .any(|hit| matches!(hit.target, QueueHitTarget::SectionProject(_))),
+        "actual scoped state, not its colliding display label, must keep ON DECK inert: {hits:?}"
+    );
+}
+
 /// inline capture's painted fields focus the shared form, while Scope opens its
 /// dropdown. Selecting an option changes only the capture draft and closes back to it.
 #[test]

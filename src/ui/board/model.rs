@@ -618,6 +618,12 @@ impl BoardModel {
         }
     }
 
+    /// Cancel an armed project-header double-click when another pointer target
+    /// intervenes. Mouse-boundary state only, never persisted.
+    pub(crate) fn cancel_project_header_double_click(&mut self) {
+        self.last_project_header_click = None;
+    }
+
     /// Options the session project selector offers, in presentation order.
     ///
     /// All projects and Global are always available. Project entries are paths that really
