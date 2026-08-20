@@ -56,8 +56,8 @@ pub enum BoardInputMode {
     Palette,
     /// the help card is open.
     Help,
-    /// Inline capture row/takeover from board `a`. Uses EditBuffer + snapshot; separate from standalone CaptureModel.
-    Capture,
+    /// Single-line status-row capture from board `+`.
+    QuickAdd,
 }
 
 /// Result of applying a [`BoardIntent`].
@@ -130,13 +130,46 @@ pub(super) enum BoardFormBinding {
     Capture(Box<Option<InvocationSnapshot>>),
 }
 
-/// One transient board form, shared by inline capture and task editing.
+/// One transient board form, shared by quick-add expansion and task editing.
 ///
 /// Both variants own two independent [`EditBuffer`]s, the selected task scope, field focus,
 /// and a selection within the scope choices. A task form adds exactly one immutable task id;
-/// a capture form instead retains exactly one immutable invocation snapshot. Keeping those two
-/// mutually exclusive values inside the same form is what prevents title, Notes, and scope
-/// from drifting into separately-bound edits.
+/// a quick-add form instead retains exactly one immutable invocation snapshot. Keeping those
+/// two mutually exclusive values inside the same form prevents title, Notes, and scope from
+/// drifting into separately-bound edits.
+#[derive(Debug, Clone)]
+pub(super) struct QuickAddState {
+    pub(super) title: EditBuffer,
+    /// The invocation snapshot adjusted once at open for the board's current scope.
+    pub(super) snapshot: Box<Option<InvocationSnapshot>>,
+    /// Default from the invocation snapshot, overridden by a parsed title token.
+    pub(super) scope: TaskScope,
+}
+
+impl QuickAddState {
+    pub(super) fn new(snapshot: Option<InvocationSnapshot>) -> Self {
+        let title = snapshot
+            .as_ref()
+            .and_then(|snapshot| snapshot.title_prefill.as_deref())
+            .unwrap_or_default();
+        let scope = snapshot
+            .as_ref()
+            .map(crate::ui::capture::CaptureModel::default_scope)
+            .unwrap_or(TaskScope::Global);
+        Self {
+            title: seeded_draft(title),
+            snapshot: Box::new(snapshot),
+            scope,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct QuickAddSave {
+    id: Uuid,
+    keep_open: bool,
+}
+
 #[derive(Debug, Clone)]
 pub(super) struct BoardForm {
     pub(super) title: EditBuffer,
@@ -250,14 +283,10 @@ impl BoardForm {
     }
 
     pub(super) fn parent_mode(&self) -> BoardInputMode {
-        if self.is_task() {
-            match self.focus {
-                CaptureField::Title => BoardInputMode::EditTitle,
-                CaptureField::Notes => BoardInputMode::EditNotes,
-                CaptureField::Scope => BoardInputMode::EditScope,
-            }
-        } else {
-            BoardInputMode::Capture
+        match self.focus {
+            CaptureField::Title => BoardInputMode::EditTitle,
+            CaptureField::Notes => BoardInputMode::EditNotes,
+            CaptureField::Scope => BoardInputMode::EditScope,
         }
     }
 
@@ -393,9 +422,16 @@ pub struct BoardModel {
     /// persisted.
     pub(super) last_project_header_click: Option<(Instant, PathBuf)>,
     pub(super) input_mode: BoardInputMode,
-    /// The one active board form. It is present for inline capture and task editing alike;
+    /// The one active board form. It is present for expanded quick-add and task editing alike;
     /// task identity or invocation context are held inside it and never rebound after open.
     pub(super) form: Option<BoardForm>,
+    /// The status-row quick-add draft. It remains while its expanded form is open so Esc can
+    /// return to the line without reconstructing its snapshot or cursor state.
+    pub(super) quick_add: Option<QuickAddState>,
+    /// Newly-created task briefly emphasized until the next input intent.
+    pub(super) saved_task: Option<Uuid>,
+    /// A quick-add create waiting for the app save boundary to confirm persistence.
+    pub(super) quick_add_save: Option<QuickAddSave>,
     /// Last board action feedback or empty-selection chrome message.
     pub(super) message: Option<String>,
     /// Title of the task the last soft-delete removed, captured at delete time.
@@ -458,6 +494,9 @@ impl BoardModel {
             last_project_header_click: None,
             input_mode: BoardInputMode::Normal,
             form: None,
+            quick_add: None,
+            saved_task: None,
+            quick_add_save: None,
             message: None,
             delete_notice: None,
             suspended_delete_notice: None,
@@ -530,7 +569,7 @@ impl BoardModel {
     /// just made durable) and falls back to whatever was armed instead of wiping it, and both
     /// fields are emptied either way, so no path can lose the notice or leave a second copy
     /// behind to resurface at the next failure.
-    pub fn end_save_recovery(&mut self, resolution: SaveResolution) {
+    pub fn end_save_recovery(&mut self, resolution: SaveResolution) -> bool {
         if self.popup == BoardPopup::SaveRecovery {
             self.popup = BoardPopup::None;
         }
@@ -542,6 +581,16 @@ impl BoardModel {
                 None
             }
         };
+        let cancelled_quick_add = resolution == SaveResolution::Cancelled
+            && self.quick_add_save.take().is_some()
+            && self.quick_add.is_some();
+        if cancelled_quick_add {
+            // The retained capture form is a stash, not an active page. Return its line to
+            // normal keyboard routing and remove the failure chrome that line would cover.
+            self.input_mode = BoardInputMode::QuickAdd;
+            self.clear_message();
+        }
+        cancelled_quick_add
     }
 
     /// Snapshot tasks from domain state (default agent kind; seed env at open).
@@ -555,7 +604,6 @@ impl BoardModel {
     /// Replace task snapshot from domain (after mutation) and reanchor selection by id.
     pub fn sync_from_domain(&mut self, state: &DomainState) {
         let previous_visible = self.visible_ids();
-        let previous = self.selection_id;
         self.tasks = state.tasks().to_vec();
         self.stale_links.retain(|id| {
             self.tasks
@@ -563,7 +611,8 @@ impl BoardModel {
                 .any(|task| task.id == *id && !task.soft_deleted && is_linked(task))
         });
         self.attempts = state.active_attempts().to_vec();
-        self.reanchor_selection(previous, &previous_visible);
+        self.finish_quick_add_save();
+        self.reanchor_selection(self.selection_id, &previous_visible);
         if self.attempts.is_empty()
             && matches!(
                 self.popup,
@@ -764,9 +813,9 @@ impl BoardModel {
             .find(|attempt| attempt.task_id() == task_id)
     }
 
-    /// Edit buffer contents for the focused task-form text field.
+    /// Edit buffer contents for the focused board-page text field.
     pub fn edit_buffer(&self) -> &str {
-        let Some(form) = self.form.as_ref().filter(|form| form.is_task()) else {
+        let Some(form) = self.form.as_ref() else {
             return "";
         };
         match form.focus {
@@ -775,9 +824,9 @@ impl BoardModel {
         }
     }
 
-    /// Cursor position in the focused task-form text buffer, counted in Unicode scalar values.
+    /// Cursor position in the focused board-page text buffer, counted in Unicode scalar values.
     pub fn edit_cursor(&self) -> usize {
-        let Some(form) = self.form.as_ref().filter(|form| form.is_task()) else {
+        let Some(form) = self.form.as_ref() else {
             return 0;
         };
         match form.focus {
@@ -787,14 +836,70 @@ impl BoardModel {
     }
 
     /// Whether a board form currently owns keyboard input. The app loop uses this one predicate
-    /// to route Capture and task-form keys through the same mapper.
+    /// to route expanded quick-add and task-form keys through the same mapper.
     pub fn board_form_open(&self) -> bool {
         self.form.is_some()
     }
 
-    /// True when the open shared form is the task page's (not inline capture's).
-    pub fn board_form_is_task(&self) -> bool {
-        self.form.as_ref().is_some_and(BoardForm::is_task)
+    /// Title draft displayed in the status-row quick-add line.
+    pub fn quick_add_title_value(&self) -> &str {
+        self.quick_add
+            .as_ref()
+            .map(|quick_add| quick_add.title.value())
+            .unwrap_or("")
+    }
+
+    pub(super) fn clear_saved_task(&mut self) {
+        self.saved_task = None;
+    }
+
+    pub(super) fn begin_quick_add_save(&mut self, id: Uuid, keep_open: bool) {
+        self.quick_add_save = Some(QuickAddSave { id, keep_open });
+    }
+
+    pub(super) fn discard_quick_add(&mut self) {
+        self.quick_add = None;
+        self.quick_add_save = None;
+        self.form = None;
+        self.input_mode = BoardInputMode::Normal;
+        self.clear_message();
+    }
+
+    /// Drop a retained expanded draft after the quick-add title changed.
+    pub(super) fn invalidate_quick_add_stash(&mut self) {
+        if self.form.as_ref().is_some_and(|form| !form.is_task()) {
+            self.form = None;
+        }
+    }
+
+    /// True when the current save-recovery result just completed a quick add.
+    pub fn has_saved_task(&self) -> bool {
+        self.saved_task.is_some()
+    }
+
+    fn finish_quick_add_save(&mut self) {
+        let Some(pending) = self.quick_add_save.as_ref() else {
+            return;
+        };
+        if !self.tasks.iter().any(|task| task.id == pending.id) {
+            return;
+        }
+        let pending = self.quick_add_save.take().expect("checked quick-add save");
+        self.saved_task = Some(pending.id);
+        self.selection_id = Some(pending.id);
+        // The pending create is now durable. This is the only point an expanded quick-add
+        // may release its complete form, so a failed save can still return to that stash.
+        self.form = None;
+        if pending.keep_open {
+            if let Some(quick_add) = self.quick_add.as_mut() {
+                quick_add.title = seeded_draft("");
+            }
+            self.input_mode = BoardInputMode::QuickAdd;
+        } else {
+            self.quick_add = None;
+            self.input_mode = BoardInputMode::Normal;
+        }
+        self.clear_message();
     }
 
     /// Focused field of the shared board form, if one is open.
@@ -819,50 +924,6 @@ impl BoardModel {
     pub fn form_scope_dropdown_choice(&self) -> Option<&TaskScope> {
         let form = self.form.as_ref()?;
         form.scope_options.get(form.scope_selected)
-    }
-
-    /// Inline capture's title draft.
-    pub fn capture_title_value(&self) -> &str {
-        self.form
-            .as_ref()
-            .filter(|form| !form.is_task())
-            .map(|form| form.title.value())
-            .unwrap_or("")
-    }
-
-    /// Inline capture's notes draft.
-    pub fn capture_notes_value(&self) -> &str {
-        self.form
-            .as_ref()
-            .filter(|form| !form.is_task())
-            .map(|form| form.notes.value())
-            .unwrap_or("")
-    }
-
-    /// Which capture field currently has keyboard focus.
-    pub fn capture_focus(&self) -> CaptureField {
-        self.form
-            .as_ref()
-            .filter(|form| !form.is_task())
-            .map(|form| form.focus)
-            .unwrap_or(CaptureField::Title)
-    }
-
-    /// The scope this inline capture will create in, if its shared form is open.
-    pub fn capture_scope(&self) -> Option<&TaskScope> {
-        self.form
-            .as_ref()
-            .filter(|form| !form.is_task())
-            .map(|form| &form.scope)
-    }
-
-    /// Project scopes available to the open inline capture, followed by Global.
-    pub fn capture_scope_options(&self) -> Vec<TaskScope> {
-        self.form
-            .as_ref()
-            .filter(|form| !form.is_task())
-            .map(|form| form.scope_options.clone())
-            .unwrap_or_default()
     }
 
     /// Enter field edit on the page's own focused field (Tab from view mode).

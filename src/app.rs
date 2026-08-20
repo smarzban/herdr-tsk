@@ -651,8 +651,7 @@ fn board_keyboard_intent(
     // resolved (or escaped) from the keyboard at all.
     let form_field_mode = matches!(
         mode,
-        BoardInputMode::Capture
-            | BoardInputMode::EditTitle
+        BoardInputMode::EditTitle
             | BoardInputMode::EditNotes
             | BoardInputMode::EditScope
             | BoardInputMode::FormScopeDropdown
@@ -698,7 +697,9 @@ pub fn apply_board_intent_with_save_recovery(
                     *domain = working;
                     model.sync_from_domain(domain);
                     model.end_save_recovery(SaveResolution::Retried);
-                    model.set_message("saved");
+                    if !model.has_saved_task() {
+                        model.set_message("saved");
+                    }
                     return Ok(IntentOutcome::Persisted);
                 }
                 model.begin_save_recovery(recovery.error().unwrap_or("save failed"));
@@ -708,8 +709,10 @@ pub fn apply_board_intent_with_save_recovery(
                 model.close_command_surface();
                 *domain = recovery.cancel().expect("pending recovery has a baseline");
                 model.sync_from_domain(domain);
-                model.end_save_recovery(SaveResolution::Cancelled);
-                model.set_message("save cancelled");
+                let cancelled_quick_add = model.end_save_recovery(SaveResolution::Cancelled);
+                if !cancelled_quick_add {
+                    model.set_message("save cancelled");
+                }
                 return Ok(IntentOutcome::None);
             }
             // Navigation and presentation state mutate nothing.
@@ -1590,19 +1593,19 @@ mod idle_store_revalidation_tests {
             None,
             None,
         )
-        .expect("open capture");
-        assert_eq!(model.input_mode(), BoardInputMode::Capture);
+        .expect("open quick add");
+        assert_eq!(model.input_mode(), BoardInputMode::QuickAdd);
         for character in "Draft in progress".chars() {
             apply_intent(
                 &mut domain,
                 &mut model,
-                BoardIntent::EditInsert(character),
+                BoardIntent::QuickAddInsert(character),
                 None,
                 None,
             )
             .expect("type into the capture draft");
         }
-        assert_eq!(model.capture_title_value(), "Draft in progress");
+        assert_eq!(model.quick_add_title_value(), "Draft in progress");
 
         let writer_store = TaskStore::new(&dir);
         let mut writer_domain = writer_store.load().unwrap();
@@ -1632,11 +1635,11 @@ mod idle_store_revalidation_tests {
 
         assert_eq!(
             model.input_mode(),
-            BoardInputMode::Capture,
-            "AC-24: an open capture draft must not be redirected by an idle merge"
+            BoardInputMode::QuickAdd,
+            "AC-24: an open quick-add draft must not be redirected by an idle merge"
         );
         assert_eq!(
-            model.capture_title_value(),
+            model.quick_add_title_value(),
             "Draft in progress",
             "the open draft must survive the merge untouched"
         );
@@ -2233,7 +2236,7 @@ mod tests {
     /// product never supplies. This is the app-loop boundary test the second review asked
     /// for: no snapshot is constructed or injected here, only real board intents.
     #[test]
-    fn board_a_title_enter_creates_one_task_through_the_real_app_intent_route() {
+    fn board_plus_title_enter_creates_one_task_through_the_real_app_intent_route() {
         let temp = TempStore::new("board-a-real-route");
         let mut domain = DomainState::new();
         temp.store.save(&domain).expect("seed empty store");
@@ -2254,7 +2257,7 @@ mod tests {
         )
         .expect("open capture");
         assert!(!quit);
-        assert_eq!(model.input_mode(), BoardInputMode::Capture);
+        assert_eq!(model.input_mode(), BoardInputMode::QuickAdd);
 
         // Type a title one key at a time, the way the real keyboard loop feeds it in.
         for ch in "Real app-route capture".chars() {
@@ -2262,23 +2265,23 @@ mod tests {
                 &temp.store,
                 &mut domain,
                 &mut model,
-                BoardIntent::EditInsert(ch),
+                BoardIntent::QuickAddInsert(ch),
                 &mut pending_dispatch,
                 &mut save_recovery,
             )
             .expect("type title");
         }
 
-        // Ctrl+Enter: ConfirmEdit.
+        // Enter saves and closes the status-row line.
         let quit = handle_board_intent(
             &temp.store,
             &mut domain,
             &mut model,
-            BoardIntent::ConfirmEdit,
+            BoardIntent::QuickAddSave,
             &mut pending_dispatch,
             &mut save_recovery,
         )
-        .expect("confirm capture");
+        .expect("save quick add");
         assert!(!quit);
         assert_eq!(
             model.input_mode(),
@@ -2299,7 +2302,7 @@ mod tests {
         assert_eq!(
             created.len(),
             1,
-            "board `a` must create exactly one task through the real app intent path, not zero"
+            "board `+` must create exactly one task through the real app intent path, not zero"
         );
         assert!(
             model.visible_ids().contains(&created[0].id),
@@ -2307,11 +2310,256 @@ mod tests {
         );
     }
 
-    /// The failure mode B1 named directly: without a snapshot, ConfirmEdit on an open
-    /// capture must neither call `capture_save` nor report `Persist`. It must stay in
-    /// Capture, keep the draft, and say why.
     #[test]
-    fn confirm_edit_without_a_capture_snapshot_neither_saves_nor_reports_persist() {
+    fn quick_add_refusals_keep_the_line_open_and_esc_drops_their_message() {
+        let snapshot = InvocationSnapshot {
+            default_scope: TaskScope::Global,
+            this_repo: None,
+            title_prefill: None,
+            provenance: ProvenanceOrigin::Capture,
+            capsule: None,
+            agent_meta: None,
+        };
+        let mut domain = DomainState::new();
+        let mut model = BoardModel::from_domain(&domain, None);
+
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::OpenCapture,
+            Some(&snapshot),
+            None,
+        )
+        .expect("open quick add");
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::QuickAddSave,
+            Some(&snapshot),
+            None,
+        )
+        .expect("reject empty title");
+        assert_eq!(model.input_mode(), BoardInputMode::QuickAdd);
+        assert_eq!(model.message(), Some(TITLE_REQUIRED_MESSAGE));
+
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::CancelQuickAdd,
+            Some(&snapshot),
+            None,
+        )
+        .expect("close refused quick add");
+        assert_eq!(model.input_mode(), BoardInputMode::Normal);
+        assert_eq!(model.message(), None, "no refusal leaks onto the board");
+
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::OpenCapture,
+            None,
+            None,
+        )
+        .expect("open snapshot-less quick add");
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::QuickAddSave,
+            None,
+            None,
+        )
+        .expect("refuse unavailable capture context");
+        assert_eq!(model.input_mode(), BoardInputMode::QuickAdd);
+        assert_eq!(
+            model.message(),
+            Some("capture context unavailable; press Esc and try again")
+        );
+    }
+
+    #[test]
+    fn expanded_quick_add_save_recovery_cancel_keeps_the_complete_draft_stash() {
+        use std::fs;
+
+        let dir = temp_state_dir("expanded-quick-add-save-recovery");
+        let blocked = dir.join("not-a-directory");
+        fs::write(&blocked, "not a state directory").expect("blocking file");
+        let store = TaskStore::new(&blocked);
+        let snapshot = InvocationSnapshot {
+            default_scope: TaskScope::Global,
+            this_repo: Some(PathBuf::from("/repos/chosen")),
+            title_prefill: Some("Retained title".into()),
+            provenance: ProvenanceOrigin::Capture,
+            capsule: None,
+            agent_meta: None,
+        };
+        let mut domain = DomainState::new();
+        let mut model = BoardModel::from_domain(&domain, snapshot.this_repo.clone());
+        let mut recovery = SaveRecovery::new();
+
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::OpenCapture,
+            Some(&snapshot),
+            None,
+        )
+        .expect("open quick add");
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::ExpandQuickAdd,
+            Some(&snapshot),
+            None,
+        )
+        .expect("expand quick add");
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::EditInsertText("retained notes".into()),
+            Some(&snapshot),
+            None,
+        )
+        .expect("write notes");
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::FocusFormField(CaptureField::Scope),
+            Some(&snapshot),
+            None,
+        )
+        .expect("focus scope");
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::FormCycleScope,
+            Some(&snapshot),
+            None,
+        )
+        .expect("choose project scope");
+        assert_eq!(
+            model.form_scope(),
+            Some(&TaskScope::Project {
+                path: "/repos/chosen".into()
+            })
+        );
+
+        let outcome = apply_board_intent_with_save_recovery(
+            &mut domain,
+            &mut model,
+            &mut recovery,
+            BoardSaveContext {
+                baseline: DomainState::new(),
+                intent: BoardIntent::ConfirmEdit,
+                snapshot: Some(&snapshot),
+                host: None,
+            },
+            |working| store.save(working).map_err(|error| error.to_string()),
+        )
+        .expect("failed save enters recovery");
+        assert_eq!(outcome, IntentOutcome::None);
+        assert!(recovery.is_pending());
+        assert!(
+            model.board_form_open(),
+            "recovery retains the expanded form"
+        );
+
+        apply_board_intent_with_save_recovery(
+            &mut domain,
+            &mut model,
+            &mut recovery,
+            BoardSaveContext {
+                baseline: DomainState::new(),
+                intent: BoardIntent::CancelSave,
+                snapshot: None,
+                host: None,
+            },
+            |_| panic!("CancelSave must not persist"),
+        )
+        .expect("cancel failed save");
+
+        assert_eq!(model.input_mode(), BoardInputMode::QuickAdd);
+        assert_eq!(model.quick_add_title_value(), "Retained title");
+        assert!(
+            model.board_form_open(),
+            "complete expanded draft remains stashed"
+        );
+        assert_eq!(
+            model.form_scope(),
+            Some(&TaskScope::Project {
+                path: "/repos/chosen".into()
+            })
+        );
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::ExpandQuickAdd,
+            Some(&snapshot),
+            None,
+        )
+        .expect("reopen retained draft");
+        assert_eq!(model.input_mode(), BoardInputMode::EditNotes);
+        assert_eq!(model.edit_buffer(), "retained notes");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn confirmed_expanded_quick_add_clears_the_form_and_selects_the_new_task() {
+        let temp = TempStore::new("confirmed-expanded-quick-add");
+        let snapshot = InvocationSnapshot {
+            default_scope: TaskScope::Global,
+            this_repo: None,
+            title_prefill: Some("Expanded saved task".into()),
+            provenance: ProvenanceOrigin::Capture,
+            capsule: None,
+            agent_meta: None,
+        };
+        let mut domain = DomainState::new();
+        let mut model = BoardModel::from_domain(&domain, None);
+        let mut recovery = SaveRecovery::new();
+
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::OpenCapture,
+            Some(&snapshot),
+            None,
+        )
+        .expect("open quick add");
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::ExpandQuickAdd,
+            Some(&snapshot),
+            None,
+        )
+        .expect("expand quick add");
+        let outcome = apply_board_intent_with_save_recovery(
+            &mut domain,
+            &mut model,
+            &mut recovery,
+            BoardSaveContext {
+                baseline: DomainState::new(),
+                intent: BoardIntent::ConfirmEdit,
+                snapshot: Some(&snapshot),
+                host: None,
+            },
+            |working| temp.store.save(working).map_err(|error| error.to_string()),
+        )
+        .expect("save expanded quick add");
+
+        let id = domain.tasks()[0].id;
+        assert_eq!(outcome, IntentOutcome::Persisted);
+        assert!(!recovery.is_pending());
+        assert_eq!(model.input_mode(), BoardInputMode::Normal);
+        assert!(!model.board_form_open());
+        assert_eq!(model.selected_id(), Some(id));
+    }
+
+    /// Without a snapshot, quick-add save must neither call `capture_save` nor report
+    /// `Persist`. It keeps its draft and says why.
+    #[test]
+    fn quick_add_save_without_a_capture_snapshot_neither_saves_nor_reports_persist() {
         let mut domain = DomainState::new();
         let mut model = BoardModel::from_domain(&domain, None);
         apply_intent(
@@ -2321,13 +2569,13 @@ mod tests {
             None,
             None,
         )
-        .expect("open capture with no snapshot");
-        assert_eq!(model.input_mode(), BoardInputMode::Capture);
+        .expect("open quick add with no snapshot");
+        assert_eq!(model.input_mode(), BoardInputMode::QuickAdd);
 
         apply_intent(
             &mut domain,
             &mut model,
-            BoardIntent::EditInsert('x'),
+            BoardIntent::QuickAddInsert('x'),
             None,
             None,
         )
@@ -2336,7 +2584,7 @@ mod tests {
         let outcome = apply_intent(
             &mut domain,
             &mut model,
-            BoardIntent::ConfirmEdit,
+            BoardIntent::QuickAddSave,
             None,
             None,
         )
@@ -2350,11 +2598,11 @@ mod tests {
         assert!(domain.tasks().is_empty(), "nothing was ever saved");
         assert_eq!(
             model.input_mode(),
-            BoardInputMode::Capture,
-            "capture stays open so the draft is not lost"
+            BoardInputMode::QuickAdd,
+            "quick add stays open so the draft is not lost"
         );
         assert_eq!(
-            model.capture_title_value(),
+            model.quick_add_title_value(),
             "x",
             "the draft the user typed must survive the refusal"
         );
@@ -2469,11 +2717,7 @@ mod tests {
         .expect("open task form");
         assert!(model.board_form_open());
 
-        for mode in [
-            BoardInputMode::Capture,
-            BoardInputMode::EditTitle,
-            BoardInputMode::EditNotes,
-        ] {
+        for mode in [BoardInputMode::EditTitle, BoardInputMode::EditNotes] {
             assert_eq!(
                 board_keyboard_intent(
                     &model,

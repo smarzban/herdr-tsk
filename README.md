@@ -78,7 +78,7 @@ letters do nothing, so typing in a focused board cannot complete or delete work.
 | `alt+b` | toggle blocked |
 | `Enter` | open the task page |
 | `→` `←` | peek notes under the row (up to five lines) |
-| `alt+a` | capture |
+| `+` | capture |
 | `alt+e` | edit title |
 | `alt+x` or `alt+Delete` | delete (`alt+u` undoes) |
 | `z` | done drawer |

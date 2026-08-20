@@ -34,7 +34,7 @@ fn normal_mode_keymap_equals_the_readme_and_queue_board_v1_set() {
         (KeyCode::Enter, BoardIntent::OpenTaskPage),
         (KeyCode::Right, BoardIntent::PeekDetail),
         (KeyCode::Left, BoardIntent::CollapseDetail),
-        (KeyCode::Char('a'), BoardIntent::OpenCapture),
+        (KeyCode::Char('+'), BoardIntent::OpenCapture),
         (KeyCode::Char('e'), BoardIntent::BeginEditTitle),
         (KeyCode::Char('x'), BoardIntent::SoftDelete),
         (KeyCode::Delete, BoardIntent::SoftDelete),
@@ -55,7 +55,6 @@ fn normal_mode_keymap_equals_the_readme_and_queue_board_v1_set() {
         KeyCode::Char('d'),
         KeyCode::Char('o'),
         KeyCode::Char('b'),
-        KeyCode::Char('a'),
         KeyCode::Char('e'),
         KeyCode::Char('x'),
         KeyCode::Delete,
@@ -71,7 +70,7 @@ fn normal_mode_keymap_equals_the_readme_and_queue_board_v1_set() {
     }
 
     for retired in [
-        'v', 'p', 'r', 'l', 'c', 'n', 's', 't', 'i', 'f', '1', '2', '3', '[', ']',
+        'a', 'v', 'p', 'r', 'l', 'c', 'n', 's', 't', 'i', 'f', '1', '2', '3', '[', ']',
     ] {
         assert_eq!(
             normal(KeyCode::Char(retired)),

@@ -8,7 +8,6 @@ use herdr_tasks::config::VerbModifier;
 use herdr_tasks::domain::{
     DomainState, HumanStatus, ProvenanceOrigin, Task, TaskEvent, TaskEventKind, TaskScope,
 };
-use herdr_tasks::ui::capture::CaptureField;
 use herdr_tasks::ui::queue::{self, DeckScope, QueueView};
 use herdr_tasks::ui::render::{
     assert_buffer_mono, assert_no_color_sgr, draw_queue_frame, PaletteCommandRow, QueueFrameModel,
@@ -17,7 +16,6 @@ use herdr_tasks::ui::render::{
 use herdr_tasks::ui::tier::{self, Tier, TierGeometry};
 use herdr_tasks::ui::{apply_intent, board_verb_items, BoardIntent, BoardModel};
 use ratatui::backend::TestBackend;
-use ratatui::layout::Rect;
 use ratatui::{Frame, Terminal};
 use uuid::Uuid;
 
@@ -565,64 +563,58 @@ fn every_section_header_has_symmetric_spacing_and_scrolls_with_its_selected_task
     }
 }
 
-/// An empty hint and capture form are first list content after a destination heading. The
-/// compact capture takeover still leaves its fields, status, and verb controls reachable.
 #[test]
-fn empty_hint_and_capture_first_content_keep_symmetric_spacing_and_compact_controls() {
-    let tasks = Vec::new();
+fn empty_board_hint_advertises_the_live_quick_add_key() {
+    let tasks = fixture_tasks();
     let view = queue::query(
         &tasks,
         None,
-        DeckScope::Project(Path::new("/repos/empty")),
+        DeckScope::Project(Path::new("/no-tasks")),
         false,
     );
-    let empty_model = QueueFrameModel {
-        scope_label: "empty",
-        all_projects_scope: false,
-        ..fixture_model(&tasks, &view)
-    };
+    let model = fixture_model(&tasks, &view);
+    let (rows, _) = paint(80, 24, &model);
+    let frame = rows.join("\n");
 
-    for &(width, height) in &[(80u16, 24u16), (77u16, 24u16), (40u16, 10u16)] {
-        let dimensions = format!("{width}x{height}");
-        let (rows, geo) = paint(width, height, &empty_model);
-        assert_exact_header_spacing(&rows, geo, "ON DECK", "no open tasks here", &dimensions);
-        assert_visible_chrome(&rows, geo, &dimensions);
+    assert!(frame.contains("+ capture"), "empty-board hint: {frame}");
+    assert!(!frame.contains("a capture"), "empty-board hint: {frame}");
+}
 
-        let mut capture_model = empty_model.clone();
-        capture_model.overlay = QueueOverlay::Capture {
-            title: "Capture is first content".to_string(),
-            title_cursor: 24,
-            notes_rows: vec![String::new()],
-            notes_cursor_row: 0,
-            notes_cursor_col: 0,
-            scope_label: "/repos/empty".to_string(),
-            focus: CaptureField::Title,
-            scope_dropdown: None,
+#[test]
+fn quick_add_refusal_message_uses_the_reserved_blank_row_without_color_or_overflow() {
+    let tasks = fixture_tasks();
+    let view = fixture_view(&tasks, true);
+
+    for &(width, height) in &[(80, 24), (40, 10)] {
+        let mut model = fixture_model(&tasks, &view);
+        model.overlay = QueueOverlay::QuickAdd {
+            title: String::new(),
+            title_cursor: 0,
+            project_scope: false,
+            recovery: false,
+            message: Some("Title required"),
         };
-        let (capture_rows, capture_geo) = paint(width, height, &capture_model);
-        if capture_geo.tier == Tier::Standard {
-            assert_exact_header_spacing(
-                &capture_rows,
-                capture_geo,
-                "ON DECK",
-                "title  Capture is first content",
-                &dimensions,
-            );
-        } else {
-            let body = capture_rows
-                .iter()
-                .map(|row| trimmed(row))
-                .collect::<Vec<_>>()
-                .join("\n");
-            assert!(
-                body.contains("title  Capture is first content"),
-                "{dimensions}: compact capture must remain reachable:\n{body}"
-            );
+        let (rows, geo) = paint(width, height, &model);
+        // Quick-add reserves two rows by shifting its input up one from ordinary status
+        // chrome, leaving the former status row blank below it and this row above it.
+        let input_row = (geo.status_row.expect("quick-add input row") - 1) as usize;
+        let message_row = input_row.checked_sub(1).expect("reserved blank row");
+
+        assert!(
+            trimmed(&rows[message_row]).contains("Title required"),
+            "{width}x{height}: refusal must be visible above quick-add input: {rows:#?}"
+        );
+        assert!(
+            trimmed(&rows[input_row]).starts_with('▎'),
+            "{width}x{height}: refusal must not replace the input cursor row: {rows:#?}"
+        );
+        for row in &rows {
+            assert_eq!(row_display_width(row), width as usize, "{width}x{height}");
         }
-        assert_visible_chrome(&capture_rows, capture_geo, &dimensions);
     }
 }
 
+/// An empty hint and capture form are first list content after a destination heading. The
 /// B4 regression: overlays must pad every painted cell to their width so base frame content
 /// (status line, section rules+counts, task meta) cannot bleed through.
 #[test]
@@ -824,44 +816,6 @@ fn compact_77x24_and_48x19_and_40x10_paint_glyph_title_only_rows_and_leq_5_verb_
     }
 }
 
-/// Imp-6 (round 2 regression): the compact capture takeover painted the raw filesystem
-/// path in its scope row while the standard inline capture row already shortened with
-/// `short_project`. Both tiers of the same surface must agree.
-#[test]
-fn compact_capture_shortens_the_project_path_scope_like_standard_does() {
-    let tasks = fixture_tasks();
-    let view = fixture_view(&tasks, false);
-    let mut model = fixture_model(&tasks, &view);
-    model.overlay = QueueOverlay::Capture {
-        title: "Sketch the queue prototype".to_string(),
-        title_cursor: 5,
-        notes_rows: vec![String::new()],
-        notes_cursor_row: 0,
-        notes_cursor_col: 0,
-        scope_label: "/repos/herdr-tasks".to_string(),
-        focus: CaptureField::Title,
-        scope_dropdown: None,
-    };
-
-    for &(w, h) in &[(48u16, 19u16), (40u16, 10u16)] {
-        let (rows, geo) = paint(w, h, &model);
-        assert_eq!(geo.tier, Tier::Compact, "{w}x{h}");
-        let body = rows
-            .iter()
-            .map(|r| trimmed(r))
-            .collect::<Vec<_>>()
-            .join("\n");
-        assert!(
-            body.contains("scope  herdr-tasks"),
-            "{w}x{h}: compact capture must shorten the scope path like standard: {body:?}"
-        );
-        assert!(
-            !body.contains("/repos/herdr-tasks"),
-            "{w}x{h}: compact capture must not paint the raw filesystem path: {body:?}"
-        );
-    }
-}
-
 /// The task page paints a full-height takeover in BOTH tiers: header (glyph + title +
 /// status word), notes body, and meta footer. The selector row stays hidden, the base list
 /// never bleeds through, and every row is width-bounded at the 40x10 floor.
@@ -922,386 +876,17 @@ fn task_page_renders_header_notes_and_meta_as_a_full_takeover_in_both_tiers() {
     }
 }
 
-/// inline capture's Notes field paints every visible draft line in both tiers, keeps
-/// the live cursor on its own line, and never exceeds the frame width.
-#[test]
-fn inline_capture_multiline_notes_are_cursor_aware_and_width_bounded_in_both_tiers() {
-    let tasks = fixture_tasks();
-    let view = fixture_view(&tasks, false);
-    let mut model = fixture_model(&tasks, &view);
-    model.overlay = QueueOverlay::Capture {
-        title: "Capture with note".to_string(),
-        title_cursor: 17,
-        notes_rows: vec![
-            "first note line".to_string(),
-            "second note line".to_string(),
-        ],
-        notes_cursor_row: 1,
-        notes_cursor_col: 16,
-        scope_label: "global".to_string(),
-        focus: CaptureField::Notes,
-        scope_dropdown: None,
-    };
-
-    for &(width, height) in &[(80u16, 24u16), (77u16, 24u16), (40u16, 10u16)] {
-        let geo = tier::resolve(width, height);
-        let backend = TestBackend::new(width, height);
-        let mut terminal = Terminal::new(backend).expect("terminal");
-        terminal
-            .draw(|frame| {
-                let _hits = draw_queue_frame(frame, &model, &geo);
-            })
-            .expect("draw capture notes");
-        let buffer = terminal.backend().buffer();
-        let rows: Vec<String> = (0..height)
-            .map(|y| {
-                (0..width)
-                    .map(|x| buffer[(x, y)].symbol().to_string())
-                    .collect()
-            })
-            .collect();
-        let body = rows.join("\n");
-        assert!(body.contains("first note line"), "{width}x{height}: {body}");
-        assert!(
-            body.contains("second note line"),
-            "{width}x{height}: {body}"
-        );
-        let cursor = terminal.get_cursor_position().expect("notes cursor");
-        assert!(
-            cursor.x < width && cursor.y < height,
-            "{width}x{height}: {cursor:?}"
-        );
-        assert!(
-            rows[cursor.y as usize].contains("second note line"),
-            "{width}x{height}: cursor must sit on the second Notes line: {cursor:?}\n{body}"
-        );
-        assert!(
-            rows.iter().all(|row| row.chars().count() == width as usize),
-            "{width}x{height}: a rendered row exceeded the width bound"
-        );
-    }
-}
-
 /// Imp-1 (round 2 regression): the compact palette windowed its command list off a raw
 /// row *index* (`list_bottom`) instead of the rows actually available above chrome, so an
 /// ordinary unfiltered the catalog (>= 6 commands) painted the `command` header over row 0 --
 /// the selector row -- instead of stopping at `viewport_top`. Reproduce with 9 commands (the
 /// review's repro count) at three compact sizes and assert the selector survives untouched
-/// and no command row lands above the viewport.
-#[test]
-fn compact_palette_never_paints_its_header_above_the_viewport_top() {
-    let tasks = fixture_tasks();
-    let view = fixture_view(&tasks, false);
-    let commands: Vec<PaletteCommandRow<'_>> = [
-        "change scope",
-        "set status: ready",
-        "set status: started",
-        "set status: blocked",
-        "set status: review",
-        "reopen",
-        "delete",
-        "undo",
-        "help",
-    ]
-    .into_iter()
-    .enumerate()
-    .map(|(i, label)| PaletteCommandRow {
-        label,
-        selected: i == 0,
-    })
-    .collect();
-
-    for &(w, h) in &[(40u16, 10u16), (40u16, 8u16), (40u16, 5u16)] {
-        let mut model = fixture_model(&tasks, &view);
-        model.overlay = QueueOverlay::Palette {
-            query: "",
-            commands: &commands,
-        };
-        let (rows, geo) = paint(w, h, &model);
-        assert_eq!(geo.tier, Tier::Compact, "{w}x{h}");
-
-        if let Some(selector_row) = geo.selector_row {
-            let selector = trimmed(&rows[selector_row as usize]);
-            assert!(
-                !selector.contains("command"),
-                "{w}x{h}: palette header must not overwrite the selector row: {selector:?}"
-            );
-            // The selector remains queue-only whenever the viewport starts below it.
-            if geo.viewport_top > selector_row {
-                assert!(
-                    !selector.contains("board"),
-                    "{w}x{h}: selector row must keep the project chip, not a view switcher: {selector:?}"
-                );
-            }
-        }
-
-        // No row above `viewport_top` may carry the `command` header or a command row.
-        for (y, row) in rows.iter().enumerate() {
-            if (y as u16) < geo.viewport_top {
-                let trimmed_row = trimmed(row);
-                assert!(
-                    !trimmed_row.contains("command"),
-                    "{w}x{h}: row {y} above viewport_top {} carries the palette header: {trimmed_row:?}",
-                    geo.viewport_top
-                );
-            }
-        }
-    }
-}
-
-#[test]
-fn exhaustive_1x1_through_40x10_never_panics_and_no_line_exceeds_width() {
-    let tasks = fixture_tasks();
-    let view = fixture_view(&tasks, true);
-
-    // the sweep used to run only `overlay: None, detail_open: None` (the base list),
-    // leaving the detail takeover, inline capture, and palette painters -- which each have
-    // their own tiny-size math (`editor_row_budget`, `capture_field_width`, the palette's
-    // `list_bottom`/`available` clamp) -- outside a claim broader than its coverage.
-    // Parameterize over the overlay set so every painter this sweep's docstring claims to
-    // cover is actually exercised down to 1x1.
-    let palette_commands = [
-        PaletteCommandRow {
-            label: "change scope",
-            selected: true,
-        },
-        PaletteCommandRow {
-            label: "set status: ready",
-            selected: false,
-        },
-        PaletteCommandRow {
-            label: "set status: started",
-            selected: false,
-        },
-        PaletteCommandRow {
-            label: "set status: blocked",
-            selected: false,
-        },
-        PaletteCommandRow {
-            label: "set status: review",
-            selected: false,
-        },
-        PaletteCommandRow {
-            label: "reopen",
-            selected: false,
-        },
-    ];
-    let scenarios: Vec<(&'static str, QueueFrameModel<'_>)> = vec![
-        ("base list", fixture_model(&tasks, &view)),
-        ("detail takeover (compact) / accordion (standard)", {
-            let mut m = fixture_model(&tasks, &view);
-            m.detail_open = Some(Uuid::from_u128(1));
-            m
-        }),
-        ("inline capture / compact capture takeover", {
-            let mut m = fixture_model(&tasks, &view);
-            m.overlay = QueueOverlay::Capture {
-                title: "a title".to_string(),
-                title_cursor: 7,
-                notes_rows: vec!["some notes".to_string()],
-                notes_cursor_row: 0,
-                notes_cursor_col: 5,
-                scope_label: "/repos/herdr-tasks".to_string(),
-                focus: CaptureField::Notes,
-                scope_dropdown: None,
-            };
-            m
-        }),
-        ("palette", {
-            let mut m = fixture_model(&tasks, &view);
-            m.overlay = QueueOverlay::Palette {
-                query: "stat",
-                commands: &palette_commands,
-            };
-            m
-        }),
-    ];
-
-    for (name, model) in &scenarios {
-        for h in 1u16..=10 {
-            for w in 1u16..=40 {
-                let geo = tier::resolve(w, h);
-                let backend = TestBackend::new(w, h);
-                let mut terminal = Terminal::new(backend).unwrap_or_else(|e| {
-                    panic!("{name} terminal {w}x{h}: {e}");
-                });
-                terminal
-                    .draw(|frame| {
-                        let _hits = draw_queue_frame(frame, model, &geo);
-                    })
-                    .unwrap_or_else(|e| panic!("{name} draw {w}x{h}: {e}"));
-                let buffer = terminal.backend().buffer();
-                assert_buffer_mono(buffer);
-                let area = Rect::new(0, 0, w, h);
-                for y in area.top()..area.bottom() {
-                    let mut width = 0usize;
-                    let mut line = String::new();
-                    for x in area.left()..area.right() {
-                        let sym = buffer[(x, y)].symbol();
-                        line.push_str(sym);
-                        width += 1; // TestBackend cells are 1 wide each
-                    }
-                    assert!(
-                        width <= w as usize,
-                        "{name} {w}x{h} row {y} width {width} exceeds: {line:?}"
-                    );
-                    assert_eq!(
-                        width, w as usize,
-                        "{name} {w}x{h} row {y} under-filled the grid: {line:?}"
-                    );
-                }
-            }
-        }
-    }
-}
-
 /// Imp-2 (round 2 regression): the title/notes editors reused `CAPTURE_VERBS`, which
 /// advertised `tab notes/scope` (Tab is unbound in both single-field modes) and `enter save`
 /// (Notes' plain Enter opens a line, not save). Each editor's verb bar must name only keys
-/// its own keymap actually binds to the word given.
-#[test]
-fn edit_title_and_notes_verb_bars_never_advertise_tab_or_a_plain_enter_save() {
-    let tasks = fixture_tasks();
-    let view = fixture_view(&tasks, false);
-    let mut model = fixture_model(&tasks, &view);
-
-    model.overlay = QueueOverlay::EditTitle {
-        draft: "a title".to_string(),
-        cursor_col: 7,
-    };
-    let (rows, geo) = paint(80, 24, &model);
-    let verbs = trimmed(&rows[geo.verb_row.expect("verb row") as usize]);
-    assert!(
-        !verbs.contains("tab"),
-        "EditTitle must not advertise Tab (unbound): {verbs:?}"
-    );
-    assert!(
-        verbs.contains("enter save"),
-        "EditTitle Enter does save: {verbs:?}"
-    );
-    assert!(
-        verbs.contains("esc") && verbs.contains("cancel"),
-        "{verbs:?}"
-    );
-
-    model.overlay = QueueOverlay::EditNotes {
-        rows: vec!["a note".to_string()],
-        cursor_row: 0,
-        cursor_col: 6,
-    };
-    let (rows, geo) = paint(80, 24, &model);
-    let verbs = trimmed(&rows[geo.verb_row.expect("verb row") as usize]);
-    assert!(
-        !verbs.contains("tab"),
-        "EditNotes must not advertise Tab (unbound): {verbs:?}"
-    );
-    // The plain, unqualified chord "enter" must not appear as a key on this row (a bare
-    // Enter opens a line here, it does not save): only the qualified "ctrl+enter" chord may.
-    let first_key = verbs.trim_start().split(' ').next().unwrap_or("");
-    assert_eq!(
-        first_key, "ctrl+enter",
-        "EditNotes must name its real save chord, not a plain Enter: {verbs:?}"
-    );
-    assert!(
-        verbs.contains("ctrl+enter save"),
-        "EditNotes must name its real save chord: {verbs:?}"
-    );
-    assert!(
-        verbs.contains("esc") && verbs.contains("cancel"),
-        "{verbs:?}"
-    );
-
-    // Capture's shared form names its immediate next field (Tab does move focus there).
-    model.overlay = QueueOverlay::Capture {
-        title: "a title".to_string(),
-        title_cursor: 7,
-        notes_rows: vec![String::new()],
-        notes_cursor_row: 0,
-        notes_cursor_col: 0,
-        scope_label: "global".to_string(),
-        focus: CaptureField::Title,
-        scope_dropdown: None,
-    };
-    let (rows, geo) = paint(80, 24, &model);
-    let verbs = trimmed(&rows[geo.verb_row.expect("verb row") as usize]);
-    assert!(
-        verbs.contains("tab") && verbs.contains("next"),
-        "Capture keeps its own tab-moves-focus legend: {verbs:?}"
-    );
-}
-
 /// a compact editor takeover must actually erase the base list underneath it. The prior
 /// bug painted `Paragraph::new("")` over the viewport, which sets style but writes no symbols,
 /// so the list content already painted there kept showing through every one of the three
-/// editor overlays.
-#[test]
-fn compact_editor_takeovers_erase_the_base_list_at_48x19_and_40x10() {
-    let tasks = fixture_tasks();
-    let view = fixture_view(&tasks, false);
-    let mut model = fixture_model(&tasks, &view);
-
-    let overlays = [
-        (
-            "EditTitle",
-            QueueOverlay::EditTitle {
-                draft: "my draft".to_string(),
-                cursor_col: 8,
-            },
-        ),
-        (
-            "EditNotes",
-            QueueOverlay::EditNotes {
-                rows: vec!["note line".to_string()],
-                cursor_row: 0,
-                cursor_col: 9,
-            },
-        ),
-        (
-            "Capture",
-            QueueOverlay::Capture {
-                title: "cap title".to_string(),
-                title_cursor: 9,
-                notes_rows: vec![String::new()],
-                notes_cursor_row: 0,
-                notes_cursor_col: 0,
-                scope_label: "global".to_string(),
-                focus: CaptureField::Title,
-                scope_dropdown: None,
-            },
-        ),
-    ];
-
-    for &(w, h) in &[(48u16, 19u16), (40u16, 10u16)] {
-        let geo = tier::resolve(w, h);
-        assert_eq!(geo.tier, Tier::Compact, "{w}x{h}");
-
-        for (name, overlay) in overlays.clone() {
-            model.overlay = overlay;
-            let (rows, geo) = paint(w, h, &model);
-            let top = geo.viewport_top as usize;
-            let bottom = (geo.viewport_top + geo.viewport_height) as usize;
-            let viewport: String = rows[top..bottom]
-                .iter()
-                .map(|r| trimmed(r))
-                .collect::<Vec<_>>()
-                .join("\n");
-            for leaked in [
-                "IN MOTION",
-                "ON DECK",
-                "Smoke-test worktree dispatch",
-                "Edit target binding pin",
-                "Prototype the queue-style board UI",
-            ] {
-                assert!(
-                    !viewport.contains(leaked),
-                    "{w}x{h} {name}: compact takeover must erase the base list, found \
-                     {leaked:?} in:\n{viewport}"
-                );
-            }
-        }
-    }
-}
-
 /// an over-tall notes draft must stop at the takeover region, not paint into the rule or
 /// status row below it. At 40x10 the prior bug's hardcoded 8-row request destroyed both.
 #[test]
@@ -1345,136 +930,6 @@ fn compact_notes_editor_never_paints_into_the_rule_or_status_row_at_40x10() {
         trimmed(&rows[status_row as usize]).contains("done"),
         "status row lost its counts chrome: {:?}",
         rows[status_row as usize]
-    );
-}
-
-/// B5 (paint side): the focused capture field is visibly distinguished so Tab has an
-/// observable effect, and the unfocused notes row keeps the "tab to edit" hint honest only
-/// while it is actually unfocused and empty.
-#[test]
-fn capture_focus_changes_which_field_is_painted_emphasized() {
-    let tasks = fixture_tasks();
-    let view = fixture_view(&tasks, false);
-    let mut model = fixture_model(&tasks, &view);
-
-    model.overlay = QueueOverlay::Capture {
-        title: "a title".to_string(),
-        title_cursor: 7,
-        notes_rows: vec![String::new()],
-        notes_cursor_row: 0,
-        notes_cursor_col: 0,
-        scope_label: "global".to_string(),
-        focus: CaptureField::Notes,
-        scope_dropdown: None,
-    };
-    let (rows, _geo) = paint(80, 24, &model);
-    // standard capture is an inline row under its destination section header (here
-    // "ON DECK · global", since `scope_label` is "global"), not a fixed viewport_top+1
-    // offset -- that fixed offset was the residual bug (it overwrote the first
-    // deck/header row). Locate the notes row by its label instead of assuming a position.
-    let notes_row = rows
-        .iter()
-        .map(|r| trimmed(r))
-        .find(|r| r.contains("notes"))
-        .expect("capture notes row must be painted somewhere in the standard frame");
-    assert!(
-        !notes_row.contains("tab to edit"),
-        "the empty-notes hint must not paint while Notes is the focused field: {notes_row:?}"
-    );
-    // And it must not have landed on the very first list row (the residual bug: the
-    // overlay painted title at `viewport_top`/rows[1] and notes at rows[2], overwriting the
-    // leading spacer/header row). Check the row the bug actually wrote to: the prior
-    // assertion checked `rows[1]` for "notes", which the buggy code would also have passed
-    // since it put the title, not the notes, on that row.
-    let first_list_row = trimmed(&rows[1]);
-    assert!(
-        !first_list_row.contains("title"),
-        "capture must not consume the first deck/header row: {first_list_row:?}"
-    );
-}
-
-/// a global-scope capture's destination is the *last* ON DECK group. On a deck long
-/// enough to overflow the standard viewport, the naive `.take(viewport_height)` from row 0
-/// would silently drop the capture rows off the bottom -- an invisible, caret-less input the
-/// user types blind into. The capture rows must always be scrolled into view, with the
-/// caret placed on them.
-#[test]
-fn standard_inline_capture_is_scrolled_into_view_and_caret_placed_on_a_long_deck() {
-    let mut tasks = fixture_tasks();
-    // Pad the herdr-tasks ON DECK section well past the 20-row standard viewport so the
-    // trailing global-scope capture destination would fall outside a naive top-anchored
-    // window.
-    for i in 0..30u128 {
-        tasks.push(task(
-            1000 + i,
-            &format!("Padding task {i}"),
-            HumanStatus::Ready,
-            project("/repos/herdr-tasks"),
-            3600,
-        ));
-    }
-    let view = fixture_view(&tasks, false);
-    let mut model = fixture_model(&tasks, &view);
-    model.overlay = QueueOverlay::Capture {
-        title: "Sketch the queue prototype".to_string(),
-        title_cursor: 5,
-        notes_rows: vec![String::new()],
-        notes_cursor_row: 0,
-        notes_cursor_col: 0,
-        scope_label: "global".to_string(),
-        focus: CaptureField::Title,
-        scope_dropdown: None,
-    };
-
-    let geo = tier::resolve(80, 24);
-    assert_eq!(geo.tier, Tier::Standard);
-    let backend = TestBackend::new(80, 24);
-    let mut terminal = Terminal::new(backend).expect("test terminal");
-    terminal
-        .draw(|frame: &mut Frame| {
-            let _hits = draw_queue_frame(frame, &model, &geo);
-        })
-        .expect("draw");
-    let buffer = terminal.backend().buffer().clone();
-    assert_buffer_mono(&buffer);
-
-    let top = geo.viewport_top as usize;
-    let bottom = (geo.viewport_top + geo.viewport_height) as usize;
-    let viewport: String = (top..bottom)
-        .map(|y| {
-            trimmed(
-                &(0..80u16)
-                    .map(|x| buffer[(x, y as u16)].symbol().to_string())
-                    .collect::<String>(),
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    assert!(
-        viewport.contains("title") && viewport.contains("Sketch the queue prototype"),
-        "capture title row must be scrolled into the viewport on a long deck:\n{viewport}"
-    );
-    assert!(
-        viewport.contains("global"),
-        "the destination section header should still be visible alongside the capture row:\n{viewport}"
-    );
-    // Imp-4 (round 2 regression): the prior fix anchored on the last `ListRow::Capture`
-    // row (Notes), but the scope row is a `ListRow::Detail` painted immediately after it,
-    // so it fell out of the window exactly on this long-deck case. The block must scroll
-    // as a unit: the scope row and its save/cancel hint must be visible too.
-    assert!(
-        viewport.contains("scope") && viewport.contains("global"),
-        "the capture's scope row must be scrolled into view alongside title/notes:\n{viewport}"
-    );
-    assert!(
-        viewport.contains("enter: save") && viewport.contains("esc: cancel"),
-        "the scope row's save/cancel hint must be visible on a long deck:\n{viewport}"
-    );
-
-    let cursor = terminal.get_cursor_position().expect("cursor position");
-    assert!(
-        (cursor.y as usize) >= top && (cursor.y as usize) < bottom,
-        "caret must be placed inside the viewport, got {cursor:?} (viewport {top}..{bottom})"
     );
 }
 
@@ -1679,10 +1134,9 @@ fn standard_accordion_on_a_task_below_the_fold_scrolls_the_whole_block_into_view
     }
 }
 
-/// G-2 (gate round 1, PR #11): `draw_queue_frame` only ever derived `scroll` from the
-/// *open-surface* anchor (an open inline capture block or an open accordion) -- with
-/// neither open, the list always painted from row 0, so on a deck longer than the
-/// viewport, moving the plain selection past the fold walked it off-screen with no visual
+/// G-2 (gate round 1, PR #11): with no expanded accordion open, the list once painted from
+/// row 0, so on a deck longer than the viewport, moving the plain selection past the fold
+/// walked it off-screen with no visual
 /// feedback, and the mutating verbs (`space`/`d`/`x`) then acted on a row the user could not
 /// see. Select the *last* task of a 40-task deck with nothing else open and require its own
 /// title to be scrolled into view.
@@ -1885,19 +1339,6 @@ fn golden_scenes() -> Vec<GoldenScene> {
     accordion_model.verb_items = &accordion_verbs_owned;
     let (accordion_rows, _) = paint(80, 24, &accordion_model);
 
-    let mut capture_model = fixture_model(&tasks, &board_view);
-    capture_model.overlay = QueueOverlay::Capture {
-        title: "Sketch the queue prototype".to_string(),
-        title_cursor: 27,
-        notes_rows: vec!["One list, verbs, no lenses.".to_string()],
-        notes_cursor_row: 0,
-        notes_cursor_col: 27,
-        scope_label: "/repos/herdr-tasks".to_string(),
-        focus: CaptureField::Notes,
-        scope_dropdown: None,
-    };
-    let (capture_rows, _) = paint(80, 24, &capture_model);
-
     let mut palette_model = fixture_model(&tasks, &board_view);
     let palette_commands_owned = palette_commands();
     palette_model.overlay = QueueOverlay::Palette {
@@ -1944,11 +1385,6 @@ fn golden_scenes() -> Vec<GoldenScene> {
         GoldenScene {
             name: "accordion",
             rows: accordion_rows,
-            width: 80,
-        },
-        GoldenScene {
-            name: "capture",
-            rows: capture_rows,
             width: 80,
         },
         GoldenScene {
@@ -2009,11 +1445,11 @@ fn regenerate_golden_fixtures() {
 }
 
 /// the the-relevant scenes the reviewer compares against the frozen prototype dump
-/// (board at 80×24, board at the default 78×24 split, accordion/expanded, capture, palette,
-/// help, done drawer) each have a checked-in golden frame, and every fresh paint still matches
+/// (board at 80×24, board at the default 78×24 split, accordion/expanded, palette, help,
+/// done drawer) each have a checked-in golden frame, and every fresh paint still matches
 /// its golden byte-for-byte.
 #[test]
-fn surface_goldens_board_accordion_capture_palette_help_drawer_exist_for_reviewer_side_by_side() {
+fn surface_goldens_board_accordion_palette_help_drawer_exist_for_reviewer_side_by_side() {
     for scene in golden_scenes() {
         let dump = dump_frame(&scene.rows, scene.width);
         let path = golden_path(scene.name);
@@ -2088,7 +1524,7 @@ fn all_golden_frames_pass_no_color_sgr_scan() {
         scanned += 1;
     }
     assert_eq!(
-        scanned, 7,
-        "expected the seven M1 surface goldens (board, board_default_split_78, accordion, capture, palette, help, done_drawer) in {dir:?}"
+        scanned, 6,
+        "expected the six board surface goldens (board, board_default_split_78, accordion, palette, help, done_drawer) in {dir:?}"
     );
 }

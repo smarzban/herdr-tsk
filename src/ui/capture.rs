@@ -113,12 +113,20 @@ pub struct CaptureModel {
 }
 
 impl CaptureModel {
+    /// Resolve the form's initial scope from its immutable invocation snapshot.
+    ///
+    /// Board quick-add adjusts that snapshot once for its current lens, then calls this same
+    /// derivation rather than keeping a second default-scope rule.
+    pub fn default_scope(snapshot: &InvocationSnapshot) -> TaskScope {
+        snapshot.default_scope.clone()
+    }
+
     /// Build a draft from an invocation snapshot.
     pub fn from_snapshot(snapshot: &InvocationSnapshot) -> Self {
         Self {
             title: seeded_draft(snapshot.title_prefill.as_deref().unwrap_or_default()),
             notes: seeded_draft(""),
-            scope: snapshot.default_scope.clone(),
+            scope: Self::default_scope(snapshot),
             this_repo: snapshot.this_repo.clone(),
             focused: CaptureField::Title,
             scope_path_edit: None,

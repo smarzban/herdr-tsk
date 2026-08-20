@@ -18,7 +18,9 @@ use super::capture::{
     CAPTURE_SCOPE_CONTROLS,
 };
 use super::input::{BoardIntent, CaptureIntent, PrimaryCaptureAction, PRIMARY_CAPTURE_ACTIONS};
-use super::render::{form_verb_items, QueueHitMap, QueueHitTarget, PALETTE_VERBS, SCOPE_VERBS};
+use super::render::{
+    form_verb_items, QueueHitMap, QueueHitTarget, PALETTE_VERBS, QUICK_ADD_VERBS, SCOPE_VERBS,
+};
 
 /// Transient presentation that still exists on the V1 queue board.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -317,6 +319,16 @@ fn verb_intent(model: &BoardModel, index: usize) -> Option<BoardIntent> {
     }
 }
 
+fn quick_add_verb_intent(index: usize) -> Option<BoardIntent> {
+    match QUICK_ADD_VERBS.get(index)?.key {
+        "enter" => Some(BoardIntent::QuickAddSave),
+        "ctrl+enter" => Some(BoardIntent::QuickAddSaveNext),
+        "tab" => Some(BoardIntent::ExpandQuickAdd),
+        "esc" => Some(BoardIntent::CancelQuickAdd),
+        _ => None,
+    }
+}
+
 fn palette_verb_intent(index: usize) -> Option<BoardIntent> {
     match PALETTE_VERBS.get(index)?.key {
         "enter" => Some(BoardIntent::ConfirmCommand),
@@ -418,20 +430,32 @@ pub fn map_board_mouse(
             _ => Some(BoardIntent::CancelProjectPicker),
         },
         BoardInputMode::Help => Some(BoardIntent::CloseLayer),
-        BoardInputMode::Capture
-        | BoardInputMode::EditTitle
-        | BoardInputMode::EditNotes
-        | BoardInputMode::EditScope => match hit_at(hits, pos) {
-            Some(QueueHitTarget::FormTitle) => {
-                Some(BoardIntent::FocusFormField(CaptureField::Title))
-            }
-            Some(QueueHitTarget::FormNotes(_)) => {
-                Some(BoardIntent::FocusFormField(CaptureField::Notes))
-            }
-            Some(QueueHitTarget::FormScope) => Some(BoardIntent::OpenFormScopeDropdown),
-            Some(QueueHitTarget::Verb(index)) => form_verb_intent(model, index),
-            _ => None,
+        BoardInputMode::QuickAdd => match hit_at(hits, pos) {
+            // The line already owns keyboard focus, so its click is intentionally inert.
+            Some(QueueHitTarget::QuickAddInput) => None,
+            Some(QueueHitTarget::Task(id)) => model
+                .visible_ids()
+                .iter()
+                .position(|&visible| visible == id)
+                .map(BoardIntent::QuickAddSelectIndex),
+            Some(QueueHitTarget::Verb(index)) => quick_add_verb_intent(index),
+            // Chosen policy: outside clicks discard the draft and are swallowed, rather than
+            // triggering a second board action behind the capture surface.
+            _ => Some(BoardIntent::CancelQuickAdd),
         },
+        BoardInputMode::EditTitle | BoardInputMode::EditNotes | BoardInputMode::EditScope => {
+            match hit_at(hits, pos) {
+                Some(QueueHitTarget::FormTitle) => {
+                    Some(BoardIntent::FocusFormField(CaptureField::Title))
+                }
+                Some(QueueHitTarget::FormNotes(_)) => {
+                    Some(BoardIntent::FocusFormField(CaptureField::Notes))
+                }
+                Some(QueueHitTarget::FormScope) => Some(BoardIntent::OpenFormScopeDropdown),
+                Some(QueueHitTarget::Verb(index)) => form_verb_intent(model, index),
+                _ => None,
+            }
+        }
         BoardInputMode::TaskPage => match hit_at(hits, pos) {
             Some(QueueHitTarget::FormScope) => None,
             Some(QueueHitTarget::Verb(index)) => verb_intent(model, index),
