@@ -85,7 +85,7 @@ pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
         return items;
     }
 
-    let mut items = Vec::with_capacity(6);
+    let mut items = Vec::with_capacity(7);
     let selected_task = model
         .selected_id()
         .and_then(|id| model.tasks.iter().find(|t| t.id == id));
@@ -139,6 +139,11 @@ pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
     items.push(VerbEntry {
         key: "?",
         label: help("?", "help"),
+    });
+    // Capture is last so the compact budget preserves the established board verbs.
+    items.push(VerbEntry {
+        key: "+",
+        label: "capture",
     });
     items
 }

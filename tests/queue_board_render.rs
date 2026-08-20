@@ -425,8 +425,8 @@ fn standard_78x24_fixture_has_selector_list_rule_status_verb_and_no_other_chrome
     // correct legend omits the entry rather than advertise a no-op. `enter`/`?` are always
     // present regardless of selection.
     assert!(
-        verbs.contains("enter") && verbs.contains('?'),
-        "verb bar must list entries: {verbs:?}"
+        verbs.contains("enter") && verbs.contains('?') && verbs.contains("+ capture"),
+        "standard verb bar must retain open, help, and capture: {verbs:?}"
     );
 
     // Chrome is exactly selector + rule + status + verb. Viewport rows are list content only
@@ -797,7 +797,13 @@ fn compact_77x24_and_48x19_and_40x10_paint_glyph_title_only_rows_and_leq_5_verb_
             // Count key tokens from the fixture set that actually appear.
             let shown = todo_verbs()
                 .iter()
-                .filter(|v| painted.contains(v.key))
+                .filter(|v| {
+                    if v.key == "+" {
+                        painted.contains("+ capture")
+                    } else {
+                        painted.contains(v.key)
+                    }
+                })
                 .count();
             assert!(
                 shown <= 5,
@@ -807,6 +813,10 @@ fn compact_77x24_and_48x19_and_40x10_paint_glyph_title_only_rows_and_leq_5_verb_
                 shown <= geo.verb_bar_entry_budget as usize,
                 "{w}x{h} showed {shown} verbs over budget {}",
                 geo.verb_bar_entry_budget
+            );
+            assert!(
+                !painted.contains("+ capture"),
+                "{w}x{h} compact keeps its existing verbs instead of displacing one for capture: {painted:?}"
             );
         }
 

@@ -624,6 +624,7 @@ fn click_and_wheel_match_keyboard_effects_for_each_control() {
     assert_verb_parity("b", HumanStatus::Ready, "b", KeyCode::Char('b'));
     assert_verb_parity("colon", HumanStatus::Ready, ":", KeyCode::Char(':'));
     assert_verb_parity("question", HumanStatus::Ready, "?", KeyCode::Char('?'));
+    assert_verb_parity("capture", HumanStatus::Started, "+", KeyCode::Char('+'));
     assert_verb_parity("reopen", HumanStatus::Done, "o", KeyCode::Char('o'));
 
     // Drawer toggle: open it by keyboard on both boards first (a shared start state), then

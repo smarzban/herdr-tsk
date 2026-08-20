@@ -315,6 +315,7 @@ fn verb_intent(model: &BoardModel, index: usize) -> Option<BoardIntent> {
         "esc" => Some(BoardIntent::CloseLayer),
         ":" => Some(BoardIntent::OpenCommandPalette),
         "?" => Some(BoardIntent::OpenHelp),
+        "+" => Some(BoardIntent::OpenCapture),
         _ => None,
     }
 }

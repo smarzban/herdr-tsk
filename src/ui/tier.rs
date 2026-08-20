@@ -47,8 +47,8 @@ pub const SELECTOR_CHIP_MAX_CELLS: u16 = 24;
 /// Compact verb bar keeps at most this many entries.
 pub const COMPACT_VERB_BAR_ENTRY_BUDGET: u16 = 5;
 
-/// Full the standard verb-bar set: space · enter · d · b · : · ?
-pub const STANDARD_VERB_BAR_ENTRY_BUDGET: u16 = 6;
+/// Full standard verb-bar set: space · enter · d · b · : · ? · +.
+pub const STANDARD_VERB_BAR_ENTRY_BUDGET: u16 = 7;
 
 /// Minimum width for the standard board tier. This is the default Herdr split amendment.
 const STANDARD_MIN_WIDTH: u16 = 78;
