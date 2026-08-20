@@ -563,6 +563,57 @@ fn every_section_header_has_symmetric_spacing_and_scrolls_with_its_selected_task
     }
 }
 
+#[test]
+fn empty_board_hint_advertises_the_live_quick_add_key() {
+    let tasks = fixture_tasks();
+    let view = queue::query(
+        &tasks,
+        None,
+        DeckScope::Project(Path::new("/no-tasks")),
+        false,
+    );
+    let model = fixture_model(&tasks, &view);
+    let (rows, _) = paint(80, 24, &model);
+    let frame = rows.join("\n");
+
+    assert!(frame.contains("+ capture"), "empty-board hint: {frame}");
+    assert!(!frame.contains("a capture"), "empty-board hint: {frame}");
+}
+
+#[test]
+fn quick_add_refusal_message_uses_the_reserved_blank_row_without_color_or_overflow() {
+    let tasks = fixture_tasks();
+    let view = fixture_view(&tasks, true);
+
+    for &(width, height) in &[(80, 24), (40, 10)] {
+        let mut model = fixture_model(&tasks, &view);
+        model.overlay = QueueOverlay::QuickAdd {
+            title: String::new(),
+            title_cursor: 0,
+            project_scope: false,
+            recovery: false,
+            message: Some("Title required"),
+        };
+        let (rows, geo) = paint(width, height, &model);
+        // Quick-add reserves two rows by shifting its input up one from ordinary status
+        // chrome, leaving the former status row blank below it and this row above it.
+        let input_row = (geo.status_row.expect("quick-add input row") - 1) as usize;
+        let message_row = input_row.checked_sub(1).expect("reserved blank row");
+
+        assert!(
+            trimmed(&rows[message_row]).contains("Title required"),
+            "{width}x{height}: refusal must be visible above quick-add input: {rows:#?}"
+        );
+        assert!(
+            trimmed(&rows[input_row]).starts_with('▎'),
+            "{width}x{height}: refusal must not replace the input cursor row: {rows:#?}"
+        );
+        for row in &rows {
+            assert_eq!(row_display_width(row), width as usize, "{width}x{height}");
+        }
+    }
+}
+
 /// An empty hint and capture form are first list content after a destination heading. The
 /// B4 regression: overlays must pad every painted cell to their width so base frame content
 /// (status line, section rules+counts, task meta) cannot bleed through.

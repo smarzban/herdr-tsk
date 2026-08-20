@@ -709,8 +709,10 @@ pub fn apply_board_intent_with_save_recovery(
                 model.close_command_surface();
                 *domain = recovery.cancel().expect("pending recovery has a baseline");
                 model.sync_from_domain(domain);
-                model.end_save_recovery(SaveResolution::Cancelled);
-                model.set_message("save cancelled");
+                let cancelled_quick_add = model.end_save_recovery(SaveResolution::Cancelled);
+                if !cancelled_quick_add {
+                    model.set_message("save cancelled");
+                }
                 return Ok(IntentOutcome::None);
             }
             // Navigation and presentation state mutate nothing.
@@ -2306,6 +2308,252 @@ mod tests {
             model.visible_ids().contains(&created[0].id),
             "board model must show the task it just created"
         );
+    }
+
+    #[test]
+    fn quick_add_refusals_keep_the_line_open_and_esc_drops_their_message() {
+        let snapshot = InvocationSnapshot {
+            default_scope: TaskScope::Global,
+            this_repo: None,
+            title_prefill: None,
+            provenance: ProvenanceOrigin::Capture,
+            capsule: None,
+            agent_meta: None,
+        };
+        let mut domain = DomainState::new();
+        let mut model = BoardModel::from_domain(&domain, None);
+
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::OpenCapture,
+            Some(&snapshot),
+            None,
+        )
+        .expect("open quick add");
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::QuickAddSave,
+            Some(&snapshot),
+            None,
+        )
+        .expect("reject empty title");
+        assert_eq!(model.input_mode(), BoardInputMode::QuickAdd);
+        assert_eq!(model.message(), Some(TITLE_REQUIRED_MESSAGE));
+
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::CancelQuickAdd,
+            Some(&snapshot),
+            None,
+        )
+        .expect("close refused quick add");
+        assert_eq!(model.input_mode(), BoardInputMode::Normal);
+        assert_eq!(model.message(), None, "no refusal leaks onto the board");
+
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::OpenCapture,
+            None,
+            None,
+        )
+        .expect("open snapshot-less quick add");
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::QuickAddSave,
+            None,
+            None,
+        )
+        .expect("refuse unavailable capture context");
+        assert_eq!(model.input_mode(), BoardInputMode::QuickAdd);
+        assert_eq!(
+            model.message(),
+            Some("capture context unavailable; press Esc and try again")
+        );
+    }
+
+    #[test]
+    fn expanded_quick_add_save_recovery_cancel_keeps_the_complete_draft_stash() {
+        use std::fs;
+
+        let dir = temp_state_dir("expanded-quick-add-save-recovery");
+        let blocked = dir.join("not-a-directory");
+        fs::write(&blocked, "not a state directory").expect("blocking file");
+        let store = TaskStore::new(&blocked);
+        let snapshot = InvocationSnapshot {
+            default_scope: TaskScope::Global,
+            this_repo: Some(PathBuf::from("/repos/chosen")),
+            title_prefill: Some("Retained title".into()),
+            provenance: ProvenanceOrigin::Capture,
+            capsule: None,
+            agent_meta: None,
+        };
+        let mut domain = DomainState::new();
+        let mut model = BoardModel::from_domain(&domain, snapshot.this_repo.clone());
+        let mut recovery = SaveRecovery::new();
+
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::OpenCapture,
+            Some(&snapshot),
+            None,
+        )
+        .expect("open quick add");
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::ExpandQuickAdd,
+            Some(&snapshot),
+            None,
+        )
+        .expect("expand quick add");
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::EditInsertText("retained notes".into()),
+            Some(&snapshot),
+            None,
+        )
+        .expect("write notes");
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::FocusFormField(CaptureField::Scope),
+            Some(&snapshot),
+            None,
+        )
+        .expect("focus scope");
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::FormCycleScope,
+            Some(&snapshot),
+            None,
+        )
+        .expect("choose project scope");
+        assert_eq!(
+            model.form_scope(),
+            Some(&TaskScope::Project {
+                path: "/repos/chosen".into()
+            })
+        );
+
+        let outcome = apply_board_intent_with_save_recovery(
+            &mut domain,
+            &mut model,
+            &mut recovery,
+            BoardSaveContext {
+                baseline: DomainState::new(),
+                intent: BoardIntent::ConfirmEdit,
+                snapshot: Some(&snapshot),
+                host: None,
+            },
+            |working| store.save(working).map_err(|error| error.to_string()),
+        )
+        .expect("failed save enters recovery");
+        assert_eq!(outcome, IntentOutcome::None);
+        assert!(recovery.is_pending());
+        assert!(
+            model.board_form_open(),
+            "recovery retains the expanded form"
+        );
+
+        apply_board_intent_with_save_recovery(
+            &mut domain,
+            &mut model,
+            &mut recovery,
+            BoardSaveContext {
+                baseline: DomainState::new(),
+                intent: BoardIntent::CancelSave,
+                snapshot: None,
+                host: None,
+            },
+            |_| panic!("CancelSave must not persist"),
+        )
+        .expect("cancel failed save");
+
+        assert_eq!(model.input_mode(), BoardInputMode::QuickAdd);
+        assert_eq!(model.quick_add_title_value(), "Retained title");
+        assert!(
+            model.board_form_open(),
+            "complete expanded draft remains stashed"
+        );
+        assert_eq!(
+            model.form_scope(),
+            Some(&TaskScope::Project {
+                path: "/repos/chosen".into()
+            })
+        );
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::ExpandQuickAdd,
+            Some(&snapshot),
+            None,
+        )
+        .expect("reopen retained draft");
+        assert_eq!(model.input_mode(), BoardInputMode::EditNotes);
+        assert_eq!(model.edit_buffer(), "retained notes");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn confirmed_expanded_quick_add_clears_the_form_and_selects_the_new_task() {
+        let temp = TempStore::new("confirmed-expanded-quick-add");
+        let snapshot = InvocationSnapshot {
+            default_scope: TaskScope::Global,
+            this_repo: None,
+            title_prefill: Some("Expanded saved task".into()),
+            provenance: ProvenanceOrigin::Capture,
+            capsule: None,
+            agent_meta: None,
+        };
+        let mut domain = DomainState::new();
+        let mut model = BoardModel::from_domain(&domain, None);
+        let mut recovery = SaveRecovery::new();
+
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::OpenCapture,
+            Some(&snapshot),
+            None,
+        )
+        .expect("open quick add");
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::ExpandQuickAdd,
+            Some(&snapshot),
+            None,
+        )
+        .expect("expand quick add");
+        let outcome = apply_board_intent_with_save_recovery(
+            &mut domain,
+            &mut model,
+            &mut recovery,
+            BoardSaveContext {
+                baseline: DomainState::new(),
+                intent: BoardIntent::ConfirmEdit,
+                snapshot: Some(&snapshot),
+                host: None,
+            },
+            |working| temp.store.save(working).map_err(|error| error.to_string()),
+        )
+        .expect("save expanded quick add");
+
+        let id = domain.tasks()[0].id;
+        assert_eq!(outcome, IntentOutcome::Persisted);
+        assert!(!recovery.is_pending());
+        assert_eq!(model.input_mode(), BoardInputMode::Normal);
+        assert!(!model.board_form_open());
+        assert_eq!(model.selected_id(), Some(id));
     }
 
     /// Without a snapshot, quick-add save must neither call `capture_save` nor report

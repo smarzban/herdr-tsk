@@ -569,7 +569,7 @@ impl BoardModel {
     /// just made durable) and falls back to whatever was armed instead of wiping it, and both
     /// fields are emptied either way, so no path can lose the notice or leave a second copy
     /// behind to resurface at the next failure.
-    pub fn end_save_recovery(&mut self, resolution: SaveResolution) {
+    pub fn end_save_recovery(&mut self, resolution: SaveResolution) -> bool {
         if self.popup == BoardPopup::SaveRecovery {
             self.popup = BoardPopup::None;
         }
@@ -581,6 +581,16 @@ impl BoardModel {
                 None
             }
         };
+        let cancelled_quick_add = resolution == SaveResolution::Cancelled
+            && self.quick_add_save.take().is_some()
+            && self.quick_add.is_some();
+        if cancelled_quick_add {
+            // The retained capture form is a stash, not an active page. Return its line to
+            // normal keyboard routing and remove the failure chrome that line would cover.
+            self.input_mode = BoardInputMode::QuickAdd;
+            self.clear_message();
+        }
+        cancelled_quick_add
     }
 
     /// Snapshot tasks from domain state (default agent kind; seed env at open).
@@ -852,6 +862,7 @@ impl BoardModel {
         self.quick_add_save = None;
         self.form = None;
         self.input_mode = BoardInputMode::Normal;
+        self.clear_message();
     }
 
     /// Drop a retained expanded draft after the quick-add title changed.
@@ -876,14 +887,19 @@ impl BoardModel {
         let pending = self.quick_add_save.take().expect("checked quick-add save");
         self.saved_task = Some(pending.id);
         self.selection_id = Some(pending.id);
+        // The pending create is now durable. This is the only point an expanded quick-add
+        // may release its complete form, so a failed save can still return to that stash.
+        self.form = None;
         if pending.keep_open {
             if let Some(quick_add) = self.quick_add.as_mut() {
                 quick_add.title = seeded_draft("");
             }
+            self.input_mode = BoardInputMode::QuickAdd;
         } else {
             self.quick_add = None;
             self.input_mode = BoardInputMode::Normal;
         }
+        self.clear_message();
     }
 
     /// Focused field of the shared board form, if one is open.

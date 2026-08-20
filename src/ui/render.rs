@@ -541,9 +541,23 @@ pub fn draw_queue_frame(
         if let QueueOverlay::QuickAdd {
             title,
             title_cursor,
+            recovery,
+            message,
             ..
         } = &model.overlay
         {
+            // Quick-add reserves this blank row above its input at every operable geometry.
+            // Validation and context refusals cannot use the ordinary status row because the
+            // input owns it, while save recovery already owns the verb row.
+            if !recovery {
+                if let Some(message_row) = row.checked_sub(1).filter(|message_row| {
+                    geo.rule_row.is_some_and(|rule_row| *message_row > rule_row)
+                }) {
+                    if let Some(message) = message {
+                        paint_quick_add_message(frame, message_row, width, message);
+                    }
+                }
+            }
             paint_quick_add_status(frame, row, width, title, *title_cursor);
             hits.push(QueueHitTarget::QuickAddInput, Rect::new(0, row, width, 1));
         } else {
@@ -1606,12 +1620,12 @@ fn section_title(section: &QueueSection, all_projects: bool) -> String {
 }
 
 fn paint_empty_hint(width: u16) -> Line<'static> {
-    // Prototype: " no open tasks here — P rescope or a capture"
+    // " no open tasks here — P rescope or + capture"
     let spans = vec![
         Span::styled("    no open tasks here — ".to_string(), style_dim()),
         Span::styled("P".to_string(), style_bold()),
         Span::styled(" rescope or ".to_string(), style_dim()),
-        Span::styled("a".to_string(), style_bold()),
+        Span::styled("+".to_string(), style_bold()),
         Span::styled(" capture".to_string(), style_dim()),
     ];
     bound_line(Line::from(spans), width as usize)
@@ -1673,6 +1687,22 @@ fn paint_quick_add_status(
             1,
         ),
         title_cursor,
+    );
+}
+
+/// Paint an inline quick-add refusal in its reserved blank row, never over the input cursor.
+fn paint_quick_add_message(frame: &mut Frame<'_>, row: u16, width: u16, message: &str) {
+    put_line(
+        frame,
+        row,
+        width,
+        bound_line(
+            Line::from(Span::styled(
+                present_line(message, width as usize),
+                style_reverse_bold(),
+            )),
+            width as usize,
+        ),
     );
 }
 

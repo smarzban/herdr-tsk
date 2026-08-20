@@ -272,6 +272,7 @@ fn apply_board_intent(
             model.invalidate_quick_add_stash();
             if let Some(quick_add) = model.quick_add.as_mut() {
                 quick_add.title.insert_char(character);
+                model.clear_message();
             }
             return Ok(IntentOutcome::None);
         }
@@ -279,6 +280,7 @@ fn apply_board_intent(
             model.invalidate_quick_add_stash();
             if let Some(quick_add) = model.quick_add.as_mut() {
                 quick_add.title.insert_text(&flatten_line_breaks(&text));
+                model.clear_message();
             }
             return Ok(IntentOutcome::None);
         }
@@ -286,6 +288,7 @@ fn apply_board_intent(
             model.invalidate_quick_add_stash();
             if let Some(quick_add) = model.quick_add.as_mut() {
                 quick_add.title.backspace();
+                model.clear_message();
             }
             return Ok(IntentOutcome::None);
         }
@@ -293,6 +296,7 @@ fn apply_board_intent(
             model.invalidate_quick_add_stash();
             if let Some(quick_add) = model.quick_add.as_mut() {
                 quick_add.title.delete_forward();
+                model.clear_message();
             }
             return Ok(IntentOutcome::None);
         }
@@ -637,8 +641,10 @@ fn apply_board_intent(
                 ) {
                     Ok(id) => {
                         let expanded_quick_add = model.quick_add.is_some();
-                        model.form = None;
                         if expanded_quick_add {
+                            // The app save boundary still owns this create. Retain the expanded
+                            // form until it succeeds so recovery Cancel can return to a complete
+                            // quick-add stash instead of an edit mode with no form.
                             model.begin_quick_add_save(id, false);
                         } else {
                             model.input_mode = BoardInputMode::Normal;
