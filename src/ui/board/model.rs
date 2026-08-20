@@ -56,7 +56,7 @@ pub enum BoardInputMode {
     Palette,
     /// the help card is open.
     Help,
-    /// Single-line status-row capture from board `a`.
+    /// Single-line status-row capture from board `+`.
     QuickAdd,
     /// Full capture form expanded from quick-add, separate from standalone CaptureModel.
     Capture,

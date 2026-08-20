@@ -2235,7 +2235,7 @@ mod tests {
     /// product never supplies. This is the app-loop boundary test the second review asked
     /// for: no snapshot is constructed or injected here, only real board intents.
     #[test]
-    fn board_a_title_enter_creates_one_task_through_the_real_app_intent_route() {
+    fn board_plus_title_enter_creates_one_task_through_the_real_app_intent_route() {
         let temp = TempStore::new("board-a-real-route");
         let mut domain = DomainState::new();
         temp.store.save(&domain).expect("seed empty store");
@@ -2301,7 +2301,7 @@ mod tests {
         assert_eq!(
             created.len(),
             1,
-            "board `a` must create exactly one task through the real app intent path, not zero"
+            "board `+` must create exactly one task through the real app intent path, not zero"
         );
         assert!(
             model.visible_ids().contains(&created[0].id),

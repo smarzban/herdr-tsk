@@ -267,7 +267,7 @@ pub enum BoardIntent {
 }
 
 /// Bottom chrome: compact key legend for primary board actions.
-pub const BOARD_HELP_LINE: &str = "↑↓/jk  ·  alt+space primary  ·  enter open  ·  → peek  ·  alt+d done  ·  alt+o reopen  ·  alt+b block  ·  alt+a capture  ·  alt+e title  ·  alt+x del  ·  alt+u undo  ·  z drawer  ·  : palette  ·  ? help  ·  alt+q quit";
+pub const BOARD_HELP_LINE: &str = "↑↓/jk  ·  alt+space primary  ·  enter open  ·  → peek  ·  alt+d done  ·  alt+o reopen  ·  alt+b block  ·  + capture  ·  alt+e title  ·  alt+x del  ·  alt+u undo  ·  z drawer  ·  : palette  ·  ? help  ·  alt+q quit";
 /// Compact legend shown while the action sheet or command palette is open.
 pub const COMMAND_SURFACE_HELP_LINE: &str =
     "↑↓ select  ·  type to filter  ·  Enter run  ·  Esc close";
@@ -382,12 +382,14 @@ const NORMAL_KEYMAP: &[NormalKeyEntry] = &[
         help_label: "peek",
         verb: false,
     },
+    // `+` opens an input surface, like bare `:` palette, `z` drawer, and `?` help. It is
+    // not a task-mutating verb, so it does not take the configured verb modifier.
     NormalKeyEntry {
-        code: KeyCode::Char('a'),
+        code: KeyCode::Char('+'),
         intent: BoardIntent::OpenCapture,
-        help_chord: "a",
+        help_chord: "+",
         help_label: "capture",
-        verb: true,
+        verb: false,
     },
     NormalKeyEntry {
         code: KeyCode::Char('e'),
@@ -858,7 +860,7 @@ pub fn intent_primary_action(intent: &BoardIntent) -> Option<PrimaryBoardAction>
 pub fn primary_action_sample_key(action: PrimaryBoardAction) -> KeyEvent {
     let (code, mods) = match action {
         PrimaryBoardAction::SelectTask => (KeyCode::Char('j'), KeyModifiers::NONE),
-        PrimaryBoardAction::OpenCapture => (KeyCode::Char('a'), KeyModifiers::ALT),
+        PrimaryBoardAction::OpenCapture => (KeyCode::Char('+'), KeyModifiers::NONE),
         PrimaryBoardAction::EditTitle => (KeyCode::Char('e'), KeyModifiers::ALT),
         PrimaryBoardAction::Complete => (KeyCode::Char('d'), KeyModifiers::ALT),
         PrimaryBoardAction::Reopen => (KeyCode::Char('o'), KeyModifiers::ALT),

@@ -1,5 +1,6 @@
 //! Board intent reducer and dispatch-recovery result application.
 
+use std::collections::BTreeSet;
 use std::time::Instant;
 
 use uuid::Uuid;
@@ -331,7 +332,11 @@ fn apply_board_intent(
             let Some(quick_add) = model.quick_add.as_ref() else {
                 return Ok(IntentOutcome::None);
             };
-            let (title, token_scope) = quick_add_title_and_scope(quick_add.title.value());
+            let (title, token_scope) = quick_add_title_and_scope(
+                quick_add.title.value(),
+                domain,
+                quick_add.snapshot.as_ref().as_ref(),
+            );
             let scope = token_scope.unwrap_or_else(|| quick_add.scope.clone());
             let snapshot = quick_add.snapshot.as_ref().clone();
             if let Some(quick_add) = model.quick_add.as_mut() {
@@ -1148,7 +1153,11 @@ fn quick_add_save(
         model.set_message("capture context unavailable; press Esc and try again");
         return Ok(IntentOutcome::None);
     };
-    let (title, token_scope) = quick_add_title_and_scope(quick_add.title.value());
+    let (title, token_scope) = quick_add_title_and_scope(
+        quick_add.title.value(),
+        domain,
+        quick_add.snapshot.as_ref().as_ref(),
+    );
     let scope = token_scope.unwrap_or_else(|| quick_add.scope.clone());
     match crate::capture::capture_save(domain, None, &snapshot, title, None, Some(scope.clone())) {
         Ok(id) => {
@@ -1169,7 +1178,11 @@ fn quick_add_save(
 }
 
 /// Parse whitespace-delimited quick-add scope directives before creating a task.
-fn quick_add_title_and_scope(value: &str) -> (String, Option<TaskScope>) {
+fn quick_add_title_and_scope(
+    value: &str,
+    domain: &DomainState,
+    snapshot: Option<&InvocationSnapshot>,
+) -> (String, Option<TaskScope>) {
     let words: Vec<&str> = value.split_whitespace().collect();
     if let Some(index) = words.iter().position(|word| *word == "!p") {
         let path = words[index + 1..].join(" ");
@@ -1180,7 +1193,12 @@ fn quick_add_title_and_scope(value: &str) -> (String, Option<TaskScope>) {
                 .copied()
                 .collect::<Vec<_>>()
                 .join(" ");
-            return (title, Some(TaskScope::Project { path }));
+            return (
+                title,
+                Some(TaskScope::Project {
+                    path: resolve_quick_add_project_path(&path, domain, snapshot),
+                }),
+            );
         }
     }
     let global = words.contains(&"!g");
@@ -1191,6 +1209,46 @@ fn quick_add_title_and_scope(value: &str) -> (String, Option<TaskScope>) {
         .collect::<Vec<_>>()
         .join(" ");
     (title, global.then_some(TaskScope::Global))
+}
+
+/// Resolve a separator-free `!p` token against the projects available to this board.
+///
+/// Basename matching is case-sensitive, matching the domain's path equality. An absent or
+/// ambiguous basename deliberately stays verbatim so a quick add never guesses a project.
+fn resolve_quick_add_project_path(
+    token: &str,
+    domain: &DomainState,
+    snapshot: Option<&InvocationSnapshot>,
+) -> String {
+    if token.contains('/') {
+        return token.to_string();
+    }
+
+    let mut candidates = BTreeSet::new();
+    for task in domain.tasks() {
+        if let TaskScope::Project { path } = &task.scope {
+            candidates.insert(path.clone());
+        }
+    }
+    if let Some(snapshot) = snapshot {
+        if let TaskScope::Project { path } = &snapshot.default_scope {
+            candidates.insert(path.clone());
+        }
+        if let Some(this_repo) = snapshot.this_repo.as_deref() {
+            candidates.insert(this_repo.to_string_lossy().into_owned());
+        }
+    }
+
+    let mut matches = candidates.into_iter().filter(|path| {
+        path.trim_end_matches('/')
+            .rsplit('/')
+            .find(|component| !component.is_empty())
+            == Some(token)
+    });
+    match (matches.next(), matches.next()) {
+        (Some(path), None) => path,
+        _ => token.to_string(),
+    }
 }
 
 fn confirm_edit(

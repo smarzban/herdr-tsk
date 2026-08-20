@@ -522,6 +522,8 @@ pub fn draw_queue_frame(
     model: &QueueFrameModel<'_>,
     geo: &TierGeometry,
 ) -> QueueHitMap {
+    let quick_add_geo = quick_add_geometry(*geo, &model.overlay);
+    let geo = &quick_add_geo;
     let mut hits = QueueHitMap::default();
     let width = geo.row_width;
     let height = geo.height;
@@ -748,6 +750,22 @@ pub fn draw_queue_frame(
     paint_overlay(frame, model, geo, &mut hits);
 
     hits
+}
+
+/// Reserve breathing room around the quick-add input by taking two rows from the list.
+///
+/// At the 40×10 operating floor this leaves four list rows, so both blank rows remain. On
+/// shorter frames with fewer than two viewport rows we retain the ordinary compact geometry:
+/// functional chrome wins over decorative spacing.
+fn quick_add_geometry(mut geo: TierGeometry, overlay: &QueueOverlay<'_>) -> TierGeometry {
+    if !matches!(overlay, QueueOverlay::QuickAdd { .. }) || geo.viewport_height < 2 {
+        return geo;
+    }
+
+    geo.viewport_height -= 2;
+    geo.rule_row = geo.rule_row.map(|row| row.saturating_sub(2));
+    geo.status_row = geo.status_row.map(|row| row.saturating_sub(1));
+    geo
 }
 
 pub(crate) const QUICK_ADD_VERBS: &[VerbEntry<'static>] = &[
