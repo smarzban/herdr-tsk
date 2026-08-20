@@ -651,8 +651,7 @@ fn board_keyboard_intent(
     // resolved (or escaped) from the keyboard at all.
     let form_field_mode = matches!(
         mode,
-        BoardInputMode::Capture
-            | BoardInputMode::EditTitle
+        BoardInputMode::EditTitle
             | BoardInputMode::EditNotes
             | BoardInputMode::EditScope
             | BoardInputMode::FormScopeDropdown
@@ -2470,11 +2469,7 @@ mod tests {
         .expect("open task form");
         assert!(model.board_form_open());
 
-        for mode in [
-            BoardInputMode::Capture,
-            BoardInputMode::EditTitle,
-            BoardInputMode::EditNotes,
-        ] {
+        for mode in [BoardInputMode::EditTitle, BoardInputMode::EditNotes] {
             assert_eq!(
                 board_keyboard_intent(
                     &model,

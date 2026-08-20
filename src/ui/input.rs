@@ -178,12 +178,6 @@ pub enum BoardIntent {
     /// A list click while quick-add is open discards the draft, then selects its row.
     QuickAddSelectIndex(usize),
     OpenCapture,
-    /// Move keyboard focus to the next Capture field (Title → Notes → Scope → Title).
-    CaptureFocusNext,
-    /// Move keyboard focus to the previous Capture field.
-    CaptureFocusPrev,
-    /// Cycle the session-only inline-capture task scope through available projects and Global.
-    CaptureCycleScope,
     /// Open the session project selector for the Projects lens (`P` or the chip).
     OpenProjectSelector,
     /// Move the project selector's option.
@@ -548,9 +542,7 @@ pub fn map_key_with(
         BoardInputMode::QuickAdd => map_quick_add_key(key),
         BoardInputMode::FormScopeDropdown => map_board_form_key(CaptureField::Scope, true, key),
         BoardInputMode::EditScope => map_board_form_key(CaptureField::Scope, false, key),
-        BoardInputMode::EditTitle | BoardInputMode::EditNotes | BoardInputMode::Capture => {
-            map_edit(mode, key)
-        }
+        BoardInputMode::EditTitle | BoardInputMode::EditNotes => map_edit(mode, key),
     }
 }
 
@@ -576,7 +568,7 @@ pub fn map_quick_add_key(key: KeyEvent) -> Option<BoardIntent> {
     let alt = mods.contains(KeyModifiers::ALT);
     match key.code {
         KeyCode::Enter if ctrl => return Some(BoardIntent::QuickAddSaveNext),
-        KeyCode::Enter if alt => return Some(BoardIntent::ExpandQuickAdd),
+        KeyCode::Tab if mods.is_empty() => return Some(BoardIntent::ExpandQuickAdd),
         KeyCode::Char('a') if ctrl => return Some(BoardIntent::QuickAddMoveLineStart),
         KeyCode::Char('e') if ctrl => return Some(BoardIntent::QuickAddMoveLineEnd),
         KeyCode::Char('b') if alt => return Some(BoardIntent::QuickAddMoveWordLeft),
@@ -721,22 +713,6 @@ fn map_form_edit_key(
     }
 }
 
-/// Compatibility entry point for inline-capture callers. The model-aware app loop uses
-/// [`map_board_form_key`] directly for capture and task forms alike.
-pub fn map_inline_capture_key(focused: CaptureField, key: KeyEvent) -> Option<BoardIntent> {
-    map_board_form_key(focused, false, key).map(capture_form_intent)
-}
-
-/// Translate the shared form's focus intents for compatibility callers that predate forms.
-fn capture_form_intent(intent: BoardIntent) -> BoardIntent {
-    match intent {
-        BoardIntent::FormFocusNext => BoardIntent::CaptureFocusNext,
-        BoardIntent::FormFocusPrev => BoardIntent::CaptureFocusPrev,
-        BoardIntent::FormCycleScope => BoardIntent::CaptureCycleScope,
-        other => other,
-    }
-}
-
 /// Map a bracketed-paste payload to the intent that inserts it.
 ///
 /// A paste arrives as `Event::Paste`, never as a key press, so it cannot go through
@@ -746,7 +722,7 @@ fn capture_form_intent(intent: BoardIntent) -> BoardIntent {
 pub fn map_edit_paste(mode: BoardInputMode, text: &str) -> Option<BoardIntent> {
     match mode {
         BoardInputMode::QuickAdd => Some(BoardIntent::QuickAddInsertText(text.to_string())),
-        BoardInputMode::EditTitle | BoardInputMode::EditNotes | BoardInputMode::Capture => {
+        BoardInputMode::EditTitle | BoardInputMode::EditNotes => {
             Some(BoardIntent::EditInsertText(text.to_string()))
         }
         BoardInputMode::EditScope
@@ -806,9 +782,6 @@ pub fn intent_primary_action(intent: &BoardIntent) -> Option<PrimaryBoardAction>
         | BoardIntent::ExpandQuickAdd
         | BoardIntent::CancelQuickAdd
         | BoardIntent::QuickAddSelectIndex(_)
-        | BoardIntent::CaptureFocusNext
-        | BoardIntent::CaptureFocusPrev
-        | BoardIntent::CaptureCycleScope
         | BoardIntent::FormFocusNext
         | BoardIntent::FormFocusPrev
         | BoardIntent::FocusFormField(_)
@@ -1034,22 +1007,14 @@ fn map_cleanup_confirmation(key: KeyEvent) -> Option<BoardIntent> {
 
 /// Thin mode-only wrapper over [`map_form_edit_key`].
 ///
-/// The live board carries a `CaptureField` and calls [`map_board_form_key`] directly. This
-/// compatibility path has only a `BoardInputMode`, so `Capture` retains its historical
-/// title-field default and rewrites the shared form-focus intents after mapping.
+/// The live board carries a `CaptureField` and calls [`map_board_form_key`] directly.
 fn map_edit(mode: BoardInputMode, key: KeyEvent) -> Option<BoardIntent> {
-    let (focused, navigation) = match mode {
-        BoardInputMode::EditTitle => (CaptureField::Title, FormEditNavigation::None),
-        BoardInputMode::EditNotes => (CaptureField::Notes, FormEditNavigation::None),
-        BoardInputMode::Capture => (CaptureField::Title, FormEditNavigation::Form),
+    let focused = match mode {
+        BoardInputMode::EditTitle => CaptureField::Title,
+        BoardInputMode::EditNotes => CaptureField::Notes,
         _ => return None,
     };
-    let intent = map_form_edit_key(focused, navigation, key);
-    if mode == BoardInputMode::Capture {
-        intent.map(capture_form_intent)
-    } else {
-        intent
-    }
+    map_form_edit_key(focused, FormEditNavigation::None, key)
 }
 
 /// Map a key event to a capture form intent for the focused field.

@@ -323,7 +323,7 @@ fn quick_add_verb_intent(index: usize) -> Option<BoardIntent> {
     match QUICK_ADD_VERBS.get(index)?.key {
         "enter" => Some(BoardIntent::QuickAddSave),
         "ctrl+enter" => Some(BoardIntent::QuickAddSaveNext),
-        "alt+enter" => Some(BoardIntent::ExpandQuickAdd),
+        "tab" => Some(BoardIntent::ExpandQuickAdd),
         "esc" => Some(BoardIntent::CancelQuickAdd),
         _ => None,
     }
@@ -443,20 +443,19 @@ pub fn map_board_mouse(
             // triggering a second board action behind the capture surface.
             _ => Some(BoardIntent::CancelQuickAdd),
         },
-        BoardInputMode::Capture
-        | BoardInputMode::EditTitle
-        | BoardInputMode::EditNotes
-        | BoardInputMode::EditScope => match hit_at(hits, pos) {
-            Some(QueueHitTarget::FormTitle) => {
-                Some(BoardIntent::FocusFormField(CaptureField::Title))
+        BoardInputMode::EditTitle | BoardInputMode::EditNotes | BoardInputMode::EditScope => {
+            match hit_at(hits, pos) {
+                Some(QueueHitTarget::FormTitle) => {
+                    Some(BoardIntent::FocusFormField(CaptureField::Title))
+                }
+                Some(QueueHitTarget::FormNotes(_)) => {
+                    Some(BoardIntent::FocusFormField(CaptureField::Notes))
+                }
+                Some(QueueHitTarget::FormScope) => Some(BoardIntent::OpenFormScopeDropdown),
+                Some(QueueHitTarget::Verb(index)) => form_verb_intent(model, index),
+                _ => None,
             }
-            Some(QueueHitTarget::FormNotes(_)) => {
-                Some(BoardIntent::FocusFormField(CaptureField::Notes))
-            }
-            Some(QueueHitTarget::FormScope) => Some(BoardIntent::OpenFormScopeDropdown),
-            Some(QueueHitTarget::Verb(index)) => form_verb_intent(model, index),
-            _ => None,
-        },
+        }
         BoardInputMode::TaskPage => match hit_at(hits, pos) {
             Some(QueueHitTarget::FormScope) => None,
             Some(QueueHitTarget::Verb(index)) => verb_intent(model, index),

@@ -36,17 +36,6 @@ pub(crate) fn editor_field_width(geo: &TierGeometry) -> usize {
     (geo.row_width as usize).saturating_sub(EDIT_FIELD_LABEL_WIDTH as usize)
 }
 
-/// Cells reserved by a capture field label (`" title "`, `" notes "`,
-/// `" scope "`): capture indents 4 columns (not 2, like the
-/// title/notes editors), so it needs its own label width.
-pub(crate) const CAPTURE_FIELD_LABEL_WIDTH: u16 = 11;
-
-/// Cells left for a capture field's text after its (4-indent) label, at the frame's actual
-/// paint width. Same B4 rationale as [`editor_field_width`], sized for the capture label.
-pub(crate) fn capture_field_width(geo: &TierGeometry) -> usize {
-    (geo.row_width as usize).saturating_sub(CAPTURE_FIELD_LABEL_WIDTH as usize)
-}
-
 /// Rows an open title/notes/capture editor may paint from `viewport_top` without writing
 /// into the rule, status, or verb chrome below it.
 pub(crate) fn editor_row_budget(geo: &TierGeometry) -> u16 {
@@ -289,20 +278,6 @@ pub enum QueueOverlay<'a> {
         recovery: bool,
         message: Option<&'a str>,
     },
-    /// Inline capture takeover/row. Painted as a full viewport takeover on compact and an
-    /// inline region on standard.
-    Capture {
-        title: String,
-        title_cursor: u16,
-        /// Cursor-following, width-bounded visible rows from the multiline Notes draft.
-        notes_rows: Vec<String>,
-        notes_cursor_row: u16,
-        notes_cursor_col: u16,
-        scope_label: String,
-        focus: CaptureField,
-        /// Open only while this shared form's scope chooser owns input.
-        scope_dropdown: Option<FormScopeDropdown<'a>>,
-    },
     /// The task page: a full-height, view-first takeover for one bound task. `focus` is
     /// `None` in view mode; field edits focus the same drafts the board form carries.
     TaskPage {
@@ -325,56 +300,6 @@ pub enum QueueOverlay<'a> {
         focus: Option<CaptureField>,
         scope_dropdown: Option<FormScopeDropdown<'a>>,
     },
-}
-
-/// The two board-form presentations share geometry, field rows, and hit targets. Capture
-/// keeps its deeper prototype indent, task edit keeps the selected-task accordion indent.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum FormPresentation {
-    Capture,
-    Task,
-}
-
-#[derive(Clone, Copy)]
-struct FormOverlay<'form, 'options> {
-    presentation: FormPresentation,
-    title: &'form str,
-    title_cursor: u16,
-    notes_rows: &'form [String],
-    notes_cursor_row: u16,
-    notes_cursor_col: u16,
-    scope_label: &'form str,
-    focus: CaptureField,
-    scope_dropdown: Option<FormScopeDropdown<'options>>,
-}
-
-fn form_overlay<'form, 'options>(
-    overlay: &'form QueueOverlay<'options>,
-) -> Option<FormOverlay<'form, 'options>> {
-    match overlay {
-        QueueOverlay::Capture {
-            title,
-            title_cursor,
-            notes_rows,
-            notes_cursor_row,
-            notes_cursor_col,
-            scope_label,
-            focus,
-            scope_dropdown,
-        } => Some(FormOverlay {
-            presentation: FormPresentation::Capture,
-            title,
-            title_cursor: *title_cursor,
-            notes_rows,
-            notes_cursor_row: *notes_cursor_row,
-            notes_cursor_col: *notes_cursor_col,
-            scope_label,
-            focus: *focus,
-            scope_dropdown: *scope_dropdown,
-        }),
-
-        _ => None,
-    }
 }
 
 /// Form-scope chooser state embedded in its parent form overlay. Its options intentionally
@@ -548,36 +473,17 @@ pub fn draw_queue_frame(
         }
     }
 
-    // A compact board form clears the viewport it paints over, so the base list's own hit
-    // regions under it must not be collected -- a stale `Task` rect under the takeover must
-    // not be clickable. (The peek is inline list content in both tiers, never a takeover.)
-    let form_takeover_active = geo.tier == Tier::Compact && form_overlay(&model.overlay).is_some();
-    let base_list_interactive = !form_takeover_active;
+    // Task pages replace the viewport entirely. Accordion detail remains inline, so its task
+    // rows stay interactive in both tiers.
+    let base_list_interactive = true;
 
     if geo.viewport_height > 0 && !page_active {
         let (list_rows, anchor_last_idx, selected_idx) = build_list_rows(model, geo);
         let top = geo.viewport_top;
         let viewport_h = geo.viewport_height as usize;
-        // Min-1 / Imp-4: an open surface -- the inline capture block or an expanded
-        // accordion -- can land past the viewport on a long deck (capture is woven under
-        // whichever ON DECK section matches its destination scope, which for a
-        // global-scope capture is the last group; an accordion opens under whichever task
-        // is selected). A plain `.take(viewport_h)` from row 0 would silently drop it --
-        // invisible content the user is actively acting on. Scroll the list so the whole
-        // block (not just its first row) stays inside the painted window. `anchor_last_idx`
-        // is the last row of that block, computed once in `build_list_rows` rather than
-        // re-derived here by row-kind matching (the round-2 regression: the capture block's
-        // last row is a `ListRow::Detail` -- the scope row -- not a `ListRow::Capture`, so
-        // scanning for the last `Capture` row anchored one row short of the block and the
-        // scope row fell out of the window).
-        //
-        // with no open surface, the list still must follow the plain selection --
-        // otherwise navigating (j/k, arrows, wheel) past the fold on a long deck walks the
-        // selection off-screen with no visual feedback, and the mutating verbs then act on
-        // a row the user cannot see. `anchor_last_idx` wins when both are set: an open
-        // capture/accordion block's own anchor is always at or past the selected row it is
-        // woven under, so preferring it here never re-hides the open surface a plain
-        // selection-only clamp would otherwise have satisfied with a smaller scroll.
+        // An expanded accordion can land past the viewport on a long deck. Keep its complete
+        // block visible, and otherwise follow the plain selection so mutating verbs never act
+        // on an invisible row.
         let follow_idx = anchor_last_idx.or(selected_idx);
         let scroll = match follow_idx {
             Some(idx) if idx >= viewport_h => idx + 1 - viewport_h,
@@ -623,49 +529,6 @@ pub fn draw_queue_frame(
                     }
                 }
                 ListRow::Detail(line) => put_line(frame, y, width, line),
-                ListRow::Form {
-                    kind,
-                    presentation,
-                    line,
-                } => {
-                    put_line(frame, y, width, line);
-                    if let Some(form) = form_overlay(&model.overlay)
-                        .filter(|form| form.presentation == presentation)
-                    {
-                        let (label_w, avail) = form_field_geometry(geo, presentation);
-                        let field_w = avail.min(width.saturating_sub(label_w));
-                        match kind {
-                            FormRowKind::Title => {
-                                hits.push(QueueHitTarget::FormTitle, Rect::new(0, y, width, 1));
-                                if form.focus == CaptureField::Title {
-                                    place_edit_cursor(
-                                        frame,
-                                        Rect::new(label_w, y, field_w, 1),
-                                        form.title_cursor.min(avail),
-                                    );
-                                }
-                            }
-                            FormRowKind::Notes(index) => {
-                                hits.push(
-                                    QueueHitTarget::FormNotes(index),
-                                    Rect::new(0, y, width, 1),
-                                );
-                                if form.focus == CaptureField::Notes
-                                    && index == form.notes_cursor_row as usize
-                                {
-                                    place_edit_cursor(
-                                        frame,
-                                        Rect::new(label_w, y, field_w, 1),
-                                        form.notes_cursor_col.min(avail),
-                                    );
-                                }
-                            }
-                            FormRowKind::Scope => {
-                                hits.push(QueueHitTarget::FormScope, Rect::new(0, y, width, 1));
-                            }
-                        }
-                    }
-                }
             }
         }
     }
@@ -705,11 +568,6 @@ pub fn draw_queue_frame(
             QueueOverlay::ScopeDropdown { .. } => SCOPE_VERBS,
             QueueOverlay::QuickAdd { recovery, .. } if *recovery => &[],
             QueueOverlay::QuickAdd { .. } => QUICK_ADD_VERBS,
-            QueueOverlay::Capture {
-                focus,
-                scope_dropdown,
-                ..
-            } => form_verb_items(*focus, scope_dropdown.is_some()),
             // The page's field edits keep the form legends; its view mode reads the
             // model-computed page verbs (status-dependent, like the board row's own).
             QueueOverlay::TaskPage {
@@ -778,8 +636,8 @@ pub(crate) const QUICK_ADD_VERBS: &[VerbEntry<'static>] = &[
         label: "save+next",
     },
     VerbEntry {
-        key: "alt+enter",
-        label: "more",
+        key: "tab",
+        label: "details",
     },
     VerbEntry {
         key: "esc",
@@ -973,17 +831,6 @@ fn paint_overlay(
             paint_edit_notes_overlay(frame, geo, rows, *cursor_row, *cursor_col);
         }
         QueueOverlay::QuickAdd { .. } => {}
-        QueueOverlay::Capture { .. } => {
-            let form = form_overlay(&model.overlay).expect("form overlay variant");
-            // Standard capture is woven into its list position. Compact keeps the same field
-            // renderer but clears the viewport first, so both tiers share hit/cursor geometry.
-            if geo.tier == Tier::Compact {
-                paint_form_overlay(frame, geo, form, hits);
-            }
-            if let Some(dropdown) = form.scope_dropdown {
-                paint_form_scope_dropdown(frame, geo, dropdown, hits);
-            }
-        }
         QueueOverlay::TaskPage {
             ref header,
             title_cursor,
@@ -1113,150 +960,6 @@ fn paint_edit_notes_overlay(
             painted_rows,
         );
         place_edit_cursor_at(frame, region, cursor_row, cursor_col.min(avail as u16));
-    }
-}
-
-fn form_labels(presentation: FormPresentation) -> (&'static str, &'static str, &'static str) {
-    match presentation {
-        FormPresentation::Capture => ("    title  ", "    notes  ", "    scope  "),
-        FormPresentation::Task => ("  title  ", "  notes  ", "  scope  "),
-    }
-}
-
-fn form_field_geometry(geo: &TierGeometry, presentation: FormPresentation) -> (u16, u16) {
-    let label_width = match presentation {
-        FormPresentation::Capture => CAPTURE_FIELD_LABEL_WIDTH,
-        FormPresentation::Task => EDIT_FIELD_LABEL_WIDTH,
-    };
-    let available = match presentation {
-        FormPresentation::Capture => capture_field_width(geo),
-        FormPresentation::Task => editor_field_width(geo),
-    } as u16;
-    (
-        label_width.min(geo.row_width.saturating_sub(1)),
-        available.min(geo.row_width),
-    )
-}
-
-/// Paint either shared board-form presentation as a compact takeover. Standard uses the same
-/// labels and field geometry through [`build_form_rows`], keeping cursor and hit rectangles in
-/// lockstep across both tiers.
-fn paint_form_overlay(
-    frame: &mut Frame<'_>,
-    geo: &TierGeometry,
-    form: FormOverlay<'_, '_>,
-    hits: &mut QueueHitMap,
-) {
-    let width = geo.row_width;
-    let height = geo.height;
-    if width == 0 || height == 0 {
-        return;
-    }
-    clear_compact_takeover(frame, geo);
-    let y0 = geo.viewport_top;
-    let limit_y = y0.saturating_add(editor_row_budget(geo));
-    let (title_label, notes_label, scope_label) = form_labels(form.presentation);
-    let continuation = " ".repeat(display_width(notes_label));
-    let (label_w, avail) = form_field_geometry(geo, form.presentation);
-    let avail_usize = avail as usize;
-    if y0 < height && y0 < limit_y {
-        let style = if form.focus == CaptureField::Title {
-            style_bold()
-        } else {
-            style_plain()
-        };
-        put_line(
-            frame,
-            y0,
-            width,
-            paint_bounded_line(
-                &format!("{title_label}{}", present_line(form.title, avail_usize)),
-                width,
-                style,
-            ),
-        );
-        hits.push(QueueHitTarget::FormTitle, Rect::new(0, y0, width, 1));
-        if form.focus == CaptureField::Title {
-            place_edit_cursor(
-                frame,
-                Rect::new(label_w, y0, avail, 1),
-                form.title_cursor.min(avail),
-            );
-        }
-    }
-
-    let notes_y = y0.saturating_add(1);
-    let note_count = form.notes_rows.len().max(1);
-    let mut painted_notes = 0u16;
-    for index in 0..note_count {
-        let y = notes_y.saturating_add(index as u16);
-        if y >= height || y >= limit_y {
-            break;
-        }
-        let row = form
-            .notes_rows
-            .get(index)
-            .map(String::as_str)
-            .unwrap_or_default();
-        let body = if index == 0
-            && row.is_empty()
-            && form.focus != CaptureField::Notes
-            && form.presentation == FormPresentation::Capture
-        {
-            "(tab to edit)"
-        } else {
-            row
-        };
-        let prefix = if index == 0 {
-            notes_label
-        } else {
-            continuation.as_str()
-        };
-        let style = if form.focus == CaptureField::Notes {
-            style_bold()
-        } else {
-            style_dim()
-        };
-        put_line(
-            frame,
-            y,
-            width,
-            paint_bounded_line(
-                &format!("{prefix}{}", present_line(body, avail_usize)),
-                width,
-                style,
-            ),
-        );
-        hits.push(QueueHitTarget::FormNotes(index), Rect::new(0, y, width, 1));
-        painted_notes = painted_notes.saturating_add(1);
-    }
-    if form.focus == CaptureField::Notes && painted_notes > 0 {
-        place_edit_cursor_at(
-            frame,
-            Rect::new(label_w, notes_y, avail, painted_notes),
-            form.notes_cursor_row.min(painted_notes - 1),
-            form.notes_cursor_col.min(avail),
-        );
-    }
-
-    let scope_y = notes_y.saturating_add(painted_notes);
-    if scope_y < height && scope_y < limit_y {
-        let style = if form.focus == CaptureField::Scope {
-            style_reverse()
-        } else {
-            style_plain()
-        };
-        put_line(
-            frame,
-            scope_y,
-            width,
-            paint_bounded_line(
-                &format!("{scope_label}{}", short_project(form.scope_label)),
-                width,
-                style,
-            ),
-        );
-        hits.push(QueueHitTarget::FormScope, Rect::new(0, scope_y, width, 1));
     }
 }
 
@@ -1649,22 +1352,6 @@ fn paint_page_scope_dropdown(
     }
 }
 
-fn paint_form_scope_dropdown(
-    frame: &mut Frame<'_>,
-    geo: &TierGeometry,
-    dropdown: FormScopeDropdown<'_>,
-    hits: &mut QueueHitMap,
-) {
-    paint_scope_dropdown(
-        frame,
-        geo,
-        dropdown.options,
-        dropdown.selected,
-        QueueHitTarget::FormScopeOption,
-        hits,
-    );
-}
-
 fn paint_scope_dropdown(
     frame: &mut Frame<'_>,
     geo: &TierGeometry,
@@ -1745,125 +1432,6 @@ enum ListRow {
     },
     /// Read-only accordion content under a task, full-width and un-hit-tested.
     Detail(Line<'static>),
-    /// One row from either shared board-form presentation. Both use the same topmost field
-    /// targets, so Title/Notes/Scope clicks cannot drift between capture and task edit.
-    Form {
-        kind: FormRowKind,
-        presentation: FormPresentation,
-        line: Line<'static>,
-    },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum FormRowKind {
-    Title,
-    Notes(usize),
-    Scope,
-}
-
-/// Does this ON DECK section match the capture destination (`scope_label` is the raw
-/// project path, or the literal `"global"`, exactly as the board passes it through)?
-fn section_matches_scope_label(section: &QueueSection, scope_label: &str) -> bool {
-    if section.kind != SectionKind::OnDeck {
-        return false;
-    }
-    match section.project_label.as_deref() {
-        // Compare normalized paths: `queue.rs` may carry a trailing-slash project
-        // label while the capture snapshot's scope path has none (or vice versa), and a
-        // raw string mismatch silently falls through to the "no section matched" path,
-        // inserting the capture rows far from the destination the scope row names.
-        Some(path) => normalize_scope_path(path) == normalize_scope_path(scope_label),
-        None => scope_label.eq_ignore_ascii_case("global"),
-    }
-}
-
-/// Strip a single trailing path separator so `"/repo"` and `"/repo/"` compare equal.
-fn normalize_scope_path(path: &str) -> &str {
-    path.strip_suffix('/').unwrap_or(path)
-}
-
-/// Shared form rows (Title, multiline Notes, Scope), painted inline at standard width.
-/// Compact calls [`paint_form_overlay`] with the same labels, widths, styles, and field model.
-fn build_form_rows(geo: &TierGeometry, form: FormOverlay<'_, '_>) -> Vec<ListRow> {
-    let width = geo.row_width;
-    let (_, avail) = form_field_geometry(geo, form.presentation);
-    let avail = avail as usize;
-    let (title_label, notes_label, scope_label) = form_labels(form.presentation);
-    let continuation = " ".repeat(display_width(notes_label));
-
-    let title_style = if form.focus == CaptureField::Title {
-        style_bold()
-    } else {
-        style_plain()
-    };
-    let mut rows = vec![ListRow::Form {
-        kind: FormRowKind::Title,
-        presentation: form.presentation,
-        line: paint_bounded_line(
-            &format!("{title_label}{}", present_line(form.title, avail)),
-            width,
-            title_style,
-        ),
-    }];
-
-    let notes_style = if form.focus == CaptureField::Notes {
-        style_bold()
-    } else {
-        style_dim()
-    };
-    for index in 0..form.notes_rows.len().max(1) {
-        let row = form
-            .notes_rows
-            .get(index)
-            .map(String::as_str)
-            .unwrap_or_default();
-        let body = if index == 0
-            && row.is_empty()
-            && form.focus != CaptureField::Notes
-            && form.presentation == FormPresentation::Capture
-        {
-            "(tab to edit)"
-        } else {
-            row
-        };
-        let prefix = if index == 0 {
-            notes_label
-        } else {
-            continuation.as_str()
-        };
-        rows.push(ListRow::Form {
-            kind: FormRowKind::Notes(index),
-            presentation: form.presentation,
-            line: paint_bounded_line(
-                &format!("{prefix}{}", present_line(body, avail)),
-                width,
-                notes_style,
-            ),
-        });
-    }
-
-    let scope_style = if form.focus == CaptureField::Scope {
-        style_reverse()
-    } else {
-        style_plain()
-    };
-    let scope_hint = match form.presentation {
-        FormPresentation::Capture => "   tab: more · enter: save · esc: cancel",
-        FormPresentation::Task => "   tab: next · space: cycle · enter: scopes · esc: cancel",
-    };
-    rows.push(ListRow::Form {
-        kind: FormRowKind::Scope,
-        presentation: form.presentation,
-        line: paint_bounded_line(
-            &format!(
-                "{scope_label}{}{scope_hint}",
-                short_project(form.scope_label)
-            ),
-            width,
-            scope_style,
-        ),
-    });
-    rows
 }
 
 /// Read-only accordion body under an expanded task: notes preview,
@@ -1929,14 +1497,8 @@ fn detail_lines_for_task(task: &Task, now: SystemTime, width: u16) -> Vec<Line<'
     lines
 }
 
-/// Builds the list rows plus:
-/// - the index of the last row of whichever "open surface" block (inline capture or
-///   accordion detail) must stay fully visible in the viewport, if either is open. The two blocks are mutually exclusive: capture only weaves in while
-///   `model.overlay` is `Capture`, detail only while it is `None`.
-/// - the index of the row carrying the plain selection (`model.selection_id`), if any task
-///   row matches it. This is tracked independently of the open-surface anchor above:
-///   with neither capture nor accordion open, the list still must scroll to keep whatever
-///   is selected on screen, or the mutating verbs (`space`/`d`/`x`) act on an invisible row.
+/// Builds the list rows plus the index of an open accordion detail or selected task, which
+/// must stay fully visible in the viewport.
 fn build_list_rows(
     model: &QueueFrameModel<'_>,
     geo: &TierGeometry,
@@ -1948,13 +1510,6 @@ fn build_list_rows(
     // content, so selection scrolling keeps the section and its first task reachable.
     out.push(ListRow::Blank);
 
-    // Standard weaves both shared-form presentations into their natural list position;
-    // compact paints the same fields as a full-viewport takeover after the list.
-    let open_form = (geo.tier == Tier::Standard)
-        .then(|| form_overlay(&model.overlay))
-        .flatten();
-    let inline_capture = open_form.filter(|form| form.presentation == FormPresentation::Capture);
-    let task_form = open_form.filter(|form| form.presentation == FormPresentation::Task);
     // The peek weaves inline under its row in BOTH tiers: rows keep their tier styling,
     // the peek body is ordinary list content that scrolls with the section.
     let detail_target = if matches!(model.overlay, QueueOverlay::None) {
@@ -1963,7 +1518,6 @@ fn build_list_rows(
         None
     };
 
-    let mut capture_inserted = false;
     for (section_idx, section) in model.view.sections.iter().enumerate() {
         // A preceding section with no content already ends in its required below-header blank
         // row, which doubles as this heading's above-header row. Otherwise add one list row.
@@ -1978,13 +1532,6 @@ fn build_list_rows(
         // every kind, in either tier, gets its below-header spacer before first
         // content. It is a `ListRow`, not chrome, and therefore scrolls normally.
         out.push(ListRow::Blank);
-        if let Some(form) = inline_capture {
-            if section_matches_scope_label(section, form.scope_label) {
-                out.extend(build_form_rows(geo, form));
-                capture_inserted = true;
-                anchor_last_idx = Some(out.len() - 1);
-            }
-        }
         if section.empty_hint {
             out.push(ListRow::Hint(paint_empty_hint(geo.row_width)));
             continue;
@@ -2012,31 +1559,12 @@ fn build_list_rows(
                 selected_idx = Some(out.len());
             }
             out.push(ListRow::Task { id: task.id, line });
-            if model.selection_id == Some(task.id) {
-                if let Some(form) = task_form {
-                    out.extend(build_form_rows(geo, form));
-                    anchor_last_idx = Some(out.len() - 1);
-                }
-            }
             if detail_target == Some(task.id) {
                 for line in detail_lines_for_task(task, model.now, geo.row_width) {
                     out.push(ListRow::Detail(line));
                 }
                 anchor_last_idx = Some(out.len() - 1);
             }
-        }
-    }
-    // No ON DECK section currently matches the capture's destination scope (e.g. a
-    // project-scoped deck view hides it): still paint the row rather than silently drop it.
-    if let Some(form) = inline_capture {
-        if !capture_inserted {
-            let rows = build_form_rows(geo, form);
-            let at = 1usize.min(out.len());
-            let rows_len = rows.len();
-            for (i, row) in rows.into_iter().enumerate() {
-                out.insert(at + i, row);
-            }
-            anchor_last_idx = Some(at + rows_len - 1);
         }
     }
     (out, anchor_last_idx, selected_idx)
@@ -2116,7 +1644,7 @@ fn paint_quick_add_status(
     let prefix = "▎ ";
     let prefix_width = display_width(prefix) as u16;
     let body = if title.is_empty() {
-        "title…   !g global · alt+enter details"
+        "title…   !g global · tab details"
     } else {
         title
     };

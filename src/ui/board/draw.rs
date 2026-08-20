@@ -12,8 +12,7 @@ use crate::ui::input::{help_card_lines, keymap_help_label};
 use crate::ui::mouse::BoardPopup;
 use crate::ui::present_line;
 use crate::ui::render::{
-    self, editor_row_budget, FormScopeDropdown, PaletteCommandRow, QueueFrameModel, QueueOverlay,
-    VerbEntry,
+    self, FormScopeDropdown, PaletteCommandRow, QueueFrameModel, QueueOverlay, VerbEntry,
 };
 use crate::ui::tier;
 
@@ -283,8 +282,7 @@ fn draw_board_impl(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap
     // When both channels are set (stale undo refusal after delete), compose notice first
     // then message so the refusal is visible. Use visible + notice_framed for
     // consistency with chrome row and hit test.
-    let editing_on_page =
-        model.open_field_edit().is_some() && model.form.as_ref().is_some_and(BoardForm::is_task);
+    let editing_on_page = model.open_field_edit().is_some() && model.form.is_some();
     let status_owned = match (model.visible_delete_notice(), model.message()) {
         (Some(title), Some(msg)) => Some(format!("{}  ·  {}", notice_framed(title, true), msg)),
         (Some(title), None) => Some(notice_framed(title, true)),
@@ -391,29 +389,7 @@ fn draw_board_impl(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap
                 selected: scope_selected,
             },
         );
-        if form.is_task() {
-            build_task_page_overlay(model, form, &geo, scope_dropdown)
-        } else {
-            let field_width = render::capture_field_width(&geo);
-            let notes_height = editor_row_budget(&geo).saturating_sub(2).clamp(1, 3) as usize;
-            let (title, title_cursor) = escaped_line_window(&form.title, field_width);
-            let (notes_rows, notes_cursor_row, notes_cursor_col) =
-                escaped_draft_rows(&form.notes, field_width, notes_height);
-            let scope_label = match &form.scope {
-                TaskScope::Project { path } => path.clone(),
-                TaskScope::Global => "global".into(),
-            };
-            QueueOverlay::Capture {
-                title,
-                title_cursor,
-                notes_rows,
-                notes_cursor_row,
-                notes_cursor_col,
-                scope_label,
-                focus: form.focus,
-                scope_dropdown,
-            }
-        }
+        build_task_page_overlay(model, form, &geo, scope_dropdown)
     } else {
         QueueOverlay::None
     };
@@ -434,9 +410,8 @@ fn draw_board_impl(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap
     };
     let hits = render::draw_queue_frame(frame, &frame_model, &geo);
 
-    // Inline capture / board-form edits still own the rule row. The task page keeps the
-    // rule and puts `editing…` on the status line instead: the verb bar already names save.
-    if model.open_field_edit().is_some() && !model.form.as_ref().is_some_and(BoardForm::is_task) {
+    // Board-form edits use the task page's status and verb rows rather than an inline rule row.
+    if model.open_field_edit().is_some() && model.form.is_none() {
         if let Some(row) = geo.rule_row {
             let toast_area = ratatui::layout::Rect::new(0, row, area.width, 1);
             // Use the mono-only helpers so no product frame emits foreground or background

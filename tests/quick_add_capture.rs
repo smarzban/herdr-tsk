@@ -131,7 +131,7 @@ fn unique_project_basename_resolves_for_expansion_and_saved_status() {
     type_title(&mut domain, &mut model, "expanded task !p herdr-tasks");
     apply(&mut domain, &mut model, BoardIntent::ExpandQuickAdd, None);
     assert_eq!(
-        model.capture_scope(),
+        model.form_scope(),
         Some(&TaskScope::Project {
             path: "/work/herdr-tasks".into()
         })
@@ -291,7 +291,7 @@ fn capture_bar_strips_global_and_project_scope_tokens() {
 }
 
 #[test]
-fn empty_enter_stays_open_esc_discards_and_alt_enter_expands_the_seeded_full_form() {
+fn empty_enter_stays_open_esc_discards_and_tab_expands_the_seeded_task_page() {
     let snap = snapshot();
     let mut domain = DomainState::new();
     let mut model = BoardModel::from_domain(&domain, None);
@@ -314,15 +314,27 @@ fn empty_enter_stays_open_esc_discards_and_alt_enter_expands_the_seeded_full_for
     assert_eq!(
         map_key(
             BoardInputMode::QuickAdd,
-            KeyEvent::new(KeyCode::Enter, KeyModifiers::ALT)
+            KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)
         ),
         Some(BoardIntent::ExpandQuickAdd)
     );
-    apply(&mut domain, &mut model, BoardIntent::ExpandQuickAdd, None);
-    assert_eq!(model.input_mode(), BoardInputMode::Capture);
-    assert_eq!(model.capture_title_value(), "needs notes");
     assert_eq!(
-        model.capture_scope(),
+        map_key(
+            BoardInputMode::QuickAdd,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::ALT)
+        ),
+        None,
+        "Alt+Enter no longer expands quick add"
+    );
+    apply(&mut domain, &mut model, BoardIntent::ExpandQuickAdd, None);
+    assert_eq!(model.input_mode(), BoardInputMode::EditNotes);
+    assert_eq!(model.edit_buffer(), "");
+    assert_eq!(
+        model.form_focus(),
+        Some(herdr_tasks::ui::capture::CaptureField::Notes)
+    );
+    assert_eq!(
+        model.form_scope(),
         Some(&TaskScope::Project {
             path: "/repos/invocation".into()
         })
@@ -330,6 +342,73 @@ fn empty_enter_stays_open_esc_discards_and_alt_enter_expands_the_seeded_full_for
     apply(&mut domain, &mut model, BoardIntent::CancelEdit, None);
     assert_eq!(model.input_mode(), BoardInputMode::QuickAdd);
     assert_eq!(model.quick_add_title_value(), "needs notes");
+}
+
+#[test]
+fn expanded_page_stashes_notes_and_scope_across_esc_and_saves_like_quick_add() {
+    let mut domain = DomainState::new();
+    let mut model = BoardModel::from_domain(&domain, None);
+    let snap = snapshot();
+    open(&mut domain, &mut model, &snap);
+    type_title(&mut domain, &mut model, "draft with details !g");
+
+    apply(&mut domain, &mut model, BoardIntent::ExpandQuickAdd, None);
+    assert_eq!(model.input_mode(), BoardInputMode::EditNotes);
+    assert_eq!(
+        model.form_focus(),
+        Some(herdr_tasks::ui::capture::CaptureField::Notes)
+    );
+    let page = render_text(&model, 80, 24);
+    assert!(page.contains("draft with details"));
+    assert!(page.contains("global"));
+    assert!(
+        !page.contains("title…"),
+        "expanded draft uses the task page, not the quick-add row"
+    );
+    assert!(render_rows(&model, 40, 10)
+        .iter()
+        .all(|row| row.chars().count() == 40));
+    for character in "preserved note".chars() {
+        apply(
+            &mut domain,
+            &mut model,
+            BoardIntent::EditInsert(character),
+            None,
+        );
+    }
+    assert_eq!(
+        herdr_tasks::ui::input::map_board_form_key(
+            herdr_tasks::ui::capture::CaptureField::Notes,
+            false,
+            KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE),
+        ),
+        Some(BoardIntent::FormFocusNext),
+        "Tab in the page advances the form rather than re-expanding quick add"
+    );
+    apply(&mut domain, &mut model, BoardIntent::FormFocusNext, None);
+    assert_eq!(model.input_mode(), BoardInputMode::EditScope);
+    assert_eq!(model.form_scope(), Some(&TaskScope::Global));
+
+    apply(&mut domain, &mut model, BoardIntent::CancelEdit, None);
+    assert_eq!(model.input_mode(), BoardInputMode::QuickAdd);
+    assert_eq!(model.quick_add_title_value(), "draft with details");
+    apply(&mut domain, &mut model, BoardIntent::ExpandQuickAdd, None);
+    assert_eq!(model.input_mode(), BoardInputMode::EditNotes);
+    assert_eq!(model.edit_buffer(), "preserved note");
+    assert_eq!(model.form_scope(), Some(&TaskScope::Global));
+
+    assert_eq!(
+        apply(&mut domain, &mut model, BoardIntent::ConfirmEdit, None),
+        IntentOutcome::Persist
+    );
+    model.sync_from_domain(&domain);
+    assert_eq!(model.input_mode(), BoardInputMode::Normal);
+    assert!(model.has_saved_task(), "saved task remains emphasized");
+    assert_eq!(model.message(), Some("saved to global"));
+    let task = domain.tasks().last().expect("saved task");
+    assert_eq!(task.title, "draft with details");
+    assert_eq!(task.notes.as_deref(), Some("preserved note"));
+    assert_eq!(task.scope, TaskScope::Global);
 }
 
 #[test]
@@ -470,7 +549,7 @@ fn capture_bar_renders_spaced_three_row_block_and_stays_bounded_without_color_sg
     for text in [
         "visible task",
         "title…",
-        "enter save · ctrl+enter save+next · alt+enter more · esc close",
+        "enter save · ctrl+enter save+next · tab details · esc close",
     ] {
         assert!(standard.contains(text), "missing {text:?}: {standard}");
     }

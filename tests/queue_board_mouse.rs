@@ -11,16 +11,13 @@ use std::path::{Path, PathBuf};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
 
-use herdr_tasks::context::InvocationSnapshot;
 use herdr_tasks::domain::{DomainState, HumanStatus, ProvenanceOrigin, TaskScope};
 use herdr_tasks::ui::board::{
     apply_intent, board_hit_map, board_verb_items, resolve_board_command, BoardInputMode,
     BoardModel,
 };
 use herdr_tasks::ui::capture::CaptureField;
-use herdr_tasks::ui::input::{
-    map_board_form_key, map_inline_capture_key, map_key, BoardIntent, PRIMARY_CAPTURE_ACTIONS,
-};
+use herdr_tasks::ui::input::{map_board_form_key, map_key, BoardIntent, PRIMARY_CAPTURE_ACTIONS};
 use herdr_tasks::ui::mouse::{
     capture_layout, capture_mouse_paths_complete, left_click, map_board_mouse, map_capture_mouse,
     primary_capture_action_sample_mouse,
@@ -344,183 +341,9 @@ fn scoped_project_named_all_projects_has_no_group_header_hit_target() {
     );
 }
 
-/// inline capture's painted fields focus the shared form, while Scope opens its
-/// dropdown. Selecting an option changes only the capture draft and closes back to it.
-#[test]
-fn inline_capture_mouse_fields_and_scope_dropdown_stay_inside_the_form() {
-    let mut domain = DomainState::new();
-    domain
-        .create(
-            "other project",
-            None,
-            project(OTHER_REPO),
-            None,
-            None,
-            ProvenanceOrigin::Manual,
-        )
-        .expect("other project fixture");
-    let snapshot = InvocationSnapshot {
-        default_scope: project(THIS_REPO),
-        this_repo: Some(PathBuf::from(THIS_REPO)),
-        title_prefill: None,
-        provenance: ProvenanceOrigin::Capture,
-        capsule: None,
-        agent_meta: None,
-    };
-    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::OpenCapture,
-        Some(&snapshot),
-        None,
-    )
-    .expect("open capture");
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::ExpandQuickAdd,
-        None,
-        None,
-    )
-    .expect("expand quick add");
-    let task_count = domain.tasks().len();
-
-    let mut hits = board_hit_map(STANDARD, &model);
-    for (target, field) in [
-        (QueueHitTarget::FormTitle, CaptureField::Title),
-        (QueueHitTarget::FormNotes(0), CaptureField::Notes),
-    ] {
-        let hit = hits
-            .regions
-            .iter()
-            .find(|hit| hit.target == target)
-            .unwrap_or_else(|| panic!("missing capture field hit {target:?}"));
-        let intent = click(hit, &model, &hits).expect("field click intent");
-        assert_eq!(intent, BoardIntent::FocusFormField(field));
-        apply_intent(&mut domain, &mut model, intent, None, None).expect("focus field");
-        assert_eq!(model.form_focus(), Some(field));
-        hits = board_hit_map(STANDARD, &model);
-    }
-
-    let scope_hit = hits
-        .regions
-        .iter()
-        .find(|hit| hit.target == QueueHitTarget::FormScope)
-        .expect("inline capture scope hit");
-    let scope_intent = click(scope_hit, &model, &hits).expect("scope click intent");
-    assert_eq!(scope_intent, BoardIntent::OpenFormScopeDropdown);
-    assert_eq!(
-        map_board_form_key(
-            CaptureField::Scope,
-            false,
-            KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE),
-        ),
-        Some(BoardIntent::FormCycleScope),
-        "Space remains the only direct scope-cycle route"
-    );
-    apply_intent(&mut domain, &mut model, scope_intent, None, None).expect("open dropdown");
-    assert_eq!(model.input_mode(), BoardInputMode::FormScopeDropdown);
-    assert_eq!(model.form_focus(), Some(CaptureField::Scope));
-
-    let global_index = model
-        .form_scope_options()
-        .iter()
-        .position(|scope| *scope == TaskScope::Global)
-        .expect("Global form option");
-    assert_eq!(
-        model.form_scope_options(),
-        vec![project(THIS_REPO), project(OTHER_REPO), TaskScope::Global,],
-        "form choices are task scopes only, never the board selector's all-projects option"
-    );
-    hits = board_hit_map(STANDARD, &model);
-    let global_hit = hits
-        .regions
-        .iter()
-        .find(|hit| hit.target == QueueHitTarget::FormScopeOption(global_index))
-        .expect("Global dropdown option hit");
-    let choose = click(global_hit, &model, &hits).expect("dropdown click intent");
-    assert_eq!(choose, BoardIntent::SelectFormScopeOption(global_index));
-    apply_intent(&mut domain, &mut model, choose, None, None).expect("choose scope draft");
-    assert_eq!(model.input_mode(), BoardInputMode::Capture);
-    assert_eq!(model.capture_scope(), Some(&TaskScope::Global));
-    assert_eq!(
-        domain.tasks().len(),
-        task_count,
-        "scope choice must not persist"
-    );
-}
-
-/// Capture paints Save and Cancel verbs matching their keyboard routes. Its Scope control
-/// opens the form dropdown, and base-board chrome remains inert while capture owns input.
-#[test]
-fn inline_capture_verb_bar_save_cancel_match_keyboard_and_keep_other_hits_scoped() {
-    let mut domain = DomainState::new();
-    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::OpenCapture,
-        None,
-        None,
-    )
-    .expect("open capture");
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::ExpandQuickAdd,
-        None,
-        None,
-    )
-    .expect("expand quick add");
-    assert_eq!(model.input_mode(), BoardInputMode::Capture);
-
-    let hits = board_hit_map(STANDARD, &model);
-    let intent_for = |target| {
-        let hit = hits
-            .regions
-            .iter()
-            .find(|hit| hit.target == target)
-            .unwrap_or_else(|| panic!("missing capture hit region for {target:?}"));
-        click(hit, &model, &hits)
-    };
-
-    assert_eq!(
-        intent_for(QueueHitTarget::Verb(0)),
-        map_inline_capture_key(
-            model.capture_focus(),
-            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
-        ),
-        "the painted Save verb must match keyboard save"
-    );
-    assert_eq!(
-        intent_for(QueueHitTarget::Verb(2)),
-        map_inline_capture_key(
-            model.capture_focus(),
-            KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
-        ),
-        "the painted Cancel verb must match keyboard cancel"
-    );
-    assert_eq!(
-        intent_for(QueueHitTarget::Verb(1)),
-        None,
-        "the Tab field-navigation hint must remain inert to mouse clicks"
-    );
-    assert_eq!(
-        intent_for(QueueHitTarget::FormScope),
-        Some(BoardIntent::OpenFormScopeDropdown),
-        "the dedicated scope row opens the dropdown rather than directly cycling"
-    );
-    assert_eq!(
-        intent_for(QueueHitTarget::ProjectChip),
-        None,
-        "unrelated base-board hits must stay inert while capture owns input"
-    );
-}
-
-/// the selected task owns one standard form even below the list fold. Its field
-/// hits are topmost, the dropdown click equals keyboard navigation plus Enter, and inactive
-/// board chrome never escapes the modal form.
+/// The selected task owns one standard form even below the list fold. Its field hits are
+/// topmost, the dropdown click equals keyboard navigation plus Enter, and inactive board
+/// chrome never escapes the modal form.
 #[test]
 fn task_form_mouse_fields_dropdown_and_verbs_match_keyboard_while_scrolled() {
     let mut domain = DomainState::new();

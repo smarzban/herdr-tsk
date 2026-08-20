@@ -269,24 +269,28 @@ fn apply_board_intent(
             return Ok(IntentOutcome::None);
         }
         BoardIntent::QuickAddInsert(character) => {
+            model.invalidate_quick_add_stash();
             if let Some(quick_add) = model.quick_add.as_mut() {
                 quick_add.title.insert_char(character);
             }
             return Ok(IntentOutcome::None);
         }
         BoardIntent::QuickAddInsertText(text) => {
+            model.invalidate_quick_add_stash();
             if let Some(quick_add) = model.quick_add.as_mut() {
                 quick_add.title.insert_text(&flatten_line_breaks(&text));
             }
             return Ok(IntentOutcome::None);
         }
         BoardIntent::QuickAddBackspace => {
+            model.invalidate_quick_add_stash();
             if let Some(quick_add) = model.quick_add.as_mut() {
                 quick_add.title.backspace();
             }
             return Ok(IntentOutcome::None);
         }
         BoardIntent::QuickAddDeleteForward => {
+            model.invalidate_quick_add_stash();
             if let Some(quick_add) = model.quick_add.as_mut() {
                 quick_add.title.delete_forward();
             }
@@ -332,6 +336,12 @@ fn apply_board_intent(
             let Some(quick_add) = model.quick_add.as_ref() else {
                 return Ok(IntentOutcome::None);
             };
+            if model.form.as_ref().is_some_and(|form| !form.is_task()) {
+                // The task page is view-first for persisted tasks. A capture draft has nothing
+                // to view, so quick-add deliberately opens its page in Notes edit mode.
+                model.focus_form_field(CaptureField::Notes);
+                return Ok(IntentOutcome::None);
+            }
             let (title, token_scope) = quick_add_title_and_scope(
                 quick_add.title.value(),
                 domain,
@@ -346,9 +356,10 @@ fn apply_board_intent(
             let mut form = BoardForm::capture(snapshot, model.this_repo.as_deref(), &model.tasks);
             form.title = crate::ui::edit::seeded_draft(&title);
             form.scope = scope;
+            form.focus = CaptureField::Notes;
             form.select_current_scope();
             model.form = Some(form);
-            model.input_mode = BoardInputMode::Capture;
+            model.input_mode = BoardInputMode::EditNotes;
             return Ok(IntentOutcome::None);
         }
         BoardIntent::CancelQuickAdd => {
@@ -373,26 +384,6 @@ fn apply_board_intent(
                 model,
                 matches!(intent, BoardIntent::QuickAddSaveNext),
             );
-        }
-        // Compatibility intent names retained for existing capture callers. The reducer keeps
-        // their capture-only guard; the shared names below drive either form type.
-        BoardIntent::CaptureFocusNext => {
-            if model.input_mode == BoardInputMode::Capture {
-                model.move_form_focus(true);
-            }
-            return Ok(IntentOutcome::None);
-        }
-        BoardIntent::CaptureFocusPrev => {
-            if model.input_mode == BoardInputMode::Capture {
-                model.move_form_focus(false);
-            }
-            return Ok(IntentOutcome::None);
-        }
-        BoardIntent::CaptureCycleScope => {
-            if model.input_mode == BoardInputMode::Capture {
-                model.cycle_form_scope();
-            }
-            return Ok(IntentOutcome::None);
         }
         BoardIntent::FormFocusNext => {
             if model.input_mode == BoardInputMode::TaskPage {
@@ -604,8 +595,15 @@ fn apply_board_intent(
                 model.clear_message();
                 return Ok(IntentOutcome::None);
             }
-            // Esc from a full form expanded out of quick-add returns to the retained line;
-            // all other complete forms discard as before. Dropdown Esc has its own intent.
+            // Esc from an expanded capture returns to its retained quick-add line. Keep the
+            // complete form as a stash so Tab can restore its notes and scope.
+            if model.quick_add.is_some() && model.form.as_ref().is_some_and(|form| !form.is_task())
+            {
+                model.input_mode = BoardInputMode::QuickAdd;
+                model.clear_message();
+                return Ok(IntentOutcome::None);
+            }
+            // All other complete forms discard as before. Dropdown Esc has its own intent.
             if model.form.take().is_some() {
                 model.input_mode = if model.quick_add.is_some() {
                     BoardInputMode::QuickAdd
@@ -1163,6 +1161,7 @@ fn quick_add_save(
         Ok(id) => {
             // Do not discard the draft until the app save boundary confirms persistence. A
             // failed save keeps this exact state behind SaveRecovery for retry or cancel.
+            model.form = None;
             model.begin_quick_add_save(id, keep_open, scope);
             Ok(IntentOutcome::Persist)
         }
