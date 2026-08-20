@@ -160,6 +160,23 @@ pub enum BoardIntent {
     EditMoveWordRight,
     ConfirmEdit,
     CancelEdit,
+    /// Status-row quick-add edits and actions.
+    QuickAddInsert(char),
+    QuickAddInsertText(String),
+    QuickAddBackspace,
+    QuickAddDeleteForward,
+    QuickAddMoveLeft,
+    QuickAddMoveRight,
+    QuickAddMoveLineStart,
+    QuickAddMoveLineEnd,
+    QuickAddMoveWordLeft,
+    QuickAddMoveWordRight,
+    QuickAddSave,
+    QuickAddSaveNext,
+    ExpandQuickAdd,
+    CancelQuickAdd,
+    /// A list click while quick-add is open discards the draft, then selects its row.
+    QuickAddSelectIndex(usize),
     OpenCapture,
     /// Move keyboard focus to the next Capture field (Title → Notes → Scope → Title).
     CaptureFocusNext,
@@ -526,6 +543,7 @@ pub fn map_key_with(
         BoardInputMode::SaveRecovery => map_save_recovery(key),
         BoardInputMode::Palette => map_palette(key),
         BoardInputMode::Help => map_help(key),
+        BoardInputMode::QuickAdd => map_quick_add_key(key),
         BoardInputMode::FormScopeDropdown => map_board_form_key(CaptureField::Scope, true, key),
         BoardInputMode::EditScope => map_board_form_key(CaptureField::Scope, false, key),
         BoardInputMode::EditTitle | BoardInputMode::EditNotes | BoardInputMode::Capture => {
@@ -549,6 +567,41 @@ enum FormEditNavigation {
 /// Unlike standalone quick capture, board capture and task editing emit [`BoardIntent`]s. They
 /// differ only in the immutable value held by the form, so this is a thin form-navigation wrapper
 /// over [`map_form_edit_key`], the sole field-edit implementation.
+/// Map the one-line quick-add status input. Its editing chords intentionally match Title.
+pub fn map_quick_add_key(key: KeyEvent) -> Option<BoardIntent> {
+    let mods = key.modifiers;
+    let ctrl = mods.contains(KeyModifiers::CONTROL);
+    let alt = mods.contains(KeyModifiers::ALT);
+    match key.code {
+        KeyCode::Enter if ctrl => return Some(BoardIntent::QuickAddSaveNext),
+        KeyCode::Enter if alt => return Some(BoardIntent::ExpandQuickAdd),
+        KeyCode::Char('a') if ctrl => return Some(BoardIntent::QuickAddMoveLineStart),
+        KeyCode::Char('e') if ctrl => return Some(BoardIntent::QuickAddMoveLineEnd),
+        KeyCode::Char('b') if alt => return Some(BoardIntent::QuickAddMoveWordLeft),
+        KeyCode::Char('f') if alt => return Some(BoardIntent::QuickAddMoveWordRight),
+        KeyCode::Left if ctrl || alt => return Some(BoardIntent::QuickAddMoveWordLeft),
+        KeyCode::Right if ctrl || alt => return Some(BoardIntent::QuickAddMoveWordRight),
+        _ => {}
+    }
+    if mods.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER) {
+        return None;
+    }
+    match key.code {
+        KeyCode::Enter => Some(BoardIntent::QuickAddSave),
+        KeyCode::Esc => Some(BoardIntent::CancelQuickAdd),
+        KeyCode::Backspace => Some(BoardIntent::QuickAddBackspace),
+        KeyCode::Delete => Some(BoardIntent::QuickAddDeleteForward),
+        KeyCode::Left => Some(BoardIntent::QuickAddMoveLeft),
+        KeyCode::Right => Some(BoardIntent::QuickAddMoveRight),
+        KeyCode::Home => Some(BoardIntent::QuickAddMoveLineStart),
+        KeyCode::End => Some(BoardIntent::QuickAddMoveLineEnd),
+        KeyCode::Char(character) if !character.is_control() => {
+            Some(BoardIntent::QuickAddInsert(character))
+        }
+        _ => None,
+    }
+}
+
 pub fn map_board_form_key(
     focused: CaptureField,
     dropdown_open: bool,
@@ -690,6 +743,7 @@ fn capture_form_intent(intent: BoardIntent) -> BoardIntent {
 /// ignores it.
 pub fn map_edit_paste(mode: BoardInputMode, text: &str) -> Option<BoardIntent> {
     match mode {
+        BoardInputMode::QuickAdd => Some(BoardIntent::QuickAddInsertText(text.to_string())),
         BoardInputMode::EditTitle | BoardInputMode::EditNotes | BoardInputMode::Capture => {
             Some(BoardIntent::EditInsertText(text.to_string()))
         }
@@ -735,6 +789,21 @@ pub fn intent_primary_action(intent: &BoardIntent) -> Option<PrimaryBoardAction>
         | BoardIntent::EditMoveWordRight
         | BoardIntent::ConfirmEdit
         | BoardIntent::CancelEdit
+        | BoardIntent::QuickAddInsert(_)
+        | BoardIntent::QuickAddInsertText(_)
+        | BoardIntent::QuickAddBackspace
+        | BoardIntent::QuickAddDeleteForward
+        | BoardIntent::QuickAddMoveLeft
+        | BoardIntent::QuickAddMoveRight
+        | BoardIntent::QuickAddMoveLineStart
+        | BoardIntent::QuickAddMoveLineEnd
+        | BoardIntent::QuickAddMoveWordLeft
+        | BoardIntent::QuickAddMoveWordRight
+        | BoardIntent::QuickAddSave
+        | BoardIntent::QuickAddSaveNext
+        | BoardIntent::ExpandQuickAdd
+        | BoardIntent::CancelQuickAdd
+        | BoardIntent::QuickAddSelectIndex(_)
         | BoardIntent::CaptureFocusNext
         | BoardIntent::CaptureFocusPrev
         | BoardIntent::CaptureCycleScope

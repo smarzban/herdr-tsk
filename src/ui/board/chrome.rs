@@ -49,6 +49,7 @@ fn edit_chrome_legends(mode: BoardInputMode) -> [&'static str; 3] {
             "Enter choose · Esc",
         ],
         BoardInputMode::EditTitle
+        | BoardInputMode::QuickAdd
         | BoardInputMode::FormScopeDropdown
         | BoardInputMode::Capture
         | BoardInputMode::Normal

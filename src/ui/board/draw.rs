@@ -357,7 +357,22 @@ fn draw_board_impl(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap
             .position(|scope| Some(scope) == model.form_scope_dropdown_choice())
             .unwrap_or(0)
     };
-    let overlay = if model.input_mode() == BoardInputMode::Help {
+    let overlay = if let Some(quick_add) = model.quick_add.as_ref().filter(|_| {
+        matches!(
+            model.input_mode(),
+            BoardInputMode::QuickAdd | BoardInputMode::SaveRecovery
+        )
+    }) {
+        let input_width = (geo.row_width as usize).saturating_sub(2);
+        let (title, title_cursor) = escaped_line_window(&quick_add.title, input_width);
+        QueueOverlay::QuickAdd {
+            title,
+            title_cursor,
+            project_scope: matches!(quick_add.scope, TaskScope::Project { .. }),
+            recovery: model.input_mode() == BoardInputMode::SaveRecovery,
+            message: model.message(),
+        }
+    } else if model.input_mode() == BoardInputMode::Help {
         QueueOverlay::Help { lines: &help_lines }
     } else if model.command_surface() == CommandSurface::Palette {
         QueueOverlay::Palette {
@@ -406,7 +421,7 @@ fn draw_board_impl(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap
     let frame_model = QueueFrameModel {
         tasks: &model.tasks,
         view: &queue_view,
-        selection_id: model.selection_id,
+        selection_id: model.saved_task.or(model.selection_id),
         scope_label: &scope_label,
         all_projects_scope: matches!(&model.deck_scope, OwnedDeckScope::All),
         status_message: status_owned.as_deref(),

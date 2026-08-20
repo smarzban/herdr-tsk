@@ -698,7 +698,9 @@ pub fn apply_board_intent_with_save_recovery(
                     *domain = working;
                     model.sync_from_domain(domain);
                     model.end_save_recovery(SaveResolution::Retried);
-                    model.set_message("saved");
+                    if !model.has_saved_task() {
+                        model.set_message("saved");
+                    }
                     return Ok(IntentOutcome::Persisted);
                 }
                 model.begin_save_recovery(recovery.error().unwrap_or("save failed"));
@@ -1590,19 +1592,19 @@ mod idle_store_revalidation_tests {
             None,
             None,
         )
-        .expect("open capture");
-        assert_eq!(model.input_mode(), BoardInputMode::Capture);
+        .expect("open quick add");
+        assert_eq!(model.input_mode(), BoardInputMode::QuickAdd);
         for character in "Draft in progress".chars() {
             apply_intent(
                 &mut domain,
                 &mut model,
-                BoardIntent::EditInsert(character),
+                BoardIntent::QuickAddInsert(character),
                 None,
                 None,
             )
             .expect("type into the capture draft");
         }
-        assert_eq!(model.capture_title_value(), "Draft in progress");
+        assert_eq!(model.quick_add_title_value(), "Draft in progress");
 
         let writer_store = TaskStore::new(&dir);
         let mut writer_domain = writer_store.load().unwrap();
@@ -1632,11 +1634,11 @@ mod idle_store_revalidation_tests {
 
         assert_eq!(
             model.input_mode(),
-            BoardInputMode::Capture,
-            "AC-24: an open capture draft must not be redirected by an idle merge"
+            BoardInputMode::QuickAdd,
+            "AC-24: an open quick-add draft must not be redirected by an idle merge"
         );
         assert_eq!(
-            model.capture_title_value(),
+            model.quick_add_title_value(),
             "Draft in progress",
             "the open draft must survive the merge untouched"
         );
@@ -2254,7 +2256,7 @@ mod tests {
         )
         .expect("open capture");
         assert!(!quit);
-        assert_eq!(model.input_mode(), BoardInputMode::Capture);
+        assert_eq!(model.input_mode(), BoardInputMode::QuickAdd);
 
         // Type a title one key at a time, the way the real keyboard loop feeds it in.
         for ch in "Real app-route capture".chars() {
@@ -2262,23 +2264,23 @@ mod tests {
                 &temp.store,
                 &mut domain,
                 &mut model,
-                BoardIntent::EditInsert(ch),
+                BoardIntent::QuickAddInsert(ch),
                 &mut pending_dispatch,
                 &mut save_recovery,
             )
             .expect("type title");
         }
 
-        // Ctrl+Enter: ConfirmEdit.
+        // Enter saves and closes the status-row line.
         let quit = handle_board_intent(
             &temp.store,
             &mut domain,
             &mut model,
-            BoardIntent::ConfirmEdit,
+            BoardIntent::QuickAddSave,
             &mut pending_dispatch,
             &mut save_recovery,
         )
-        .expect("confirm capture");
+        .expect("save quick add");
         assert!(!quit);
         assert_eq!(
             model.input_mode(),
@@ -2307,11 +2309,10 @@ mod tests {
         );
     }
 
-    /// The failure mode B1 named directly: without a snapshot, ConfirmEdit on an open
-    /// capture must neither call `capture_save` nor report `Persist`. It must stay in
-    /// Capture, keep the draft, and say why.
+    /// Without a snapshot, quick-add save must neither call `capture_save` nor report
+    /// `Persist`. It keeps its draft and says why.
     #[test]
-    fn confirm_edit_without_a_capture_snapshot_neither_saves_nor_reports_persist() {
+    fn quick_add_save_without_a_capture_snapshot_neither_saves_nor_reports_persist() {
         let mut domain = DomainState::new();
         let mut model = BoardModel::from_domain(&domain, None);
         apply_intent(
@@ -2321,13 +2322,13 @@ mod tests {
             None,
             None,
         )
-        .expect("open capture with no snapshot");
-        assert_eq!(model.input_mode(), BoardInputMode::Capture);
+        .expect("open quick add with no snapshot");
+        assert_eq!(model.input_mode(), BoardInputMode::QuickAdd);
 
         apply_intent(
             &mut domain,
             &mut model,
-            BoardIntent::EditInsert('x'),
+            BoardIntent::QuickAddInsert('x'),
             None,
             None,
         )
@@ -2336,7 +2337,7 @@ mod tests {
         let outcome = apply_intent(
             &mut domain,
             &mut model,
-            BoardIntent::ConfirmEdit,
+            BoardIntent::QuickAddSave,
             None,
             None,
         )
@@ -2350,11 +2351,11 @@ mod tests {
         assert!(domain.tasks().is_empty(), "nothing was ever saved");
         assert_eq!(
             model.input_mode(),
-            BoardInputMode::Capture,
-            "capture stays open so the draft is not lost"
+            BoardInputMode::QuickAdd,
+            "quick add stays open so the draft is not lost"
         );
         assert_eq!(
-            model.capture_title_value(),
+            model.quick_add_title_value(),
             "x",
             "the draft the user typed must survive the refusal"
         );

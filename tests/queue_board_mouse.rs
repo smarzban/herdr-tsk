@@ -376,6 +376,14 @@ fn inline_capture_mouse_fields_and_scope_dropdown_stay_inside_the_form() {
         None,
     )
     .expect("open capture");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ExpandQuickAdd,
+        None,
+        None,
+    )
+    .expect("expand quick add");
     let task_count = domain.tasks().len();
 
     let mut hits = board_hit_map(STANDARD, &model);
@@ -457,6 +465,14 @@ fn inline_capture_verb_bar_save_cancel_match_keyboard_and_keep_other_hits_scoped
         None,
     )
     .expect("open capture");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ExpandQuickAdd,
+        None,
+        None,
+    )
+    .expect("expand quick add");
     assert_eq!(model.input_mode(), BoardInputMode::Capture);
 
     let hits = board_hit_map(STANDARD, &model);

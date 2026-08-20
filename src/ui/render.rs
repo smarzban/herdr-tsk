@@ -281,6 +281,14 @@ pub enum QueueOverlay<'a> {
         cursor_row: u16,
         cursor_col: u16,
     },
+    /// Single-line capture painted into the two bottom chrome rows, never covering the queue.
+    QuickAdd {
+        title: String,
+        title_cursor: u16,
+        project_scope: bool,
+        recovery: bool,
+        message: Option<&'a str>,
+    },
     /// Inline capture takeover/row. Painted as a full viewport takeover on compact and an
     /// inline region on standard.
     Capture {
@@ -418,6 +426,8 @@ pub struct QueueFrameModel<'a> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QueueHitTarget {
     ProjectChip,
+    /// The quick-add input row. Clicking it keeps the already-focused line focused.
+    QuickAddInput,
     Task(Uuid),
     Verb(usize),
     /// The DONE section header (painted only while the drawer is open): toggles it shut,
@@ -663,15 +673,25 @@ pub fn draw_queue_frame(
     }
 
     if let Some(row) = geo.status_row {
-        let (line, undo_hit) = paint_status_line(
-            model.status_message,
-            model.status_undo_offset,
-            model.view.counts,
-            width,
-        );
-        put_line(frame, row, width, line);
-        if let Some((x, w)) = undo_hit {
-            hits.push(QueueHitTarget::DeleteNoticeUndo, Rect::new(x, row, w, 1));
+        if let QueueOverlay::QuickAdd {
+            title,
+            title_cursor,
+            ..
+        } = &model.overlay
+        {
+            paint_quick_add_status(frame, row, width, title, *title_cursor);
+            hits.push(QueueHitTarget::QuickAddInput, Rect::new(0, row, width, 1));
+        } else {
+            let (line, undo_hit) = paint_status_line(
+                model.status_message,
+                model.status_undo_offset,
+                model.view.counts,
+                width,
+            );
+            put_line(frame, row, width, line);
+            if let Some((x, w)) = undo_hit {
+                hits.push(QueueHitTarget::DeleteNoticeUndo, Rect::new(x, row, w, 1));
+            }
         }
     }
 
@@ -681,6 +701,8 @@ pub fn draw_queue_frame(
             QueueOverlay::Palette { .. } => PALETTE_VERBS,
             QueueOverlay::Help { .. } => HELP_VERBS,
             QueueOverlay::ScopeDropdown { .. } => SCOPE_VERBS,
+            QueueOverlay::QuickAdd { recovery, .. } if *recovery => &[],
+            QueueOverlay::QuickAdd { .. } => QUICK_ADD_VERBS,
             QueueOverlay::Capture {
                 focus,
                 scope_dropdown,
@@ -706,10 +728,20 @@ pub fn draw_queue_frame(
             QueueOverlay::None | QueueOverlay::TaskPage { focus: None, .. },
         )
         .then_some(model.verb_modifier);
-        let (line, verb_hits) = paint_verb_bar(verb_items, budget, width, prefix_verbs);
-        put_line(frame, row, width, line);
-        for (index, x, w) in verb_hits {
-            hits.push(QueueHitTarget::Verb(index), Rect::new(x, row, w, 1));
+        if let QueueOverlay::QuickAdd {
+            project_scope,
+            recovery: true,
+            message,
+            ..
+        } = &model.overlay
+        {
+            paint_quick_add_hint(frame, row, width, *project_scope, *message, geo.tier);
+        } else {
+            let (line, verb_hits) = paint_verb_bar(verb_items, budget, width, prefix_verbs);
+            put_line(frame, row, width, line);
+            for (index, x, w) in verb_hits {
+                hits.push(QueueHitTarget::Verb(index), Rect::new(x, row, w, 1));
+            }
         }
     }
 
@@ -717,6 +749,25 @@ pub fn draw_queue_frame(
 
     hits
 }
+
+pub(crate) const QUICK_ADD_VERBS: &[VerbEntry<'static>] = &[
+    VerbEntry {
+        key: "enter",
+        label: "save",
+    },
+    VerbEntry {
+        key: "ctrl+enter",
+        label: "save+next",
+    },
+    VerbEntry {
+        key: "alt+enter",
+        label: "more",
+    },
+    VerbEntry {
+        key: "esc",
+        label: "close",
+    },
+];
 
 pub(crate) const PALETTE_VERBS: &[VerbEntry<'static>] = &[
     VerbEntry {
@@ -903,6 +954,7 @@ fn paint_overlay(
         } => {
             paint_edit_notes_overlay(frame, geo, rows, *cursor_row, *cursor_col);
         }
+        QueueOverlay::QuickAdd { .. } => {}
         QueueOverlay::Capture { .. } => {
             let form = form_overlay(&model.overlay).expect("form overlay variant");
             // Standard capture is woven into its list position. Compact keeps the same field
@@ -2035,6 +2087,87 @@ fn paint_rule_row(width: u16) -> Line<'static> {
 /// first in that text rather than the one actually painted -- Minor 1's regression. The one
 /// thing this function still verifies is that the control survived the row's own width
 /// clipping, exactly as the pre-fix code did for a control it had located by search.
+/// Paint the focused quick-add line in the row normally used for board feedback.
+fn paint_quick_add_status(
+    frame: &mut Frame<'_>,
+    row: u16,
+    width: u16,
+    title: &str,
+    title_cursor: u16,
+) {
+    let prefix = "▎ ";
+    let prefix_width = display_width(prefix) as u16;
+    let body = if title.is_empty() {
+        "title…   !g global · alt+enter details"
+    } else {
+        title
+    };
+    let style = if title.is_empty() {
+        style_dim()
+    } else {
+        style_bold()
+    };
+    let line = bound_line(
+        Line::from(vec![
+            Span::styled(prefix, style_bold()),
+            Span::styled(
+                present_line(body, width.saturating_sub(prefix_width) as usize),
+                style,
+            ),
+        ]),
+        width as usize,
+    );
+    put_line(frame, row, width, line);
+    place_edit_cursor(
+        frame,
+        Rect::new(
+            prefix_width.min(width.saturating_sub(1)),
+            row,
+            width.saturating_sub(prefix_width),
+            1,
+        ),
+        title_cursor,
+    );
+}
+
+fn paint_quick_add_hint(
+    frame: &mut Frame<'_>,
+    row: u16,
+    width: u16,
+    project_scope: bool,
+    message: Option<&str>,
+    tier: Tier,
+) {
+    let (text, style) = if let Some(message) = message {
+        (message.to_string(), style_reverse_bold())
+    } else {
+        let text = match tier {
+            Tier::Standard => format!(
+                "Enter save · esc cancel · tab expand · scope: {}",
+                if project_scope {
+                    "this project"
+                } else {
+                    "global"
+                }
+            ),
+            Tier::Compact => format!(
+                "⏎ save · esc · tab · {}",
+                if project_scope { "proj" } else { "glob" }
+            ),
+        };
+        (text, style_dim())
+    };
+    put_line(
+        frame,
+        row,
+        width,
+        bound_line(
+            Line::from(Span::styled(present_line(&text, width as usize), style)),
+            width as usize,
+        ),
+    );
+}
+
 fn paint_status_line(
     message: Option<&str>,
     undo_offset: Option<usize>,

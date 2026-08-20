@@ -7,7 +7,7 @@ use uuid::Uuid;
 use crate::config::{default_config_dir, SettingsRecord};
 use crate::context::InvocationSnapshot;
 use crate::dispatch::DispatchRecoveryResult;
-use crate::domain::{DomainError, DomainState, HumanStatus};
+use crate::domain::{DomainError, DomainState, HumanStatus, TaskScope};
 use crate::host::HostPorts;
 use crate::ui::capture::{CaptureField, TITLE_REQUIRED_MESSAGE};
 use crate::ui::edit::{flatten_line_breaks, EditBuffer};
@@ -62,6 +62,8 @@ pub fn board_intent_may_persist(intent: &BoardIntent) -> bool {
             | BoardIntent::Undo
             | BoardIntent::PrimaryVerb
             | BoardIntent::ToggleBlock
+            | BoardIntent::QuickAddSave
+            | BoardIntent::QuickAddSaveNext
     )
 }
 
@@ -120,6 +122,8 @@ pub fn apply_intent(
     snapshot: Option<&InvocationSnapshot>,
     host: Option<&dyn HostPorts>,
 ) -> Result<IntentOutcome, DomainError> {
+    // A successful quick add remains emphasized only until the next input intent.
+    model.clear_saved_task();
     let notice_before = model.delete_notice().map(str::to_string);
     let mutating = board_intent_may_persist(&intent);
     let result = apply_board_intent(domain, model, intent, snapshot, host);
@@ -254,17 +258,116 @@ fn apply_board_intent(
         }
         BoardIntent::OpenCapture => {
             model.close_popup();
-            // Inline capture retains the invocation snapshot inside the shared form. The
-            // snapshot is never recomputed while the form is open; only its chosen scope can
-            // differ at save time.
-            model.form = Some(BoardForm::capture(
-                snapshot.cloned(),
-                model.this_repo.as_deref(),
-                &model.tasks,
-            ));
-            model.input_mode = BoardInputMode::Capture;
+            model.form = None;
+            // The invocation snapshot remains the default scope unless a title token says
+            // otherwise, matching full capture semantics.
+            model.quick_add = Some(super::model::QuickAddState::new(snapshot.cloned()));
+            model.quick_add_save = None;
+            model.input_mode = BoardInputMode::QuickAdd;
             model.clear_message();
             return Ok(IntentOutcome::None);
+        }
+        BoardIntent::QuickAddInsert(character) => {
+            if let Some(quick_add) = model.quick_add.as_mut() {
+                quick_add.title.insert_char(character);
+            }
+            return Ok(IntentOutcome::None);
+        }
+        BoardIntent::QuickAddInsertText(text) => {
+            if let Some(quick_add) = model.quick_add.as_mut() {
+                quick_add.title.insert_text(&flatten_line_breaks(&text));
+            }
+            return Ok(IntentOutcome::None);
+        }
+        BoardIntent::QuickAddBackspace => {
+            if let Some(quick_add) = model.quick_add.as_mut() {
+                quick_add.title.backspace();
+            }
+            return Ok(IntentOutcome::None);
+        }
+        BoardIntent::QuickAddDeleteForward => {
+            if let Some(quick_add) = model.quick_add.as_mut() {
+                quick_add.title.delete_forward();
+            }
+            return Ok(IntentOutcome::None);
+        }
+        BoardIntent::QuickAddMoveLeft => {
+            if let Some(quick_add) = model.quick_add.as_mut() {
+                quick_add.title.move_left();
+            }
+            return Ok(IntentOutcome::None);
+        }
+        BoardIntent::QuickAddMoveRight => {
+            if let Some(quick_add) = model.quick_add.as_mut() {
+                quick_add.title.move_right();
+            }
+            return Ok(IntentOutcome::None);
+        }
+        BoardIntent::QuickAddMoveLineStart => {
+            if let Some(quick_add) = model.quick_add.as_mut() {
+                quick_add.title.move_line_start();
+            }
+            return Ok(IntentOutcome::None);
+        }
+        BoardIntent::QuickAddMoveLineEnd => {
+            if let Some(quick_add) = model.quick_add.as_mut() {
+                quick_add.title.move_line_end();
+            }
+            return Ok(IntentOutcome::None);
+        }
+        BoardIntent::QuickAddMoveWordLeft => {
+            if let Some(quick_add) = model.quick_add.as_mut() {
+                quick_add.title.move_word_left();
+            }
+            return Ok(IntentOutcome::None);
+        }
+        BoardIntent::QuickAddMoveWordRight => {
+            if let Some(quick_add) = model.quick_add.as_mut() {
+                quick_add.title.move_word_right();
+            }
+            return Ok(IntentOutcome::None);
+        }
+        BoardIntent::ExpandQuickAdd => {
+            let Some(quick_add) = model.quick_add.as_ref() else {
+                return Ok(IntentOutcome::None);
+            };
+            let (title, token_scope) = quick_add_title_and_scope(quick_add.title.value());
+            let scope = token_scope.unwrap_or_else(|| quick_add.scope.clone());
+            let snapshot = quick_add.snapshot.as_ref().clone();
+            if let Some(quick_add) = model.quick_add.as_mut() {
+                quick_add.title = crate::ui::edit::seeded_draft(&title);
+                quick_add.scope = scope.clone();
+            }
+            let mut form = BoardForm::capture(snapshot, model.this_repo.as_deref(), &model.tasks);
+            form.title = crate::ui::edit::seeded_draft(&title);
+            form.scope = scope;
+            form.select_current_scope();
+            model.form = Some(form);
+            model.input_mode = BoardInputMode::Capture;
+            return Ok(IntentOutcome::None);
+        }
+        BoardIntent::CancelQuickAdd => {
+            model.discard_quick_add();
+            // A save+next acknowledgement has no free status row while the line is open.
+            // Keep it for the restored board row when the user finally closes quick-add.
+            return Ok(IntentOutcome::None);
+        }
+        BoardIntent::QuickAddSelectIndex(index) => {
+            model.discard_quick_add();
+            return apply_board_intent(
+                domain,
+                model,
+                BoardIntent::SelectIndex(index),
+                snapshot,
+                host,
+            );
+        }
+        BoardIntent::QuickAddSave | BoardIntent::QuickAddSaveNext => {
+            return quick_add_save(
+                domain,
+                model,
+                matches!(intent, BoardIntent::QuickAddSaveNext),
+            );
         }
         // Compatibility intent names retained for existing capture callers. The reducer keeps
         // their capture-only guard; the shared names below drive either form type.
@@ -496,10 +599,14 @@ fn apply_board_intent(
                 model.clear_message();
                 return Ok(IntentOutcome::None);
             }
-            // Outer Esc discards either complete form. Dropdown Esc has its own intent and
-            // restores this form instead, so it can never accidentally cancel a draft.
+            // Esc from a full form expanded out of quick-add returns to the retained line;
+            // all other complete forms discard as before. Dropdown Esc has its own intent.
             if model.form.take().is_some() {
-                model.input_mode = BoardInputMode::Normal;
+                model.input_mode = if model.quick_add.is_some() {
+                    BoardInputMode::QuickAdd
+                } else {
+                    BoardInputMode::Normal
+                };
                 model.clear_message();
             }
             return Ok(IntentOutcome::None);
@@ -525,10 +632,16 @@ fn apply_board_intent(
                     notes,
                     scope_override,
                 ) {
-                    Ok(_) => {
+                    Ok(id) => {
+                        let expanded_quick_add = model.quick_add.is_some();
+                        let scope = form.scope.clone();
                         model.form = None;
-                        model.input_mode = BoardInputMode::Normal;
-                        model.clear_message();
+                        if expanded_quick_add {
+                            model.begin_quick_add_save(id, false, scope);
+                        } else {
+                            model.input_mode = BoardInputMode::Normal;
+                            model.clear_message();
+                        }
                         Ok(IntentOutcome::Persist)
                     }
                     Err(crate::capture::CaptureError::Domain(DomainError::EmptyTitle)) => {
@@ -816,6 +929,15 @@ fn apply_board_intent(
                 return Ok(IntentOutcome::None);
             }
             if model.form.take().is_some() {
+                model.input_mode = if model.quick_add.is_some() {
+                    BoardInputMode::QuickAdd
+                } else {
+                    BoardInputMode::Normal
+                };
+                model.clear_message();
+                return Ok(IntentOutcome::None);
+            }
+            if model.quick_add.take().is_some() {
                 model.input_mode = BoardInputMode::Normal;
                 model.clear_message();
                 return Ok(IntentOutcome::None);
@@ -1012,6 +1134,64 @@ fn open_task_page_on(domain: &DomainState, model: &mut BoardModel, id: Uuid) {
 
 /// The row double-click window: a second click on the same row within it opens the page.
 const ROW_DOUBLE_CLICK_WINDOW: std::time::Duration = std::time::Duration::from_millis(400);
+
+/// Save the line through the same capture pipeline the expanded form uses.
+fn quick_add_save(
+    domain: &mut DomainState,
+    model: &mut BoardModel,
+    keep_open: bool,
+) -> Result<IntentOutcome, DomainError> {
+    let Some(quick_add) = model.quick_add.as_ref() else {
+        return Ok(IntentOutcome::None);
+    };
+    let Some(snapshot) = quick_add.snapshot.as_ref().clone() else {
+        model.set_message("capture context unavailable; press Esc and try again");
+        return Ok(IntentOutcome::None);
+    };
+    let (title, token_scope) = quick_add_title_and_scope(quick_add.title.value());
+    let scope = token_scope.unwrap_or_else(|| quick_add.scope.clone());
+    match crate::capture::capture_save(domain, None, &snapshot, title, None, Some(scope.clone())) {
+        Ok(id) => {
+            // Do not discard the draft until the app save boundary confirms persistence. A
+            // failed save keeps this exact state behind SaveRecovery for retry or cancel.
+            model.begin_quick_add_save(id, keep_open, scope);
+            Ok(IntentOutcome::Persist)
+        }
+        Err(crate::capture::CaptureError::Domain(DomainError::EmptyTitle)) => {
+            model.set_message(TITLE_REQUIRED_MESSAGE);
+            Ok(IntentOutcome::None)
+        }
+        Err(error) => {
+            model.set_message(error.to_string());
+            Ok(IntentOutcome::None)
+        }
+    }
+}
+
+/// Parse whitespace-delimited quick-add scope directives before creating a task.
+fn quick_add_title_and_scope(value: &str) -> (String, Option<TaskScope>) {
+    let words: Vec<&str> = value.split_whitespace().collect();
+    if let Some(index) = words.iter().position(|word| *word == "!p") {
+        let path = words[index + 1..].join(" ");
+        if !path.is_empty() {
+            let title = words[..index]
+                .iter()
+                .filter(|word| **word != "!g")
+                .copied()
+                .collect::<Vec<_>>()
+                .join(" ");
+            return (title, Some(TaskScope::Project { path }));
+        }
+    }
+    let global = words.contains(&"!g");
+    let title = words
+        .iter()
+        .filter(|word| **word != "!g")
+        .copied()
+        .collect::<Vec<_>>()
+        .join(" ");
+    (title, global.then_some(TaskScope::Global))
+}
 
 fn confirm_edit(
     domain: &mut DomainState,

@@ -83,8 +83,17 @@ fn inline_capture_a_uses_invocation_snapshot_scope_capsule_provenance_and_esc_di
         Some(&NoopHost),
     )
     .expect("OpenCapture must be accepted");
-    // Inline path returns None and enters Capture mode (separate from AppMode::Capture).
+    // Inline path opens the status-row draft. Expand to exercise the retained full form.
     assert_eq!(outcome, IntentOutcome::None);
+    assert_eq!(model.input_mode(), BoardInputMode::QuickAdd);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ExpandQuickAdd,
+        None,
+        None,
+    )
+    .expect("expand quick add");
     assert_eq!(model.input_mode(), BoardInputMode::Capture);
 
     // Change the selected scope before cancel: scope is still only a draft until save.
@@ -108,6 +117,16 @@ fn inline_capture_a_uses_invocation_snapshot_scope_capsule_provenance_and_esc_di
         Some(&snap),
         Some(&NoopHost),
     );
+    assert_eq!(model.input_mode(), BoardInputMode::QuickAdd);
+    assert_eq!(model.quick_add_title_value(), "");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::CancelQuickAdd,
+        Some(&snap),
+        Some(&NoopHost),
+    )
+    .expect("close quick add");
     assert_eq!(model.input_mode(), BoardInputMode::Normal);
     assert_eq!(model.capture_scope(), None);
     assert_eq!(
@@ -163,6 +182,14 @@ fn inline_capture_can_change_scope_and_create_a_global_task_with_snapshot_proven
         None,
     )
     .expect("open inline capture");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ExpandQuickAdd,
+        None,
+        None,
+    )
+    .expect("expand quick add");
 
     let available = model.capture_scope_options();
     assert!(available.contains(&project(THIS_REPO)));
@@ -249,6 +276,14 @@ fn inline_capture_notes_enter_adds_a_line_and_save_chords_persist_all_lines() {
         None,
     )
     .expect("open inline capture");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ExpandQuickAdd,
+        None,
+        None,
+    )
+    .expect("expand quick add");
     for character in "Multiline task".chars() {
         apply_intent(
             &mut domain,
@@ -585,6 +620,14 @@ fn tab_and_shift_tab_move_capture_focus_through_title_notes_scope_and_back() {
         None,
     )
     .expect("open capture");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ExpandQuickAdd,
+        None,
+        None,
+    )
+    .expect("expand quick add");
     assert_eq!(model.capture_focus(), CaptureField::Title);
 
     let tab = map_key(
@@ -1070,6 +1113,14 @@ fn capture_scope_dropdown_returns_to_its_form_and_applies_only_on_enter() {
     apply_intent(
         &mut domain,
         &mut model,
+        BoardIntent::ExpandQuickAdd,
+        None,
+        None,
+    )
+    .expect("expand quick add");
+    apply_intent(
+        &mut domain,
+        &mut model,
         BoardIntent::FormFocusNext,
         None,
         None,
@@ -1148,7 +1199,16 @@ fn capture_scope_dropdown_returns_to_its_form_and_applies_only_on_enter() {
     assert_eq!(model.input_mode(), BoardInputMode::Capture);
     assert_eq!(model.capture_scope(), Some(&TaskScope::Global));
     apply_intent(&mut domain, &mut model, BoardIntent::CancelEdit, None, None)
-        .expect("outer Esc discards capture");
+        .expect("Esc returns to quick add");
+    assert_eq!(model.input_mode(), BoardInputMode::QuickAdd);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::CancelQuickAdd,
+        None,
+        None,
+    )
+    .expect("close quick add");
     assert_eq!(model.input_mode(), BoardInputMode::Normal);
     assert!(!model.board_form_open());
 }
