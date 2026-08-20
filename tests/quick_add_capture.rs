@@ -101,6 +101,130 @@ fn plus_opens_focused_bar_regardless_of_shift_and_legacy_chord_is_unbound() {
 }
 
 #[test]
+fn scoped_project_quick_add_defaults_to_the_selected_project() {
+    let mut domain = DomainState::new();
+    create_project_fixture(&mut domain, "/repos/project-x");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/project-y")));
+    model.set_selected_project(Some(PathBuf::from("/repos/project-x")));
+    let mut snap = snapshot();
+    snap.default_scope = TaskScope::Project {
+        path: "/repos/project-y".into(),
+    };
+
+    open(&mut domain, &mut model, &snap);
+    type_title(&mut domain, &mut model, "selected project task");
+    assert_eq!(
+        apply(&mut domain, &mut model, BoardIntent::QuickAddSave, None),
+        IntentOutcome::Persist
+    );
+    model.sync_from_domain(&domain);
+
+    assert_eq!(
+        domain.tasks().last().expect("saved task").scope,
+        TaskScope::Project {
+            path: "/repos/project-x".into()
+        }
+    );
+}
+
+#[test]
+fn all_projects_quick_add_keeps_the_invocation_default_scope() {
+    let mut domain = DomainState::new();
+    create_project_fixture(&mut domain, "/repos/project-x");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/project-y")));
+    let mut snap = snapshot();
+    snap.default_scope = TaskScope::Project {
+        path: "/repos/project-y".into(),
+    };
+
+    open(&mut domain, &mut model, &snap);
+    type_title(&mut domain, &mut model, "all projects task");
+    assert_eq!(
+        apply(&mut domain, &mut model, BoardIntent::QuickAddSave, None),
+        IntentOutcome::Persist
+    );
+    model.sync_from_domain(&domain);
+
+    assert_eq!(
+        domain.tasks().last().expect("saved task").scope,
+        TaskScope::Project {
+            path: "/repos/project-y".into()
+        }
+    );
+}
+
+#[test]
+fn quick_add_project_token_overrides_the_selected_project() {
+    let mut domain = DomainState::new();
+    create_project_fixture(&mut domain, "/repos/project-x");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/project-y")));
+    model.set_selected_project(Some(PathBuf::from("/repos/project-x")));
+    let mut snap = snapshot();
+    snap.default_scope = TaskScope::Project {
+        path: "/repos/project-y".into(),
+    };
+
+    open(&mut domain, &mut model, &snap);
+    type_title(&mut domain, &mut model, "token wins !p /repos/project-z");
+    assert_eq!(
+        apply(&mut domain, &mut model, BoardIntent::QuickAddSave, None),
+        IntentOutcome::Persist
+    );
+    model.sync_from_domain(&domain);
+
+    assert_eq!(
+        domain.tasks().last().expect("saved task").scope,
+        TaskScope::Project {
+            path: "/repos/project-z".into()
+        }
+    );
+}
+
+#[test]
+fn expanded_quick_add_keeps_the_selected_project_scope_through_esc_and_tab() {
+    let mut domain = DomainState::new();
+    create_project_fixture(&mut domain, "/repos/project-x");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/project-y")));
+    model.set_selected_project(Some(PathBuf::from("/repos/project-x")));
+    let mut snap = snapshot();
+    snap.default_scope = TaskScope::Project {
+        path: "/repos/project-y".into(),
+    };
+
+    open(&mut domain, &mut model, &snap);
+    type_title(&mut domain, &mut model, "expanded selected project task");
+    apply(&mut domain, &mut model, BoardIntent::ExpandQuickAdd, None);
+    assert_eq!(
+        model.form_scope(),
+        Some(&TaskScope::Project {
+            path: "/repos/project-x".into()
+        })
+    );
+
+    apply(&mut domain, &mut model, BoardIntent::CancelEdit, None);
+    assert_eq!(model.input_mode(), BoardInputMode::QuickAdd);
+    apply(&mut domain, &mut model, BoardIntent::ExpandQuickAdd, None);
+    assert_eq!(
+        model.form_scope(),
+        Some(&TaskScope::Project {
+            path: "/repos/project-x".into()
+        })
+    );
+    assert_eq!(
+        apply(&mut domain, &mut model, BoardIntent::ConfirmEdit, None),
+        IntentOutcome::Persist
+    );
+    model.sync_from_domain(&domain);
+
+    assert_eq!(
+        domain.tasks().last().expect("saved task").scope,
+        TaskScope::Project {
+            path: "/repos/project-x".into()
+        }
+    );
+}
+
+#[test]
 fn quick_add_save_selects_the_new_task_and_navigation_stays_relative_to_it() {
     let mut domain = DomainState::new();
     create_project_fixture(&mut domain, "/repos/existing");

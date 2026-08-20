@@ -140,22 +140,20 @@ pub(super) enum BoardFormBinding {
 #[derive(Debug, Clone)]
 pub(super) struct QuickAddState {
     pub(super) title: EditBuffer,
-    /// The invocation snapshot adjusted once at open for the board's current scope.
+    /// The immutable invocation snapshot, retained for title prefill, token resolution, and
+    /// capture provenance.
     pub(super) snapshot: Box<Option<InvocationSnapshot>>,
-    /// Default from the invocation snapshot, overridden by a parsed title token.
+    /// Default from the selected single-project board scope or invocation snapshot, overridden
+    /// by a parsed title token.
     pub(super) scope: TaskScope,
 }
 
 impl QuickAddState {
-    pub(super) fn new(snapshot: Option<InvocationSnapshot>) -> Self {
+    pub(super) fn new(snapshot: Option<InvocationSnapshot>, scope: TaskScope) -> Self {
         let title = snapshot
             .as_ref()
             .and_then(|snapshot| snapshot.title_prefill.as_deref())
             .unwrap_or_default();
-        let scope = snapshot
-            .as_ref()
-            .map(crate::ui::capture::CaptureModel::default_scope)
-            .unwrap_or(TaskScope::Global);
         Self {
             title: seeded_draft(title),
             snapshot: Box::new(snapshot),
