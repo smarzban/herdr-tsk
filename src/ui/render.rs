@@ -1644,7 +1644,7 @@ fn paint_quick_add_status(
     let prefix = "▎ ";
     let prefix_width = display_width(prefix) as u16;
     let body = if title.is_empty() {
-        "title…   !g global · tab details"
+        "title…   !p global · !p name project · tab details"
     } else {
         title
     };

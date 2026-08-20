@@ -637,10 +637,9 @@ fn apply_board_intent(
                 ) {
                     Ok(id) => {
                         let expanded_quick_add = model.quick_add.is_some();
-                        let scope = form.scope.clone();
                         model.form = None;
                         if expanded_quick_add {
-                            model.begin_quick_add_save(id, false, scope);
+                            model.begin_quick_add_save(id, false);
                         } else {
                             model.input_mode = BoardInputMode::Normal;
                             model.clear_message();
@@ -1162,7 +1161,7 @@ fn quick_add_save(
             // Do not discard the draft until the app save boundary confirms persistence. A
             // failed save keeps this exact state behind SaveRecovery for retry or cancel.
             model.form = None;
-            model.begin_quick_add_save(id, keep_open, scope);
+            model.begin_quick_add_save(id, keep_open);
             Ok(IntentOutcome::Persist)
         }
         Err(crate::capture::CaptureError::Domain(DomainError::EmptyTitle)) => {
@@ -1184,30 +1183,18 @@ fn quick_add_title_and_scope(
 ) -> (String, Option<TaskScope>) {
     let words: Vec<&str> = value.split_whitespace().collect();
     if let Some(index) = words.iter().position(|word| *word == "!p") {
+        let title = words[..index].join(" ");
         let path = words[index + 1..].join(" ");
-        if !path.is_empty() {
-            let title = words[..index]
-                .iter()
-                .filter(|word| **word != "!g")
-                .copied()
-                .collect::<Vec<_>>()
-                .join(" ");
-            return (
-                title,
-                Some(TaskScope::Project {
-                    path: resolve_quick_add_project_path(&path, domain, snapshot),
-                }),
-            );
-        }
+        let scope = if path.is_empty() {
+            TaskScope::Global
+        } else {
+            TaskScope::Project {
+                path: resolve_quick_add_project_path(&path, domain, snapshot),
+            }
+        };
+        return (title, Some(scope));
     }
-    let global = words.contains(&"!g");
-    let title = words
-        .iter()
-        .filter(|word| **word != "!g")
-        .copied()
-        .collect::<Vec<_>>()
-        .join(" ");
-    (title, global.then_some(TaskScope::Global))
+    (words.join(" "), None)
 }
 
 /// Resolve a separator-free `!p` token against the projects available to this board.

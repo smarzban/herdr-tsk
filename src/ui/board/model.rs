@@ -168,7 +168,6 @@ impl QuickAddState {
 pub(super) struct QuickAddSave {
     id: Uuid,
     keep_open: bool,
-    scope: TaskScope,
 }
 
 #[derive(Debug, Clone)]
@@ -595,7 +594,6 @@ impl BoardModel {
     /// Replace task snapshot from domain (after mutation) and reanchor selection by id.
     pub fn sync_from_domain(&mut self, state: &DomainState) {
         let previous_visible = self.visible_ids();
-        let previous = self.selection_id;
         self.tasks = state.tasks().to_vec();
         self.stale_links.retain(|id| {
             self.tasks
@@ -604,7 +602,7 @@ impl BoardModel {
         });
         self.attempts = state.active_attempts().to_vec();
         self.finish_quick_add_save();
-        self.reanchor_selection(previous, &previous_visible);
+        self.reanchor_selection(self.selection_id, &previous_visible);
         if self.attempts.is_empty()
             && matches!(
                 self.popup,
@@ -845,12 +843,8 @@ impl BoardModel {
         self.saved_task = None;
     }
 
-    pub(super) fn begin_quick_add_save(&mut self, id: Uuid, keep_open: bool, scope: TaskScope) {
-        self.quick_add_save = Some(QuickAddSave {
-            id,
-            keep_open,
-            scope,
-        });
+    pub(super) fn begin_quick_add_save(&mut self, id: Uuid, keep_open: bool) {
+        self.quick_add_save = Some(QuickAddSave { id, keep_open });
     }
 
     pub(super) fn discard_quick_add(&mut self) {
@@ -881,6 +875,7 @@ impl BoardModel {
         }
         let pending = self.quick_add_save.take().expect("checked quick-add save");
         self.saved_task = Some(pending.id);
+        self.selection_id = Some(pending.id);
         if pending.keep_open {
             if let Some(quick_add) = self.quick_add.as_mut() {
                 quick_add.title = seeded_draft("");
@@ -889,15 +884,6 @@ impl BoardModel {
             self.quick_add = None;
             self.input_mode = BoardInputMode::Normal;
         }
-        let label = match &pending.scope {
-            TaskScope::Global => "global".to_string(),
-            TaskScope::Project { path } => path
-                .rsplit('/')
-                .find(|segment| !segment.is_empty())
-                .unwrap_or(path)
-                .to_string(),
-        };
-        self.set_message(format!("saved to {label}"));
     }
 
     /// Focused field of the shared board form, if one is open.

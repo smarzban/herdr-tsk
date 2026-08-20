@@ -96,6 +96,40 @@ fn plus_opens_focused_bar_regardless_of_shift_and_legacy_chord_is_unbound() {
         }
     );
     assert_eq!(task.provenance, ProvenanceOrigin::Capture);
+    assert_eq!(model.selected_id(), Some(task.id));
+    assert_eq!(model.message(), None);
+}
+
+#[test]
+fn quick_add_save_selects_the_new_task_and_navigation_stays_relative_to_it() {
+    let mut domain = DomainState::new();
+    create_project_fixture(&mut domain, "/repos/existing");
+    let mut model = BoardModel::from_domain(&domain, None);
+    let prior_selection = model.selected_id().expect("fixture is selected");
+
+    save_quick_add(&mut domain, &mut model, "new task");
+    let saved = domain.tasks().last().expect("saved task").id;
+    assert_eq!(model.selected_id(), Some(saved));
+    assert_ne!(saved, prior_selection);
+
+    let visible = model.visible_ids();
+    let saved_index = visible
+        .iter()
+        .position(|id| *id == saved)
+        .expect("saved task is visible");
+    let expected_down = visible[(saved_index + 1) % visible.len()];
+    apply(&mut domain, &mut model, BoardIntent::SelectNext, None);
+    assert_eq!(model.selected_id(), Some(expected_down));
+
+    apply(&mut domain, &mut model, BoardIntent::SelectPrev, None);
+    assert_eq!(model.selected_id(), Some(saved));
+    apply(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenCapture,
+        Some(&snapshot()),
+    );
+    assert_eq!(model.selected_id(), Some(saved));
 }
 
 fn create_project_fixture(domain: &mut DomainState, path: &str) {
@@ -122,7 +156,7 @@ fn save_quick_add(domain: &mut DomainState, model: &mut BoardModel, title: &str)
 }
 
 #[test]
-fn unique_project_basename_resolves_for_expansion_and_saved_status() {
+fn unique_project_basename_resolves_for_expansion_without_a_saved_status_message() {
     let mut domain = DomainState::new();
     create_project_fixture(&mut domain, "/work/herdr-tasks");
     let mut model = BoardModel::from_domain(&domain, None);
@@ -147,7 +181,7 @@ fn unique_project_basename_resolves_for_expansion_and_saved_status() {
             path: "/work/herdr-tasks".into()
         }
     );
-    assert_eq!(model.message(), Some("saved to herdr-tasks"));
+    assert_eq!(model.message(), None);
 }
 
 #[test]
@@ -246,22 +280,25 @@ fn ctrl_enter_uses_the_same_project_basename_resolution() {
     );
     model.sync_from_domain(&domain);
     assert_eq!(model.input_mode(), BoardInputMode::QuickAdd);
+    let task = domain.tasks().last().expect("saved task");
     assert_eq!(
-        domain.tasks().last().expect("saved task").scope,
+        task.scope,
         TaskScope::Project {
             path: "/work/ctrl-target".into()
         }
     );
+    assert_eq!(model.selected_id(), Some(task.id));
+    assert_eq!(model.message(), None);
 }
 
 #[test]
-fn capture_bar_strips_global_and_project_scope_tokens() {
+fn capture_bar_strips_bare_project_token_as_global_and_project_scope_tokens() {
     let snap = snapshot();
     let mut domain = DomainState::new();
     let mut model = BoardModel::from_domain(&domain, None);
 
     open(&mut domain, &mut model, &snap);
-    type_title(&mut domain, &mut model, "global task !g");
+    type_title(&mut domain, &mut model, "global task !p");
     apply(&mut domain, &mut model, BoardIntent::QuickAddSave, None);
     model.sync_from_domain(&domain);
     assert_eq!(domain.tasks()[0].title, "global task");
@@ -287,7 +324,39 @@ fn capture_bar_strips_global_and_project_scope_tokens() {
     assert_eq!(model.quick_add_title_value(), "");
     apply(&mut domain, &mut model, BoardIntent::CancelQuickAdd, None);
     assert_eq!(model.input_mode(), BoardInputMode::Normal);
-    assert_eq!(model.message(), Some("saved to invocation"));
+    assert_eq!(model.message(), None);
+
+    open(&mut domain, &mut model, &snap);
+    type_title(&mut domain, &mut model, "legacy !g");
+    apply(&mut domain, &mut model, BoardIntent::QuickAddSave, None);
+    model.sync_from_domain(&domain);
+    let task = domain.tasks().last().expect("saved legacy token task");
+    assert_eq!(task.title, "legacy !g");
+    assert_eq!(
+        task.scope,
+        TaskScope::Project {
+            path: "/repos/invocation".into()
+        }
+    );
+}
+
+#[test]
+fn bare_project_token_requires_a_title_and_preselects_global_when_expanded() {
+    let snap = snapshot();
+    let mut domain = DomainState::new();
+    let mut model = BoardModel::from_domain(&domain, None);
+
+    open(&mut domain, &mut model, &snap);
+    type_title(&mut domain, &mut model, "!p");
+    assert_eq!(
+        apply(&mut domain, &mut model, BoardIntent::QuickAddSave, None),
+        IntentOutcome::None
+    );
+    assert_eq!(model.message(), Some("Title required"));
+    assert!(domain.tasks().is_empty());
+
+    apply(&mut domain, &mut model, BoardIntent::ExpandQuickAdd, None);
+    assert_eq!(model.form_scope(), Some(&TaskScope::Global));
 }
 
 #[test]
@@ -350,7 +419,7 @@ fn expanded_page_stashes_notes_and_scope_across_esc_and_saves_like_quick_add() {
     let mut model = BoardModel::from_domain(&domain, None);
     let snap = snapshot();
     open(&mut domain, &mut model, &snap);
-    type_title(&mut domain, &mut model, "draft with details !g");
+    type_title(&mut domain, &mut model, "draft with details !p");
 
     apply(&mut domain, &mut model, BoardIntent::ExpandQuickAdd, None);
     assert_eq!(model.input_mode(), BoardInputMode::EditNotes);
@@ -404,8 +473,9 @@ fn expanded_page_stashes_notes_and_scope_across_esc_and_saves_like_quick_add() {
     model.sync_from_domain(&domain);
     assert_eq!(model.input_mode(), BoardInputMode::Normal);
     assert!(model.has_saved_task(), "saved task remains emphasized");
-    assert_eq!(model.message(), Some("saved to global"));
+    assert_eq!(model.message(), None);
     let task = domain.tasks().last().expect("saved task");
+    assert_eq!(model.selected_id(), Some(task.id));
     assert_eq!(task.title, "draft with details");
     assert_eq!(task.notes.as_deref(), Some("preserved note"));
     assert_eq!(task.scope, TaskScope::Global);
@@ -548,7 +618,7 @@ fn capture_bar_renders_spaced_three_row_block_and_stays_bounded_without_color_sg
     let standard = render_text(&model, 80, 24);
     for text in [
         "visible task",
-        "title…",
+        "title…   !p global · !p name project · tab details",
         "enter save · ctrl+enter save+next · tab details · esc close",
     ] {
         assert!(standard.contains(text), "missing {text:?}: {standard}");
