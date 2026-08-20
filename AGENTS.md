@@ -29,13 +29,27 @@ A gitignored `HANDOFF.md` may hold this clone’s live working state.
 - Standard ≥78×24, compact below, operable to 40×10
 - Human status: `ready` · `started` · `blocked` · `review` · `done`. The store
   still reads old `todo`/`doing` values.
-- Mutating verbs (`space` `d` `o` `b` `a` `e` `n` `x` `u` `q`) need Alt, or Ctrl
+- Mutating verbs (`space` `d` `o` `b` `e` `n` `x` `u` `q`) need Alt, or Ctrl
   if the user flipped it in the palette. Bare letters do nothing. Nav, peek,
-  `Enter`, `P`, `z`, `:`, `?`, and `Esc` stay bare.
+  `Enter`, `P`, `z`, `:`, `?`, `+`, and `Esc` stay bare.
+- Task creation is the quick-add bar, never a form takeover. `+` opens a one-line
+  title input on the status-row slot with a blank row above and below, list still
+  visible. `Enter` saves and closes, `Ctrl+Enter` saves and stays open, `Tab`
+  expands the draft onto the task page with a title·notes·scope stash, so Esc
+  returns to the line and a second `Tab` restores what was typed. Scope tokens in
+  the title: bare `!p` global, `!p name` by project basename (case-sensitive),
+  `!p /path` verbatim; tokens are stripped from the saved title. A saved task
+  becomes the selection. Success has no status message: the row flash is the
+  feedback. Refusals paint while the line is open and clear when it closes.
+- There is no inline board capture form. Creation detail lives on the task page;
+  the standalone Capture UI (`AppMode::Capture`, `src/ui/capture.rs`) is a
+  separate surface reached through the host launcher.
 - Row click peeks. Click the same row again closes peek. Fast double-click opens
   the page.
 - Task page is view-first. Only `e`/`n`/Tab (with the verb modifier) enter edit
-  mode. The scope footer is inert until an edit has started.
+  mode, the one exception being a quick-add draft expanded with `Tab`, which opens
+  straight into Notes edit mode because a draft has nothing to view. The scope
+  footer is inert until an edit has started.
 - Mono modifiers only. No color theme module.
 - No live attention poll on the board.
 
@@ -72,3 +86,9 @@ If `HERDR_ENV` is unset, say that live smoke was not run.
 - `map_edit` and `map_board_form_key` share `map_form_edit_key`. Save-recovery
   `r`/`c`/Esc must reach Retry/Cancel even if a form is allocated
   (`src/app.rs` allowlist).
+- A form and its input mode must outlive the save call. Never clear the form or
+  switch mode before the persistence boundary confirms: a cancelled failed save
+  otherwise leaves an edit mode with no form allocated, which no key can escape.
+- Anything painted on the status-row slot hides `status_message` while it is up.
+  A surface that lives there owns showing its own refusals and clearing them on
+  close, or the message is invisible and then leaks onto the board afterwards.
