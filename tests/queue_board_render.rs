@@ -298,6 +298,7 @@ fn fixture_model<'a>(tasks: &'a [Task], view: &'a QueueView) -> QueueFrameModel<
         view,
         selection_id: Some(Uuid::from_u128(1)),
         scope_label: "all projects",
+        all_projects_scope: true,
         status_message: None,
         status_undo_offset: None,
         verb_items: fixture_verbs(),
@@ -577,6 +578,7 @@ fn empty_hint_and_capture_first_content_keep_symmetric_spacing_and_compact_contr
     );
     let empty_model = QueueFrameModel {
         scope_label: "empty",
+        all_projects_scope: false,
         ..fixture_model(&tasks, &view)
     };
 
@@ -1830,6 +1832,8 @@ fn compact_paints_no_takeover_for_a_detail_open_task_excluded_by_the_current_sco
     );
     let model = QueueFrameModel {
         detail_open: Some(excluded_id),
+        scope_label: "herdr-tasks",
+        all_projects_scope: false,
         ..fixture_model(&tasks, &scoped_view)
     };
 

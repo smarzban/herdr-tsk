@@ -6,7 +6,7 @@
 //! path and the mouse path and comparing what actually happened, never by asserting a
 //! mapping table.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
@@ -265,6 +265,82 @@ fn hit_map_covers_selection_rows_verbs_drawer_selector_chip_dropdown_palette_row
             .iter()
             .any(|hit| matches!(hit.target, QueueHitTarget::HelpDismiss)),
         "no help dismiss hit region: {hits:?}"
+    );
+}
+
+#[test]
+fn all_projects_group_header_double_click_scopes_the_board_to_that_project() {
+    // All-projects view (the default): each ON DECK project group's header is that
+    // project's own scope control, resolved through the same queue view the frame
+    // painted rather than by searching rendered text.
+    let (mut domain, mut model, _id) = scoped_board();
+    assert_eq!(model.selected_project(), None, "fixture starts unscoped");
+    let hits = board_hit_map(STANDARD, &model);
+    let view = model.queue_view();
+    let header = hits
+        .regions
+        .iter()
+        .find(|hit| match hit.target {
+            QueueHitTarget::SectionProject(index) => {
+                view.sections
+                    .get(index)
+                    .and_then(|section| section.project_label.as_deref())
+                    == Some(OTHER_REPO)
+            }
+            _ => false,
+        })
+        .unwrap_or_else(|| panic!("no group header hit region for {OTHER_REPO}: {hits:?}"));
+    let intent = click(header, &model, &hits).expect("header click maps to an intent");
+    apply_intent(&mut domain, &mut model, intent.clone(), None, None)
+        .expect("apply first header click");
+    assert_eq!(
+        model.selected_project(),
+        None,
+        "one header click must leave the all-projects scope unchanged"
+    );
+    apply_intent(&mut domain, &mut model, intent, None, None).expect("apply second header click");
+    assert_eq!(
+        model.selected_project(),
+        Some(Path::new(OTHER_REPO)),
+        "header double-click narrows the session deck scope to the clicked project"
+    );
+
+    // Scoped to one project the header reads plain ON DECK, so it stops being a scope
+    // control: no SectionProject target may be pushed at all.
+    let hits = board_hit_map(STANDARD, &model);
+    assert!(
+        !hits
+            .regions
+            .iter()
+            .any(|hit| matches!(hit.target, QueueHitTarget::SectionProject(_))),
+        "scoped view must not offer group-header scope controls: {hits:?}"
+    );
+}
+
+#[test]
+fn scoped_project_named_all_projects_has_no_group_header_hit_target() {
+    const COLLIDING_REPO: &str = "/repos/all projects";
+    let mut domain = DomainState::new();
+    domain
+        .create(
+            "name collision",
+            None,
+            project(COLLIDING_REPO),
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("create task");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(COLLIDING_REPO)));
+    model.set_selected_project(Some(PathBuf::from(COLLIDING_REPO)));
+
+    let hits = board_hit_map(STANDARD, &model);
+    assert!(
+        !hits
+            .regions
+            .iter()
+            .any(|hit| matches!(hit.target, QueueHitTarget::SectionProject(_))),
+        "actual scoped state, not its colliding display label, must keep ON DECK inert: {hits:?}"
     );
 }
 

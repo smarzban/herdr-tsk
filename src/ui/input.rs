@@ -181,6 +181,11 @@ pub enum BoardIntent {
     /// the task list: it runs the same effect `ConfirmProjectChoice` does after enough
     /// `ProjectPickerNext`/`ProjectPickerPrev` presses reached this option.
     SelectProjectOption(usize),
+    /// Register one click on an all-projects ON DECK group header by that header's painted
+    /// section index (mouse-only). Two clicks on the same project within the double-click
+    /// window run the same session-only scope jump choosing it in the selector dropdown
+    /// would; no key produces it.
+    SelectSectionProject(usize),
     /// Continue the selected durable dispatch attempt.
     RecoveryResume,
     /// Ask for explicit confirmation before removing recorded owned receipts.
@@ -749,6 +754,7 @@ pub fn intent_primary_action(intent: &BoardIntent) -> Option<PrimaryBoardAction>
         | BoardIntent::ConfirmProjectChoice
         | BoardIntent::CancelProjectPicker
         | BoardIntent::SelectProjectOption(_)
+        | BoardIntent::SelectSectionProject(_)
         | BoardIntent::RecoveryResume
         | BoardIntent::BeginCleanup
         | BoardIntent::ConfirmCleanup

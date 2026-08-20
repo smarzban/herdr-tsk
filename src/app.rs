@@ -854,7 +854,16 @@ fn board_mouse_intent(
     } else {
         crate::ui::render::QueueHitMap::default()
     };
-    let intent = crate::ui::mouse::map_board_mouse(model, &hits, mouse)?;
+    let intent = crate::ui::mouse::map_board_mouse(model, &hits, mouse);
+    if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
+        && !matches!(intent, Some(BoardIntent::SelectSectionProject(_)))
+    {
+        // A double-click is two consecutive clicks on the same project header. Any other
+        // pointer target, including inert board space, cancels the armed first click before
+        // the next event can be mistaken for its second half.
+        model.cancel_project_header_double_click();
+    }
+    let intent = intent?;
     let intent = board_intent_for_area(area, intent)?;
     resolve_board_command(model, intent)
 }
@@ -1708,6 +1717,8 @@ mod idle_store_revalidation_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
+
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     use crate::context::InvocationSnapshot;
@@ -2002,6 +2013,85 @@ mod tests {
              ConfirmCommand does"
         );
         assert_eq!(domain.get(id).expect("task").status, HumanStatus::Ready);
+    }
+
+    #[test]
+    fn intervening_task_click_cancels_an_armed_project_header_double_click() {
+        use crate::ui::board::{apply_intent, board_hit_map};
+        use crate::ui::mouse::left_click;
+        use crate::ui::render::QueueHitTarget;
+
+        let mut domain = DomainState::new();
+        let id = domain
+            .create(
+                "click between headers",
+                None,
+                TaskScope::Project {
+                    path: "/repos/app".into(),
+                },
+                None,
+                None,
+                ProvenanceOrigin::Manual,
+            )
+            .expect("create task");
+        let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/app")));
+        let area = Rect::new(0, 0, 80, 24);
+
+        fn target_mouse(
+            area: Rect,
+            model: &BoardModel,
+            target: impl Fn(QueueHitTarget) -> bool,
+        ) -> crossterm::event::MouseEvent {
+            let hits = board_hit_map(area, model);
+            let hit = hits
+                .regions
+                .iter()
+                .find(|hit| target(hit.target))
+                .unwrap_or_else(|| panic!("missing target in {hits:?}"));
+            left_click(hit.area.x, hit.area.y)
+        }
+        let drive_click = |domain: &mut DomainState,
+                           model: &mut BoardModel,
+                           mouse: crossterm::event::MouseEvent| {
+            let intent = board_mouse_intent(area, model, mouse).expect("click maps to intent");
+            apply_intent(domain, model, intent, None, None).expect("click applies");
+        };
+
+        let mouse = target_mouse(area, &model, |target| {
+            matches!(target, QueueHitTarget::SectionProject(_))
+        });
+        drive_click(&mut domain, &mut model, mouse);
+        assert_eq!(
+            model.selected_project(),
+            None,
+            "first header click only arms"
+        );
+
+        let mouse = target_mouse(
+            area,
+            &model,
+            |target| matches!(target, QueueHitTarget::Task(task_id) if task_id == id),
+        );
+        drive_click(&mut domain, &mut model, mouse);
+        let mouse = target_mouse(area, &model, |target| {
+            matches!(target, QueueHitTarget::SectionProject(_))
+        });
+        drive_click(&mut domain, &mut model, mouse);
+        assert_eq!(
+            model.selected_project(),
+            None,
+            "header click after an intervening task click must be a new first click"
+        );
+
+        let mouse = target_mouse(area, &model, |target| {
+            matches!(target, QueueHitTarget::SectionProject(_))
+        });
+        drive_click(&mut domain, &mut model, mouse);
+        assert_eq!(
+            model.selected_project(),
+            Some(Path::new("/repos/app")),
+            "only two consecutive header clicks scope the board"
+        );
     }
 
     /// live dispatch reaches the project selector by mouse and keyboard in

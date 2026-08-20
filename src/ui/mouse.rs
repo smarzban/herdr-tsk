@@ -449,6 +449,9 @@ pub fn map_board_mouse(
         | BoardInputMode::SaveRecovery => None,
         BoardInputMode::Normal => match hit_at(hits, pos) {
             Some(QueueHitTarget::ProjectChip) => Some(BoardIntent::OpenProjectSelector),
+            Some(QueueHitTarget::SectionProject(index)) => {
+                Some(BoardIntent::SelectSectionProject(index))
+            }
             Some(QueueHitTarget::Drawer) => Some(BoardIntent::ToggleDoneDrawer),
             Some(QueueHitTarget::Task(id)) => model
                 .visible_ids()

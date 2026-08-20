@@ -616,6 +616,37 @@ fn apply_board_intent(
             model.clear_message();
             return Ok(IntentOutcome::None);
         }
+        BoardIntent::SelectSectionProject(index) => {
+            // Mouse-only jump: an all-projects ON DECK group header names its own project.
+            // The first click only arms that path; a second click on the same header within
+            // the task-row double-click window adopts it exactly the way choosing it in the
+            // selector dropdown would. Session-only navigation: nothing durable is touched.
+            // A stale section index or a header without a project remains inert.
+            let Some(path) = model
+                .queue_view()
+                .sections
+                .get(index)
+                .and_then(|section| section.project_label.clone())
+                .map(Into::into)
+            else {
+                return Ok(IntentOutcome::None);
+            };
+            let now = Instant::now();
+            let is_double = model
+                .last_project_header_click
+                .as_ref()
+                .is_some_and(|(at, last)| {
+                    last == &path && now.duration_since(*at) <= ROW_DOUBLE_CLICK_WINDOW
+                });
+            if is_double {
+                model.last_project_header_click = None;
+                model.set_deck_scope(ProjectScopeOption::Project(path));
+                model.clear_message();
+            } else {
+                model.last_project_header_click = Some((now, path));
+            }
+            return Ok(IntentOutcome::None);
+        }
         BoardIntent::RecoveryResume => {
             let Some(attempt) = model.selected_attempt().cloned() else {
                 model.close_popup();
