@@ -1205,8 +1205,8 @@ fn quick_add_title_and_scope(
 
 /// Resolve a separator-free `!p` token against the projects available to this board.
 ///
-/// Basename matching is case-sensitive, matching the domain's path equality. An absent or
-/// ambiguous basename deliberately stays verbatim so a quick add never guesses a project.
+/// Basename matching is ASCII case-insensitive. An absent or ambiguous basename deliberately
+/// stays verbatim so a quick add never guesses a project.
 fn resolve_quick_add_project_path(
     token: &str,
     domain: &DomainState,
@@ -1235,7 +1235,7 @@ fn resolve_quick_add_project_path(
         path.trim_end_matches('/')
             .rsplit('/')
             .find(|component| !component.is_empty())
-            == Some(token)
+            .is_some_and(|basename| basename.eq_ignore_ascii_case(token))
     });
     match (matches.next(), matches.next()) {
         (Some(path), None) => path,

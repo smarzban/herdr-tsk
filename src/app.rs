@@ -2311,6 +2311,54 @@ mod tests {
     }
 
     #[test]
+    fn quick_add_project_token_matches_a_project_basename_case_insensitively() {
+        let snapshot = InvocationSnapshot {
+            default_scope: TaskScope::Global,
+            this_repo: Some(PathBuf::from("/repos/herdr-tasks")),
+            title_prefill: None,
+            provenance: ProvenanceOrigin::Capture,
+            capsule: None,
+            agent_meta: None,
+        };
+        let mut domain = DomainState::new();
+        let mut model = BoardModel::from_domain(&domain, snapshot.this_repo.clone());
+
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::OpenCapture,
+            Some(&snapshot),
+            None,
+        )
+        .expect("open quick add");
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::QuickAddInsertText("Case insensitive scope !p HERDR-TASKS".into()),
+            Some(&snapshot),
+            None,
+        )
+        .expect("type title and scope token");
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::QuickAddSave,
+            Some(&snapshot),
+            None,
+        )
+        .expect("save quick add");
+
+        let task = domain.tasks().first().expect("quick add creates a task");
+        assert_eq!(task.title, "Case insensitive scope");
+        assert_eq!(
+            task.scope,
+            TaskScope::Project {
+                path: "/repos/herdr-tasks".into()
+            }
+        );
+    }
+
+    #[test]
     fn quick_add_refusals_keep_the_line_open_and_esc_drops_their_message() {
         let snapshot = InvocationSnapshot {
             default_scope: TaskScope::Global,
