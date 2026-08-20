@@ -665,6 +665,17 @@ impl BoardModel {
         }
     }
 
+    /// Non-All session scope used as a quick-add default at open.
+    pub(super) fn quick_add_scope(&self) -> Option<TaskScope> {
+        match &self.deck_scope {
+            OwnedDeckScope::All => None,
+            OwnedDeckScope::Global => Some(TaskScope::Global),
+            OwnedDeckScope::Project(path) => Some(TaskScope::Project {
+                path: path.to_string_lossy().into_owned(),
+            }),
+        }
+    }
+
     /// Cancel an armed project-header double-click when another pointer target
     /// intervenes. Mouse-boundary state only, never persisted.
     pub(crate) fn cancel_project_header_double_click(&mut self) {

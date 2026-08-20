@@ -36,10 +36,10 @@ A gitignored `HANDOFF.md` may hold this clone’s live working state.
   title input on the status-row slot with a blank row above and below, list still
   visible. `Enter` saves and closes, `Ctrl+Enter` saves and stays open, `Tab`
   expands the draft onto the task page with a title·notes·scope stash, so Esc
-  returns to the line and a second `Tab` restores what was typed. A single-project
-  board defaults the draft to that project, all other board scopes keep the invocation
-  cwd-derived default. Scope tokens in the title: bare `!p` global, `!p name` by
-  project basename (case-insensitive),
+  returns to the line and a second `Tab` restores what was typed. A project board
+  defaults the draft to that project, a Global board defaults it to global, and All
+  keeps the invocation cwd-derived default. Scope tokens in the title: bare `!p`
+  global, `!p name` by project basename (case-insensitive),
   `!p /path` verbatim; tokens are stripped from the saved title. A saved task
   becomes the selection. Success has no status message: the row flash is the
   feedback. Refusals paint while the line is open and clear when it closes.

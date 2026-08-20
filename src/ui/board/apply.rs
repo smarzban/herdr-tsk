@@ -260,13 +260,10 @@ fn apply_board_intent(
         BoardIntent::OpenCapture => {
             model.close_popup();
             model.form = None;
-            // A single-project board scope wins for this quick-add draft. Other session
-            // scopes, including all projects and global, retain the invocation default.
+            // A non-All board scope wins for this quick-add draft. All projects retains the
+            // invocation default.
             let scope = model
-                .selected_project()
-                .map(|path| TaskScope::Project {
-                    path: path.to_string_lossy().into_owned(),
-                })
+                .quick_add_scope()
                 .or_else(|| snapshot.map(crate::ui::capture::CaptureModel::default_scope))
                 .unwrap_or(TaskScope::Global);
             model.quick_add = Some(super::model::QuickAddState::new(snapshot.cloned(), scope));
