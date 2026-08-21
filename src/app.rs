@@ -56,10 +56,10 @@ pub enum AppMode {
     Capture,
 }
 
-/// Resolve mode from an explicit mode-env value and remaining argv (after argv0).
+/// Resolve the TUI mode from an explicit mode-env value and remaining argv (after argv0).
 ///
-/// Default is [`AppMode::Board`]. `capture` (env string or arg) selects Capture.
-/// Pure: no process env reads. Prefer this in tests.
+/// Default is [`AppMode::Board`]. `capture` (env string or arg) selects Capture. Process command
+/// validation belongs to [`crate::cli::router`]. Prefer this pure helper in tests.
 pub fn resolve_mode_from<S: AsRef<str>>(
     mode_env: Option<&str>,
     args: impl IntoIterator<Item = S>,
@@ -79,9 +79,7 @@ pub fn resolve_mode_from<S: AsRef<str>>(
     AppMode::Board
 }
 
-/// Resolve mode from `HERDR_TASKS_MODE` and remaining argv (after argv0).
-///
-/// Default is [`AppMode::Board`]. `capture` (env or arg) selects Capture.
+/// Resolve the TUI mode from `HERDR_TASKS_MODE` and remaining argv (after argv0).
 pub fn resolve_mode<S: AsRef<str>>(args: impl IntoIterator<Item = S>) -> AppMode {
     resolve_mode_from(env::var(MODE_ENV).ok().as_deref(), args)
 }

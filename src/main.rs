@@ -3,17 +3,37 @@
 use std::io::{self, Write};
 use std::process::ExitCode;
 
+use herdr_tasks::cli::router::{route, Surface};
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().collect();
-    if args.iter().any(|a| a == "--find-board-pane") {
-        return find_board_pane_main();
+    match route(
+        &args,
+        std::env::var(herdr_tasks::app::MODE_ENV).ok().as_deref(),
+    ) {
+        Surface::FindBoardPane => find_board_pane_main(),
+        Surface::GlobalHelp => {
+            println!("usage: herdr-tasks [capture] | add | list | --find-board-pane | --help");
+            ExitCode::SUCCESS
+        }
+        Surface::Usage => usage_exit(),
+        Surface::Add | Surface::List => {
+            eprintln!("herdr-tasks: this command is not available yet");
+            ExitCode::from(2)
+        }
+        Surface::Board | Surface::Capture => match herdr_tasks::run(args) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(err) => {
+                eprintln!("herdr-tasks: {err}");
+                ExitCode::from(1)
+            }
+        },
     }
+}
 
-    if let Err(err) = herdr_tasks::run(args) {
-        eprintln!("herdr-tasks: {err}");
-        return ExitCode::from(1);
-    }
-    ExitCode::SUCCESS
+fn usage_exit() -> ExitCode {
+    eprintln!("usage: herdr-tasks [capture] | add | list | --find-board-pane | --help");
+    ExitCode::from(2)
 }
 
 /// Read herdr `pane list` JSON from stdin; print first Tasks pane_id or exit 1.

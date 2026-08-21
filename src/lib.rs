@@ -4,6 +4,7 @@ pub mod app;
 pub mod attention;
 pub mod board_pane;
 pub mod capture;
+pub mod cli;
 pub mod config;
 pub mod context;
 pub mod dispatch;
