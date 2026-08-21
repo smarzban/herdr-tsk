@@ -22,6 +22,10 @@ plugin are `0.1.0`.
 
 A gitignored `HANDOFF.md` may hold this clone’s live working state.
 
+Headless `add` / `list` is specified, not shipped. Contract:
+`docs/specs/headless-add/headless-add.md`. Do not invent CLI behaviour off that
+spec. T-8 adds the skill and the routing line here once the commands exist.
+
 ### Board
 
 - Sections are computed, never navigated: IN MOTION · project groups when showing
