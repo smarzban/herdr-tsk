@@ -1,6 +1,5 @@
 //! Board intent reducer and dispatch-recovery result application.
 
-use std::collections::BTreeSet;
 use std::time::Instant;
 
 use uuid::Uuid;
@@ -1199,52 +1198,12 @@ fn quick_add_title_and_scope(
             TaskScope::Global
         } else {
             TaskScope::Project {
-                path: resolve_quick_add_project_path(&path, domain, snapshot),
+                path: crate::scope::resolve_project_path(&path, domain, snapshot),
             }
         };
         return (title, Some(scope));
     }
     (words.join(" "), None)
-}
-
-/// Resolve a separator-free `!p` token against the projects available to this board.
-///
-/// Basename matching is ASCII case-insensitive. An absent or ambiguous basename deliberately
-/// stays verbatim so a quick add never guesses a project.
-fn resolve_quick_add_project_path(
-    token: &str,
-    domain: &DomainState,
-    snapshot: Option<&InvocationSnapshot>,
-) -> String {
-    if token.contains('/') {
-        return token.to_string();
-    }
-
-    let mut candidates = BTreeSet::new();
-    for task in domain.tasks() {
-        if let TaskScope::Project { path } = &task.scope {
-            candidates.insert(path.clone());
-        }
-    }
-    if let Some(snapshot) = snapshot {
-        if let TaskScope::Project { path } = &snapshot.default_scope {
-            candidates.insert(path.clone());
-        }
-        if let Some(this_repo) = snapshot.this_repo.as_deref() {
-            candidates.insert(this_repo.to_string_lossy().into_owned());
-        }
-    }
-
-    let mut matches = candidates.into_iter().filter(|path| {
-        path.trim_end_matches('/')
-            .rsplit('/')
-            .find(|component| !component.is_empty())
-            .is_some_and(|basename| basename.eq_ignore_ascii_case(token))
-    });
-    match (matches.next(), matches.next()) {
-        (Some(path), None) => path,
-        _ => token.to_string(),
-    }
 }
 
 fn confirm_edit(

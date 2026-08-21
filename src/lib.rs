@@ -11,6 +11,7 @@ pub mod domain;
 pub mod host;
 pub mod resume;
 pub mod save_recovery;
+pub mod scope;
 pub mod store;
 pub(crate) mod text;
 pub mod ui;
