@@ -1,6 +1,6 @@
 //! herdr-tasks binary entry.
 
-use std::io::{self, Write};
+use std::io::{self, IsTerminal, Write};
 use std::process::ExitCode;
 
 use herdr_tasks::cli::router::{route, Surface};
@@ -17,7 +17,8 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Surface::Usage => usage_exit(),
-        Surface::Add | Surface::List => {
+        Surface::Add => add_main(args),
+        Surface::List => {
             eprintln!("herdr-tasks: this command is not available yet");
             ExitCode::from(2)
         }
@@ -34,6 +35,19 @@ fn main() -> ExitCode {
 fn usage_exit() -> ExitCode {
     eprintln!("usage: herdr-tasks [capture] | add | list | --find-board-pane | --help");
     ExitCode::from(2)
+}
+
+fn add_main(args: Vec<String>) -> ExitCode {
+    let stdin = io::stdin();
+    let stdin_is_tty = stdin.is_terminal();
+    let output = herdr_tasks::cli::run_with(args, stdin, stdin_is_tty);
+    if io::stdout().write_all(output.stdout.as_bytes()).is_err() {
+        return ExitCode::from(1);
+    }
+    if io::stderr().write_all(output.stderr.as_bytes()).is_err() {
+        return ExitCode::from(1);
+    }
+    ExitCode::from(output.code)
 }
 
 /// Read herdr `pane list` JSON from stdin; print first Tasks pane_id or exit 1.
