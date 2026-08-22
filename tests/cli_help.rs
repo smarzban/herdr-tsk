@@ -63,6 +63,8 @@ fn add_help_documents_plan_shape_and_exit_contract() {
         "state-dir",
         "invocation project",
         "list --all --json",
+        "--project=<scope>",
+        "dash-leading",
         "Exit contract",
         "exit 0",
         "exit 2",

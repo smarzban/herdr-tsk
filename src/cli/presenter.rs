@@ -1,11 +1,12 @@
 //! Text output for headless command results.
 
-use std::path::Path;
+use std::collections::BTreeMap;
 
 use super::CliOutput;
 use crate::cli::add::{AddError, FlagAddResult};
 use crate::cli::list::{ListError, ListResult, ListRow, ListView};
 use crate::domain::HumanStatus;
+use crate::ui::terminal_text;
 
 pub fn add_help() -> CliOutput {
     help_output(
@@ -18,10 +19,10 @@ pub fn list_help() -> CliOutput {
         stdout: concat!(
             "usage: herdr-tasks list [-p <project> | --global | --all] [--done | --deleted] [--json] [--state-dir <dir>]\n\n",
             "Lists ready, started, blocked, and review tasks in the invocation project by default, or global scope outside a repository.\n",
-            "--project uses the same basename-or-path scope resolution as add; --global selects global tasks; --all selects every scope.\n",
+            "--project uses the same basename-or-path scope resolution as add; --global selects global tasks; --all selects every scope. A dash-leading project value must use --project=<scope>.\n",
             "--done lists done tasks only. --deleted lists soft-deleted tasks only, regardless of status.\n",
             "To recover a typo scope, use herdr-tasks list --all --json.\n",
-            "--json emits a flat array of id, title, status, and project in displayed group order. Human --all groups rows by status, then project scope (basename when unique, full path when needed) or global.\n\n",
+            "--json emits a flat array of id, title, status, and project in displayed group order. Human --all groups rows by status, then project scope, using a unique concise trailing path or global.\n\n",
             "Exit contract:\n",
             "  exit 0: tasks were listed\n",
             "  exit 2: usage or parse error, nothing persisted\n",
@@ -123,6 +124,7 @@ fn list_human(result: &ListResult) -> String {
         ListView::Deleted => &[(None, "DELETED")],
     };
     let mut output = String::new();
+    let labels = result.include_scope.then(|| scope_labels(&result.rows));
     for (status, heading) in groups {
         let rows = result
             .rows
@@ -138,7 +140,7 @@ fn list_human(result: &ListResult) -> String {
         output.push_str(heading);
         output.push('\n');
         if result.include_scope {
-            append_scope_groups(&mut output, rows);
+            append_scope_groups(&mut output, rows, labels.as_ref().expect("scope labels"));
         } else {
             append_rows(&mut output, &rows, " ");
         }
@@ -146,7 +148,11 @@ fn list_human(result: &ListResult) -> String {
     output
 }
 
-fn append_scope_groups(output: &mut String, rows: Vec<&ListRow>) {
+fn append_scope_groups(
+    output: &mut String,
+    rows: Vec<&ListRow>,
+    labels: &BTreeMap<Option<String>, String>,
+) {
     let mut scopes = Vec::<(Option<&str>, Vec<&ListRow>)>::new();
     for row in rows {
         let scope = row.project.as_deref();
@@ -158,18 +164,15 @@ fn append_scope_groups(output: &mut String, rows: Vec<&ListRow>) {
             None => scopes.push((scope, vec![row])),
         }
     }
-    for index in 0..scopes.len() {
-        let (scope, rows) = &scopes[index];
-        let concise = concise_scope(*scope);
-        let disambiguate = scopes
-            .iter()
-            .filter(|(other_scope, _)| concise_scope(*other_scope) == concise)
-            .count()
-            > 1;
+    for (scope, rows) in scopes {
         output.push_str("  ");
-        output.push_str(&scope_label(*scope, disambiguate));
+        output.push_str(&terminal_text(
+            labels
+                .get(&scope.map(str::to_owned))
+                .expect("label for displayed scope"),
+        ));
         output.push('\n');
-        append_rows(output, rows, "    ");
+        append_rows(output, &rows, "    ");
     }
 }
 
@@ -182,27 +185,143 @@ fn append_rows(output: &mut String, rows: &[&ListRow], indent: &str) {
     }
 }
 
-fn scope_label(scope: Option<&str>, disambiguate: bool) -> String {
-    match scope {
-        None => "global".into(),
-        Some(path) if path.trim().is_empty() => "<empty project>".into(),
-        Some(path) if disambiguate && concise_scope(scope) == "global" => {
-            format!("project: {path}")
+fn scope_labels(rows: &[ListRow]) -> BTreeMap<Option<String>, String> {
+    let mut entries = Vec::new();
+    let mut empty_projects = 0;
+    for row in rows {
+        if entries
+            .iter()
+            .any(|entry: &ScopeLabel| entry.scope == row.project)
+        {
+            continue;
         }
-        Some(path) if disambiguate => path.into(),
-        Some(_) => concise_scope(scope).into(),
+        let empty_number = if row
+            .project
+            .as_deref()
+            .is_some_and(|path| path.trim().is_empty())
+        {
+            empty_projects += 1;
+            empty_projects
+        } else {
+            0
+        };
+        entries.push(ScopeLabel::new(row.project.clone(), empty_number));
+    }
+
+    loop {
+        let mut labels = BTreeMap::<String, Vec<usize>>::new();
+        for (index, entry) in entries.iter().enumerate() {
+            labels
+                .entry(terminal_text(&entry.label()))
+                .or_default()
+                .push(index);
+        }
+        let duplicate_groups = labels
+            .values()
+            .filter(|indexes| indexes.len() > 1)
+            .cloned()
+            .collect::<Vec<_>>();
+        if duplicate_groups.is_empty() {
+            break;
+        }
+
+        let mut changed = false;
+        for indexes in &duplicate_groups {
+            for &index in indexes {
+                changed |= entries[index].widen();
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+
+    entries
+        .into_iter()
+        .map(|entry| {
+            let label = entry.label();
+            (entry.scope, label)
+        })
+        .collect()
+}
+
+struct ScopeLabel {
+    scope: Option<String>,
+    segments: Vec<String>,
+    depth: usize,
+    prefixed: bool,
+    raw: bool,
+    empty_number: usize,
+}
+
+impl ScopeLabel {
+    fn new(scope: Option<String>, empty_number: usize) -> Self {
+        let segments = scope
+            .as_deref()
+            .filter(|path| !path.trim().is_empty())
+            .map(path_segments)
+            .unwrap_or_default();
+        Self {
+            scope,
+            depth: 1,
+            segments,
+            prefixed: false,
+            raw: false,
+            empty_number,
+        }
+    }
+
+    fn label(&self) -> String {
+        let mut label = match self.scope.as_deref() {
+            None => "global".into(),
+            Some(path) if path.trim().is_empty() => {
+                format!("project: <empty project {}>", self.empty_number)
+            }
+            Some(path) if self.raw => format!(
+                "project: {}",
+                serde_json::to_string(path).expect("scope path is serializable")
+            ),
+            Some(path) if self.segments.is_empty() => path.into(),
+            Some(_) => {
+                let start = self.segments.len().saturating_sub(self.depth);
+                self.segments[start..].join("/")
+            }
+        };
+        if self.prefixed && !self.raw {
+            label = format!("project: {label}");
+        }
+        label
+    }
+
+    fn widen(&mut self) -> bool {
+        if self.scope.is_none()
+            || self
+                .scope
+                .as_deref()
+                .is_some_and(|path| path.trim().is_empty())
+        {
+            return false;
+        }
+        if self.depth < self.segments.len() {
+            self.depth += 1;
+            true
+        } else if !self.prefixed {
+            self.prefixed = true;
+            true
+        } else if !self.raw {
+            self.raw = true;
+            true
+        } else {
+            false
+        }
     }
 }
 
-fn concise_scope(scope: Option<&str>) -> &str {
-    match scope {
-        None => "global",
-        Some(path) if path.trim().is_empty() => "<empty project>",
-        Some(path) => Path::new(path)
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or(path),
-    }
+fn path_segments(path: &str) -> Vec<String> {
+    path.split('/')
+        .filter(|segment| !segment.is_empty())
+        .map(str::to_owned)
+        .collect()
 }
 
 pub fn list_usage(reason: &str) -> CliOutput {

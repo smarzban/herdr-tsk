@@ -623,8 +623,149 @@ fn list_all_distinguishes_global_from_project_global_and_uses_visible_scope_labe
     assert_eq!(output.code, 0);
     assert_eq!(
         output.stdout,
-        "READY\n  global\n    - global task\n  project: global\n    - project global token\n  project: /work/global\n    - project global path\n  /work/api\n    - work api\n  /personal/api\n    - personal api\n  <empty project>\n    - whitespace scope\n"
+        "READY\n  global\n    - global task\n  project: global\n    - project global token\n  work/global\n    - project global path\n  work/api\n    - work api\n  personal/api\n    - personal api\n  project: <empty project 1>\n    - whitespace scope\n"
     );
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn list_all_uses_shortest_unique_trailing_scope_labels_across_statuses() {
+    let _env = env_lock();
+    let dir = temp_state_dir("all-cross-status-scopes");
+    let mut state = DomainState::new();
+    create_task(
+        &mut state,
+        "project global",
+        TaskScope::Project {
+            path: "global".into(),
+        },
+        HumanStatus::Started,
+    );
+    create_task(
+        &mut state,
+        "work api",
+        TaskScope::Project {
+            path: "/work/api".into(),
+        },
+        HumanStatus::Started,
+    );
+    create_task(&mut state, "global", TaskScope::Global, HumanStatus::Ready);
+    create_task(
+        &mut state,
+        "blank one",
+        TaskScope::Project { path: " ".into() },
+        HumanStatus::Ready,
+    );
+    create_task(
+        &mut state,
+        "personal api",
+        TaskScope::Project {
+            path: "/personal/api".into(),
+        },
+        HumanStatus::Blocked,
+    );
+    create_task(
+        &mut state,
+        "blank two",
+        TaskScope::Project { path: "\t".into() },
+        HumanStatus::Review,
+    );
+    TaskStore::new(&dir).save(&state).expect("seed store");
+
+    let output = list(&[
+        "herdr-tasks".into(),
+        "list".into(),
+        "--all".into(),
+        "--state-dir".into(),
+        state_dir_arg(&dir),
+    ]);
+
+    assert_eq!(output.code, 0);
+    assert_eq!(
+        output.stdout,
+        "STARTED\n  project: global\n    - project global\n  work/api\n    - work api\n\nREADY\n  global\n    - global\n  project: <empty project 1>\n    - blank one\n\nBLOCKED\n  personal/api\n    - personal api\n\nREVIEW\n  project: <empty project 2>\n    - blank two\n"
+    );
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn list_all_preserves_raw_scope_syntax_after_trailing_segments_are_exhausted() {
+    let _env = env_lock();
+    let dir = temp_state_dir("all-raw-scope-syntax");
+    let mut state = DomainState::new();
+    for (title, path) in [
+        ("absolute api", "/work/api"),
+        ("relative api", "work/api"),
+        ("trailing api", "/work/api/"),
+        ("repeated api", "//work//api"),
+    ] {
+        create_task(
+            &mut state,
+            title,
+            TaskScope::Project { path: path.into() },
+            HumanStatus::Ready,
+        );
+    }
+    TaskStore::new(&dir).save(&state).expect("seed store");
+
+    let output = list(&[
+        "herdr-tasks".into(),
+        "list".into(),
+        "--all".into(),
+        "--state-dir".into(),
+        state_dir_arg(&dir),
+    ]);
+
+    assert_eq!(output.code, 0);
+    assert_eq!(
+        output.stdout,
+        "READY\n  project: \"/work/api\"\n    - absolute api\n  project: \"work/api\"\n    - relative api\n  project: \"/work/api/\"\n    - trailing api\n  project: \"//work//api\"\n    - repeated api\n"
+    );
+    assert!(
+        !output.stdout.contains("(scope "),
+        "syntactically distinct scopes must remain distinguishable without synthetic suffixes"
+    );
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn list_all_visibly_escapes_and_disambiguates_control_scope_labels() {
+    let _env = env_lock();
+    let dir = temp_state_dir("all-escaped-scope-label");
+    let mut state = DomainState::new();
+    for (title, path) in [
+        ("control scope task", "\u{001b}[2Japi"),
+        ("literal escape scope task", "\\u{001b}[2Japi"),
+    ] {
+        create_task(
+            &mut state,
+            title,
+            TaskScope::Project { path: path.into() },
+            HumanStatus::Ready,
+        );
+    }
+    TaskStore::new(&dir).save(&state).expect("seed store");
+
+    let output = list(&[
+        "herdr-tasks".into(),
+        "list".into(),
+        "--all".into(),
+        "--state-dir".into(),
+        state_dir_arg(&dir),
+    ]);
+
+    assert_eq!(output.code, 0);
+    assert!(!output.stdout.contains('\u{001b}'));
+    let labels = output
+        .stdout
+        .lines()
+        .filter(|line| line.starts_with("  ") && !line.starts_with("    "))
+        .collect::<Vec<_>>();
+    assert_eq!(labels.len(), 2);
+    assert_ne!(labels[0], labels[1]);
 
     let _ = std::fs::remove_dir_all(dir);
 }
@@ -718,12 +859,58 @@ fn list_rejects_conflicting_scope_and_filter_flags_and_missing_project_values() 
             "--state-dir".into(),
             state_dir_arg(&dir),
         ],
+        vec![
+            "herdr-tasks".into(),
+            "list".into(),
+            "-p".into(),
+            "-maintenance".into(),
+            "--state-dir".into(),
+            state_dir_arg(&dir),
+        ],
     ] {
         let output = list(&args);
         assert_eq!(output.code, 2);
         assert!(output.stdout.is_empty());
         assert!(output.stderr.contains("usage: herdr-tasks list"));
     }
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn list_equals_project_form_accepts_dash_leading_scope() {
+    let _env = env_lock();
+    let dir = temp_state_dir("equals-project");
+    let mut state = DomainState::new();
+    create_task(
+        &mut state,
+        "maintenance task",
+        TaskScope::Project {
+            path: "-maintenance".into(),
+        },
+        HumanStatus::Ready,
+    );
+    TaskStore::new(&dir).save(&state).expect("seed store");
+
+    let output = list(&[
+        "herdr-tasks".into(),
+        "list".into(),
+        "--project=-maintenance".into(),
+        "--json".into(),
+        "--state-dir".into(),
+        state_dir_arg(&dir),
+    ]);
+
+    assert_eq!(output.code, 0);
+    assert_eq!(
+        serde_json::from_str::<Vec<serde_json::Value>>(&output.stdout).expect("JSON rows"),
+        vec![serde_json::json!({
+            "id": state.tasks()[0].id,
+            "title": "maintenance task",
+            "status": "ready",
+            "project": "-maintenance",
+        })]
+    );
 
     let _ = std::fs::remove_dir_all(dir);
 }

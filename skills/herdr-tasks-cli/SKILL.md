@@ -43,7 +43,8 @@ reports it in `existing` with its `i`, `id`, and `title`.
 `herdr-tasks list` defaults to ready, started, blocked, and review tasks in the
 invocation project, or global scope outside a repository. Use `-p`/`--project <scope>`
 for the same basename-or-path resolution as add, `--global` for global tasks, or `--all`
-for every scope. `--done` lists done tasks only; `--deleted` lists soft-deleted tasks only,
+for every scope. Use `--project=<scope>` when a list project value begins with `-`,
+`-p -maintenance` is usage. `--done` lists done tasks only; `--deleted` lists soft-deleted tasks only,
 regardless of stored status. Scope selectors are mutually exclusive, as are `--done` and
 `--deleted`.
 

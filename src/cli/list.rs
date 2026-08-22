@@ -77,6 +77,10 @@ pub fn parse(args: &[String]) -> Result<ListInput, String> {
             _ => Err(format!("missing value for {name}")),
         };
         match flag {
+            flag if flag.starts_with("--project=") => {
+                input.project = Some(flag["--project=".len()..].to_owned());
+                index += 1;
+            }
             "--json" => {
                 input.json = true;
                 index += 1;

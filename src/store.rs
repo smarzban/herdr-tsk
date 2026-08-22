@@ -134,6 +134,25 @@ impl TaskStore {
         Ok(result)
     }
 
+    /// Hold the exclusive store lock across a transition that may not need a durable write.
+    ///
+    /// The transition returns its result and whether the loaded state changed. This lets
+    /// idempotent callers check and create under one lock without rewriting an existing state.
+    pub fn locked_transition_if_changed<T>(
+        &self,
+        transition: impl FnOnce(&mut DomainState) -> Result<(T, bool), String>,
+    ) -> Result<T, String> {
+        let _guard = self.lock_exclusive().map_err(|error| error.to_string())?;
+        let mut state = self.load_unlocked().map_err(|error| error.to_string())?;
+        let (result, changed) = transition(&mut state)?;
+        if changed {
+            state.clear_merge_bases();
+            self.save_unlocked(&state)
+                .map_err(|error| error.to_string())?;
+        }
+        Ok(result)
+    }
+
     /// Under exclusive lock: load disk, validate each local mutation against the revision it
     /// changed from, merge sibling records, then durably write. Divergent same-task writes are
     /// rejected rather than ordered by wall clock or silently overwritten.

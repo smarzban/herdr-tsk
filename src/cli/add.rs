@@ -113,20 +113,23 @@ pub fn run(input: FlagAdd) -> Result<FlagAddResult, AddError> {
     let global = input.global;
     let notes = input.notes.filter(|notes| !notes.trim().is_empty());
     store
-        .locked_transition(|domain| {
+        .locked_transition_if_changed(|domain| {
             let scope = resolve_flag_scope(project.as_deref(), global, domain, &snapshot);
             if let Some(task) = existing_task(domain, &title, &scope) {
-                return Ok(FlagAddResult::Existing {
-                    id: task.id,
-                    title: task.title.clone(),
-                    project: scope_project(&task.scope),
-                });
+                return Ok((
+                    FlagAddResult::Existing {
+                        id: task.id,
+                        title: task.title.clone(),
+                        project: scope_project(&task.scope),
+                    },
+                    false,
+                ));
             }
             let project = scope_project(&scope);
             let id = domain
                 .create(&title, notes, scope, None, None, ProvenanceOrigin::Capture)
                 .map_err(|error| error.to_string())?;
-            Ok(FlagAddResult::Created { id, title, project })
+            Ok((FlagAddResult::Created { id, title, project }, true))
         })
         .map_err(AddError::Store)
 }
@@ -156,7 +159,7 @@ pub fn run_plan(
     let store = TaskStore::new(state_dir.unwrap_or_else(default_state_dir));
     let snapshot = snapshot_from_env();
     store
-        .locked_transition(|domain| {
+        .locked_transition_if_changed(|domain| {
             let resolved = resolve_plan_items(valid, domain, &snapshot);
             let mut created = Vec::with_capacity(resolved.len());
             let mut existing = Vec::new();
@@ -185,11 +188,15 @@ pub fn run_plan(
                     title: item.title,
                 });
             }
-            Ok(PlanResult {
-                created,
-                existing,
-                failed,
-            })
+            let changed = !created.is_empty();
+            Ok((
+                PlanResult {
+                    created,
+                    existing,
+                    failed,
+                },
+                changed,
+            ))
         })
         .map_err(AddError::Store)
 }

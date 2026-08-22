@@ -1,4 +1,6 @@
 use std::io::{Cursor, Read};
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -48,6 +50,34 @@ impl Read for PanicOnRead {
 
 fn task_store(dir: &std::path::Path) -> TaskStore {
     TaskStore::new(dir)
+}
+
+#[cfg(unix)]
+struct ReadOnlyDir {
+    path: PathBuf,
+    permissions: std::fs::Permissions,
+}
+
+#[cfg(unix)]
+impl ReadOnlyDir {
+    fn new(path: &std::path::Path) -> Self {
+        let permissions = std::fs::metadata(path)
+            .expect("stat state directory")
+            .permissions();
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o555))
+            .expect("make state directory read-only");
+        Self {
+            path: path.to_owned(),
+            permissions,
+        }
+    }
+}
+
+#[cfg(unix)]
+impl Drop for ReadOnlyDir {
+    fn drop(&mut self) {
+        let _ = std::fs::set_permissions(&self.path, self.permissions.clone());
+    }
 }
 
 #[test]
@@ -107,6 +137,15 @@ fn flag_add_existing_trimmed_title_and_scope_is_a_successful_noop() {
         .set_status(id, HumanStatus::Done)
         .expect("set existing task status");
     task_store(&dir).save(&state).expect("save status");
+    let state_file = dir.join("tasks.json");
+    let before = std::fs::read(&state_file).expect("read seeded state");
+    let before_mtime = std::fs::metadata(&state_file)
+        .expect("stat seeded state")
+        .modified()
+        .expect("state mtime");
+    #[cfg(unix)]
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o555))
+        .expect("make state dir unwritable");
 
     let duplicate = add(
         &[
@@ -123,9 +162,24 @@ fn flag_add_existing_trimmed_title_and_scope_is_a_successful_noop() {
         true,
     );
 
+    #[cfg(unix)]
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755))
+        .expect("restore state dir permissions");
+
     assert_eq!(duplicate.code, 0);
     assert_eq!(duplicate.stdout, "task already exists\n");
     assert!(duplicate.stderr.is_empty());
+    assert_eq!(
+        std::fs::read(&state_file).expect("read unchanged state"),
+        before
+    );
+    assert_eq!(
+        std::fs::metadata(&state_file)
+            .expect("stat unchanged state")
+            .modified()
+            .expect("state mtime"),
+        before_mtime
+    );
     let state = task_store(&dir).load().expect("reload state");
     assert_eq!(state.tasks().len(), 1);
     assert_eq!(state.tasks()[0].status, HumanStatus::Done);
@@ -582,8 +636,9 @@ fn mixed_plan_persists_only_valid_items_exits_1() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+#[cfg(unix)]
 #[test]
-fn plan_reports_persisted_existing_rows_without_failing() {
+fn plan_with_only_existing_tasks_is_a_successful_read_only_noop() {
     let _env = env_lock();
     let dir = temp_state_dir("plan-existing");
     let store = task_store(&dir);
@@ -602,19 +657,28 @@ fn plan_reports_persisted_existing_rows_without_failing() {
         .set_status(id, HumanStatus::Review)
         .expect("set status");
     store.save(&seeded).expect("save seed");
+    let state_file = dir.join("tasks.json");
+    let before = std::fs::read(&state_file).expect("read seeded state");
+    let before_mtime = std::fs::metadata(&state_file)
+        .expect("stat seeded state")
+        .modified()
+        .expect("state mtime");
 
-    let output = run_with(
-        [
-            "herdr-tasks",
-            "add",
-            "--state-dir",
-            &state_dir_arg(&dir),
-            "--file",
-            "-",
-        ],
-        Cursor::new(r#"[{"title":"  same task  ","notes":"new notes","project":null}]"#),
-        true,
-    );
+    let output = {
+        let _read_only = ReadOnlyDir::new(&dir);
+        run_with(
+            [
+                "herdr-tasks",
+                "add",
+                "--state-dir",
+                &state_dir_arg(&dir),
+                "--file",
+                "-",
+            ],
+            Cursor::new(r#"[{"title":"  same task  ","notes":"new notes","project":null}]"#),
+            true,
+        )
+    };
 
     assert_eq!(output.code, 0);
     let result: serde_json::Value = serde_json::from_str(&output.stdout).expect("tiny result");
@@ -624,6 +688,17 @@ fn plan_reports_persisted_existing_rows_without_failing() {
         serde_json::json!([{"i":0,"id":id,"title":"same task"}])
     );
     assert!(result["failed"].as_array().expect("failed").is_empty());
+    assert_eq!(
+        std::fs::read(&state_file).expect("read unchanged state"),
+        before
+    );
+    assert_eq!(
+        std::fs::metadata(&state_file)
+            .expect("stat unchanged state")
+            .modified()
+            .expect("state mtime"),
+        before_mtime
+    );
     assert_eq!(store.load().expect("reload").tasks().len(), 1);
 
     let _ = std::fs::remove_dir_all(dir);
