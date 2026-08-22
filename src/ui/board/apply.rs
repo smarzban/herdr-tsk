@@ -17,7 +17,8 @@ use crate::ui::mouse::BoardPopup;
 use super::commands::{resolve_board_command, CommandSurface};
 use super::model::{
     owned_resource_summary, BoardForm, BoardInputMode, BoardModel, ChecklistEditor,
-    ChecklistPageState, IntentOutcome, OwnedDeckScope, ProjectPickerState, ProjectScopeOption,
+    ChecklistEditorSave, ChecklistPageState, IntentOutcome, OwnedDeckScope, ProjectPickerState,
+    ProjectScopeOption,
 };
 
 /// What the row says when an action that aims at the selection is asked for on a board that
@@ -55,6 +56,7 @@ pub fn board_intent_may_persist(intent: &BoardIntent) -> bool {
     matches!(
         intent,
         BoardIntent::ConfirmEdit
+            | BoardIntent::ConfirmEditNext
             | BoardIntent::SetStatus(_)
             | BoardIntent::Complete
             | BoardIntent::Reopen
@@ -674,11 +676,22 @@ fn apply_board_intent(
             }
             return Ok(IntentOutcome::None);
         }
+        BoardIntent::ConfirmEditNext => {
+            // Ctrl+Enter in the item line editor (AC-12): add mode saves and reopens
+            // the line empty — the rapid-capture loop; rename mode downgrades to a
+            // plain save, decided inside `confirm_checklist_editor` from the editor's
+            // own mode. No other surface maps the key, so anywhere else it is the
+            // plain confirm.
+            if model.input_mode == BoardInputMode::EditChecklistItem {
+                return confirm_checklist_editor(domain, model, true);
+            }
+            return apply_intent(domain, model, BoardIntent::ConfirmEdit, snapshot, host);
+        }
         BoardIntent::ConfirmEdit => {
             // The item line editor applies its own domain command (add or rename) and
             // returns to page view; it never saves the task form's title/notes drafts.
             if model.input_mode == BoardInputMode::EditChecklistItem {
-                return confirm_checklist_editor(domain, model);
+                return confirm_checklist_editor(domain, model, false);
             }
             if model.form.as_ref().is_some_and(|form| !form.is_task()) {
                 // Capture keeps its immutable invocation snapshot in the shared form. Without
@@ -1219,13 +1232,16 @@ fn edit_draft(model: &mut BoardModel, operation: impl FnOnce(&mut EditBuffer)) {
         return;
     }
     // The checklist item editor owns the keyboard in its mode: its draft is the page
-    // form's checklist editor buffer, not the task form's title/notes fields.
+    // form's checklist editor buffer, not the task form's title/notes fields. Any
+    // edit-draft intent takes the line's refusal down (AC-13) — including a cursor
+    // move that changes no text — the same lifetime quick-add's message follows.
     if model.input_mode == BoardInputMode::EditChecklistItem {
         if let Some(editor) = model
             .form
             .as_mut()
             .and_then(|form| form.checklist.editor.as_mut())
         {
+            editor.refusal = None;
             operation(&mut editor.buffer);
         }
         return;
@@ -1460,28 +1476,49 @@ fn open_checklist_editor(model: &mut BoardModel, text: &str, rename: Option<Uuid
         form.checklist.editor = Some(ChecklistEditor {
             buffer: crate::ui::edit::seeded_draft(text),
             rename,
+            refusal: None,
         });
         model.input_mode = BoardInputMode::EditChecklistItem;
         model.clear_message();
     }
 }
 
-/// Close the item editor back to page view, discarding its draft.
+/// Close the item editor back to page view, discarding its draft. Any pending editor
+/// save goes with it: a closed line has nothing left for the save boundary to
+/// release (the only path that can be here with one pending is a defensive direct
+/// intent, never the keyboard).
 fn close_checklist_editor(model: &mut BoardModel) {
     if let Some(form) = model.form.as_mut() {
+        form.checklist.pending_save = None;
         form.checklist.editor = None;
     }
     model.input_mode = BoardInputMode::TaskPage;
     model.clear_message();
 }
 
-/// Apply the item editor's draft through the domain command (add or rename) and close
-/// it (Enter; AC-12's T-3 subset). A domain refusal — empty-after-trim text, an item
-/// another actor removed — propagates before anything is cleared, so the editor and its
-/// mode outlive the refused apply exactly as the task form's edit does.
+/// What the item line paints when its draft is empty after trim (AC-13): a short dim
+/// refusal on the line itself, never the board status row.
+const ITEM_TEXT_REQUIRED: &str = "text required";
+
+/// Apply the item editor's draft through the domain command (add or rename).
+///
+/// The editor and its input mode OUTLIVE the save call (AC-14): a successful apply
+/// records the touched item on the page's pending-save slot and leaves the line
+/// exactly as the user left it. Only the persistence boundary's confirmed sync —
+/// `BoardModel::sync_from_domain` → `finish_checklist_editor_save` — releases it:
+/// closing for a plain Enter, reopening empty for Ctrl+Enter in add mode
+/// (`keep_open`, downgraded to a close in rename mode). A failed save therefore
+/// holds the line behind SaveRecovery until Retry/Cancel resolve it, and a Cancelled
+/// resolution unwinds it to page view with no orphan edit mode.
+///
+/// An empty-after-trim draft is the line's own refusal (AC-13), painted on the line
+/// and cleared when it closes or its buffer changes; it never reaches the board
+/// message. Every other domain refusal — an item another actor removed — propagates
+/// before anything is cleared, exactly as the task form's edit does.
 fn confirm_checklist_editor(
     domain: &mut DomainState,
     model: &mut BoardModel,
+    keep_open: bool,
 ) -> Result<IntentOutcome, DomainError> {
     let Some(form) = model.form.as_ref().filter(|form| form.is_task()) else {
         return Ok(IntentOutcome::None);
@@ -1493,12 +1530,32 @@ fn confirm_checklist_editor(
         return Ok(IntentOutcome::None);
     };
     let text = editor.buffer.value().to_string();
-    match editor.rename {
-        Some(item_id) => domain.rename_checklist_item(task_id, item_id, text)?,
-        None => {
-            domain.add_checklist_item(task_id, text)?;
+    let rename = editor.rename;
+    let touched = match rename {
+        Some(item_id) => domain
+            .rename_checklist_item(task_id, item_id, &text)
+            .map(|()| item_id),
+        None => domain.add_checklist_item(task_id, &text),
+    };
+    let touched = match touched {
+        Ok(item) => item,
+        Err(DomainError::EmptyItemText) => {
+            if let Some(editor) = model
+                .form
+                .as_mut()
+                .and_then(|form| form.checklist.editor.as_mut())
+            {
+                editor.refusal = Some(ITEM_TEXT_REQUIRED.to_string());
+            }
+            return Ok(IntentOutcome::None);
         }
-    }
-    close_checklist_editor(model);
+        Err(other) => return Err(other),
+    };
+    let form = model.form.as_mut().expect("task form checked above");
+    form.checklist.pending_save = Some(ChecklistEditorSave {
+        item: touched,
+        text: text.trim().to_string(),
+        reopen: keep_open && rename.is_none(),
+    });
     Ok(IntentOutcome::Persist)
 }

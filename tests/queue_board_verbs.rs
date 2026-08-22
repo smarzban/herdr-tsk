@@ -1969,6 +1969,8 @@ fn rename_verb_targets_item_or_title_by_cursor() {
     assert_eq!(save, BoardIntent::ConfirmEdit);
     let outcome = apply_intent(&mut domain, &mut model, save, None, None).expect("rename item");
     assert_eq!(outcome, IntentOutcome::Persist);
+    // The app boundary persisted; its confirmed sync closes the held line (T-4).
+    model.sync_from_domain(&domain);
 
     let task = domain.get(id).expect("task");
     assert_eq!(
@@ -2293,6 +2295,8 @@ fn add_verb_opens_editor_enter_applies_esc_cancels() {
     assert_eq!(save, BoardIntent::ConfirmEdit);
     let outcome = apply_intent(&mut domain, &mut model, save, None, None).expect("add item");
     assert_eq!(outcome, IntentOutcome::Persist);
+    // The app boundary persisted; its confirmed sync closes the held line (T-4).
+    model.sync_from_domain(&domain);
     let task = domain.get(id).expect("task");
     let texts: Vec<&str> = task
         .checklist
@@ -2338,5 +2342,299 @@ fn add_verb_opens_editor_enter_applies_esc_cancels() {
     assert!(
         !closed.lines().any(|row| row.contains("item")),
         "the editor line is gone on close:\n{closed}"
+    );
+}
+
+/// T-4 (AC-12, add mode): Enter saves and closes; Ctrl+Enter saves and reopens the
+/// line empty — the rapid-capture loop, proven by two items added back-to-back; Esc
+/// discards. Every save here drives the reducer then the confirmed sync
+/// (`sync_from_domain`), which is exactly the pair the app save boundary runs on a
+/// successful persist.
+#[test]
+fn item_editor_enter_saves_ctrl_enter_reopens_esc_cancels() {
+    let (mut domain, mut model, id) = board_with_checklist("Loop witness", None, &["alpha step"]);
+
+    // Alt+a opens the add line; type, then Ctrl+Enter saves and reopens it empty.
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::BeginAddChecklistItem,
+        None,
+        None,
+    )
+    .expect("open add editor");
+    for ch in "bravo step".chars() {
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::EditInsert(ch),
+            None,
+            None,
+        )
+        .expect("type first item");
+    }
+    let ctrl_enter = map_key(
+        model.input_mode(),
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL),
+    )
+    .expect("ctrl+enter maps in the item editor");
+    let outcome = apply_intent(&mut domain, &mut model, ctrl_enter, None, None)
+        .expect("save and reopen the line");
+    assert_eq!(outcome, IntentOutcome::Persist);
+    model.sync_from_domain(&domain);
+    assert_eq!(
+        model.input_mode(),
+        BoardInputMode::EditChecklistItem,
+        "Ctrl+Enter in add mode reopens the line for the next item"
+    );
+    let reopened = rendered_board(&model, 80, 24);
+    assert!(
+        reopened.lines().any(|row| row.contains("item")),
+        "the reopened line paints on the section:\n{reopened}"
+    );
+
+    // The reopened line is empty: the second item is exactly what is typed next.
+    for ch in "charlie step".chars() {
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::EditInsert(ch),
+            None,
+            None,
+        )
+        .expect("type second item");
+    }
+    let enter = map_key(model.input_mode(), press(KeyCode::Enter)).expect("enter");
+    let outcome =
+        apply_intent(&mut domain, &mut model, enter.clone(), None, None).expect("save and close");
+    assert_eq!(outcome, IntentOutcome::Persist);
+    model.sync_from_domain(&domain);
+    assert_eq!(
+        model.input_mode(),
+        BoardInputMode::TaskPage,
+        "Enter saves and closes"
+    );
+    let texts: Vec<&str> = domain
+        .get(id)
+        .expect("task")
+        .checklist
+        .iter()
+        .map(|item| item.text.as_str())
+        .collect();
+    assert_eq!(
+        texts,
+        vec!["alpha step", "bravo step", "charlie step"],
+        "the rapid-capture loop adds two items back-to-back"
+    );
+
+    // Esc discards: reopen, type junk, Esc — nothing is appended.
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::BeginAddChecklistItem,
+        None,
+        None,
+    )
+    .expect("reopen add editor");
+    for ch in "junk".chars() {
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::EditInsert(ch),
+            None,
+            None,
+        )
+        .expect("type junk");
+    }
+    let esc = map_key(model.input_mode(), press(KeyCode::Esc)).expect("esc");
+    assert_eq!(esc, BoardIntent::CancelEdit);
+    let outcome = apply_intent(&mut domain, &mut model, esc, None, None).expect("cancel");
+    assert_eq!(outcome, IntentOutcome::None);
+    assert_eq!(
+        domain.get(id).expect("task").checklist.len(),
+        3,
+        "Esc discards the draft"
+    );
+    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+}
+
+/// T-4 (AC-12, rename mode): Ctrl+Enter behaves as plain Enter — save and close,
+/// no reopen — and the editor outlives the save call until the boundary confirms.
+#[test]
+fn rename_mode_ctrl_enter_saves_and_closes() {
+    let (mut domain, mut model, id) =
+        board_with_checklist("Rename ctrl witness", None, &["alpha step"]);
+
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::PageScrollDown,
+        None,
+        None,
+    )
+    .expect("activate cursor");
+    let rename = map_key(BoardInputMode::TaskPage, alt(KeyCode::Char('e'))).expect("alt+e");
+    apply_intent(&mut domain, &mut model, rename, None, None).expect("open rename editor");
+    assert_eq!(model.input_mode(), BoardInputMode::EditChecklistItem);
+    for ch in " twice".chars() {
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::EditInsert(ch),
+            None,
+            None,
+        )
+        .expect("extend item text");
+    }
+    let ctrl_enter = map_key(
+        model.input_mode(),
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL),
+    )
+    .expect("ctrl+enter maps in the item editor");
+    let outcome = apply_intent(&mut domain, &mut model, ctrl_enter, None, None)
+        .expect("rename via ctrl+enter");
+    assert_eq!(outcome, IntentOutcome::Persist);
+    assert_eq!(
+        model.input_mode(),
+        BoardInputMode::EditChecklistItem,
+        "the editor and its mode outlive the save call until the boundary confirms"
+    );
+    model.sync_from_domain(&domain);
+    assert_eq!(
+        model.input_mode(),
+        BoardInputMode::TaskPage,
+        "Ctrl+Enter in rename mode saves and closes like Enter"
+    );
+    assert_eq!(
+        domain.get(id).expect("task").checklist[0].text,
+        "alpha step twice",
+        "the rename landed"
+    );
+    let closed = rendered_board(&model, 80, 24);
+    assert!(
+        !closed.lines().any(|row| row.contains("item")),
+        "no reopened line in rename mode:\n{closed}"
+    );
+}
+
+/// T-4 (AC-13): empty or whitespace-only item text is refused by a message painted
+/// on the editor line itself — never the board status message — and the refusal
+/// clears when the line closes (Esc, or a successful save).
+#[test]
+fn empty_item_text_refusal_paints_on_line_and_clears_on_close() {
+    let (mut domain, mut model, id) =
+        board_with_checklist("Refusal witness", None, &["alpha step"]);
+
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::BeginAddChecklistItem,
+        None,
+        None,
+    )
+    .expect("open add editor");
+    let enter = map_key(model.input_mode(), press(KeyCode::Enter)).expect("enter");
+    let outcome = apply_intent(&mut domain, &mut model, enter.clone(), None, None)
+        .expect("an empty draft is refused on the line, not by a propagated error");
+    assert_eq!(
+        outcome,
+        IntentOutcome::None,
+        "an empty draft persists nothing"
+    );
+    assert_eq!(
+        model.input_mode(),
+        BoardInputMode::EditChecklistItem,
+        "the line stays open on refusal"
+    );
+    assert_eq!(
+        model.message(),
+        None,
+        "the refusal must not leak onto the board status message"
+    );
+    let refused = rendered_board(&model, 80, 24);
+    assert!(
+        refused
+            .lines()
+            .any(|row| row.contains("item") && row.contains("text required")),
+        "the refusal paints on the editor line itself:\n{refused}"
+    );
+    assert_eq!(
+        domain.get(id).expect("task").checklist.len(),
+        1,
+        "the refused Enter appends nothing"
+    );
+
+    // Whitespace-only text is refused the same way.
+    for ch in "   ".chars() {
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::EditInsert(ch),
+            None,
+            None,
+        )
+        .expect("type whitespace");
+    }
+    let outcome = apply_intent(&mut domain, &mut model, enter.clone(), None, None)
+        .expect("whitespace is refused on the line too");
+    assert_eq!(outcome, IntentOutcome::None);
+    let whitespace = rendered_board(&model, 80, 24);
+    assert!(
+        whitespace
+            .lines()
+            .any(|row| row.contains("item") && row.contains("text required")),
+        "whitespace-only text paints the same refusal:\n{whitespace}"
+    );
+
+    // Closing the line with Esc clears the refusal; nothing leaks to the board.
+    let esc = map_key(model.input_mode(), press(KeyCode::Esc)).expect("esc");
+    apply_intent(&mut domain, &mut model, esc, None, None).expect("cancel the line");
+    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+    assert_eq!(
+        model.message(),
+        None,
+        "closing the line leaves no message behind"
+    );
+    let closed = rendered_board(&model, 80, 24);
+    assert!(
+        !closed.contains("text required"),
+        "the refusal clears when the line closes:\n{closed}"
+    );
+
+    // A successful save clears it too: refuse once, type valid text, Enter saves.
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::BeginAddChecklistItem,
+        None,
+        None,
+    )
+    .expect("reopen add editor");
+    apply_intent(&mut domain, &mut model, enter.clone(), None, None)
+        .expect("refuse the empty line again");
+    for ch in "zed step".chars() {
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::EditInsert(ch),
+            None,
+            None,
+        )
+        .expect("type valid text");
+    }
+    let outcome =
+        apply_intent(&mut domain, &mut model, enter, None, None).expect("save the valid text");
+    assert_eq!(outcome, IntentOutcome::Persist);
+    model.sync_from_domain(&domain);
+    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+    let saved = rendered_board(&model, 80, 24);
+    assert!(
+        !saved.contains("text required"),
+        "a successful save clears the refusal:\n{saved}"
+    );
+    assert_eq!(
+        domain.get(id).expect("task").checklist.len(),
+        2,
+        "the valid text after a refusal still saves"
     );
 }

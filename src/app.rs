@@ -743,8 +743,13 @@ pub fn apply_board_intent_with_save_recovery(
 
     // decision 8: judged against the durable record, before the reducer runs, so no mutation
     // happens and the session (mode, draft, cursor, binding) survives the refusal intact. The
-    // caller presents the returned error on the message row.
-    if intent == BoardIntent::ConfirmEdit {
+    // caller presents the returned error on the message row. Both save chords on a line
+    // editor are this one surface, so they refuse identically: Enter (`ConfirmEdit`)
+    // and Ctrl+Enter (`ConfirmEditNext`).
+    if matches!(
+        intent,
+        BoardIntent::ConfirmEdit | BoardIntent::ConfirmEditNext
+    ) {
         if let Some(refusal) = confirm_edit_refusal_against_the_record(&baseline, model) {
             return Err(refusal);
         }

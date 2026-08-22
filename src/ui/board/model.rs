@@ -48,7 +48,10 @@ pub enum BoardInputMode {
     /// The checklist section's one-line add/rename editor owns input. It is a Title-like
     /// single-line draft ([`crate::ui::edit::EditBuffer`]) carried on the page form's
     /// checklist state, not one of the three task-form fields: Enter applies the domain
-    /// command and Esc cancels, both returning to [`BoardInputMode::TaskPage`].
+    /// command (Ctrl+Enter adds and reopens the line empty), Esc cancels. The applied
+    /// line and this mode outlive the save call — only the persistence boundary's
+    /// confirmed sync closes (or reopens) the line, and a failed save holds it until
+    /// Retry/Cancel resolve; every close returns to [`BoardInputMode::TaskPage`].
     EditChecklistItem,
     /// Modal selection over the session project-scope options.
     ProjectPicker,
@@ -372,10 +375,24 @@ impl BoardForm {
 /// The one-line add/rename editor on the checklist section (page-session only).
 ///
 /// `rename` names the item being edited; `None` is an add (the buffer starts empty).
+/// `refusal` is the line's own empty-text refusal (AC-13): painted on the line,
+/// never the board status row, and cleared when the line closes or its buffer
+/// changes.
 #[derive(Debug, Clone)]
 pub(super) struct ChecklistEditor {
     pub(super) buffer: EditBuffer,
     pub(super) rename: Option<Uuid>,
+    pub(super) refusal: Option<String>,
+}
+
+/// An item-editor apply waiting for the app save boundary to confirm persistence
+/// (AC-14). `item` + `text` name the mutation that must land before the line may
+/// close — or, for Ctrl+Enter in add mode, reopen empty.
+#[derive(Debug, Clone)]
+pub(super) struct ChecklistEditorSave {
+    pub(super) item: Uuid,
+    pub(super) text: String,
+    pub(super) reopen: bool,
 }
 
 /// Page-session checklist state for the task page, never persisted.
@@ -400,6 +417,9 @@ pub(super) struct ChecklistPageState {
     pub(super) delete_mark: Option<usize>,
     /// The open one-line add/rename editor, if any.
     pub(super) editor: Option<ChecklistEditor>,
+    /// An editor apply the save boundary has not confirmed yet (AC-14). While it is
+    /// set, the editor and its input mode are held exactly as the user left them.
+    pub(super) pending_save: Option<ChecklistEditorSave>,
     /// Item rows the last painted window actually showed (renderer-recorded).
     pub(super) window_rows: std::cell::Cell<usize>,
 }
@@ -649,6 +669,25 @@ impl BoardModel {
             self.input_mode = BoardInputMode::QuickAdd;
             self.clear_message();
         }
+        // A held item line editor unwinds to page view on Cancel (AC-14): the
+        // baseline Cancel just restored rolled its mutation back, so nothing is left
+        // to hold the line for, and an edit mode whose editor is gone is the orphan
+        // no key can escape. The Cancel path's `sync_from_domain` ran first and left
+        // the pending save unresolved precisely because the mutation is not in the
+        // baseline; Retried resolves it there instead and never reaches this branch.
+        if resolution == SaveResolution::Cancelled
+            && self
+                .form
+                .as_ref()
+                .is_some_and(|form| form.checklist.pending_save.is_some())
+        {
+            if let Some(form) = self.form.as_mut() {
+                form.checklist.pending_save = None;
+                form.checklist.editor = None;
+            }
+            self.input_mode = BoardInputMode::TaskPage;
+            self.clear_message();
+        }
         cancelled_quick_add
     }
 
@@ -671,6 +710,7 @@ impl BoardModel {
         });
         self.attempts = state.active_attempts().to_vec();
         self.finish_quick_add_save();
+        self.finish_checklist_editor_save();
         self.reanchor_selection(self.selection_id, &previous_visible);
         if self.attempts.is_empty()
             && matches!(
@@ -968,6 +1008,53 @@ impl BoardModel {
         } else {
             self.quick_add = None;
             self.input_mode = BoardInputMode::Normal;
+        }
+        self.clear_message();
+    }
+
+    /// Release a held item line editor once persistence has confirmed its mutation
+    /// (AC-14's release side).
+    ///
+    /// Mirrors [`Self::finish_quick_add_save`]'s identity check: the touched item
+    /// must be present carrying its new text in the synced tasks before the line may
+    /// close — or reopen empty, for Ctrl+Enter in add mode. The Cancel path syncs the
+    /// rolled-back baseline first, where the item is absent (an add) or still carries
+    /// its old text (a rename), so the line stays held for [`Self::end_save_recovery`]
+    /// to unwind to page view instead. The editor and its input mode outlive the save
+    /// call precisely because nothing but this confirmed landing releases them.
+    fn finish_checklist_editor_save(&mut self) {
+        let Some(form) = self.form.as_ref().filter(|form| form.is_task()) else {
+            return;
+        };
+        let Some(task_id) = form.task_id() else {
+            return;
+        };
+        let Some(pending) = form.checklist.pending_save.clone() else {
+            return;
+        };
+        let landed = self.tasks.iter().any(|task| {
+            task.id == task_id
+                && task
+                    .checklist
+                    .iter()
+                    .any(|item| item.id == pending.item && item.text == pending.text)
+        });
+        if !landed {
+            return;
+        }
+        let form = self.form.as_mut().expect("task form checked above");
+        form.checklist.pending_save = None;
+        if pending.reopen {
+            // The rapid-capture loop: the line reopens empty for the next item, its
+            // mode never having left it.
+            form.checklist.editor = Some(ChecklistEditor {
+                buffer: seeded_draft(""),
+                rename: None,
+                refusal: None,
+            });
+        } else {
+            form.checklist.editor = None;
+            self.input_mode = BoardInputMode::TaskPage;
         }
         self.clear_message();
     }

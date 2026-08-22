@@ -161,6 +161,10 @@ pub enum BoardIntent {
     EditMoveWordLeft,
     EditMoveWordRight,
     ConfirmEdit,
+    /// Ctrl+Enter in the checklist item line editor (AC-12): save and continue — add
+    /// mode reopens the line empty for the next item, rename mode downgrades to a
+    /// plain save-and-close (decided by the reducer from the editor's own mode).
+    ConfirmEditNext,
     CancelEdit,
     /// Status-row quick-add edits and actions.
     QuickAddInsert(char),
@@ -771,6 +775,7 @@ pub fn intent_primary_action(intent: &BoardIntent) -> Option<PrimaryBoardAction>
         | BoardIntent::EditMoveWordLeft
         | BoardIntent::EditMoveWordRight
         | BoardIntent::ConfirmEdit
+        | BoardIntent::ConfirmEditNext
         | BoardIntent::CancelEdit
         | BoardIntent::QuickAddInsert(_)
         | BoardIntent::QuickAddInsertText(_)
@@ -1021,6 +1026,19 @@ fn map_cleanup_confirmation(key: KeyEvent) -> Option<BoardIntent> {
 ///
 /// The live board carries a `CaptureField` and calls [`map_board_form_key`] directly.
 fn map_edit(mode: BoardInputMode, key: KeyEvent) -> Option<BoardIntent> {
+    // The item editor's Ctrl+Enter is the rapid-capture loop (AC-12): save and
+    // reopen the line empty in add mode; rename mode downgrades to a plain save in
+    // the reducer. Alt+Enter stays the equal save chord (ADR 0006), mapping to
+    // `ConfirmEdit` through the shared form map below — and so does any composite
+    // carrying Alt alongside Control, which the shared chord table already
+    // classifies; excluding it here keeps the two tables agreeing on such an event.
+    if mode == BoardInputMode::EditChecklistItem
+        && key.code == KeyCode::Enter
+        && key.modifiers.contains(KeyModifiers::CONTROL)
+        && !key.modifiers.contains(KeyModifiers::ALT)
+    {
+        return Some(BoardIntent::ConfirmEditNext);
+    }
     // The checklist item editor is a single-line draft: it takes Title's map (Enter
     // confirms, Esc cancels, no line-break insertion) and no form-focus navigation.
     let focused = match mode {

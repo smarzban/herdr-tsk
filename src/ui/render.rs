@@ -254,12 +254,14 @@ pub struct ChecklistItemView {
 }
 
 /// The checklist section's one-line editor as the page paints it: the draft already
-/// windowed around its cursor at the section's width, plus the terminal cursor column
-/// inside that window. T-4 adds refusal state here.
+/// windowed around its cursor at the section's width, the terminal cursor column
+/// inside that window, and the line's own empty-text refusal (AC-13) — a short dim
+/// tail painted beside the label, never the board status row.
 #[derive(Debug, Clone)]
-pub struct ChecklistEditorLine {
+pub struct ChecklistEditorLine<'a> {
     pub text: String,
     pub cursor_col: u16,
+    pub refusal: Option<&'a str>,
 }
 
 /// Transient overlay painted above the queue frame (palette, help, scope dropdown).
@@ -324,7 +326,7 @@ pub enum QueueOverlay<'a> {
         /// Absolute index of the item the delete verb visibly marked, when armed.
         checklist_marked: Option<usize>,
         /// The section's one-line add/rename editor, painted on its label row.
-        checklist_editor: Option<ChecklistEditorLine>,
+        checklist_editor: Option<ChecklistEditorLine<'a>>,
         /// Footer: scope · created · updated.
         meta: String,
         /// Which field owns the cursor, if any (view mode: none).
@@ -1449,11 +1451,22 @@ fn paint_task_page(
             let label_w = EDITOR_LABEL.len() as u16;
             let avail = (width as usize).saturating_sub(EDITOR_LABEL.len() + 1);
             let shown = present_line(&editor.text, avail);
+            let mut spans = vec![Span::styled(format!("{EDITOR_LABEL}{shown}"), style_bold())];
+            if let Some(refusal) = editor.refusal {
+                // AC-13: the line owns its refusal. It paints as a dim tail on the
+                // editor line itself — the refusal only ever sets on a draft that is
+                // empty after trim, so it never crowds out real text.
+                let room = avail.saturating_sub(display_width(&shown) + 1);
+                spans.push(Span::styled(
+                    format!(" {}", present_line(refusal, room)),
+                    style_dim(),
+                ));
+            }
             put_line(
                 frame,
                 lay.checklist_y,
                 width,
-                paint_bounded_line(&format!("{EDITOR_LABEL}{shown}"), width, style_bold()),
+                bound_line(Line::from(spans), width as usize),
             );
             place_edit_cursor(
                 frame,

@@ -15,11 +15,11 @@ use herdr_tasks::ui::mouse::{
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use herdr_tasks::app::{apply_board_intent_with_save_recovery, BoardSaveContext};
-use herdr_tasks::domain::{DomainState, HumanStatus, ProvenanceOrigin, TaskScope};
+use herdr_tasks::domain::{DomainError, DomainState, HumanStatus, ProvenanceOrigin, TaskScope};
 use herdr_tasks::save_recovery::SaveRecovery;
 use herdr_tasks::ui::board::{
-    apply_intent, board_hit_map, resolve_board_command, BoardInputMode, BoardModel, CommandSurface,
-    IntentOutcome,
+    apply_intent, board_hit_map, draw_board, resolve_board_command, BoardInputMode, BoardModel,
+    CommandSurface, IntentOutcome,
 };
 use herdr_tasks::ui::capture::draw_capture;
 use herdr_tasks::ui::input::{map_key, BoardIntent};
@@ -1237,4 +1237,415 @@ fn save_recovery_unbinds_retired_lens_keys() {
             "save recovery must not mutate retired lens state behind its modal: {key}"
         );
     }
+}
+
+// ---- T-4 (AC-14): the checklist item line editor and the save boundary ----
+
+/// Painted board text at the standard size, exactly as the board loop draws it.
+fn board_painted(model: &BoardModel) -> String {
+    painted(|frame| draw_board(frame, model), (80, 24))
+}
+
+/// A task page opened on a task carrying one item, with the item line editor open
+/// holding a typed draft, whose save through the boundary has just failed.
+///
+/// Returns the pieces both resolution tests need: the driven domain/model/recovery,
+/// the bound task id, and the text of the item that existed before the failed add.
+fn failed_item_editor_save() -> (
+    DomainState,
+    BoardModel,
+    SaveRecovery<DomainState>,
+    uuid::Uuid,
+) {
+    let mut domain = DomainState::new();
+    let id = domain
+        .create(
+            "Editor witness",
+            None,
+            TaskScope::Project {
+                path: "/repos/app".into(),
+            },
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("create task");
+    domain
+        .add_checklist_item(id, "alpha step")
+        .expect("seed one item");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/app")));
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenTaskPage,
+        None,
+        None,
+    )
+    .expect("open task page");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::BeginAddChecklistItem,
+        None,
+        None,
+    )
+    .expect("open item editor");
+    for character in "zed step".chars() {
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::EditInsert(character),
+            None,
+            None,
+        )
+        .expect("type draft");
+    }
+
+    let baseline = snapshot_of(&domain);
+    let mut recovery = SaveRecovery::new();
+    let failed = apply_board_intent_with_save_recovery(
+        &mut domain,
+        &mut model,
+        &mut recovery,
+        BoardSaveContext {
+            baseline,
+            intent: BoardIntent::ConfirmEdit,
+            snapshot: None,
+            host: None,
+        },
+        |_| Err(INJECTED.into()),
+    )
+    .expect("editor save enters recovery");
+    assert_eq!(failed, IntentOutcome::None);
+    assert!(recovery.is_pending());
+
+    // The editor is HELD while unresolved (AC-14): the surface stays allocated with
+    // its draft on the section's line. Closing it before the boundary — the failure
+    // this test exists to catch — paints the plain checklist label instead.
+    assert_eq!(model.input_mode(), BoardInputMode::SaveRecovery);
+    let held = board_painted(&model);
+    assert!(
+        held.lines()
+            .any(|row| row.contains("item") && row.contains("zed step")),
+        "the failed save must hold the editor with its draft on the line:\n{held}"
+    );
+    (domain, model, recovery, id)
+}
+
+/// AC-14 (decisive): a failed save while the item editor is open holds the editor
+/// and its input mode until Retry/Cancel resolve it; `r`/`c`/Esc reach Retry/Cancel
+/// even with the form allocated; a cancelled failed save returns to page view with
+/// every surface intact and keys escaping normally — no orphan edit mode.
+#[test]
+fn cancelled_failed_item_editor_save_leaves_no_orphan_edit_mode() {
+    let (mut domain, mut model, mut recovery, id) = failed_item_editor_save();
+
+    // The recovery keys own the keyboard even with the page form allocated.
+    assert_eq!(
+        map_key(
+            model.input_mode(),
+            KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE),
+        ),
+        Some(BoardIntent::RetrySave)
+    );
+    assert_eq!(
+        map_key(
+            model.input_mode(),
+            KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE),
+        ),
+        Some(BoardIntent::CancelSave)
+    );
+    assert_eq!(
+        map_key(
+            model.input_mode(),
+            KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+        ),
+        Some(BoardIntent::CancelSave)
+    );
+
+    let cancelled = apply_board_intent_with_save_recovery(
+        &mut domain,
+        &mut model,
+        &mut recovery,
+        BoardSaveContext {
+            baseline: DomainState::new(),
+            intent: BoardIntent::CancelSave,
+            snapshot: None,
+            host: None,
+        },
+        |_| panic!("cancel must not persist"),
+    )
+    .expect("cancel");
+    assert_eq!(cancelled, IntentOutcome::None);
+    assert!(!recovery.is_pending());
+    assert_eq!(
+        model.input_mode(),
+        BoardInputMode::TaskPage,
+        "cancel returns to page view, not an edit mode with no editor behind it"
+    );
+    let page = board_painted(&model);
+    assert!(
+        page.contains("Editor witness"),
+        "the task page survives the cancelled save:\n{page}"
+    );
+    assert!(
+        !page.lines().any(|row| row.contains("item")),
+        "the held editor closed with the cancelled save:\n{page}"
+    );
+    let texts: Vec<&str> = domain
+        .get(id)
+        .expect("task")
+        .checklist
+        .iter()
+        .map(|item| item.text.as_str())
+        .collect();
+    assert_eq!(
+        texts,
+        vec!["alpha step"],
+        "cancel restores the pre-add baseline: the draft never landed"
+    );
+
+    // Keys escape normally from the returned page view: Esc closes the page.
+    let esc = map_key(
+        BoardInputMode::TaskPage,
+        KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+    )
+    .expect("esc maps");
+    assert_eq!(esc, BoardIntent::CloseLayer);
+    apply_intent(&mut domain, &mut model, esc, None, None).expect("close the page");
+    assert_eq!(
+        model.input_mode(),
+        BoardInputMode::Normal,
+        "no mode is left without its surface"
+    );
+
+    // And a fresh editor session works: the cancelled pending save left no state.
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenTaskPage,
+        None,
+        None,
+    )
+    .expect("reopen the page");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::BeginAddChecklistItem,
+        None,
+        None,
+    )
+    .expect("open a fresh editor");
+    for character in "after cancel".chars() {
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::EditInsert(character),
+            None,
+            None,
+        )
+        .expect("type");
+    }
+    let fresh_baseline = snapshot_of(&domain);
+    let saved = apply_board_intent_with_save_recovery(
+        &mut domain,
+        &mut model,
+        &mut recovery,
+        BoardSaveContext {
+            baseline: fresh_baseline,
+            intent: BoardIntent::ConfirmEdit,
+            snapshot: None,
+            host: None,
+        },
+        |_| Ok(()),
+    )
+    .expect("fresh editor save");
+    assert_eq!(saved, IntentOutcome::Persisted);
+    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+    let texts: Vec<&str> = domain
+        .get(id)
+        .expect("task")
+        .checklist
+        .iter()
+        .map(|item| item.text.as_str())
+        .collect();
+    assert_eq!(
+        texts,
+        vec!["alpha step", "after cancel"],
+        "the editor round-trips cleanly after a cancelled save"
+    );
+}
+
+/// AC-14: resolving the held editor's failed save through Retry, after the store
+/// accepts, applies exactly the held working state — the item lands and the editor
+/// closes cleanly.
+#[test]
+fn retried_item_editor_save_applies_and_closes() {
+    let (mut domain, mut model, mut recovery, id) = failed_item_editor_save();
+
+    let mut retries = 0;
+    let retried = apply_board_intent_with_save_recovery(
+        &mut domain,
+        &mut model,
+        &mut recovery,
+        BoardSaveContext {
+            baseline: DomainState::new(),
+            intent: BoardIntent::RetrySave,
+            snapshot: None,
+            host: None,
+        },
+        |working| {
+            retries += 1;
+            let texts: Vec<&str> = working
+                .get(id)
+                .expect("task in retained working state")
+                .checklist
+                .iter()
+                .map(|item| item.text.as_str())
+                .collect();
+            assert_eq!(
+                texts,
+                vec!["alpha step", "zed step"],
+                "retry persists exactly the held editor's working state"
+            );
+            Ok(())
+        },
+    )
+    .expect("retry");
+    assert_eq!(retried, IntentOutcome::Persisted);
+    assert_eq!(retries, 1);
+    assert!(!recovery.is_pending());
+    let texts: Vec<&str> = domain
+        .get(id)
+        .expect("task")
+        .checklist
+        .iter()
+        .map(|item| item.text.as_str())
+        .collect();
+    assert_eq!(texts, vec!["alpha step", "zed step"], "the item lands");
+    assert_eq!(
+        model.input_mode(),
+        BoardInputMode::TaskPage,
+        "the editor closes cleanly once the boundary confirms"
+    );
+    let page = board_painted(&model);
+    assert!(
+        !page.lines().any(|row| row.contains("item")),
+        "the editor line is gone after the retried save:\n{page}"
+    );
+    assert!(
+        page.contains("zed step"),
+        "the retried item paints on the page:\n{page}"
+    );
+}
+
+/// Remediation round 1 / Important 1: the item editor's two save chords share one
+/// refusal discipline. When another actor soft-deleted the bound task on the
+/// durable record between open and confirm, Ctrl+Enter (`ConfirmEditNext`) must
+/// refuse in place exactly like Enter — the editor held with its draft, nothing
+/// mutated, the save boundary never reached — not degrade to a failing save behind
+/// SaveRecovery.
+#[test]
+fn ctrl_enter_refuses_in_place_when_the_bound_task_was_concurrently_soft_deleted() {
+    let mut domain = DomainState::new();
+    let id = domain
+        .create(
+            "Deleted witness",
+            None,
+            TaskScope::Project {
+                path: "/repos/app".into(),
+            },
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("create task");
+    domain
+        .add_checklist_item(id, "alpha step")
+        .expect("seed one item");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/app")));
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenTaskPage,
+        None,
+        None,
+    )
+    .expect("open task page");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::BeginAddChecklistItem,
+        None,
+        None,
+    )
+    .expect("open item editor");
+    for character in "zed step".chars() {
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::EditInsert(character),
+            None,
+            None,
+        )
+        .expect("type draft");
+    }
+
+    // The concurrent soft delete lives on the durable record this confirm is judged
+    // against; the local working copy still shows the task alive, exactly as the
+    // live loop's freshly loaded baseline would.
+    let mut baseline = snapshot_of(&domain);
+    baseline.soft_delete(id).expect("soft delete on the record");
+    assert!(
+        !domain.get(id).expect("local copy").soft_deleted,
+        "the working copy has not merged the deletion"
+    );
+
+    let mut recovery = SaveRecovery::new();
+    let mut saves = 0;
+    let refused = apply_board_intent_with_save_recovery(
+        &mut domain,
+        &mut model,
+        &mut recovery,
+        BoardSaveContext {
+            baseline,
+            intent: BoardIntent::ConfirmEditNext,
+            snapshot: None,
+            host: None,
+        },
+        |_| {
+            saves += 1;
+            Err(INJECTED.into())
+        },
+    );
+    assert_eq!(
+        refused,
+        Err(DomainError::SoftDeleted(id)),
+        "Ctrl+Enter must refuse against the fresh durable record like Enter"
+    );
+    assert_eq!(saves, 0, "a refused chord never reaches the save boundary");
+    assert!(!recovery.is_pending(), "the refusal is not a failed save");
+    assert_eq!(
+        model.input_mode(),
+        BoardInputMode::EditChecklistItem,
+        "the editor stays open through the refusal"
+    );
+    let held = board_painted(&model);
+    assert!(
+        held.lines()
+            .any(|row| row.contains("item") && row.contains("zed step")),
+        "the draft survives the refusal on the line:\n{held}"
+    );
+    let texts: Vec<&str> = domain
+        .get(id)
+        .expect("task")
+        .checklist
+        .iter()
+        .map(|item| item.text.as_str())
+        .collect();
+    assert_eq!(
+        texts,
+        vec!["alpha step"],
+        "a refused chord must not mutate the working state"
+    );
 }

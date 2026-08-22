@@ -152,7 +152,7 @@ pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
 /// draft and windows it by the page scroll; field edits reuse the form's cursor windowing.
 fn build_task_page_overlay<'a>(
     model: &BoardModel,
-    form: &BoardForm,
+    form: &'a BoardForm,
     geo: &tier::TierGeometry,
     scope_dropdown: Option<FormScopeDropdown<'a>>,
 ) -> QueueOverlay<'a> {
@@ -171,7 +171,11 @@ fn build_task_page_overlay<'a>(
     let checklist_editor = form.checklist.editor.as_ref().map(|editor| {
         let avail = (geo.row_width as usize).saturating_sub("  item  ".len() + 1);
         let (text, cursor_col) = escaped_line_window(&editor.buffer, avail);
-        crate::ui::render::ChecklistEditorLine { text, cursor_col }
+        crate::ui::render::ChecklistEditorLine {
+            text,
+            cursor_col,
+            refusal: editor.refusal.as_deref(),
+        }
     });
     // A notes edit always keeps one row: the layout reserves it (checklist caps around
     // it), so an active edit can never be scrolled/clamped out of the frame entirely.
