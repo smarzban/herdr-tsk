@@ -53,6 +53,7 @@ impl From<StoreError> for CaptureError {
 ///
 /// - Scope: `scope_override` when set, else `snapshot.default_scope`.
 /// - Capsule, agent meta, and provenance origin come from the snapshot.
+/// - `thread`, when supplied, is already normalized and enters the same create mutation.
 /// - Empty/whitespace title is rejected by the domain; no task is created.
 /// - When `store` is `Some`, persists domain state after a successful create.
 pub fn capture_save(
@@ -62,15 +63,17 @@ pub fn capture_save(
     title: impl AsRef<str>,
     notes: Option<String>,
     scope_override: Option<TaskScope>,
+    thread: Option<String>,
 ) -> Result<TaskId, CaptureError> {
     let scope = scope_override.unwrap_or_else(|| snapshot.default_scope.clone());
-    let id = state.create(
+    let id = state.create_with_thread(
         title,
         notes,
         scope,
         snapshot.capsule.clone(),
         snapshot.agent_meta.clone(),
         snapshot.provenance,
+        thread,
     )?;
     if let Some(store) = store {
         // Merge with any concurrent writer before persist (board + capture).
@@ -83,7 +86,7 @@ pub fn capture_save(
 mod tests {
     use super::*;
     use crate::context::{build_snapshot, RawHostContext};
-    use crate::domain::{AgentMeta, ContextCapsule, HumanStatus, ProvenanceOrigin};
+    use crate::domain::{AgentMeta, ContextCapsule, HumanStatus, ProvenanceOrigin, TaskEventKind};
     use std::env;
     use std::fs;
     use std::path::PathBuf;
@@ -148,7 +151,8 @@ mod tests {
     fn default_create_uses_snapshot_project_scope() {
         let snap = project_snapshot("/repos/app");
         let mut state = DomainState::new();
-        let id = capture_save(&mut state, None, &snap, "Ship capture", None, None).expect("create");
+        let id = capture_save(&mut state, None, &snap, "Ship capture", None, None, None)
+            .expect("create");
 
         let task = state.get(id).expect("task");
         assert_eq!(
@@ -172,10 +176,38 @@ mod tests {
     }
 
     #[test]
+    fn capture_creation_carries_supplied_normalized_thread() {
+        let snap = project_snapshot("/repos/app");
+        let mut state = DomainState::new();
+
+        let id = capture_save(
+            &mut state,
+            None,
+            &snap,
+            "Threaded capture",
+            None,
+            None,
+            Some("release-2026".into()),
+        )
+        .expect("create threaded capture");
+
+        let task = state.get(id).expect("task");
+        assert_eq!(task.thread.as_deref(), Some("release-2026"));
+        assert_eq!(
+            task.history
+                .iter()
+                .map(|event| event.kind)
+                .collect::<Vec<_>>(),
+            vec![TaskEventKind::Created]
+        );
+    }
+
+    #[test]
     fn default_create_uses_snapshot_global_when_no_repo() {
         let snap = global_snapshot();
         let mut state = DomainState::new();
-        let id = capture_save(&mut state, None, &snap, "Loose note", None, None).expect("create");
+        let id =
+            capture_save(&mut state, None, &snap, "Loose note", None, None, None).expect("create");
         assert_eq!(state.get(id).expect("task").scope, TaskScope::Global);
     }
 
@@ -190,6 +222,7 @@ mod tests {
             "Global instead",
             Some("notes".into()),
             Some(TaskScope::Global),
+            None,
         )
         .expect("create");
 
@@ -217,6 +250,7 @@ mod tests {
             "Other project",
             None,
             Some(other.clone()),
+            None,
         )
         .expect("create");
 
@@ -227,7 +261,7 @@ mod tests {
     fn empty_title_rejected_at_domain_boundary() {
         let snap = project_snapshot("/repos/app");
         let mut state = DomainState::new();
-        let err = capture_save(&mut state, None, &snap, "   \t  ", None, None)
+        let err = capture_save(&mut state, None, &snap, "   \t  ", None, None, None)
             .expect_err("empty title must fail");
         match err {
             CaptureError::Domain(DomainError::EmptyTitle) => {}
@@ -248,8 +282,8 @@ mod tests {
 
         let mut state = DomainState::new();
         // Title may still be user-edited; prefill is UI concern. Provenance stays Selection.
-        let id =
-            capture_save(&mut state, None, &snap, "from selection", None, None).expect("create");
+        let id = capture_save(&mut state, None, &snap, "from selection", None, None, None)
+            .expect("create");
         let task = state.get(id).expect("task");
         assert_eq!(task.provenance, ProvenanceOrigin::Selection);
         assert_eq!(
@@ -269,8 +303,16 @@ mod tests {
 
         let snap = project_snapshot("/repos/app");
         let mut state = DomainState::new();
-        let id = capture_save(&mut state, Some(&store), &snap, "Persisted", None, None)
-            .expect("create+save");
+        let id = capture_save(
+            &mut state,
+            Some(&store),
+            &snap,
+            "Persisted",
+            None,
+            None,
+            None,
+        )
+        .expect("create+save");
 
         let reloaded = store.load().expect("load");
         let task = reloaded.get(id).expect("task on disk");

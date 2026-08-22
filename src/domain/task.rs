@@ -414,6 +414,23 @@ impl DomainState {
         agent_meta: Option<AgentMeta>,
         provenance: ProvenanceOrigin,
     ) -> Result<Uuid, DomainError> {
+        self.create_with_thread(title, notes, scope, capsule, agent_meta, provenance, None)
+    }
+
+    /// Create a task with an already-normalized optional thread in its initial mutation.
+    ///
+    /// [`Self::create`] remains the unthreaded compatibility path for existing callers.
+    #[allow(clippy::too_many_arguments)] // Mirrors the stable `create` field list plus thread.
+    pub fn create_with_thread(
+        &mut self,
+        title: impl AsRef<str>,
+        notes: Option<String>,
+        scope: TaskScope,
+        capsule: Option<ContextCapsule>,
+        agent_meta: Option<AgentMeta>,
+        provenance: ProvenanceOrigin,
+        thread: Option<String>,
+    ) -> Result<Uuid, DomainError> {
         let title = title.as_ref().trim();
         if title.is_empty() {
             return Err(DomainError::EmptyTitle);
@@ -429,7 +446,7 @@ impl DomainState {
             merge_base_revision: None,
             title: title.to_string(),
             notes,
-            thread: None,
+            thread,
             status: HumanStatus::Ready,
             scope,
             capsule,

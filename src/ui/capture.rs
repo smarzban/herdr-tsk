@@ -538,6 +538,7 @@ pub fn apply_capture_intent(
                 model.title(),
                 notes,
                 Some(model.scope.clone()),
+                None,
             ) {
                 Ok(id) => id,
                 Err(error) => {

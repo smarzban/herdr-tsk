@@ -183,6 +183,8 @@ pub(super) struct BoardForm {
     pub(super) title: EditBuffer,
     pub(super) notes: EditBuffer,
     pub(super) scope: TaskScope,
+    /// Parsed from the quick-add line only. Task title and note editors treat `!t` literally.
+    pub(super) thread: Option<String>,
     pub(super) focus: CaptureField,
     pub(super) scope_options: Vec<TaskScope>,
     pub(super) scope_selected: usize,
@@ -265,6 +267,7 @@ impl BoardForm {
             title: seeded_draft(title),
             notes: seeded_draft(notes),
             scope,
+            thread: None,
             focus,
             scope_options,
             scope_selected,

@@ -419,7 +419,7 @@ fn draw_board_impl(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap
             input: crate::ui::render::BottomInputSlot {
                 text: title,
                 cursor_col: title_cursor,
-                placeholder: "title…   !p global · !p name project · tab details",
+                placeholder: "title…   !p global · !p name project · !t thread · tab details",
                 refusal: None,
                 // Save recovery owns the verb row; ordinary quick-add refusals
                 // use the shared slot's reserved row above the cursor.
