@@ -5,7 +5,18 @@ fn skill_documents_retry_and_misfiling() {
         .expect("CLI skill should exist");
     let agents = std::fs::read_to_string(root.join("AGENTS.md")).expect("AGENTS.md should exist");
 
-    for term in ["failed", "exit 1", "never whole-plan-retry", "exit 3"] {
+    for term in [
+        "herdr-tasks add -t",
+        "--global",
+        "--project",
+        "--file plan.json",
+        "cat plan.json | herdr-tasks add",
+        "exit 0",
+        "exit 1",
+        "exit 2",
+        "exit 3",
+        "never whole-plan-retry",
+    ] {
         assert!(skill.contains(term), "skill should contain {term:?}");
     }
     assert!(

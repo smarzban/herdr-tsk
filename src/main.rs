@@ -13,7 +13,9 @@ fn main() -> ExitCode {
     ) {
         Surface::FindBoardPane => find_board_pane_main(),
         Surface::GlobalHelp => {
-            println!("usage: herdr-tasks [capture] | add | list | --find-board-pane | --help");
+            println!(
+                "usage: herdr-tasks [capture] | add | list | --find-board-pane | --help\n\nCommands:\n  add   create one task or apply a JSON plan\n  list  inspect tasks\n\nRun `herdr-tasks add --help` or `herdr-tasks list --help` for command details."
+            );
             ExitCode::SUCCESS
         }
         Surface::Usage => usage_exit(),

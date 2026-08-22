@@ -1,5 +1,6 @@
 use std::io::{Cursor, Read};
 use std::path::PathBuf;
+use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -1085,6 +1086,163 @@ fn plan_project_resolution_is_independent_of_item_order() {
 
     let _ = std::fs::remove_dir_all(forward_dir);
     let _ = std::fs::remove_dir_all(reverse_dir);
+}
+
+#[test]
+fn flag_add_rejects_flag_like_item_values_without_persisting() {
+    let _env = env_lock();
+
+    for (label, item_flags) in [
+        ("title", vec!["--title", "--global"]),
+        (
+            "notes",
+            vec!["--title", "ordinary title", "--notes", "--global"],
+        ),
+        (
+            "project",
+            vec!["--title", "ordinary title", "--project", "--global"],
+        ),
+    ] {
+        let dir = temp_state_dir(label);
+        let mut args = vec![
+            "herdr-tasks".into(),
+            "add".into(),
+            "--state-dir".into(),
+            state_dir_arg(&dir),
+        ];
+        args.extend(item_flags.into_iter().map(String::from));
+
+        let output = add(&args, true);
+
+        assert_eq!(output.code, 2, "{label}");
+        assert!(output.stdout.is_empty(), "{label}");
+        assert!(output.stderr.contains("missing value"), "{label}");
+        assert!(task_store(&dir)
+            .load()
+            .expect("load state")
+            .tasks()
+            .is_empty());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+#[test]
+fn flag_add_equals_forms_allow_dash_leading_values() {
+    let _env = env_lock();
+    let dir = temp_state_dir("dash-leading-values");
+    let output = add(
+        &[
+            "herdr-tasks".into(),
+            "add".into(),
+            "--state-dir".into(),
+            state_dir_arg(&dir),
+            "--title=-fix parser".into(),
+            "--notes=-5 degrees".into(),
+            "--project=-maintenance".into(),
+        ],
+        true,
+    );
+
+    assert_eq!(output.code, 0);
+    assert_eq!(output.stdout, "added -fix parser\n");
+    let state = task_store(&dir).load().expect("load state");
+    let task = &state.tasks()[0];
+    assert_eq!(task.title, "-fix parser");
+    assert_eq!(task.notes.as_deref(), Some("-5 degrees"));
+    assert_eq!(
+        task.scope,
+        TaskScope::Project {
+            path: "-maintenance".into()
+        }
+    );
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn flag_add_rejects_flag_like_state_dir_and_file_values_without_mutating() {
+    let _env = env_lock();
+    let cwd = temp_state_dir("flag-like-global-value");
+    let binary = std::env::var("CARGO_BIN_EXE_herdr-tasks")
+        .expect("Cargo must provide the herdr-tasks binary path");
+
+    let state_dir = Command::new(&binary)
+        .current_dir(&cwd)
+        .args(["add", "--state-dir", "--global", "--title", "junk"])
+        .output()
+        .expect("run flag-like state-dir value");
+    assert_eq!(state_dir.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&state_dir.stderr).contains("missing value for --state-dir"));
+    assert!(!cwd.join("--global").exists());
+
+    let file = Command::new(binary)
+        .current_dir(&cwd)
+        .args(["add", "--file", "--global"])
+        .output()
+        .expect("run flag-like file value");
+    assert_eq!(file.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&file.stderr).contains("missing value for --file"));
+    assert!(!cwd.join("--global").exists());
+
+    let _ = std::fs::remove_dir_all(cwd);
+}
+
+#[test]
+fn flag_add_json_reports_created_and_existing_resolved_tasks() {
+    let _env = env_lock();
+    let dir = temp_state_dir("json");
+    let args = [
+        "herdr-tasks".into(),
+        "add".into(),
+        "--json".into(),
+        "--state-dir".into(),
+        state_dir_arg(&dir),
+        "-t".into(),
+        "  json task  ".into(),
+        "-p".into(),
+        "/projects/json".into(),
+    ];
+
+    let created = add(&args, true);
+    assert_eq!(created.code, 0);
+    assert!(created.stderr.is_empty());
+    let created: serde_json::Value = serde_json::from_str(&created.stdout).expect("created JSON");
+    assert_eq!(created["outcome"], "created");
+    assert_eq!(created["title"], "json task");
+    assert_eq!(created["project"], "/projects/json");
+    let id = created["id"].as_str().expect("created id").to_owned();
+    assert_eq!(created.as_object().expect("created object").len(), 4);
+
+    let existing = add(&args, true);
+    assert_eq!(existing.code, 0);
+    assert!(existing.stderr.is_empty());
+    let existing: serde_json::Value =
+        serde_json::from_str(&existing.stdout).expect("existing JSON");
+    assert_eq!(existing["outcome"], "existing");
+    assert_eq!(existing["id"], id);
+    assert_eq!(existing["title"], "json task");
+    assert_eq!(existing["project"], "/projects/json");
+    assert_eq!(existing.as_object().expect("existing object").len(), 4);
+
+    let global = add(
+        &[
+            "herdr-tasks".into(),
+            "add".into(),
+            "--json".into(),
+            "--state-dir".into(),
+            state_dir_arg(&dir),
+            "-t".into(),
+            "global JSON task".into(),
+            "--global".into(),
+        ],
+        true,
+    );
+    assert_eq!(global.code, 0);
+    let global: serde_json::Value = serde_json::from_str(&global.stdout).expect("global JSON");
+    assert_eq!(global["outcome"], "created");
+    assert!(global["project"].is_null());
+
+    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]

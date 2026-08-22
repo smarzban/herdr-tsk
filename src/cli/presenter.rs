@@ -7,7 +7,7 @@ use crate::domain::HumanStatus;
 
 pub fn add_help() -> CliOutput {
     help_output(
-        "usage: herdr-tasks add -t <title> [-n <notes>] [-p <project> | --global] [--state-dir <dir>]\n       herdr-tasks add [--file <path|->] [--state-dir <dir>]",
+        "usage: herdr-tasks add -t <title> [-n <notes>] [-p <project> | --global] [--json] [--state-dir <dir>]\n       herdr-tasks add [--file <path|->] [--state-dir <dir>]",
     )
 }
 
@@ -19,7 +19,7 @@ pub fn list_help() -> CliOutput {
             "--project uses the same basename-or-path scope resolution as add; --global selects global tasks; --all selects every scope.\n",
             "--done lists done tasks only. --deleted lists soft-deleted tasks only, regardless of status.\n",
             "To recover a typo scope, use herdr-tasks list --all --json.\n",
-            "--json emits a flat array of id, title, status, and project in displayed group order.\n\n",
+            "--json emits a flat array of id, title, status, and project in displayed group order. Human --all rows append [project] or [global].\n\n",
             "Exit contract:\n",
             "  exit 0: tasks were listed\n",
             "  exit 2: usage or parse error, nothing persisted\n",
@@ -34,17 +34,35 @@ pub fn list_help() -> CliOutput {
 fn help_output(usage: &str) -> CliOutput {
     CliOutput {
         stdout: format!(
-            "{usage}\n\nAn add whose trimmed title and resolved project scope already exist succeeds without changing the task.\nPlan JSON: [{{\"title\": \"...\", \"notes\": \"...\", \"project\": \"...\"}}]\nPlan result: {{\"created\": [...], \"existing\": [...], \"failed\": [...]}}\n\nExit contract:\n  exit 0: every item was created or already existed\n  exit 1: one or more items were refused, retry failed only\n  exit 2: usage or parse error, nothing persisted\n  exit 3: store I/O, commit indeterminate, verify with list before retrying\n"
+            "{usage}\n\nExamples:\n  herdr-tasks add -t \"Draft release notes\"\n  herdr-tasks add -t \"Buy milk\" --global\n  herdr-tasks add -t \"Fix widget\" --project widget\n  herdr-tasks add --title=\"-fix parser\" --notes=\"-5 degrees\" --project=\"-maintenance\"\n  herdr-tasks add --file plan.json\n  cat plan.json | herdr-tasks add\n\nValues beginning with - must use --title=<value>, --notes=<value>, or --project=<value>.\nAn add whose trimmed title and resolved project scope already exist succeeds without changing the task. With --json, flag add emits one object with outcome, id, title, and project (or null).\nPlan JSON: [{{\"title\": \"...\", \"notes\": \"...\", \"project\": \"...\"}}]\nPlan result: {{\"created\": [...], \"existing\": [...], \"failed\": [...]}}\n\nExit contract:\n  exit 0: every item was created or already existed\n  exit 1: one or more items were refused, retry failed only\n  exit 2: usage or parse error, nothing persisted\n  exit 3: store I/O, commit indeterminate, verify with list before retrying\n"
         ),
         stderr: String::new(),
         code: 0,
     }
 }
 
-pub fn added(result: FlagAddResult) -> CliOutput {
+pub fn added(result: FlagAddResult, json: bool) -> CliOutput {
     let stdout = match result {
-        FlagAddResult::Created(title) => format!("added {title}\n"),
-        FlagAddResult::Existing => "task already exists\n".into(),
+        FlagAddResult::Created { id, title, project } if json => format!(
+            "{}\n",
+            serde_json::json!({
+                "outcome": "created",
+                "id": id,
+                "title": title,
+                "project": project,
+            })
+        ),
+        FlagAddResult::Existing { id, title, project } if json => format!(
+            "{}\n",
+            serde_json::json!({
+                "outcome": "existing",
+                "id": id,
+                "title": title,
+                "project": project,
+            })
+        ),
+        FlagAddResult::Created { title, .. } => format!("added {title}\n"),
+        FlagAddResult::Existing { .. } => "task already exists\n".into(),
     };
     CliOutput {
         stdout,
@@ -69,7 +87,7 @@ pub fn usage(reason: &str) -> CliOutput {
     CliOutput {
         stdout: String::new(),
         stderr: format!(
-            "herdr-tasks add: {reason}\nusage: herdr-tasks add -t <title> [-n <notes>] [-p <project> | --global] [--state-dir <dir>]\n"
+            "herdr-tasks add: {reason}\nusage: herdr-tasks add -t <title> [-n <notes>] [-p <project> | --global] [--json] [--state-dir <dir>]\n"
         ),
         code: 2,
     }
@@ -120,6 +138,11 @@ fn list_human(result: &ListResult) -> String {
         for row in rows {
             output.push_str(" - ");
             output.push_str(&row.title);
+            if result.include_scope {
+                output.push_str(" [");
+                output.push_str(row.project.as_deref().unwrap_or("global"));
+                output.push(']');
+            }
             output.push('\n');
         }
     }

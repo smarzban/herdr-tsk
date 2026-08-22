@@ -83,8 +83,16 @@ struct ResolvedPlanItem {
 /// Result of one accepted flag add.
 #[derive(Debug)]
 pub enum FlagAddResult {
-    Created(String),
-    Existing,
+    Created {
+        id: Uuid,
+        title: String,
+        project: Option<String>,
+    },
+    Existing {
+        id: Uuid,
+        title: String,
+        project: Option<String>,
+    },
 }
 
 /// Create one headless task, or report a non-soft-deleted match without changing it.
@@ -107,13 +115,18 @@ pub fn run(input: FlagAdd) -> Result<FlagAddResult, AddError> {
     store
         .locked_transition(|domain| {
             let scope = resolve_flag_scope(project.as_deref(), global, domain, &snapshot);
-            if existing_task(domain, &title, &scope).is_some() {
-                return Ok(FlagAddResult::Existing);
+            if let Some(task) = existing_task(domain, &title, &scope) {
+                return Ok(FlagAddResult::Existing {
+                    id: task.id,
+                    title: task.title.clone(),
+                    project: scope_project(&task.scope),
+                });
             }
-            domain
+            let project = scope_project(&scope);
+            let id = domain
                 .create(&title, notes, scope, None, None, ProvenanceOrigin::Capture)
                 .map_err(|error| error.to_string())?;
-            Ok(FlagAddResult::Created(title))
+            Ok(FlagAddResult::Created { id, title, project })
         })
         .map_err(AddError::Store)
 }
@@ -201,6 +214,13 @@ fn resolve_plan_items(
             },
         })
         .collect()
+}
+
+fn scope_project(scope: &TaskScope) -> Option<String> {
+    match scope {
+        TaskScope::Global => None,
+        TaskScope::Project { path } => Some(path.clone()),
+    }
 }
 
 fn existing_task<'a>(
@@ -301,6 +321,7 @@ mod tests {
             notes: None,
             project: None,
             global: false,
+            json: false,
             state_dir: None,
             file: None,
             has_item_flags: true,

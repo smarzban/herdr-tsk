@@ -27,6 +27,15 @@ fn add_help_documents_plan_shape_and_exit_contract() {
         "exit 3",
         "indeterminate",
         "list",
+        "--json",
+        "herdr-tasks add -t",
+        "--global",
+        "--project",
+        "--title=<value>",
+        "--notes=<value>",
+        "--project=<value>",
+        "--file plan.json",
+        "cat plan.json | herdr-tasks add",
     ] {
         assert!(
             add.stdout.contains(term),

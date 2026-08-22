@@ -8,6 +8,22 @@ fn binary() -> String {
 }
 
 #[test]
+fn top_level_help_names_subcommands_and_their_help() {
+    let output = Command::new(binary())
+        .arg("--help")
+        .output()
+        .expect("run global help");
+
+    assert_eq!(output.status.code(), Some(0));
+    assert!(output.stderr.is_empty());
+    let stdout = String::from_utf8(output.stdout).expect("UTF-8 help");
+    assert!(stdout.contains("add"));
+    assert!(stdout.contains("list"));
+    assert!(stdout.contains("herdr-tasks add --help"));
+    assert!(stdout.contains("herdr-tasks list --help"));
+}
+
+#[test]
 fn unknown_positional_exits_2_without_opening_the_board() {
     let mut child = Command::new(binary())
         .arg("foo")

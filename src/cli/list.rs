@@ -51,6 +51,7 @@ pub(crate) struct ListRow {
 pub struct ListResult {
     pub(crate) rows: Vec<ListRow>,
     pub(crate) view: ListView,
+    pub(crate) include_scope: bool,
 }
 
 /// Parse `herdr-tasks list` arguments, including argv0 and the `list` subcommand.
@@ -165,7 +166,11 @@ pub fn run(input: ListInput) -> Result<ListResult, ListError> {
         })
         .collect::<Vec<_>>();
     rows.sort_by_key(|row| status_group_rank(row.status));
-    Ok(ListResult { rows, view })
+    Ok(ListResult {
+        rows,
+        view,
+        include_scope: input.all,
+    })
 }
 
 fn is_open(status: HumanStatus) -> bool {

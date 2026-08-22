@@ -434,7 +434,10 @@ fn list_all_includes_every_scope_in_displayed_order_for_each_filter() {
     assert_eq!(open.code, 0);
     assert_eq!(
         open.stdout,
-        "STARTED\n - global started\n\nREADY\n - project ready\n\nBLOCKED\n - other blocked\n\nREVIEW\n - global review\n"
+        format!(
+            "STARTED\n - global started [global]\n\nREADY\n - project ready [{}]\n\nBLOCKED\n - other blocked [/projects/other]\n\nREVIEW\n - global review [global]\n",
+            repo.display()
+        )
     );
 
     let done = list(&[
@@ -455,6 +458,31 @@ fn list_all_includes_every_scope_in_displayed_order_for_each_filter() {
             .collect::<Vec<_>>(),
         vec!["project done", "global done"]
     );
+    for row in &done_rows {
+        assert_eq!(
+            row.as_object()
+                .expect("JSON row")
+                .keys()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            vec!["id", "project", "status", "title"]
+        );
+    }
+    let done_human = list(&[
+        "herdr-tasks".into(),
+        "list".into(),
+        "--all".into(),
+        "--done".into(),
+        "--state-dir".into(),
+        state_dir_arg(&dir),
+    ]);
+    assert_eq!(
+        done_human.stdout,
+        format!(
+            "DONE\n - project done [{}]\n - global done [global]\n",
+            repo.display()
+        )
+    );
 
     let deleted = list(&[
         "herdr-tasks".into(),
@@ -474,6 +502,18 @@ fn list_all_includes_every_scope_in_displayed_order_for_each_filter() {
             .map(|row| row["title"].as_str().expect("title"))
             .collect::<Vec<_>>(),
         vec!["global deleted", "other deleted"]
+    );
+    let deleted_human = list(&[
+        "herdr-tasks".into(),
+        "list".into(),
+        "--all".into(),
+        "--deleted".into(),
+        "--state-dir".into(),
+        state_dir_arg(&dir),
+    ]);
+    assert_eq!(
+        deleted_human.stdout,
+        "DELETED\n - global deleted [global]\n - other deleted [/projects/other]\n"
     );
 
     let _ = std::fs::remove_dir_all(repo);
