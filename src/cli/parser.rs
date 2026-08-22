@@ -12,6 +12,7 @@ pub struct FlagAdd {
     pub state_dir: Option<PathBuf>,
     pub file: Option<PathBuf>,
     pub has_item_flags: bool,
+    pub help: bool,
 }
 
 /// Parse `herdr-tasks add` arguments, including argv0 and the `add` subcommand.
@@ -28,6 +29,7 @@ pub fn parse_flag_add(args: &[String]) -> Result<FlagAdd, String> {
         state_dir: None,
         file: None,
         has_item_flags: false,
+        help: false,
     };
     let mut index = 2;
     while let Some(flag) = args.get(index).map(String::as_str) {
@@ -55,6 +57,10 @@ pub fn parse_flag_add(args: &[String]) -> Result<FlagAdd, String> {
             "--global" => {
                 parsed.global = true;
                 parsed.has_item_flags = true;
+                index += 1;
+            }
+            "--help" => {
+                parsed.help = true;
                 index += 1;
             }
             "--state-dir" => {

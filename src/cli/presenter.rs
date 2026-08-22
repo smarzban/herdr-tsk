@@ -4,6 +4,26 @@ use super::CliOutput;
 use crate::cli::add::AddError;
 use crate::cli::list::{ListError, ListResult};
 
+pub fn add_help() -> CliOutput {
+    help_output(
+        "usage: herdr-tasks add -t <title> [-n <notes>] [-p <project> | --global] [--state-dir <dir>]\n       herdr-tasks add [--file <path|->] [--state-dir <dir>]",
+    )
+}
+
+pub fn list_help() -> CliOutput {
+    help_output("usage: herdr-tasks list [--json] [--state-dir <dir>]")
+}
+
+fn help_output(usage: &str) -> CliOutput {
+    CliOutput {
+        stdout: format!(
+            "{usage}\n\nPlan JSON: [{{\"title\": \"...\", \"notes\": \"...\", \"project\": \"...\"}}]\nPlan result: {{\"created\": [...], \"failed\": [...]}}\n\nExit contract:\n  exit 0: every item was created\n  exit 1: one or more items were refused, retry failed only\n  exit 2: usage or parse error, nothing persisted\n  exit 3: store I/O, commit indeterminate, verify with list before retrying\n"
+        ),
+        stderr: String::new(),
+        code: 0,
+    }
+}
+
 pub fn added(title: &str) -> CliOutput {
     CliOutput {
         stdout: format!("added {title}\n"),

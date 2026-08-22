@@ -263,6 +263,7 @@ mod tests {
             state_dir: None,
             file: None,
             has_item_flags: true,
+            help: false,
         };
         assert_eq!(run(input).unwrap_err().code(), "invalid-title");
     }

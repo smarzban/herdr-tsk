@@ -13,6 +13,7 @@ use crate::store::{default_state_dir, TaskStore};
 pub struct ListInput {
     pub json: bool,
     pub state_dir: Option<PathBuf>,
+    pub help: bool,
 }
 
 /// A list failure after parsing and before presenting output.
@@ -45,12 +46,17 @@ pub fn parse(args: &[String]) -> Result<ListInput, String> {
     let mut input = ListInput {
         json: false,
         state_dir: None,
+        help: false,
     };
     let mut index = 2;
     while let Some(flag) = args.get(index).map(String::as_str) {
         match flag {
             "--json" => {
                 input.json = true;
+                index += 1;
+            }
+            "--help" => {
+                input.help = true;
                 index += 1;
             }
             "--state-dir" => {

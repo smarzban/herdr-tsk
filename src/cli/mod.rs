@@ -42,6 +42,9 @@ fn run_list(args: Vec<String>) -> CliOutput {
         Ok(input) => input,
         Err(reason) => return presenter::list_usage(&reason),
     };
+    if input.help {
+        return presenter::list_help();
+    }
     let json = input.json;
     match list::run(input) {
         Ok(result) => presenter::list(result, json),
@@ -54,6 +57,10 @@ fn run_add<R: Read>(args: Vec<String>, stdin: &mut R, stdin_is_tty: bool) -> Cli
         Ok(input) => input,
         Err(reason) => return presenter::usage(&reason),
     };
+
+    if input.help {
+        return presenter::add_help();
+    }
 
     if input.has_item_flags {
         if input.title.is_none() {
