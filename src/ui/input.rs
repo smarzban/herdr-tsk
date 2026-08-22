@@ -203,6 +203,10 @@ pub enum BoardIntent {
     /// window run the same session-only scope jump choosing it in the selector dropdown
     /// would; no key produces it.
     SelectSectionProject(usize),
+    /// Move the task page's item cursor onto one checklist item by its painted absolute
+    /// index (mouse click on an item row; AC-21). A click selects — it never toggles the
+    /// item, opens the editor, or arms the delete mark; no key produces it.
+    SelectChecklistItem(usize),
     /// Continue the selected durable dispatch attempt.
     RecoveryResume,
     /// Ask for explicit confirmation before removing recorded owned receipts.
@@ -809,6 +813,7 @@ pub fn intent_primary_action(intent: &BoardIntent) -> Option<PrimaryBoardAction>
         | BoardIntent::CancelProjectPicker
         | BoardIntent::SelectProjectOption(_)
         | BoardIntent::SelectSectionProject(_)
+        | BoardIntent::SelectChecklistItem(_)
         | BoardIntent::RecoveryResume
         | BoardIntent::BeginCleanup
         | BoardIntent::ConfirmCleanup

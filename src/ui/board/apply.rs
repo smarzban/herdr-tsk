@@ -958,6 +958,28 @@ fn apply_board_intent(
             open_task_page_on(domain, model, id);
             return Ok(IntentOutcome::None);
         }
+        BoardIntent::SelectChecklistItem(index) => {
+            // AC-21: a click on an item row moves the item cursor onto that item,
+            // scrolling the window to reveal it if hidden. A click only selects —
+            // no toggle, no editor, no delete mark, nothing persisted — and any
+            // armed mark was already cleared as an intervening intent above
+            // (AC-11). The mouse map produces this intent only for the page in
+            // view mode; anywhere else it stays inert.
+            if model.input_mode == BoardInputMode::TaskPage {
+                if let Some(form) = model.form.as_mut().filter(|form| form.is_task()) {
+                    let items = form
+                        .task_id()
+                        .and_then(|id| domain.get(id))
+                        .map(|task| task.checklist.len())
+                        .unwrap_or(0);
+                    if index < items {
+                        form.checklist.cursor = Some(index);
+                        checklist_scroll_to_cursor(&mut form.checklist, index);
+                    }
+                }
+            }
+            return Ok(IntentOutcome::None);
+        }
         BoardIntent::PageScrollUp => {
             if let Some(form) = model.form.as_mut().filter(|form| form.is_task()) {
                 if model.input_mode == BoardInputMode::TaskPage {
@@ -986,12 +1008,12 @@ fn apply_board_intent(
                         .map(|task| task.checklist.len())
                         .unwrap_or(0);
                     match form.checklist.cursor {
-                        // A first bare Down on a task with items activates the cursor on
-                        // the first item instead of scrolling (AC-17); one-shot per page
-                        // session, so after an Up-deactivation Down scrolls notes again.
-                        None if items > 0 && !form.checklist.activation_taken => {
+                        // A bare Down on a task with items activates the cursor on
+                        // the first item instead of scrolling (AC-17) — including
+                        // after an earlier Up-deactivation: activation is
+                        // re-activatable, never one-shot (AC-18, amended).
+                        None if items > 0 => {
                             form.checklist.cursor = Some(0);
-                            form.checklist.activation_taken = true;
                         }
                         Some(index) if items > 0 => {
                             let cursor = (index + 1).min(items - 1);

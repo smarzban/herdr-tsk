@@ -9,12 +9,14 @@
 use std::path::{Path, PathBuf};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use ratatui::backend::TestBackend;
 use ratatui::layout::Rect;
+use ratatui::Terminal;
 
 use herdr_tasks::domain::{DomainState, HumanStatus, ProvenanceOrigin, TaskScope};
 use herdr_tasks::ui::board::{
-    apply_intent, board_hit_map, board_verb_items, resolve_board_command, BoardInputMode,
-    BoardModel,
+    apply_intent, board_hit_map, board_verb_items, draw_board, resolve_board_command,
+    BoardInputMode, BoardModel,
 };
 use herdr_tasks::ui::capture::CaptureField;
 use herdr_tasks::ui::input::{map_board_form_key, map_key, BoardIntent, PRIMARY_CAPTURE_ACTIONS};
@@ -1455,4 +1457,103 @@ fn page_verb_clicks_resolve_through_the_page_legend() {
         "clicking the page's done verb completes its task"
     );
     assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+}
+
+/// The task page painted row by row at the standard board size, so a test can
+/// click the coordinates a row actually painted at.
+fn page_rows(model: &BoardModel) -> Vec<String> {
+    let mut terminal =
+        Terminal::new(TestBackend::new(STANDARD.width, STANDARD.height)).expect("test terminal");
+    terminal
+        .draw(|frame| draw_board(frame, model))
+        .expect("draw page");
+    let buffer = terminal.backend().buffer();
+    (0..STANDARD.height)
+        .map(|y| {
+            (0..STANDARD.width)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect::<String>()
+        })
+        .collect()
+}
+
+/// AC-21: a single click on a checklist item row moves the item cursor onto
+/// that item — a click selects, it never toggles, never opens the editor,
+/// never arms a delete mark — and a click on the notes half changes nothing
+/// about the cursor.
+#[test]
+fn clicking_an_item_row_selects_it() {
+    let (mut domain, mut model, id) = board_with_task("Click target", HumanStatus::Ready);
+    for text in ["alpha step", "bravo step", "charlie step"] {
+        domain.add_checklist_item(id, text).expect("add item");
+    }
+    model.sync_from_domain(&domain);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenTaskPage,
+        None,
+        None,
+    )
+    .expect("open the page");
+    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+
+    // The click lands on item 3's painted row, located from the same frame the
+    // hit map was recorded beside.
+    let hits = board_hit_map(STANDARD, &model);
+    let rows = page_rows(&model);
+    let item_y = rows
+        .iter()
+        .position(|row| row.contains("charlie step"))
+        .expect("item 3 paints a row");
+    let intent = map_board_mouse(&model, &hits, left_click(3, item_y as u16))
+        .expect("an item-row click must dispatch a select intent");
+    let revision_before = domain.get(id).expect("task").revision;
+    apply_intent(&mut domain, &mut model, intent, None, None).expect("apply the click");
+
+    let selected = page_rows(&model);
+    assert!(
+        selected.iter().any(|row| row.contains("▸ ▪ charlie step")),
+        "the cursor must sit on the clicked item:\n{}",
+        selected.join("\n")
+    );
+    assert_eq!(
+        model.input_mode(),
+        BoardInputMode::TaskPage,
+        "a click never opens the editor"
+    );
+    let task = domain.get(id).expect("task");
+    assert_eq!(
+        task.checklist
+            .iter()
+            .map(|item| item.done)
+            .collect::<Vec<_>>(),
+        vec![false, false, false],
+        "a click never toggles an item"
+    );
+    assert_eq!(task.revision, revision_before, "a click persists nothing");
+    assert!(
+        !selected.iter().any(|row| row.contains("✗")),
+        "a click never arms a delete mark:\n{}",
+        selected.join("\n")
+    );
+
+    // A click on the notes half changes nothing about the cursor.
+    let notes_area = hits
+        .regions
+        .iter()
+        .find(|hit| matches!(hit.target, QueueHitTarget::FormNotes(_)))
+        .expect("the page body paints notes hits")
+        .area;
+    assert_eq!(
+        map_board_mouse(&model, &hits, left_click(notes_area.x + 3, notes_area.y)),
+        None,
+        "a notes-half click dispatches nothing"
+    );
+    let after = page_rows(&model);
+    assert!(
+        after.iter().any(|row| row.contains("▸ ▪ charlie step")),
+        "the cursor stays on the clicked item after a notes-half click:\n{}",
+        after.join("\n")
+    );
 }

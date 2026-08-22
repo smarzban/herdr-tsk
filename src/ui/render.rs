@@ -421,6 +421,11 @@ pub enum QueueHitTarget {
     FormNotes(usize),
     /// Shared-form scope row. A click opens the pending scope dropdown, never cycles scope.
     FormScope,
+    /// One painted checklist item row on the open task page, indexed by the item's
+    /// absolute position in the task's checklist (storage order), whatever window
+    /// scroll painted it — the same absolute-index discipline [`Command`] follows.
+    /// A click moves the item cursor onto that item (AC-21): select, never toggle.
+    ChecklistItem(usize),
     /// One painted option in a shared form's scope dropdown, indexed into that form's own
     /// `TaskScope` choices. It cannot name the board selector's all-projects choice.
     FormScopeOption(usize),
@@ -1501,6 +1506,12 @@ fn paint_task_page(
                     width,
                     style_plain(),
                 ),
+            );
+            // Absolute index, so a click resolves to the same item whatever
+            // window the frame is showing (AC-21).
+            hits.push(
+                QueueHitTarget::ChecklistItem(absolute),
+                Rect::new(0, y, width, 1),
             );
         }
         if win.affordance {

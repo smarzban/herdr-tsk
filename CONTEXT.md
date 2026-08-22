@@ -19,5 +19,5 @@ Canonical terms for this repo. No implementation detail.
 - **checklist item**: a single checklist entry: stable identity, one line of text, a done flag. Nothing else.
 - **item done**: an item's checked state. Progress information only; it never implies, drives, or auto-applies a task status change.
 - **toggle**: flip one item's done flag. The only checklist state change that is not a text change.
-- **item cursor**: the task page's checklist-row focus. Inactive on page open; a first bare ↓ activates it, ↑ from the first item deactivates it. While active, bare arrows move it and modifier-protected verbs act on it.
+- **item cursor**: the task page's checklist-row focus. Inactive on page open; a bare ↓ activates it (again after any deactivation), ↑ from the first item deactivates it. While active, bare arrows move it and modifier-protected verbs act on it; a single click on an item row moves it.
 - **item short id**: an unambiguous prefix of an item's stable identity, the way tasks are addressed from the CLI.

@@ -459,6 +459,11 @@ pub fn map_board_mouse(
         }
         BoardInputMode::TaskPage => match hit_at(hits, pos) {
             Some(QueueHitTarget::FormScope) => None,
+            // A click on an item row selects it (AC-21) — the board's click
+            // convention: a click selects, never mutates.
+            Some(QueueHitTarget::ChecklistItem(index)) => {
+                Some(BoardIntent::SelectChecklistItem(index))
+            }
             Some(QueueHitTarget::Verb(index)) => verb_intent(model, index),
             _ => None,
         },

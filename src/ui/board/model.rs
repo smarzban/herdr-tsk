@@ -399,17 +399,16 @@ pub(super) struct ChecklistEditorSave {
 
 /// Page-session checklist state for the task page, never persisted.
 ///
-/// The item cursor lifecycle (spec: resolved decisions): inactive when the page opens; a
-/// first bare ↓ activates it on the first item; ↑ from the first item deactivates it and
-/// returns bare arrows to note scrolling. Activation is deliberately one-shot per page
-/// session — after that ↑-deactivation a bare ↓ scrolls the notes again ("subsequent
-/// bare arrows scroll notes as before activation"); reopening the page re-arms it.
+/// The item cursor lifecycle (spec: resolved decisions, amended 2026-08-22):
+/// inactive when the page opens; a bare ↓ (re-)activates it on the first item —
+/// including after an earlier ↑-deactivation, so activation is never one-shot;
+/// ↑ from the first item deactivates it. While inactive ↑ scrolls the notes and
+/// ↓ re-activates; a click on an item row moves the cursor onto that item
+/// (AC-21). A task with no items never activates a cursor.
 #[derive(Debug, Clone, Default)]
 pub(super) struct ChecklistPageState {
     /// Highlighted item index; `None` = inactive.
     pub(super) cursor: Option<usize>,
-    /// Whether this page session's one activating ↓ has been consumed.
-    pub(super) activation_taken: bool,
     /// First item index the painted window shows; the renderer records how many item
     /// rows it actually laid out in [`Self::window_rows`], the same seam
     /// [`BoardForm::notes_max_scroll`] uses for the notes window.

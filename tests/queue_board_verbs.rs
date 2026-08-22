@@ -2149,8 +2149,10 @@ fn first_bare_down_activates_item_cursor_without_scrolling() {
     );
 }
 
-/// AC-18: Up from the first item deactivates the cursor and returns bare
-/// arrows to note scrolling.
+/// AC-18 (amended): Up from the first item deactivates the cursor, consuming
+/// the press so the notes keep their scroll; while inactive, Up belongs to the
+/// notes (never the cursor). The amended claim that a bare Down re-activates
+/// after this deactivation lives in `down_reactivates_the_cursor_after_deactivation`.
 #[test]
 fn up_from_first_item_deactivates_cursor_and_restores_scroll() {
     let notes = wrapping_notes();
@@ -2196,7 +2198,45 @@ fn up_from_first_item_deactivates_cursor_and_restores_scroll() {
         "the deactivating press is consumed, notes stay put:\n{deactivated}"
     );
 
-    // Bare arrows scroll the notes again.
+    // While inactive, Up is a notes press: it neither activates nor moves the
+    // cursor, and the notes stay pinned at their top row (the scroll clamps at
+    // zero — the same notes arm retreats a scrolled window, which the no-items
+    // page proves directly).
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::PageScrollUp,
+        None,
+        None,
+    )
+    .expect("up while inactive");
+    let still_inactive = rendered_board(&model, 80, 24);
+    assert!(
+        !still_inactive.contains("▸"),
+        "an Up press while inactive must not touch the cursor:\n{still_inactive}"
+    );
+    assert!(
+        still_inactive.contains("L0"),
+        "the notes keep their top row while the scroll is clamped:\n{still_inactive}"
+    );
+}
+
+/// AC-17/AC-18 (amended): after an Up-deactivation, a bare Down re-activates
+/// the cursor on the first item instead of scrolling — activation is
+/// re-activatable, never one-shot.
+#[test]
+fn down_reactivates_the_cursor_after_deactivation() {
+    let notes = wrapping_notes();
+    let (mut domain, mut model, _id) = board_with_checklist(
+        "Reactivation witness",
+        Some(&notes),
+        &["alpha step", "bravo step"],
+    );
+
+    // One painted frame establishes the wrap geometry the notes window uses.
+    rendered_board(&model, 80, 24);
+
+    // Activate, then deactivate with Up from the first item.
     apply_intent(
         &mut domain,
         &mut model,
@@ -2204,15 +2244,72 @@ fn up_from_first_item_deactivates_cursor_and_restores_scroll() {
         None,
         None,
     )
-    .expect("scroll notes");
-    let scrolled = rendered_board(&model, 80, 24);
+    .expect("activate");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::PageScrollUp,
+        None,
+        None,
+    )
+    .expect("deactivate");
+    let inactive = rendered_board(&model, 80, 24);
     assert!(
-        !scrolled.contains("L0") && scrolled.contains("L1"),
-        "after deactivation a bare Down must scroll the notes:\n{scrolled}"
+        !inactive.contains("▸"),
+        "the cursor must be inactive before the re-activating press:\n{inactive}"
+    );
+
+    // While inactive, Up belongs to the notes (amended inactive state): the
+    // cursor stays down and the notes stay at their top row.
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::PageScrollUp,
+        None,
+        None,
+    )
+    .expect("up while inactive");
+    let still_inactive = rendered_board(&model, 80, 24);
+    assert!(
+        !still_inactive.contains("▸"),
+        "an Up press while inactive must not activate the cursor:\n{still_inactive}"
     );
     assert!(
-        !scrolled.contains("▸"),
-        "the cursor stays inactive while notes scroll:\n{scrolled}"
+        still_inactive.contains("L0"),
+        "an Up press while inactive reaches the notes, clamped at their top:\n{still_inactive}"
+    );
+
+    // The amended claim: Down re-activates on the first item, not a scroll.
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::PageScrollDown,
+        None,
+        None,
+    )
+    .expect("re-activate");
+    let reactivated = rendered_board(&model, 80, 24);
+    assert!(
+        reactivated.contains("▸ ▪ alpha step"),
+        "a bare Down after deactivation must re-activate the cursor on the first item:\n{reactivated}"
+    );
+    // The notes window is exactly what it was before the press: the
+    // re-activating press never scrolls (same comparison shape the first
+    // activating press proves itself with).
+    let rows_before: Vec<&str> = still_inactive.lines().collect();
+    let rows_after: Vec<&str> = reactivated.lines().collect();
+    let label_before = rows_before
+        .iter()
+        .position(|row| row.contains("checklist"))
+        .expect("checklist section painted before the press");
+    let label_after = rows_after
+        .iter()
+        .position(|row| row.contains("checklist"))
+        .expect("checklist section painted after the press");
+    assert_eq!(
+        &rows_before[..label_before],
+        &rows_after[..label_after],
+        "the re-activating press must not scroll the notes"
     );
 }
 
