@@ -1320,13 +1320,13 @@ fn failed_item_editor_save() -> (
     assert!(recovery.is_pending());
 
     // The editor is HELD while unresolved (AC-14): the surface stays allocated with
-    // its draft on the section's line. Closing it before the boundary — the failure
-    // this test exists to catch — paints the plain checklist label instead.
+    // its draft on the footer's input line. Closing it before the boundary — the
+    // failure this test exists to catch — paints the plain meta footer instead.
     assert_eq!(model.input_mode(), BoardInputMode::SaveRecovery);
     let held = board_painted(&model);
     assert!(
         held.lines()
-            .any(|row| row.contains("item") && row.contains("zed step")),
+            .any(|row| row.contains("▎") && row.contains("zed step")),
         "the failed save must hold the editor with its draft on the line:\n{held}"
     );
     (domain, model, recovery, id)
@@ -1389,7 +1389,7 @@ fn cancelled_failed_item_editor_save_leaves_no_orphan_edit_mode() {
         "the task page survives the cancelled save:\n{page}"
     );
     assert!(
-        !page.lines().any(|row| row.contains("item")),
+        !page.lines().any(|row| row.contains("▎")),
         "the held editor closed with the cancelled save:\n{page}"
     );
     let texts: Vec<&str> = domain
@@ -1530,7 +1530,7 @@ fn retried_item_editor_save_applies_and_closes() {
     );
     let page = board_painted(&model);
     assert!(
-        !page.lines().any(|row| row.contains("item")),
+        !page.lines().any(|row| row.contains("▎")),
         "the editor line is gone after the retried save:\n{page}"
     );
     assert!(
@@ -1633,7 +1633,7 @@ fn ctrl_enter_refuses_in_place_when_the_bound_task_was_concurrently_soft_deleted
     let held = board_painted(&model);
     assert!(
         held.lines()
-            .any(|row| row.contains("item") && row.contains("zed step")),
+            .any(|row| row.contains("▎") && row.contains("zed step")),
         "the draft survives the refusal on the line:\n{held}"
     );
     let texts: Vec<&str> = domain

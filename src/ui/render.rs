@@ -253,10 +253,11 @@ pub struct ChecklistItemView {
     pub text: String,
 }
 
-/// The checklist section's one-line editor as the page paints it: the draft already
-/// windowed around its cursor at the section's width, the terminal cursor column
-/// inside that window, and the line's own empty-text refusal (AC-13) — a short dim
-/// tail painted beside the label, never the board status row.
+/// The checklist item input as the page paints it on its FOOTER row (AC-25), on the
+/// quick-add line pattern: the draft already windowed around its cursor at the
+/// footer line's width (row width less the two-cell prompt), the terminal cursor
+/// column inside that window, and the line's own empty-text refusal (AC-13) — a
+/// short dim tail painted on the line itself, never the board status row.
 #[derive(Debug, Clone)]
 pub struct ChecklistEditorLine<'a> {
     pub text: String,
@@ -325,7 +326,8 @@ pub enum QueueOverlay<'a> {
         checklist_scroll: usize,
         /// Absolute index of the item the delete verb visibly marked, when armed.
         checklist_marked: Option<usize>,
-        /// The section's one-line add/rename editor, painted on its label row.
+        /// The footer's one-line add/rename item input, painted on the meta
+        /// footer row (AC-25) on the quick-add line pattern.
         checklist_editor: Option<ChecklistEditorLine<'a>>,
         /// Footer: scope · created · updated.
         meta: String,
@@ -1192,8 +1194,7 @@ fn paint_help_overlay(
 /// page the content region halves (AC-24): notes own the top half, the checklist
 /// section the bottom, and each half scrolls within its own window — the notes scroll
 /// bound and the item cursor's scroll window both key off this layout. Zero required
-/// rows (no items, no open editor) reserves nothing: such pages keep the exact
-/// pre-checklist layout.
+/// rows (no items) reserves nothing: such pages keep the exact pre-checklist layout.
 pub struct TaskPageLayout {
     /// First row the page must not paint (the lowest chrome row, or the frame height).
     pub bottom: u16,
@@ -1212,23 +1213,21 @@ pub struct TaskPageLayout {
 /// What the page's checklist section asks of the layout (AC-24).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChecklistSection {
-    /// No items and no editor: no section paints, notes keep the full content region.
+    /// No items: no section paints, notes keep the full content region. The item
+    /// editor no longer reserves a section row — since T-7 it paints on the page
+    /// footer, so an open line over an empty checklist is still no section.
     None,
-    /// The one-line editor open on an empty checklist: its label row alone.
-    EditorLine,
     /// At least one item: the content region halves and the section owns the bottom
     /// half, however many items there are — the `+N more ↓` affordance names the
     /// tail the half cannot show.
     Items,
 }
 
-/// Classify the page's checklist section from its payload facts. Items outrank the
-/// editor: an open line over existing items paints inside the halved section.
-pub fn checklist_section(items: usize, editor_open: bool) -> ChecklistSection {
+/// Classify the page's checklist section from its payload facts: items alone
+/// decide it.
+pub fn checklist_section(items: usize) -> ChecklistSection {
     if items > 0 {
         ChecklistSection::Items
-    } else if editor_open {
-        ChecklistSection::EditorLine
     } else {
         ChecklistSection::None
     }
@@ -1318,7 +1317,6 @@ pub fn task_page_layout(
     let cap = content_rows.saturating_sub(notes_floor.min(content_rows));
     let checklist_rows = match section {
         ChecklistSection::None => 0,
-        ChecklistSection::EditorLine => 1u16.min(cap),
         ChecklistSection::Items => (content_rows / 2).max(1).min(cap),
     };
     let checklist_y = content_end.saturating_sub(checklist_rows);
@@ -1364,7 +1362,7 @@ fn paint_task_page(
     // used, so both sides of the payload/paint seam budget the same notes floor.
     let lay = task_page_layout(
         geo,
-        checklist_section(checklist_items.len(), checklist_editor.is_some()),
+        checklist_section(checklist_items.len()),
         u16::from(focus == Some(CaptureField::Notes)),
     );
     if lay.bottom == 0 {
@@ -1453,57 +1451,22 @@ fn paint_task_page(
     // Checklist section: the bottom half of the content region, its label row the
     // divider between the halves (AC-24). The label names the done/total counts
     // (derived from the same item views, so the label cannot drift from the states
-    // painted beside it) — except while the one-line editor is open, when the editor
-    // owns the label row. Items stack from the top of the half, directly under the
+    // painted beside it). Items stack from the top of the half, directly under the
     // label (`checklist_scroll` windows them): the cursor's row is marked by a `▸`
     // gutter, a delete-marked row by `✗` in place of its state glyph, and hidden
     // items are named by a dim `+N more ↓` row on the half's last row, mirroring the
-    // notes divider's style. Mono only. An empty checklist with no editor paints no
-    // block at all: `checklist_rows` is zero and the layout above kept the
-    // pre-checklist page whole.
+    // notes divider's style. Mono only. An empty checklist paints no block at all:
+    // `checklist_rows` is zero and the layout above kept the pre-checklist page
+    // whole — the item input lives on the footer row, not here (AC-25).
     if lay.checklist_rows > 0 {
-        if let Some(editor) = checklist_editor {
-            const EDITOR_LABEL: &str = "  item  ";
-            let label_w = EDITOR_LABEL.len() as u16;
-            let avail = (width as usize).saturating_sub(EDITOR_LABEL.len() + 1);
-            let shown = present_line(&editor.text, avail);
-            let mut spans = vec![Span::styled(format!("{EDITOR_LABEL}{shown}"), style_bold())];
-            if let Some(refusal) = editor.refusal {
-                // AC-13: the line owns its refusal. It paints as a dim tail on the
-                // editor line itself — the refusal only ever sets on a draft that is
-                // empty after trim, so it never crowds out real text.
-                let room = avail.saturating_sub(display_width(&shown) + 1);
-                spans.push(Span::styled(
-                    format!(" {}", present_line(refusal, room)),
-                    style_dim(),
-                ));
-            }
-            put_line(
-                frame,
-                lay.checklist_y,
-                width,
-                bound_line(Line::from(spans), width as usize),
-            );
-            place_edit_cursor(
-                frame,
-                Rect::new(
-                    label_w.min(width.saturating_sub(1)),
-                    lay.checklist_y,
-                    (avail as u16).min(width),
-                    1,
-                ),
-                editor.cursor_col.min(avail as u16),
-            );
-        } else {
-            let done = checklist_items.iter().filter(|item| item.done).count();
-            let label = format!("  checklist {}/{}", done, checklist_items.len());
-            put_line(
-                frame,
-                lay.checklist_y,
-                width,
-                paint_bounded_line(&label, width, style_dim()),
-            );
-        }
+        let done = checklist_items.iter().filter(|item| item.done).count();
+        let label = format!("  checklist {}/{}", done, checklist_items.len());
+        put_line(
+            frame,
+            lay.checklist_y,
+            width,
+            paint_bounded_line(&label, width, style_dim()),
+        );
         let win = checklist_window(
             checklist_items.len(),
             checklist_scroll,
@@ -1561,17 +1524,36 @@ fn paint_task_page(
         }
     }
 
-    // Meta footer: scope · created · updated. The whole row is the scope control.
+    // Meta footer: scope · created · updated. The whole row is the scope control —
+    // except while the item input is open (AC-25): the footer row is then the
+    // quick-add-pattern input line (prompt + mono line + cursor, its own refusal
+    // tail), and the scope control is not painted, so it offers no click either.
     if let Some(y) = lay.meta_y {
-        put_line(
-            frame,
-            y,
-            width,
-            paint_bounded_line(&format!("  {meta}"), width, style_dim()),
-        );
-        hits.push(QueueHitTarget::FormScope, Rect::new(0, y, width, 1));
+        if let Some(editor) = checklist_editor {
+            paint_prompt_input_line(
+                frame,
+                y,
+                width,
+                &editor.text,
+                ITEM_INPUT_PLACEHOLDER,
+                editor.cursor_col,
+                editor.refusal,
+            );
+        } else {
+            put_line(
+                frame,
+                y,
+                width,
+                paint_bounded_line(&format!("  {meta}"), width, style_dim()),
+            );
+            hits.push(QueueHitTarget::FormScope, Rect::new(0, y, width, 1));
+        }
     }
 }
+
+/// What the footer item input paints while its draft is empty: the line's dim
+/// placeholder, mirroring the quick-add bar's hint-on-empty convention.
+const ITEM_INPUT_PLACEHOLDER: &str = "item…   enter save · ctrl+enter save+next · esc cancel";
 
 /// The page's scope chooser stacks its options directly above the scope footer (left,
 /// indented like the footer), never in the selector's corner: the footer is the control
@@ -1924,29 +1906,58 @@ fn paint_quick_add_status(
     title: &str,
     title_cursor: u16,
 ) {
+    paint_prompt_input_line(
+        frame,
+        row,
+        width,
+        title,
+        "title…   !p global · !p name project · tab details",
+        title_cursor,
+        None,
+    );
+}
+
+/// The one-line input pattern the board's quick-add bar established (AC-25 reuses
+/// it for the task page's footer item input): a bold prompt glyph, the mono body —
+/// dim placeholder while the draft is empty, bold text otherwise — the surface's
+/// own dim refusal tail painted on the line itself, and the terminal cursor just
+/// past the prompt. `body` must already be windowed around its cursor at
+/// `width - 2` cells, exactly as the quick-add line hands its title over.
+pub(crate) fn paint_prompt_input_line(
+    frame: &mut Frame<'_>,
+    row: u16,
+    width: u16,
+    body: &str,
+    placeholder: &str,
+    cursor_col: u16,
+    refusal: Option<&str>,
+) {
     let prefix = "▎ ";
     let prefix_width = display_width(prefix) as u16;
-    let body = if title.is_empty() {
-        "title…   !p global · !p name project · tab details"
-    } else {
-        title
-    };
-    let style = if title.is_empty() {
-        style_dim()
-    } else {
-        style_bold()
-    };
-    let line = bound_line(
-        Line::from(vec![
-            Span::styled(prefix, style_bold()),
-            Span::styled(
-                present_line(body, width.saturating_sub(prefix_width) as usize),
-                style,
-            ),
-        ]),
-        width as usize,
+    let avail = width.saturating_sub(prefix_width) as usize;
+    let empty = body.is_empty();
+    let shown = present_line(if empty { placeholder } else { body }, avail);
+    let style = if empty { style_dim() } else { style_bold() };
+    let mut spans = vec![
+        Span::styled(prefix, style_bold()),
+        Span::styled(shown.clone(), style),
+    ];
+    if let Some(refusal) = refusal {
+        // AC-13: the line owns its refusal. It paints as a dim tail on the input
+        // line itself — the refusal only ever sets on a draft that is empty after
+        // trim, so it never crowds out real text.
+        let room = avail.saturating_sub(display_width(&shown) + 1);
+        spans.push(Span::styled(
+            format!(" {}", present_line(refusal, room)),
+            style_dim(),
+        ));
+    }
+    put_line(
+        frame,
+        row,
+        width,
+        bound_line(Line::from(spans), width as usize),
     );
-    put_line(frame, row, width, line);
     place_edit_cursor(
         frame,
         Rect::new(
@@ -1955,7 +1966,7 @@ fn paint_quick_add_status(
             width.saturating_sub(prefix_width),
             1,
         ),
-        title_cursor,
+        cursor_col,
     );
 }
 

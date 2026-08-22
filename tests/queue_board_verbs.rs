@@ -1954,8 +1954,8 @@ fn rename_verb_targets_item_or_title_by_cursor() {
     assert!(
         frame
             .lines()
-            .any(|row| row.contains("item") && row.contains("alpha step")),
-        "the section's line editor must paint seeded with the item's text:\n{frame}"
+            .any(|row| row.contains("▎") && row.contains("alpha step")),
+        "the footer item input must paint seeded with the item's text:\n{frame}"
     );
 
     // Edit the draft, then Enter applies the rename to the item, not the title.
@@ -2279,8 +2279,8 @@ fn add_verb_opens_editor_enter_applies_esc_cancels() {
     );
     let frame = rendered_board(&model, 80, 24);
     assert!(
-        frame.lines().any(|row| row.contains("item")),
-        "the empty editor must paint on the section's line:\n{frame}"
+        frame.lines().any(|row| row.contains("▎")),
+        "the empty editor must paint its prompt on the footer line:\n{frame}"
     );
 
     for ch in "zed step".chars() {
@@ -2342,8 +2342,8 @@ fn add_verb_opens_editor_enter_applies_esc_cancels() {
     assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
     let closed = rendered_board(&model, 80, 24);
     assert!(
-        !closed.lines().any(|row| row.contains("item")),
-        "the editor line is gone on close:\n{closed}"
+        !closed.lines().any(|row| row.contains("▎")),
+        "the footer input line is gone on close:\n{closed}"
     );
 }
 
@@ -2391,8 +2391,8 @@ fn item_editor_enter_saves_ctrl_enter_reopens_esc_cancels() {
     );
     let reopened = rendered_board(&model, 80, 24);
     assert!(
-        reopened.lines().any(|row| row.contains("item")),
-        "the reopened line paints on the section:\n{reopened}"
+        reopened.lines().any(|row| row.contains("▎")),
+        "the reopened line paints its prompt on the footer:\n{reopened}"
     );
 
     // The reopened line is empty: the second item is exactly what is typed next.
@@ -2514,7 +2514,7 @@ fn rename_mode_ctrl_enter_saves_and_closes() {
     );
     let closed = rendered_board(&model, 80, 24);
     assert!(
-        !closed.lines().any(|row| row.contains("item")),
+        !closed.lines().any(|row| row.contains("▎")),
         "no reopened line in rename mode:\n{closed}"
     );
 }
@@ -2557,7 +2557,7 @@ fn empty_item_text_refusal_paints_on_line_and_clears_on_close() {
     assert!(
         refused
             .lines()
-            .any(|row| row.contains("item") && row.contains("text required")),
+            .any(|row| row.contains("▎") && row.contains("text required")),
         "the refusal paints on the editor line itself:\n{refused}"
     );
     assert_eq!(
@@ -2584,7 +2584,7 @@ fn empty_item_text_refusal_paints_on_line_and_clears_on_close() {
     assert!(
         whitespace
             .lines()
-            .any(|row| row.contains("item") && row.contains("text required")),
+            .any(|row| row.contains("▎") && row.contains("text required")),
         "whitespace-only text paints the same refusal:\n{whitespace}"
     );
 
@@ -2639,4 +2639,283 @@ fn empty_item_text_refusal_paints_on_line_and_clears_on_close() {
         2,
         "the valid text after a refusal still saves"
     );
+}
+
+/// T-7 (AC-25): the item add/rename input paints in the page's FOOTER row on the
+/// quick-add line pattern — prompt glyph + mono line — never inside the checklist
+/// section; Enter/Ctrl+Enter/Esc semantics hold through the footer surface, the
+/// line owns its empty-text refusal there, and nothing leaks to the board status
+/// message.
+#[test]
+fn item_input_uses_the_footer_quick_add_line() {
+    let (mut domain, mut model, id) = board_with_checklist("Footer witness", None, &["alpha step"]);
+
+    // The footer row is the row the closed page paints its scope/meta footer on.
+    let closed = rendered_board(&model, 80, 24);
+    let closed_rows: Vec<&str> = closed.lines().collect();
+    let footer_row = closed_rows
+        .iter()
+        .position(|row| row.contains("created"))
+        .expect("the closed page paints its meta footer");
+
+    // The add verb opens the line in the FOOTER row: quick-add pattern (prompt +
+    // line), the meta footer hidden while the line is up.
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::BeginAddChecklistItem,
+        None,
+        None,
+    )
+    .expect("open add editor");
+    for ch in "bravo step".chars() {
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::EditInsert(ch),
+            None,
+            None,
+        )
+        .expect("type");
+    }
+    let open = rendered_board(&model, 80, 24);
+    let open_rows: Vec<&str> = open.lines().collect();
+    assert!(
+        open_rows[footer_row].contains("▎") && open_rows[footer_row].contains("bravo step"),
+        "the input line must paint on the footer row with the quick-add prompt pattern:\n{open}"
+    );
+    assert!(
+        !open_rows[footer_row].contains("created"),
+        "the footer row is the input while the line is up:\n{open}"
+    );
+    // Not in the checklist section: its label row keeps the plain counts, and no
+    // section row carries the prompt or the draft.
+    let label_row = open_rows
+        .iter()
+        .position(|row| row.contains("checklist 0/1"))
+        .expect("the section label still paints its counts");
+    assert_ne!(
+        label_row, footer_row,
+        "the editor line must not paint on the section's label row"
+    );
+    assert!(
+        !open_rows[label_row].contains("▎") && !open_rows[label_row].contains("bravo step"),
+        "the editor must not paint inside the checklist section:\n{open}"
+    );
+
+    // Enter saves and closes through the footer surface.
+    let enter = map_key(model.input_mode(), press(KeyCode::Enter)).expect("enter");
+    let outcome = apply_intent(&mut domain, &mut model, enter, None, None).expect("save");
+    assert_eq!(outcome, IntentOutcome::Persist);
+    model.sync_from_domain(&domain);
+    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+    assert_eq!(
+        domain.get(id).expect("task").checklist.len(),
+        2,
+        "Enter appends through the footer line"
+    );
+    let saved = rendered_board(&model, 80, 24);
+    let saved_rows: Vec<&str> = saved.lines().collect();
+    assert!(
+        !saved_rows.iter().any(|row| row.contains("▎")),
+        "the footer line closes on save:\n{saved}"
+    );
+    assert!(
+        saved_rows[footer_row].contains("created"),
+        "the meta footer returns when the line closes:\n{saved}"
+    );
+
+    // Ctrl+Enter saves and reopens the line empty in add mode, on the footer.
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::BeginAddChecklistItem,
+        None,
+        None,
+    )
+    .expect("reopen add editor");
+    for ch in "charlie step".chars() {
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::EditInsert(ch),
+            None,
+            None,
+        )
+        .expect("type second item");
+    }
+    let ctrl_enter = map_key(
+        model.input_mode(),
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL),
+    )
+    .expect("ctrl+enter maps in the item editor");
+    let outcome = apply_intent(&mut domain, &mut model, ctrl_enter, None, None)
+        .expect("save and reopen the line");
+    assert_eq!(outcome, IntentOutcome::Persist);
+    model.sync_from_domain(&domain);
+    assert_eq!(
+        model.input_mode(),
+        BoardInputMode::EditChecklistItem,
+        "Ctrl+Enter in add mode reopens the footer line for the next item"
+    );
+    let reopened = rendered_board(&model, 80, 24);
+    let reopened_rows: Vec<&str> = reopened.lines().collect();
+    assert!(
+        reopened_rows[footer_row].contains("▎") && !reopened_rows[footer_row].contains("charlie"),
+        "the reopened footer line is empty:\n{reopened}"
+    );
+
+    // Esc cancels: the draft is discarded, the line closes, nothing is appended.
+    for ch in "junk".chars() {
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::EditInsert(ch),
+            None,
+            None,
+        )
+        .expect("type junk");
+    }
+    let esc = map_key(model.input_mode(), press(KeyCode::Esc)).expect("esc");
+    let outcome = apply_intent(&mut domain, &mut model, esc, None, None).expect("cancel");
+    assert_eq!(outcome, IntentOutcome::None);
+    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+    assert_eq!(
+        domain.get(id).expect("task").checklist.len(),
+        3,
+        "Esc appends nothing"
+    );
+
+    // The empty-text refusal paints on the footer line itself, never the board
+    // status message, and clears when the line closes.
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::BeginAddChecklistItem,
+        None,
+        None,
+    )
+    .expect("reopen add editor");
+    let enter = map_key(model.input_mode(), press(KeyCode::Enter)).expect("enter");
+    let outcome = apply_intent(&mut domain, &mut model, enter, None, None).expect("refuse");
+    assert_eq!(outcome, IntentOutcome::None);
+    assert_eq!(model.input_mode(), BoardInputMode::EditChecklistItem);
+    assert_eq!(
+        model.message(),
+        None,
+        "the refusal must not leak to the board status message"
+    );
+    let refused = rendered_board(&model, 80, 24);
+    let refused_rows: Vec<&str> = refused.lines().collect();
+    assert!(
+        refused_rows[footer_row].contains("▎")
+            && refused_rows[footer_row].contains("text required"),
+        "the refusal paints on the footer line itself:\n{refused}"
+    );
+    let esc = map_key(model.input_mode(), press(KeyCode::Esc)).expect("esc");
+    apply_intent(&mut domain, &mut model, esc, None, None).expect("close the line");
+    assert_eq!(
+        model.message(),
+        None,
+        "closing the line leaves no message behind"
+    );
+    let shut = rendered_board(&model, 80, 24);
+    assert!(
+        !shut.contains("text required") && !shut.contains("▎"),
+        "the refusal and the line clear on close:\n{shut}"
+    );
+    assert_eq!(
+        domain.get(id).expect("task").checklist.len(),
+        3,
+        "the refused Enter appends nothing"
+    );
+}
+
+/// T-7 (AC-23): the first delete-verb press arms the visible mark AND paints the
+/// press-again hint in the footer's message slot; any intervening key clears both;
+/// the second press with nothing between removes the item and the hint goes with
+/// the mark.
+#[test]
+fn delete_mark_shows_press_again_footer_message() {
+    let (mut domain, mut model, id) =
+        board_with_checklist("Hint witness", None, &["alpha step", "bravo step"]);
+
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::PageScrollDown,
+        None,
+        None,
+    )
+    .expect("activate cursor");
+    let delete = map_key(BoardInputMode::TaskPage, alt(KeyCode::Char('x'))).expect("alt+x");
+    assert_eq!(delete, BoardIntent::SoftDelete);
+
+    // First press: the mark is visible AND the footer hint is painted.
+    let outcome =
+        apply_intent(&mut domain, &mut model, delete.clone(), None, None).expect("mark item");
+    assert_eq!(outcome, IntentOutcome::None);
+    let marked = rendered_board(&model, 80, 24);
+    assert!(
+        marked.contains("✗ alpha step"),
+        "the marked item must stay visible:\n{marked}"
+    );
+    assert!(
+        marked.contains("press alt+x again to remove"),
+        "the footer must prompt the second press while the mark is armed:\n{marked}"
+    );
+    assert_eq!(
+        model.message().expect("hint message"),
+        "press alt+x again to remove"
+    );
+
+    // An intervening key clears the mark AND the hint.
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::PageScrollDown,
+        None,
+        None,
+    )
+    .expect("intervening key");
+    let cleared = rendered_board(&model, 80, 24);
+    assert!(!cleared.contains("✗"), "the mark clears:\n{cleared}");
+    assert!(
+        !cleared.contains("again to remove"),
+        "the hint clears with the mark:\n{cleared}"
+    );
+    assert_eq!(model.message(), None);
+    assert_eq!(
+        domain.get(id).expect("task").checklist.len(),
+        2,
+        "clearing the mark removes nothing"
+    );
+
+    // Second press with nothing between: the item is removed, the hint is gone.
+    apply_intent(&mut domain, &mut model, delete.clone(), None, None).expect("mark again");
+    let outcome = apply_intent(&mut domain, &mut model, delete, None, None).expect("remove item");
+    assert_eq!(outcome, IntentOutcome::Persist);
+    let texts: Vec<&str> = domain
+        .get(id)
+        .expect("task")
+        .checklist
+        .iter()
+        .map(|item| item.text.as_str())
+        .collect();
+    assert_eq!(
+        texts,
+        vec!["alpha step"],
+        "the second press removes the marked item (the intervening key moved the \
+         cursor, and the re-mark follows it)"
+    );
+    let removed = rendered_board(&model, 80, 24);
+    assert!(
+        !removed.contains("✗"),
+        "no mark survives the removal:\n{removed}"
+    );
+    assert!(
+        !removed.contains("again to remove"),
+        "the hint goes with the mark:\n{removed}"
+    );
+    assert_eq!(model.message(), None);
 }

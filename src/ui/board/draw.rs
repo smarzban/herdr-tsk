@@ -43,7 +43,7 @@ pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
         None
     };
     if let Some(task) = page_task {
-        let mut items = Vec::with_capacity(5);
+        let mut items = Vec::with_capacity(6);
         items.push(VerbEntry {
             key: "e",
             label: "edit",
@@ -82,6 +82,16 @@ pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
             key: "esc",
             label: "close",
         });
+        // AC-22: the footer verb bar lists the item-add verb while the page's task
+        // has at least one item. Last, like the board's capture entry, so the
+        // compact budget keeps the established verbs; the bar's prefix convention
+        // implies the modifier, exactly as for every other mutating key.
+        if !task.checklist.is_empty() {
+            items.push(VerbEntry {
+                key: "a",
+                label: "item",
+            });
+        }
         return items;
     }
 
@@ -167,10 +177,11 @@ fn build_task_page_overlay<'a>(
     let checklist_items = bound_task
         .map(super::model::checklist_item_views)
         .unwrap_or_default();
-    // The one-line item editor's draft, windowed around its cursor at the section's
-    // width. Its label row (`  item  `) plus one trailing cell bound the window.
+    // The footer item input's draft, windowed around its cursor at the footer
+    // line's width — the quick-add line's budget: the row less the two-cell `▎ `
+    // prompt the painter puts in front (AC-25).
     let checklist_editor = form.checklist.editor.as_ref().map(|editor| {
-        let avail = (geo.row_width as usize).saturating_sub("  item  ".len() + 1);
+        let avail = (geo.row_width as usize).saturating_sub(2);
         let (text, cursor_col) = escaped_line_window(&editor.buffer, avail);
         crate::ui::render::ChecklistEditorLine {
             text,
@@ -180,10 +191,11 @@ fn build_task_page_overlay<'a>(
     });
     // A notes edit always keeps one row: the layout reserves it (the section caps
     // around it), so an active edit can never be scrolled/clamped out of the frame
-    // entirely.
+    // entirely. The item editor no longer sizes the section: it paints on the
+    // footer row, so items alone classify the section (AC-25).
     let lay = render::task_page_layout(
         geo,
-        render::checklist_section(checklist_items.len(), checklist_editor.is_some()),
+        render::checklist_section(checklist_items.len()),
         u16::from(model.input_mode() == BoardInputMode::EditNotes),
     );
     // Record the item rows this frame's window actually shows, so the next cursor-move

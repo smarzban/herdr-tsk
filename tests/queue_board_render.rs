@@ -1905,6 +1905,71 @@ fn palette_golden_scene_commands_are_bound_to_the_real_m1_catalog_and_exclude_di
     );
 }
 
+/// T-7 (AC-22): the task page's footer verb bar lists the item-add verb while the
+/// bound task has checklist items (view mode). A task with no items keeps the
+/// pre-T-7 verb bar exactly: the with-items bar is the without-items bar plus the
+/// one item-add entry — modifier implied by the bar's prefix convention — and
+/// nothing else. The full listing is asserted at a width the whole bar fits; at
+/// the 78-column standard floor the bar's existing width clipping may take the
+/// entry's label tail but never its key chord.
+#[test]
+fn footer_lists_the_item_add_verb() {
+    let page_verb_row_with = |items: &[&str], width: u16| -> String {
+        let mut domain = DomainState::new();
+        let id = domain
+            .create(
+                "Verb bar witness",
+                Some("the notes body".into()),
+                TaskScope::Global,
+                None,
+                None,
+                ProvenanceOrigin::Manual,
+            )
+            .expect("create task");
+        for text in items {
+            domain.add_checklist_item(id, text).expect("add item");
+        }
+        let mut model = BoardModel::from_domain(&domain, None);
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::OpenTaskPage,
+            None,
+            None,
+        )
+        .expect("open task page");
+        let rows = board_rows(&model, width, 24);
+        let verb_row = tier::resolve(width, 24).verb_row.expect("verb row");
+        trimmed(&rows[verb_row as usize])
+    };
+
+    let with = page_verb_row_with(&["only step"], 100);
+    let without = page_verb_row_with(&[], 100);
+
+    assert!(
+        with.contains("alt+a item"),
+        "view mode + items must list the item-add verb (modifier by the bar's convention):\n{with}"
+    );
+    assert!(
+        !without.contains("item"),
+        "view mode + no items keeps the pre-T-7 verb bar:\n{without}"
+    );
+    let suffix = " · alt+a item";
+    let stripped = with
+        .strip_suffix(suffix)
+        .unwrap_or_else(|| panic!("the with-items bar must end in the item-add entry:\n{with}"));
+    assert_eq!(
+        stripped, without,
+        "the item-add verb must be the footer verb bar's only change"
+    );
+
+    let floor = page_verb_row_with(&["only step"], 78);
+    assert!(
+        floor.contains("alt+a"),
+        "the item-add key chord must stay listed at the standard width floor:\n{floor}"
+    );
+}
+
 #[test]
 fn all_golden_frames_pass_no_color_sgr_scan() {
     let dir = golden_fixtures_dir();

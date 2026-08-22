@@ -142,6 +142,10 @@ pub fn apply_intent(
         if let Some(form) = model.form.as_mut() {
             form.checklist.delete_mark = None;
         }
+        // The press-again hint lives exactly as long as the mark it explains
+        // (AC-23): the intervening intent that disarms the mark takes the footer
+        // message down with it, before whatever the intent itself has to report.
+        model.clear_message();
     }
     let notice_before = model.delete_notice().map(str::to_string);
     let mutating = board_intent_may_persist(&intent);
@@ -508,8 +512,8 @@ fn apply_board_intent(
         }
         BoardIntent::BeginAddChecklistItem => {
             model.close_popup();
-            // The item editor lives on the task page's checklist section; from any other
-            // surface there is no section line to paint it on, so the verb is inert.
+            // The item input lives on the task page's footer row; from any other
+            // surface there is no footer line to paint it on, so the verb is inert.
             if model.form.as_ref().is_some_and(|form| form.is_task()) {
                 open_checklist_editor(model, "", None);
             }
@@ -524,7 +528,7 @@ fn apply_board_intent(
                 _ => unreachable!("matched task-form entry intent"),
             };
             // Contextual rename (AC-10): on the page with the item cursor active, `e`
-            // opens the checklist section's one-line editor seeded with the highlighted
+            // opens the footer's one-line item input seeded with the highlighted
             // item instead of the title field.
             if intent == BoardIntent::BeginEditTitle {
                 if let Some((task_id, item_id)) = cursor_item(domain, model) {
@@ -1445,6 +1449,14 @@ fn page_item_delete(
             .expect("task form checked above")
             .checklist
             .delete_mark = Some(index);
+        // AC-23: the footer's message slot carries the press-again hint for exactly
+        // as long as the mark is armed — the removal press and every intervening
+        // intent clear it with the mark. The verb's own modifier names the key, so
+        // the hint stays truthful when the palette flips the chord.
+        model.set_message(format!(
+            "press {}x again to remove",
+            model.verb_modifier.prefix()
+        ));
         return Ok(PageItemDelete::Marked);
     }
     domain.remove_checklist_item(task_id, item_id)?;
@@ -1469,7 +1481,7 @@ fn page_item_delete(
     Ok(PageItemDelete::Removed)
 }
 
-/// Open the checklist section's one-line editor: seeded with `text`, renaming
+/// Open the page footer's one-line item input: seeded with `text`, renaming
 /// `item` when given, adding when `None`.
 fn open_checklist_editor(model: &mut BoardModel, text: &str, rename: Option<Uuid>) {
     if let Some(form) = model.form.as_mut().filter(|form| form.is_task()) {

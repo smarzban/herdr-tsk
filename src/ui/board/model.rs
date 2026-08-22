@@ -45,13 +45,14 @@ pub enum BoardInputMode {
     /// click does NOT: field regions are inert in this state, and only move focus once one
     /// of the edit states is already open (see the mouse mapper's form-field arms).
     TaskPage,
-    /// The checklist section's one-line add/rename editor owns input. It is a Title-like
-    /// single-line draft ([`crate::ui::edit::EditBuffer`]) carried on the page form's
-    /// checklist state, not one of the three task-form fields: Enter applies the domain
-    /// command (Ctrl+Enter adds and reopens the line empty), Esc cancels. The applied
-    /// line and this mode outlive the save call — only the persistence boundary's
-    /// confirmed sync closes (or reopens) the line, and a failed save holds it until
-    /// Retry/Cancel resolve; every close returns to [`BoardInputMode::TaskPage`].
+    /// The page footer's one-line add/rename item input owns input (AC-25). It is a
+    /// Title-like single-line draft ([`crate::ui::edit::EditBuffer`]) carried on the
+    /// page form's checklist state, not one of the three task-form fields: Enter
+    /// applies the domain command (Ctrl+Enter adds and reopens the line empty), Esc
+    /// cancels. The applied line and this mode outlive the save call — only the
+    /// persistence boundary's confirmed sync closes (or reopens) the line, and a
+    /// failed save holds it until Retry/Cancel resolve; every close returns to
+    /// [`BoardInputMode::TaskPage`].
     EditChecklistItem,
     /// Modal selection over the session project-scope options.
     ProjectPicker,
@@ -372,7 +373,8 @@ impl BoardForm {
     }
 }
 
-/// The one-line add/rename editor on the checklist section (page-session only).
+/// The one-line add/rename item input on the task page's footer row
+/// (page-session only).
 ///
 /// `rename` names the item being edited; `None` is an add (the buffer starts empty).
 /// `refusal` is the line's own empty-text refusal (AC-13): painted on the line,
