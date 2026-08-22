@@ -1798,10 +1798,12 @@ fn arrow_keys_move_item_cursor_and_drive_scroll() {
     let _ = domain.get(id).expect("task");
 
     // Fresh page: no cursor yet, the window truncates 30 items, the affordance
-    // names the hidden tail, and the items past the fold are absent.
+    // names the hidden tail, and the items past the fold are absent. T-6 halved the
+    // content region: the checklist half at 80x24 is 8 rows (label + 7 item rows,
+    // the last of which the affordance takes), so 6 items paint and 23 hide below.
     let frame = rendered_board(&model, 80, 24);
     assert!(
-        frame.contains("+14 more"),
+        frame.contains("+23 more"),
         "the truncated section must paint the hidden-items affordance:\n{frame}"
     );
     assert!(frame.contains("step 01"), "first item visible:\n{frame}");

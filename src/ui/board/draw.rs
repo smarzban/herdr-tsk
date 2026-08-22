@@ -160,9 +160,10 @@ fn build_task_page_overlay<'a>(
     let bound_task = form
         .task_id()
         .and_then(|id| model.tasks.iter().find(|task| task.id == id));
-    // The section consumes the extracted item views, never the raw storage; the layout
-    // below shrinks the notes window by the same block, so the existing notes scroll
-    // bound (recorded from `lay.notes_rows`) keeps a long checklist + notes scrolling.
+    // The section consumes the extracted item views, never the raw storage; with
+    // items the layout halves the content region (AC-24), so the notes window —
+    // and with it the notes scroll bound recorded below — keys off the same halved
+    // budget the painter lays out.
     let checklist_items = bound_task
         .map(super::model::checklist_item_views)
         .unwrap_or_default();
@@ -177,11 +178,12 @@ fn build_task_page_overlay<'a>(
             refusal: editor.refusal.as_deref(),
         }
     });
-    // A notes edit always keeps one row: the layout reserves it (checklist caps around
-    // it), so an active edit can never be scrolled/clamped out of the frame entirely.
+    // A notes edit always keeps one row: the layout reserves it (the section caps
+    // around it), so an active edit can never be scrolled/clamped out of the frame
+    // entirely.
     let lay = render::task_page_layout(
         geo,
-        render::checklist_section_rows(checklist_items.len(), checklist_editor.is_some()),
+        render::checklist_section(checklist_items.len(), checklist_editor.is_some()),
         u16::from(model.input_mode() == BoardInputMode::EditNotes),
     );
     // Record the item rows this frame's window actually shows, so the next cursor-move

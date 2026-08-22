@@ -1188,11 +1188,12 @@ fn paint_help_overlay(
 
 /// The task page's full-height geometry: row 0 down to (not including) the lowest bottom
 /// chrome row. Rows are budgeted title · divider · notes · checklist · meta footer,
-/// dropping the divider and then the meta first as the pane shrinks. The checklist block
-/// (label + one row per item) is anchored directly above the meta footer and takes its
-/// rows out of the notes window, so a long checklist plus notes scrolls through the
-/// existing notes scroll bound rather than overflowing. Zero required rows (no items,
-/// no open editor) reserves nothing: such pages keep the exact pre-checklist layout.
+/// dropping the divider and then the meta first as the pane shrinks. With items on the
+/// page the content region halves (AC-24): notes own the top half, the checklist
+/// section the bottom, and each half scrolls within its own window — the notes scroll
+/// bound and the item cursor's scroll window both key off this layout. Zero required
+/// rows (no items, no open editor) reserves nothing: such pages keep the exact
+/// pre-checklist layout.
 pub struct TaskPageLayout {
     /// First row the page must not paint (the lowest chrome row, or the frame height).
     pub bottom: u16,
@@ -1208,15 +1209,28 @@ pub struct TaskPageLayout {
     pub meta_y: Option<u16>,
 }
 
-/// Rows of checklist section the page must reserve: label + one row per item when a
-/// section paints; an open item editor keeps the label row alive even with no items (it
-/// is the line the editor paints on); zero when neither, so an empty checklist keeps the
-/// exact pre-checklist layout.
-pub fn checklist_section_rows(items: usize, editor_open: bool) -> usize {
-    if items == 0 && !editor_open {
-        0
+/// What the page's checklist section asks of the layout (AC-24).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChecklistSection {
+    /// No items and no editor: no section paints, notes keep the full content region.
+    None,
+    /// The one-line editor open on an empty checklist: its label row alone.
+    EditorLine,
+    /// At least one item: the content region halves and the section owns the bottom
+    /// half, however many items there are — the `+N more ↓` affordance names the
+    /// tail the half cannot show.
+    Items,
+}
+
+/// Classify the page's checklist section from its payload facts. Items outrank the
+/// editor: an open line over existing items paints inside the halved section.
+pub fn checklist_section(items: usize, editor_open: bool) -> ChecklistSection {
+    if items > 0 {
+        ChecklistSection::Items
+    } else if editor_open {
+        ChecklistSection::EditorLine
     } else {
-        1 + items
+        ChecklistSection::None
     }
 }
 
@@ -1262,16 +1276,17 @@ pub fn checklist_window(total: usize, scroll: usize, avail: u16) -> ChecklistWin
     }
 }
 
-/// Build the task page's row budget. `checklist_rows_needed` (see
-/// [`checklist_section_rows`]) sizes the checklist block (label + one row per item,
-/// anchored directly above the meta footer); `notes_floor` is the
-/// minimum number of notes rows the page must keep visible. Callers pass 1 while a
-/// notes edit is active -- an edit that paints no row is a blind edit -- and 0
-/// otherwise, and both layout callers must agree, because the payload builder windows
-/// the notes draft against the same budget the painter lays out.
+/// Build the task page's row budget. `section` (see [`checklist_section`]) sizes the
+/// checklist block: with items the block is the bottom half of the content region
+/// (`content_rows / 2` rounded down, odd rows to the notes half, at least its label
+/// row); `notes_floor` is the minimum number of notes rows the page must keep
+/// visible. Callers pass 1 while a notes edit is active -- an edit that paints no row
+/// is a blind edit -- and 0 otherwise, and both layout callers must agree, because the
+/// payload builder windows the notes draft against the same budget the painter lays
+/// out.
 pub fn task_page_layout(
     geo: &TierGeometry,
-    checklist_rows_needed: usize,
+    section: ChecklistSection,
     notes_floor: u16,
 ) -> TaskPageLayout {
     let height = geo.height;
@@ -1297,14 +1312,15 @@ pub fn task_page_layout(
     };
     let content_end = meta_y.unwrap_or(bottom);
     let content_rows = content_end.saturating_sub(notes_y);
-    // SHORTCUT(T-2): in view mode the clamp still lets a long checklist take the whole
-    // content region (0 notes rows at the compact floor). The one consequence that was
-    // not acceptable -- a notes edit painting nothing at all -- is closed by
-    // `notes_floor`: while a notes edit is active the checklist caps around the
-    // reserved row instead of displacing it.
-    let floor = notes_floor.min(content_rows);
-    let checklist_rows =
-        checklist_rows_needed.min(content_rows.saturating_sub(floor) as usize) as u16;
+    // `notes_floor` wins over the section (T-2 remediation): while a notes edit is
+    // active the block caps around the reserved row instead of displacing it, so the
+    // edit can never be scrolled or clamped out of the frame entirely.
+    let cap = content_rows.saturating_sub(notes_floor.min(content_rows));
+    let checklist_rows = match section {
+        ChecklistSection::None => 0,
+        ChecklistSection::EditorLine => 1u16.min(cap),
+        ChecklistSection::Items => (content_rows / 2).max(1).min(cap),
+    };
     let checklist_y = content_end.saturating_sub(checklist_rows);
     TaskPageLayout {
         bottom,
@@ -1345,12 +1361,10 @@ fn paint_task_page(
         return;
     }
     // `focus == Notes` arrives from the same frame's input mode the payload builder
-    // used, so both sides of the payload/paint seam budget the same notes floor. The
-    // section reserves its label row while the editor is open even with no items,
-    // because the label row is the line the editor paints on.
+    // used, so both sides of the payload/paint seam budget the same notes floor.
     let lay = task_page_layout(
         geo,
-        checklist_section_rows(checklist_items.len(), checklist_editor.is_some()),
+        checklist_section(checklist_items.len(), checklist_editor.is_some()),
         u16::from(focus == Some(CaptureField::Notes)),
     );
     if lay.bottom == 0 {
@@ -1436,15 +1450,17 @@ fn paint_task_page(
         );
     }
 
-    // Checklist section, anchored above the meta footer. Its label row names the
-    // done/total counts (derived from the same item views, so the label cannot drift
-    // from the states painted beside it) — except while the one-line editor is open,
-    // when the editor owns the label row. Below it the section paints a window onto
-    // the items (`checklist_scroll`), the cursor's row marked by a `▸` gutter and a
-    // delete-marked row by `✗` in place of its state glyph; hidden items are named by
-    // a dim `+N more ↓` row mirroring the notes divider's style. Mono only. An empty
-    // checklist with no editor paints no block at all: `checklist_rows` is zero
-    // and the layout above kept the pre-checklist page whole.
+    // Checklist section: the bottom half of the content region, its label row the
+    // divider between the halves (AC-24). The label names the done/total counts
+    // (derived from the same item views, so the label cannot drift from the states
+    // painted beside it) — except while the one-line editor is open, when the editor
+    // owns the label row. Items stack from the top of the half, directly under the
+    // label (`checklist_scroll` windows them): the cursor's row is marked by a `▸`
+    // gutter, a delete-marked row by `✗` in place of its state glyph, and hidden
+    // items are named by a dim `+N more ↓` row on the half's last row, mirroring the
+    // notes divider's style. Mono only. An empty checklist with no editor paints no
+    // block at all: `checklist_rows` is zero and the layout above kept the
+    // pre-checklist page whole.
     if lay.checklist_rows > 0 {
         if let Some(editor) = checklist_editor {
             const EDITOR_LABEL: &str = "  item  ";
@@ -1525,7 +1541,13 @@ fn paint_task_page(
             );
         }
         if win.affordance {
-            let y = lay.checklist_y.saturating_add(1 + win.count as u16);
+            // AC-24: the affordance owns the half's last row. Items stack down from
+            // the label, so the row after the last painted item is no longer the
+            // block's foot; the half's own bottom row is.
+            let y = lay
+                .checklist_y
+                .saturating_add(lay.checklist_rows)
+                .saturating_sub(1);
             put_line(
                 frame,
                 y,
@@ -1566,7 +1588,7 @@ fn paint_page_scope_dropdown(
     }
     // The dropdown anchors on the meta footer, which never moves with the checklist,
     // and never opens while a field edit owns the page.
-    let lay = task_page_layout(geo, 0, 0);
+    let lay = task_page_layout(geo, ChecklistSection::None, 0);
     let Some(meta_y) = lay.meta_y else {
         return;
     };

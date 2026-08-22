@@ -1111,6 +1111,167 @@ fn task_page_notes_edit_keeps_a_visible_row_at_the_compact_floor_alongside_a_che
     );
 }
 
+/// T-6 (AC-24): once the first item lands, the content region between the page
+/// header and the footer halves — notes own the top half, the checklist section
+/// the bottom — replacing the footer-hugging section block. With zero items the
+/// page keeps the exact full-height notes window (AC-6 unchanged).
+///
+/// 78x24 standard: chrome bottoms at rule row 21, so the content region is rows
+/// 3..=19 (17 rows, below the title at 1 and the notes divider at 2, above the
+/// meta footer at 20). Halved, the checklist block takes 17/2 = 8 rows (label on
+/// row 12 down to 19) and notes keep 9 (rows 3..=11). The notes window height is
+/// asserted through the divider's hidden-rows tail and the last painted wrapped
+/// row, both derived by the payload builder from the same layout the painter used.
+#[test]
+fn content_splits_in_half_once_the_first_item_lands() {
+    // 20 short lines: none wraps at the 75-cell notes width, so the notes wrap
+    // count is exactly 20 whatever the window shows.
+    let notes = (0..20)
+        .map(|i| format!("N{i:02} filler line"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut domain = DomainState::new();
+    let id = domain
+        .create(
+            "Halved page",
+            Some(notes),
+            TaskScope::Global,
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("create task");
+    let mut model = BoardModel::from_domain(&domain, None);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenTaskPage,
+        None,
+        None,
+    )
+    .expect("open task page");
+
+    // Zero items: the notes window is the whole content region (17 rows), so it
+    // hides only the last 3 of 20 wrapped rows and paints no section at all.
+    let bare = board_rows(&model, 78, 24);
+    let bare_shown: Vec<String> = bare.iter().map(|row| trimmed(row)).collect();
+    assert!(
+        bare_shown[2].contains("3 more"),
+        "a full-height notes window hides only the tail:\n{}",
+        bare_shown.join("\n")
+    );
+    assert!(
+        bare_shown[19].contains("N16 filler line"),
+        "the full-height notes window paints down to the footer:\n{}",
+        bare_shown.join("\n")
+    );
+    assert!(
+        !bare_shown.iter().any(|row| row.contains("checklist")),
+        "no items, no section:\n{}",
+        bare_shown.join("\n")
+    );
+
+    // The first item lands: the region halves. The section label opens the
+    // bottom half at the halfway row 12, the item sits directly under it, and the
+    // notes window now ends on row 11 (its 9th wrapped row) hiding 11.
+    domain
+        .add_checklist_item(id, "only step")
+        .expect("add item");
+    model.sync_from_domain(&domain);
+    let rows = board_rows(&model, 78, 24);
+    let shown: Vec<String> = rows.iter().map(|row| trimmed(row)).collect();
+    assert!(
+        shown[12].contains("checklist 0/1"),
+        "the checklist half must open at the halfway row 12:\n{}",
+        shown.join("\n")
+    );
+    assert!(
+        shown[13].contains("▪ only step"),
+        "the first item must land directly under the label, not pinned to the footer:\n{}",
+        shown.join("\n")
+    );
+    assert!(
+        shown[11].contains("N08 filler line") && !shown[12].contains("N0"),
+        "the notes half must end at row 11:\n{}",
+        shown.join("\n")
+    );
+    assert!(
+        shown[2].contains("11 more"),
+        "the halved notes window (9 rows of 20) must hide 11:\n{}",
+        shown.join("\n")
+    );
+}
+
+/// T-6 (AC-24): items stack from the TOP of the checklist half — item 1 directly
+/// under the section label, each next item directly below the previous — so a
+/// fourth item lands below the third, never pinned to the row above the footer.
+#[test]
+fn items_stack_from_the_top_below_the_divider() {
+    let mut domain = DomainState::new();
+    let id = domain
+        .create(
+            "Stacking page",
+            Some("the notes body".into()),
+            TaskScope::Global,
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("create task");
+    for text in ["first step", "second step", "third step"] {
+        domain.add_checklist_item(id, text).expect("add item");
+    }
+    let mut model = BoardModel::from_domain(&domain, None);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenTaskPage,
+        None,
+        None,
+    )
+    .expect("open task page");
+
+    // 78x24: label opens the bottom half on row 12; items 1..3 stack downward
+    // from it while the footer-side rows of the half stay empty.
+    let rows = board_rows(&model, 78, 24);
+    let shown: Vec<String> = rows.iter().map(|row| trimmed(row)).collect();
+    let label = shown
+        .iter()
+        .position(|row| row.contains("checklist 0/3"))
+        .unwrap_or_else(|| panic!("checklist label missing:\n{}", shown.join("\n")));
+    assert_eq!(label, 12, "the half opens on the halfway row");
+    assert!(
+        shown[13].contains("▪ first step")
+            && shown[14].contains("▪ second step")
+            && shown[15].contains("▪ third step"),
+        "items must stack one directly under another from the top of the half:\n{}",
+        shown.join("\n")
+    );
+    assert!(
+        shown[19].is_empty(),
+        "the row above the footer must stay empty — the block is not footer-anchored:\n{}",
+        shown.join("\n")
+    );
+
+    // A fourth item lands directly below the third, still far from the footer.
+    domain
+        .add_checklist_item(id, "fourth step")
+        .expect("add item 4");
+    model.sync_from_domain(&domain);
+    let rows4 = board_rows(&model, 78, 24);
+    let shown4: Vec<String> = rows4.iter().map(|row| trimmed(row)).collect();
+    assert!(
+        shown4[16].contains("▪ fourth step"),
+        "the fourth item must land directly below the third:\n{}",
+        shown4.join("\n")
+    );
+    assert!(
+        shown4[19].is_empty(),
+        "the fourth item must not be pinned to the footer:\n{}",
+        shown4.join("\n")
+    );
+}
+
 /// Imp-1 (round 2 regression): the compact palette windowed its command list off a raw
 /// row *index* (`list_bottom`) instead of the rows actually available above chrome, so an
 /// ordinary unfiltered the catalog (>= 6 commands) painted the `command` header over row 0 --
