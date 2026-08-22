@@ -1095,3 +1095,183 @@ fn list_uses_environment_state_dir_by_default() {
 
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// One task whose checklist items carry chosen ids `aaa1…`/`aaa2…`, shaped through
+/// the store document because item ids are otherwise minted by the domain.
+fn state_with_checklist_items(
+    done_first: bool,
+) -> (DomainState, herdr_tasks::domain::ChecklistItem) {
+    let mut state = DomainState::new();
+    let id = state
+        .create(
+            "checklist target",
+            None,
+            TaskScope::Global,
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("seed checklist task");
+    state
+        .add_checklist_item(id, "First step")
+        .expect("seed first item");
+    state
+        .add_checklist_item(id, "Second step")
+        .expect("seed second item");
+    if done_first {
+        let first = state.tasks()[0].checklist[0].id;
+        state
+            .toggle_checklist_item(id, first)
+            .expect("seed first item done");
+    }
+    let mut document = serde_json::to_value(&state).expect("serialize seed state");
+    for (index, id) in [
+        "aaa11111-0000-4000-8000-000000000001",
+        "aaa22222-0000-4000-8000-000000000002",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        document["tasks"][0]["checklist"][index]["id"] =
+            serde_json::json!(uuid::Uuid::parse_str(id).expect("shaped item id"));
+    }
+    let shaped: DomainState = serde_json::from_value(document).expect("state with shaped item ids");
+    let first_item = shaped.tasks()[0].checklist[0].clone();
+    (shaped, first_item)
+}
+
+#[test]
+fn list_task_prints_checklist_lines_with_state_and_short_id() {
+    let dir = temp_state_dir("checklist-lines");
+    let (state, first_item) = state_with_checklist_items(true);
+    let task = state.tasks()[0].id;
+    TaskStore::new(&dir).save(&state).expect("seed store");
+
+    let output = list(&[
+        "herdr-tasks".into(),
+        "list".into(),
+        task.to_string(),
+        "--state-dir".into(),
+        state_dir_arg(&dir),
+    ]);
+
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    assert!(output.stderr.is_empty());
+    assert_eq!(
+        output.stdout,
+        format!("READY\n - checklist target\n   [x] aaa1 First step\n   [ ] aaa2 Second step\n"),
+        "one line per item with state and unambiguous short id"
+    );
+    assert!(
+        first_item.id.to_string().starts_with("aaa1"),
+        "printed short id must prefix the item identity"
+    );
+
+    let json = list(&[
+        "herdr-tasks".into(),
+        "list".into(),
+        task.to_string(),
+        "--json".into(),
+        "--state-dir".into(),
+        state_dir_arg(&dir),
+    ]);
+    assert_eq!(json.code, 0);
+    let rows: Vec<serde_json::Value> = serde_json::from_str(&json.stdout).expect("JSON rows");
+    assert_eq!(rows.len(), 1);
+    for key in ["id", "project", "status", "title"] {
+        assert!(rows[0].get(key).is_some(), "single-task row keeps {key}");
+    }
+    assert_eq!(
+        rows[0]["checklist"],
+        serde_json::json!([
+            {
+                "id": first_item.id.to_string(),
+                "done": true,
+                "short_id": "aaa1",
+                "text": "First step",
+            },
+            {
+                "id": "aaa22222-0000-4000-8000-000000000002",
+                "done": false,
+                "short_id": "aaa2",
+                "text": "Second step",
+            },
+        ]),
+        "single-task JSON carries the checklist items with ids, state, and short ids"
+    );
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn list_task_without_items_keeps_task_rows_and_rejects_conflicting_flags() {
+    let dir = temp_state_dir("task-without-items");
+    let mut state = DomainState::new();
+    create_task(
+        &mut state,
+        "plain target",
+        TaskScope::Global,
+        HumanStatus::Ready,
+    );
+    TaskStore::new(&dir).save(&state).expect("seed store");
+    let task = state.tasks()[0].id;
+
+    let plain = list(&[
+        "herdr-tasks".into(),
+        "list".into(),
+        task.to_string(),
+        "--state-dir".into(),
+        state_dir_arg(&dir),
+    ]);
+    assert_eq!(plain.code, 0);
+    assert_eq!(plain.stdout, "READY\n - plain target\n");
+
+    let plain_json = list(&[
+        "herdr-tasks".into(),
+        "list".into(),
+        task.to_string(),
+        "--json".into(),
+        "--state-dir".into(),
+        state_dir_arg(&dir),
+    ]);
+    assert_eq!(plain_json.code, 0);
+    let rows: Vec<serde_json::Value> = serde_json::from_str(&plain_json.stdout).expect("JSON rows");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(
+        rows[0]
+            .as_object()
+            .expect("JSON row")
+            .keys()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        vec!["id", "project", "status", "title"],
+        "a task without items keeps today's exact JSON row shape"
+    );
+
+    for extra in ["--global", "--all", "--done", "--deleted"] {
+        let output = list(&[
+            "herdr-tasks".into(),
+            "list".into(),
+            task.to_string(),
+            extra.into(),
+            "--state-dir".into(),
+            state_dir_arg(&dir),
+        ]);
+        assert_eq!(output.code, 2, "task id with {extra} is usage");
+        assert!(output.stdout.is_empty());
+        assert!(output.stderr.contains("usage: herdr-tasks list"));
+    }
+
+    let invalid = list(&[
+        "herdr-tasks".into(),
+        "list".into(),
+        "not-a-uuid".into(),
+        "--state-dir".into(),
+        state_dir_arg(&dir),
+    ]);
+    assert_eq!(invalid.code, 2);
+    assert!(invalid.stdout.is_empty());
+    assert!(invalid.stderr.contains("invalid task id"));
+
+    let _ = std::fs::remove_dir_all(dir);
+}

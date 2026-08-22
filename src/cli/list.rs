@@ -19,6 +19,8 @@ pub struct ListInput {
     pub all: bool,
     pub done: bool,
     pub deleted: bool,
+    /// One task addressed by id: single-task listing with checklist lines.
+    pub task: Option<Uuid>,
     pub state_dir: Option<PathBuf>,
     pub help: bool,
 }
@@ -35,6 +37,8 @@ pub(crate) enum ListView {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ListError {
     Store(String),
+    /// A well-formed task id that addresses no task in the store.
+    UnknownTask(Uuid),
 }
 
 /// One task visible to the list command.
@@ -52,6 +56,8 @@ pub struct ListResult {
     pub(crate) rows: Vec<ListRow>,
     pub(crate) view: ListView,
     pub(crate) include_scope: bool,
+    /// Checklist lines for single-task listing; empty for every other listing.
+    pub(crate) checklist: Vec<crate::cli::check::ChecklistLine>,
 }
 
 /// Parse `herdr-tasks list` arguments, including argv0 and the `list` subcommand.
@@ -67,6 +73,7 @@ pub fn parse(args: &[String]) -> Result<ListInput, String> {
         all: false,
         done: false,
         deleted: false,
+        task: None,
         state_dir: None,
         help: false,
     };
@@ -117,10 +124,24 @@ pub fn parse(args: &[String]) -> Result<ListInput, String> {
                 input.state_dir = Some(PathBuf::from(value(flag)?));
                 index += 2;
             }
+            flag if !flag.starts_with('-') => {
+                if input.task.is_some() {
+                    return Err(format!("unknown list argument {flag}"));
+                }
+                input.task =
+                    Some(Uuid::parse_str(flag).map_err(|_| format!("invalid task id {flag}"))?);
+                index += 1;
+            }
             _ => return Err(format!("unknown list argument {flag}")),
         }
     }
 
+    if input.task.is_some() && (input.all || input.global || input.project.is_some()) {
+        return Err("task id cannot be used with --project, --global, or --all".into());
+    }
+    if input.task.is_some() && (input.done || input.deleted) {
+        return Err("task id cannot be used with --done or --deleted".into());
+    }
     if input.all && (input.global || input.project.is_some()) {
         return Err("--all cannot be used with --project or --global".into());
     }
@@ -139,6 +160,27 @@ pub fn run(input: ListInput) -> Result<ListResult, ListError> {
     let domain = store
         .load()
         .map_err(|error| ListError::Store(error.to_string()))?;
+    if let Some(task_id) = input.task {
+        // Single-task listing: id addressing, no scope or filter, checklist lines included.
+        let task = domain
+            .tasks()
+            .iter()
+            .find(|task| task.id == task_id)
+            .ok_or(ListError::UnknownTask(task_id))?;
+        let view = if task.soft_deleted {
+            ListView::Deleted
+        } else if task.status == HumanStatus::Done {
+            ListView::Done
+        } else {
+            ListView::Open
+        };
+        return Ok(ListResult {
+            rows: vec![row_for(task)],
+            view,
+            include_scope: false,
+            checklist: crate::cli::check::checklist_lines(&task.checklist),
+        });
+    }
     let scope = (!input.all).then(|| {
         resolve_flag_scope(
             input.project.as_deref(),
@@ -163,22 +205,27 @@ pub fn run(input: ListInput) -> Result<ListResult, ListError> {
             ListView::Done => !task.soft_deleted && task.status == HumanStatus::Done,
             ListView::Deleted => task.soft_deleted,
         })
-        .map(|task| ListRow {
-            id: task.id,
-            title: task.title.clone(),
-            status: task.status,
-            project: match &task.scope {
-                TaskScope::Global => None,
-                TaskScope::Project { path } => Some(path.clone()),
-            },
-        })
+        .map(row_for)
         .collect::<Vec<_>>();
     rows.sort_by_key(|row| status_group_rank(row.status));
     Ok(ListResult {
         rows,
         view,
         include_scope: input.all,
+        checklist: Vec::new(),
     })
+}
+
+fn row_for(task: &crate::domain::Task) -> ListRow {
+    ListRow {
+        id: task.id,
+        title: task.title.clone(),
+        status: task.status,
+        project: match &task.scope {
+            TaskScope::Global => None,
+            TaskScope::Project { path } => Some(path.clone()),
+        },
+    }
 }
 
 fn is_open(status: HumanStatus) -> bool {

@@ -312,7 +312,7 @@ fn failed(i: usize, title: Option<String>, code: &'static str, error: &'static s
     }
 }
 
-fn has_c0_control(value: &str) -> bool {
+pub(crate) fn has_c0_control(value: &str) -> bool {
     value.chars().any(|character| character <= '\u{001f}')
 }
 

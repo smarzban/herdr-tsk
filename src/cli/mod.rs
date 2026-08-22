@@ -6,6 +6,7 @@ use std::io::Read;
 use serde_json::Value;
 
 pub mod add;
+pub mod check;
 pub mod list;
 pub mod parser;
 pub mod presenter;
@@ -32,8 +33,26 @@ where
         .collect::<Vec<_>>();
     match args.get(1).map(String::as_str) {
         Some("add") => run_add(args, &mut stdin, stdin_is_tty),
+        Some("check") => run_check(args),
         Some("list") => run_list(args),
-        _ => presenter::usage("expected add or list command"),
+        _ => presenter::usage("expected add, check, or list command"),
+    }
+}
+
+fn run_check(args: Vec<String>) -> CliOutput {
+    let input = match parser::parse_flag_check(&args) {
+        Ok(input) => input,
+        Err(reason) => return presenter::check_usage(&reason),
+    };
+    if input.help {
+        return presenter::check_help();
+    }
+    let (Some(task), Some(action)) = (input.task, input.action) else {
+        return presenter::check_usage("task id and action are required");
+    };
+    match check::run(task, action, input.state_dir) {
+        Ok(result) => presenter::checked(result),
+        Err(error) => presenter::check_rejected(error),
     }
 }
 
