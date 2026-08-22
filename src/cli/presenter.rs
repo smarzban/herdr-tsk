@@ -1,7 +1,7 @@
 //! Text output for headless command results.
 
 use super::CliOutput;
-use crate::cli::add::AddError;
+use crate::cli::add::{AddError, FlagAddResult};
 use crate::cli::list::{ListError, ListResult};
 
 pub fn add_help() -> CliOutput {
@@ -17,16 +17,20 @@ pub fn list_help() -> CliOutput {
 fn help_output(usage: &str) -> CliOutput {
     CliOutput {
         stdout: format!(
-            "{usage}\n\nPlan JSON: [{{\"title\": \"...\", \"notes\": \"...\", \"project\": \"...\"}}]\nPlan result: {{\"created\": [...], \"failed\": [...]}}\n\nExit contract:\n  exit 0: every item was created\n  exit 1: one or more items were refused, retry failed only\n  exit 2: usage or parse error, nothing persisted\n  exit 3: store I/O, commit indeterminate, verify with list before retrying\n"
+            "{usage}\n\nAn add whose trimmed title and resolved project scope already exist succeeds without changing the task.\nPlan JSON: [{{\"title\": \"...\", \"notes\": \"...\", \"project\": \"...\"}}]\nPlan result: {{\"created\": [...], \"existing\": [...], \"failed\": [...]}}\n\nExit contract:\n  exit 0: every item was created or already existed\n  exit 1: one or more items were refused, retry failed only\n  exit 2: usage or parse error, nothing persisted\n  exit 3: store I/O, commit indeterminate, verify with list before retrying\n"
         ),
         stderr: String::new(),
         code: 0,
     }
 }
 
-pub fn added(title: &str) -> CliOutput {
+pub fn added(result: FlagAddResult) -> CliOutput {
+    let stdout = match result {
+        FlagAddResult::Created(title) => format!("added {title}\n"),
+        FlagAddResult::Existing => "task already exists\n".into(),
+    };
     CliOutput {
-        stdout: format!("added {title}\n"),
+        stdout,
         stderr: String::new(),
         code: 0,
     }

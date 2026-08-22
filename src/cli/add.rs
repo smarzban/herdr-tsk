@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use crate::cli::parser::FlagAdd;
 use crate::context::snapshot_from_env;
-use crate::domain::{ProvenanceOrigin, TaskScope};
+use crate::domain::{DomainState, ProvenanceOrigin, TaskScope};
 use crate::scope::resolve_project_path;
 use crate::store::{default_state_dir, TaskStore};
 
@@ -32,6 +32,7 @@ impl AddError {
 #[derive(Debug, Serialize)]
 pub struct PlanResult {
     created: Vec<Created>,
+    existing: Vec<Existing>,
     failed: Vec<Failed>,
 }
 
@@ -43,6 +44,14 @@ impl PlanResult {
 
 #[derive(Debug, Serialize)]
 struct Created {
+    i: usize,
+    id: Uuid,
+    title: String,
+}
+
+/// An accepted item that already has a matching non-soft-deleted task.
+#[derive(Debug, Serialize)]
+struct Existing {
     i: usize,
     id: Uuid,
     title: String,
@@ -71,39 +80,42 @@ struct ResolvedPlanItem {
     scope: TaskScope,
 }
 
-/// Create one headless task and return its normalized title.
-pub fn run(input: FlagAdd) -> Result<String, AddError> {
+/// Result of one accepted flag add.
+#[derive(Debug)]
+pub enum FlagAddResult {
+    Created(String),
+    Existing,
+}
+
+/// Create one headless task, or report a non-soft-deleted match without changing it.
+pub fn run(input: FlagAdd) -> Result<FlagAddResult, AddError> {
     let title = input.title.ok_or(AddError::EmptyTitle)?;
     // AC-21 rejects any C0 control, including one that end trimming would remove.
     if has_c0_control(&title) {
         return Err(AddError::InvalidTitle);
     }
-    let title = title.trim();
+    let title = title.trim().to_string();
     if title.is_empty() {
         return Err(AddError::EmptyTitle);
     }
 
     let store = TaskStore::new(input.state_dir.unwrap_or_else(default_state_dir));
-    let mut domain = store
-        .load()
-        .map_err(|error| AddError::Store(error.to_string()))?;
     let snapshot = snapshot_from_env();
-    let scope = match input.project {
-        Some(project) => TaskScope::Project {
-            path: resolve_project_path(&project, &domain, Some(&snapshot)),
-        },
-        None if input.global => TaskScope::Global,
-        None => snapshot.default_scope,
-    };
+    let project = input.project;
+    let global = input.global;
     let notes = input.notes.filter(|notes| !notes.trim().is_empty());
-
-    domain
-        .create(title, notes, scope, None, None, ProvenanceOrigin::Capture)
-        .map_err(|error| AddError::Store(error.to_string()))?;
     store
-        .reload_merge_save(&mut domain)
-        .map_err(|error| AddError::Store(error.to_string()))?;
-    Ok(title.into())
+        .locked_transition(|domain| {
+            let scope = resolve_flag_scope(project.as_deref(), global, domain, &snapshot);
+            if existing_task(domain, &title, &scope).is_some() {
+                return Ok(FlagAddResult::Existing);
+            }
+            domain
+                .create(&title, notes, scope, None, None, ProvenanceOrigin::Capture)
+                .map_err(|error| error.to_string())?;
+            Ok(FlagAddResult::Created(title))
+        })
+        .map_err(AddError::Store)
 }
 
 /// Create every valid item from a parsed JSON plan in one durable write.
@@ -123,16 +135,73 @@ pub fn run_plan(
     if valid.is_empty() {
         return Ok(PlanResult {
             created: Vec::new(),
+            existing: Vec::new(),
             failed,
         });
     }
 
     let store = TaskStore::new(state_dir.unwrap_or_else(default_state_dir));
-    let mut domain = store
-        .load()
-        .map_err(|error| AddError::Store(error.to_string()))?;
     let snapshot = snapshot_from_env();
-    let resolved = valid
+    store
+        .locked_transition(|domain| {
+            let resolved = resolve_plan_items(valid, domain, &snapshot);
+            let mut created = Vec::with_capacity(resolved.len());
+            let mut existing = Vec::new();
+            for item in resolved {
+                if let Some(task) = existing_task(domain, &item.title, &item.scope) {
+                    existing.push(Existing {
+                        i: item.i,
+                        id: task.id,
+                        title: item.title,
+                    });
+                    continue;
+                }
+                let id = domain
+                    .create(
+                        &item.title,
+                        item.notes,
+                        item.scope,
+                        None,
+                        None,
+                        ProvenanceOrigin::Capture,
+                    )
+                    .expect("plan item titles are validated before domain creation");
+                created.push(Created {
+                    i: item.i,
+                    id,
+                    title: item.title,
+                });
+            }
+            Ok(PlanResult {
+                created,
+                existing,
+                failed,
+            })
+        })
+        .map_err(AddError::Store)
+}
+
+fn resolve_flag_scope(
+    project: Option<&str>,
+    global: bool,
+    domain: &DomainState,
+    snapshot: &crate::context::InvocationSnapshot,
+) -> TaskScope {
+    match project {
+        Some(project) => TaskScope::Project {
+            path: resolve_project_path(project, domain, Some(snapshot)),
+        },
+        None if global => TaskScope::Global,
+        None => snapshot.default_scope.clone(),
+    }
+}
+
+fn resolve_plan_items(
+    items: Vec<PlanItem>,
+    domain: &DomainState,
+    snapshot: &crate::context::InvocationSnapshot,
+) -> Vec<ResolvedPlanItem> {
+    items
         .into_iter()
         .map(|item| ResolvedPlanItem {
             i: item.i,
@@ -141,36 +210,23 @@ pub fn run_plan(
             scope: match item.project {
                 Some(None) => TaskScope::Global,
                 Some(Some(project)) => TaskScope::Project {
-                    path: resolve_project_path(&project, &domain, Some(&snapshot)),
+                    path: resolve_project_path(&project, domain, Some(snapshot)),
                 },
                 None => snapshot.default_scope.clone(),
             },
         })
-        .collect::<Vec<_>>();
+        .collect()
+}
 
-    let mut created = Vec::with_capacity(resolved.len());
-    for item in resolved {
-        let id = domain
-            .create(
-                &item.title,
-                item.notes,
-                item.scope,
-                None,
-                None,
-                ProvenanceOrigin::Capture,
-            )
-            .expect("plan item titles are validated before domain creation");
-        created.push(Created {
-            i: item.i,
-            id,
-            title: item.title,
-        });
-    }
-    store
-        .reload_merge_save(&mut domain)
-        .map_err(|error| AddError::Store(error.to_string()))?;
-
-    Ok(PlanResult { created, failed })
+fn existing_task<'a>(
+    domain: &'a DomainState,
+    title: &str,
+    scope: &TaskScope,
+) -> Option<&'a crate::domain::Task> {
+    domain
+        .tasks()
+        .iter()
+        .find(|task| !task.soft_deleted && task.title == title && &task.scope == scope)
 }
 
 fn parse_plan_item(i: usize, value: Value) -> Result<PlanItem, Failed> {
