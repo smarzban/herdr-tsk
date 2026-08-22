@@ -43,20 +43,21 @@ fn add_help_documents_plan_shape_and_exit_contract() {
     assert_eq!(list.code, 0);
     assert!(list.stderr.is_empty());
     for term in [
-        "title",
-        "notes",
         "project",
-        "created",
-        "existing",
-        "already existed",
-        "failed",
-        "exit 1",
-        "retry",
+        "global",
+        "done",
+        "deleted",
+        "soft-deleted",
+        "status",
+        "json",
+        "all",
+        "state-dir",
+        "invocation project",
+        "list --all --json",
+        "Exit contract",
+        "exit 0",
         "exit 2",
-        "nothing persisted",
         "exit 3",
-        "indeterminate",
-        "list",
     ] {
         assert!(
             list.stdout.contains(term),

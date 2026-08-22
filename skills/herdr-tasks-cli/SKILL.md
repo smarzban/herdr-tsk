@@ -18,7 +18,14 @@ inspect the shared board store before and after adding work.
 - On exit 3, the commit is indeterminate. Run `herdr-tasks list`, then retry
   only what is missing. You must never whole-plan-retry an exit 3 run.
 
-## Scope check
+## Listing scope and filters
+
+`herdr-tasks list` defaults to ready, started, blocked, and review tasks in the
+invocation project, or global scope outside a repository. Use `-p`/`--project <scope>`
+for the same basename-or-path resolution as add, `--global` for global tasks, or `--all`
+for every scope. `--done` lists done tasks only; `--deleted` lists soft-deleted tasks only,
+regardless of stored status. Scope selectors are mutually exclusive, as are `--done` and
+`--deleted`.
 
 A typo in a project name silently files the task under a new scope. Use
-`herdr-tasks list` to check the resulting scope.
+`herdr-tasks list --all --json` to recover the resulting scope.

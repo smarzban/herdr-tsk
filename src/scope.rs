@@ -5,6 +5,23 @@ use std::collections::BTreeSet;
 use crate::context::InvocationSnapshot;
 use crate::domain::{DomainState, TaskScope};
 
+/// Resolve command-line project/global scope flags with the same default and basename
+/// rules used by headless add.
+pub fn resolve_flag_scope(
+    project: Option<&str>,
+    global: bool,
+    domain: &DomainState,
+    snapshot: &InvocationSnapshot,
+) -> TaskScope {
+    match project {
+        Some(project) => TaskScope::Project {
+            path: resolve_project_path(project, domain, Some(snapshot)),
+        },
+        None if global => TaskScope::Global,
+        None => snapshot.default_scope.clone(),
+    }
+}
+
 /// Resolve a project token against task and invocation project paths.
 ///
 /// A token containing a slash remains verbatim. Otherwise, a unique ASCII-case-insensitive

@@ -2,7 +2,8 @@
 
 use super::CliOutput;
 use crate::cli::add::{AddError, FlagAddResult};
-use crate::cli::list::{ListError, ListResult};
+use crate::cli::list::{ListError, ListResult, ListView};
+use crate::domain::HumanStatus;
 
 pub fn add_help() -> CliOutput {
     help_output(
@@ -11,7 +12,23 @@ pub fn add_help() -> CliOutput {
 }
 
 pub fn list_help() -> CliOutput {
-    help_output("usage: herdr-tasks list [--json] [--state-dir <dir>]")
+    CliOutput {
+        stdout: concat!(
+            "usage: herdr-tasks list [-p <project> | --global | --all] [--done | --deleted] [--json] [--state-dir <dir>]\n\n",
+            "Lists ready, started, blocked, and review tasks in the invocation project by default, or global scope outside a repository.\n",
+            "--project uses the same basename-or-path scope resolution as add; --global selects global tasks; --all selects every scope.\n",
+            "--done lists done tasks only. --deleted lists soft-deleted tasks only, regardless of status.\n",
+            "To recover a typo scope, use herdr-tasks list --all --json.\n",
+            "--json emits a flat array of id, title, status, and project in displayed group order.\n\n",
+            "Exit contract:\n",
+            "  exit 0: tasks were listed\n",
+            "  exit 2: usage or parse error, nothing persisted\n",
+            "  exit 3: store I/O failure, no tasks listed\n"
+        )
+        .into(),
+        stderr: String::new(),
+        code: 0,
+    }
 }
 
 fn help_output(usage: &str) -> CliOutput {
@@ -65,11 +82,7 @@ pub fn list(result: ListResult, json: bool) -> CliOutput {
             serde_json::to_string(&result.rows).expect("list rows are serializable")
         )
     } else {
-        result
-            .rows
-            .iter()
-            .map(|row| format!("{}\n", row.title))
-            .collect()
+        list_human(&result)
     };
     CliOutput {
         stdout,
@@ -78,11 +91,42 @@ pub fn list(result: ListResult, json: bool) -> CliOutput {
     }
 }
 
+fn list_human(result: &ListResult) -> String {
+    let groups: &[(Option<HumanStatus>, &str)] = match result.view {
+        ListView::Open => &[
+            (Some(HumanStatus::Started), "STARTED"),
+            (Some(HumanStatus::Ready), "READY"),
+            (Some(HumanStatus::Blocked), "BLOCKED"),
+            (Some(HumanStatus::Review), "REVIEW"),
+        ],
+        ListView::Done => &[(None, "DONE")],
+        ListView::Deleted => &[(None, "DELETED")],
+    };
+    let mut output = String::new();
+    for (status, heading) in groups {
+        let rows = result
+            .rows
+            .iter()
+            .filter(|row| status.is_none_or(|status| row.status == status));
+        let mut rows = rows.peekable();
+        if rows.peek().is_none() {
+            continue;
+        }
+        output.push_str(heading);
+        output.push('\n');
+        for row in rows {
+            output.push_str(&row.title);
+            output.push('\n');
+        }
+    }
+    output
+}
+
 pub fn list_usage(reason: &str) -> CliOutput {
     CliOutput {
         stdout: String::new(),
         stderr: format!(
-            "herdr-tasks list: {reason}\nusage: herdr-tasks list [--json] [--state-dir <dir>]\n"
+            "herdr-tasks list: {reason}\nusage: herdr-tasks list [-p <project> | --global | --all] [--done | --deleted] [--json] [--state-dir <dir>]\n"
         ),
         code: 2,
     }

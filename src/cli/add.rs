@@ -7,7 +7,7 @@ use uuid::Uuid;
 use crate::cli::parser::FlagAdd;
 use crate::context::snapshot_from_env;
 use crate::domain::{DomainState, ProvenanceOrigin, TaskScope};
-use crate::scope::resolve_project_path;
+use crate::scope::{resolve_flag_scope, resolve_project_path};
 use crate::store::{default_state_dir, TaskStore};
 
 /// A flag-add failure after parsing and before presenting an output.
@@ -179,21 +179,6 @@ pub fn run_plan(
             })
         })
         .map_err(AddError::Store)
-}
-
-fn resolve_flag_scope(
-    project: Option<&str>,
-    global: bool,
-    domain: &DomainState,
-    snapshot: &crate::context::InvocationSnapshot,
-) -> TaskScope {
-    match project {
-        Some(project) => TaskScope::Project {
-            path: resolve_project_path(project, domain, Some(snapshot)),
-        },
-        None if global => TaskScope::Global,
-        None => snapshot.default_scope.clone(),
-    }
 }
 
 fn resolve_plan_items(
