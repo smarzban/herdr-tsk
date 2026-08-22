@@ -112,9 +112,13 @@ fn list_human(result: &ListResult) -> String {
         if rows.peek().is_none() {
             continue;
         }
+        if !output.is_empty() {
+            output.push('\n');
+        }
         output.push_str(heading);
         output.push('\n');
         for row in rows {
+            output.push_str(" - ");
             output.push_str(&row.title);
             output.push('\n');
         }

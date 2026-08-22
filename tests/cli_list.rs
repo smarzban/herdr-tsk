@@ -165,7 +165,7 @@ fn list_defaults_to_invocation_project_open_tasks_in_human_and_json_group_order(
     assert!(human.stderr.is_empty());
     assert_eq!(
         human.stdout,
-        "STARTED\nstarted target\nREADY\nready target\nBLOCKED\nblocked target\nREVIEW\nreview target\n"
+        "STARTED\n - started target\n\nREADY\n - ready target\n\nBLOCKED\n - blocked target\n\nREVIEW\n - review target\n"
     );
 
     let json = list(&[
@@ -311,7 +311,7 @@ fn list_done_and_deleted_filters_are_status_and_soft_delete_specific() {
         state_dir_arg(&dir),
     ]);
     assert_eq!(done.code, 0);
-    assert_eq!(done.stdout, "DONE\ndone visible\n");
+    assert_eq!(done.stdout, "DONE\n - done visible\n");
 
     let deleted = list(&[
         "herdr-tasks".into(),
@@ -344,7 +344,7 @@ fn list_done_and_deleted_filters_are_status_and_soft_delete_specific() {
     assert_eq!(deleted_human.code, 0);
     assert_eq!(
         deleted_human.stdout,
-        "DELETED\ndeleted ready\ndeleted done\n"
+        "DELETED\n - deleted ready\n - deleted done\n"
     );
 
     let _ = std::fs::remove_dir_all(repo);
@@ -434,7 +434,7 @@ fn list_all_includes_every_scope_in_displayed_order_for_each_filter() {
     assert_eq!(open.code, 0);
     assert_eq!(
         open.stdout,
-        "STARTED\nglobal started\nREADY\nproject ready\nBLOCKED\nother blocked\nREVIEW\nglobal review\n"
+        "STARTED\n - global started\n\nREADY\n - project ready\n\nBLOCKED\n - other blocked\n\nREVIEW\n - global review\n"
     );
 
     let done = list(&[
