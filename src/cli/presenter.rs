@@ -2,6 +2,7 @@
 
 use super::CliOutput;
 use crate::cli::add::AddError;
+use crate::cli::list::{ListError, ListResult};
 
 pub fn added(title: &str) -> CliOutput {
     CliOutput {
@@ -30,6 +31,45 @@ pub fn usage(reason: &str) -> CliOutput {
             "herdr-tasks add: {reason}\nusage: herdr-tasks add -t <title> [-n <notes>] [-p <project> | --global] [--state-dir <dir>]\n"
         ),
         code: 2,
+    }
+}
+
+pub fn list(result: ListResult, json: bool) -> CliOutput {
+    let stdout = if json {
+        format!(
+            "{}\n",
+            serde_json::to_string(&result.rows).expect("list rows are serializable")
+        )
+    } else {
+        result
+            .rows
+            .iter()
+            .map(|row| format!("{}\n", row.title))
+            .collect()
+    };
+    CliOutput {
+        stdout,
+        stderr: String::new(),
+        code: 0,
+    }
+}
+
+pub fn list_usage(reason: &str) -> CliOutput {
+    CliOutput {
+        stdout: String::new(),
+        stderr: format!(
+            "herdr-tasks list: {reason}\nusage: herdr-tasks list [--json] [--state-dir <dir>]\n"
+        ),
+        code: 2,
+    }
+}
+
+pub fn list_rejected(error: ListError) -> CliOutput {
+    let ListError::Store(detail) = error;
+    CliOutput {
+        stdout: String::new(),
+        stderr: format!("herdr-tasks list: {detail}\n"),
+        code: 1,
     }
 }
 

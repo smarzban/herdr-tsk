@@ -17,11 +17,7 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Surface::Usage => usage_exit(),
-        Surface::Add => add_main(args),
-        Surface::List => {
-            eprintln!("herdr-tasks: this command is not available yet");
-            ExitCode::from(2)
-        }
+        Surface::Add | Surface::List => headless_main(args),
         Surface::Board | Surface::Capture => match herdr_tasks::run(args) {
             Ok(()) => ExitCode::SUCCESS,
             Err(err) => {
@@ -37,7 +33,7 @@ fn usage_exit() -> ExitCode {
     ExitCode::from(2)
 }
 
-fn add_main(args: Vec<String>) -> ExitCode {
+fn headless_main(args: Vec<String>) -> ExitCode {
     let stdin = io::stdin();
     let stdin_is_tty = stdin.is_terminal();
     let output = herdr_tasks::cli::run_with(args, stdin, stdin_is_tty);

@@ -6,6 +6,7 @@ use std::io::Read;
 use serde_json::Value;
 
 pub mod add;
+pub mod list;
 pub mod parser;
 pub mod presenter;
 pub mod router;
@@ -18,7 +19,7 @@ pub struct CliOutput {
     pub code: u8,
 }
 
-/// Run the `add` command with its selected flag or JSON-plan input.
+/// Run a selected headless command. `stdin` is consumed only by plan-form `add`.
 pub fn run_with<S, I, R>(args: I, mut stdin: R, stdin_is_tty: bool) -> CliOutput
 where
     S: AsRef<str>,
@@ -29,6 +30,26 @@ where
         .into_iter()
         .map(|argument| argument.as_ref().to_owned())
         .collect::<Vec<_>>();
+    match args.get(1).map(String::as_str) {
+        Some("add") => run_add(args, &mut stdin, stdin_is_tty),
+        Some("list") => run_list(args),
+        _ => presenter::usage("expected add or list command"),
+    }
+}
+
+fn run_list(args: Vec<String>) -> CliOutput {
+    let input = match list::parse(&args) {
+        Ok(input) => input,
+        Err(reason) => return presenter::list_usage(&reason),
+    };
+    let json = input.json;
+    match list::run(input) {
+        Ok(result) => presenter::list(result, json),
+        Err(error) => presenter::list_rejected(error),
+    }
+}
+
+fn run_add<R: Read>(args: Vec<String>, stdin: &mut R, stdin_is_tty: bool) -> CliOutput {
     let input = match parser::parse_flag_add(&args) {
         Ok(input) => input,
         Err(reason) => return presenter::usage(&reason),
@@ -48,7 +69,7 @@ where
         return presenter::usage("title is required");
     }
 
-    let source = match read_plan_source(&input, &mut stdin) {
+    let source = match read_plan_source(&input, stdin) {
         Ok(source) => source,
         Err(reason) => return presenter::usage(&reason),
     };
