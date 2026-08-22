@@ -44,6 +44,7 @@ fn task(id: u128, title: &str, status: HumanStatus, scope: TaskScope, secs_ago: 
         merge_base_revision: None,
         title: title.to_string(),
         notes: None,
+        thread: None,
         status,
         scope,
         capsule: None,

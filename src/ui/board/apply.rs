@@ -1399,8 +1399,8 @@ fn confirm_edit(
         return Err(DomainError::SoftDeleted(id));
     }
 
-    // One existing DomainState::edit call updates title, Notes, and scope together.
-    domain.edit(id, &title, notes, scope)?;
+    // One existing DomainState::edit call updates title, Notes, scope, and thread together.
+    domain.edit(id, &title, notes, scope, task.thread.clone())?;
 
     // Only a successful atomic domain edit releases the form. Validation and stale-task
     // refusals leave its buffers, focus, scope choice, and immutable id untouched.

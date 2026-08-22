@@ -151,6 +151,9 @@ pub struct Task {
     pub merge_base_revision: Option<Uuid>,
     pub title: String,
     pub notes: Option<String>,
+    /// Optional normalized thread name. Missing fields in older stores decode as unthreaded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread: Option<String>,
     pub status: HumanStatus,
     pub scope: TaskScope,
     pub capsule: Option<ContextCapsule>,
@@ -426,6 +429,7 @@ impl DomainState {
             merge_base_revision: None,
             title: title.to_string(),
             notes,
+            thread: None,
             status: HumanStatus::Ready,
             scope,
             capsule,
@@ -489,13 +493,14 @@ impl DomainState {
         Ok(())
     }
 
-    /// Edit title, notes, and scope. Title uses the same non-empty trim rule as create.
+    /// Edit title, notes, scope, and thread together. Title uses the same non-empty trim rule as create.
     pub fn edit(
         &mut self,
         id: Uuid,
         title: impl AsRef<str>,
         notes: Option<String>,
         scope: TaskScope,
+        thread: Option<String>,
     ) -> Result<(), DomainError> {
         let title = title.as_ref().trim();
         if title.is_empty() {
@@ -505,6 +510,7 @@ impl DomainState {
         task.title = title.to_string();
         task.notes = notes;
         task.scope = scope;
+        task.thread = thread;
         record_mutation(task, TaskEventKind::Edited);
         Ok(())
     }
@@ -949,7 +955,7 @@ mod tests {
         assert_eq!(kinds(&state), vec![TaskEventKind::Created]);
 
         state
-            .edit(id, "Edited title", None, TaskScope::Global)
+            .edit(id, "Edited title", None, TaskScope::Global, None)
             .expect("edit");
         assert!(kinds(&state).contains(&TaskEventKind::Edited));
 
@@ -1011,7 +1017,7 @@ mod tests {
         };
 
         state
-            .edit(id, "Edited", None, TaskScope::Global)
+            .edit(id, "Edited", None, TaskScope::Global, None)
             .expect("edit");
         assert_refreshed(&state);
         state.set_status(id, HumanStatus::Started).expect("status");
@@ -1130,12 +1136,49 @@ mod tests {
                 "  New title  ",
                 Some("updated notes".into()),
                 project.clone(),
+                None,
             )
             .expect("edit known id");
         let task = state.get(id).expect("task exists");
         assert_eq!(task.title, "New title");
         assert_eq!(task.notes.as_deref(), Some("updated notes"));
         assert_eq!(task.scope, project);
+    }
+
+    #[test]
+    fn edit_carrying_thread_journals_one_event_and_bumps_revision_once() {
+        let mut state = DomainState::new();
+        let id = create_sample(&mut state);
+        let before = state.get(id).expect("task").clone();
+
+        state
+            .edit(
+                id,
+                "Edited title",
+                Some("edited notes".into()),
+                TaskScope::Project {
+                    path: "/repos/threads".into(),
+                },
+                Some("release-2026".into()),
+            )
+            .expect("edit carrying thread");
+
+        let task = state.get(id).expect("task");
+        assert_eq!(task.title, "Edited title");
+        assert_eq!(task.notes.as_deref(), Some("edited notes"));
+        assert_eq!(task.thread.as_deref(), Some("release-2026"));
+        assert_eq!(
+            task.scope,
+            TaskScope::Project {
+                path: "/repos/threads".into(),
+            }
+        );
+        assert_eq!(task.history.len(), before.history.len() + 1);
+        assert_eq!(
+            task.history.last().map(|event| event.kind),
+            Some(TaskEventKind::Edited)
+        );
+        assert_ne!(task.revision, before.revision);
     }
 
     #[test]
@@ -1157,7 +1200,7 @@ mod tests {
         );
         assert_eq!(state.restore(missing), Err(DomainError::UnknownId(missing)));
         assert_eq!(
-            state.edit(missing, "x", None, TaskScope::Global),
+            state.edit(missing, "x", None, TaskScope::Global, None),
             Err(DomainError::UnknownId(missing))
         );
         assert_eq!(

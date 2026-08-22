@@ -3244,7 +3244,13 @@ mod tests {
         thread::sleep(Duration::from_millis(5));
         let mut other = store.load().unwrap();
         other
-            .edit(id, "Newer title from other board", None, TaskScope::Global)
+            .edit(
+                id,
+                "Newer title from other board",
+                None,
+                TaskScope::Global,
+                None,
+            )
             .unwrap();
         store.save(&other).unwrap();
 
