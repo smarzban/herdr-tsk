@@ -74,6 +74,42 @@ test mixed_plan_persists_only_valid_items_exits_1 ... ok
 test plan_project_resolution_is_independent_of_item_order ... ok
 ```
 
+### T-5 (@ `34d8b01`)
+
+```text
+$ cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && cargo build --release
+exit codes: fmt=0 clippy=0 test=0 build=0
+machine test result: 0 failed
+test list_json_includes_done_excludes_soft_deleted ... ok
+```
+
+### T-6 (@ `2747034`)
+
+```text
+$ cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && cargo build --release
+exit codes: fmt=0 clippy=0 test=0 build=0
+machine test result: 0 failed
+test add_when_state_dir_is_a_file_exits_3 ... ok
+```
+
+### T-7 (@ `fa07cf7`)
+
+```text
+$ cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && cargo build --release
+exit codes: fmt=0 clippy=0 test=0 build=0
+machine test result: 0 failed
+test add_help_documents_plan_shape_and_exit_contract ... ok
+```
+
+### T-8 (@ `d146b11`)
+
+```text
+$ cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && cargo build --release
+exit codes: fmt=0 clippy=0 test=0 build=0
+machine test result: 0 failed
+test skill_documents_retry_and_misfiling ... ok
+```
+
 ## Deviations
 
 - T-3: clarified C0 precedence after reviewer finding I-2. C0 control validation precedes trimming and wins over `empty-title`; spec delta re-gated with `sdlc-check` (0 findings).
