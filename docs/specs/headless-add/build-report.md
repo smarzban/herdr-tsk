@@ -18,12 +18,12 @@ No substitutions.
 | --- | --- | --- | --- | --- |
 | T-1 | done | `ccb5a98` | AC-4 | Shared scope resolver, reviewer pass (0 Critical, 0 Important, 3 Minor advisory). |
 | T-2 | done | `3fb1a37` | AC-19 | Router, process test, reviewer remediation pass. Continuation unavailable, fresh implementer fallback used. |
-| T-3 | done | `PENDING` | AC-1, AC-2, AC-3, AC-4, AC-6, AC-7, AC-12, AC-21 | Flag add, reviewer remediation pass. |
-| T-4 | done | `PENDING` | AC-4, AC-5, AC-6, AC-8, AC-9, AC-10, AC-11, AC-21 | Plan add, reviewer remediation pass. |
-| T-5 | pending | — | AC-12, AC-13, AC-14, AC-15 | List. |
-| T-6 | pending | — | AC-20 | Store I/O exit 3. |
-| T-7 | pending | — | AC-16 | Help. |
-| T-8 | pending | — | AC-17, AC-18 | Discovery. |
+| T-3 | done | `4f96acf` | AC-1, AC-2, AC-3, AC-4, AC-6, AC-7, AC-12, AC-21 | Flag add, reviewer remediation pass. |
+| T-4 | done | `6e2212d` | AC-4, AC-5, AC-6, AC-8, AC-9, AC-10, AC-11, AC-21 | Plan add, reviewer remediation pass. |
+| T-5 | done | `34d8b01` | AC-12, AC-13, AC-14, AC-15 | List. |
+| T-6 | done | `2747034` | AC-20 | Store I/O exit 3. |
+| T-7 | done | `fa07cf7` | AC-16 | Help. |
+| T-8 | done | `d146b11` | AC-17, AC-18 | Discovery. |
 
 ### T-1 (@ `ccb5a98`)
 
@@ -50,7 +50,7 @@ test unknown_positional_exits_2_without_opening_the_board ... ok
 
 Verification form: direct command exit codes captured from `/tmp/headless-add-T2-green.txt`; Cargo test reported 0 failed.
 
-### T-3 (@ `PENDING`)
+### T-3 (@ `4f96acf`)
 
 ```text
 $ cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && cargo build --release
@@ -63,7 +63,7 @@ test title_with_any_c0_control_is_rejected_before_trimming ... ok
 
 Verification form: direct command exit codes captured from `/tmp/headless-add-T3-green.txt`; Cargo test reported 0 failed.
 
-### T-4 (@ `PENDING`)
+### T-4 (@ `6e2212d`)
 
 ```text
 $ cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && cargo build --release
