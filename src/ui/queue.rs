@@ -29,12 +29,25 @@ pub enum DeckScope<'a> {
     Project(&'a Path),
 }
 
+/// Ordered open tasks sharing a normalized thread name in a scoped ON DECK section.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ThreadBlock {
+    pub name: String,
+    pub open_count: usize,
+    pub task_ids: Vec<Uuid>,
+}
+
 /// One ordered section of the queue board.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QueueSection {
     pub kind: SectionKind,
     /// Project path for an ON DECK project group. `None` for IN MOTION, DONE, and the global ON DECK group.
     pub project_label: Option<String>,
+    /// Thread groups for scoped ON DECK sections only, newest group first.
+    pub thread_blocks: Vec<ThreadBlock>,
+    /// Unthreaded scoped ON DECK tasks, after every thread block.
+    pub loose_task_ids: Vec<Uuid>,
+    /// Exact thread-blocks-then-loose flattening, retained for task-only consumers.
     pub task_ids: Vec<Uuid>,
     pub count: usize,
     /// True when a scoped deck group has zero open tasks (renderer paints the empty hint; no invented ids).
@@ -185,6 +198,8 @@ fn section_from(kind: SectionKind, project_label: Option<String>, tasks: &[&Task
     QueueSection {
         kind,
         project_label,
+        thread_blocks: Vec::new(),
+        loose_task_ids: Vec::new(),
         task_ids,
         count,
         empty_hint: false,
@@ -193,11 +208,49 @@ fn section_from(kind: SectionKind, project_label: Option<String>, tasks: &[&Task
 
 /// ON DECK section for a scoped group: empty groups keep the header and set `empty_hint`.
 fn deck_section(project_label: Option<String>, tasks: &[&Task]) -> QueueSection {
-    let task_ids: Vec<Uuid> = tasks.iter().map(|t| t.id).collect();
-    let count = task_ids.len();
+    let mut grouped: BTreeMap<String, Vec<&Task>> = BTreeMap::new();
+    let mut loose = Vec::new();
+    for task in tasks {
+        if let Some(name) = task.thread.as_deref() {
+            grouped
+                .entry(name.to_ascii_lowercase())
+                .or_default()
+                .push(*task);
+        } else {
+            loose.push(*task);
+        }
+    }
+
+    let mut thread_blocks: Vec<ThreadBlock> = grouped
+        .into_iter()
+        .map(|(name, tasks)| ThreadBlock {
+            name,
+            open_count: tasks.len(),
+            task_ids: tasks.iter().map(|task| task.id).collect(),
+        })
+        .collect();
+    thread_blocks.sort_by_key(|block| {
+        Reverse(
+            tasks
+                .iter()
+                .find(|task| task.id == block.task_ids[0])
+                .expect("thread block task comes from deck tasks")
+                .updated_at,
+        )
+    });
+
+    let loose_task_ids: Vec<Uuid> = loose.iter().map(|task| task.id).collect();
+    let task_ids = thread_blocks
+        .iter()
+        .flat_map(|block| block.task_ids.iter().copied())
+        .chain(loose_task_ids.iter().copied())
+        .collect();
+    let count = tasks.len();
     QueueSection {
         kind: SectionKind::OnDeck,
         project_label,
+        thread_blocks,
+        loose_task_ids,
         task_ids,
         count,
         empty_hint: count == 0,

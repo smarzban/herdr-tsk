@@ -51,6 +51,26 @@ fn project(path: &str) -> TaskScope {
     }
 }
 
+fn threaded_task(
+    id: u128,
+    title: &str,
+    status: HumanStatus,
+    scope: TaskScope,
+    updated_secs: u64,
+    thread: &str,
+) -> Task {
+    let mut task = task(id, title, status, scope, updated_secs);
+    task.thread = Some(thread.to_string());
+    task
+}
+
+fn on_deck(view: &herdr_tasks::ui::queue::QueueView) -> &herdr_tasks::ui::queue::QueueSection {
+    view.sections
+        .iter()
+        .find(|section| section.kind == SectionKind::OnDeck)
+        .expect("ON DECK section")
+}
+
 fn temp_dir(tag: &str) -> PathBuf {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -326,6 +346,357 @@ fn sync_from_domain_reanchors_by_id() {
         "when the pinned id leaves the visible set, reanchor lands on a survivor"
     );
     assert!(!model.visible_ids().contains(&id_todo));
+}
+
+#[test]
+fn deck_group_emits_thread_blocks_with_open_counts_iff_open_tasks() {
+    let tasks = vec![
+        threaded_task(
+            1,
+            "open",
+            HumanStatus::Ready,
+            project(THIS_REPO),
+            20,
+            "Release",
+        ),
+        threaded_task(
+            2,
+            "done",
+            HumanStatus::Done,
+            project(THIS_REPO),
+            30,
+            "release",
+        ),
+        threaded_task(
+            3,
+            "doing",
+            HumanStatus::Started,
+            project(THIS_REPO),
+            40,
+            "release",
+        ),
+    ];
+
+    let view = query(
+        &tasks,
+        Some(Path::new(THIS_REPO)),
+        DeckScope::Project(Path::new(THIS_REPO)),
+        true,
+    );
+    let deck = on_deck(&view);
+
+    assert_eq!(deck.thread_blocks.len(), 1);
+    assert_eq!(deck.thread_blocks[0].name, "release");
+    assert_eq!(deck.thread_blocks[0].open_count, 1);
+    assert_eq!(deck.thread_blocks[0].task_ids, vec![Uuid::from_u128(1)]);
+}
+
+#[test]
+fn unthreaded_tasks_list_after_thread_blocks() {
+    let tasks = vec![
+        task(
+            1,
+            "loose newest",
+            HumanStatus::Ready,
+            project(THIS_REPO),
+            30,
+        ),
+        threaded_task(
+            2,
+            "threaded",
+            HumanStatus::Ready,
+            project(THIS_REPO),
+            20,
+            "release",
+        ),
+        task(
+            3,
+            "loose older",
+            HumanStatus::Blocked,
+            project(THIS_REPO),
+            10,
+        ),
+    ];
+
+    let view = query(
+        &tasks,
+        Some(Path::new(THIS_REPO)),
+        DeckScope::Project(Path::new(THIS_REPO)),
+        false,
+    );
+    let deck = on_deck(&view);
+
+    assert_eq!(deck.thread_blocks[0].task_ids, vec![Uuid::from_u128(2)]);
+    assert_eq!(
+        deck.loose_task_ids,
+        vec![Uuid::from_u128(1), Uuid::from_u128(3)]
+    );
+    assert_eq!(
+        deck.task_ids,
+        vec![Uuid::from_u128(2), Uuid::from_u128(1), Uuid::from_u128(3)]
+    );
+}
+
+#[test]
+fn thread_blocks_order_by_recency_and_tasks_within_by_updated_desc() {
+    let tasks = vec![
+        threaded_task(
+            1,
+            "alpha older",
+            HumanStatus::Ready,
+            project(THIS_REPO),
+            20,
+            "alpha",
+        ),
+        threaded_task(
+            2,
+            "alpha newer",
+            HumanStatus::Blocked,
+            project(THIS_REPO),
+            50,
+            "alpha",
+        ),
+        threaded_task(
+            3,
+            "beta",
+            HumanStatus::Review,
+            project(THIS_REPO),
+            40,
+            "beta",
+        ),
+    ];
+
+    let view = query(
+        &tasks,
+        Some(Path::new(THIS_REPO)),
+        DeckScope::Project(Path::new(THIS_REPO)),
+        false,
+    );
+    let deck = on_deck(&view);
+
+    assert_eq!(
+        deck.thread_blocks
+            .iter()
+            .map(|block| block.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["alpha", "beta"]
+    );
+    assert_eq!(
+        deck.thread_blocks[0].task_ids,
+        vec![Uuid::from_u128(2), Uuid::from_u128(1)]
+    );
+}
+
+#[test]
+fn flat_task_ids_equal_block_then_loose_concatenation() {
+    let tasks = vec![
+        threaded_task(
+            1,
+            "alpha",
+            HumanStatus::Ready,
+            project(THIS_REPO),
+            10,
+            "alpha",
+        ),
+        threaded_task(
+            2,
+            "beta",
+            HumanStatus::Ready,
+            project(THIS_REPO),
+            30,
+            "beta",
+        ),
+        task(3, "loose", HumanStatus::Ready, project(THIS_REPO), 40),
+    ];
+
+    let view = query(
+        &tasks,
+        Some(Path::new(THIS_REPO)),
+        DeckScope::Project(Path::new(THIS_REPO)),
+        false,
+    );
+    let deck = on_deck(&view);
+    let expected: Vec<_> = deck
+        .thread_blocks
+        .iter()
+        .flat_map(|block| block.task_ids.iter().copied())
+        .chain(deck.loose_task_ids.iter().copied())
+        .collect();
+
+    assert_eq!(deck.task_ids, expected);
+}
+
+#[test]
+fn same_thread_name_in_two_scopes_forms_independent_groups() {
+    let tasks = vec![
+        threaded_task(
+            1,
+            "project",
+            HumanStatus::Ready,
+            project(THIS_REPO),
+            20,
+            "release",
+        ),
+        threaded_task(
+            2,
+            "global",
+            HumanStatus::Ready,
+            TaskScope::Global,
+            30,
+            "release",
+        ),
+    ];
+
+    let project_view = query(
+        &tasks,
+        Some(Path::new(THIS_REPO)),
+        DeckScope::Project(Path::new(THIS_REPO)),
+        false,
+    );
+    let global_view = query(&tasks, None, DeckScope::Global, false);
+    let project_deck = on_deck(&project_view);
+    let global_deck = on_deck(&global_view);
+
+    assert_eq!(
+        project_deck.thread_blocks[0].task_ids,
+        vec![Uuid::from_u128(1)]
+    );
+    assert_eq!(
+        global_deck.thread_blocks[0].task_ids,
+        vec![Uuid::from_u128(2)]
+    );
+}
+
+#[test]
+fn all_scope_in_motion_and_drawer_emit_no_blocks() {
+    let tasks = vec![
+        threaded_task(
+            1,
+            "deck",
+            HumanStatus::Ready,
+            project(THIS_REPO),
+            10,
+            "release",
+        ),
+        threaded_task(
+            2,
+            "motion",
+            HumanStatus::Started,
+            project(THIS_REPO),
+            20,
+            "release",
+        ),
+        threaded_task(
+            3,
+            "done",
+            HumanStatus::Done,
+            project(THIS_REPO),
+            30,
+            "release",
+        ),
+    ];
+
+    let all = query(&tasks, Some(Path::new(THIS_REPO)), DeckScope::All, true);
+    assert!(all
+        .sections
+        .iter()
+        .all(|section| section.thread_blocks.is_empty() && section.loose_task_ids.is_empty()));
+
+    let scoped = query(
+        &tasks,
+        Some(Path::new(THIS_REPO)),
+        DeckScope::Project(Path::new(THIS_REPO)),
+        true,
+    );
+    assert!(scoped
+        .sections
+        .iter()
+        .filter(|section| section.kind != SectionKind::OnDeck)
+        .all(|section| section.thread_blocks.is_empty() && section.loose_task_ids.is_empty()));
+}
+
+#[test]
+fn selection_stays_on_task_id_across_thread_block_reorder() {
+    let mut domain = DomainState::new();
+    let alpha = domain
+        .create_with_thread(
+            "alpha",
+            None,
+            project(THIS_REPO),
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+            Some("alpha".into()),
+        )
+        .unwrap();
+    let beta = domain
+        .create_with_thread(
+            "beta",
+            None,
+            project(THIS_REPO),
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+            Some("beta".into()),
+        )
+        .unwrap();
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
+    model.set_selected_project(Some(PathBuf::from(THIS_REPO)));
+
+    let before = model.queue_view();
+    let before_deck = on_deck(&before);
+    assert_eq!(before_deck.thread_blocks.len(), 2);
+    assert_eq!(
+        before_deck
+            .thread_blocks
+            .iter()
+            .map(|block| block.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["beta", "alpha"]
+    );
+    assert_eq!(before_deck.task_ids, vec![beta, alpha]);
+
+    let beta_index = model
+        .visible_ids()
+        .iter()
+        .position(|id| *id == beta)
+        .expect("beta is visible");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::SelectIndex(beta_index),
+        None,
+        None,
+    )
+    .unwrap();
+
+    domain
+        .edit(
+            alpha,
+            "alpha changed",
+            None,
+            project(THIS_REPO),
+            Some("alpha".into()),
+        )
+        .unwrap();
+    model.sync_from_domain(&domain);
+
+    let after = model.queue_view();
+    let after_deck = on_deck(&after);
+    assert_eq!(after_deck.thread_blocks.len(), 2);
+    assert_eq!(
+        after_deck
+            .thread_blocks
+            .iter()
+            .map(|block| block.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["alpha", "beta"]
+    );
+    assert_eq!(after_deck.task_ids, vec![alpha, beta]);
+    assert_eq!(model.selected_id(), Some(beta));
+    assert_eq!(model.visible_ids(), after_deck.task_ids);
+    assert_eq!(model.selected_index(), Some(1));
+    assert_eq!(after_deck.task_ids[model.selected_index().unwrap()], beta);
 }
 
 /// Two fresh models from the same store share no UI state and write no UI-state files.
