@@ -14,7 +14,7 @@ use herdr_tasks::ui::render::{
     QueueOverlay, VerbEntry,
 };
 use herdr_tasks::ui::tier::{self, Tier, TierGeometry};
-use herdr_tasks::ui::{apply_intent, board_verb_items, BoardIntent, BoardModel};
+use herdr_tasks::ui::{apply_intent, board_verb_items, draw_board, BoardIntent, BoardModel};
 use ratatui::backend::TestBackend;
 use ratatui::{Frame, Terminal};
 use uuid::Uuid;
@@ -336,6 +336,26 @@ fn paint(width: u16, height: u16, model: &QueueFrameModel<'_>) -> (Vec<String>, 
 fn row_display_width(row: &str) -> usize {
     // Buffer symbols are already one cell each in the TestBackend grid; length == width budget.
     row.chars().count()
+}
+
+/// Paint a whole [`BoardModel`] through `draw_board` -- the payload-builder path
+/// (`build_task_page_overlay`) rather than a hand-composed `QueueFrameModel` -- so a
+/// test can assert what the page payload consumed from a real stored task.
+fn board_rows(model: &BoardModel, width: u16, height: u16) -> Vec<String> {
+    let backend = TestBackend::new(width, height);
+    let mut terminal = Terminal::new(backend).expect("test terminal");
+    terminal
+        .draw(|frame: &mut Frame| draw_board(frame, model))
+        .expect("draw board");
+    let buffer = terminal.backend().buffer();
+    assert_buffer_mono(buffer);
+    (0..height)
+        .map(|y| {
+            (0..width)
+                .map(|x| buffer[(x, y)].symbol().to_string())
+                .collect::<String>()
+        })
+        .collect()
 }
 
 fn trimmed(row: &str) -> String {
@@ -845,6 +865,7 @@ fn task_page_renders_header_notes_and_meta_as_a_full_takeover_in_both_tiers() {
         ],
         notes_cursor: None,
         more_lines: 0,
+        checklist_items: Vec::new(),
         meta: "herdr-tasks \u{b7} created 1h ago \u{b7} updated 1h ago".to_string(),
         focus: None,
         scope_dropdown: None,
@@ -885,6 +906,205 @@ fn task_page_renders_header_notes_and_meta_as_a_full_takeover_in_both_tiers() {
         );
         assert_visible_chrome(&rows, geo, &format!("{width}x{height}"));
     }
+}
+
+/// T-2 (AC-5/AC-7): the task page of a task with checklist items paints a checklist
+/// section between the notes block and the meta footer. The fixture drives the real
+/// payload-builder path (`BoardModel` + `draw_board`) from stored items (add + toggle),
+/// so the assertions cross the storage -> page-payload -> paint boundary: the label's
+/// done/total counts and the per-item glyphs must come from the extracted item views.
+#[test]
+fn task_page_paints_checklist_section_between_notes_and_footer() {
+    let mut domain = DomainState::new();
+    let id = domain
+        .create(
+            "Page task with steps",
+            Some("the notes body".into()),
+            TaskScope::Global,
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("create task");
+    let first = domain.add_checklist_item(id, "first step").expect("item 1");
+    let second = domain
+        .add_checklist_item(id, "second step")
+        .expect("item 2");
+    domain.add_checklist_item(id, "third step").expect("item 3");
+    domain
+        .toggle_checklist_item(id, first)
+        .expect("toggle item 1");
+    domain
+        .toggle_checklist_item(id, second)
+        .expect("toggle item 2");
+
+    let mut model = BoardModel::from_domain(&domain, None);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenTaskPage,
+        None,
+        None,
+    )
+    .expect("open task page");
+
+    let rows = board_rows(&model, 78, 24);
+    let shown: Vec<String> = rows.iter().map(|row| trimmed(row)).collect();
+    let find = |needle: &str, shown: &[String]| {
+        shown
+            .iter()
+            .position(|row| row.contains(needle))
+            .unwrap_or_else(|| panic!("{needle:?} missing from page:\n{rows:#?}"))
+    };
+    let notes_row = find("the notes body", &shown);
+    let label_row = find("checklist 2/3", &shown);
+    let meta_row = find("created", &shown);
+    assert!(
+        notes_row < label_row,
+        "checklist section must sit after the notes block:\n{}",
+        shown.join("\n")
+    );
+    assert!(
+        label_row < meta_row,
+        "checklist section must sit before the meta footer:\n{}",
+        shown.join("\n")
+    );
+    // Items render one per line below the label, in storage order: done `✓`, open `▪`.
+    let first_item = find("✓ first step", &shown);
+    let second_item = find("✓ second step", &shown);
+    let third_item = find("▪ third step", &shown);
+    assert!(
+        label_row < first_item && first_item < second_item && second_item < third_item,
+        "items must paint one per line below the label in storage order:\n{}",
+        shown.join("\n")
+    );
+
+    // The compact tier stays operable: the section still paints and never reaches the
+    // bottom chrome rows, and every row stays width-bounded.
+    let compact = board_rows(&model, 40, 10);
+    let compact_shown: Vec<String> = compact.iter().map(|row| trimmed(row)).collect();
+    let compact_label = compact_shown
+        .iter()
+        .position(|row| row.contains("checklist 2/3"))
+        .unwrap_or_else(|| panic!("compact page omitted the checklist label:\n{compact:#?}"));
+    let geo = tier::resolve(40, 10);
+    assert!(
+        (compact_label as u16) < geo.rule_row.expect("compact rule row"),
+        "compact checklist section must stay above the chrome rows:\n{}",
+        compact_shown.join("\n")
+    );
+    assert!(
+        compact.iter().all(|row| row_display_width(row) == 40),
+        "compact checklist rows exceeded the frame width"
+    );
+}
+
+/// T-2 (AC-6): a task with no checklist items paints no checklist section at all --
+/// the page is identical to pre-feature for such tasks.
+#[test]
+fn task_page_without_items_paints_no_checklist_section() {
+    let mut domain = DomainState::new();
+    domain
+        .create(
+            "Page task without steps",
+            Some("still just notes".into()),
+            TaskScope::Global,
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("create task");
+    let mut model = BoardModel::from_domain(&domain, None);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenTaskPage,
+        None,
+        None,
+    )
+    .expect("open task page");
+
+    for &(width, height) in &[(78u16, 24u16), (40u16, 10u16)] {
+        let rows = board_rows(&model, width, height);
+        let shown: Vec<String> = rows.iter().map(|row| trimmed(row)).collect();
+        let body = shown.join("\n");
+        // Sanity first: the page itself rendered, so absence below is not a blank frame.
+        assert!(
+            body.contains("still just notes") && body.contains("created"),
+            "{width}x{height} page did not render notes + meta:\n{body}"
+        );
+        assert!(
+            !body.contains("checklist"),
+            "{width}x{height} empty-checklist page must paint no section label:\n{body}"
+        );
+        // `✓`/`▪` are item glyphs (the task is ready, so the header glyph is `○`).
+        assert!(
+            !body.contains('✓') && !body.contains('▪'),
+            "{width}x{height} empty-checklist page must paint no item glyphs:\n{body}"
+        );
+    }
+}
+
+/// T-2 remediation 1 (review round 0, Important): at the 40x10 compact floor a >=3-item
+/// checklist clamps to the whole content region, and the notes edit that shared those
+/// rows painted NOTHING -- keystrokes worked, nothing rendered. A notes edit must always
+/// keep at least one visible draft row; the checklist section yields the row (it caps,
+/// it does not vanish).
+#[test]
+fn task_page_notes_edit_keeps_a_visible_row_at_the_compact_floor_alongside_a_checklist() {
+    let mut domain = DomainState::new();
+    let id = domain
+        .create(
+            "Editing notes beside steps",
+            Some("draft line under edit".into()),
+            TaskScope::Global,
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("create task");
+    let first = domain.add_checklist_item(id, "first step").expect("item 1");
+    domain
+        .add_checklist_item(id, "second step")
+        .expect("item 2");
+    domain.add_checklist_item(id, "third step").expect("item 3");
+    domain
+        .toggle_checklist_item(id, first)
+        .expect("toggle item 1");
+
+    let mut model = BoardModel::from_domain(&domain, None);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenTaskPage,
+        None,
+        None,
+    )
+    .expect("open task page");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::BeginEditNotes,
+        None,
+        None,
+    )
+    .expect("begin notes edit");
+
+    let rows = board_rows(&model, 40, 10);
+    let shown: Vec<String> = rows.iter().map(|row| trimmed(row)).collect();
+    let body = shown.join("\n");
+    assert!(
+        body.contains("draft line under edit"),
+        "a notes edit must paint at least one draft row at 40x10:\n{body}"
+    );
+    assert!(
+        body.contains("checklist 1/3"),
+        "the checklist section must cap to make room, not vanish:\n{body}"
+    );
+    assert!(
+        rows.iter().all(|row| row_display_width(row) == 40),
+        "compact edit page exceeded the frame width"
+    );
 }
 
 /// Imp-1 (round 2 regression): the compact palette windowed its command list off a raw

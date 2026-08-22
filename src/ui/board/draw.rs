@@ -157,10 +157,22 @@ fn build_task_page_overlay<'a>(
     scope_dropdown: Option<FormScopeDropdown<'a>>,
 ) -> QueueOverlay<'a> {
     let width = geo.row_width as usize;
-    let lay = render::task_page_layout(geo);
     let bound_task = form
         .task_id()
         .and_then(|id| model.tasks.iter().find(|task| task.id == id));
+    // The section consumes the extracted item views, never the raw storage; the layout
+    // below shrinks the notes window by the same block, so the existing notes scroll
+    // bound (recorded from `lay.notes_rows`) keeps a long checklist + notes scrolling.
+    let checklist_items = bound_task
+        .map(super::model::checklist_item_views)
+        .unwrap_or_default();
+    // A notes edit always keeps one row: the layout reserves it (checklist caps around
+    // it), so an active edit can never be scrolled/clamped out of the frame entirely.
+    let lay = render::task_page_layout(
+        geo,
+        checklist_items.len(),
+        u16::from(model.input_mode() == BoardInputMode::EditNotes),
+    );
     let status = bound_task
         .map(|task| task.status)
         .unwrap_or(HumanStatus::Ready);
@@ -205,7 +217,14 @@ fn build_task_page_overlay<'a>(
         form.notes_max_scroll.set(max_scroll);
         let scroll = form.notes_scroll.min(max_scroll);
         let rows: Vec<String> = all.iter().skip(scroll).take(want).cloned().collect();
-        let more = total.saturating_sub(scroll + rows.len());
+        // A 0-row window (view mode at the compact floor beside a long checklist) can
+        // never reveal another row by scrolling, so the divider must not advertise
+        // hidden lines it cannot show.
+        let more = if rows.is_empty() {
+            0
+        } else {
+            total.saturating_sub(scroll + rows.len())
+        };
         (rows, None, more)
     };
 
@@ -237,6 +256,7 @@ fn build_task_page_overlay<'a>(
         notes_rows,
         notes_cursor,
         more_lines,
+        checklist_items,
         meta,
         focus,
         scope_dropdown,

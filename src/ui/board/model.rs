@@ -19,6 +19,7 @@ use crate::ui::input::{
 };
 use crate::ui::mouse::BoardPopup;
 use crate::ui::queue::{self, DeckScope, QueueView, SectionKind};
+use crate::ui::render::ChecklistItemView;
 use crate::ui::selection;
 use crate::ui::terminal_text;
 
@@ -393,6 +394,22 @@ fn board_form_scope_options(
     }
     push(TaskScope::Global, &mut options);
     options
+}
+
+/// Extract the checklist item views the task page paints: done flag + text per item,
+/// in storage order.
+///
+/// This is the one seam between the page payload and checklist storage: the payload
+/// consumes these views and never reads `Task.checklist` itself, so later page
+/// consumers (cursor, verbs, editor) swap the view, not the storage shape.
+pub(super) fn checklist_item_views(task: &Task) -> Vec<ChecklistItemView> {
+    task.checklist
+        .iter()
+        .map(|item| ChecklistItemView {
+            done: item.done,
+            text: item.text.clone(),
+        })
+        .collect()
 }
 
 /// Pure board presentation state for one open session.
