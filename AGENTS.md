@@ -23,8 +23,7 @@ plugin are `0.1.0`.
 A gitignored `HANDOFF.md` may hold this clone’s live working state.
 
 For scriptable board work, use `herdr-tasks add` and `herdr-tasks list`; read
-`skills/herdr-tasks-cli/SKILL.md` first for retry and scope-check rules. Contract:
-`docs/specs/headless-add/headless-add.md`.
+`skills/herdr-tasks-cli/SKILL.md` first for retry and scope-check rules.
 
 ### Board
 
