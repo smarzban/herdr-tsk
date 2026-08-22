@@ -127,6 +127,16 @@ pub enum ObservedStatus {
     Unknown,
 }
 
+/// One step in a task's flat, ordered checklist.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChecklistItem {
+    /// Stable identity, addressable by id prefix like a task.
+    pub id: Uuid,
+    /// One line of text, trimmed at the boundaries.
+    pub text: String,
+    pub done: bool,
+}
+
 /// One unit of intended work.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Task {
@@ -152,6 +162,9 @@ pub struct Task {
     pub provenance: ProvenanceOrigin,
     /// Append-only domain event history.
     pub history: Vec<TaskEvent>,
+    /// Flat, ordered checklist. Absent on pre-checklist stores; never reordered by a verb.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub checklist: Vec<ChecklistItem>,
     pub soft_deleted: bool,
     #[serde(with = "super::time_serde")]
     pub created_at: SystemTime,
@@ -202,6 +215,10 @@ pub enum DomainError {
     StaleUndo(Uuid),
     /// No active dispatch attempt with this id exists in the domain state.
     UnknownDispatchAttempt(Uuid),
+    /// Checklist item text was empty or whitespace-only after trim.
+    EmptyItemText,
+    /// No checklist item with this id exists on the task.
+    UnknownChecklistItem(Uuid),
     /// A task already owns an active dispatch attempt and cannot start another.
     ActiveDispatchAttempt { task_id: Uuid, attempt_id: Uuid },
     /// Dispatch-attempt transition was refused without changing the journal.
@@ -218,6 +235,12 @@ impl std::fmt::Display for DomainError {
                 write!(f, "task {id} changed since the undoable action")
             }
             DomainError::UnknownDispatchAttempt(id) => write!(f, "unknown dispatch attempt {id}"),
+            DomainError::EmptyItemText => {
+                write!(f, "checklist item text must be non-empty after trim")
+            }
+            DomainError::UnknownChecklistItem(id) => {
+                write!(f, "unknown checklist item id {id}")
+            }
             DomainError::ActiveDispatchAttempt {
                 task_id,
                 attempt_id,
@@ -416,6 +439,7 @@ impl DomainState {
                 kind: TaskEventKind::Created,
                 at: now,
             }],
+            checklist: Vec::new(),
             soft_deleted: false,
             created_at: now,
             updated_at: now,
@@ -485,6 +509,97 @@ impl DomainState {
         task.notes = notes;
         task.scope = scope;
         record_mutation(task, TaskEventKind::Edited);
+        Ok(())
+    }
+
+    /// Add one checklist item at the end of the task's checklist.
+    ///
+    /// Trims text and refuses empty-after-trim. Returns the new item's id.
+    /// Never touches status, scope, or notes.
+    pub fn add_checklist_item(
+        &mut self,
+        task_id: Uuid,
+        text: impl AsRef<str>,
+    ) -> Result<Uuid, DomainError> {
+        let text = text.as_ref().trim();
+        if text.is_empty() {
+            return Err(DomainError::EmptyItemText);
+        }
+        let task = self.task_mut(task_id)?;
+        let item = ChecklistItem {
+            id: Uuid::new_v4(),
+            text: text.to_string(),
+            done: false,
+        };
+        let item_id = item.id;
+        task.checklist.push(item);
+        record_mutation(task, TaskEventKind::ChecklistItemAdded);
+        Ok(item_id)
+    }
+
+    /// Flip one checklist item's done flag.
+    ///
+    /// Journals `ChecklistItemChecked` when the item turns done and
+    /// `ChecklistItemUnchecked` when it turns open. Never touches status, scope, or
+    /// notes; completing the checklist never completes the task.
+    pub fn toggle_checklist_item(
+        &mut self,
+        task_id: Uuid,
+        item_id: Uuid,
+    ) -> Result<(), DomainError> {
+        let task = self.task_mut(task_id)?;
+        let item = task
+            .checklist
+            .iter_mut()
+            .find(|item| item.id == item_id)
+            .ok_or(DomainError::UnknownChecklistItem(item_id))?;
+        item.done = !item.done;
+        let kind = if item.done {
+            TaskEventKind::ChecklistItemChecked
+        } else {
+            TaskEventKind::ChecklistItemUnchecked
+        };
+        record_mutation(task, kind);
+        Ok(())
+    }
+
+    /// Rename one checklist item. Trims text and refuses empty-after-trim.
+    /// Never touches status, scope, or notes.
+    pub fn rename_checklist_item(
+        &mut self,
+        task_id: Uuid,
+        item_id: Uuid,
+        text: impl AsRef<str>,
+    ) -> Result<(), DomainError> {
+        let text = text.as_ref().trim();
+        if text.is_empty() {
+            return Err(DomainError::EmptyItemText);
+        }
+        let task = self.task_mut(task_id)?;
+        let item = task
+            .checklist
+            .iter_mut()
+            .find(|item| item.id == item_id)
+            .ok_or(DomainError::UnknownChecklistItem(item_id))?;
+        item.text = text.to_string();
+        record_mutation(task, TaskEventKind::ChecklistItemRenamed);
+        Ok(())
+    }
+
+    /// Remove one checklist item by id. Never touches status, scope, or notes.
+    pub fn remove_checklist_item(
+        &mut self,
+        task_id: Uuid,
+        item_id: Uuid,
+    ) -> Result<(), DomainError> {
+        let task = self.task_mut(task_id)?;
+        let index = task
+            .checklist
+            .iter()
+            .position(|item| item.id == item_id)
+            .ok_or(DomainError::UnknownChecklistItem(item_id))?;
+        task.checklist.remove(index);
+        record_mutation(task, TaskEventKind::ChecklistItemRemoved);
         Ok(())
     }
 
@@ -1589,6 +1704,150 @@ mod tests {
         assert!(c.file.is_none());
         assert!(c.line.is_none());
         assert!(task.agent_meta.is_none());
+    }
+
+    #[test]
+    fn checklist_mutations_journal_events_and_bump_revision() {
+        let mut state = DomainState::new();
+        let id = create_sample(&mut state);
+        let mut previous_revision = state.get(id).expect("task").revision.expect("revision");
+        let mut previous_len = state.get(id).expect("task").history.len();
+
+        let mut assert_journaled = |state: &DomainState, kind: TaskEventKind| {
+            let task = state.get(id).expect("task exists");
+            let revision = task.revision.expect("revision");
+            assert_ne!(revision, previous_revision, "revision must change");
+            previous_revision = revision;
+            assert_eq!(
+                task.history.len(),
+                previous_len + 1,
+                "exactly one history event must be appended"
+            );
+            previous_len = task.history.len();
+            assert_eq!(task.history.last().expect("event").kind, kind);
+        };
+
+        let item = state
+            .add_checklist_item(id, "  First step  ")
+            .expect("add checklist item");
+        assert_journaled(&state, TaskEventKind::ChecklistItemAdded);
+        assert_eq!(
+            state.get(id).expect("task").checklist,
+            vec![ChecklistItem {
+                id: item,
+                text: "First step".into(),
+                done: false,
+            }],
+            "add must trim and append at the end"
+        );
+
+        state.toggle_checklist_item(id, item).expect("toggle on");
+        assert_journaled(&state, TaskEventKind::ChecklistItemChecked);
+        assert!(state.get(id).expect("task").checklist[0].done);
+
+        state.toggle_checklist_item(id, item).expect("toggle off");
+        assert_journaled(&state, TaskEventKind::ChecklistItemUnchecked);
+        assert!(!state.get(id).expect("task").checklist[0].done);
+
+        state
+            .rename_checklist_item(id, item, "  Renamed step  ")
+            .expect("rename checklist item");
+        assert_journaled(&state, TaskEventKind::ChecklistItemRenamed);
+        assert_eq!(
+            state.get(id).expect("task").checklist[0].text,
+            "Renamed step",
+            "rename must trim"
+        );
+
+        state.remove_checklist_item(id, item).expect("remove item");
+        assert_journaled(&state, TaskEventKind::ChecklistItemRemoved);
+        assert!(state.get(id).expect("task").checklist.is_empty());
+    }
+
+    #[test]
+    fn toggle_item_keeps_human_status_including_completing_last_item() {
+        let mut state = DomainState::new();
+        let id = create_sample(&mut state);
+        state
+            .set_status(id, HumanStatus::Started)
+            .expect("set_status");
+        let item = state
+            .add_checklist_item(id, "Only step")
+            .expect("add checklist item");
+        state
+            .toggle_checklist_item(id, item)
+            .expect("toggle the only item done");
+        let task = state.get(id).expect("task exists");
+        assert!(task.checklist[0].done, "the only item is now done");
+        assert_eq!(
+            task.status,
+            HumanStatus::Started,
+            "completing the checklist must never change human status"
+        );
+    }
+
+    #[test]
+    fn checklist_commands_reject_unknown_ids_and_empty_text() {
+        let mut state = DomainState::new();
+        let id = create_sample(&mut state);
+        let item = state
+            .add_checklist_item(id, "Step")
+            .expect("add checklist item");
+        let missing_task = Uuid::new_v4();
+        let missing_item = Uuid::new_v4();
+
+        assert_eq!(
+            state.add_checklist_item(missing_task, "x"),
+            Err(DomainError::UnknownId(missing_task))
+        );
+        assert_eq!(
+            state.toggle_checklist_item(missing_task, item),
+            Err(DomainError::UnknownId(missing_task))
+        );
+        assert_eq!(
+            state.rename_checklist_item(missing_task, item, "x"),
+            Err(DomainError::UnknownId(missing_task))
+        );
+        assert_eq!(
+            state.remove_checklist_item(missing_task, item),
+            Err(DomainError::UnknownId(missing_task))
+        );
+        assert_eq!(
+            state.toggle_checklist_item(id, missing_item),
+            Err(DomainError::UnknownChecklistItem(missing_item))
+        );
+        assert_eq!(
+            state.rename_checklist_item(id, missing_item, "x"),
+            Err(DomainError::UnknownChecklistItem(missing_item))
+        );
+        assert_eq!(
+            state.remove_checklist_item(id, missing_item),
+            Err(DomainError::UnknownChecklistItem(missing_item))
+        );
+        assert_eq!(
+            state.add_checklist_item(id, "   "),
+            Err(DomainError::EmptyItemText)
+        );
+        assert_eq!(
+            state.rename_checklist_item(id, item, "  "),
+            Err(DomainError::EmptyItemText)
+        );
+
+        let task = state.get(id).expect("task exists");
+        assert_eq!(
+            task.checklist,
+            vec![ChecklistItem {
+                id: item,
+                text: "Step".into(),
+                done: false,
+            }],
+            "refused commands must not mutate the checklist"
+        );
+        assert_eq!(
+            task.history.len(),
+            2,
+            "no journal writes for refused commands"
+        );
     }
 
     #[test]

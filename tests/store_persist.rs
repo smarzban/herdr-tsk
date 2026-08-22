@@ -7,11 +7,11 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use herdr_tasks::dispatch::DispatchRecoveryResult;
 use herdr_tasks::domain::{
-    AgentMeta, AgentReceipt, AgentSessionIdentity, ContextCapsule, DispatchAttemptError,
-    DispatchAttemptMode, DispatchAttemptPhase, DispatchAttemptStep, DispatchAttemptStepState,
-    DispatchAttemptTransition, DomainError, DomainState, HumanStatus, ObservedStatus,
-    OwnedResourceReceipt, PaneReceipt, ProvenanceOrigin, TaskEvent, TaskEventKind, TaskScope,
-    WorktreeReceipt,
+    AgentMeta, AgentReceipt, AgentSessionIdentity, ChecklistItem, ContextCapsule,
+    DispatchAttemptError, DispatchAttemptMode, DispatchAttemptPhase, DispatchAttemptStep,
+    DispatchAttemptStepState, DispatchAttemptTransition, DomainError, DomainState, HumanStatus,
+    ObservedStatus, OwnedResourceReceipt, PaneReceipt, ProvenanceOrigin, TaskEvent, TaskEventKind,
+    TaskScope, WorktreeReceipt,
 };
 use herdr_tasks::store::TaskStore;
 use herdr_tasks::ui::board::{apply_dispatch_recovery_result, BoardInputMode, BoardModel};
@@ -143,6 +143,120 @@ fn assert_pre_stabilize_fixture_payload(state: &DomainState, task_id: Uuid, atte
     assert_eq!(
         attempt.last_error(),
         Some("agent exited before the initial prompt")
+    );
+}
+
+/// A store document exactly as a pre-checklist binary would have written it:
+/// task objects carry no `checklist` key anywhere.
+const PRE_CHECKLIST_TASKS_JSON: &str = r#"{
+  "tasks": [
+    {
+      "id": "44444444-4444-4444-8444-444444444444",
+      "revision": "55555555-5555-4555-8555-555555555555",
+      "title": "Written before checklists",
+      "notes": "old store, no checklist field",
+      "status": "ready",
+      "scope": "global",
+      "provenance": "manual",
+      "history": [
+        { "kind": "created", "at": [1723852800, 0] }
+      ],
+      "soft_deleted": false,
+      "created_at": [1723852800, 0],
+      "updated_at": [1723852800, 0]
+    },
+    {
+      "id": "66666666-6666-4666-8666-666666666666",
+      "revision": "77777777-7777-4777-8777-777777777777",
+      "title": "Also written before checklists",
+      "notes": null,
+      "status": "started",
+      "scope": "global",
+      "provenance": "manual",
+      "history": [
+        { "kind": "created", "at": [1723852900, 0] },
+        { "kind": "status_set", "at": [1723852960, 0] }
+      ],
+      "soft_deleted": false,
+      "created_at": [1723852900, 0],
+      "updated_at": [1723852960, 0]
+    }
+  ],
+  "undo_stack": []
+}"#;
+
+#[test]
+fn pre_checklist_store_decodes_with_empty_checklists() {
+    let dir = temp_state_dir();
+    let _guard = TempDirGuard(dir.clone());
+    fs::write(dir.join("tasks.json"), PRE_CHECKLIST_TASKS_JSON)
+        .expect("install pre-checklist store");
+
+    let state = TaskStore::new(&dir)
+        .load()
+        .expect("pre-checklist store loads without error");
+    let tasks = state.tasks();
+    assert_eq!(tasks.len(), 2, "both fixture tasks decode");
+    for task in tasks {
+        assert!(
+            task.checklist.is_empty(),
+            "task {} written before checklists must present an empty checklist",
+            task.id
+        );
+    }
+}
+
+#[test]
+fn checklist_round_trip_preserves_identity_flags_and_order() {
+    let dir = temp_state_dir();
+    let _guard = TempDirGuard(dir.clone());
+    let store = TaskStore::new(&dir);
+
+    let mut state = DomainState::new();
+    let id = state
+        .create(
+            "Checklist round trip",
+            None,
+            TaskScope::Global,
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("create task");
+    let first = state.add_checklist_item(id, "First").expect("add first");
+    let second = state.add_checklist_item(id, "Second").expect("add second");
+    let third = state.add_checklist_item(id, "Third").expect("add third");
+    state
+        .toggle_checklist_item(id, first)
+        .expect("toggle first done");
+    state
+        .toggle_checklist_item(id, third)
+        .expect("toggle third done");
+
+    store.save(&state).expect("save checklist state");
+
+    let loaded = store.load().expect("reload checklist state");
+    let task = loaded.get(id).expect("task survives reload");
+    assert_eq!(
+        task.checklist,
+        vec![
+            ChecklistItem {
+                id: first,
+                text: "First".into(),
+                done: true,
+            },
+            ChecklistItem {
+                id: second,
+                text: "Second".into(),
+                done: false,
+            },
+            ChecklistItem {
+                id: third,
+                text: "Third".into(),
+                done: true,
+            },
+        ],
+        "identity, text, done flag, and order must round-trip unchanged"
     );
 }
 

@@ -32,6 +32,16 @@ pub enum TaskEventKind {
     AgentUnlinked,
     /// Successful dispatch: agent started and linked.
     Dispatched,
+    /// Checklist item appended to the task.
+    ChecklistItemAdded,
+    /// Checklist item flipped to done.
+    ChecklistItemChecked,
+    /// Checklist item flipped back to open.
+    ChecklistItemUnchecked,
+    /// Checklist item text changed.
+    ChecklistItemRenamed,
+    /// Checklist item removed from the task.
+    ChecklistItemRemoved,
 }
 
 /// One append-only history record on a task.

@@ -236,6 +236,7 @@ mod tests {
                 kind: TaskEventKind::Created,
                 at,
             }],
+            checklist: Vec::new(),
             soft_deleted,
             created_at: at,
             updated_at: at,

@@ -50,6 +50,7 @@ fn task(id: u128, title: &str, status: HumanStatus, scope: TaskScope, secs_ago: 
             kind: TaskEventKind::Created,
             at,
         }],
+        checklist: Vec::new(),
         soft_deleted: false,
         created_at: at,
         updated_at: at,

@@ -15,3 +15,9 @@ Canonical terms for this repo. No implementation detail.
 - **exactly once**: one `list` row per task id.
 - **closed global-flag set**: `--find-board-pane` and `--help`. Recognized only before the first positional argument. Nothing else selects a surface.
 - **stdin_is_tty seam**: injected boolean the headless parser uses instead of asking the live process whether stdin is a TTY.
+- **checklist**: the flat ordered list of items attached to one task. Exactly one level deep; there is no nesting.
+- **checklist item**: a single checklist entry: stable identity, one line of text, a done flag. Nothing else.
+- **item done**: an item's checked state. Progress information only; it never implies, drives, or auto-applies a task status change.
+- **toggle**: flip one item's done flag. The only checklist state change that is not a text change.
+- **item cursor**: the task page's checklist-row focus. Inactive on page open; a first bare ↓ activates it, ↑ from the first item deactivates it. While active, bare arrows move it and modifier-protected verbs act on it.
+- **item short id**: an unambiguous prefix of an item's stable identity, the way tasks are addressed from the CLI.
