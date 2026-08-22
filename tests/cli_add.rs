@@ -446,6 +446,363 @@ fn add_without_item_flags_on_a_tty_is_usage() {
 }
 
 #[test]
+fn mixed_plan_persists_only_valid_items_exits_1() {
+    let _env = env_lock();
+    let dir = temp_state_dir("mixed-plan");
+    let fixture = format!(
+        "{}/tests/fixtures/cli_add_mixed_plan.json",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let output = add(
+        &[
+            "herdr-tasks".into(),
+            "add".into(),
+            "--state-dir".into(),
+            state_dir_arg(&dir),
+            "--file".into(),
+            fixture,
+        ],
+        true,
+    );
+
+    assert_eq!(output.code, 1);
+    assert!(output.stderr.is_empty());
+    let result: serde_json::Value = serde_json::from_str(&output.stdout).expect("tiny result JSON");
+    let created = result["created"].as_array().expect("created array");
+    assert_eq!(created.len(), 1);
+    assert_eq!(created[0]["i"], 0);
+    assert!(created[0]["id"].as_str().is_some_and(|id| !id.is_empty()));
+    assert_eq!(created[0]["title"], "ok");
+    assert!(created[0].get("notes").is_none());
+    let failed = result["failed"].as_array().expect("failed array");
+    assert_eq!(failed.len(), 2);
+    assert_eq!(failed[0]["i"], 1);
+    assert_eq!(failed[0]["title"], "");
+    assert_eq!(failed[0]["code"], "empty-title");
+    assert_eq!(failed[1]["i"], 2);
+    assert!(failed[1]["title"].is_null());
+    assert_eq!(failed[1]["code"], "invalid-item");
+    assert_eq!(
+        task_store(&dir).load().expect("load state").tasks()[0].title,
+        "ok"
+    );
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn plan_reads_dash_file_and_piped_stdin_and_allows_empty_array() {
+    let _env = env_lock();
+    let dash_dir = temp_state_dir("dash-plan");
+    let dash = run_with(
+        [
+            "herdr-tasks",
+            "add",
+            "--state-dir",
+            &state_dir_arg(&dash_dir),
+            "--file",
+            "-",
+        ],
+        Cursor::new(r#"[{"title":"from dash"}]"#),
+        true,
+    );
+    assert_eq!(dash.code, 0);
+    assert_eq!(
+        task_store(&dash_dir)
+            .load()
+            .expect("load dash state")
+            .tasks()[0]
+            .title,
+        "from dash"
+    );
+
+    let piped_dir = temp_state_dir("piped-plan");
+    let piped = run_with(
+        [
+            "herdr-tasks",
+            "add",
+            "--state-dir",
+            &state_dir_arg(&piped_dir),
+        ],
+        Cursor::new(r#"[{"title":"from pipe"}]"#),
+        false,
+    );
+    assert_eq!(piped.code, 0);
+    assert_eq!(
+        task_store(&piped_dir)
+            .load()
+            .expect("load piped state")
+            .tasks()[0]
+            .title,
+        "from pipe"
+    );
+
+    let empty_dir = temp_state_dir("empty-plan");
+    let empty = run_with(
+        [
+            "herdr-tasks",
+            "add",
+            "--state-dir",
+            &state_dir_arg(&empty_dir),
+            "--file",
+            "-",
+        ],
+        Cursor::new("[]"),
+        true,
+    );
+    assert_eq!(empty.code, 0);
+    assert_eq!(empty.stdout, "{\"created\":[],\"failed\":[]}\n");
+    assert!(task_store(&empty_dir)
+        .load()
+        .expect("load empty state")
+        .tasks()
+        .is_empty());
+
+    let _ = std::fs::remove_dir_all(dash_dir);
+    let _ = std::fs::remove_dir_all(piped_dir);
+    let _ = std::fs::remove_dir_all(empty_dir);
+}
+
+#[test]
+fn plan_usage_errors_persist_nothing_and_do_not_read_mixed_stdin() {
+    let _env = env_lock();
+    let object_dir = temp_state_dir("object-plan");
+    let object = run_with(
+        [
+            "herdr-tasks",
+            "add",
+            "--state-dir",
+            &state_dir_arg(&object_dir),
+            "--file",
+            "-",
+        ],
+        Cursor::new(r#"{"title":"not an array"}"#),
+        true,
+    );
+    assert_eq!(object.code, 2);
+    assert!(object.stdout.is_empty());
+    let malformed = run_with(
+        [
+            "herdr-tasks",
+            "add",
+            "--state-dir",
+            &state_dir_arg(&object_dir),
+            "--file",
+            "-",
+        ],
+        Cursor::new("["),
+        true,
+    );
+    assert_eq!(malformed.code, 2);
+    assert!(malformed.stdout.is_empty());
+    assert!(task_store(&object_dir)
+        .load()
+        .expect("load object state")
+        .tasks()
+        .is_empty());
+
+    let mixed_dir = temp_state_dir("mixed-plan-flags");
+    let mixed = run_with(
+        [
+            "herdr-tasks",
+            "add",
+            "--state-dir",
+            &state_dir_arg(&mixed_dir),
+            "-t",
+            "never read",
+            "--file",
+            "-",
+        ],
+        PanicOnRead,
+        false,
+    );
+    assert_eq!(mixed.code, 2);
+    assert!(mixed.stdout.is_empty());
+    assert!(task_store(&mixed_dir)
+        .load()
+        .expect("load mixed state")
+        .tasks()
+        .is_empty());
+
+    let _ = std::fs::remove_dir_all(object_dir);
+    let _ = std::fs::remove_dir_all(mixed_dir);
+}
+
+#[test]
+fn plan_projects_and_item_validation_follow_the_contract() {
+    let _env = env_lock();
+    let repo = temp_state_dir("plan-default-repo");
+    std::fs::create_dir(repo.join(".git")).expect("create git marker");
+    let dir = temp_state_dir("plan-validation");
+    let prior = std::env::var_os("HERDR_PLUGIN_CONTEXT_JSON");
+    let context = format!(
+        r#"{{"focused_pane_cwd":{}}}"#,
+        serde_json::to_string(&repo).expect("serialize repo")
+    );
+    // SAFETY: ENV_LOCK serializes this test's process-wide environment mutation.
+    unsafe { std::env::set_var("HERDR_PLUGIN_CONTEXT_JSON", context) };
+
+    let output = run_with(
+        [
+            "herdr-tasks",
+            "add",
+            "--state-dir",
+            &state_dir_arg(&dir),
+            "--file",
+            "-",
+        ],
+        Cursor::new(
+            r#"[{"title":"global","project":null},{"title":"default"},{"title":"extra","unknown":true,"notes":null},{"title":"  bad notes  ","notes":42},{"title":"bad project","project":42},{"title":"bad\n"}]"#,
+        ),
+        true,
+    );
+
+    match prior {
+        Some(value) => {
+            // SAFETY: ENV_LOCK serializes this test's process-wide environment mutation.
+            unsafe { std::env::set_var("HERDR_PLUGIN_CONTEXT_JSON", value) };
+        }
+        None => {
+            // SAFETY: ENV_LOCK serializes this test's process-wide environment mutation.
+            unsafe { std::env::remove_var("HERDR_PLUGIN_CONTEXT_JSON") };
+        }
+    }
+
+    assert_eq!(output.code, 1);
+    let result: serde_json::Value = serde_json::from_str(&output.stdout).expect("tiny result JSON");
+    assert_eq!(result["created"].as_array().expect("created").len(), 3);
+    assert_eq!(result["failed"][0]["code"], "invalid-item");
+    assert_eq!(result["failed"][0]["title"], "bad notes");
+    assert_eq!(result["failed"][1]["code"], "invalid-item");
+    assert_eq!(result["failed"][1]["title"], "bad project");
+    assert_eq!(result["failed"][2]["code"], "invalid-title");
+    let state = task_store(&dir).load().expect("load state");
+    assert_eq!(state.tasks()[0].scope, TaskScope::Global);
+    assert_eq!(
+        state.tasks()[1].scope,
+        TaskScope::Project {
+            path: repo.to_string_lossy().into_owned()
+        }
+    );
+    assert_eq!(state.tasks()[2].title, "extra");
+    assert!(state.tasks()[2].notes.is_none());
+
+    let _ = std::fs::remove_dir_all(repo);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn plan_project_string_uses_the_shared_basename_resolver() {
+    let _env = env_lock();
+    let dir = temp_state_dir("plan-project");
+    let store = task_store(&dir);
+    let mut seeded = DomainState::new();
+    seeded
+        .create(
+            "existing project",
+            None,
+            TaskScope::Project {
+                path: "/projects/Widget".into(),
+            },
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("seed project");
+    store.save(&seeded).expect("save seed");
+
+    let output = run_with(
+        [
+            "herdr-tasks",
+            "add",
+            "--state-dir",
+            &state_dir_arg(&dir),
+            "--file",
+            "-",
+        ],
+        Cursor::new(r#"[{"title":"resolved","project":"widget"}]"#),
+        true,
+    );
+
+    assert_eq!(output.code, 0);
+    assert_eq!(
+        task_store(&dir).load().expect("load state").tasks()[1].scope,
+        TaskScope::Project {
+            path: "/projects/Widget".into()
+        }
+    );
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn plan_project_resolution_is_independent_of_item_order() {
+    let _env = env_lock();
+    let forward_dir = temp_state_dir("plan-project-order-forward");
+    let forward = run_with(
+        [
+            "herdr-tasks",
+            "add",
+            "--state-dir",
+            &state_dir_arg(&forward_dir),
+            "--file",
+            "-",
+        ],
+        Cursor::new(
+            r#"[{"title":"explicit first","project":"/repos/Widget"},{"title":"bare second","project":"widget"}]"#,
+        ),
+        true,
+    );
+    assert_eq!(forward.code, 0);
+    let forward_state = task_store(&forward_dir).load().expect("load forward state");
+    assert_eq!(
+        forward_state.tasks()[0].scope,
+        TaskScope::Project {
+            path: "/repos/Widget".into()
+        }
+    );
+    assert_eq!(
+        forward_state.tasks()[1].scope,
+        TaskScope::Project {
+            path: "widget".into()
+        }
+    );
+
+    let reverse_dir = temp_state_dir("plan-project-order-reverse");
+    let reverse = run_with(
+        [
+            "herdr-tasks",
+            "add",
+            "--state-dir",
+            &state_dir_arg(&reverse_dir),
+            "--file",
+            "-",
+        ],
+        Cursor::new(
+            r#"[{"title":"bare first","project":"widget"},{"title":"explicit second","project":"/repos/Widget"}]"#,
+        ),
+        true,
+    );
+    assert_eq!(reverse.code, 0);
+    let reverse_state = task_store(&reverse_dir).load().expect("load reverse state");
+    assert_eq!(
+        reverse_state.tasks()[0].scope,
+        TaskScope::Project {
+            path: "widget".into()
+        }
+    );
+    assert_eq!(
+        reverse_state.tasks()[1].scope,
+        TaskScope::Project {
+            path: "/repos/Widget".into()
+        }
+    );
+
+    let _ = std::fs::remove_dir_all(forward_dir);
+    let _ = std::fs::remove_dir_all(reverse_dir);
+}
+
+#[test]
 fn state_dir_flag_wins_over_environment() {
     let _env = env_lock();
     let environment_dir = temp_state_dir("environment");

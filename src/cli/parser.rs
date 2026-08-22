@@ -1,8 +1,8 @@
-//! Flag parsing for the `add` command.
+//! Argument parsing for the `add` command.
 
 use std::path::PathBuf;
 
-/// Parsed flag-form add input. Plan input is deliberately not accepted until T-4.
+/// Parsed add input. A plan source is selected by `file` or piped stdin.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FlagAdd {
     pub title: Option<String>,
@@ -10,6 +10,7 @@ pub struct FlagAdd {
     pub project: Option<String>,
     pub global: bool,
     pub state_dir: Option<PathBuf>,
+    pub file: Option<PathBuf>,
     pub has_item_flags: bool,
 }
 
@@ -25,6 +26,7 @@ pub fn parse_flag_add(args: &[String]) -> Result<FlagAdd, String> {
         project: None,
         global: false,
         state_dir: None,
+        file: None,
         has_item_flags: false,
     };
     let mut index = 2;
@@ -59,12 +61,19 @@ pub fn parse_flag_add(args: &[String]) -> Result<FlagAdd, String> {
                 parsed.state_dir = Some(PathBuf::from(value(flag)?));
                 index += 2;
             }
+            "--file" => {
+                parsed.file = Some(PathBuf::from(value(flag)?));
+                index += 2;
+            }
             _ => return Err(format!("unknown add argument {flag}")),
         }
     }
 
     if parsed.global && parsed.project.is_some() {
         return Err("--global cannot be used with --project".into());
+    }
+    if parsed.has_item_flags && parsed.file.is_some() {
+        return Err("item flags cannot be used with --file".into());
     }
     Ok(parsed)
 }

@@ -11,6 +11,18 @@ pub fn added(title: &str) -> CliOutput {
     }
 }
 
+pub fn plan(result: crate::cli::add::PlanResult) -> CliOutput {
+    let code = if result.has_failures() { 1 } else { 0 };
+    CliOutput {
+        stdout: format!(
+            "{}\n",
+            serde_json::to_string(&result).expect("plan result is serializable")
+        ),
+        stderr: String::new(),
+        code,
+    }
+}
+
 pub fn usage(reason: &str) -> CliOutput {
     CliOutput {
         stdout: String::new(),
