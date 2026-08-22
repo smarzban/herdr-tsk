@@ -67,7 +67,7 @@ fn run_add<R: Read>(args: Vec<String>, stdin: &mut R, stdin_is_tty: bool) -> Cli
             return presenter::usage("title is required");
         }
         return match add::run(input) {
-            Ok(result) => presenter::added(result),
+            Ok(title) => presenter::added(&title),
             Err(error) => presenter::rejected(error),
         };
     }
