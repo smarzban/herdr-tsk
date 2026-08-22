@@ -352,7 +352,7 @@ fn list_done_and_deleted_filters_are_status_and_soft_delete_specific() {
 }
 
 #[test]
-fn list_all_includes_every_scope_in_displayed_order_for_each_filter() {
+fn list_all_groups_each_status_by_concise_scope_for_every_filter() {
     let _env = env_lock();
     let repo = project_repo("all-repo");
     let _context = EnvironmentGuard::context_for(&repo);
@@ -365,6 +365,20 @@ fn list_all_includes_every_scope_in_displayed_order_for_each_filter() {
         &mut state,
         "global started",
         TaskScope::Global,
+        HumanStatus::Started,
+    );
+    create_task(
+        &mut state,
+        "project started",
+        project.clone(),
+        HumanStatus::Started,
+    );
+    create_task(
+        &mut state,
+        "other started",
+        TaskScope::Project {
+            path: "/projects/other".into(),
+        },
         HumanStatus::Started,
     );
     create_task(
@@ -423,6 +437,10 @@ fn list_all_includes_every_scope_in_displayed_order_for_each_filter() {
         .soft_delete(deleted_other)
         .expect("soft delete other task");
     TaskStore::new(&dir).save(&state).expect("seed store");
+    let project_name = repo
+        .file_name()
+        .and_then(|name| name.to_str())
+        .expect("project basename");
 
     let open = list(&[
         "herdr-tasks".into(),
@@ -435,9 +453,33 @@ fn list_all_includes_every_scope_in_displayed_order_for_each_filter() {
     assert_eq!(
         open.stdout,
         format!(
-            "STARTED\n - global started [global]\n\nREADY\n - project ready [{}]\n\nBLOCKED\n - other blocked [/projects/other]\n\nREVIEW\n - global review [global]\n",
-            repo.display()
+            "STARTED\n  global\n    - global started\n  {project_name}\n    - project started\n  other\n    - other started\n\nREADY\n  {project_name}\n    - project ready\n\nBLOCKED\n  other\n    - other blocked\n\nREVIEW\n  global\n    - global review\n"
         )
+    );
+
+    let open_json = list(&[
+        "herdr-tasks".into(),
+        "list".into(),
+        "--all".into(),
+        "--json".into(),
+        "--state-dir".into(),
+        state_dir_arg(&dir),
+    ]);
+    let open_rows: Vec<serde_json::Value> =
+        serde_json::from_str(&open_json.stdout).expect("open JSON rows");
+    assert_eq!(
+        open_rows
+            .iter()
+            .map(|row| row["title"].as_str().expect("title"))
+            .collect::<Vec<_>>(),
+        vec![
+            "global started",
+            "project started",
+            "other started",
+            "project ready",
+            "other blocked",
+            "global review",
+        ]
     );
 
     let done = list(&[
@@ -478,10 +520,7 @@ fn list_all_includes_every_scope_in_displayed_order_for_each_filter() {
     ]);
     assert_eq!(
         done_human.stdout,
-        format!(
-            "DONE\n - project done [{}]\n - global done [global]\n",
-            repo.display()
-        )
+        format!("DONE\n  {project_name}\n    - project done\n  global\n    - global done\n")
     );
 
     let deleted = list(&[
@@ -513,10 +552,80 @@ fn list_all_includes_every_scope_in_displayed_order_for_each_filter() {
     ]);
     assert_eq!(
         deleted_human.stdout,
-        "DELETED\n - global deleted [global]\n - other deleted [/projects/other]\n"
+        "DELETED\n  global\n    - global deleted\n  other\n    - other deleted\n"
     );
 
     let _ = std::fs::remove_dir_all(repo);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn list_all_distinguishes_global_from_project_global_and_uses_visible_scope_labels() {
+    let _env = env_lock();
+    let dir = temp_state_dir("all-colliding-scopes");
+    let mut state = DomainState::new();
+    create_task(
+        &mut state,
+        "global task",
+        TaskScope::Global,
+        HumanStatus::Ready,
+    );
+    create_task(
+        &mut state,
+        "project global token",
+        TaskScope::Project {
+            path: "global".into(),
+        },
+        HumanStatus::Ready,
+    );
+    create_task(
+        &mut state,
+        "project global path",
+        TaskScope::Project {
+            path: "/work/global".into(),
+        },
+        HumanStatus::Ready,
+    );
+    create_task(
+        &mut state,
+        "work api",
+        TaskScope::Project {
+            path: "/work/api".into(),
+        },
+        HumanStatus::Ready,
+    );
+    create_task(
+        &mut state,
+        "personal api",
+        TaskScope::Project {
+            path: "/personal/api".into(),
+        },
+        HumanStatus::Ready,
+    );
+    create_task(
+        &mut state,
+        "whitespace scope",
+        TaskScope::Project {
+            path: " \t ".into(),
+        },
+        HumanStatus::Ready,
+    );
+    TaskStore::new(&dir).save(&state).expect("seed store");
+
+    let output = list(&[
+        "herdr-tasks".into(),
+        "list".into(),
+        "--all".into(),
+        "--state-dir".into(),
+        state_dir_arg(&dir),
+    ]);
+
+    assert_eq!(output.code, 0);
+    assert_eq!(
+        output.stdout,
+        "READY\n  global\n    - global task\n  project: global\n    - project global token\n  project: /work/global\n    - project global path\n  /work/api\n    - work api\n  /personal/api\n    - personal api\n  <empty project>\n    - whitespace scope\n"
+    );
+
     let _ = std::fs::remove_dir_all(dir);
 }
 

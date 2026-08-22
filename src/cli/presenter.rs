@@ -1,8 +1,10 @@
 //! Text output for headless command results.
 
+use std::path::Path;
+
 use super::CliOutput;
 use crate::cli::add::{AddError, FlagAddResult};
-use crate::cli::list::{ListError, ListResult, ListView};
+use crate::cli::list::{ListError, ListResult, ListRow, ListView};
 use crate::domain::HumanStatus;
 
 pub fn add_help() -> CliOutput {
@@ -19,7 +21,7 @@ pub fn list_help() -> CliOutput {
             "--project uses the same basename-or-path scope resolution as add; --global selects global tasks; --all selects every scope.\n",
             "--done lists done tasks only. --deleted lists soft-deleted tasks only, regardless of status.\n",
             "To recover a typo scope, use herdr-tasks list --all --json.\n",
-            "--json emits a flat array of id, title, status, and project in displayed group order. Human --all rows append [project] or [global].\n\n",
+            "--json emits a flat array of id, title, status, and project in displayed group order. Human --all groups rows by status, then project scope (basename when unique, full path when needed) or global.\n\n",
             "Exit contract:\n",
             "  exit 0: tasks were listed\n",
             "  exit 2: usage or parse error, nothing persisted\n",
@@ -125,9 +127,9 @@ fn list_human(result: &ListResult) -> String {
         let rows = result
             .rows
             .iter()
-            .filter(|row| status.is_none_or(|status| row.status == status));
-        let mut rows = rows.peekable();
-        if rows.peek().is_none() {
+            .filter(|row| status.is_none_or(|status| row.status == status))
+            .collect::<Vec<_>>();
+        if rows.is_empty() {
             continue;
         }
         if !output.is_empty() {
@@ -135,18 +137,72 @@ fn list_human(result: &ListResult) -> String {
         }
         output.push_str(heading);
         output.push('\n');
-        for row in rows {
-            output.push_str(" - ");
-            output.push_str(&row.title);
-            if result.include_scope {
-                output.push_str(" [");
-                output.push_str(row.project.as_deref().unwrap_or("global"));
-                output.push(']');
-            }
-            output.push('\n');
+        if result.include_scope {
+            append_scope_groups(&mut output, rows);
+        } else {
+            append_rows(&mut output, &rows, " ");
         }
     }
     output
+}
+
+fn append_scope_groups(output: &mut String, rows: Vec<&ListRow>) {
+    let mut scopes = Vec::<(Option<&str>, Vec<&ListRow>)>::new();
+    for row in rows {
+        let scope = row.project.as_deref();
+        match scopes
+            .iter_mut()
+            .find(|(group_scope, _)| *group_scope == scope)
+        {
+            Some((_, rows)) => rows.push(row),
+            None => scopes.push((scope, vec![row])),
+        }
+    }
+    for index in 0..scopes.len() {
+        let (scope, rows) = &scopes[index];
+        let concise = concise_scope(*scope);
+        let disambiguate = scopes
+            .iter()
+            .filter(|(other_scope, _)| concise_scope(*other_scope) == concise)
+            .count()
+            > 1;
+        output.push_str("  ");
+        output.push_str(&scope_label(*scope, disambiguate));
+        output.push('\n');
+        append_rows(output, rows, "    ");
+    }
+}
+
+fn append_rows(output: &mut String, rows: &[&ListRow], indent: &str) {
+    for row in rows {
+        output.push_str(indent);
+        output.push_str("- ");
+        output.push_str(&row.title);
+        output.push('\n');
+    }
+}
+
+fn scope_label(scope: Option<&str>, disambiguate: bool) -> String {
+    match scope {
+        None => "global".into(),
+        Some(path) if path.trim().is_empty() => "<empty project>".into(),
+        Some(path) if disambiguate && concise_scope(scope) == "global" => {
+            format!("project: {path}")
+        }
+        Some(path) if disambiguate => path.into(),
+        Some(_) => concise_scope(scope).into(),
+    }
+}
+
+fn concise_scope(scope: Option<&str>) -> &str {
+    match scope {
+        None => "global",
+        Some(path) if path.trim().is_empty() => "<empty project>",
+        Some(path) => Path::new(path)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or(path),
+    }
 }
 
 pub fn list_usage(reason: &str) -> CliOutput {
