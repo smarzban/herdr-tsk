@@ -1,8 +1,3 @@
----
-name: herdr-tasks-cli
-description: Use when asked to add tasks, a task list, or a plan to the Tasks board, or to inspect Tasks board items. Use `herdr-tasks add` and `herdr-tasks list`, never the TUI.
----
-
 # herdr-tasks CLI
 
 Use `herdr-tasks add` to create a task or JSON plan, and `herdr-tasks list` to
