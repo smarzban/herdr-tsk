@@ -166,13 +166,28 @@ fn build_task_page_overlay<'a>(
     let checklist_items = bound_task
         .map(super::model::checklist_item_views)
         .unwrap_or_default();
+    // The one-line item editor's draft, windowed around its cursor at the section's
+    // width. Its label row (`  item  `) plus one trailing cell bound the window.
+    let checklist_editor = form.checklist.editor.as_ref().map(|editor| {
+        let avail = (geo.row_width as usize).saturating_sub("  item  ".len() + 1);
+        let (text, cursor_col) = escaped_line_window(&editor.buffer, avail);
+        crate::ui::render::ChecklistEditorLine { text, cursor_col }
+    });
     // A notes edit always keeps one row: the layout reserves it (checklist caps around
     // it), so an active edit can never be scrolled/clamped out of the frame entirely.
     let lay = render::task_page_layout(
         geo,
-        checklist_items.len(),
+        render::checklist_section_rows(checklist_items.len(), checklist_editor.is_some()),
         u16::from(model.input_mode() == BoardInputMode::EditNotes),
     );
+    // Record the item rows this frame's window actually shows, so the next cursor-move
+    // intent bounds its scroll by rendered rows (the same seam `notes_max_scroll` uses).
+    let checklist_win = render::checklist_window(
+        checklist_items.len(),
+        form.checklist.scroll,
+        lay.checklist_rows.saturating_sub(1),
+    );
+    form.checklist.window_rows.set(checklist_win.count);
     let status = bound_task
         .map(|task| task.status)
         .unwrap_or(HumanStatus::Ready);
@@ -257,6 +272,10 @@ fn build_task_page_overlay<'a>(
         notes_cursor,
         more_lines,
         checklist_items,
+        checklist_cursor: form.checklist.cursor,
+        checklist_scroll: form.checklist.scroll,
+        checklist_marked: form.checklist.delete_mark,
+        checklist_editor,
         meta,
         focus,
         scope_dropdown,

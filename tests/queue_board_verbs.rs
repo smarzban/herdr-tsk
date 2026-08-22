@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use herdr_tasks::domain::{DomainState, HumanStatus, ProvenanceOrigin, TaskScope};
+use herdr_tasks::domain::{DomainState, HumanStatus, ProvenanceOrigin, TaskEventKind, TaskScope};
 use herdr_tasks::ui::board::{
     apply_intent, board_intent_may_persist, draw_board, resolve_board_command, BoardInputMode,
     BoardModel, CommandSurface, IntentOutcome, ProjectScopeOption,
@@ -1732,5 +1732,611 @@ fn closing_the_page_after_completing_its_task_reanchors_to_a_visible_row() {
     assert_eq!(
         selected, other,
         "selection should reanchor to the open task"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// T-3: page item cursor and modifier-protected checklist verbs. Bare arrows own
+// the cursor lifecycle (first Down activates, Up from the first item
+// deactivates); Alt+space toggles the highlighted item, Alt+x marks then
+// removes, Alt+e renames the highlighted item or the title by cursor state,
+// Alt+a opens the one-line add editor.
+// ---------------------------------------------------------------------------
+
+/// A task page opened on a task carrying `items`, painted at the standard
+/// 80x24 board size. Returns the opened page.
+fn board_with_checklist(
+    title: &str,
+    notes: Option<&str>,
+    items: &[&str],
+) -> (DomainState, BoardModel, uuid::Uuid) {
+    let mut domain = DomainState::new();
+    let id = domain
+        .create(
+            title,
+            notes.map(str::to_string),
+            project(THIS_REPO),
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("create");
+    for item in items {
+        domain.add_checklist_item(id, item).expect("add item");
+    }
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenTaskPage,
+        None,
+        None,
+    )
+    .expect("open task page");
+    (domain, model, id)
+}
+
+/// Ten note lines that each wrap ~5x at the 80-column page width (~50 wrapped
+/// rows against a ~14-row notes window), each carrying a unique `L{n}` marker on
+/// its first wrapped row so scroll position is paint-observable.
+fn wrapping_notes() -> String {
+    (0..10)
+        .map(|i| format!("L{i} {}", "w".repeat(300)))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// AC-8 / T-2 review Minor 1: bare arrows move the item cursor through items,
+/// the checklist window scrolls to keep the cursor visible, and the dim
+/// `+N more ↓` affordance appears and disappears with hidden items.
+#[test]
+fn arrow_keys_move_item_cursor_and_drive_scroll() {
+    let items: Vec<String> = (1..=30).map(|i| format!("step {i:02}")).collect();
+    let item_refs: Vec<&str> = items.iter().map(String::as_str).collect();
+    let (mut domain, mut model, id) =
+        board_with_checklist("Window walker", Some("the notes body"), &item_refs);
+    let _ = domain.get(id).expect("task");
+
+    // Fresh page: no cursor yet, the window truncates 30 items, the affordance
+    // names the hidden tail, and the items past the fold are absent.
+    let frame = rendered_board(&model, 80, 24);
+    assert!(
+        frame.contains("+14 more"),
+        "the truncated section must paint the hidden-items affordance:\n{frame}"
+    );
+    assert!(frame.contains("step 01"), "first item visible:\n{frame}");
+    assert!(
+        !frame.contains("step 16"),
+        "items past the fold must not paint:\n{frame}"
+    );
+
+    // First Down activates the cursor on the first item; 29 more walk it to the
+    // last, driving the window scroll to keep it visible.
+    for _ in 0..30 {
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::PageScrollDown,
+            None,
+            None,
+        )
+        .expect("walk down");
+    }
+    let bottom = rendered_board(&model, 80, 24);
+    assert!(
+        bottom.contains("▸ ▪ step 30"),
+        "the cursor must be visible on the last item:\n{bottom}"
+    );
+    assert!(
+        !bottom.contains("step 01"),
+        "the window must have scrolled past the first item:\n{bottom}"
+    );
+    assert!(
+        !bottom.contains("more"),
+        "no hidden items remain, so no affordance row:\n{bottom}"
+    );
+
+    // Walking back up drives the window the other way; hidden items bring the
+    // affordance back.
+    for _ in 0..16 {
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::PageScrollUp,
+            None,
+            None,
+        )
+        .expect("walk up");
+    }
+    let mid = rendered_board(&model, 80, 24);
+    assert!(
+        mid.contains("▸ ▪ step 14"),
+        "the cursor must be visible after walking up:\n{mid}"
+    );
+    assert!(
+        mid.contains("more"),
+        "hidden items must restore the affordance:\n{mid}"
+    );
+    assert!(
+        !mid.contains("step 01"),
+        "the window is still scrolled: the first item stays hidden:\n{mid}"
+    );
+}
+
+/// Alt+space with the cursor active toggles exactly the highlighted item
+/// through the real apply/save path: domain command, revision bump, journaled
+/// event, Persist outcome -- and the task's human status never changes.
+#[test]
+fn modifier_toggle_flips_item_under_cursor() {
+    let (mut domain, mut model, id) = board_with_checklist(
+        "Toggle witness",
+        None,
+        &["alpha step", "bravo step", "charlie step"],
+    );
+    let revision_before = domain.get(id).expect("task").revision;
+
+    // Activate + one Down: cursor on "bravo step".
+    for intent in [BoardIntent::PageScrollDown, BoardIntent::PageScrollDown] {
+        apply_intent(&mut domain, &mut model, intent, None, None).expect("cursor down");
+    }
+
+    let toggle = map_key(BoardInputMode::TaskPage, alt(KeyCode::Char(' '))).expect("alt+space");
+    assert_eq!(toggle, BoardIntent::PrimaryVerb);
+    let outcome = apply_intent(&mut domain, &mut model, toggle, None, None).expect("toggle");
+    assert_eq!(
+        outcome,
+        IntentOutcome::Persist,
+        "the item toggle must ride the real persist path"
+    );
+
+    let task = domain.get(id).expect("task");
+    let dones: Vec<bool> = task.checklist.iter().map(|item| item.done).collect();
+    assert_eq!(
+        dones,
+        vec![false, true, false],
+        "exactly the highlighted item flips"
+    );
+    assert_eq!(
+        task.status,
+        HumanStatus::Ready,
+        "toggling an item never changes human status"
+    );
+    assert_ne!(
+        task.revision, revision_before,
+        "the toggle must bump the revision"
+    );
+    assert_eq!(
+        task.history.last().expect("event").kind,
+        TaskEventKind::ChecklistItemChecked,
+        "the toggle must journal its typed event"
+    );
+
+    let frame = rendered_board(&model, 80, 24);
+    assert!(
+        frame.contains("checklist 1/3"),
+        "done/total counts must follow the toggle:\n{frame}"
+    );
+    assert!(
+        frame.contains("▸ ✓ bravo step"),
+        "the toggled item stays under the cursor:\n{frame}"
+    );
+}
+
+/// Alt+e is contextual: with the cursor active it opens the section's one-line
+/// editor seeded with the highlighted item's text (Enter renames the item);
+/// with the cursor inactive it is the existing title-edit verb, unchanged.
+#[test]
+fn rename_verb_targets_item_or_title_by_cursor() {
+    let (mut domain, mut model, id) =
+        board_with_checklist("Rename target", None, &["alpha step", "bravo step"]);
+
+    // Cursor on the first item, then Alt+e opens the item editor seeded with it.
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::PageScrollDown,
+        None,
+        None,
+    )
+    .expect("activate cursor");
+    let rename = map_key(BoardInputMode::TaskPage, alt(KeyCode::Char('e'))).expect("alt+e");
+    assert_eq!(rename, BoardIntent::BeginEditTitle);
+    apply_intent(&mut domain, &mut model, rename.clone(), None, None).expect("open item editor");
+
+    assert_ne!(
+        model.input_mode(),
+        BoardInputMode::EditTitle,
+        "with the cursor active the rename verb must not edit the title"
+    );
+    let frame = rendered_board(&model, 80, 24);
+    assert!(
+        frame
+            .lines()
+            .any(|row| row.contains("item") && row.contains("alpha step")),
+        "the section's line editor must paint seeded with the item's text:\n{frame}"
+    );
+
+    // Edit the draft, then Enter applies the rename to the item, not the title.
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::EditInsert('!'),
+        None,
+        None,
+    )
+    .expect("type into item editor");
+    let save = map_key(model.input_mode(), press(KeyCode::Enter)).expect("enter");
+    assert_eq!(save, BoardIntent::ConfirmEdit);
+    let outcome = apply_intent(&mut domain, &mut model, save, None, None).expect("rename item");
+    assert_eq!(outcome, IntentOutcome::Persist);
+
+    let task = domain.get(id).expect("task");
+    assert_eq!(
+        task.checklist[0].text, "alpha step!",
+        "Enter must rename the highlighted item"
+    );
+    assert_eq!(task.title, "Rename target", "the title is untouched");
+    assert_eq!(
+        task.history.last().expect("event").kind,
+        TaskEventKind::ChecklistItemRenamed
+    );
+    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+
+    // Cursor inactive (fresh page session): Alt+e is the existing title edit.
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenTaskPage,
+        None,
+        None,
+    )
+    .expect("close page");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenTaskPage,
+        None,
+        None,
+    )
+    .expect("reopen page");
+    apply_intent(&mut domain, &mut model, rename, None, None).expect("alt+e inactive cursor");
+    assert_eq!(
+        model.input_mode(),
+        BoardInputMode::EditTitle,
+        "with the cursor inactive Alt+e edits the title, unchanged"
+    );
+    assert_eq!(model.edit_buffer(), "Rename target");
+}
+
+/// Alt+x is mark-then-confirm: the first press visibly marks the cursor's item,
+/// any intervening key clears the mark without removing, and a second Alt+x
+/// with nothing between removes the item through the domain command.
+#[test]
+fn delete_verb_marks_then_removes_on_second_press() {
+    let (mut domain, mut model, id) = board_with_checklist(
+        "Delete witness",
+        None,
+        &["alpha step", "bravo step", "charlie step"],
+    );
+    let revision_before = domain.get(id).expect("task").revision;
+
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::PageScrollDown,
+        None,
+        None,
+    )
+    .expect("activate cursor");
+    let delete = map_key(BoardInputMode::TaskPage, alt(KeyCode::Char('x'))).expect("alt+x");
+    assert_eq!(delete, BoardIntent::SoftDelete);
+
+    // First press: visible mark, no mutation.
+    let outcome =
+        apply_intent(&mut domain, &mut model, delete.clone(), None, None).expect("mark item");
+    assert_eq!(
+        outcome,
+        IntentOutcome::None,
+        "the marking press persists nothing"
+    );
+    let task = domain.get(id).expect("task");
+    assert_eq!(task.checklist.len(), 3, "nothing removed yet");
+    assert!(!task.soft_deleted, "the task itself is not deleted");
+    assert_eq!(task.revision, revision_before, "no journaled mutation yet");
+    let marked = rendered_board(&model, 80, 24);
+    assert!(
+        marked.contains("✗ alpha step"),
+        "the marked item must paint visibly:\n{marked}"
+    );
+
+    // An intervening key (a cursor move) clears the mark without removing.
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::PageScrollDown,
+        None,
+        None,
+    )
+    .expect("intervening key");
+    let cleared = rendered_board(&model, 80, 24);
+    assert!(
+        !cleared.contains("✗"),
+        "the intervening key must clear the mark:\n{cleared}"
+    );
+    assert_eq!(
+        domain.get(id).expect("task").checklist.len(),
+        3,
+        "clearing the mark removes nothing"
+    );
+
+    // Mark again, then confirm with a second Alt+x and nothing between.
+    apply_intent(&mut domain, &mut model, delete.clone(), None, None).expect("mark again");
+    let removed = rendered_board(&model, 80, 24);
+    assert!(
+        removed.contains("✗ bravo step"),
+        "the mark follows the cursor's item:\n{removed}"
+    );
+    let outcome = apply_intent(&mut domain, &mut model, delete, None, None).expect("remove item");
+    assert_eq!(outcome, IntentOutcome::Persist);
+    let task = domain.get(id).expect("task");
+    let texts: Vec<&str> = task
+        .checklist
+        .iter()
+        .map(|item| item.text.as_str())
+        .collect();
+    assert_eq!(
+        texts,
+        vec!["alpha step", "charlie step"],
+        "the second press removes the marked item"
+    );
+    assert_eq!(
+        task.history.last().expect("event").kind,
+        TaskEventKind::ChecklistItemRemoved
+    );
+    assert_eq!(
+        model.input_mode(),
+        BoardInputMode::TaskPage,
+        "the page stays open"
+    );
+}
+
+/// AC-17: on a task with items and the cursor inactive, a first bare Down
+/// activates the cursor on the first item instead of scrolling the notes.
+#[test]
+fn first_bare_down_activates_item_cursor_without_scrolling() {
+    let notes = wrapping_notes();
+    let (mut domain, mut model, _id) = board_with_checklist(
+        "Scroll witness",
+        Some(&notes),
+        &["alpha step", "bravo step"],
+    );
+
+    // One painted frame establishes the wrap geometry the notes scroll bound uses.
+    let before = rendered_board(&model, 80, 24);
+    let rows_before: Vec<&str> = before.lines().collect();
+    let label_at = rows_before
+        .iter()
+        .position(|row| row.contains("checklist"))
+        .expect("checklist section painted");
+
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::PageScrollDown,
+        None,
+        None,
+    )
+    .expect("first bare down");
+
+    let after = rendered_board(&model, 80, 24);
+    let rows_after: Vec<&str> = after.lines().collect();
+    let label_after = rows_after
+        .iter()
+        .position(|row| row.contains("checklist"))
+        .expect("checklist section painted");
+    assert_eq!(
+        &rows_before[..label_at],
+        &rows_after[..label_after],
+        "the activating press must not scroll the notes"
+    );
+    assert!(
+        after.contains("▸ ▪ alpha step"),
+        "the cursor must be active on the first item:\n{after}"
+    );
+}
+
+/// AC-18: Up from the first item deactivates the cursor and returns bare
+/// arrows to note scrolling.
+#[test]
+fn up_from_first_item_deactivates_cursor_and_restores_scroll() {
+    let notes = wrapping_notes();
+    let (mut domain, mut model, _id) = board_with_checklist(
+        "Deactivate witness",
+        Some(&notes),
+        &["alpha step", "bravo step"],
+    );
+
+    // One painted frame establishes the wrap geometry, so a scrolling press
+    // below would actually move the notes.
+    rendered_board(&model, 80, 24);
+
+    // Activate on the first item (visible cursor), then Up deactivates.
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::PageScrollDown,
+        None,
+        None,
+    )
+    .expect("activate");
+    let activated = rendered_board(&model, 80, 24);
+    assert!(
+        activated.contains("▸ ▪ alpha step"),
+        "the cursor must be active on the first item:\n{activated}"
+    );
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::PageScrollUp,
+        None,
+        None,
+    )
+    .expect("deactivate");
+    let deactivated = rendered_board(&model, 80, 24);
+    assert!(
+        !deactivated.contains("▸"),
+        "the cursor must be deactivated:\n{deactivated}"
+    );
+    assert!(
+        deactivated.contains("L0"),
+        "the deactivating press is consumed, notes stay put:\n{deactivated}"
+    );
+
+    // Bare arrows scroll the notes again.
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::PageScrollDown,
+        None,
+        None,
+    )
+    .expect("scroll notes");
+    let scrolled = rendered_board(&model, 80, 24);
+    assert!(
+        !scrolled.contains("L0") && scrolled.contains("L1"),
+        "after deactivation a bare Down must scroll the notes:\n{scrolled}"
+    );
+    assert!(
+        !scrolled.contains("▸"),
+        "the cursor stays inactive while notes scroll:\n{scrolled}"
+    );
+}
+
+/// AC-19: a task with no checklist items never activates a cursor; bare
+/// arrows scroll the page exactly as before this feature.
+#[test]
+fn no_item_task_arrows_scroll_notes_unchanged() {
+    let notes = wrapping_notes();
+    let (mut domain, mut model, _id) = board_with_checklist("No steps task", Some(&notes), &[]);
+
+    let start = rendered_board(&model, 80, 24);
+    assert!(start.contains("L0"), "notes painted from the top:\n{start}");
+    assert!(
+        !start.contains("checklist") && !start.contains("▸"),
+        "no section, no cursor, on an empty checklist:\n{start}"
+    );
+
+    // Exactly pre-feature behavior: every arrow press scrolls the notes by one row.
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::PageScrollDown,
+        None,
+        None,
+    )
+    .expect("scroll down one");
+    let down = rendered_board(&model, 80, 24);
+    assert!(
+        !down.contains("L0") && down.contains("L1"),
+        "a bare Down must scroll the notes exactly one row:\n{down}"
+    );
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::PageScrollUp,
+        None,
+        None,
+    )
+    .expect("scroll up one");
+    let up = rendered_board(&model, 80, 24);
+    assert!(
+        up.contains("L0"),
+        "a bare Up must scroll the notes back:\n{up}"
+    );
+    assert!(
+        !up.contains("▸"),
+        "an empty checklist never activates a cursor:\n{up}"
+    );
+}
+
+/// Alt+a opens the section's one-line editor empty; Enter applies the add
+/// through the domain command and closes, Esc cancels and closes.
+#[test]
+fn add_verb_opens_editor_enter_applies_esc_cancels() {
+    let (mut domain, mut model, id) = board_with_checklist("Add witness", None, &["alpha step"]);
+
+    let add = map_key(BoardInputMode::TaskPage, alt(KeyCode::Char('a')))
+        .expect("alt+a must open the item editor");
+    apply_intent(&mut domain, &mut model, add, None, None).expect("open add editor");
+    assert_ne!(
+        model.input_mode(),
+        BoardInputMode::TaskPage,
+        "the editor owns input"
+    );
+    let frame = rendered_board(&model, 80, 24);
+    assert!(
+        frame.lines().any(|row| row.contains("item")),
+        "the empty editor must paint on the section's line:\n{frame}"
+    );
+
+    for ch in "zed step".chars() {
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::EditInsert(ch),
+            None,
+            None,
+        )
+        .expect("type");
+    }
+    let save = map_key(model.input_mode(), press(KeyCode::Enter)).expect("enter");
+    assert_eq!(save, BoardIntent::ConfirmEdit);
+    let outcome = apply_intent(&mut domain, &mut model, save, None, None).expect("add item");
+    assert_eq!(outcome, IntentOutcome::Persist);
+    let task = domain.get(id).expect("task");
+    let texts: Vec<&str> = task
+        .checklist
+        .iter()
+        .map(|item| item.text.as_str())
+        .collect();
+    assert_eq!(
+        texts,
+        vec!["alpha step", "zed step"],
+        "Enter must append the typed item"
+    );
+    assert_eq!(
+        task.history.last().expect("event").kind,
+        TaskEventKind::ChecklistItemAdded
+    );
+    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+
+    // Esc cancels: the draft is discarded, nothing is appended.
+    let add = map_key(BoardInputMode::TaskPage, alt(KeyCode::Char('a')))
+        .expect("alt+a reopens the editor");
+    apply_intent(&mut domain, &mut model, add, None, None).expect("reopen add editor");
+    for ch in "junk".chars() {
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::EditInsert(ch),
+            None,
+            None,
+        )
+        .expect("type junk");
+    }
+    let cancel = map_key(model.input_mode(), press(KeyCode::Esc)).expect("esc");
+    assert_eq!(cancel, BoardIntent::CancelEdit);
+    let outcome = apply_intent(&mut domain, &mut model, cancel, None, None).expect("cancel");
+    assert_eq!(outcome, IntentOutcome::None);
+    assert_eq!(
+        domain.get(id).expect("task").checklist.len(),
+        2,
+        "Esc appends nothing"
+    );
+    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+    let closed = rendered_board(&model, 80, 24);
+    assert!(
+        !closed.lines().any(|row| row.contains("item")),
+        "the editor line is gone on close:\n{closed}"
     );
 }

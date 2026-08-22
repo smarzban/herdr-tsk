@@ -16,8 +16,8 @@ use crate::ui::mouse::BoardPopup;
 
 use super::commands::{resolve_board_command, CommandSurface};
 use super::model::{
-    owned_resource_summary, BoardForm, BoardInputMode, BoardModel, IntentOutcome, OwnedDeckScope,
-    ProjectPickerState, ProjectScopeOption,
+    owned_resource_summary, BoardForm, BoardInputMode, BoardModel, ChecklistEditor,
+    ChecklistPageState, IntentOutcome, OwnedDeckScope, ProjectPickerState, ProjectScopeOption,
 };
 
 /// What the row says when an action that aims at the selection is asked for on a board that
@@ -124,6 +124,23 @@ pub fn apply_intent(
 ) -> Result<IntentOutcome, DomainError> {
     // A successful quick add remains emphasized only until the next input intent.
     model.clear_saved_task();
+    // Mark-then-confirm (AC-11): any intent other than the delete verb's own
+    // confirmation routes clears an armed checklist delete mark. Command confirmations
+    // are excluded here because they recurse below as the intent they resolved to, which
+    // then faces this same rule as itself.
+    if model
+        .form
+        .as_ref()
+        .is_some_and(|form| form.checklist.delete_mark.is_some())
+        && !matches!(
+            intent,
+            BoardIntent::SoftDelete | BoardIntent::ConfirmCommand | BoardIntent::SelectCommand(_)
+        )
+    {
+        if let Some(form) = model.form.as_mut() {
+            form.checklist.delete_mark = None;
+        }
+    }
     let notice_before = model.delete_notice().map(str::to_string);
     let mutating = board_intent_may_persist(&intent);
     let result = apply_board_intent(domain, model, intent, snapshot, host);
@@ -487,6 +504,15 @@ fn apply_board_intent(
             }
             return Ok(IntentOutcome::None);
         }
+        BoardIntent::BeginAddChecklistItem => {
+            model.close_popup();
+            // The item editor lives on the task page's checklist section; from any other
+            // surface there is no section line to paint it on, so the verb is inert.
+            if model.form.as_ref().is_some_and(|form| form.is_task()) {
+                open_checklist_editor(model, "", None);
+            }
+            return Ok(IntentOutcome::None);
+        }
         BoardIntent::BeginEditTitle | BoardIntent::BeginEditNotes | BoardIntent::BeginEditScope => {
             model.close_popup();
             let focus = match intent {
@@ -495,6 +521,23 @@ fn apply_board_intent(
                 BoardIntent::BeginEditScope => CaptureField::Scope,
                 _ => unreachable!("matched task-form entry intent"),
             };
+            // Contextual rename (AC-10): on the page with the item cursor active, `e`
+            // opens the checklist section's one-line editor seeded with the highlighted
+            // item instead of the title field.
+            if intent == BoardIntent::BeginEditTitle {
+                if let Some((task_id, item_id)) = cursor_item(domain, model) {
+                    let text = domain.get(task_id).and_then(|task| {
+                        task.checklist
+                            .iter()
+                            .find(|item| item.id == item_id)
+                            .map(|item| item.text.clone())
+                    });
+                    if let Some(text) = text {
+                        open_checklist_editor(model, &text, Some(item_id));
+                        return Ok(IntentOutcome::None);
+                    }
+                }
+            }
             // The page already open: move focus into the asked field, keep every draft.
             if model.form.as_ref().is_some_and(BoardForm::is_task) {
                 model.focus_form_field(focus);
@@ -520,10 +563,12 @@ fn apply_board_intent(
         }
         BoardIntent::EditInsertText(text) => {
             // Title stays one line in either form; Notes preserves pasted line breaks.
-            let single_line = model
-                .form
-                .as_ref()
-                .is_some_and(|form| form.focus == CaptureField::Title);
+            // The item editor is one line by construction, so it flattens like Title.
+            let single_line = model.input_mode == BoardInputMode::EditChecklistItem
+                || model
+                    .form
+                    .as_ref()
+                    .is_some_and(|form| form.focus == CaptureField::Title);
             edit_draft(model, |draft| {
                 if single_line {
                     draft.insert_text(&flatten_line_breaks(&text));
@@ -576,6 +621,14 @@ fn apply_board_intent(
             return Ok(IntentOutcome::None);
         }
         BoardIntent::CancelEdit => {
+            // The item line editor cancels to page view: draft discarded, no mutation,
+            // the page and its item cursor state untouched.
+            if model.input_mode == BoardInputMode::EditChecklistItem
+                && model.form.as_ref().is_some_and(BoardForm::is_task)
+            {
+                close_checklist_editor(model);
+                return Ok(IntentOutcome::None);
+            }
             // Field edit on the task page: Esc cancels the field being edited (its draft
             // resets to the saved value) and steps back to view mode. Drafts on other
             // fields survive; the second Esc closes the page.
@@ -622,6 +675,11 @@ fn apply_board_intent(
             return Ok(IntentOutcome::None);
         }
         BoardIntent::ConfirmEdit => {
+            // The item line editor applies its own domain command (add or rename) and
+            // returns to page view; it never saves the task form's title/notes drafts.
+            if model.input_mode == BoardInputMode::EditChecklistItem {
+                return confirm_checklist_editor(domain, model);
+            }
             if model.form.as_ref().is_some_and(|form| !form.is_task()) {
                 // Capture keeps its immutable invocation snapshot in the shared form. Without
                 // it there is nothing to save against, so the draft remains visible and intact.
@@ -817,24 +875,31 @@ fn apply_board_intent(
         BoardIntent::RetrySave | BoardIntent::CancelSave => return Ok(IntentOutcome::None),
         BoardIntent::PrimaryVerb => {
             model.close_popup();
-            let Some(id) = model.selected_id() else {
-                model.set_message(NO_SELECTION);
-                return Ok(IntentOutcome::None);
-            };
-            let Some(task) = domain.get(id) else {
-                model.set_message("that task is no longer here");
-                return Ok(IntentOutcome::None);
-            };
-            match task.status {
-                HumanStatus::Ready => {
-                    domain.set_status(id, HumanStatus::Started)?;
-                }
-                HumanStatus::Done => {
-                    domain.reopen(id)?;
-                }
-                HumanStatus::Started | HumanStatus::Blocked | HumanStatus::Review => {
-                    model.set_message("resume not available yet");
+            // With the page's item cursor active, `space` toggles the highlighted
+            // checklist item (never the task's status); every other context keeps the
+            // state-mapped status verb.
+            if let Some((task_id, item_id)) = cursor_item(domain, model) {
+                domain.toggle_checklist_item(task_id, item_id)?;
+            } else {
+                let Some(id) = model.selected_id() else {
+                    model.set_message(NO_SELECTION);
                     return Ok(IntentOutcome::None);
+                };
+                let Some(task) = domain.get(id) else {
+                    model.set_message("that task is no longer here");
+                    return Ok(IntentOutcome::None);
+                };
+                match task.status {
+                    HumanStatus::Ready => {
+                        domain.set_status(id, HumanStatus::Started)?;
+                    }
+                    HumanStatus::Done => {
+                        domain.reopen(id)?;
+                    }
+                    HumanStatus::Started | HumanStatus::Blocked | HumanStatus::Review => {
+                        model.set_message("resume not available yet");
+                        return Ok(IntentOutcome::None);
+                    }
                 }
             }
         }
@@ -879,7 +944,18 @@ fn apply_board_intent(
         BoardIntent::PageScrollUp => {
             if let Some(form) = model.form.as_mut().filter(|form| form.is_task()) {
                 if model.input_mode == BoardInputMode::TaskPage {
-                    form.notes_scroll = form.notes_scroll.saturating_sub(1);
+                    // With the item cursor active, Up moves it through items (AC-8);
+                    // Up from the first item deactivates it, consuming the press so the
+                    // notes keep their scroll (AC-18).
+                    match form.checklist.cursor {
+                        Some(0) => form.checklist.cursor = None,
+                        Some(index) => {
+                            let cursor = index - 1;
+                            form.checklist.cursor = Some(cursor);
+                            checklist_scroll_to_cursor(&mut form.checklist, cursor);
+                        }
+                        None => form.notes_scroll = form.notes_scroll.saturating_sub(1),
+                    }
                 }
             }
             return Ok(IntentOutcome::None);
@@ -887,11 +963,32 @@ fn apply_board_intent(
         BoardIntent::PageScrollDown => {
             if let Some(form) = model.form.as_mut().filter(|form| form.is_task()) {
                 if model.input_mode == BoardInputMode::TaskPage {
-                    // Bounded by the rows the last painted frame actually laid out, so the
-                    // bottom of a wrapping note is reachable. Logical lines undercount every
-                    // wrapped row, which stranded the tail of long notes.
-                    let horizon = form.notes_max_scroll.get();
-                    form.notes_scroll = form.notes_scroll.saturating_add(1).min(horizon);
+                    let items = form
+                        .task_id()
+                        .and_then(|id| domain.get(id))
+                        .map(|task| task.checklist.len())
+                        .unwrap_or(0);
+                    match form.checklist.cursor {
+                        // A first bare Down on a task with items activates the cursor on
+                        // the first item instead of scrolling (AC-17); one-shot per page
+                        // session, so after an Up-deactivation Down scrolls notes again.
+                        None if items > 0 && !form.checklist.activation_taken => {
+                            form.checklist.cursor = Some(0);
+                            form.checklist.activation_taken = true;
+                        }
+                        Some(index) if items > 0 => {
+                            let cursor = (index + 1).min(items - 1);
+                            form.checklist.cursor = Some(cursor);
+                            checklist_scroll_to_cursor(&mut form.checklist, cursor);
+                        }
+                        _ => {
+                            // Bounded by the rows the last painted frame actually laid out, so the
+                            // bottom of a wrapping note is reachable. Logical lines undercount every
+                            // wrapped row, which stranded the tail of long notes.
+                            let horizon = form.notes_max_scroll.get();
+                            form.notes_scroll = form.notes_scroll.saturating_add(1).min(horizon);
+                        }
+                    }
                 }
             }
             return Ok(IntentOutcome::None);
@@ -993,28 +1090,38 @@ fn apply_board_intent(
         }
         BoardIntent::SoftDelete => {
             model.close_popup();
-            let Some(id) = model.selected_id() else {
-                model.set_message(NO_SELECTION);
-                return Ok(IntentOutcome::None);
-            };
-            // Read the title before the delete, and only arm the notice once the delete
-            // itself succeeded: a refused delete has nothing to recover from.
-            let title = domain.get(id).map(|task| task.title.clone());
-            domain.soft_delete(id)?;
-            if let Some(title) = title {
-                model.arm_delete_notice(&title);
-            }
-            // Deleting from the page deletes the page's own task: the surface closes and
-            // the undo route back to it lives on the board row, same as the notice says.
-            if model
-                .form
-                .as_ref()
-                .filter(|form| form.is_task())
-                .and_then(BoardForm::task_id)
-                == Some(id)
-            {
-                model.form = None;
-                model.input_mode = BoardInputMode::Normal;
+            // On the page with the item cursor active, the delete verb is the
+            // checklist's mark-then-confirm: the first press visibly marks the
+            // highlighted item, a second press removes it, and the task-level soft
+            // delete below never runs.
+            match page_item_delete(domain, model)? {
+                PageItemDelete::Marked => return Ok(IntentOutcome::None),
+                PageItemDelete::Removed => {}
+                PageItemDelete::NotApplicable => {
+                    let Some(id) = model.selected_id() else {
+                        model.set_message(NO_SELECTION);
+                        return Ok(IntentOutcome::None);
+                    };
+                    // Read the title before the delete, and only arm the notice once the delete
+                    // itself succeeded: a refused delete has nothing to recover from.
+                    let title = domain.get(id).map(|task| task.title.clone());
+                    domain.soft_delete(id)?;
+                    if let Some(title) = title {
+                        model.arm_delete_notice(&title);
+                    }
+                    // Deleting from the page deletes the page's own task: the surface closes and
+                    // the undo route back to it lives on the board row, same as the notice says.
+                    if model
+                        .form
+                        .as_ref()
+                        .filter(|form| form.is_task())
+                        .and_then(BoardForm::task_id)
+                        == Some(id)
+                    {
+                        model.form = None;
+                        model.input_mode = BoardInputMode::Normal;
+                    }
+                }
             }
         }
         BoardIntent::Undo => {
@@ -1109,6 +1216,18 @@ pub fn apply_dispatch_recovery_result(
 /// intents already were before the cursor arrived.
 fn edit_draft(model: &mut BoardModel, operation: impl FnOnce(&mut EditBuffer)) {
     if model.input_mode == BoardInputMode::FormScopeDropdown {
+        return;
+    }
+    // The checklist item editor owns the keyboard in its mode: its draft is the page
+    // form's checklist editor buffer, not the task form's title/notes fields.
+    if model.input_mode == BoardInputMode::EditChecklistItem {
+        if let Some(editor) = model
+            .form
+            .as_mut()
+            .and_then(|form| form.checklist.editor.as_mut())
+        {
+            operation(&mut editor.buffer);
+        }
         return;
     }
     let Some(form) = model.form.as_mut() else {
@@ -1234,5 +1353,152 @@ fn confirm_edit(
     model.input_mode = BoardInputMode::Normal;
     model.form = None;
     model.clear_message();
+    Ok(IntentOutcome::Persist)
+}
+
+// ---------------------------------------------------------------------------
+// Checklist item cursor, verbs, and one-line editor (T-3)
+// ---------------------------------------------------------------------------
+
+/// The item the page's cursor highlights, as (task id, item id), when the page is in
+/// view mode with a task form open, the item cursor active, and the highlighted index
+/// still naming a live item. `None` in every other case — including a cursor left past
+/// the end of a checklist another actor shrank — so verbs degrade to their inactive
+/// behavior instead of acting on a stale index.
+fn cursor_item(domain: &DomainState, model: &BoardModel) -> Option<(Uuid, Uuid)> {
+    if model.input_mode != BoardInputMode::TaskPage {
+        return None;
+    }
+    let form = model.form.as_ref().filter(|form| form.is_task())?;
+    let task_id = form.task_id()?;
+    let index = form.checklist.cursor?;
+    let item_id = domain
+        .get(task_id)?
+        .checklist
+        .get(index)
+        .map(|item| item.id)?;
+    Some((task_id, item_id))
+}
+
+/// Keep the checklist window's scroll showing `cursor`, using the item-row count the
+/// last painted frame recorded. Mirrors the notes window's renderer-recorded bound: the
+/// model is geometry-free, so the paint seam reports what actually fit.
+fn checklist_scroll_to_cursor(state: &mut ChecklistPageState, cursor: usize) {
+    let rows = state.window_rows.get().max(1);
+    if cursor < state.scroll {
+        state.scroll = cursor;
+    } else if cursor >= state.scroll + rows {
+        state.scroll = cursor + 1 - rows;
+    }
+}
+
+/// Outcome of routing the delete verb through the page's item cursor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PageItemDelete {
+    /// The cursor is not active on the page: the verb is the task soft delete.
+    NotApplicable,
+    /// First press: the cursor's item is visibly marked; nothing was removed.
+    Marked,
+    /// Second press: the marked item was removed through the domain command.
+    Removed,
+}
+
+/// Mark-then-confirm delete for the item under the page's cursor (AC-11). Any
+/// intervening intent already cleared the mark in [`apply_intent`], so a mark found
+/// here equal to the cursor's item can only be this verb's own first press.
+fn page_item_delete(
+    domain: &mut DomainState,
+    model: &mut BoardModel,
+) -> Result<PageItemDelete, DomainError> {
+    let Some((task_id, item_id)) = cursor_item(domain, model) else {
+        return Ok(PageItemDelete::NotApplicable);
+    };
+    let form = model
+        .form
+        .as_ref()
+        .filter(|form| form.is_task())
+        .expect("cursor_item checked a task form");
+    let index = form
+        .checklist
+        .cursor
+        .expect("cursor_item checked an active cursor");
+    if form.checklist.delete_mark != Some(index) {
+        model
+            .form
+            .as_mut()
+            .expect("task form checked above")
+            .checklist
+            .delete_mark = Some(index);
+        return Ok(PageItemDelete::Marked);
+    }
+    domain.remove_checklist_item(task_id, item_id)?;
+    let len = domain
+        .get(task_id)
+        .map(|task| task.checklist.len())
+        .unwrap_or(0);
+    let form = model
+        .form
+        .as_mut()
+        .filter(|form| form.is_task())
+        .expect("task form checked above");
+    form.checklist.delete_mark = None;
+    if len == 0 {
+        form.checklist.cursor = None;
+        form.checklist.scroll = 0;
+    } else {
+        let cursor = form.checklist.cursor.unwrap_or(0).min(len - 1);
+        form.checklist.cursor = Some(cursor);
+        checklist_scroll_to_cursor(&mut form.checklist, cursor);
+    }
+    Ok(PageItemDelete::Removed)
+}
+
+/// Open the checklist section's one-line editor: seeded with `text`, renaming
+/// `item` when given, adding when `None`.
+fn open_checklist_editor(model: &mut BoardModel, text: &str, rename: Option<Uuid>) {
+    if let Some(form) = model.form.as_mut().filter(|form| form.is_task()) {
+        form.checklist.editor = Some(ChecklistEditor {
+            buffer: crate::ui::edit::seeded_draft(text),
+            rename,
+        });
+        model.input_mode = BoardInputMode::EditChecklistItem;
+        model.clear_message();
+    }
+}
+
+/// Close the item editor back to page view, discarding its draft.
+fn close_checklist_editor(model: &mut BoardModel) {
+    if let Some(form) = model.form.as_mut() {
+        form.checklist.editor = None;
+    }
+    model.input_mode = BoardInputMode::TaskPage;
+    model.clear_message();
+}
+
+/// Apply the item editor's draft through the domain command (add or rename) and close
+/// it (Enter; AC-12's T-3 subset). A domain refusal — empty-after-trim text, an item
+/// another actor removed — propagates before anything is cleared, so the editor and its
+/// mode outlive the refused apply exactly as the task form's edit does.
+fn confirm_checklist_editor(
+    domain: &mut DomainState,
+    model: &mut BoardModel,
+) -> Result<IntentOutcome, DomainError> {
+    let Some(form) = model.form.as_ref().filter(|form| form.is_task()) else {
+        return Ok(IntentOutcome::None);
+    };
+    let Some(task_id) = form.task_id() else {
+        return Ok(IntentOutcome::None);
+    };
+    let Some(editor) = form.checklist.editor.as_ref() else {
+        return Ok(IntentOutcome::None);
+    };
+    let text = editor.buffer.value().to_string();
+    match editor.rename {
+        Some(item_id) => domain.rename_checklist_item(task_id, item_id, text)?,
+        None => {
+            domain.add_checklist_item(task_id, text)?;
+        }
+    }
+    close_checklist_editor(model);
     Ok(IntentOutcome::Persist)
 }

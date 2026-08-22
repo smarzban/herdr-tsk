@@ -45,6 +45,11 @@ pub enum BoardInputMode {
     /// click does NOT: field regions are inert in this state, and only move focus once one
     /// of the edit states is already open (see the mouse mapper's form-field arms).
     TaskPage,
+    /// The checklist section's one-line add/rename editor owns input. It is a Title-like
+    /// single-line draft ([`crate::ui::edit::EditBuffer`]) carried on the page form's
+    /// checklist state, not one of the three task-form fields: Enter applies the domain
+    /// command and Esc cancels, both returning to [`BoardInputMode::TaskPage`].
+    EditChecklistItem,
     /// Modal selection over the session project-scope options.
     ProjectPicker,
     /// Durable dispatch attempt recovery actions.
@@ -180,6 +185,9 @@ pub(super) struct BoardForm {
     pub(super) binding: BoardFormBinding,
     /// View-mode scroll of the task page's notes body (wrapped rows), never used by capture.
     pub(super) notes_scroll: usize,
+    /// Page-session checklist state (item cursor, window scroll, delete mark, item
+    /// editor). Carried by the form so it lives exactly as long as the page does.
+    pub(super) checklist: ChecklistPageState,
     /// The furthest `notes_scroll` the LAST painted frame could actually show, in wrapped
     /// rows (`wrapped rows - visible rows`).
     ///
@@ -259,6 +267,7 @@ impl BoardForm {
             scope_selected,
             binding,
             notes_scroll: 0,
+            checklist: ChecklistPageState::default(),
             notes_max_scroll: std::cell::Cell::new(0),
         }
     }
@@ -358,6 +367,41 @@ impl BoardForm {
             self.scope = scope.clone();
         }
     }
+}
+
+/// The one-line add/rename editor on the checklist section (page-session only).
+///
+/// `rename` names the item being edited; `None` is an add (the buffer starts empty).
+#[derive(Debug, Clone)]
+pub(super) struct ChecklistEditor {
+    pub(super) buffer: EditBuffer,
+    pub(super) rename: Option<Uuid>,
+}
+
+/// Page-session checklist state for the task page, never persisted.
+///
+/// The item cursor lifecycle (spec: resolved decisions): inactive when the page opens; a
+/// first bare ↓ activates it on the first item; ↑ from the first item deactivates it and
+/// returns bare arrows to note scrolling. Activation is deliberately one-shot per page
+/// session — after that ↑-deactivation a bare ↓ scrolls the notes again ("subsequent
+/// bare arrows scroll notes as before activation"); reopening the page re-arms it.
+#[derive(Debug, Clone, Default)]
+pub(super) struct ChecklistPageState {
+    /// Highlighted item index; `None` = inactive.
+    pub(super) cursor: Option<usize>,
+    /// Whether this page session's one activating ↓ has been consumed.
+    pub(super) activation_taken: bool,
+    /// First item index the painted window shows; the renderer records how many item
+    /// rows it actually laid out in [`Self::window_rows`], the same seam
+    /// [`BoardForm::notes_max_scroll`] uses for the notes window.
+    pub(super) scroll: usize,
+    /// Item index visibly marked by the first press of the delete verb. Any intervening
+    /// intent clears it; only the verb's second press removes.
+    pub(super) delete_mark: Option<usize>,
+    /// The open one-line add/rename editor, if any.
+    pub(super) editor: Option<ChecklistEditor>,
+    /// Item rows the last painted window actually showed (renderer-recorded).
+    pub(super) window_rows: std::cell::Cell<usize>,
 }
 
 /// Scope choices shared by capture and task forms.

@@ -124,6 +124,8 @@ pub enum BoardIntent {
     BeginEditNotes,
     /// Open the same bound task form as `e`, focused on Scope (palette Change scope).
     BeginEditScope,
+    /// Open the checklist section's one-line editor empty to add an item (page `a`).
+    BeginAddChecklistItem,
     /// Move focus through the shared capture/task form fields.
     FormFocusNext,
     FormFocusPrev,
@@ -542,7 +544,9 @@ pub fn map_key_with(
         BoardInputMode::QuickAdd => map_quick_add_key(key),
         BoardInputMode::FormScopeDropdown => map_board_form_key(CaptureField::Scope, true, key),
         BoardInputMode::EditScope => map_board_form_key(CaptureField::Scope, false, key),
-        BoardInputMode::EditTitle | BoardInputMode::EditNotes => map_edit(mode, key),
+        BoardInputMode::EditTitle
+        | BoardInputMode::EditNotes
+        | BoardInputMode::EditChecklistItem => map_edit(mode, key),
     }
 }
 
@@ -722,9 +726,9 @@ fn map_form_edit_key(
 pub fn map_edit_paste(mode: BoardInputMode, text: &str) -> Option<BoardIntent> {
     match mode {
         BoardInputMode::QuickAdd => Some(BoardIntent::QuickAddInsertText(text.to_string())),
-        BoardInputMode::EditTitle | BoardInputMode::EditNotes => {
-            Some(BoardIntent::EditInsertText(text.to_string()))
-        }
+        BoardInputMode::EditTitle
+        | BoardInputMode::EditNotes
+        | BoardInputMode::EditChecklistItem => Some(BoardIntent::EditInsertText(text.to_string())),
         BoardInputMode::EditScope
         | BoardInputMode::FormScopeDropdown
         | BoardInputMode::TaskPage => None,
@@ -753,6 +757,7 @@ pub fn intent_primary_action(intent: &BoardIntent) -> Option<PrimaryBoardAction>
         BoardIntent::SetStatus(_)
         | BoardIntent::BeginEditNotes
         | BoardIntent::BeginEditScope
+        | BoardIntent::BeginAddChecklistItem
         | BoardIntent::Quit
         | BoardIntent::EditInsert(_)
         | BoardIntent::EditInsertText(_)
@@ -872,7 +877,13 @@ fn map_normal(key: KeyEvent, verbs: VerbModifier) -> Option<BoardIntent> {
 }
 
 /// Task page view mode: the page is a focused single-task surface. Verbs act on the
-/// page's task, `e`/`n`/Tab enter field edits, arrows scroll the notes, Esc closes.
+/// page's task, `e`/`n`/Tab enter field edits, `a` opens the checklist item editor,
+/// bare arrows own the item cursor lifecycle (the reducer decides activation vs note
+/// scrolling from page state), Esc closes.
+///
+/// The checklist verbs reuse this map's existing intents — `space`, `e`, `x` — because
+/// whether they act on the task or on the highlighted checklist item depends on the item
+/// cursor state, which lives in the model, not the key event; the reducer disambiguates.
 fn map_task_page(key: KeyEvent, verbs: VerbModifier) -> Option<BoardIntent> {
     let mods = key.modifiers;
     if key.code == KeyCode::Char('c') && mods.contains(KeyModifiers::CONTROL) {
@@ -888,6 +899,7 @@ fn map_task_page(key: KeyEvent, verbs: VerbModifier) -> Option<BoardIntent> {
         KeyCode::Char('q') if verb => Some(BoardIntent::CloseLayer),
         KeyCode::Enter if !extra => Some(BoardIntent::OpenTaskPage),
         KeyCode::Char(' ') if verb => Some(BoardIntent::PrimaryVerb),
+        KeyCode::Char('a') if verb => Some(BoardIntent::BeginAddChecklistItem),
         KeyCode::Char('d') if verb => Some(BoardIntent::Complete),
         KeyCode::Char('o') if verb => Some(BoardIntent::Reopen),
         KeyCode::Char('b') if verb => Some(BoardIntent::ToggleBlock),
@@ -1009,8 +1021,10 @@ fn map_cleanup_confirmation(key: KeyEvent) -> Option<BoardIntent> {
 ///
 /// The live board carries a `CaptureField` and calls [`map_board_form_key`] directly.
 fn map_edit(mode: BoardInputMode, key: KeyEvent) -> Option<BoardIntent> {
+    // The checklist item editor is a single-line draft: it takes Title's map (Enter
+    // confirms, Esc cancels, no line-break insertion) and no form-focus navigation.
     let focused = match mode {
-        BoardInputMode::EditTitle => CaptureField::Title,
+        BoardInputMode::EditTitle | BoardInputMode::EditChecklistItem => CaptureField::Title,
         BoardInputMode::EditNotes => CaptureField::Notes,
         _ => return None,
     };

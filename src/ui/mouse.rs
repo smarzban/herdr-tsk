@@ -469,7 +469,11 @@ pub fn map_board_mouse(
             Some(QueueHitTarget::Verb(index)) => form_verb_intent(model, index),
             _ => None,
         },
-        BoardInputMode::Recovery
+        // The item line editor is keyboard-only in this slice: the mouse has no hit
+        // region on the section's line yet, so every click is inert rather than
+        // reaching the page behind the editor.
+        BoardInputMode::EditChecklistItem
+        | BoardInputMode::Recovery
         | BoardInputMode::CleanupConfirm
         | BoardInputMode::SaveRecovery => None,
         BoardInputMode::Normal => match hit_at(hits, pos) {

@@ -253,6 +253,15 @@ pub struct ChecklistItemView {
     pub text: String,
 }
 
+/// The checklist section's one-line editor as the page paints it: the draft already
+/// windowed around its cursor at the section's width, plus the terminal cursor column
+/// inside that window. T-4 adds refusal state here.
+#[derive(Debug, Clone)]
+pub struct ChecklistEditorLine {
+    pub text: String,
+    pub cursor_col: u16,
+}
+
 /// Transient overlay painted above the queue frame (palette, help, scope dropdown).
 #[derive(Debug, Clone, Default)]
 pub enum QueueOverlay<'a> {
@@ -307,6 +316,15 @@ pub enum QueueOverlay<'a> {
         /// checklist section at all: the page is identical to pre-feature for a task
         /// with no items.
         checklist_items: Vec<ChecklistItemView>,
+        /// Absolute index of the item cursor's row, when active. The painter turns it
+        /// into the row's `▸` gutter marker.
+        checklist_cursor: Option<usize>,
+        /// First item index the section's window shows (the cursor's scroll window).
+        checklist_scroll: usize,
+        /// Absolute index of the item the delete verb visibly marked, when armed.
+        checklist_marked: Option<usize>,
+        /// The section's one-line add/rename editor, painted on its label row.
+        checklist_editor: Option<ChecklistEditorLine>,
         /// Footer: scope · created · updated.
         meta: String,
         /// Which field owns the cursor, if any (view mode: none).
@@ -866,6 +884,10 @@ fn paint_overlay(
             notes_cursor,
             more_lines,
             ref checklist_items,
+            checklist_cursor,
+            checklist_scroll,
+            checklist_marked,
+            ref checklist_editor,
             ref meta,
             focus,
             scope_dropdown,
@@ -880,6 +902,10 @@ fn paint_overlay(
                 *notes_cursor,
                 *more_lines,
                 checklist_items,
+                *checklist_cursor,
+                *checklist_scroll,
+                *checklist_marked,
+                checklist_editor.as_ref(),
                 meta,
                 *focus,
                 hits,
@@ -1163,8 +1189,8 @@ fn paint_help_overlay(
 /// dropping the divider and then the meta first as the pane shrinks. The checklist block
 /// (label + one row per item) is anchored directly above the meta footer and takes its
 /// rows out of the notes window, so a long checklist plus notes scrolls through the
-/// existing notes scroll bound rather than overflowing. `checklist_len == 0` reserves
-/// nothing: such pages keep the exact pre-checklist layout.
+/// existing notes scroll bound rather than overflowing. Zero required rows (no items,
+/// no open editor) reserves nothing: such pages keep the exact pre-checklist layout.
 pub struct TaskPageLayout {
     /// First row the page must not paint (the lowest chrome row, or the frame height).
     pub bottom: u16,
@@ -1180,15 +1206,70 @@ pub struct TaskPageLayout {
     pub meta_y: Option<u16>,
 }
 
-/// Build the task page's row budget. `checklist_len` sizes the checklist block (label +
-/// one row per item, anchored directly above the meta footer); `notes_floor` is the
+/// Rows of checklist section the page must reserve: label + one row per item when a
+/// section paints; an open item editor keeps the label row alive even with no items (it
+/// is the line the editor paints on); zero when neither, so an empty checklist keeps the
+/// exact pre-checklist layout.
+pub fn checklist_section_rows(items: usize, editor_open: bool) -> usize {
+    if items == 0 && !editor_open {
+        0
+    } else {
+        1 + items
+    }
+}
+
+/// The window of checklist items the section's item rows show.
+///
+/// `avail` is the row count the section has for items (its block minus the label). When
+/// items remain hidden below, the last row becomes the dim `+N more ↓` affordance —
+/// unless that would leave no item row at all, the one degenerate window (a single item
+/// row beside a long list) where the item wins and the affordance is dropped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChecklistWindow {
+    /// First painted item's absolute index.
+    pub first: usize,
+    /// Item rows painted.
+    pub count: usize,
+    /// Items hidden below the window.
+    pub hidden_after: usize,
+    /// Whether the last section row paints the affordance instead of an item.
+    pub affordance: bool,
+}
+
+pub fn checklist_window(total: usize, scroll: usize, avail: u16) -> ChecklistWindow {
+    let avail = avail as usize;
+    if total == 0 || avail == 0 {
+        return ChecklistWindow {
+            first: 0,
+            count: 0,
+            hidden_after: 0,
+            affordance: false,
+        };
+    }
+    // Never start past the last item, whatever a stale scroll offset claims.
+    let first = scroll.min(total - 1);
+    let fitting = avail.min(total - first);
+    let hidden_after = total - first - fitting;
+    let affordance = hidden_after > 0 && fitting >= 2;
+    let count = if affordance { fitting - 1 } else { fitting };
+    ChecklistWindow {
+        first,
+        count,
+        hidden_after,
+        affordance,
+    }
+}
+
+/// Build the task page's row budget. `checklist_rows_needed` (see
+/// [`checklist_section_rows`]) sizes the checklist block (label + one row per item,
+/// anchored directly above the meta footer); `notes_floor` is the
 /// minimum number of notes rows the page must keep visible. Callers pass 1 while a
 /// notes edit is active -- an edit that paints no row is a blind edit -- and 0
 /// otherwise, and both layout callers must agree, because the payload builder windows
 /// the notes draft against the same budget the painter lays out.
 pub fn task_page_layout(
     geo: &TierGeometry,
-    checklist_len: usize,
+    checklist_rows_needed: usize,
     notes_floor: u16,
 ) -> TaskPageLayout {
     let height = geo.height;
@@ -1220,11 +1301,8 @@ pub fn task_page_layout(
     // `notes_floor`: while a notes edit is active the checklist caps around the
     // reserved row instead of displacing it.
     let floor = notes_floor.min(content_rows);
-    let checklist_rows = if checklist_len == 0 {
-        0
-    } else {
-        (1 + checklist_len as u16).min(content_rows - floor)
-    };
+    let checklist_rows =
+        checklist_rows_needed.min(content_rows.saturating_sub(floor) as usize) as u16;
     let checklist_y = content_end.saturating_sub(checklist_rows);
     TaskPageLayout {
         bottom,
@@ -1252,6 +1330,10 @@ fn paint_task_page(
     notes_cursor: Option<(u16, u16)>,
     more_lines: usize,
     checklist_items: &[ChecklistItemView],
+    checklist_cursor: Option<usize>,
+    checklist_scroll: usize,
+    checklist_marked: Option<usize>,
+    checklist_editor: Option<&ChecklistEditorLine>,
     meta: &str,
     focus: Option<CaptureField>,
     hits: &mut QueueHitMap,
@@ -1261,10 +1343,12 @@ fn paint_task_page(
         return;
     }
     // `focus == Notes` arrives from the same frame's input mode the payload builder
-    // used, so both sides of the payload/paint seam budget the same notes floor.
+    // used, so both sides of the payload/paint seam budget the same notes floor. The
+    // section reserves its label row while the editor is open even with no items,
+    // because the label row is the line the editor paints on.
     let lay = task_page_layout(
         geo,
-        checklist_items.len(),
+        checklist_section_rows(checklist_items.len(), checklist_editor.is_some()),
         u16::from(focus == Some(CaptureField::Notes)),
     );
     if lay.bottom == 0 {
@@ -1350,29 +1434,94 @@ fn paint_task_page(
         );
     }
 
-    // Checklist section, anchored above the meta footer: a dim label naming its
+    // Checklist section, anchored above the meta footer. Its label row names the
     // done/total counts (derived from the same item views, so the label cannot drift
-    // from the states painted beside it), then one row per item -- `✓` done, `▪` open.
-    // Mono only. An empty checklist paints no block at all: `checklist_rows` is zero
+    // from the states painted beside it) — except while the one-line editor is open,
+    // when the editor owns the label row. Below it the section paints a window onto
+    // the items (`checklist_scroll`), the cursor's row marked by a `▸` gutter and a
+    // delete-marked row by `✗` in place of its state glyph; hidden items are named by
+    // a dim `+N more ↓` row mirroring the notes divider's style. Mono only. An empty
+    // checklist with no editor paints no block at all: `checklist_rows` is zero
     // and the layout above kept the pre-checklist page whole.
     if lay.checklist_rows > 0 {
-        let done = checklist_items.iter().filter(|item| item.done).count();
-        let label = format!("  checklist {}/{}", done, checklist_items.len());
-        put_line(
-            frame,
-            lay.checklist_y,
-            width,
-            paint_bounded_line(&label, width, style_dim()),
+        if let Some(editor) = checklist_editor {
+            const EDITOR_LABEL: &str = "  item  ";
+            let label_w = EDITOR_LABEL.len() as u16;
+            let avail = (width as usize).saturating_sub(EDITOR_LABEL.len() + 1);
+            let shown = present_line(&editor.text, avail);
+            put_line(
+                frame,
+                lay.checklist_y,
+                width,
+                paint_bounded_line(&format!("{EDITOR_LABEL}{shown}"), width, style_bold()),
+            );
+            place_edit_cursor(
+                frame,
+                Rect::new(
+                    label_w.min(width.saturating_sub(1)),
+                    lay.checklist_y,
+                    (avail as u16).min(width),
+                    1,
+                ),
+                editor.cursor_col.min(avail as u16),
+            );
+        } else {
+            let done = checklist_items.iter().filter(|item| item.done).count();
+            let label = format!("  checklist {}/{}", done, checklist_items.len());
+            put_line(
+                frame,
+                lay.checklist_y,
+                width,
+                paint_bounded_line(&label, width, style_dim()),
+            );
+        }
+        let win = checklist_window(
+            checklist_items.len(),
+            checklist_scroll,
+            lay.checklist_rows.saturating_sub(1),
         );
-        let item_rows = lay.checklist_rows.saturating_sub(1) as usize;
-        for (index, item) in checklist_items.iter().take(item_rows).enumerate() {
-            let y = lay.checklist_y.saturating_add(1 + index as u16);
-            let glyph = if item.done { "✓" } else { "▪" };
+        for (i, item) in checklist_items
+            .iter()
+            .skip(win.first)
+            .take(win.count)
+            .enumerate()
+        {
+            let absolute = win.first + i;
+            let y = lay.checklist_y.saturating_add(1 + i as u16);
+            let gutter = if Some(absolute) == checklist_cursor {
+                "▸ "
+            } else {
+                "  "
+            };
+            let glyph = if Some(absolute) == checklist_marked {
+                "✗"
+            } else if item.done {
+                "✓"
+            } else {
+                "▪"
+            };
             put_line(
                 frame,
                 y,
                 width,
-                paint_bounded_line(&format!("  {glyph} {} ", item.text), width, style_plain()),
+                paint_bounded_line(
+                    &format!("{gutter}{glyph} {} ", item.text),
+                    width,
+                    style_plain(),
+                ),
+            );
+        }
+        if win.affordance {
+            let y = lay.checklist_y.saturating_add(1 + win.count as u16);
+            put_line(
+                frame,
+                y,
+                width,
+                paint_bounded_line(
+                    &format!("  +{} more ↓ ", win.hidden_after),
+                    width,
+                    style_dim(),
+                ),
             );
         }
     }

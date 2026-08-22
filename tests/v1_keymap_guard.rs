@@ -1,7 +1,8 @@
 //! Guard the documented V1 queue keymap against retired UI returning.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use herdr_tasks::ui::board::BoardInputMode;
+use herdr_tasks::domain::{DomainState, ProvenanceOrigin, TaskScope};
+use herdr_tasks::ui::board::{apply_intent, BoardInputMode, BoardModel};
 use herdr_tasks::ui::input::{map_key, normal_mode_keymap, BoardIntent};
 
 fn normal(code: KeyCode) -> Option<BoardIntent> {
@@ -95,5 +96,73 @@ fn ctrl_c_quits_from_normal_and_task_page_modes() {
             KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)
         ),
         Some(BoardIntent::Quit)
+    );
+}
+
+/// T-3 (AC-9): bare `a`/`space`/`x`/`e` on the task page view produce no checklist
+/// mutation. The guard runs with the item cursor active (the state the modifier-protected
+/// verbs would target), so a bare key that slipped past the verb-modifier gate would be
+/// caught acting on the highlighted item.
+#[test]
+fn bare_page_keys_never_mutate_checklist() {
+    let mut domain = DomainState::new();
+    let id = domain
+        .create(
+            "Guarded page task",
+            None,
+            TaskScope::Global,
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("create");
+    domain.add_checklist_item(id, "alpha step").expect("item 1");
+    domain.add_checklist_item(id, "bravo step").expect("item 2");
+    let mut model = BoardModel::from_domain(&domain, None);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenTaskPage,
+        None,
+        None,
+    )
+    .expect("open page");
+    // Activate the item cursor (the first bare Down on a task with items).
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::PageScrollDown,
+        None,
+        None,
+    )
+    .expect("cursor press");
+
+    let before = domain.get(id).expect("task").clone();
+    for key in [
+        KeyCode::Char('a'),
+        KeyCode::Char(' '),
+        KeyCode::Char('x'),
+        KeyCode::Char('e'),
+    ] {
+        assert_eq!(
+            map_key(
+                BoardInputMode::TaskPage,
+                KeyEvent::new(key, KeyModifiers::NONE)
+            ),
+            None,
+            "bare {key:?} must be dead on the page view"
+        );
+    }
+    let after = domain.get(id).expect("task");
+    assert_eq!(
+        after.checklist, before.checklist,
+        "bare page keys must not mutate the checklist"
+    );
+    assert_eq!(after.status, before.status, "status untouched");
+    assert_eq!(after.revision, before.revision, "no journaled mutation");
+    assert_eq!(
+        model.input_mode(),
+        BoardInputMode::TaskPage,
+        "bare page keys must not open an edit"
     );
 }
