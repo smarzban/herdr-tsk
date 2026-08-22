@@ -19,8 +19,9 @@ herdr-tasks add --file plan.json
 cat plan.json | herdr-tasks add
 ```
 
-Use `--title=<value>`, `--notes=<value>`, or `--project=<value>` when a value
-begins with `-`. Use `--json` with a flag add when another tool needs one result object.
+Use `--title=<value>`, `--notes=<value>`, `--project=<value>`,
+`--state-dir=<dir>`, or `--file=<path>` when a value begins with `-`. Use
+`--json` with a flag add when another tool needs one result object.
 It contains `outcome` (`created` or `existing`), `id`, trimmed `title`, and resolved
 `project` (or `null` for global).
 
@@ -31,8 +32,8 @@ It contains `outcome` (`created` or `existing`), `id`, trimmed `title`, and reso
   `created` and `existing` items both succeeded, so you must never whole-plan-retry an
   exit 1 run.
 - exit 2: usage or parse error, nothing persisted. Correct the invocation, then run it.
-- exit 3: store I/O, commit indeterminate. Run `herdr-tasks list`, then retry only
-  what is missing. You must never whole-plan-retry an exit 3 run.
+- exit 3: store I/O, commit indeterminate. Run `herdr-tasks list --all --json` to
+  check every scope, then retry only missing work. You must never whole-plan-retry an exit 3 run.
 
 Add is idempotent by trimmed title and resolved project scope. A non-soft-deleted
 matching task is a success: plain flag add prints `task already exists`, and plan add
@@ -43,8 +44,8 @@ reports it in `existing` with its `i`, `id`, and `title`.
 `herdr-tasks list` defaults to ready, started, blocked, and review tasks in the
 invocation project, or global scope outside a repository. Use `-p`/`--project <scope>`
 for the same basename-or-path resolution as add, `--global` for global tasks, or `--all`
-for every scope. Use `--project=<scope>` when a list project value begins with `-`,
-`-p -maintenance` is usage. `--done` lists done tasks only; `--deleted` lists soft-deleted tasks only,
+for every scope. Use `--project=<scope>` or `--state-dir=<dir>` when either list value
+begins with `-`, `-p -maintenance` is usage. `--done` lists done tasks only; `--deleted` lists soft-deleted tasks only,
 regardless of stored status. Scope selectors are mutually exclusive, as are `--done` and
 `--deleted`.
 

@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use herdr_tasks::cli::run_with;
+use herdr_tasks::cli::{parser, run_with};
 use herdr_tasks::domain::{DomainState, HumanStatus, ProvenanceOrigin, TaskScope};
 use herdr_tasks::store::TaskStore;
 
@@ -1235,23 +1235,63 @@ fn flag_add_equals_forms_allow_dash_leading_values() {
 }
 
 #[test]
-fn flag_add_rejects_flag_like_state_dir_and_file_values_without_mutating() {
-    let _env = env_lock();
-    let cwd = temp_state_dir("flag-like-global-value");
+fn flag_add_equals_state_dir_and_file_forms_accept_dash_leading_values() {
+    let cwd = temp_state_dir("equals-dash-paths");
+    std::fs::write(
+        cwd.join("-plan.json"),
+        r#"[{"title":"equals file task","project":null}]"#,
+    )
+    .expect("write dash-leading plan");
     let binary = std::env::var("CARGO_BIN_EXE_herdr-tasks")
         .expect("Cargo must provide the herdr-tasks binary path");
 
-    let state_dir = Command::new(&binary)
+    let output = Command::new(binary)
         .current_dir(&cwd)
+        .args(["add", "--state-dir=-state", "--file=-plan.json"])
+        .output()
+        .expect("run equals forms");
+
+    assert_eq!(output.status.code(), Some(0));
+    assert!(output.stderr.is_empty());
+    assert_eq!(
+        task_store(&cwd.join("-state"))
+            .load()
+            .expect("load equals state")
+            .tasks()[0]
+            .title,
+        "equals file task"
+    );
+
+    let stdin = parser::parse_flag_add(&["herdr-tasks".into(), "add".into(), "--file=-".into()])
+        .expect("parse stdin file marker");
+    assert_eq!(stdin.file, Some(PathBuf::from("-")));
+
+    let _ = std::fs::remove_dir_all(cwd);
+}
+
+#[test]
+fn flag_add_rejects_flag_like_state_dir_and_file_values_without_mutating() {
+    let _env = env_lock();
+    let cwd = temp_state_dir("flag-like-global-value");
+    let state_dir = temp_state_dir("flag-like-global-state");
+    let binary = std::env::var("CARGO_BIN_EXE_herdr-tasks")
+        .expect("Cargo must provide the herdr-tasks binary path");
+
+    let state_dir_output = Command::new(&binary)
+        .current_dir(&cwd)
+        .env("HERDR_PLUGIN_STATE_DIR", &state_dir)
         .args(["add", "--state-dir", "--global", "--title", "junk"])
         .output()
         .expect("run flag-like state-dir value");
-    assert_eq!(state_dir.status.code(), Some(2));
-    assert!(String::from_utf8_lossy(&state_dir.stderr).contains("missing value for --state-dir"));
+    assert_eq!(state_dir_output.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&state_dir_output.stderr).contains("missing value for --state-dir")
+    );
     assert!(!cwd.join("--global").exists());
 
     let file = Command::new(binary)
         .current_dir(&cwd)
+        .env("HERDR_PLUGIN_STATE_DIR", &state_dir)
         .args(["add", "--file", "--global"])
         .output()
         .expect("run flag-like file value");
@@ -1260,6 +1300,7 @@ fn flag_add_rejects_flag_like_state_dir_and_file_values_without_mutating() {
     assert!(!cwd.join("--global").exists());
 
     let _ = std::fs::remove_dir_all(cwd);
+    let _ = std::fs::remove_dir_all(state_dir);
 }
 
 #[test]

@@ -10,12 +10,15 @@ fn skill_documents_retry_and_misfiling() {
         "--global",
         "--project",
         "--file plan.json",
+        "--file=<path>",
+        "--state-dir=<dir>",
         "cat plan.json | herdr-tasks add",
         "exit 0",
         "exit 1",
         "exit 2",
         "exit 3",
         "never whole-plan-retry",
+        "list --all --json",
     ] {
         assert!(skill.contains(term), "skill should contain {term:?}");
     }

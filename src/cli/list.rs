@@ -109,6 +109,10 @@ pub fn parse(args: &[String]) -> Result<ListInput, String> {
                 input.help = true;
                 index += 1;
             }
+            flag if flag.starts_with("--state-dir=") => {
+                input.state_dir = Some(PathBuf::from(flag["--state-dir=".len()..].to_owned()));
+                index += 1;
+            }
             "--state-dir" => {
                 input.state_dir = Some(PathBuf::from(value(flag)?));
                 index += 2;

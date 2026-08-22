@@ -19,7 +19,7 @@ pub fn list_help() -> CliOutput {
         stdout: concat!(
             "usage: herdr-tasks list [-p <project> | --global | --all] [--done | --deleted] [--json] [--state-dir <dir>]\n\n",
             "Lists ready, started, blocked, and review tasks in the invocation project by default, or global scope outside a repository.\n",
-            "--project uses the same basename-or-path scope resolution as add; --global selects global tasks; --all selects every scope. A dash-leading project value must use --project=<scope>.\n",
+            "--project uses the same basename-or-path scope resolution as add; --global selects global tasks; --all selects every scope. For dash-leading project and state-directory values, use --project=<scope> and --state-dir=<dir>.\n",
             "--done lists done tasks only. --deleted lists soft-deleted tasks only, regardless of status.\n",
             "To recover a typo scope, use herdr-tasks list --all --json.\n",
             "--json emits a flat array of id, title, status, and project in displayed group order. Human --all groups rows by status, then project scope, using a unique concise trailing path or global.\n\n",
@@ -37,7 +37,7 @@ pub fn list_help() -> CliOutput {
 fn help_output(usage: &str) -> CliOutput {
     CliOutput {
         stdout: format!(
-            "{usage}\n\nExamples:\n  herdr-tasks add -t \"Draft release notes\"\n  herdr-tasks add -t \"Buy milk\" --global\n  herdr-tasks add -t \"Fix widget\" --project widget\n  herdr-tasks add --title=\"-fix parser\" --notes=\"-5 degrees\" --project=\"-maintenance\"\n  herdr-tasks add --file plan.json\n  cat plan.json | herdr-tasks add\n\nValues beginning with - must use --title=<value>, --notes=<value>, or --project=<value>.\nAn add whose trimmed title and resolved project scope already exist succeeds without changing the task. With --json, flag add emits one object with outcome, id, title, and project (or null).\nPlan JSON: [{{\"title\": \"...\", \"notes\": \"...\", \"project\": \"...\"}}]\nPlan result: {{\"created\": [...], \"existing\": [...], \"failed\": [...]}}\n\nExit contract:\n  exit 0: every item was created or already existed\n  exit 1: one or more items were refused, retry failed only\n  exit 2: usage or parse error, nothing persisted\n  exit 3: store I/O, commit indeterminate, verify with list before retrying\n"
+            "{usage}\n\nExamples:\n  herdr-tasks add -t \"Draft release notes\"\n  herdr-tasks add -t \"Buy milk\" --global\n  herdr-tasks add -t \"Fix widget\" --project widget\n  herdr-tasks add --title=\"-fix parser\" --notes=\"-5 degrees\" --project=\"-maintenance\"\n  herdr-tasks add --file plan.json\n  cat plan.json | herdr-tasks add\n\nValues beginning with - must use --title=<value>, --notes=<value>, --project=<value>, --state-dir=<dir>, or --file=<path>.\nAn add whose trimmed title and resolved project scope already exist succeeds without changing the task. With --json, flag add emits one object with outcome, id, title, and project (or null).\nPlan JSON: [{{\"title\": \"...\", \"notes\": \"...\", \"project\": \"...\"}}]\nPlan result: {{\"created\": [...], \"existing\": [...], \"failed\": [...]}}\n\nExit contract:\n  exit 0: every item was created or already existed\n  exit 1: one or more items were refused, retry failed only\n  exit 2: usage or parse error, nothing persisted\n  exit 3: store I/O, commit indeterminate, verify with list before retrying\n"
         ),
         stderr: String::new(),
         code: 0,
@@ -180,7 +180,7 @@ fn append_rows(output: &mut String, rows: &[&ListRow], indent: &str) {
     for row in rows {
         output.push_str(indent);
         output.push_str("- ");
-        output.push_str(&row.title);
+        output.push_str(&terminal_text(&row.title));
         output.push('\n');
     }
 }

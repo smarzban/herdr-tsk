@@ -34,6 +34,8 @@ fn add_help_documents_plan_shape_and_exit_contract() {
         "--title=<value>",
         "--notes=<value>",
         "--project=<value>",
+        "--state-dir=<dir>",
+        "--file=<path>",
         "--file plan.json",
         "cat plan.json | herdr-tasks add",
     ] {
@@ -64,6 +66,7 @@ fn add_help_documents_plan_shape_and_exit_contract() {
         "invocation project",
         "list --all --json",
         "--project=<scope>",
+        "--state-dir=<dir>",
         "dash-leading",
         "Exit contract",
         "exit 0",

@@ -87,6 +87,14 @@ pub fn parse_flag_add(args: &[String]) -> Result<FlagAdd, String> {
                 parsed.help = true;
                 index += 1;
             }
+            flag if flag.starts_with("--state-dir=") => {
+                parsed.state_dir = Some(PathBuf::from(flag["--state-dir=".len()..].to_owned()));
+                index += 1;
+            }
+            flag if flag.starts_with("--file=") => {
+                parsed.file = Some(PathBuf::from(flag["--file=".len()..].to_owned()));
+                index += 1;
+            }
             "--state-dir" => {
                 parsed.state_dir = Some(PathBuf::from(value(flag)?));
                 index += 2;

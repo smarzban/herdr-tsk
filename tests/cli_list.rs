@@ -771,6 +771,89 @@ fn list_all_visibly_escapes_and_disambiguates_control_scope_labels() {
 }
 
 #[test]
+fn human_list_escapes_terminal_control_titles_without_changing_json() {
+    let _env = env_lock();
+    let dir = temp_state_dir("terminal-control-title");
+    let title = "control\u{001b}]52;c;clipboard\u{0007}";
+    let escaped = "control\\u{001b}]52;c;clipboard\\u{0007}";
+    let mut state = DomainState::new();
+    create_task(&mut state, title, TaskScope::Global, HumanStatus::Ready);
+    create_task(&mut state, title, TaskScope::Global, HumanStatus::Done);
+    let deleted = state
+        .create(
+            title,
+            None,
+            TaskScope::Global,
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("create deleted task");
+    state.soft_delete(deleted).expect("soft delete task");
+    TaskStore::new(&dir).save(&state).expect("seed store");
+
+    for view in [vec![], vec!["--done"], vec!["--deleted"]] {
+        let mut args = vec![
+            "herdr-tasks".into(),
+            "list".into(),
+            "--global".into(),
+            "--state-dir".into(),
+            state_dir_arg(&dir),
+        ];
+        args.extend(view.into_iter().map(String::from));
+        let human = list(&args);
+        assert_eq!(human.code, 0);
+        assert!(human.stderr.is_empty());
+        assert!(human.stdout.contains(escaped));
+        assert!(!human.stdout.contains('\u{001b}'));
+        assert!(!human.stdout.contains('\u{0007}'));
+    }
+
+    let json = list(&[
+        "herdr-tasks".into(),
+        "list".into(),
+        "--global".into(),
+        "--json".into(),
+        "--state-dir".into(),
+        state_dir_arg(&dir),
+    ]);
+    assert_eq!(json.code, 0);
+    let rows: Vec<serde_json::Value> = serde_json::from_str(&json.stdout).expect("JSON rows");
+    assert_eq!(rows[0]["title"], title);
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn list_equals_state_dir_form_accepts_dash_leading_value() {
+    let cwd = temp_state_dir("equals-dash-state");
+    let state_dir = cwd.join("-state");
+    let mut state = DomainState::new();
+    create_task(
+        &mut state,
+        "equals state task",
+        TaskScope::Global,
+        HumanStatus::Ready,
+    );
+    TaskStore::new(&state_dir).save(&state).expect("seed state");
+    let binary = std::env::var("CARGO_BIN_EXE_herdr-tasks")
+        .expect("Cargo must provide the herdr-tasks binary path");
+
+    let output = std::process::Command::new(binary)
+        .current_dir(&cwd)
+        .args(["list", "--global", "--json", "--state-dir=-state"])
+        .output()
+        .expect("run equals state directory");
+
+    assert_eq!(output.status.code(), Some(0));
+    assert!(output.stderr.is_empty());
+    let rows: Vec<serde_json::Value> = serde_json::from_slice(&output.stdout).expect("JSON rows");
+    assert_eq!(rows[0]["title"], "equals state task");
+
+    let _ = std::fs::remove_dir_all(cwd);
+}
+
+#[test]
 fn bare_list_outside_a_repo_falls_back_to_global_scope() {
     let _env = env_lock();
     let outside = temp_state_dir("outside-repo");
