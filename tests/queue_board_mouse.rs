@@ -1300,6 +1300,40 @@ fn non_left_clicks_over_a_live_control_are_ignored() {
 // ---------------------------------------------------------------------------
 
 #[test]
+fn header_line_registers_no_hit_target() {
+    let mut domain = DomainState::new();
+    domain
+        .create_with_thread(
+            "threaded row",
+            None,
+            project(THIS_REPO),
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+            Some("release".to_string()),
+        )
+        .expect("create threaded task");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
+    model.set_selected_project(Some(PathBuf::from(THIS_REPO)));
+    let rows = page_rows(&model);
+    let header_y = rows
+        .iter()
+        .position(|row| row.contains("#release"))
+        .expect("thread header paints");
+    let hits = board_hit_map(STANDARD, &model);
+
+    assert!(
+        hits.regions.iter().all(|hit| hit.area.y != header_y as u16),
+        "decorative thread header must register no hit target: {hits:?}"
+    );
+    assert_eq!(
+        map_board_mouse(&model, &hits, left_click(0, header_y as u16)),
+        None,
+        "clicking the decorative header must be inert"
+    );
+}
+
+#[test]
 fn a_row_click_selects_and_peeks_and_a_second_click_opens_the_task_page() {
     let (mut domain, mut model) = deck_of(3);
     let visible = model.visible_ids();

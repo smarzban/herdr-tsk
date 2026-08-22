@@ -2178,6 +2178,224 @@ fn footer_lists_the_step_add_verb() {
     );
 }
 
+/// T-4: scoped ON DECK thread blocks paint one dim decorative header before their task rows.
+#[test]
+fn scoped_board_paints_thread_header_above_its_tasks() {
+    let mut tasks = fixture_tasks();
+    tasks[2].thread = Some("release".to_string());
+    tasks[3].thread = Some("release".to_string());
+    let mut model = BoardModel::from_tasks(tasks, Some(PathBuf::from("/repos/herdr-tasks")));
+    model.set_selected_project(Some(PathBuf::from("/repos/herdr-tasks")));
+
+    let rows = board_rows(&model, 80, 24);
+    let header = rows
+        .iter()
+        .position(|row| row.contains("#release"))
+        .expect("scoped thread block must paint its header");
+    let first_task = rows
+        .iter()
+        .position(|row| row.contains("Prototype the queue-style board UI"))
+        .expect("threaded task must paint");
+    assert!(
+        header < first_task,
+        "the thread header must precede its task rows:\n{}",
+        rows.join("\n")
+    );
+}
+
+#[test]
+fn header_shows_name_and_open_count() {
+    let mut tasks = fixture_tasks();
+    tasks[2].thread = Some("release".to_string());
+    tasks[3].thread = Some("release".to_string());
+    let mut model = BoardModel::from_tasks(tasks, Some(PathBuf::from("/repos/herdr-tasks")));
+    model.set_selected_project(Some(PathBuf::from("/repos/herdr-tasks")));
+    let deck_index = model
+        .visible_ids()
+        .iter()
+        .position(|id| *id == Uuid::from_u128(10))
+        .expect("threaded task is visible");
+    let mut domain = DomainState::new();
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::SelectIndex(deck_index),
+        None,
+        None,
+    )
+    .expect("select threaded task");
+
+    let standard = board_rows(&model, 80, 24).join("\n");
+    assert!(
+        standard.contains("#release") && standard.contains("2 open"),
+        "standard thread header must name its block and its open count:\n{standard}"
+    );
+    let compact = board_rows(&model, 40, 10).join("\n");
+    assert!(
+        compact.contains("#release 2") && !compact.contains("2 open"),
+        "compact thread header must retain name/count in its compressed form:\n{compact}"
+    );
+}
+
+#[test]
+fn board_with_headers_paints_within_40x10_and_all_tasks_reachable() {
+    let mut tasks = vec![
+        task(
+            100,
+            "alpha first",
+            HumanStatus::Ready,
+            project("/repos/herdr-tasks"),
+            40,
+        ),
+        task(
+            101,
+            "alpha second",
+            HumanStatus::Ready,
+            project("/repos/herdr-tasks"),
+            30,
+        ),
+        task(
+            102,
+            "beta first",
+            HumanStatus::Ready,
+            project("/repos/herdr-tasks"),
+            20,
+        ),
+        task(
+            103,
+            "beta second",
+            HumanStatus::Ready,
+            project("/repos/herdr-tasks"),
+            10,
+        ),
+    ];
+    tasks[0].thread = Some("alpha".to_string());
+    tasks[1].thread = Some("alpha".to_string());
+    tasks[2].thread = Some("beta".to_string());
+    tasks[3].thread = Some("beta".to_string());
+    let mut model = BoardModel::from_tasks(tasks, Some(PathBuf::from("/repos/herdr-tasks")));
+    model.set_selected_project(Some(PathBuf::from("/repos/herdr-tasks")));
+    let mut domain = DomainState::new();
+    let ids = model.visible_ids();
+    assert_eq!(ids.len(), 4, "fixture must expose every open task");
+    assert_eq!(
+        model.selected_id(),
+        Some(ids[0]),
+        "the first visible task must seed arrow traversal"
+    );
+
+    for (index, id) in ids.into_iter().enumerate() {
+        if index > 0 {
+            apply_intent(&mut domain, &mut model, BoardIntent::SelectNext, None, None)
+                .expect("arrow to next task");
+        }
+        assert_eq!(
+            model.selected_id(),
+            Some(id),
+            "arrow traversal must land on every open task"
+        );
+        let rows = board_rows(&model, 40, 10);
+        let task = model
+            .visible_tasks()
+            .into_iter()
+            .find(|task| task.id == id)
+            .expect("selected task stays visible");
+        let header = format!(
+            "#{} 2",
+            task.thread.as_deref().expect("threaded fixture task")
+        );
+        let header_y = rows
+            .iter()
+            .position(|row| row.contains(&header))
+            .expect("selected task's header must occupy a painted row");
+        let task_y = rows
+            .iter()
+            .position(|row| row.contains(&task.title))
+            .expect("selected task must be reachable at 40x10");
+        assert!(
+            header_y < task_y,
+            "the header must consume its own row before the selected task:\n{}",
+            rows.join("\n")
+        );
+        assert!(
+            rows.iter().all(|row| row_display_width(row) == 40),
+            "thread headers and rows must stay within 40 columns"
+        );
+
+        if index == 3 {
+            let positions: Vec<usize> = [
+                "#beta 2",
+                "beta second",
+                "beta first",
+                "#alpha 2",
+                "alpha second",
+                "alpha first",
+            ]
+            .into_iter()
+            .map(|line| {
+                rows.iter()
+                    .position(|row| row.contains(line))
+                    .unwrap_or_else(|| {
+                        panic!("{line:?} must occupy the 40x10 frame:\n{}", rows.join("\n"))
+                    })
+            })
+            .collect();
+            assert!(
+                positions.windows(2).all(|pair| pair[0] < pair[1]),
+                "two headers and four tasks must occupy distinct, ordered frame rows:\n{}",
+                rows.join("\n")
+            );
+        }
+    }
+}
+
+#[test]
+fn peek_shows_thread_line_only_for_threaded_task() {
+    let mut threaded = task(200, "threaded", HumanStatus::Ready, TaskScope::Global, 1);
+    threaded.thread = Some("release".to_string());
+    let mut threaded_model = BoardModel::from_tasks(vec![threaded], None);
+    let mut domain = DomainState::new();
+    apply_intent(
+        &mut domain,
+        &mut threaded_model,
+        BoardIntent::PeekDetail,
+        None,
+        None,
+    )
+    .expect("open threaded peek");
+    assert!(
+        board_rows(&threaded_model, 80, 24)
+            .join("\n")
+            .contains("thread #release"),
+        "threaded peek must name its thread"
+    );
+
+    let mut unthreaded_model = BoardModel::from_tasks(
+        vec![task(
+            201,
+            "unthreaded",
+            HumanStatus::Ready,
+            TaskScope::Global,
+            1,
+        )],
+        None,
+    );
+    apply_intent(
+        &mut domain,
+        &mut unthreaded_model,
+        BoardIntent::PeekDetail,
+        None,
+        None,
+    )
+    .expect("open unthreaded peek");
+    assert!(
+        !board_rows(&unthreaded_model, 80, 24)
+            .join("\n")
+            .contains("thread #"),
+        "unthreaded peek must not invent a thread line"
+    );
+}
+
 #[test]
 fn all_golden_frames_pass_no_color_sgr_scan() {
     let dir = golden_fixtures_dir();

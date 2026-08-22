@@ -27,8 +27,10 @@ For scriptable board work, use `herdr-tasks add` and `herdr-tasks list`; read
 
 ### Board
 
-- Sections are computed, never navigated: IN MOTION · project groups when showing
-  all projects, ON DECK when scoped · global last · done drawer (`z`)
+- Sections and scoped thread headers are computed, never navigated: IN MOTION · project
+  groups when showing all projects, ON DECK when scoped · global last · done drawer (`z`).
+  Scoped ON DECK thread blocks paint dim `#name` headers with open counts; headers consume
+  row budget but are not selectable or hit-testable.
 - Standard ≥78×24, compact below, operable to 40×10
 - Human status: `ready` · `started` · `blocked` · `review` · `done`. The store
   still reads old `todo`/`doing` values.

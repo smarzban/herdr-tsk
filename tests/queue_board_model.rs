@@ -8,9 +8,11 @@ use herdr_tasks::domain::{
     DomainState, HumanStatus, ProvenanceOrigin, Task, TaskEvent, TaskEventKind, TaskScope,
 };
 use herdr_tasks::store::TaskStore;
-use herdr_tasks::ui::board::{apply_intent, BoardModel, ProjectScopeOption};
+use herdr_tasks::ui::board::{apply_intent, draw_board, BoardModel, ProjectScopeOption};
 use herdr_tasks::ui::input::BoardIntent;
 use herdr_tasks::ui::queue::{query, DeckScope, SectionKind};
+use ratatui::backend::TestBackend;
+use ratatui::Terminal;
 use uuid::Uuid;
 
 const THIS_REPO: &str = "/repos/app";
@@ -700,6 +702,89 @@ fn selection_stays_on_task_id_across_thread_block_reorder() {
 }
 
 /// Two fresh models from the same store share no UI state and write no UI-state files.
+fn board_rows(model: &BoardModel, width: u16, height: u16) -> Vec<String> {
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("test terminal");
+    terminal
+        .draw(|frame| draw_board(frame, model))
+        .expect("draw board");
+    let buffer = terminal.backend().buffer();
+    (0..height)
+        .map(|y| {
+            (0..width)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect::<String>()
+        })
+        .collect()
+}
+
+#[test]
+fn arrow_navigation_crosses_painted_header_task_to_task() {
+    let mut domain = DomainState::new();
+    domain
+        .create_with_thread(
+            "alpha task",
+            None,
+            project(THIS_REPO),
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+            Some("alpha".to_string()),
+        )
+        .expect("create alpha");
+    domain
+        .create_with_thread(
+            "beta task",
+            None,
+            project(THIS_REPO),
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+            Some("beta".to_string()),
+        )
+        .expect("create beta");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
+    model.set_selected_project(Some(PathBuf::from(THIS_REPO)));
+    let ids = model.visible_ids();
+    assert_eq!(ids.len(), 2, "two threaded tasks are visible");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::SelectIndex(0),
+        None,
+        None,
+    )
+    .expect("select first task");
+
+    let rows = board_rows(&model, 80, 24);
+    let first_title = domain.get(ids[0]).expect("first task").title.clone();
+    let second = domain.get(ids[1]).expect("second task");
+    let first_y = rows
+        .iter()
+        .position(|row| row.contains(&first_title))
+        .expect("first task paints");
+    let header_y = rows
+        .iter()
+        .position(|row| row.contains(&format!("#{}", second.thread.as_deref().unwrap())))
+        .expect("second block header paints");
+    let second_y = rows
+        .iter()
+        .position(|row| row.contains(&second.title))
+        .expect("second task paints");
+    assert!(
+        first_y < header_y && header_y < second_y,
+        "a painted header must physically sit between the tasks:\n{}",
+        rows.join("\n")
+    );
+
+    apply_intent(&mut domain, &mut model, BoardIntent::SelectNext, None, None)
+        .expect("arrow navigation moves to next task");
+    assert_eq!(
+        model.selected_id(),
+        Some(ids[1]),
+        "selection must skip decorative headers and land on the next task"
+    );
+}
+
 #[test]
 fn two_fresh_models_from_same_store_share_no_ui_state_and_no_ui_writes_under_state_or_config_dirs()
 {
