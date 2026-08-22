@@ -803,6 +803,32 @@ fn plan_project_resolution_is_independent_of_item_order() {
 }
 
 #[test]
+fn add_when_state_dir_is_a_file_exits_3() {
+    let _env = env_lock();
+    let parent = temp_state_dir("state-dir-file");
+    let state_file = parent.join("not-a-directory");
+    std::fs::write(&state_file, "not a directory").expect("create state-dir file");
+
+    let output = add(
+        &[
+            "herdr-tasks".into(),
+            "add".into(),
+            "--state-dir".into(),
+            state_dir_arg(&state_file),
+            "--title".into(),
+            "cannot persist".into(),
+        ],
+        true,
+    );
+
+    assert_eq!(output.code, 3);
+    assert!(output.stdout.is_empty());
+    assert!(!output.stderr.is_empty());
+
+    let _ = std::fs::remove_dir_all(parent);
+}
+
+#[test]
 fn state_dir_flag_wins_over_environment() {
     let _env = env_lock();
     let environment_dir = temp_state_dir("environment");

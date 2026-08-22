@@ -156,6 +156,32 @@ fn list_json_includes_done_excludes_soft_deleted() {
 }
 
 #[test]
+fn list_when_state_dir_is_a_file_exits_3() {
+    let _env = env_lock();
+    let parent = temp_state_dir("state-dir-file");
+    let state_file = parent.join("not-a-directory");
+    std::fs::write(&state_file, "not a directory").expect("create state-dir file");
+
+    let output = run_with(
+        [
+            "herdr-tasks",
+            "list",
+            "--json",
+            "--state-dir",
+            &state_dir_arg(&state_file),
+        ],
+        Cursor::new(Vec::<u8>::new()),
+        true,
+    );
+
+    assert_eq!(output.code, 3);
+    assert!(output.stdout.is_empty());
+    assert!(!output.stderr.is_empty());
+
+    let _ = std::fs::remove_dir_all(parent);
+}
+
+#[test]
 fn list_state_dir_flag_wins_over_environment() {
     let _env = env_lock();
     let environment_dir = temp_state_dir("environment");

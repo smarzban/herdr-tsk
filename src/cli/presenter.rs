@@ -69,18 +69,18 @@ pub fn list_rejected(error: ListError) -> CliOutput {
     CliOutput {
         stdout: String::new(),
         stderr: format!("herdr-tasks list: {detail}\n"),
-        code: 1,
+        code: 3,
     }
 }
 
 pub fn rejected(error: AddError) -> CliOutput {
-    let detail = match error {
-        AddError::Store(detail) => detail,
-        other => other.code().into(),
+    let (detail, code) = match error {
+        AddError::Store(detail) => (detail, 3),
+        other => (other.code().into(), 1),
     };
     CliOutput {
         stdout: String::new(),
         stderr: format!("herdr-tasks add: {detail}\n"),
-        code: 1,
+        code,
     }
 }
