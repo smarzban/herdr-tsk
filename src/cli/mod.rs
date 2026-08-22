@@ -66,8 +66,9 @@ fn run_add<R: Read>(args: Vec<String>, stdin: &mut R, stdin_is_tty: bool) -> Cli
         if input.title.is_none() {
             return presenter::usage("title is required");
         }
+        let json = input.json;
         return match add::run(input) {
-            Ok(title) => presenter::added(&title),
+            Ok(result) => presenter::added(result, json),
             Err(error) => presenter::rejected(error),
         };
     }

@@ -9,6 +9,7 @@ pub struct FlagAdd {
     pub notes: Option<String>,
     pub project: Option<String>,
     pub global: bool,
+    pub json: bool,
     pub state_dir: Option<PathBuf>,
     pub file: Option<PathBuf>,
     pub has_item_flags: bool,
@@ -26,6 +27,7 @@ pub fn parse_flag_add(args: &[String]) -> Result<FlagAdd, String> {
         notes: None,
         project: None,
         global: false,
+        json: false,
         state_dir: None,
         file: None,
         has_item_flags: false,
@@ -33,12 +35,30 @@ pub fn parse_flag_add(args: &[String]) -> Result<FlagAdd, String> {
     };
     let mut index = 2;
     while let Some(flag) = args.get(index).map(String::as_str) {
-        let value = |name: &str| {
-            args.get(index + 1)
-                .cloned()
-                .ok_or_else(|| format!("missing value for {name}"))
+        let value = |name: &str| match args.get(index + 1) {
+            Some(value) if !value.starts_with('-') => Ok(value.clone()),
+            _ => Err(format!("missing value for {name}")),
+        };
+        let file_value = |name: &str| match args.get(index + 1) {
+            Some(value) if value == "-" || !value.starts_with('-') => Ok(value.clone()),
+            _ => Err(format!("missing value for {name}")),
         };
         match flag {
+            flag if flag.starts_with("--title=") => {
+                parsed.title = Some(flag["--title=".len()..].to_owned());
+                parsed.has_item_flags = true;
+                index += 1;
+            }
+            flag if flag.starts_with("--notes=") => {
+                parsed.notes = Some(flag["--notes=".len()..].to_owned());
+                parsed.has_item_flags = true;
+                index += 1;
+            }
+            flag if flag.starts_with("--project=") => {
+                parsed.project = Some(flag["--project=".len()..].to_owned());
+                parsed.has_item_flags = true;
+                index += 1;
+            }
             "-t" | "--title" => {
                 parsed.title = Some(value(flag)?);
                 parsed.has_item_flags = true;
@@ -59,8 +79,20 @@ pub fn parse_flag_add(args: &[String]) -> Result<FlagAdd, String> {
                 parsed.has_item_flags = true;
                 index += 1;
             }
+            "--json" => {
+                parsed.json = true;
+                index += 1;
+            }
             "--help" => {
                 parsed.help = true;
+                index += 1;
+            }
+            flag if flag.starts_with("--state-dir=") => {
+                parsed.state_dir = Some(PathBuf::from(flag["--state-dir=".len()..].to_owned()));
+                index += 1;
+            }
+            flag if flag.starts_with("--file=") => {
+                parsed.file = Some(PathBuf::from(flag["--file=".len()..].to_owned()));
                 index += 1;
             }
             "--state-dir" => {
@@ -68,7 +100,7 @@ pub fn parse_flag_add(args: &[String]) -> Result<FlagAdd, String> {
                 index += 2;
             }
             "--file" => {
-                parsed.file = Some(PathBuf::from(value(flag)?));
+                parsed.file = Some(PathBuf::from(file_value(flag)?));
                 index += 2;
             }
             _ => return Err(format!("unknown add argument {flag}")),
