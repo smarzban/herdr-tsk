@@ -865,7 +865,7 @@ mod tests {
             "result": {
                 "panes": [
                     {"pane_id": "w0:p1", "label": "Editor"},
-                    {"pane_id": "w0:p2", "label": "Tasks"}
+                    {"pane_id": "w0:p2", "label": "tsk"}
                 ]
             }
         }"#;
@@ -950,7 +950,7 @@ mod tests {
                     },
                     {
                         "pane_id": "w0:p2",
-                        "label": "Tasks",
+                        "label": "tsk",
                         "cwd": "/plugin",
                         "focused": false,
                         "workspace_id": "w0"
@@ -972,7 +972,7 @@ mod tests {
             "result": {
                 "pane": {
                     "pane_id": "w0:p2",
-                    "label": "Tasks",
+                    "label": "tsk",
                     "cwd": "/plugin",
                     "workspace_id": "w0"
                 }
@@ -995,7 +995,7 @@ mod tests {
             },
             PaneInfo {
                 pane_id: "w0:p2".into(),
-                label: Some("Tasks".into()),
+                label: Some("tsk".into()),
                 cwd: Some("/plugin".into()),
                 focused: false,
                 workspace_id: Some("w0".into()),
@@ -1018,7 +1018,7 @@ mod tests {
             },
             PaneInfo {
                 pane_id: "w0:p2".into(),
-                label: Some("Tasks".into()),
+                label: Some("tsk".into()),
                 focused: false,
                 workspace_id: Some("w0".into()),
                 ..PaneInfo::default()
@@ -1043,7 +1043,7 @@ mod tests {
             },
             PaneInfo {
                 pane_id: "w0:p2".into(),
-                label: Some("Tasks".into()),
+                label: Some("tsk".into()),
                 focused: false,
                 workspace_id: Some("w0".into()),
                 ..PaneInfo::default()
@@ -1068,8 +1068,8 @@ mod tests {
             },
             PaneInfo {
                 pane_id: "w0:p2".into(),
-                label: Some("Tasks".into()),
-                terminal_title_stripped: Some("Tasks".into()),
+                label: Some("tsk".into()),
+                terminal_title_stripped: Some("tsk".into()),
                 cwd: Some("/plugin-state".into()),
                 focused: true,
                 workspace_id: Some("w0".into()),
@@ -1085,7 +1085,7 @@ mod tests {
     fn select_work_pane_none_when_only_tasks() {
         let panes = vec![PaneInfo {
             pane_id: "w0:p2".into(),
-            label: Some("Tasks".into()),
+            label: Some("tsk".into()),
             focused: true,
             workspace_id: Some("w0".into()),
             ..PaneInfo::default()

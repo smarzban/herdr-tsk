@@ -8,7 +8,7 @@ use std::io::{self, Read};
 use serde_json::Value;
 
 /// Board pane label/title as declared in herdr-plugin.toml `[[panes]]`.
-pub const BOARD_PANE_LABEL: &str = "Tasks";
+pub const BOARD_PANE_LABEL: &str = "tsk";
 
 /// Read pane-list JSON from `stdin` and print the first flag-safe Tasks pane id.
 ///
@@ -22,7 +22,7 @@ pub fn find_board_pane_from_stdin() -> io::Result<Option<String>> {
 
 /// Parse herdr `pane list` JSON and return the first flag-safe Tasks pane_id.
 ///
-/// Matches panes whose `label` or `terminal_title_stripped` equals `"Tasks"`.
+/// Matches panes whose `label` or `terminal_title_stripped` equals `"tsk"`.
 /// Pane ids must be non-empty, not start with `-`, and match `[A-Za-z0-9_.:-]+`
 /// so they are safe to pass as a CLI argument to `plugin pane focus`.
 pub fn find_board_pane_id(json: &str) -> Option<String> {
@@ -67,7 +67,7 @@ mod tests {
             "result": {
                 "panes": [
                     {"pane_id": "w0:p1", "label": "Editor", "terminal_title_stripped": "nvim"},
-                    {"pane_id": "w0:p2", "label": "Tasks", "terminal_title_stripped": "tsk"}
+                    {"pane_id": "w0:p2", "label": "tsk", "terminal_title_stripped": "tsk"}
                 ]
             }
         }"#;
@@ -79,7 +79,7 @@ mod tests {
         let json = r#"{
             "result": {
                 "panes": [
-                    {"pane_id": "w1:p0", "label": "", "terminal_title_stripped": "Tasks"}
+                    {"pane_id": "w1:p0", "label": "", "terminal_title_stripped": "tsk"}
                 ]
             }
         }"#;
@@ -91,9 +91,9 @@ mod tests {
         let json = r#"{
             "result": {
                 "panes": [
-                    {"pane_id": "--evil", "label": "Tasks"},
-                    {"pane_id": "bad id", "label": "Tasks"},
-                    {"pane_id": "w0:p9", "label": "Tasks"}
+                    {"pane_id": "--evil", "label": "tsk"},
+                    {"pane_id": "bad id", "label": "tsk"},
+                    {"pane_id": "w0:p9", "label": "tsk"}
                 ]
             }
         }"#;

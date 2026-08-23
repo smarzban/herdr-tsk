@@ -21,7 +21,7 @@ command = ["./target/release/tsk"]
 id = "open-board"
 platforms = ["linux", "macos"]
 title = "Open tsk board"
-description = "Open the Tasks board in a split pane beside the current work."
+description = "Open the tsk board in a split pane beside the current work."
 command = ["bash", "scripts/open-board.sh"]
 
 [[actions]]

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Quick-capture launcher: short-lived popup (overlay) in capture mode.
 #
-# Opens the board entrypoint as an overlay and sets HERDR_TASKS_MODE=capture so
+# Opens the board entrypoint as an overlay and sets TSK_MODE=capture so
 # the binary can enter Capture UI without first opening a persistent split board.
 # Capture surfaces are short-lived. Board focus idempotency is in open-board.sh.
 #
@@ -17,4 +17,4 @@ exec "$herdr_bin" plugin pane open \
   --entrypoint "$entrypoint" \
   --placement overlay \
   --focus \
-  --env HERDR_TASKS_MODE=capture
+  --env TSK_MODE=capture
