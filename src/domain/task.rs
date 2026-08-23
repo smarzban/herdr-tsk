@@ -273,12 +273,16 @@ fn record_mutation(task: &mut Task, kind: TaskEventKind) {
     task.history.push(TaskEvent { kind, at: now });
 }
 
-/// Document version written by this binary. Missing on-disk fields load as this value.
+/// Document version written by this binary.
 /// Bump when an older writer cannot round-trip a newly persisted field.
 pub const STORE_FORMAT_VERSION: u32 = 1;
 
+/// Version of documents written before `format_version` existed.
+/// Stay on 1 when [`STORE_FORMAT_VERSION`] is bumped.
+pub const LEGACY_STORE_FORMAT_VERSION: u32 = 1;
+
 fn default_store_format_version() -> u32 {
-    STORE_FORMAT_VERSION
+    LEGACY_STORE_FORMAT_VERSION
 }
 
 /// In-memory task set. Persistence is Task Store.
@@ -286,7 +290,7 @@ fn default_store_format_version() -> u32 {
 /// SHORTCUT: Vec scan by id; fine until store loads many tasks.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DomainState {
-    /// Store document version. Missing on older files loads as [`STORE_FORMAT_VERSION`].
+    /// Store document version. Missing on older files loads as [`LEGACY_STORE_FORMAT_VERSION`].
     #[serde(default = "default_store_format_version")]
     format_version: u32,
     tasks: Vec<Task>,
@@ -897,13 +901,14 @@ mod tests {
     }
 
     #[test]
-    fn missing_format_version_loads_as_current() {
+    fn missing_format_version_loads_as_legacy() {
         let state: DomainState = serde_json::from_value(serde_json::json!({
             "tasks": [],
             "undo_stack": []
         }))
         .expect("legacy document");
-        assert_eq!(state.format_version(), STORE_FORMAT_VERSION);
+        assert_eq!(state.format_version(), LEGACY_STORE_FORMAT_VERSION);
+        assert_eq!(state.format_version(), 1);
     }
 
     #[test]
