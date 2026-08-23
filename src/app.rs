@@ -785,7 +785,7 @@ pub fn apply_board_intent_with_save_recovery(
         return Ok(outcome);
     }
     if let Err(error) = persist(domain) {
-        let working = std::mem::replace(domain, DomainState::new());
+        let working = std::mem::take(domain);
         recovery.fail(baseline, working, error);
         model.begin_save_recovery(recovery.error().unwrap_or("save failed"));
         return Ok(IntentOutcome::None);

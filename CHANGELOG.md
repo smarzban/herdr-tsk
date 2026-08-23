@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+Store hardening: `tasks.json` carries `format_version` (currently 1) and a
+newer document is refused rather than rewritten; each replace keeps the previous
+file as `tasks.json.1`; leftover `.tasks.json.tmp.*` files are swept under the
+lock; the exclusive lock uses `std::fs::File::lock` instead of `fs2`.
+
 Rebrand to **tsk** ("a task board for your terminal"). The crate is now
 `tsk-tui` building the `tsk` binary. Standalone state and config default to
 `~/.local/share/tsk` and `~/.config/tsk`, with new `TSK_STATE_DIR` /
