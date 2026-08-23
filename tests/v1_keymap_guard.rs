@@ -1,9 +1,9 @@
 //! Guard the documented V1 queue keymap against retired UI returning.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use herdr_tasks::domain::{DomainState, ProvenanceOrigin, TaskScope};
-use herdr_tasks::ui::board::{apply_intent, BoardInputMode, BoardModel};
-use herdr_tasks::ui::input::{map_key, normal_mode_keymap, BoardIntent};
+use tsk_tui::domain::{DomainState, ProvenanceOrigin, TaskScope};
+use tsk_tui::ui::board::{apply_intent, BoardInputMode, BoardModel};
+use tsk_tui::ui::input::{map_key, normal_mode_keymap, BoardIntent};
 
 fn normal(code: KeyCode) -> Option<BoardIntent> {
     map_key(

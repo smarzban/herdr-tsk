@@ -1,24 +1,48 @@
-# herdr-tasks
+# tsk
 
-A [herdr](https://herdr.dev) plugin: a queue board for capturing work and moving it
-through human status. Park, resume, attention, linking, and dispatch-start are not
-board actions. Dispatch recovery can still open if a persisted attempt is already
-in the store.
+**A task board for your terminal.**
+
+tsk captures work and moves it through human status: ready, started, blocked,
+review, done. It ships today as a [herdr](https://herdr.dev) plugin, and the
+`tsk` binary also runs standalone against its own state directory.
+
+Park, resume, attention, linking, and dispatch-start are not board actions.
+Dispatch recovery can still open if a persisted attempt is already in the store.
 
 ## Requirements
 
-- herdr 0.7.5 or newer
 - Rust 1.96.0 (pinned in `rust-toolchain.toml`)
 - Linux or macOS
+- herdr 0.7.5 or newer (plugin mode only)
 
 ## Install
 
-The plugin pane runs `./target/release/herdr-tasks`, so build before you link:
+Build from source:
 
 ```bash
-git clone git@github.com:smarzban/herdr-tasks.git
-cd herdr-tasks
+git clone git@github.com:smarzban/tsk.git
+cd tsk
 cargo build --release
+```
+
+The built binary is `target/release/tsk`.
+
+### Standalone
+
+Run `tsk` directly. State lives in `$XDG_DATA_HOME/tsk`
+(`~/.local/share/tsk` by default), config in `~/.config/tsk`. Override either
+with `TSK_STATE_DIR` / `TSK_CONFIG_DIR`.
+
+```bash
+tsk add -t "Draft release notes"
+tsk list
+```
+
+### As a herdr plugin
+
+The plugin pane runs `./target/release/tsk`, so build before you link:
+
+```bash
 herdr plugin link "$PWD"
 ```
 
@@ -27,13 +51,13 @@ after you pull.
 
 ## Open the board
 
-From herdr, pick **Open Tasks board**, or:
+From herdr, pick **Open tsk board**, or:
 
 ```bash
 herdr plugin action invoke open-board --plugin herdr-tasks
 ```
 
-It opens a **Tasks** split beside the current pane. Invoking it again focuses the
+It opens a **tsk** split beside the current pane. Invoking it again focuses the
 board you already have.
 
 **Quick capture** opens the capture form without the board:
@@ -42,8 +66,9 @@ board you already have.
 herdr plugin action invoke quick-capture --plugin herdr-tasks
 ```
 
-State lives under `HERDR_PLUGIN_STATE_DIR`. Config (including the verb modifier)
-lives under `HERDR_PLUGIN_CONFIG_DIR`.
+In plugin mode, state lives under `HERDR_PLUGIN_STATE_DIR` and config under
+`HERDR_PLUGIN_CONFIG_DIR`; the host injects both, so the plugin and a standalone
+CLI can be pointed at the same store deliberately but never collide by accident.
 
 ## Pane size
 
@@ -61,7 +86,8 @@ One urgency-ordered list. Sections are computed, not navigated.
 
 - **IN MOTION**: work you have started
 - When showing all projects: one group per project, global last
-- When scoped to one project: **ON DECK** for that project
+- When scoped to one project: **ON DECK** for that project, with derived thread
+  headers above their open tasks
 - **z** opens the done drawer
 
 ## Keys
@@ -105,7 +131,7 @@ Page `Esc` closes the page.
 
 | Key | Does |
 | --- | --- |
-| `Tab` / `Shift+Tab` | Title, Notes, Scope |
+| `Tab` / `Shift+Tab` | Title, Notes, Thread, Scope |
 | `Enter` in Title | save |
 | `Enter` in Notes | new line |
 | `Ctrl+Enter` or `Alt+Enter` | save from any field |

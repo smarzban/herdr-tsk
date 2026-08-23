@@ -24,10 +24,10 @@ else:
     raise SystemExit("herdr-tasks plugin is not enabled")
 '
 )
-binary="$plugin_root/target/release/herdr-tasks"
+binary="$plugin_root/target/release/tsk"
 
 if [[ ! -x "$binary" ]]; then
-  printf 'herdr-tasks binary is missing: %s\nRebuild the enabled plugin, then retry.\n' "$binary" >&2
+  printf 'tsk binary is missing: %s\nRebuild the enabled plugin, then retry.\n' "$binary" >&2
   exit 127
 fi
 

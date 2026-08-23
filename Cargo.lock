@@ -478,18 +478,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
-name = "herdr-tasks"
-version = "0.2.0"
-dependencies = [
- "crossterm",
- "fs2",
- "ratatui",
- "serde",
- "serde_json",
- "uuid",
-]
-
-[[package]]
 name = "hex"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1445,6 +1433,18 @@ name = "time-core"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9e1c906769ad99c88eaa54e728060edef082f8e358ff32030cb7c7d315e81109"
+
+[[package]]
+name = "tsk-tui"
+version = "0.2.0"
+dependencies = [
+ "crossterm",
+ "fs2",
+ "ratatui",
+ "serde",
+ "serde_json",
+ "uuid",
+]
 
 [[package]]
 name = "typenum"

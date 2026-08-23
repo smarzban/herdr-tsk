@@ -1261,7 +1261,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .expect("clock")
             .as_nanos();
-        let dir = env::temp_dir().join(format!("herdr-tasks-host-{nanos}"));
+        let dir = env::temp_dir().join(format!("tsk-host-{nanos}"));
         fs::create_dir_all(&dir).expect("mkdir");
         dir
     }

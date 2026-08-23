@@ -5,16 +5,16 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use herdr_tasks::dispatch::DispatchRecoveryResult;
-use herdr_tasks::domain::{
+use tsk_tui::dispatch::DispatchRecoveryResult;
+use tsk_tui::domain::{
     AgentMeta, AgentReceipt, AgentSessionIdentity, ContextCapsule, DispatchAttemptError,
     DispatchAttemptMode, DispatchAttemptPhase, DispatchAttemptStep, DispatchAttemptStepState,
     DispatchAttemptTransition, DomainError, DomainState, HumanStatus, ObservedStatus,
     OwnedResourceReceipt, PaneReceipt, ProvenanceOrigin, Step, TaskEvent, TaskEventKind, TaskScope,
     WorktreeReceipt,
 };
-use herdr_tasks::store::TaskStore;
-use herdr_tasks::ui::board::{apply_dispatch_recovery_result, BoardInputMode, BoardModel};
+use tsk_tui::store::TaskStore;
+use tsk_tui::ui::board::{apply_dispatch_recovery_result, BoardInputMode, BoardModel};
 use uuid::Uuid;
 
 fn temp_state_dir() -> PathBuf {
@@ -24,7 +24,7 @@ fn temp_state_dir() -> PathBuf {
         .as_nanos();
     static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!("herdr-tasks-store-persist-{nanos}-{seq}"));
+    let dir = std::env::temp_dir().join(format!("tsk-store-persist-{nanos}-{seq}"));
     fs::create_dir_all(&dir).expect("create temp state dir");
     dir
 }

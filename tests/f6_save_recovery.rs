@@ -3,31 +3,29 @@
 use std::fs;
 use std::path::PathBuf;
 
-use herdr_tasks::context::InvocationSnapshot;
-use herdr_tasks::store::TaskStore;
-use herdr_tasks::ui::capture::{
+use tsk_tui::context::InvocationSnapshot;
+use tsk_tui::store::TaskStore;
+use tsk_tui::ui::capture::{
     apply_capture_intent, CaptureField, CaptureModel, CaptureOutcome, CaptureScopeChoice,
 };
-use herdr_tasks::ui::input::{map_capture_key_state, CaptureIntent};
-use herdr_tasks::ui::mouse::{
-    capture_layout_for_model, capture_recovery_layout, map_capture_mouse,
-};
+use tsk_tui::ui::input::{map_capture_key_state, CaptureIntent};
+use tsk_tui::ui::mouse::{capture_layout_for_model, capture_recovery_layout, map_capture_mouse};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use herdr_tasks::app::{apply_board_intent_with_save_recovery, BoardSaveContext};
-use herdr_tasks::domain::{DomainError, DomainState, HumanStatus, ProvenanceOrigin, TaskScope};
-use herdr_tasks::save_recovery::SaveRecovery;
-use herdr_tasks::ui::board::{
-    apply_intent, board_hit_map, draw_board, resolve_board_command, BoardInputMode, BoardModel,
-    CommandSurface, IntentOutcome,
-};
-use herdr_tasks::ui::capture::draw_capture;
-use herdr_tasks::ui::input::{map_key, BoardIntent};
-use herdr_tasks::ui::mouse::{left_click, map_board_mouse, BoardPopup};
-use herdr_tasks::ui::render::QueueHitTarget;
 use ratatui::backend::TestBackend;
 use ratatui::layout::Rect;
 use ratatui::Terminal;
+use tsk_tui::app::{apply_board_intent_with_save_recovery, BoardSaveContext};
+use tsk_tui::domain::{DomainError, DomainState, HumanStatus, ProvenanceOrigin, TaskScope};
+use tsk_tui::save_recovery::SaveRecovery;
+use tsk_tui::ui::board::{
+    apply_intent, board_hit_map, draw_board, resolve_board_command, BoardInputMode, BoardModel,
+    CommandSurface, IntentOutcome,
+};
+use tsk_tui::ui::capture::draw_capture;
+use tsk_tui::ui::input::{map_key, BoardIntent};
+use tsk_tui::ui::mouse::{left_click, map_board_mouse, BoardPopup};
+use tsk_tui::ui::render::QueueHitTarget;
 
 /// Capture areas: roomy, and narrow enough for the compact scope controls.
 const WIDE_CAPTURE: (u16, u16) = (80, 16);
@@ -68,10 +66,7 @@ fn capture_snapshot() -> InvocationSnapshot {
 }
 
 fn bad_store_path() -> (PathBuf, PathBuf) {
-    let root = std::env::temp_dir().join(format!(
-        "herdr-tasks-capture-recovery-{}",
-        uuid::Uuid::new_v4()
-    ));
+    let root = std::env::temp_dir().join(format!("tsk-capture-recovery-{}", uuid::Uuid::new_v4()));
     fs::create_dir_all(&root).expect("create temp root");
     let file = root.join("not-a-directory");
     fs::write(&file, "not a state directory").expect("create blocking file");

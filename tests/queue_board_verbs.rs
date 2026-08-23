@@ -3,18 +3,18 @@
 use std::path::{Path, PathBuf};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use herdr_tasks::context::InvocationSnapshot;
-use herdr_tasks::domain::{DomainState, HumanStatus, ProvenanceOrigin, TaskEventKind, TaskScope};
-use herdr_tasks::ui::board::{
+use ratatui::backend::TestBackend;
+use ratatui::Terminal;
+use tsk_tui::context::InvocationSnapshot;
+use tsk_tui::domain::{DomainState, HumanStatus, ProvenanceOrigin, TaskEventKind, TaskScope};
+use tsk_tui::ui::board::{
     apply_intent, board_intent_may_persist, board_verb_items, draw_board, resolve_board_command,
     BoardInputMode, BoardModel, CommandSurface, IntentOutcome, ProjectScopeOption,
 };
-use herdr_tasks::ui::input::{map_key, normal_help_bindings, BoardIntent};
-use herdr_tasks::ui::mouse::BoardPopup;
-use herdr_tasks::ui::queue::SectionKind;
-use herdr_tasks::ui::tier;
-use ratatui::backend::TestBackend;
-use ratatui::Terminal;
+use tsk_tui::ui::input::{map_key, normal_help_bindings, BoardIntent};
+use tsk_tui::ui::mouse::BoardPopup;
+use tsk_tui::ui::queue::SectionKind;
+use tsk_tui::ui::tier;
 
 const THIS_REPO: &str = "/repos/app";
 
@@ -743,7 +743,7 @@ fn palette_excludes_park_resume_link_dispatch() {
         )
         .expect("create");
     domain
-        .start_dispatch_attempt(id, herdr_tasks::domain::DispatchAttemptMode::Here, "grok")
+        .start_dispatch_attempt(id, tsk_tui::domain::DispatchAttemptMode::Here, "grok")
         .expect("start attempt");
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
     assert!(

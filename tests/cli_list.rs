@@ -5,9 +5,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use herdr_tasks::cli::run_with;
-use herdr_tasks::domain::{DomainState, HumanStatus, ProvenanceOrigin, TaskScope};
-use herdr_tasks::store::TaskStore;
+use tsk_tui::cli::run_with;
+use tsk_tui::domain::{DomainState, HumanStatus, ProvenanceOrigin, TaskScope};
+use tsk_tui::store::TaskStore;
 
 static TEMP_SEQ: AtomicU64 = AtomicU64::new(0);
 static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -62,7 +62,7 @@ fn temp_state_dir(label: &str) -> PathBuf {
         .expect("clock after epoch")
         .as_nanos();
     let seq = TEMP_SEQ.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!("herdr-tasks-cli-list-{label}-{nanos}-{seq}"));
+    let dir = std::env::temp_dir().join(format!("tsk-cli-list-{label}-{nanos}-{seq}"));
     std::fs::create_dir_all(&dir).expect("create state directory");
     dir
 }
@@ -77,7 +77,7 @@ fn state_dir_arg(dir: &Path) -> String {
     dir.to_string_lossy().into_owned()
 }
 
-fn list(args: &[String]) -> herdr_tasks::cli::CliOutput {
+fn list(args: &[String]) -> tsk_tui::cli::CliOutput {
     run_with(args, Cursor::new(Vec::<u8>::new()), true)
 }
 
@@ -178,7 +178,7 @@ fn list_defaults_to_invocation_project_open_tasks_in_human_and_json_group_order(
     TaskStore::new(&dir).save(&state).expect("seed store");
 
     let human = list(&[
-        "herdr-tasks".into(),
+        "tsk".into(),
         "list".into(),
         "--state-dir".into(),
         state_dir_arg(&dir),
@@ -191,7 +191,7 @@ fn list_defaults_to_invocation_project_open_tasks_in_human_and_json_group_order(
     );
 
     let json = list(&[
-        "herdr-tasks".into(),
+        "tsk".into(),
         "list".into(),
         "--json".into(),
         "--state-dir".into(),
@@ -244,7 +244,7 @@ fn list_resolves_named_and_global_scopes() {
     TaskStore::new(&dir).save(&state).expect("seed store");
 
     let named = list(&[
-        "herdr-tasks".into(),
+        "tsk".into(),
         "list".into(),
         "-p".into(),
         "widget".into(),
@@ -260,7 +260,7 @@ fn list_resolves_named_and_global_scopes() {
     assert_eq!(named_rows[0]["project"], "/projects/Widget");
 
     let global = list(&[
-        "herdr-tasks".into(),
+        "tsk".into(),
         "list".into(),
         "--global".into(),
         "--json".into(),
@@ -326,7 +326,7 @@ fn list_done_and_deleted_filters_are_status_and_soft_delete_specific() {
     TaskStore::new(&dir).save(&state).expect("seed store");
 
     let done = list(&[
-        "herdr-tasks".into(),
+        "tsk".into(),
         "list".into(),
         "--done".into(),
         "--state-dir".into(),
@@ -336,7 +336,7 @@ fn list_done_and_deleted_filters_are_status_and_soft_delete_specific() {
     assert_eq!(done.stdout, "DONE\n - done visible\n");
 
     let deleted = list(&[
-        "herdr-tasks".into(),
+        "tsk".into(),
         "list".into(),
         "--deleted".into(),
         "--json".into(),
@@ -357,7 +357,7 @@ fn list_done_and_deleted_filters_are_status_and_soft_delete_specific() {
     assert_eq!(deleted_rows[1]["status"], "done");
 
     let deleted_human = list(&[
-        "herdr-tasks".into(),
+        "tsk".into(),
         "list".into(),
         "--deleted".into(),
         "--state-dir".into(),
@@ -465,7 +465,7 @@ fn list_all_groups_each_status_by_concise_scope_for_every_filter() {
         .expect("project basename");
 
     let open = list(&[
-        "herdr-tasks".into(),
+        "tsk".into(),
         "list".into(),
         "--all".into(),
         "--state-dir".into(),
@@ -480,7 +480,7 @@ fn list_all_groups_each_status_by_concise_scope_for_every_filter() {
     );
 
     let open_json = list(&[
-        "herdr-tasks".into(),
+        "tsk".into(),
         "list".into(),
         "--all".into(),
         "--json".into(),
@@ -505,7 +505,7 @@ fn list_all_groups_each_status_by_concise_scope_for_every_filter() {
     );
 
     let done = list(&[
-        "herdr-tasks".into(),
+        "tsk".into(),
         "list".into(),
         "--all".into(),
         "--done".into(),
@@ -533,7 +533,7 @@ fn list_all_groups_each_status_by_concise_scope_for_every_filter() {
         );
     }
     let done_human = list(&[
-        "herdr-tasks".into(),
+        "tsk".into(),
         "list".into(),
         "--all".into(),
         "--done".into(),
@@ -546,7 +546,7 @@ fn list_all_groups_each_status_by_concise_scope_for_every_filter() {
     );
 
     let deleted = list(&[
-        "herdr-tasks".into(),
+        "tsk".into(),
         "list".into(),
         "--all".into(),
         "--deleted".into(),
@@ -565,7 +565,7 @@ fn list_all_groups_each_status_by_concise_scope_for_every_filter() {
         vec!["global deleted", "other deleted"]
     );
     let deleted_human = list(&[
-        "herdr-tasks".into(),
+        "tsk".into(),
         "list".into(),
         "--all".into(),
         "--deleted".into(),
@@ -635,7 +635,7 @@ fn list_all_distinguishes_global_from_project_global_and_uses_visible_scope_labe
     TaskStore::new(&dir).save(&state).expect("seed store");
 
     let output = list(&[
-        "herdr-tasks".into(),
+        "tsk".into(),
         "list".into(),
         "--all".into(),
         "--state-dir".into(),
@@ -696,7 +696,7 @@ fn list_all_uses_shortest_unique_trailing_scope_labels_across_statuses() {
     TaskStore::new(&dir).save(&state).expect("seed store");
 
     let output = list(&[
-        "herdr-tasks".into(),
+        "tsk".into(),
         "list".into(),
         "--all".into(),
         "--state-dir".into(),
@@ -733,7 +733,7 @@ fn list_all_preserves_raw_scope_syntax_after_trailing_segments_are_exhausted() {
     TaskStore::new(&dir).save(&state).expect("seed store");
 
     let output = list(&[
-        "herdr-tasks".into(),
+        "tsk".into(),
         "list".into(),
         "--all".into(),
         "--state-dir".into(),
@@ -772,7 +772,7 @@ fn list_all_visibly_escapes_and_disambiguates_control_scope_labels() {
     TaskStore::new(&dir).save(&state).expect("seed store");
 
     let output = list(&[
-        "herdr-tasks".into(),
+        "tsk".into(),
         "list".into(),
         "--all".into(),
         "--state-dir".into(),
@@ -816,7 +816,7 @@ fn human_list_escapes_terminal_control_titles_without_changing_json() {
 
     for view in [vec![], vec!["--done"], vec!["--deleted"]] {
         let mut args = vec![
-            "herdr-tasks".into(),
+            "tsk".into(),
             "list".into(),
             "--global".into(),
             "--state-dir".into(),
@@ -832,7 +832,7 @@ fn human_list_escapes_terminal_control_titles_without_changing_json() {
     }
 
     let json = list(&[
-        "herdr-tasks".into(),
+        "tsk".into(),
         "list".into(),
         "--global".into(),
         "--json".into(),
@@ -863,7 +863,7 @@ fn human_list_escapes_terminal_control_thread_markers_without_changing_json() {
     TaskStore::new(&dir).save(&state).expect("seed store");
 
     let human = list(&[
-        "herdr-tasks".into(),
+        "tsk".into(),
         "list".into(),
         "--global".into(),
         "--state-dir".into(),
@@ -875,7 +875,7 @@ fn human_list_escapes_terminal_control_thread_markers_without_changing_json() {
     assert!(!human.stdout.contains('\u{0007}'));
 
     let json = list(&[
-        "herdr-tasks".into(),
+        "tsk".into(),
         "list".into(),
         "--global".into(),
         "--json".into(),
@@ -901,8 +901,8 @@ fn list_equals_state_dir_form_accepts_dash_leading_value() {
         HumanStatus::Ready,
     );
     TaskStore::new(&state_dir).save(&state).expect("seed state");
-    let binary = std::env::var("CARGO_BIN_EXE_herdr-tasks")
-        .expect("Cargo must provide the herdr-tasks binary path");
+    let binary =
+        std::env::var("CARGO_BIN_EXE_tsk").expect("Cargo must provide the tsk binary path");
 
     let output = std::process::Command::new(binary)
         .current_dir(&cwd)
@@ -942,7 +942,7 @@ fn bare_list_outside_a_repo_falls_back_to_global_scope() {
     TaskStore::new(&dir).save(&state).expect("seed store");
 
     let output = list(&[
-        "herdr-tasks".into(),
+        "tsk".into(),
         "list".into(),
         "--json".into(),
         "--state-dir".into(),
@@ -966,7 +966,7 @@ fn list_rejects_conflicting_scope_and_filter_flags_and_missing_project_values() 
 
     for args in [
         vec![
-            "herdr-tasks".into(),
+            "tsk".into(),
             "list".into(),
             "--all".into(),
             "--project".into(),
@@ -975,7 +975,7 @@ fn list_rejects_conflicting_scope_and_filter_flags_and_missing_project_values() 
             state_dir_arg(&dir),
         ],
         vec![
-            "herdr-tasks".into(),
+            "tsk".into(),
             "list".into(),
             "--all".into(),
             "--global".into(),
@@ -983,7 +983,7 @@ fn list_rejects_conflicting_scope_and_filter_flags_and_missing_project_values() 
             state_dir_arg(&dir),
         ],
         vec![
-            "herdr-tasks".into(),
+            "tsk".into(),
             "list".into(),
             "--global".into(),
             "--project".into(),
@@ -992,7 +992,7 @@ fn list_rejects_conflicting_scope_and_filter_flags_and_missing_project_values() 
             state_dir_arg(&dir),
         ],
         vec![
-            "herdr-tasks".into(),
+            "tsk".into(),
             "list".into(),
             "--done".into(),
             "--deleted".into(),
@@ -1000,7 +1000,7 @@ fn list_rejects_conflicting_scope_and_filter_flags_and_missing_project_values() 
             state_dir_arg(&dir),
         ],
         vec![
-            "herdr-tasks".into(),
+            "tsk".into(),
             "list".into(),
             "-p".into(),
             "--json".into(),
@@ -1008,7 +1008,7 @@ fn list_rejects_conflicting_scope_and_filter_flags_and_missing_project_values() 
             state_dir_arg(&dir),
         ],
         vec![
-            "herdr-tasks".into(),
+            "tsk".into(),
             "list".into(),
             "-p".into(),
             "-maintenance".into(),
@@ -1019,7 +1019,7 @@ fn list_rejects_conflicting_scope_and_filter_flags_and_missing_project_values() 
         let output = list(&args);
         assert_eq!(output.code, 2);
         assert!(output.stdout.is_empty());
-        assert!(output.stderr.contains("usage: herdr-tasks list"));
+        assert!(output.stderr.contains("usage: tsk list"));
     }
 
     let _ = std::fs::remove_dir_all(dir);
@@ -1031,7 +1031,7 @@ fn list_thread_parse_rejects_invalid_space_and_equals_forms() {
     let dir = temp_state_dir("invalid-thread");
 
     for thread in ["--thread", "--thread=bad_name"] {
-        let mut args = vec!["herdr-tasks".into(), "list".into(), thread.into()];
+        let mut args = vec!["tsk".into(), "list".into(), thread.into()];
         if thread == "--thread" {
             args.push("bad_name".into());
         }
@@ -1061,7 +1061,7 @@ fn list_equals_project_form_accepts_dash_leading_scope() {
     TaskStore::new(&dir).save(&state).expect("seed store");
 
     let output = list(&[
-        "herdr-tasks".into(),
+        "tsk".into(),
         "list".into(),
         "--project=-maintenance".into(),
         "--json".into(),
@@ -1092,7 +1092,7 @@ fn list_when_state_dir_is_a_file_exits_3() {
     std::fs::write(&state_file, "not a directory").expect("create state-dir file");
 
     let output = list(&[
-        "herdr-tasks".into(),
+        "tsk".into(),
         "list".into(),
         "--json".into(),
         "--state-dir".into(),
@@ -1134,7 +1134,7 @@ fn list_state_dir_flag_wins_over_environment() {
     let _state_dir = EnvironmentGuard::set("HERDR_PLUGIN_STATE_DIR", &environment_dir);
 
     let output = list(&[
-        "herdr-tasks".into(),
+        "tsk".into(),
         "list".into(),
         "--global".into(),
         "--json".into(),
@@ -1168,7 +1168,7 @@ fn list_uses_environment_state_dir_by_default() {
     let _state_dir = EnvironmentGuard::set("HERDR_PLUGIN_STATE_DIR", &dir);
 
     let output = list(&[
-        "herdr-tasks".into(),
+        "tsk".into(),
         "list".into(),
         "--global".into(),
         "--json".into(),
@@ -1184,7 +1184,7 @@ fn list_uses_environment_state_dir_by_default() {
 
 /// One task whose steps carry chosen ids `aaa1…`/`aaa2…`, shaped through
 /// the store document because step ids are otherwise minted by the domain.
-fn state_with_steps(done_first: bool) -> (DomainState, herdr_tasks::domain::Step) {
+fn state_with_steps(done_first: bool) -> (DomainState, tsk_tui::domain::Step) {
     let mut state = DomainState::new();
     let id = state
         .create(
@@ -1226,7 +1226,7 @@ fn list_task_prints_step_lines_with_state_and_short_id() {
     TaskStore::new(&dir).save(&state).expect("seed store");
 
     let output = list(&[
-        "herdr-tasks".into(),
+        "tsk".into(),
         "list".into(),
         task.to_string(),
         "--state-dir".into(),
@@ -1246,7 +1246,7 @@ fn list_task_prints_step_lines_with_state_and_short_id() {
     );
 
     let json = list(&[
-        "herdr-tasks".into(),
+        "tsk".into(),
         "list".into(),
         task.to_string(),
         "--json".into(),
@@ -1295,7 +1295,7 @@ fn list_task_without_steps_keeps_task_rows_and_rejects_conflicting_flags() {
     let task = state.tasks()[0].id;
 
     let plain = list(&[
-        "herdr-tasks".into(),
+        "tsk".into(),
         "list".into(),
         task.to_string(),
         "--state-dir".into(),
@@ -1305,7 +1305,7 @@ fn list_task_without_steps_keeps_task_rows_and_rejects_conflicting_flags() {
     assert_eq!(plain.stdout, "READY\n - plain target\n");
 
     let plain_json = list(&[
-        "herdr-tasks".into(),
+        "tsk".into(),
         "list".into(),
         task.to_string(),
         "--json".into(),
@@ -1328,7 +1328,7 @@ fn list_task_without_steps_keeps_task_rows_and_rejects_conflicting_flags() {
 
     for extra in ["--global", "--all", "--done", "--deleted"] {
         let output = list(&[
-            "herdr-tasks".into(),
+            "tsk".into(),
             "list".into(),
             task.to_string(),
             extra.into(),
@@ -1337,10 +1337,10 @@ fn list_task_without_steps_keeps_task_rows_and_rejects_conflicting_flags() {
         ]);
         assert_eq!(output.code, 2, "task id with {extra} is usage");
         assert!(output.stdout.is_empty());
-        assert!(output.stderr.contains("usage: herdr-tasks list"));
+        assert!(output.stderr.contains("usage: tsk list"));
     }
     let threaded = list(&[
-        "herdr-tasks".into(),
+        "tsk".into(),
         "list".into(),
         task.to_string(),
         "--thread".into(),
@@ -1350,10 +1350,10 @@ fn list_task_without_steps_keeps_task_rows_and_rejects_conflicting_flags() {
     ]);
     assert_eq!(threaded.code, 2, "task id with --thread is usage");
     assert!(threaded.stdout.is_empty());
-    assert!(threaded.stderr.contains("usage: herdr-tasks list"));
+    assert!(threaded.stderr.contains("usage: tsk list"));
 
     let invalid = list(&[
-        "herdr-tasks".into(),
+        "tsk".into(),
         "list".into(),
         "not-a-uuid".into(),
         "--state-dir".into(),
@@ -1401,7 +1401,7 @@ fn list_thread_filters_after_scope_selection() {
     TaskStore::new(&dir).save(&state).expect("seed store");
 
     let scoped = list(&[
-        "herdr-tasks".into(),
+        "tsk".into(),
         "list".into(),
         "--project".into(),
         "selected".into(),
@@ -1423,7 +1423,7 @@ fn list_thread_filters_after_scope_selection() {
     );
 
     let all = list(&[
-        "herdr-tasks".into(),
+        "tsk".into(),
         "list".into(),
         "--all".into(),
         "--thread=RELEASE".into(),
@@ -1465,7 +1465,7 @@ fn json_rows_always_carry_thread_field() {
     TaskStore::new(&dir).save(&state).expect("seed store");
 
     let output = list(&[
-        "herdr-tasks".into(),
+        "tsk".into(),
         "list".into(),
         "--global".into(),
         "--json".into(),
@@ -1527,7 +1527,7 @@ fn human_output_appends_thread_marker_iff_row_threaded_snapshots() {
         .expect("project basename");
 
     let scoped = list(&[
-        "herdr-tasks".into(),
+        "tsk".into(),
         "list".into(),
         "--state-dir".into(),
         state_dir_arg(&dir),
@@ -1538,7 +1538,7 @@ fn human_output_appends_thread_marker_iff_row_threaded_snapshots() {
     );
 
     let all = list(&[
-        "herdr-tasks".into(),
+        "tsk".into(),
         "list".into(),
         "--all".into(),
         "--state-dir".into(),
@@ -1552,7 +1552,7 @@ fn human_output_appends_thread_marker_iff_row_threaded_snapshots() {
     );
 
     let single = list(&[
-        "herdr-tasks".into(),
+        "tsk".into(),
         "list".into(),
         step.to_string(),
         "--state-dir".into(),

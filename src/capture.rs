@@ -101,7 +101,7 @@ mod tests {
             .expect("clock")
             .as_nanos();
         let seq = TEMP_SEQ.fetch_add(1, Ordering::Relaxed);
-        env::temp_dir().join(format!("herdr-tasks-t9-{label}-{nanos}-{seq}"))
+        env::temp_dir().join(format!("tsk-t9-{label}-{nanos}-{seq}"))
     }
 
     struct TempDirGuard(PathBuf);

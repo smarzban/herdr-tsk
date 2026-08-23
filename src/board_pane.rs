@@ -1,6 +1,6 @@
 //! Find an existing Tasks board pane from `herdr pane list` JSON.
 //!
-//! Used by `scripts/open-board.sh` via `herdr-tasks --find-board-pane` so the
+//! Used by `scripts/open-board.sh` via `tsk --find-board-pane` so the
 //! launcher does not depend on python3.
 
 use std::io::{self, Read};
@@ -67,7 +67,7 @@ mod tests {
             "result": {
                 "panes": [
                     {"pane_id": "w0:p1", "label": "Editor", "terminal_title_stripped": "nvim"},
-                    {"pane_id": "w0:p2", "label": "Tasks", "terminal_title_stripped": "herdr-tasks"}
+                    {"pane_id": "w0:p2", "label": "Tasks", "terminal_title_stripped": "tsk"}
                 ]
             }
         }"#;

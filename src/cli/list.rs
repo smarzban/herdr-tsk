@@ -63,7 +63,7 @@ pub struct ListResult {
     pub(crate) steps: Vec<crate::cli::steps::StepLine>,
 }
 
-/// Parse `herdr-tasks list` arguments, including argv0 and the `list` subcommand.
+/// Parse `tsk list` arguments, including argv0 and the `list` subcommand.
 pub fn parse(args: &[String]) -> Result<ListInput, String> {
     if args.get(1).map(String::as_str) != Some("list") {
         return Err("expected list command".into());

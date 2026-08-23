@@ -138,11 +138,11 @@ fn open_board_has_idempotent_focus_list_logic() {
     );
     assert!(
         active.contains("--find-board-pane"),
-        "open-board must pipe pane list through herdr-tasks --find-board-pane (no python3)"
+        "open-board must pipe pane list through tsk --find-board-pane (no python3)"
     );
     assert!(
-        active.contains("target/release/herdr-tasks") || active.contains("HERDR_TASKS_BIN"),
-        "open-board must locate plugin binary relative to script (or HERDR_TASKS_BIN)"
+        active.contains("target/release/tsk") || active.contains("TSK_BIN"),
+        "open-board must locate plugin binary relative to script (or TSK_BIN)"
     );
 
     // No bare python3 dependency for focus logic.
@@ -170,7 +170,7 @@ fn open_capture_uses_herdr_cli_and_capture_path() {
         "open-capture must open capture mode or a popup/overlay surface"
     );
     assert!(
-        text.contains("herdr-tasks") || text.contains("board"),
+        text.contains("tsk") || text.contains("board"),
         "open-capture must target this plugin / board entrypoint"
     );
 }

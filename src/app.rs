@@ -45,7 +45,7 @@ struct PendingDispatch {
 }
 
 /// Env var set by open-capture launcher for Capture UI mode.
-pub const MODE_ENV: &str = "HERDR_TASKS_MODE";
+pub const MODE_ENV: &str = "TSK_MODE";
 
 /// One binary, two modes (Board default; Capture for quick-capture).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -79,7 +79,7 @@ pub fn resolve_mode_from<S: AsRef<str>>(
     AppMode::Board
 }
 
-/// Resolve the TUI mode from `HERDR_TASKS_MODE` and remaining argv (after argv0).
+/// Resolve the TUI mode from `TSK_MODE` and remaining argv (after argv0).
 pub fn resolve_mode<S: AsRef<str>>(args: impl IntoIterator<Item = S>) -> AppMode {
     resolve_mode_from(env::var(MODE_ENV).ok().as_deref(), args)
 }
@@ -316,7 +316,7 @@ pub fn load_board_model() -> Result<BoardModel, Box<dyn Error>> {
 
 /// Binary entry used by `main`. Default mode is the Tasks board.
 ///
-/// Pass `capture` argv (or `HERDR_TASKS_MODE=capture`) for popup-style Capture UI.
+/// Pass `capture` argv (or `TSK_MODE=capture`) for popup-style Capture UI.
 pub fn run(args: impl IntoIterator<Item = impl AsRef<str>>) -> Result<(), Box<dyn Error>> {
     match resolve_mode(args) {
         AppMode::Board => run_board(),
@@ -1286,8 +1286,7 @@ mod idle_store_revalidation_tests {
             .unwrap()
             .as_nanos();
         let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let dir =
-            std::env::temp_dir().join(format!("herdr-tasks-idle-revalidate-{label}-{nanos}-{seq}"));
+        let dir = std::env::temp_dir().join(format!("tsk-idle-revalidate-{label}-{nanos}-{seq}"));
         fs::create_dir_all(&dir).unwrap();
         dir
     }
@@ -1765,27 +1764,24 @@ mod tests {
 
     #[test]
     fn default_mode_is_board() {
-        assert_eq!(resolve_mode_from(None, ["herdr-tasks"]), AppMode::Board);
+        assert_eq!(resolve_mode_from(None, ["tsk"]), AppMode::Board);
         assert_eq!(
-            resolve_mode_from(None, ["herdr-tasks", "--something"]),
+            resolve_mode_from(None, ["tsk", "--something"]),
             AppMode::Board
         );
         // Non-capture env values do not select Capture.
-        assert_eq!(
-            resolve_mode_from(Some("board"), ["herdr-tasks"]),
-            AppMode::Board
-        );
+        assert_eq!(resolve_mode_from(Some("board"), ["tsk"]), AppMode::Board);
     }
 
     #[test]
     fn capture_arg_selects_capture_mode() {
         assert_eq!(
-            resolve_mode_from(None, ["herdr-tasks", "capture"]),
+            resolve_mode_from(None, ["tsk", "capture"]),
             AppMode::Capture
         );
         // Arg still wins when env is absent or non-capture.
         assert_eq!(
-            resolve_mode_from(Some("board"), ["herdr-tasks", "capture"]),
+            resolve_mode_from(Some("board"), ["tsk", "capture"]),
             AppMode::Capture
         );
     }
@@ -1793,11 +1789,11 @@ mod tests {
     #[test]
     fn capture_env_selects_capture_mode() {
         assert_eq!(
-            resolve_mode_from(Some("capture"), ["herdr-tasks"]),
+            resolve_mode_from(Some("capture"), ["tsk"]),
             AppMode::Capture
         );
         assert_eq!(
-            resolve_mode_from(Some("CAPTURE"), ["herdr-tasks", "--something"]),
+            resolve_mode_from(Some("CAPTURE"), ["tsk", "--something"]),
             AppMode::Capture
         );
     }
@@ -2247,7 +2243,7 @@ mod tests {
                 .unwrap()
                 .as_nanos();
             let seq = TEMP_DIR_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            let dir = env::temp_dir().join(format!("herdr-tasks-{label}-{nanos}-{seq}"));
+            let dir = env::temp_dir().join(format!("tsk-{label}-{nanos}-{seq}"));
             std::fs::create_dir_all(&dir).unwrap();
             let store = TaskStore::new(&dir);
             TempStore { dir, store }
@@ -2415,7 +2411,7 @@ mod tests {
     fn quick_add_project_token_matches_a_project_basename_case_insensitively() {
         let snapshot = InvocationSnapshot {
             default_scope: TaskScope::Global,
-            this_repo: Some(PathBuf::from("/repos/herdr-tasks")),
+            this_repo: Some(PathBuf::from("/repos/tsk-board")),
             title_prefill: None,
             provenance: ProvenanceOrigin::Capture,
             capsule: None,
@@ -2435,7 +2431,7 @@ mod tests {
         apply_intent(
             &mut domain,
             &mut model,
-            BoardIntent::QuickAddInsertText("Case insensitive scope !p HERDR-TASKS".into()),
+            BoardIntent::QuickAddInsertText("Case insensitive scope !p TSK-Board".into()),
             Some(&snapshot),
             None,
         )
@@ -2454,7 +2450,7 @@ mod tests {
         assert_eq!(
             task.scope,
             TaskScope::Project {
-                path: "/repos/herdr-tasks".into()
+                path: "/repos/tsk-board".into()
             }
         );
     }
@@ -3062,7 +3058,7 @@ mod tests {
             .unwrap()
             .as_nanos();
         let seq = TEMP_DIR_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let dir = env::temp_dir().join(format!("herdr-tasks-attn-cycle-{nanos}-{seq}"));
+        let dir = env::temp_dir().join(format!("tsk-attn-cycle-{nanos}-{seq}"));
         fs::create_dir_all(&dir).unwrap();
 
         let store = TaskStore::new(&dir);
@@ -3131,7 +3127,7 @@ mod tests {
             .unwrap()
             .as_nanos();
         let seq = TEMP_DIR_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let dir = env::temp_dir().join(format!("herdr-tasks-attn-save-failure-{nanos}-{seq}"));
+        let dir = env::temp_dir().join(format!("tsk-attn-save-failure-{nanos}-{seq}"));
         fs::create_dir_all(&dir).unwrap();
         let store = TaskStore::new(&dir);
         let mut domain = DomainState::new();
@@ -3190,7 +3186,7 @@ mod tests {
             .unwrap()
             .as_nanos();
         let seq = TEMP_DIR_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let dir = env::temp_dir().join(format!("herdr-tasks-attn-unavailable-{nanos}-{seq}"));
+        let dir = env::temp_dir().join(format!("tsk-attn-unavailable-{nanos}-{seq}"));
         fs::create_dir_all(&dir).unwrap();
         let store = TaskStore::new(&dir);
         let mut domain = DomainState::new();
@@ -3243,7 +3239,7 @@ mod tests {
             .unwrap()
             .as_nanos();
         let seq = TEMP_DIR_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let dir = env::temp_dir().join(format!("herdr-tasks-attn-merge-{nanos}-{seq}"));
+        let dir = env::temp_dir().join(format!("tsk-attn-merge-{nanos}-{seq}"));
         fs::create_dir_all(&dir).unwrap();
 
         let store = TaskStore::new(&dir);
@@ -3321,7 +3317,7 @@ mod tests {
             .unwrap()
             .as_nanos();
         let seq = TEMP_DIR_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let dir = env::temp_dir().join(format!("herdr-tasks-attn-noop-{nanos}-{seq}"));
+        let dir = env::temp_dir().join(format!("tsk-attn-noop-{nanos}-{seq}"));
         fs::create_dir_all(&dir).unwrap();
 
         let store = TaskStore::new(&dir);
@@ -3652,7 +3648,7 @@ mod tests {
             .unwrap()
             .as_nanos();
         let seq = TEMP_DIR_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let dir = env::temp_dir().join(format!("herdr-tasks-{tag}-{nanos}-{seq}"));
+        let dir = env::temp_dir().join(format!("tsk-{tag}-{nanos}-{seq}"));
         fs::create_dir_all(&dir).unwrap();
         dir
     }

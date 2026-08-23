@@ -67,29 +67,26 @@ mod tests {
 
     #[test]
     fn add_dash_t_capture_stays_add() {
-        assert_eq!(
-            route(["herdr-tasks", "add", "-t", "capture"], None),
-            Surface::Add
-        );
+        assert_eq!(route(["tsk", "add", "-t", "capture"], None), Surface::Add);
     }
 
     #[test]
     fn tokens_after_add_do_not_select_a_surface() {
         assert_eq!(
-            route(["herdr-tasks", "add", "-t", "--find-board-pane"], None),
+            route(["tsk", "add", "-t", "--find-board-pane"], None),
             Surface::Add
         );
     }
 
     #[test]
     fn unknown_positional_is_usage() {
-        assert_eq!(route(["herdr-tasks", "foo"], None), Surface::Usage);
+        assert_eq!(route(["tsk", "foo"], None), Surface::Usage);
     }
 
     #[test]
     fn unknown_pre_positional_flag_is_usage_even_with_capture_env() {
         assert_eq!(
-            route(["herdr-tasks", "--something"], Some("capture")),
+            route(["tsk", "--something"], Some("capture")),
             Surface::Usage
         );
     }
@@ -97,31 +94,31 @@ mod tests {
     #[test]
     fn find_board_pane_with_extra_argument_is_usage() {
         assert_eq!(
-            route(["herdr-tasks", "--find-board-pane", "extra"], None),
+            route(["tsk", "--find-board-pane", "extra"], None),
             Surface::Usage
         );
     }
 
     #[test]
     fn subcommand_wins_over_capture_env() {
-        assert_eq!(route(["herdr-tasks", "add"], Some("capture")), Surface::Add);
+        assert_eq!(route(["tsk", "add"], Some("capture")), Surface::Add);
     }
 
     #[test]
     fn steps_positional_selects_steps_surface() {
         assert_eq!(
-            route(["herdr-tasks", "steps", "id", "toggle", "abc"], None),
+            route(["tsk", "steps", "id", "toggle", "abc"], None),
             Surface::Steps
         );
     }
 
     #[test]
     fn capture_env_selects_capture_without_subcommand() {
-        assert_eq!(route(["herdr-tasks"], Some("capture")), Surface::Capture);
+        assert_eq!(route(["tsk"], Some("capture")), Surface::Capture);
     }
 
     #[test]
     fn no_args_selects_board() {
-        assert_eq!(route(["herdr-tasks"], None), Surface::Board);
+        assert_eq!(route(["tsk"], None), Surface::Board);
     }
 }

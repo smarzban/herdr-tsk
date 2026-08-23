@@ -20,7 +20,7 @@ use crate::store::TaskStateStore;
 use crate::text::non_empty;
 
 /// Env override for dispatch agent kind (default `grok` when unset/empty).
-pub const DISPATCH_AGENT_ENV: &str = "HERDR_TASKS_DISPATCH_AGENT";
+pub const DISPATCH_AGENT_ENV: &str = "TSK_DISPATCH_AGENT";
 
 /// Default agent kind when [`DISPATCH_AGENT_ENV`] is unset or blank.
 pub const DEFAULT_DISPATCH_AGENT: &str = "grok";
@@ -90,7 +90,7 @@ impl DispatchResult {
     }
 }
 
-/// Resolve dispatch agent kind from env. Non-empty `HERDR_TASKS_DISPATCH_AGENT`
+/// Resolve dispatch agent kind from env. Non-empty `TSK_DISPATCH_AGENT`
 /// wins; otherwise [`DEFAULT_DISPATCH_AGENT`].
 pub fn dispatch_agent_kind_from_env() -> String {
     dispatch_agent_kind(env::var(DISPATCH_AGENT_ENV).ok())
@@ -1578,7 +1578,7 @@ mod tests {
             .expect("clock")
             .as_nanos();
         let sequence = TEMP_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
-        let dir = std::env::temp_dir().join(format!("herdr-tasks-dispatch-{nanos}-{sequence}"));
+        let dir = std::env::temp_dir().join(format!("tsk-dispatch-{nanos}-{sequence}"));
         std::fs::create_dir_all(&dir).expect("mkdir");
         dir
     }

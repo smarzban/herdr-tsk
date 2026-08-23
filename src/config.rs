@@ -46,15 +46,17 @@ struct WalkthroughDocument {
     dismissed: bool,
 }
 
-/// Config dir from `HERDR_PLUGIN_CONFIG_DIR`, else a per-user config directory.
+/// Config dir from `HERDR_PLUGIN_CONFIG_DIR`, else `TSK_CONFIG_DIR`, else per-user config.
 ///
-/// Production herdr injects `HERDR_PLUGIN_CONFIG_DIR`. When unset (manual runs / tests
-/// without the host), use `$XDG_CONFIG_HOME/herdr-tasks` or `$HOME/.config/herdr-tasks`.
+/// Production herdr injects `HERDR_PLUGIN_CONFIG_DIR`. Standalone runs may set
+/// `TSK_CONFIG_DIR`. When neither is set (manual runs / tests without the host), use
+/// `$XDG_CONFIG_HOME/tsk` or `$HOME/.config/tsk`.
 /// Mirrors [`crate::store::default_state_dir`], including its refusal to fall back to a
 /// shared world path under `std::env::temp_dir()`.
 pub fn default_config_dir() -> PathBuf {
     resolve_config_dir(
         env::var_os("HERDR_PLUGIN_CONFIG_DIR").as_deref(),
+        env::var_os("TSK_CONFIG_DIR").as_deref(),
         env::var_os("XDG_CONFIG_HOME").as_deref(),
         env::var_os("HOME").as_deref(),
     )
@@ -72,6 +74,7 @@ pub fn default_config_dir() -> PathBuf {
 /// would write into the current working directory: see the module doc.
 fn resolve_config_dir(
     host: Option<&OsStr>,
+    tsk_env: Option<&OsStr>,
     xdg_config_home: Option<&OsStr>,
     home: Option<&OsStr>,
 ) -> PathBuf {
@@ -80,18 +83,23 @@ fn resolve_config_dir(
             return PathBuf::from(dir);
         }
     }
+    if let Some(dir) = tsk_env {
+        if !dir.is_empty() {
+            return PathBuf::from(dir);
+        }
+    }
     if let Some(xdg) = xdg_config_home {
         if !xdg.is_empty() {
-            return PathBuf::from(xdg).join("herdr-tasks");
+            return PathBuf::from(xdg).join("tsk");
         }
     }
     if let Some(home) = home {
         if !home.is_empty() {
-            return PathBuf::from(home).join(".config/herdr-tasks");
+            return PathBuf::from(home).join(".config/tsk");
         }
     }
-    // Last resort: relative per-process dir (still not shared /tmp/herdr-tasks-config).
-    PathBuf::from(".herdr-tasks-config")
+    // Last resort: relative per-process dir (still not shared /tmp/tsk-config).
+    PathBuf::from(".tsk-config")
 }
 
 /// The single durable fact: the walkthrough was completed or skipped.
@@ -271,7 +279,7 @@ mod tests {
             .expect("clock")
             .as_nanos();
         let seq = TEMP_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        env::temp_dir().join(format!("herdr-tasks-config-{label}-{nanos}-{seq}"))
+        env::temp_dir().join(format!("tsk-config-{label}-{nanos}-{seq}"))
     }
 
     struct TempDirGuard(PathBuf);
@@ -310,7 +318,12 @@ mod tests {
     #[test]
     fn host_variable_wins_over_every_other_candidate() {
         assert_eq!(
-            resolve_config_dir(Some(os("/host")), Some(os("/xdg")), Some(os("/home/u"))),
+            resolve_config_dir(
+                Some(os("/host")),
+                None,
+                Some(os("/xdg")),
+                Some(os("/home/u"))
+            ),
             PathBuf::from("/host")
         );
     }
@@ -318,33 +331,56 @@ mod tests {
     #[test]
     fn empty_host_variable_falls_through_to_xdg() {
         assert_eq!(
-            resolve_config_dir(Some(os("")), Some(os("/xdg")), Some(os("/home/u"))),
-            PathBuf::from("/xdg/herdr-tasks"),
+            resolve_config_dir(Some(os("")), None, Some(os("/xdg")), Some(os("/home/u"))),
+            PathBuf::from("/xdg/tsk"),
             "an empty host variable must not resolve to the current working directory"
+        );
+    }
+
+    #[test]
+    fn standalone_env_sits_between_host_and_xdg() {
+        assert_eq!(
+            resolve_config_dir(
+                None,
+                Some(os("/tsk-env")),
+                Some(os("/xdg")),
+                Some(os("/home/u"))
+            ),
+            PathBuf::from("/tsk-env")
+        );
+        assert_eq!(
+            resolve_config_dir(
+                Some(os("/host")),
+                Some(os("/tsk-env")),
+                Some(os("/xdg")),
+                Some(os("/home/u"))
+            ),
+            PathBuf::from("/host"),
+            "host injection keeps precedence over the standalone override"
         );
     }
 
     #[test]
     fn xdg_config_home_wins_over_home() {
         assert_eq!(
-            resolve_config_dir(None, Some(os("/xdg")), Some(os("/home/u"))),
-            PathBuf::from("/xdg/herdr-tasks")
+            resolve_config_dir(None, None, Some(os("/xdg")), Some(os("/home/u"))),
+            PathBuf::from("/xdg/tsk")
         );
     }
 
     #[test]
     fn empty_xdg_config_home_falls_through_to_home() {
         assert_eq!(
-            resolve_config_dir(None, Some(os("")), Some(os("/home/u"))),
-            PathBuf::from("/home/u/.config/herdr-tasks")
+            resolve_config_dir(None, None, Some(os("")), Some(os("/home/u"))),
+            PathBuf::from("/home/u/.config/tsk")
         );
     }
 
     #[test]
     fn home_resolves_under_dot_config_not_dot_local_share() {
         assert_eq!(
-            resolve_config_dir(None, None, Some(os("/home/u"))),
-            PathBuf::from("/home/u/.config/herdr-tasks"),
+            resolve_config_dir(None, None, None, Some(os("/home/u"))),
+            PathBuf::from("/home/u/.config/tsk"),
             "this is the config record, not the state store"
         );
     }
@@ -352,16 +388,16 @@ mod tests {
     #[test]
     fn empty_home_falls_through_to_the_relative_fallback() {
         assert_eq!(
-            resolve_config_dir(None, None, Some(os(""))),
-            PathBuf::from(".herdr-tasks-config")
+            resolve_config_dir(None, None, None, Some(os(""))),
+            PathBuf::from(".tsk-config")
         );
     }
 
     #[test]
     fn no_candidate_resolves_to_a_relative_dir_never_a_shared_temp_path() {
-        let fallback = resolve_config_dir(None, None, None);
+        let fallback = resolve_config_dir(None, None, None, None);
 
-        assert_eq!(fallback, PathBuf::from(".herdr-tasks-config"));
+        assert_eq!(fallback, PathBuf::from(".tsk-config"));
         assert!(
             fallback.is_relative(),
             "the last resort must be per-process, not a shared world-writable path"
@@ -376,6 +412,7 @@ mod tests {
             default_config_dir(),
             resolve_config_dir(
                 env::var_os("HERDR_PLUGIN_CONFIG_DIR").as_deref(),
+                env::var_os("TSK_CONFIG_DIR").as_deref(),
                 env::var_os("XDG_CONFIG_HOME").as_deref(),
                 env::var_os("HOME").as_deref(),
             )

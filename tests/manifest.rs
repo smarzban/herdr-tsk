@@ -22,11 +22,11 @@ fn table_section<'a>(text: &'a str, header: &str) -> &'a str {
 }
 
 #[test]
-fn id_contains_tasks_product_id() {
+fn id_keeps_the_herdr_tasks_plugin_id() {
     let text = read_manifest();
     assert!(
         text.contains(r#"id = "herdr-tasks""#),
-        "manifest id must be the tasks product id herdr-tasks"
+        "manifest id must stay herdr-tasks: the host keys injected state dirs and links by it"
     );
 }
 
@@ -80,12 +80,12 @@ fn actions_include_quick_capture() {
 }
 
 #[test]
-fn pane_command_references_herdr_tasks_binary() {
+fn pane_command_references_tsk_tui_binary() {
     let text = read_manifest();
     let panes = table_section(&text, "[[panes]]");
     assert!(
-        panes.contains(r#"command = ["./target/release/herdr-tasks"]"#),
-        "pane command must reference the release binary ./target/release/herdr-tasks \
+        panes.contains(r#"command = ["./target/release/tsk"]"#),
+        "pane command must reference the release binary ./target/release/tsk \
          (not merely the product id elsewhere in the file)"
     );
 }

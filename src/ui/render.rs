@@ -2551,7 +2551,7 @@ mod tests {
             &"x".repeat(200),
             "safe\u{1b}]52;clipboard\u{7}payload",
         ];
-        let metas = ["", "1h", "herdr-tasks · 2d", &"m".repeat(80)];
+        let metas = ["", "1h", "tsk · 2d", &"m".repeat(80)];
 
         for geo in cases {
             for title in titles {
@@ -2640,7 +2640,7 @@ mod tests {
             TaskRowPaint {
                 glyph: "▲",
                 title: "bold title",
-                meta: "herdr-tasks · 2m",
+                meta: "tsk · 2m",
                 selected: false,
                 title_bold: true,
             },

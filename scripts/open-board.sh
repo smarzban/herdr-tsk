@@ -22,7 +22,7 @@ board_label="Tasks"
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Same relative layout as other herdr plugins: scripts/ next to target/release/.
-plugin_bin="${HERDR_TASKS_BIN:-$script_dir/../target/release/herdr-tasks}"
+plugin_bin="${HERDR_TASKS_BIN:-$script_dir/../target/release/tsk}"
 
 open_board() {
   exec "$herdr_bin" plugin pane open \

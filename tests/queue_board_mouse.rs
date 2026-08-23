@@ -13,21 +13,21 @@ use ratatui::backend::TestBackend;
 use ratatui::layout::Rect;
 use ratatui::Terminal;
 
-use herdr_tasks::domain::{DomainState, HumanStatus, ProvenanceOrigin, TaskScope};
-use herdr_tasks::ui::board::{
+use tsk_tui::domain::{DomainState, HumanStatus, ProvenanceOrigin, TaskScope};
+use tsk_tui::ui::board::{
     apply_intent, board_hit_map, board_verb_items, draw_board, resolve_board_command,
     BoardInputMode, BoardModel,
 };
-use herdr_tasks::ui::capture::CaptureField;
-use herdr_tasks::ui::input::{
+use tsk_tui::ui::capture::CaptureField;
+use tsk_tui::ui::input::{
     map_board_form_key, map_capture_key_state, map_capture_paste_state, map_key, BoardIntent,
     CaptureIntent, PRIMARY_CAPTURE_ACTIONS,
 };
-use herdr_tasks::ui::mouse::{
+use tsk_tui::ui::mouse::{
     capture_layout, capture_mouse_paths_complete, left_click, map_board_mouse, map_capture_mouse,
     primary_capture_action_sample_mouse,
 };
-use herdr_tasks::ui::render::{QueueHit, QueueHitMap, QueueHitTarget};
+use tsk_tui::ui::render::{QueueHit, QueueHitMap, QueueHitTarget};
 
 const THIS_REPO: &str = "/repos/app";
 const OTHER_REPO: &str = "/repos/other";
@@ -780,8 +780,7 @@ fn click_and_wheel_match_keyboard_effects_for_each_control() {
         .project_options()
         .iter()
         .position(|option| {
-            *option
-                == herdr_tasks::ui::board::ProjectScopeOption::Project(PathBuf::from(OTHER_REPO))
+            *option == tsk_tui::ui::board::ProjectScopeOption::Project(PathBuf::from(OTHER_REPO))
         })
         .expect("the other repo is an offered option");
     assert!(
@@ -1043,7 +1042,7 @@ fn click_a_task_row_selects_its_index_on_a_scrolled_list() {
     assert_eq!(model.detail_open(), Some(visible[last]));
 
     let hits = board_hit_map(STANDARD, &model);
-    let geo = herdr_tasks::ui::tier::resolve(STANDARD.width, STANDARD.height);
+    let geo = tsk_tui::ui::tier::resolve(STANDARD.width, STANDARD.height);
     assert!(
         hits.regions
             .iter()

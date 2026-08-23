@@ -1,13 +1,13 @@
 [package]
-name = "herdr-tasks"
+name = "tsk-tui"
 version = "0.2.0"
 edition = "2021"
-description = "herdr plugin: Tasks board and capture"
+description = "tsk: a task board for your terminal"
 license = "MIT"
 publish = false
 
 [[bin]]
-name = "herdr-tasks"
+name = "tsk"
 path = "src/main.rs"
 
 [dependencies]

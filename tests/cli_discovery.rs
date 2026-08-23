@@ -1,18 +1,18 @@
 #[test]
 fn skill_documents_retry_and_misfiling() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    let skill = std::fs::read_to_string(root.join("skills/herdr-tasks-cli/SKILL.md"))
+    let skill = std::fs::read_to_string(root.join("skills/tsk-cli/SKILL.md"))
         .expect("CLI skill should exist");
     let agents = std::fs::read_to_string(root.join("AGENTS.md")).expect("AGENTS.md should exist");
 
     for term in [
-        "herdr-tasks add -t",
+        "tsk add -t",
         "--global",
         "--project",
         "--file plan.json",
         "--file=<path>",
         "--state-dir=<dir>",
-        "cat plan.json | herdr-tasks add",
+        "cat plan.json | tsk add",
         "exit 0",
         "exit 1",
         "exit 2",
@@ -30,6 +30,6 @@ fn skill_documents_retry_and_misfiling() {
         skill.contains("typo") && skill.contains("scope"),
         "skill should warn that a typo can create a new scope"
     );
-    assert!(agents.contains("herdr-tasks add"));
-    assert!(agents.contains("herdr-tasks list"));
+    assert!(agents.contains("tsk add"));
+    assert!(agents.contains("tsk list"));
 }

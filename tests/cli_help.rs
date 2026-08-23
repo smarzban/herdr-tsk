@@ -1,11 +1,11 @@
 use std::io::Cursor;
 
-use herdr_tasks::cli::run_with;
+use tsk_tui::cli::run_with;
 
 #[test]
 fn add_help_documents_plan_shape_and_exit_contract() {
     let add = run_with(
-        ["herdr-tasks", "add", "--help"],
+        ["tsk", "add", "--help"],
         Cursor::new(Vec::<u8>::new()),
         true,
     );
@@ -28,7 +28,7 @@ fn add_help_documents_plan_shape_and_exit_contract() {
         "indeterminate",
         "list",
         "--json",
-        "herdr-tasks add -t",
+        "tsk add -t",
         "--global",
         "--project",
         "--title=<value>",
@@ -37,7 +37,7 @@ fn add_help_documents_plan_shape_and_exit_contract() {
         "--state-dir=<dir>",
         "--file=<path>",
         "--file plan.json",
-        "cat plan.json | herdr-tasks add",
+        "cat plan.json | tsk add",
     ] {
         assert!(
             add.stdout.contains(term),
@@ -46,7 +46,7 @@ fn add_help_documents_plan_shape_and_exit_contract() {
     }
 
     let list = run_with(
-        ["herdr-tasks", "list", "--help"],
+        ["tsk", "list", "--help"],
         Cursor::new(Vec::<u8>::new()),
         true,
     );

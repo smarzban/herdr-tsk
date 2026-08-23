@@ -8,12 +8,12 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use herdr_tasks::app::{board_frame, board_poll_duration, load_board_model, FramePoll};
-use herdr_tasks::domain::DomainState;
-use herdr_tasks::ui::scheduler::{next_wait, DEFAULT_BASE_TICK};
-use herdr_tasks::ui::{draw_board, BoardModel};
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
+use tsk_tui::app::{board_frame, board_poll_duration, load_board_model, FramePoll};
+use tsk_tui::domain::DomainState;
+use tsk_tui::ui::scheduler::{next_wait, DEFAULT_BASE_TICK};
+use tsk_tui::ui::{draw_board, BoardModel};
 
 /// A directory this test owns alone, removed on drop even if the test panics.
 struct TempDirGuard(PathBuf);
@@ -55,9 +55,7 @@ fn temp_state_dir(label: &str) -> PathBuf {
         .expect("clock after epoch")
         .as_nanos();
     let seq = SEQ.fetch_add(1, Ordering::Relaxed);
-    let dir = env::temp_dir().join(format!(
-        "herdr-tasks-queue-board-loop-{label}-{nanos}-{seq}"
-    ));
+    let dir = env::temp_dir().join(format!("tsk-queue-board-loop-{label}-{nanos}-{seq}"));
     fs::create_dir_all(&dir).expect("create temp state dir");
     dir
 }

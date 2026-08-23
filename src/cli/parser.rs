@@ -23,7 +23,7 @@ pub struct FlagAdd {
     pub help: bool,
 }
 
-/// Parse `herdr-tasks add` arguments, including argv0 and the `add` subcommand.
+/// Parse `tsk add` arguments, including argv0 and the `add` subcommand.
 pub fn parse_flag_add(args: &[String]) -> Result<FlagAdd, String> {
     if args.get(1).map(String::as_str) != Some("add") {
         return Err("expected add command".into());
@@ -150,7 +150,7 @@ pub struct FlagSteps {
     pub help: bool,
 }
 
-/// Parse `herdr-tasks steps` arguments, including argv0 and the `steps` subcommand.
+/// Parse `tsk steps` arguments, including argv0 and the `steps` subcommand.
 ///
 /// Flags may appear anywhere; the positionals in order are task id, action, and
 /// the action's operand.

@@ -4,15 +4,15 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use herdr_tasks::domain::{
-    DomainState, HumanStatus, ProvenanceOrigin, Task, TaskEvent, TaskEventKind, TaskScope,
-};
-use herdr_tasks::store::TaskStore;
-use herdr_tasks::ui::board::{apply_intent, draw_board, BoardModel, ProjectScopeOption};
-use herdr_tasks::ui::input::BoardIntent;
-use herdr_tasks::ui::queue::{query, DeckScope, SectionKind};
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
+use tsk_tui::domain::{
+    DomainState, HumanStatus, ProvenanceOrigin, Task, TaskEvent, TaskEventKind, TaskScope,
+};
+use tsk_tui::store::TaskStore;
+use tsk_tui::ui::board::{apply_intent, draw_board, BoardModel, ProjectScopeOption};
+use tsk_tui::ui::input::BoardIntent;
+use tsk_tui::ui::queue::{query, DeckScope, SectionKind};
 use uuid::Uuid;
 
 const THIS_REPO: &str = "/repos/app";
@@ -66,7 +66,7 @@ fn threaded_task(
     task
 }
 
-fn on_deck(view: &herdr_tasks::ui::queue::QueueView) -> &herdr_tasks::ui::queue::QueueSection {
+fn on_deck(view: &tsk_tui::ui::queue::QueueView) -> &tsk_tui::ui::queue::QueueSection {
     view.sections
         .iter()
         .find(|section| section.kind == SectionKind::OnDeck)
@@ -80,8 +80,7 @@ fn temp_dir(tag: &str) -> PathBuf {
         .as_nanos();
     static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let dir =
-        std::env::temp_dir().join(format!("herdr-tasks-queue-board-model-{tag}-{nanos}-{seq}"));
+    let dir = std::env::temp_dir().join(format!("tsk-queue-board-model-{tag}-{nanos}-{seq}"));
     fs::create_dir_all(&dir).expect("temp dir");
     dir
 }

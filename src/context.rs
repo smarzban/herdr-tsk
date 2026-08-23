@@ -367,7 +367,7 @@ mod tests {
             .expect("clock")
             .as_nanos();
         let seq = TEMP_SEQ.fetch_add(1, Ordering::Relaxed);
-        let dir = env::temp_dir().join(format!("herdr-tasks-t8-{label}-{nanos}-{seq}"));
+        let dir = env::temp_dir().join(format!("tsk-t8-{label}-{nanos}-{seq}"));
         fs::create_dir_all(&dir).expect("create temp dir");
         dir
     }

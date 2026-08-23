@@ -1,17 +1,17 @@
 use std::path::PathBuf;
 
-use herdr_tasks::context::InvocationSnapshot;
-use herdr_tasks::domain::{DomainState, ProvenanceOrigin, TaskScope};
-use herdr_tasks::scope::resolve_project_path;
-use herdr_tasks::ui::board::{apply_intent, BoardModel, IntentOutcome};
-use herdr_tasks::ui::input::BoardIntent;
+use tsk_tui::context::InvocationSnapshot;
+use tsk_tui::domain::{DomainState, ProvenanceOrigin, TaskScope};
+use tsk_tui::scope::resolve_project_path;
+use tsk_tui::ui::board::{apply_intent, BoardModel, IntentOutcome};
+use tsk_tui::ui::input::BoardIntent;
 
 fn snapshot() -> InvocationSnapshot {
     InvocationSnapshot {
         default_scope: TaskScope::Project {
             path: "/repos/default".into(),
         },
-        this_repo: Some(PathBuf::from("/repos/herdr-tasks")),
+        this_repo: Some(PathBuf::from("/repos/tsk-board")),
         title_prefill: None,
         provenance: ProvenanceOrigin::Capture,
         capsule: None,
@@ -82,9 +82,9 @@ fn shared_resolver_and_board_quick_add_agree_on_fixtures() {
         ("normal", "normal path !p normal", "/repos/normal"),
         ("ghost", "soft deleted path !p ghost", "/repos/ghost"),
         (
-            "HERDR-TASKS",
-            "snapshot repo !p HERDR-TASKS",
-            "/repos/herdr-tasks",
+            "TSK-Board",
+            "snapshot repo !p TSK-Board",
+            "/repos/tsk-board",
         ),
         ("missing", "missing !p missing", "missing"),
         ("/abs/x", "verbatim !p /abs/x", "/abs/x"),

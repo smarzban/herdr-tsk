@@ -7,9 +7,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use herdr_tasks::cli::{parser, run_with};
-use herdr_tasks::domain::{DomainState, HumanStatus, ProvenanceOrigin, TaskScope};
-use herdr_tasks::store::TaskStore;
+use tsk_tui::cli::{parser, run_with};
+use tsk_tui::domain::{DomainState, HumanStatus, ProvenanceOrigin, TaskScope};
+use tsk_tui::store::TaskStore;
 
 static TEMP_SEQ: AtomicU64 = AtomicU64::new(0);
 static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -27,12 +27,12 @@ fn temp_state_dir(label: &str) -> PathBuf {
         .expect("clock after epoch")
         .as_nanos();
     let seq = TEMP_SEQ.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!("herdr-tasks-cli-add-{label}-{nanos}-{seq}"));
+    let dir = std::env::temp_dir().join(format!("tsk-cli-add-{label}-{nanos}-{seq}"));
     std::fs::create_dir_all(&dir).expect("create state directory");
     dir
 }
 
-fn add(args: &[String], stdin_is_tty: bool) -> herdr_tasks::cli::CliOutput {
+fn add(args: &[String], stdin_is_tty: bool) -> tsk_tui::cli::CliOutput {
     run_with(args, Cursor::new(Vec::<u8>::new()), stdin_is_tty)
 }
 
@@ -58,7 +58,7 @@ fn add_thread_flag_applies_to_every_item_and_round_trips() {
     let dir = temp_state_dir("thread-flag");
     let output = add(
         &[
-            "herdr-tasks".into(),
+            "tsk".into(),
             "add".into(),
             "--state-dir".into(),
             state_dir_arg(&dir),
@@ -87,7 +87,7 @@ fn thread_flag_with_file_is_usage_error_exit_2() {
     std::fs::write(&plan, r#"[{"title":"from file"}]"#).expect("write plan");
     let output = add(
         &[
-            "herdr-tasks".into(),
+            "tsk".into(),
             "add".into(),
             "--state-dir".into(),
             state_dir_arg(&dir),
@@ -118,7 +118,7 @@ fn thread_flag_ignores_piped_plan_and_creates_only_flag_task() {
     let dir = temp_state_dir("thread-stdin-plan");
     let output = run_with(
         [
-            "herdr-tasks",
+            "tsk",
             "add",
             "--state-dir",
             &state_dir_arg(&dir),
@@ -154,7 +154,7 @@ fn plan_item_thread_applies_per_item() {
     .expect("write plan");
     let output = add(
         &[
-            "herdr-tasks".into(),
+            "tsk".into(),
             "add".into(),
             "--state-dir".into(),
             state_dir_arg(&dir),
@@ -172,12 +172,7 @@ fn plan_item_thread_applies_per_item() {
 
     let stdin_dir = temp_state_dir("plan-item-thread-stdin");
     let stdin = run_with(
-        [
-            "herdr-tasks",
-            "add",
-            "--state-dir",
-            &state_dir_arg(&stdin_dir),
-        ],
+        ["tsk", "add", "--state-dir", &state_dir_arg(&stdin_dir)],
         Cursor::new(r#"[{"title":"threaded from stdin","thread":"ops"}]"#),
         false,
     );
@@ -202,7 +197,7 @@ fn invalid_thread_flag_is_usage_error_exit_2_nothing_persisted() {
     let dir = temp_state_dir("invalid-thread-flag");
     let output = add(
         &[
-            "herdr-tasks".into(),
+            "tsk".into(),
             "add".into(),
             "--state-dir".into(),
             state_dir_arg(&dir),
@@ -232,7 +227,7 @@ fn invalid_plan_item_thread_fails_item_exit_1_others_persist() {
     let dir = temp_state_dir("invalid-plan-thread");
     let output = run_with(
         [
-            "herdr-tasks",
+            "tsk",
             "add",
             "--state-dir",
             &state_dir_arg(&dir),
@@ -265,7 +260,7 @@ fn idempotency_key_includes_thread_both_directions() {
     let threaded_first_dir = temp_state_dir("thread-idempotency-threaded-first");
     let threaded_first = add(
         &[
-            "herdr-tasks".into(),
+            "tsk".into(),
             "add".into(),
             "--state-dir".into(),
             state_dir_arg(&threaded_first_dir),
@@ -280,7 +275,7 @@ fn idempotency_key_includes_thread_both_directions() {
     assert_eq!(threaded_first.code, 0);
     let unthreaded_second = add(
         &[
-            "herdr-tasks".into(),
+            "tsk".into(),
             "add".into(),
             "--state-dir".into(),
             state_dir_arg(&threaded_first_dir),
@@ -303,7 +298,7 @@ fn idempotency_key_includes_thread_both_directions() {
     let unthreaded_first_dir = temp_state_dir("thread-idempotency-unthreaded-first");
     let unthreaded_first = add(
         &[
-            "herdr-tasks".into(),
+            "tsk".into(),
             "add".into(),
             "--state-dir".into(),
             state_dir_arg(&unthreaded_first_dir),
@@ -316,7 +311,7 @@ fn idempotency_key_includes_thread_both_directions() {
     assert_eq!(unthreaded_first.code, 0);
     let threaded_second = add(
         &[
-            "herdr-tasks".into(),
+            "tsk".into(),
             "add".into(),
             "--state-dir".into(),
             state_dir_arg(&unthreaded_first_dir),
@@ -331,7 +326,7 @@ fn idempotency_key_includes_thread_both_directions() {
     assert_eq!(threaded_second.code, 0);
     let normalized_duplicate = add(
         &[
-            "herdr-tasks".into(),
+            "tsk".into(),
             "add".into(),
             "--state-dir".into(),
             state_dir_arg(&unthreaded_first_dir),
@@ -357,7 +352,7 @@ fn idempotency_key_includes_thread_both_directions() {
     let plan_dir = temp_state_dir("thread-plan-idempotency");
     let plan = run_with(
         [
-            "herdr-tasks",
+            "tsk",
             "add",
             "--state-dir",
             &state_dir_arg(&plan_dir),
@@ -421,7 +416,7 @@ fn flag_add_creates_ready_task_and_prints_added_title() {
     let dir = temp_state_dir("flag");
     let output = add(
         &[
-            "herdr-tasks".into(),
+            "tsk".into(),
             "add".into(),
             "--state-dir".into(),
             state_dir_arg(&dir),
@@ -453,7 +448,7 @@ fn flag_add_existing_trimmed_title_and_scope_is_a_successful_noop() {
     let dir = temp_state_dir("flag-existing");
     let first = add(
         &[
-            "herdr-tasks".into(),
+            "tsk".into(),
             "add".into(),
             "--state-dir".into(),
             state_dir_arg(&dir),
@@ -484,7 +479,7 @@ fn flag_add_existing_trimmed_title_and_scope_is_a_successful_noop() {
 
     let duplicate = add(
         &[
-            "herdr-tasks".into(),
+            "tsk".into(),
             "add".into(),
             "--state-dir".into(),
             state_dir_arg(&dir),
@@ -544,7 +539,7 @@ fn flag_add_ignores_soft_deleted_title_and_scope_matches() {
 
     let output = add(
         &[
-            "herdr-tasks".into(),
+            "tsk".into(),
             "add".into(),
             "--state-dir".into(),
             state_dir_arg(&dir),
@@ -568,7 +563,7 @@ fn flag_add_does_not_read_piped_stdin() {
     let dir = temp_state_dir("piped-stdin");
     let output = run_with(
         [
-            "herdr-tasks",
+            "tsk",
             "add",
             "--state-dir",
             &state_dir_arg(&dir),
@@ -590,7 +585,7 @@ fn flag_add_keeps_non_whitespace_notes_and_drops_whitespace_notes() {
     let notes_dir = temp_state_dir("notes");
     let notes_output = add(
         &[
-            "herdr-tasks".into(),
+            "tsk".into(),
             "add".into(),
             "--state-dir".into(),
             state_dir_arg(&notes_dir),
@@ -612,7 +607,7 @@ fn flag_add_keeps_non_whitespace_notes_and_drops_whitespace_notes() {
     let blank_dir = temp_state_dir("blank-notes");
     let blank_output = add(
         &[
-            "herdr-tasks".into(),
+            "tsk".into(),
             "add".into(),
             "--state-dir".into(),
             state_dir_arg(&blank_dir),
@@ -641,7 +636,7 @@ fn flag_add_resolves_global_and_project_basename_scopes() {
     let global_dir = temp_state_dir("global");
     let global_output = add(
         &[
-            "herdr-tasks".into(),
+            "tsk".into(),
             "add".into(),
             "--state-dir".into(),
             state_dir_arg(&global_dir),
@@ -675,7 +670,7 @@ fn flag_add_resolves_global_and_project_basename_scopes() {
     store.save(&seeded).expect("save seed");
     let project_output = add(
         &[
-            "herdr-tasks".into(),
+            "tsk".into(),
             "add".into(),
             "--state-dir".into(),
             state_dir_arg(&project_dir),
@@ -718,7 +713,7 @@ fn flag_add_uses_the_invocation_default_scope() {
 
     let output = add(
         &[
-            "herdr-tasks".into(),
+            "tsk".into(),
             "add".into(),
             "--state-dir".into(),
             state_dir_arg(&dir),
@@ -761,7 +756,7 @@ fn flag_add_requires_a_title() {
     let dir = temp_state_dir("missing-title");
     let output = add(
         &[
-            "herdr-tasks".into(),
+            "tsk".into(),
             "add".into(),
             "--state-dir".into(),
             state_dir_arg(&dir),
@@ -786,7 +781,7 @@ fn flag_add_refuses_empty_and_control_character_titles() {
     let empty_dir = temp_state_dir("empty-title");
     let empty = add(
         &[
-            "herdr-tasks".into(),
+            "tsk".into(),
             "add".into(),
             "--state-dir".into(),
             state_dir_arg(&empty_dir),
@@ -806,7 +801,7 @@ fn flag_add_refuses_empty_and_control_character_titles() {
     let invalid_dir = temp_state_dir("invalid-title");
     let invalid = add(
         &[
-            "herdr-tasks".into(),
+            "tsk".into(),
             "add".into(),
             "--state-dir".into(),
             state_dir_arg(&invalid_dir),
@@ -827,7 +822,7 @@ fn flag_add_refuses_empty_and_control_character_titles() {
     let end_control_dir = temp_state_dir("end-control-title");
     let end_control = add(
         &[
-            "herdr-tasks".into(),
+            "tsk".into(),
             "add".into(),
             "--state-dir".into(),
             state_dir_arg(&end_control_dir),
@@ -848,7 +843,7 @@ fn flag_add_refuses_empty_and_control_character_titles() {
     let whitespace_dir = temp_state_dir("whitespace-title");
     let whitespace = add(
         &[
-            "herdr-tasks".into(),
+            "tsk".into(),
             "add".into(),
             "--state-dir".into(),
             state_dir_arg(&whitespace_dir),
@@ -877,7 +872,7 @@ fn flag_add_rejects_global_with_project() {
     let dir = temp_state_dir("global-project");
     let output = add(
         &[
-            "herdr-tasks".into(),
+            "tsk".into(),
             "add".into(),
             "--state-dir".into(),
             state_dir_arg(&dir),
@@ -907,7 +902,7 @@ fn add_without_item_flags_on_a_tty_is_usage() {
     let dir = temp_state_dir("tty");
     let output = add(
         &[
-            "herdr-tasks".into(),
+            "tsk".into(),
             "add".into(),
             "--state-dir".into(),
             state_dir_arg(&dir),
@@ -936,7 +931,7 @@ fn mixed_plan_persists_only_valid_items_exits_1() {
     );
     let output = add(
         &[
-            "herdr-tasks".into(),
+            "tsk".into(),
             "add".into(),
             "--state-dir".into(),
             state_dir_arg(&dir),
@@ -1003,7 +998,7 @@ fn plan_with_only_existing_tasks_is_a_successful_read_only_noop() {
         let _read_only = ReadOnlyDir::new(&dir);
         run_with(
             [
-                "herdr-tasks",
+                "tsk",
                 "add",
                 "--state-dir",
                 &state_dir_arg(&dir),
@@ -1059,7 +1054,7 @@ fn mixed_plan_exit_1_preserves_created_and_existing_rows_for_failed_only_retry()
 
     let initial = run_with(
         [
-            "herdr-tasks",
+            "tsk",
             "add",
             "--state-dir",
             &state_dir_arg(&dir),
@@ -1086,7 +1081,7 @@ fn mixed_plan_exit_1_preserves_created_and_existing_rows_for_failed_only_retry()
 
     let retry = run_with(
         [
-            "herdr-tasks",
+            "tsk",
             "add",
             "--state-dir",
             &state_dir_arg(&dir),
@@ -1148,7 +1143,7 @@ fn plan_marks_earlier_accepted_duplicate_as_existing_and_keeps_scopes_distinct()
     let dir = temp_state_dir("plan-duplicate");
     let output = run_with(
         [
-            "herdr-tasks",
+            "tsk",
             "add",
             "--state-dir",
             &state_dir_arg(&dir),
@@ -1189,7 +1184,7 @@ fn plan_reads_dash_file_and_piped_stdin_and_allows_empty_array() {
     let dash_dir = temp_state_dir("dash-plan");
     let dash = run_with(
         [
-            "herdr-tasks",
+            "tsk",
             "add",
             "--state-dir",
             &state_dir_arg(&dash_dir),
@@ -1211,12 +1206,7 @@ fn plan_reads_dash_file_and_piped_stdin_and_allows_empty_array() {
 
     let piped_dir = temp_state_dir("piped-plan");
     let piped = run_with(
-        [
-            "herdr-tasks",
-            "add",
-            "--state-dir",
-            &state_dir_arg(&piped_dir),
-        ],
+        ["tsk", "add", "--state-dir", &state_dir_arg(&piped_dir)],
         Cursor::new(r#"[{"title":"from pipe"}]"#),
         false,
     );
@@ -1233,7 +1223,7 @@ fn plan_reads_dash_file_and_piped_stdin_and_allows_empty_array() {
     let empty_dir = temp_state_dir("empty-plan");
     let empty = run_with(
         [
-            "herdr-tasks",
+            "tsk",
             "add",
             "--state-dir",
             &state_dir_arg(&empty_dir),
@@ -1265,7 +1255,7 @@ fn plan_usage_errors_persist_nothing_and_do_not_read_mixed_stdin() {
     let object_dir = temp_state_dir("object-plan");
     let object = run_with(
         [
-            "herdr-tasks",
+            "tsk",
             "add",
             "--state-dir",
             &state_dir_arg(&object_dir),
@@ -1279,7 +1269,7 @@ fn plan_usage_errors_persist_nothing_and_do_not_read_mixed_stdin() {
     assert!(object.stdout.is_empty());
     let malformed = run_with(
         [
-            "herdr-tasks",
+            "tsk",
             "add",
             "--state-dir",
             &state_dir_arg(&object_dir),
@@ -1300,7 +1290,7 @@ fn plan_usage_errors_persist_nothing_and_do_not_read_mixed_stdin() {
     let mixed_dir = temp_state_dir("mixed-plan-flags");
     let mixed = run_with(
         [
-            "herdr-tasks",
+            "tsk",
             "add",
             "--state-dir",
             &state_dir_arg(&mixed_dir),
@@ -1340,7 +1330,7 @@ fn plan_projects_and_item_validation_follow_the_contract() {
 
     let output = run_with(
         [
-            "herdr-tasks",
+            "tsk",
             "add",
             "--state-dir",
             &state_dir_arg(&dir),
@@ -1409,7 +1399,7 @@ fn plan_project_string_uses_the_shared_basename_resolver() {
 
     let output = run_with(
         [
-            "herdr-tasks",
+            "tsk",
             "add",
             "--state-dir",
             &state_dir_arg(&dir),
@@ -1437,7 +1427,7 @@ fn plan_project_resolution_is_independent_of_item_order() {
     let forward_dir = temp_state_dir("plan-project-order-forward");
     let forward = run_with(
         [
-            "herdr-tasks",
+            "tsk",
             "add",
             "--state-dir",
             &state_dir_arg(&forward_dir),
@@ -1467,7 +1457,7 @@ fn plan_project_resolution_is_independent_of_item_order() {
     let reverse_dir = temp_state_dir("plan-project-order-reverse");
     let reverse = run_with(
         [
-            "herdr-tasks",
+            "tsk",
             "add",
             "--state-dir",
             &state_dir_arg(&reverse_dir),
@@ -1515,7 +1505,7 @@ fn flag_add_rejects_flag_like_item_values_without_persisting() {
     ] {
         let dir = temp_state_dir(label);
         let mut args = vec![
-            "herdr-tasks".into(),
+            "tsk".into(),
             "add".into(),
             "--state-dir".into(),
             state_dir_arg(&dir),
@@ -1542,7 +1532,7 @@ fn flag_add_equals_forms_allow_dash_leading_values() {
     let dir = temp_state_dir("dash-leading-values");
     let output = add(
         &[
-            "herdr-tasks".into(),
+            "tsk".into(),
             "add".into(),
             "--state-dir".into(),
             state_dir_arg(&dir),
@@ -1577,8 +1567,8 @@ fn flag_add_equals_state_dir_and_file_forms_accept_dash_leading_values() {
         r#"[{"title":"equals file task","project":null}]"#,
     )
     .expect("write dash-leading plan");
-    let binary = std::env::var("CARGO_BIN_EXE_herdr-tasks")
-        .expect("Cargo must provide the herdr-tasks binary path");
+    let binary =
+        std::env::var("CARGO_BIN_EXE_tsk").expect("Cargo must provide the tsk binary path");
 
     let output = Command::new(binary)
         .current_dir(&cwd)
@@ -1597,7 +1587,7 @@ fn flag_add_equals_state_dir_and_file_forms_accept_dash_leading_values() {
         "equals file task"
     );
 
-    let stdin = parser::parse_flag_add(&["herdr-tasks".into(), "add".into(), "--file=-".into()])
+    let stdin = parser::parse_flag_add(&["tsk".into(), "add".into(), "--file=-".into()])
         .expect("parse stdin file marker");
     assert_eq!(stdin.file, Some(PathBuf::from("-")));
 
@@ -1609,8 +1599,8 @@ fn flag_add_rejects_flag_like_state_dir_and_file_values_without_mutating() {
     let _env = env_lock();
     let cwd = temp_state_dir("flag-like-global-value");
     let state_dir = temp_state_dir("flag-like-global-state");
-    let binary = std::env::var("CARGO_BIN_EXE_herdr-tasks")
-        .expect("Cargo must provide the herdr-tasks binary path");
+    let binary =
+        std::env::var("CARGO_BIN_EXE_tsk").expect("Cargo must provide the tsk binary path");
 
     let state_dir_output = Command::new(&binary)
         .current_dir(&cwd)
@@ -1643,7 +1633,7 @@ fn flag_add_json_reports_created_and_existing_resolved_tasks() {
     let _env = env_lock();
     let dir = temp_state_dir("json");
     let args = [
-        "herdr-tasks".into(),
+        "tsk".into(),
         "add".into(),
         "--json".into(),
         "--state-dir".into(),
@@ -1677,7 +1667,7 @@ fn flag_add_json_reports_created_and_existing_resolved_tasks() {
 
     let global = add(
         &[
-            "herdr-tasks".into(),
+            "tsk".into(),
             "add".into(),
             "--json".into(),
             "--state-dir".into(),
@@ -1705,7 +1695,7 @@ fn add_when_state_dir_is_a_file_exits_3() {
 
     let output = add(
         &[
-            "herdr-tasks".into(),
+            "tsk".into(),
             "add".into(),
             "--state-dir".into(),
             state_dir_arg(&state_file),
@@ -1733,7 +1723,7 @@ fn state_dir_flag_wins_over_environment() {
 
     let output = add(
         &[
-            "herdr-tasks".into(),
+            "tsk".into(),
             "add".into(),
             "--state-dir".into(),
             state_dir_arg(&argument_dir),

@@ -15,15 +15,17 @@ The committed `.gitignore` already covers it.
 
 ## Product
 
-**herdr-tasks** is a herdr plugin: a queue board for capture and human-status
-verbs. Park, resume, linking, and dispatch-start are not board or palette
-actions. Dispatch recovery can still open for a persisted attempt. Crate and
-plugin are `0.2.0`.
+**tsk** is a terminal task board ("a task board for your terminal"): a queue
+board for capture and human-status verbs. It ships as the herdr plugin
+`herdr-tasks`, and the built binary (`tsk`) also runs standalone. Park, resume,
+linking, and dispatch-start are not board or palette actions. Dispatch recovery
+can still open for a persisted attempt. Crate (`tsk-tui`) and plugin are
+`0.2.0`.
 
 A gitignored `HANDOFF.md` may hold this clone’s live working state.
 
-For scriptable board work, use `herdr-tasks add` and `herdr-tasks list`; read
-`skills/herdr-tasks-cli/SKILL.md` first for retry and scope-check rules.
+For scriptable board work, use `tsk add` and `tsk list`; read
+`skills/tsk-cli/SKILL.md` first for retry and scope-check rules.
 
 ### Board
 
@@ -66,7 +68,7 @@ For scriptable board work, use `herdr-tasks add` and `herdr-tasks list`; read
 ## Build / test / verify
 
 - Build: `cargo build --release`
-- `herdr-plugin.toml` launches `./target/release/herdr-tasks`. Rebuild in-repo
+- `herdr-plugin.toml` launches `./target/release/tsk`. Rebuild in-repo
   before live smoke. A running board keeps the old binary until you quit it.
 - Test: `cargo test` (plain, parallel)
 - A regression test must fail without its fix. Write it, revert the fix, watch it
@@ -90,6 +92,9 @@ If `HERDR_ENV` is unset, say that live smoke was not run.
 
 - Human status is source of truth. Never auto-complete tasks from agent status.
 - State under `HERDR_PLUGIN_STATE_DIR`. Config under `HERDR_PLUGIN_CONFIG_DIR`.
+  Standalone runs default to `$XDG_DATA_HOME/tsk` / `~/.config/tsk`, overridable
+  with `TSK_STATE_DIR` / `TSK_CONFIG_DIR`; injected host variables keep
+  precedence.
   Verb modifier is `settings.json` in that config dir; the palette flips it.
 - UI chrome lives in `src/ui/` (`board/` model·apply·commands·chrome·draw,
   `capture`, `mouse`, `input`, `render`).

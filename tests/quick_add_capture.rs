@@ -6,17 +6,17 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use herdr_tasks::app::{apply_board_intent_with_save_recovery, BoardSaveContext};
-use herdr_tasks::context::InvocationSnapshot;
-use herdr_tasks::domain::{DomainState, ProvenanceOrigin, TaskEventKind, TaskScope};
-use herdr_tasks::save_recovery::SaveRecovery;
-use herdr_tasks::ui::board::{
-    apply_intent, board_hit_map, draw_board, BoardInputMode, BoardModel, IntentOutcome,
-};
-use herdr_tasks::ui::input::{map_key, BoardIntent};
 use ratatui::backend::{CrosstermBackend, TestBackend};
 use ratatui::layout::Rect;
 use ratatui::{Terminal, TerminalOptions, Viewport};
+use tsk_tui::app::{apply_board_intent_with_save_recovery, BoardSaveContext};
+use tsk_tui::context::InvocationSnapshot;
+use tsk_tui::domain::{DomainState, ProvenanceOrigin, TaskEventKind, TaskScope};
+use tsk_tui::save_recovery::SaveRecovery;
+use tsk_tui::ui::board::{
+    apply_intent, board_hit_map, draw_board, BoardInputMode, BoardModel, IntentOutcome,
+};
+use tsk_tui::ui::input::{map_key, BoardIntent};
 
 fn snapshot() -> InvocationSnapshot {
     InvocationSnapshot {
@@ -323,16 +323,16 @@ fn save_quick_add(domain: &mut DomainState, model: &mut BoardModel, title: &str)
 #[test]
 fn unique_project_basename_resolves_for_expansion_without_a_saved_status_message() {
     let mut domain = DomainState::new();
-    create_project_fixture(&mut domain, "/work/herdr-tasks");
+    create_project_fixture(&mut domain, "/work/tsk");
     let mut model = BoardModel::from_domain(&domain, None);
 
     open(&mut domain, &mut model, &snapshot());
-    type_title(&mut domain, &mut model, "expanded task !p herdr-tasks");
+    type_title(&mut domain, &mut model, "expanded task !p tsk");
     apply(&mut domain, &mut model, BoardIntent::ExpandQuickAdd, None);
     assert_eq!(
         model.form_scope(),
         Some(&TaskScope::Project {
-            path: "/work/herdr-tasks".into()
+            path: "/work/tsk".into()
         })
     );
     assert_eq!(
@@ -343,7 +343,7 @@ fn unique_project_basename_resolves_for_expansion_without_a_saved_status_message
     assert_eq!(
         domain.tasks().last().expect("saved task").scope,
         TaskScope::Project {
-            path: "/work/herdr-tasks".into()
+            path: "/work/tsk".into()
         }
     );
     assert_eq!(model.message(), None);
@@ -415,18 +415,14 @@ fn ambiguous_project_basename_stays_verbatim() {
 #[test]
 fn project_token_with_a_slash_stays_verbatim() {
     let mut domain = DomainState::new();
-    create_project_fixture(&mut domain, "/work/herdr-tasks");
+    create_project_fixture(&mut domain, "/work/tsk");
     let mut model = BoardModel::from_domain(&domain, None);
 
-    save_quick_add(
-        &mut domain,
-        &mut model,
-        "explicit task !p elsewhere/herdr-tasks",
-    );
+    save_quick_add(&mut domain, &mut model, "explicit task !p elsewhere/tsk");
     assert_eq!(
         domain.tasks().last().expect("saved task").scope,
         TaskScope::Project {
-            path: "elsewhere/herdr-tasks".into()
+            path: "elsewhere/tsk".into()
         }
     );
 }
@@ -565,7 +561,7 @@ fn empty_enter_stays_open_esc_discards_and_tab_expands_the_seeded_task_page() {
     assert_eq!(model.edit_buffer(), "");
     assert_eq!(
         model.form_focus(),
-        Some(herdr_tasks::ui::capture::CaptureField::Notes)
+        Some(tsk_tui::ui::capture::CaptureField::Notes)
     );
     assert_eq!(
         model.form_scope(),
@@ -590,7 +586,7 @@ fn expanded_page_stashes_notes_and_scope_across_esc_and_saves_like_quick_add() {
     assert_eq!(model.input_mode(), BoardInputMode::EditNotes);
     assert_eq!(
         model.form_focus(),
-        Some(herdr_tasks::ui::capture::CaptureField::Notes)
+        Some(tsk_tui::ui::capture::CaptureField::Notes)
     );
     let page = render_text(&model, 80, 24);
     assert!(page.contains("draft with details"));
@@ -611,8 +607,8 @@ fn expanded_page_stashes_notes_and_scope_across_esc_and_saves_like_quick_add() {
         );
     }
     assert_eq!(
-        herdr_tasks::ui::input::map_board_form_key(
-            herdr_tasks::ui::capture::CaptureField::Notes,
+        tsk_tui::ui::input::map_board_form_key(
+            tsk_tui::ui::capture::CaptureField::Notes,
             false,
             KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE),
         ),
@@ -623,7 +619,7 @@ fn expanded_page_stashes_notes_and_scope_across_esc_and_saves_like_quick_add() {
     assert_eq!(model.input_mode(), BoardInputMode::EditThread);
     assert_eq!(
         model.form_focus(),
-        Some(herdr_tasks::ui::capture::CaptureField::Thread)
+        Some(tsk_tui::ui::capture::CaptureField::Thread)
     );
     apply(&mut domain, &mut model, BoardIntent::FormFocusNext, None);
     assert_eq!(model.input_mode(), BoardInputMode::EditScope);
@@ -979,7 +975,7 @@ fn render_rows(model: &BoardModel, width: u16, height: u16) -> Vec<String> {
         .draw(|frame| draw_board(frame, model))
         .expect("draw board");
     let buffer = terminal.backend().buffer();
-    herdr_tasks::ui::render::assert_buffer_mono(buffer);
+    tsk_tui::ui::render::assert_buffer_mono(buffer);
     (0..height)
         .map(|y| {
             (0..width)
@@ -1065,5 +1061,5 @@ fn capture_bar_renders_spaced_three_row_block_and_stays_bounded_without_color_sg
         .expect("ANSI draw");
     drop(terminal);
     let output = String::from_utf8(bytes.borrow().clone()).expect("ANSI output");
-    herdr_tasks::ui::render::assert_no_color_sgr(&output);
+    tsk_tui::ui::render::assert_no_color_sgr(&output);
 }

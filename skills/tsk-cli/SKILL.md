@@ -1,22 +1,22 @@
 ---
-name: herdr-tasks-cli
-description: Use when asked to add tasks, a task list, or a plan to the Tasks board, or to inspect Tasks board items. Use `herdr-tasks add` and `herdr-tasks list`, never the TUI.
+name: tsk-cli
+description: Use when asked to add tasks, a task list, or a plan to the Tasks board, or to inspect Tasks board items. Use `tsk add` and `tsk list`, never the TUI.
 ---
 
-# herdr-tasks CLI
+# tsk CLI
 
-Use `herdr-tasks add` to create a task or JSON plan, and `herdr-tasks list` to
+Use `tsk add` to create a task or JSON plan, and `tsk list` to
 inspect the shared board store before and after adding work.
 
 ## Adding
 
 ```sh
-herdr-tasks add -t "Draft release notes"
-herdr-tasks add -t "Buy milk" --global
-herdr-tasks add -t "Fix widget" --project widget --thread release-2026
-herdr-tasks add --title="-fix parser" --notes="-5 degrees" --project="-maintenance"
-herdr-tasks add --file plan.json
-cat plan.json | herdr-tasks add
+tsk add -t "Draft release notes"
+tsk add -t "Buy milk" --global
+tsk add -t "Fix widget" --project widget --thread release-2026
+tsk add --title="-fix parser" --notes="-5 degrees" --project="-maintenance"
+tsk add --file plan.json
+cat plan.json | tsk add
 ```
 
 Use `--title=<value>`, `--notes=<value>`, `--project=<value>`,
@@ -39,7 +39,7 @@ persist and the command exits 1.
   Valid siblings still persist. Retry only the `failed` subset. `created` and
   `existing` items both succeeded, so you must never whole-plan-retry an exit 1 run.
 - exit 2: usage or parse error, nothing persisted. Correct the invocation, then run it.
-- exit 3: store I/O, commit indeterminate. Run `herdr-tasks list --all --json` to
+- exit 3: store I/O, commit indeterminate. Run `tsk list --all --json` to
   check every scope, then retry only missing work. You must never whole-plan-retry an exit 3 run.
 
 Add is idempotent by trimmed title and resolved project scope. A non-soft-deleted
@@ -48,7 +48,7 @@ reports it in `existing` with its `i`, `id`, and `title`.
 
 ## Listing scope and filters
 
-`herdr-tasks list` defaults to ready, started, blocked, and review tasks in the
+`tsk list` defaults to ready, started, blocked, and review tasks in the
 invocation project, or global scope outside a repository. Use `-p`/`--project <scope>`
 for the same basename-or-path resolution as add, `--global` for global tasks, or `--all`
 for every scope. `--thread <name>` normalizes then filters tasks after scope
@@ -60,24 +60,24 @@ soft-deleted tasks only, regardless of stored status. Scope selectors are mutual
 exclusive, as are `--done` and `--deleted`.
 
 A typo in a project name silently files the task under a new scope. Use
-`herdr-tasks list --all --json` to recover the resulting scope.
+`tsk list --all --json` to recover the resulting scope.
 
 ## Steps
 
 ```sh
-herdr-tasks steps <task-id> add "Draft outline"
-herdr-tasks steps <task-id> toggle <step-short-id>
-herdr-tasks list <task-id>
+tsk steps <task-id> add "Draft outline"
+tsk steps <task-id> toggle <step-short-id>
+tsk list <task-id>
 ```
 
-`<task-id>` is a task UUID from `herdr-tasks list --json`. A step short id is
-the shortest unambiguous prefix of the step id. `herdr-tasks list <task-id>`
+`<task-id>` is a task UUID from `tsk list --json`. A step short id is
+the shortest unambiguous prefix of the step id. `tsk list <task-id>`
 prints one line per step with its `[x]`/`[ ]` state and short id; with `--json`
 the row's `steps` array carries each step's `id`, `text`, `done`, and
 `short_id`.
 
 `toggle` flips the step state: a retry after an unseen success flips it back.
-Never blind-retry a `steps` invocation — run `herdr-tasks list <task-id>`
+Never blind-retry a `steps` invocation — run `tsk list <task-id>`
 first and retry only a real refusal. `steps` exits 0 when the step was created
 or toggled, 1 for a refusal (stable tokens `empty-step-text`,
 `invalid-step-text`, `unknown-task`, `soft-deleted-task`, `unknown-step`,

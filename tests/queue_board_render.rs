@@ -5,22 +5,22 @@ use std::sync::OnceLock;
 use std::time::{Duration, SystemTime};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use herdr_tasks::config::VerbModifier;
-use herdr_tasks::domain::{
+use ratatui::backend::TestBackend;
+use ratatui::{Frame, Terminal};
+use tsk_tui::config::VerbModifier;
+use tsk_tui::domain::{
     DomainState, HumanStatus, ProvenanceOrigin, Task, TaskEvent, TaskEventKind, TaskScope,
 };
-use herdr_tasks::ui::input::map_key;
-use herdr_tasks::ui::queue::{self, DeckScope, QueueView};
-use herdr_tasks::ui::render::{
+use tsk_tui::ui::input::map_key;
+use tsk_tui::ui::queue::{self, DeckScope, QueueView};
+use tsk_tui::ui::render::{
     assert_buffer_mono, assert_no_color_sgr, draw_queue_frame, BottomInputSlot, PaletteCommandRow,
     QueueFrameModel, QueueOverlay, VerbEntry,
 };
-use herdr_tasks::ui::tier::{self, Tier, TierGeometry};
-use herdr_tasks::ui::{
+use tsk_tui::ui::tier::{self, Tier, TierGeometry};
+use tsk_tui::ui::{
     apply_intent, board_verb_items, draw_board, BoardInputMode, BoardIntent, BoardModel,
 };
-use ratatui::backend::TestBackend;
-use ratatui::{Frame, Terminal};
 use uuid::Uuid;
 
 /// Fixed "now" for deterministic age labels in the fixture.
@@ -75,7 +75,7 @@ fn fixture_tasks() -> Vec<Task> {
             1,
             "Smoke-test worktree dispatch",
             HumanStatus::Started,
-            project("/repos/herdr-tasks"),
+            project("/repos/tsk"),
             3 * 60,
         ),
         task(
@@ -89,14 +89,14 @@ fn fixture_tasks() -> Vec<Task> {
             10,
             "Prototype the queue-style board UI",
             HumanStatus::Ready,
-            project("/repos/herdr-tasks"),
+            project("/repos/tsk"),
             3600,
         ),
         task(
             11,
             "Cut rust-toolchain pin into CI docs",
             HumanStatus::Ready,
-            project("/repos/herdr-tasks"),
+            project("/repos/tsk"),
             86400,
         ),
         task(
@@ -124,7 +124,7 @@ fn fixture_tasks() -> Vec<Task> {
             40,
             "Ship the queue board milestone",
             HumanStatus::Done,
-            project("/repos/herdr-tasks"),
+            project("/repos/tsk"),
             5 * 3600,
         ),
         task(
@@ -141,7 +141,7 @@ fn fixture_tasks() -> Vec<Task> {
 /// task 1 ("Smoke-test worktree dispatch", Doing) [`fixture_model`] hardcodes as its
 /// selection.
 fn base_board_model() -> BoardModel {
-    let model = BoardModel::from_tasks(fixture_tasks(), Some(PathBuf::from("/repos/herdr-tasks")));
+    let model = BoardModel::from_tasks(fixture_tasks(), Some(PathBuf::from("/repos/tsk")));
     assert_eq!(
         model.selected_id(),
         Some(Uuid::from_u128(1)),
@@ -290,7 +290,7 @@ fn palette_commands() -> Vec<PaletteCommandRow<'static>> {
 fn fixture_view(tasks: &[Task], drawer_open: bool) -> QueueView {
     queue::query(
         tasks,
-        Some(Path::new("/repos/herdr-tasks")),
+        Some(Path::new("/repos/tsk")),
         DeckScope::All,
         drawer_open,
     )
@@ -404,7 +404,7 @@ fn standard_78x24_fixture_has_selector_list_rule_status_verb_and_no_other_chrome
         "list must include IN MOTION header:\n{list}"
     );
     assert!(
-        list.contains("herdr-tasks") && list.contains("global"),
+        list.contains("tsk") && list.contains("global"),
         "list must include project group headers:\n{list}"
     );
     assert!(
@@ -548,7 +548,7 @@ fn every_section_header_has_symmetric_spacing_and_scrolls_with_its_selected_task
             "Smoke-test worktree dispatch",
         ),
         (
-            "herdr-tasks",
+            "tsk",
             Uuid::from_u128(10),
             "Prototype the queue-style board UI",
         ),
@@ -879,7 +879,7 @@ fn task_page_renders_header_notes_and_meta_as_a_full_takeover_in_both_tiers() {
         step_scroll: 0,
         step_marked: None,
         step_editor: None,
-        meta: "herdr-tasks \u{b7} created 1h ago \u{b7} updated 1h ago".to_string(),
+        meta: "tsk \u{b7} created 1h ago \u{b7} updated 1h ago".to_string(),
         meta_scope_width: 11,
         thread_slot_width: None,
         focus: None,
@@ -1593,7 +1593,7 @@ fn standard_accordion_expands_full_width_under_selection_without_mutating_domain
         .map(|r| trimmed(r))
         .collect::<Vec<_>>()
         .join("\n");
-    for expected in ["no notes yet", "scope herdr-tasks", "created", "updated"] {
+    for expected in ["no notes yet", "scope tsk", "created", "updated"] {
         assert!(
             body_joined.contains(expected),
             "accordion body missing {expected:?}:\n{body_joined}"
@@ -1608,7 +1608,7 @@ fn standard_accordion_expands_full_width_under_selection_without_mutating_domain
         .join("\n");
     for still_present in [
         "IN MOTION",
-        "herdr-tasks",
+        "tsk",
         "DONE",
         "Edit target binding pin",
         "Prototype the queue-style board UI",
@@ -1669,7 +1669,7 @@ fn standard_peek_body_caps_notes_at_five_lines_with_a_more_lines_tail() {
         "peek must name the three hidden lines:\n{joined}"
     );
     assert!(
-        joined.contains("scope herdr-tasks") && joined.contains("created"),
+        joined.contains("scope tsk") && joined.contains("created"),
         "peek keeps the scope and age lines:\n{joined}"
     );
 }
@@ -1719,7 +1719,7 @@ fn standard_accordion_on_a_task_below_the_fold_scrolls_the_whole_block_into_view
             2000 + i,
             &format!("Padding task {i}"),
             HumanStatus::Ready,
-            project("/repos/herdr-tasks"),
+            project("/repos/tsk"),
             3600,
         ));
     }
@@ -1741,7 +1741,7 @@ fn standard_accordion_on_a_task_below_the_fold_scrolls_the_whole_block_into_view
         viewport.contains("Padding task 29"),
         "the expanded task's own row must be scrolled into view:\n{viewport}"
     );
-    for expected in ["no notes yet", "scope herdr-tasks", "created", "updated"] {
+    for expected in ["no notes yet", "scope tsk", "created", "updated"] {
         assert!(
             viewport.contains(expected),
             "accordion body missing {expected:?} once scrolled into view:\n{viewport}"
@@ -1763,7 +1763,7 @@ fn plain_selection_on_a_task_below_the_fold_scrolls_it_into_view_in_both_tiers()
                 5000 + i,
                 &format!("Selection padding task {i}"),
                 HumanStatus::Ready,
-                project("/repos/herdr-tasks"),
+                project("/repos/tsk"),
                 3600,
             )
         })
@@ -1825,7 +1825,7 @@ fn compact_peek_is_inline_and_editors_stay_full_screen_takeovers() {
             "{w}x{h}: the peeked task's row must stay visible:\n{viewport}"
         );
         assert!(
-            viewport.contains("scope herdr-tasks"),
+            viewport.contains("scope tsk"),
             "{w}x{h}: the peek body must weave inline under the row:\n{viewport}"
         );
 
@@ -1878,7 +1878,7 @@ fn compact_paints_no_takeover_for_a_detail_open_task_excluded_by_the_current_sco
     let tasks = fixture_tasks();
     // Task 20 ("Wire dispatch cleanup receipts", Blocked, `/repos/herdr`) stays in
     // `tasks` -- the slice `QueueFrameModel::tasks` always carries -- but a view scoped to
-    // just `/repos/herdr-tasks` excludes it from `view.sections` entirely (unlike a Doing
+    // just `/repos/tsk` excludes it from `view.sections` entirely (unlike a Doing
     // task, an ON DECK task is genuinely scope-filtered; `IN MOTION` is not).
     let excluded_id = Uuid::from_u128(20);
     assert!(
@@ -1887,8 +1887,8 @@ fn compact_paints_no_takeover_for_a_detail_open_task_excluded_by_the_current_sco
     );
     let scoped_view = queue::query(
         &tasks,
-        Some(Path::new("/repos/herdr-tasks")),
-        DeckScope::Project(Path::new("/repos/herdr-tasks")),
+        Some(Path::new("/repos/tsk")),
+        DeckScope::Project(Path::new("/repos/tsk")),
         false,
     );
     assert!(
@@ -1901,7 +1901,7 @@ fn compact_paints_no_takeover_for_a_detail_open_task_excluded_by_the_current_sco
     );
     let model = QueueFrameModel {
         detail_open: Some(excluded_id),
-        scope_label: "herdr-tasks",
+        scope_label: "tsk",
         all_projects_scope: false,
         ..fixture_model(&tasks, &scoped_view)
     };
@@ -1973,7 +1973,7 @@ fn golden_scenes() -> Vec<GoldenScene> {
     // recorded here so a reviewer does not re-litigate the divergence as a bug.
     let mut help_model = fixture_model(&tasks, &board_view);
     let help_lines: Vec<String> =
-        herdr_tasks::ui::input::help_card_lines(herdr_tasks::config::VerbModifier::Alt);
+        tsk_tui::ui::input::help_card_lines(tsk_tui::config::VerbModifier::Alt);
     help_model.overlay = QueueOverlay::Help { lines: &help_lines };
     let (help_rows, _) = paint(80, 24, &help_model);
 
@@ -2195,8 +2195,8 @@ fn scoped_board_paints_thread_header_above_its_tasks() {
     let mut tasks = fixture_tasks();
     tasks[2].thread = Some("release".to_string());
     tasks[3].thread = Some("release".to_string());
-    let mut model = BoardModel::from_tasks(tasks, Some(PathBuf::from("/repos/herdr-tasks")));
-    model.set_selected_project(Some(PathBuf::from("/repos/herdr-tasks")));
+    let mut model = BoardModel::from_tasks(tasks, Some(PathBuf::from("/repos/tsk")));
+    model.set_selected_project(Some(PathBuf::from("/repos/tsk")));
 
     let rows = board_rows(&model, 80, 24);
     let header = rows
@@ -2223,11 +2223,11 @@ fn threaded_task_rows_indent_under_headers_while_unthreaded_rows_stay_flush() {
         12,
         "Loose project task",
         HumanStatus::Ready,
-        project("/repos/herdr-tasks"),
+        project("/repos/tsk"),
         30,
     ));
-    let mut model = BoardModel::from_tasks(tasks, Some(PathBuf::from("/repos/herdr-tasks")));
-    model.set_selected_project(Some(PathBuf::from("/repos/herdr-tasks")));
+    let mut model = BoardModel::from_tasks(tasks, Some(PathBuf::from("/repos/tsk")));
+    model.set_selected_project(Some(PathBuf::from("/repos/tsk")));
 
     let rows = board_rows(&model, 80, 24);
     let leading_spaces = |row: &str| {
@@ -2270,11 +2270,11 @@ fn thread_blocks_leave_a_blank_row_before_loose_tasks() {
         12,
         "Loose project task",
         HumanStatus::Ready,
-        project("/repos/herdr-tasks"),
+        project("/repos/tsk"),
         30,
     ));
-    let mut model = BoardModel::from_tasks(tasks, Some(PathBuf::from("/repos/herdr-tasks")));
-    model.set_selected_project(Some(PathBuf::from("/repos/herdr-tasks")));
+    let mut model = BoardModel::from_tasks(tasks, Some(PathBuf::from("/repos/tsk")));
+    model.set_selected_project(Some(PathBuf::from("/repos/tsk")));
 
     let rows = board_rows(&model, 80, 24);
     let last_threaded_task = rows
@@ -2307,11 +2307,11 @@ fn every_thread_block_leaves_a_spacer_before_following_content() {
         12,
         "Loose project task",
         HumanStatus::Ready,
-        project("/repos/herdr-tasks"),
+        project("/repos/tsk"),
         30,
     ));
-    let mut model = BoardModel::from_tasks(tasks, Some(PathBuf::from("/repos/herdr-tasks")));
-    model.set_selected_project(Some(PathBuf::from("/repos/herdr-tasks")));
+    let mut model = BoardModel::from_tasks(tasks, Some(PathBuf::from("/repos/tsk")));
+    model.set_selected_project(Some(PathBuf::from("/repos/tsk")));
 
     let rows = board_rows(&model, 80, 24);
     for title in [
@@ -2335,8 +2335,8 @@ fn header_shows_name_and_open_count() {
     let mut tasks = fixture_tasks();
     tasks[2].thread = Some("release".to_string());
     tasks[3].thread = Some("release".to_string());
-    let mut model = BoardModel::from_tasks(tasks, Some(PathBuf::from("/repos/herdr-tasks")));
-    model.set_selected_project(Some(PathBuf::from("/repos/herdr-tasks")));
+    let mut model = BoardModel::from_tasks(tasks, Some(PathBuf::from("/repos/tsk")));
+    model.set_selected_project(Some(PathBuf::from("/repos/tsk")));
     let deck_index = model
         .visible_ids()
         .iter()
@@ -2371,28 +2371,28 @@ fn board_with_headers_paints_within_40x10_and_all_tasks_reachable() {
             100,
             "alpha first",
             HumanStatus::Ready,
-            project("/repos/herdr-tasks"),
+            project("/repos/tsk"),
             40,
         ),
         task(
             101,
             "alpha second",
             HumanStatus::Ready,
-            project("/repos/herdr-tasks"),
+            project("/repos/tsk"),
             30,
         ),
         task(
             102,
             "beta first",
             HumanStatus::Ready,
-            project("/repos/herdr-tasks"),
+            project("/repos/tsk"),
             20,
         ),
         task(
             103,
             "beta second",
             HumanStatus::Ready,
-            project("/repos/herdr-tasks"),
+            project("/repos/tsk"),
             10,
         ),
     ];
@@ -2400,8 +2400,8 @@ fn board_with_headers_paints_within_40x10_and_all_tasks_reachable() {
     tasks[1].thread = Some("alpha".to_string());
     tasks[2].thread = Some("beta".to_string());
     tasks[3].thread = Some("beta".to_string());
-    let mut model = BoardModel::from_tasks(tasks, Some(PathBuf::from("/repos/herdr-tasks")));
-    model.set_selected_project(Some(PathBuf::from("/repos/herdr-tasks")));
+    let mut model = BoardModel::from_tasks(tasks, Some(PathBuf::from("/repos/tsk")));
+    model.set_selected_project(Some(PathBuf::from("/repos/tsk")));
     let mut domain = DomainState::new();
     let ids = model.visible_ids();
     assert_eq!(ids.len(), 4, "fixture must expose every open task");

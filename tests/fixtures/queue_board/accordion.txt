@@ -3,13 +3,13 @@
 │                                                                                │
 │ IN MOTION ───────────────────────────────────────────────────────────────────2 │
 │                                                                                │
-│  ▸ Smoke-test worktree dispatch                               herdr-tasks · 3m │
+│  ▸ Smoke-test worktree dispatch                                       tsk · 3m │
 │    │ no notes yet                                                              │
-│    │ scope herdr-tasks                                                         │
+│    │ scope tsk                                                                 │
 │    │ created 3m ago · updated 3m ago                                           │
 │  ▸ Edit target binding pin                                         herdr · 12m │
 │                                                                                │
-│ herdr-tasks ─────────────────────────────────────────────────────────────────2 │
+│ tsk ─────────────────────────────────────────────────────────────────────────2 │
 │                                                                                │
 │  ○ Prototype the queue-style board UI                                       1h │
 │  ○ Cut rust-toolchain pin into CI docs                                      1d │

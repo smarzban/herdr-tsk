@@ -42,12 +42,12 @@
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use herdr_tasks::domain::{DomainState, HumanStatus, ProvenanceOrigin, TaskScope};
-use herdr_tasks::ui::{apply_intent, draw_board, BoardIntent, BoardModel};
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
+use tsk_tui::domain::{DomainState, HumanStatus, ProvenanceOrigin, TaskScope};
+use tsk_tui::ui::{apply_intent, draw_board, BoardIntent, BoardModel};
 
-const THIS_REPO: &str = "/repos/herdr-tasks";
+const THIS_REPO: &str = "/repos/tsk";
 const TASK_COUNT: usize = 100;
 const WIDTH: u16 = 80;
 const HEIGHT: u16 = 24;
@@ -240,7 +240,7 @@ fn keypress_to_repaint_p99_under_16ms_during_navigation_at_80x24_with_100_tasks(
     let has_section = ["IN MOTION", "ON DECK", "DONE"]
         .iter()
         .any(|header| plain.contains(header))
-        || ["herdr-tasks", "herdr", "alpha", "beta", "global"]
+        || ["tsk", "herdr", "alpha", "beta", "global"]
             .iter()
             .any(|name| plain.contains(&format!("{name} ─")));
     assert!(
