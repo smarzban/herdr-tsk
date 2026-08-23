@@ -1912,6 +1912,38 @@ fn failed_task_thread_edit_cancel_returns_to_task_page_with_a_retained_form() {
         None,
     )
     .expect("type thread");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::FocusFormField(CaptureField::Notes),
+        None,
+        None,
+    )
+    .expect("focus notes");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::EditInsertText("staged notes".into()),
+        None,
+        None,
+    )
+    .expect("type notes");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::FocusFormField(CaptureField::Scope),
+        None,
+        None,
+    )
+    .expect("focus scope");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::FormCycleScope,
+        None,
+        None,
+    )
+    .expect("stage changed scope");
     apply_board_intent_with_save_recovery(
         &mut domain,
         &mut model,
@@ -1957,6 +1989,19 @@ fn failed_task_thread_edit_cancel_returns_to_task_page_with_a_retained_form() {
     apply_intent(
         &mut domain,
         &mut model,
+        BoardIntent::FocusFormField(CaptureField::Notes),
+        None,
+        None,
+    )
+    .expect("focus restored notes");
+    assert_eq!(
+        model.edit_buffer(),
+        "",
+        "Cancel discards staged notes draft"
+    );
+    apply_intent(
+        &mut domain,
+        &mut model,
         BoardIntent::FocusFormField(CaptureField::Thread),
         None,
         None,
@@ -1966,6 +2011,21 @@ fn failed_task_thread_edit_cancel_returns_to_task_page_with_a_retained_form() {
         model.edit_buffer(),
         "",
         "Cancel discards staged thread draft"
+    );
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::FocusFormField(CaptureField::Scope),
+        None,
+        None,
+    )
+    .expect("focus restored scope");
+    assert_eq!(
+        model.form_scope(),
+        Some(&TaskScope::Project {
+            path: "/repos/app".into(),
+        }),
+        "Cancel restores the durable scope"
     );
 }
 
