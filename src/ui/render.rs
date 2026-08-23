@@ -107,6 +107,15 @@ pub struct TaskRowPaint<'a> {
 /// [`present_line`] so truncation always shows `…`. Compact geometry
 /// (`meta_column_width == 0`) drops meta and gives the title the full row.
 pub fn paint_task_row(row: &TaskRowPaint<'_>, geo: &TierGeometry) -> Line<'static> {
+    paint_task_row_with_indent(row, geo, 0)
+}
+
+/// Paint a task row with extra leading cells reserved for a containing visual group.
+fn paint_task_row_with_indent(
+    row: &TaskRowPaint<'_>,
+    geo: &TierGeometry,
+    leading_indent: usize,
+) -> Line<'static> {
     let row_w = geo.row_width as usize;
     let meta_budget = geo.meta_column_width as usize;
     let title_budget = if meta_budget == 0 {
@@ -116,7 +125,7 @@ pub fn paint_task_row(row: &TaskRowPaint<'_>, geo: &TierGeometry) -> Line<'stati
     };
 
     let glyph = super::terminal_text(row.glyph);
-    let prefix = format!("  {glyph} ");
+    let prefix = format!("{}  {glyph} ", " ".repeat(leading_indent));
     let title_room = title_budget.saturating_sub(display_width(&prefix));
     let title = present_line(row.title, title_room);
     let left = fit_left(&format!("{prefix}{title}"), title_budget);
@@ -1879,13 +1888,14 @@ fn build_list_rows(
                      out: &mut Vec<ListRow>,
                      selected_idx: &mut Option<usize>,
                      anchor_last_idx: &mut Option<usize>,
-                     in_project_section: bool| {
+                     in_project_section: bool,
+                     indented_under_thread: bool| {
         let Some(task) = model.tasks.iter().find(|task| task.id == id) else {
             // Stale ids may outlive a snapshot refresh. Skip them without inventing a row.
             return;
         };
         let meta = row_meta(task, model.now, in_project_section);
-        let line = paint_task_row(
+        let line = paint_task_row_with_indent(
             &TaskRowPaint {
                 glyph: status_glyph(task.status),
                 title: &task.title,
@@ -1895,6 +1905,7 @@ fn build_list_rows(
                 title_bold: false,
             },
             geo,
+            usize::from(indented_under_thread) * 2,
         );
         if model.selection_id == Some(task.id) {
             *selected_idx = Some(out.len());
@@ -1942,6 +1953,7 @@ fn build_list_rows(
                         &mut selected_idx,
                         &mut anchor_last_idx,
                         in_project_section,
+                        true,
                     );
                 }
             }
@@ -1952,6 +1964,7 @@ fn build_list_rows(
                     &mut selected_idx,
                     &mut anchor_last_idx,
                     in_project_section,
+                    false,
                 );
             }
         } else {
@@ -1962,6 +1975,7 @@ fn build_list_rows(
                     &mut selected_idx,
                     &mut anchor_last_idx,
                     in_project_section,
+                    false,
                 );
             }
         }

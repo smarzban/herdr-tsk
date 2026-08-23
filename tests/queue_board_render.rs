@@ -2213,6 +2213,53 @@ fn scoped_board_paints_thread_header_above_its_tasks() {
 }
 
 #[test]
+fn threaded_task_rows_indent_under_headers_while_unthreaded_rows_stay_flush() {
+    let mut tasks = fixture_tasks();
+    tasks[2].thread = Some("release".to_string());
+    tasks[3].thread = Some("release".to_string());
+    tasks.push(task(
+        12,
+        "Loose project task",
+        HumanStatus::Ready,
+        project("/repos/herdr-tasks"),
+        30,
+    ));
+    let mut model = BoardModel::from_tasks(tasks, Some(PathBuf::from("/repos/herdr-tasks")));
+    model.set_selected_project(Some(PathBuf::from("/repos/herdr-tasks")));
+
+    let rows = board_rows(&model, 80, 24);
+    let leading_spaces = |row: &str| {
+        row.chars()
+            .take_while(|character| *character == ' ')
+            .count()
+    };
+    let header = rows
+        .iter()
+        .find(|row| row.contains("#release"))
+        .expect("thread header paints");
+    let threaded = rows
+        .iter()
+        .find(|row| row.contains("Prototype the queue-style board UI"))
+        .expect("threaded task paints");
+    let loose = rows
+        .iter()
+        .find(|row| row.contains("Loose project task"))
+        .expect("unthreaded task paints");
+
+    assert_eq!(
+        leading_spaces(header),
+        leading_spaces(loose),
+        "headers and loose rows keep their existing left edge"
+    );
+    assert_eq!(
+        leading_spaces(threaded),
+        leading_spaces(loose) + 2,
+        "threaded rows indent beneath their header:\n{}",
+        rows.join("\n")
+    );
+}
+
+#[test]
 fn header_shows_name_and_open_count() {
     let mut tasks = fixture_tasks();
     tasks[2].thread = Some("release".to_string());
