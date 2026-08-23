@@ -968,6 +968,67 @@ fn page_thread_field_refuses_invalid_name_without_persisting() {
 }
 
 #[test]
+fn canceling_thread_edit_keeps_the_task_page_and_resets_the_thread_draft() {
+    let mut domain = DomainState::new();
+    domain
+        .create(
+            "Task",
+            None,
+            project(THIS_REPO),
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("create");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::BeginEditTitle,
+        None,
+        None,
+    )
+    .expect("open task form");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::FocusFormField(CaptureField::Thread),
+        None,
+        None,
+    )
+    .expect("focus thread");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::EditInsertText("release".into()),
+        None,
+        None,
+    )
+    .expect("type thread");
+
+    apply_intent(&mut domain, &mut model, BoardIntent::CancelEdit, None, None)
+        .expect("cancel thread field");
+    assert!(
+        model.board_form_open(),
+        "field cancel retains the task page"
+    );
+    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::FocusFormField(CaptureField::Thread),
+        None,
+        None,
+    )
+    .expect("reopen thread field");
+    assert_eq!(
+        model.edit_buffer(),
+        "",
+        "field cancel restores saved thread"
+    );
+}
+
+#[test]
 fn thread_field_is_inert_while_step_editor_owns_the_footer() {
     let mut domain = DomainState::new();
     domain

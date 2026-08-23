@@ -762,7 +762,13 @@ pub fn apply_board_intent_with_save_recovery(
     let holds_task_edit = matches!(
         intent,
         BoardIntent::ConfirmEdit | BoardIntent::ConfirmEditNext
-    ) && model.edit_target().is_some();
+    ) && matches!(
+        model.input_mode(),
+        BoardInputMode::EditTitle
+            | BoardInputMode::EditNotes
+            | BoardInputMode::EditThread
+            | BoardInputMode::EditScope
+    );
     if holds_task_edit {
         model.hold_task_edit_save();
     }

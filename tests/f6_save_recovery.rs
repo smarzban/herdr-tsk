@@ -1889,6 +1889,28 @@ fn failed_task_thread_edit_cancel_returns_to_task_page_with_a_retained_form() {
     assert!(model.board_form_open(), "Cancel retains the task page form");
     assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
     assert_eq!(domain.get(id).expect("task").thread, None);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::FocusFormField(CaptureField::Title),
+        None,
+        None,
+    )
+    .expect("focus restored title");
+    assert_eq!(model.edit_buffer(), "Delete me");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::FocusFormField(CaptureField::Thread),
+        None,
+        None,
+    )
+    .expect("focus restored thread");
+    assert_eq!(
+        model.edit_buffer(),
+        "",
+        "Cancel discards staged thread draft"
+    );
 }
 
 #[test]
@@ -1968,4 +1990,9 @@ fn failed_save_during_thread_edit_holds_form_until_retry_or_cancel() {
         domain.get(id).expect("task").thread.as_deref(),
         Some("release-2026")
     );
+    assert!(
+        !model.board_form_open(),
+        "a successful retry releases the held task form"
+    );
+    assert_eq!(model.input_mode(), BoardInputMode::Normal);
 }

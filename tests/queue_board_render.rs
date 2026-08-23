@@ -2297,6 +2297,38 @@ fn thread_blocks_leave_a_blank_row_before_loose_tasks() {
 }
 
 #[test]
+fn every_thread_block_leaves_a_spacer_before_following_content() {
+    let mut tasks = fixture_tasks();
+    tasks[2].thread = Some("alpha".to_string());
+    tasks[3].thread = Some("beta".to_string());
+    tasks.push(task(
+        12,
+        "Loose project task",
+        HumanStatus::Ready,
+        project("/repos/herdr-tasks"),
+        30,
+    ));
+    let mut model = BoardModel::from_tasks(tasks, Some(PathBuf::from("/repos/herdr-tasks")));
+    model.set_selected_project(Some(PathBuf::from("/repos/herdr-tasks")));
+
+    let rows = board_rows(&model, 80, 24);
+    for title in [
+        "Prototype the queue-style board UI",
+        "Cut rust-toolchain pin into CI docs",
+    ] {
+        let task = rows
+            .iter()
+            .position(|row| row.contains(title))
+            .unwrap_or_else(|| panic!("threaded task {title:?} paints"));
+        assert!(
+            rows[task + 1].trim().is_empty(),
+            "each thread block leaves a spacer after {title:?}:\n{}",
+            rows.join("\n")
+        );
+    }
+}
+
+#[test]
 fn header_shows_name_and_open_count() {
     let mut tasks = fixture_tasks();
     tasks[2].thread = Some("release".to_string());

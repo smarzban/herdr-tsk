@@ -643,7 +643,10 @@ fn apply_board_intent(
             // fields survive; the second Esc closes the page.
             if matches!(
                 model.input_mode,
-                BoardInputMode::EditTitle | BoardInputMode::EditNotes | BoardInputMode::EditScope
+                BoardInputMode::EditTitle
+                    | BoardInputMode::EditNotes
+                    | BoardInputMode::EditThread
+                    | BoardInputMode::EditScope
             ) && model.form.as_ref().is_some_and(BoardForm::is_task)
             {
                 let field = model

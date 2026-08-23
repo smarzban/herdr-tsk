@@ -1585,13 +1585,14 @@ fn paint_task_page(
             width,
             paint_bounded_line(&format!("  {meta}"), width, style_dim()),
         );
-        let (scope, thread) = match meta.split_once(" · #") {
+        let (scope, thread, has_thread_slot) = match meta.split_once(" · #") {
             Some((scope, tail)) => (
                 scope,
                 tail.split_once(" · created")
                     .map_or(tail, |(thread, _)| thread),
+                true,
             ),
-            None => (meta, ""),
+            None => (meta, "", false),
         };
         let thread_x = u16::try_from(2 + display_width(scope))
             .unwrap_or(u16::MAX)
@@ -1600,7 +1601,7 @@ fn paint_task_page(
             return;
         }
         hits.push(QueueHitTarget::FormScope, Rect::new(0, y, thread_x, 1));
-        if !thread.is_empty() && thread_x < width {
+        if has_thread_slot && thread_x < width {
             let thread_width = u16::try_from(display_width(" · #") + display_width(thread))
                 .unwrap_or(u16::MAX)
                 .min(width.saturating_sub(thread_x));

@@ -534,6 +534,9 @@ pub fn map_capture_mouse(layout: &CaptureLayout, mouse: MouseEvent) -> Option<Ca
     if layout.notes_area.contains(pos) {
         return Some(CaptureIntent::FocusField(CaptureField::Notes));
     }
+    if layout.thread_area.contains(pos) {
+        return Some(CaptureIntent::FocusField(CaptureField::Thread));
+    }
     for chip in &layout.scope_chips {
         if chip.rect.contains(pos) {
             if chip.value == CaptureScopeChoice::ThisProject && !layout.this_project_available {

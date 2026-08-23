@@ -19,7 +19,10 @@ use herdr_tasks::ui::board::{
     BoardInputMode, BoardModel,
 };
 use herdr_tasks::ui::capture::CaptureField;
-use herdr_tasks::ui::input::{map_board_form_key, map_key, BoardIntent, PRIMARY_CAPTURE_ACTIONS};
+use herdr_tasks::ui::input::{
+    map_board_form_key, map_capture_key_state, map_capture_paste_state, map_key, BoardIntent,
+    CaptureIntent, PRIMARY_CAPTURE_ACTIONS,
+};
 use herdr_tasks::ui::mouse::{
     capture_layout, capture_mouse_paths_complete, left_click, map_board_mouse, map_capture_mouse,
     primary_capture_action_sample_mouse,
@@ -442,6 +445,7 @@ fn task_form_mouse_fields_dropdown_and_verbs_match_keyboard_while_scrolled() {
         (QueueHitTarget::FormTitle, CaptureField::Title),
         (QueueHitTarget::FormNotes(0), CaptureField::Notes),
         (QueueHitTarget::FormNotes(1), CaptureField::Notes),
+        (QueueHitTarget::FormThread, CaptureField::Thread),
     ] {
         let hit = hits
             .regions
@@ -858,6 +862,34 @@ fn capture_popup_mouse_paths_unchanged() {
     // The narrow capture width still keeps every control clickable.
     let narrow = capture_layout(Rect::new(0, 0, 40, 16));
     assert!(capture_mouse_paths_complete(&narrow));
+}
+
+#[test]
+fn capture_thread_row_click_and_input_paths_focus_and_edit_the_thread_field() {
+    let layout = capture_layout(Rect::new(0, 0, 80, 16));
+    assert_eq!(
+        map_capture_mouse(
+            &layout,
+            left_click(layout.thread_area.x.saturating_add(1), layout.thread_area.y),
+        ),
+        Some(CaptureIntent::FocusField(CaptureField::Thread)),
+        "the visible capture Thread row must take mouse focus"
+    );
+    assert_eq!(
+        map_capture_key_state(
+            CaptureField::Thread,
+            false,
+            false,
+            KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE),
+        ),
+        Some(CaptureIntent::Insert('r')),
+        "a focused Thread field accepts keyboard input"
+    );
+    assert_eq!(
+        map_capture_paste_state(CaptureField::Thread, false, "release"),
+        Some(CaptureIntent::InsertText("release".into())),
+        "a focused Thread field accepts paste"
+    );
 }
 
 /// C1: on a deck long enough for the palette's command panel to actually

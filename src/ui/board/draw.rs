@@ -278,6 +278,16 @@ fn build_task_page_overlay<'a>(
     if let Some(task) = bound_task {
         if let Some(thread) = task.thread.as_deref() {
             meta.push_str(&format!(" · #{thread}"));
+        } else if matches!(
+            model.input_mode(),
+            BoardInputMode::EditTitle
+                | BoardInputMode::EditNotes
+                | BoardInputMode::EditScope
+                | BoardInputMode::FormScopeDropdown
+        ) {
+            // An empty thread still needs a visible field-sized footer target while the form
+            // is editing, otherwise mouse users can only reach Thread after it already exists.
+            meta.push_str(" · #");
         }
         let now = SystemTime::now();
         meta.push_str(&format!(
