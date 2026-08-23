@@ -20,8 +20,8 @@ Dispatch recovery can still open if a persisted attempt is already in the store.
 Build from source:
 
 ```bash
-git clone git@github.com:smarzban/tsk.git
-cd tsk
+git clone git@github.com:smarzban/herdr-tasks.git
+cd herdr-tasks
 cargo build --release
 ```
 
