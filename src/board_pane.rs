@@ -7,7 +7,7 @@ use std::io::{self, Read};
 
 use serde_json::Value;
 
-/// Board pane label/title as declared in herdr-plugin.toml `[[panes]]`.
+/// Board pane label as declared in herdr-plugin.toml `[[panes]]`.
 pub const BOARD_PANE_LABEL: &str = "tsk";
 
 /// Read pane-list JSON from `stdin` and print the first flag-safe Tasks pane id.
@@ -22,9 +22,12 @@ pub fn find_board_pane_from_stdin() -> io::Result<Option<String>> {
 
 /// Parse herdr `pane list` JSON and return the first flag-safe Tasks pane_id.
 ///
-/// Matches panes whose `label` or `terminal_title_stripped` equals `"tsk"`.
-/// Pane ids must be non-empty, not start with `-`, and match `[A-Za-z0-9_.:-]+`
-/// so they are safe to pass as a CLI argument to `plugin pane focus`.
+/// Matches panes whose `label` equals `"tsk"`.
+///
+/// A terminal title is not a board identity: it can be the standalone `tsk` binary's
+/// default title in an unrelated pane. Pane ids must be non-empty, not start with `-`,
+/// and match `[A-Za-z0-9_.:-]+` so they are safe to pass as a CLI argument to
+/// `plugin pane focus`.
 pub fn find_board_pane_id(json: &str) -> Option<String> {
     let data: Value = serde_json::from_str(json).ok()?;
     let panes = data
@@ -34,11 +37,7 @@ pub fn find_board_pane_id(json: &str) -> Option<String> {
 
     for pane in panes {
         let label = pane.get("label").and_then(|v| v.as_str()).unwrap_or("");
-        let title = pane
-            .get("terminal_title_stripped")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        if label != BOARD_PANE_LABEL && title != BOARD_PANE_LABEL {
+        if label != BOARD_PANE_LABEL {
             continue;
         }
         let pid = pane.get("pane_id").and_then(|v| v.as_str()).unwrap_or("");
@@ -75,15 +74,15 @@ mod tests {
     }
 
     #[test]
-    fn finds_tasks_pane_by_title() {
+    fn ignores_non_board_pane_with_tsk_terminal_title() {
         let json = r#"{
             "result": {
                 "panes": [
-                    {"pane_id": "w1:p0", "label": "", "terminal_title_stripped": "tsk"}
+                    {"pane_id": "w1:p0", "label": "shell", "terminal_title_stripped": "tsk"}
                 ]
             }
         }"#;
-        assert_eq!(find_board_pane_id(json).as_deref(), Some("w1:p0"));
+        assert_eq!(find_board_pane_id(json), None);
     }
 
     #[test]

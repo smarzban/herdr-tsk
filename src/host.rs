@@ -751,10 +751,12 @@ fn validate_host_id(value: &str, kind: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// True when the pane is the Tasks board (label or stripped title).
+/// True when the pane carries the board label from the plugin manifest.
+///
+/// The stripped terminal title is not an identity: a standalone `tsk` process can use it
+/// in an unrelated pane.
 pub fn is_tasks_pane(pane: &PaneInfo) -> bool {
     pane.label.as_deref() == Some(BOARD_PANE_LABEL)
-        || pane.terminal_title_stripped.as_deref() == Some(BOARD_PANE_LABEL)
 }
 
 /// Pick one work pane in the board workspace (not the Tasks board).
@@ -981,6 +983,18 @@ mod tests {
         let cur = parse_pane_current(current_json).expect("current");
         assert_eq!(cur.pane_id, "w0:p2");
         assert!(is_tasks_pane(&cur));
+    }
+
+    #[test]
+    fn terminal_title_alone_does_not_identify_a_board_pane() {
+        let pane = PaneInfo {
+            pane_id: "w0:p1".into(),
+            label: Some("shell".into()),
+            terminal_title_stripped: Some("tsk".into()),
+            ..PaneInfo::default()
+        };
+
+        assert!(!is_tasks_pane(&pane));
     }
 
     #[test]
