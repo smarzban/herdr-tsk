@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use super::CliOutput;
 use crate::cli::add::{AddError, FlagAddResult};
 use crate::cli::list::{ListError, ListResult, ListRow, ListView};
+use crate::cli::steps::{StepLine, StepsError, StepsResult};
 use crate::domain::HumanStatus;
 use crate::ui::terminal_text;
 
@@ -17,8 +18,9 @@ pub fn add_help() -> CliOutput {
 pub fn list_help() -> CliOutput {
     CliOutput {
         stdout: concat!(
-            "usage: herdr-tasks list [-p <project> | --global | --all] [--done | --deleted] [--json] [--state-dir <dir>]\n\n",
+            "usage: herdr-tasks list [<task-id>] [-p <project> | --global | --all] [--done | --deleted] [--json] [--state-dir <dir>]\n\n",
             "Lists ready, started, blocked, and review tasks in the invocation project by default, or global scope outside a repository.\n",
+            "With a task id (a task UUID from add --json or list --json), lists that one task alone and prints its steps: one line per step with its [x]/[ ] state and step short id. A task id cannot be combined with scope or status filters.\n",
             "--project uses the same basename-or-path scope resolution as add; --global selects global tasks; --all selects every scope. For dash-leading project and state-directory values, use --project=<scope> and --state-dir=<dir>.\n",
             "--done lists done tasks only. --deleted lists soft-deleted tasks only, regardless of status.\n",
             "To recover a typo scope, use herdr-tasks list --all --json.\n",
@@ -98,10 +100,7 @@ pub fn usage(reason: &str) -> CliOutput {
 
 pub fn list(result: ListResult, json: bool) -> CliOutput {
     let stdout = if json {
-        format!(
-            "{}\n",
-            serde_json::to_string(&result.rows).expect("list rows are serializable")
-        )
+        list_json(&result)
     } else {
         list_human(&result)
     };
@@ -110,6 +109,27 @@ pub fn list(result: ListResult, json: bool) -> CliOutput {
         stderr: String::new(),
         code: 0,
     }
+}
+
+/// The flat row array. A single-task listing with steps attaches them to its
+/// one row (`steps`: id, done, short_id, text); every other listing keeps
+/// today's exact row shape.
+fn list_json(result: &ListResult) -> String {
+    let mut value = serde_json::to_value(&result.rows).expect("list rows are serializable");
+    if !result.steps.is_empty() {
+        value
+            .as_array_mut()
+            .expect("rows serialize to an array")
+            .get_mut(0)
+            .expect("a steps collection implies the single task row")
+            .as_object_mut()
+            .expect("row serializes to an object")
+            .insert(
+                "steps".into(),
+                serde_json::to_value(&result.steps).expect("steps are serializable"),
+            );
+    }
+    format!("{value}\n")
 }
 
 fn list_human(result: &ListResult) -> String {
@@ -143,6 +163,10 @@ fn list_human(result: &ListResult) -> String {
             append_scope_groups(&mut output, rows, labels.as_ref().expect("scope labels"));
         } else {
             append_rows(&mut output, &rows, " ");
+            if !result.steps.is_empty() {
+                // Single-task listing: the step lines belong under the one row above.
+                append_step_lines(&mut output, &result.steps, " ");
+            }
         }
     }
     output
@@ -181,6 +205,20 @@ fn append_rows(output: &mut String, rows: &[&ListRow], indent: &str) {
         output.push_str(indent);
         output.push_str("- ");
         output.push_str(&terminal_text(&row.title));
+        output.push('\n');
+    }
+}
+
+/// One line per step: state glyph, short id, text, one level under the row.
+fn append_step_lines(output: &mut String, steps: &[StepLine], indent: &str) {
+    for step in steps {
+        output.push_str(indent);
+        output.push_str("  [");
+        output.push(if step.done { 'x' } else { ' ' });
+        output.push_str("] ");
+        output.push_str(&step.short_id);
+        output.push(' ');
+        output.push_str(&terminal_text(&step.text));
         output.push('\n');
     }
 }
@@ -324,22 +362,87 @@ fn path_segments(path: &str) -> Vec<String> {
         .collect()
 }
 
+pub fn steps_help() -> CliOutput {
+    CliOutput {
+        stdout: concat!(
+            "usage: herdr-tasks steps <task-id> add <text> [--state-dir <dir>]\n",
+            "       herdr-tasks steps <task-id> toggle <step-short-id> [--state-dir <dir>]\n\n",
+            "steps adds one step to a task or toggles one step's done flag. The task id is a task UUID from herdr-tasks list --json.\n",
+            "A step short id is the shortest unambiguous prefix of the step id, as printed by herdr-tasks list <task-id>.\n",
+            "toggle flips the step state: a blind retry after an unseen success flips it back, so verify with herdr-tasks list <task-id> before retrying.\n\n",
+            "Refusal tokens (exit 1): empty-step-text, invalid-step-text, unknown-task, soft-deleted-task, unknown-step, ambiguous-step.\n\n",
+            "Exit contract:\n",
+            "  exit 0: step created or toggled\n",
+            "  exit 1: step refusal; verify state with list before retrying\n",
+            "  exit 2: usage or parse error, nothing persisted\n",
+            "  exit 3: store I/O, commit indeterminate, verify with list before retrying\n"
+        )
+        .into(),
+        stderr: String::new(),
+        code: 0,
+    }
+}
+
+pub fn steps(result: StepsResult) -> CliOutput {
+    let stdout = match result {
+        StepsResult::Added { short_id, text } => format!("added {short_id} {text}\n"),
+        StepsResult::Toggled {
+            short_id,
+            text,
+            done,
+        } => format!(
+            "toggled {short_id} [{}] {text}\n",
+            if done { "x" } else { " " }
+        ),
+    };
+    CliOutput {
+        stdout,
+        stderr: String::new(),
+        code: 0,
+    }
+}
+
+pub fn steps_usage(reason: &str) -> CliOutput {
+    CliOutput {
+        stdout: String::new(),
+        stderr: format!(
+            "herdr-tasks steps: {reason}\nusage: herdr-tasks steps <task-id> add <text> | toggle <step-short-id> [--state-dir <dir>]\n"
+        ),
+        code: 2,
+    }
+}
+
+pub fn steps_rejected(error: StepsError) -> CliOutput {
+    let (detail, code) = match error {
+        StepsError::Store(detail) => (detail, 3),
+        other => (other.code().into(), 1),
+    };
+    CliOutput {
+        stdout: String::new(),
+        stderr: format!("herdr-tasks steps: {detail}\n"),
+        code,
+    }
+}
+
 pub fn list_usage(reason: &str) -> CliOutput {
     CliOutput {
         stdout: String::new(),
         stderr: format!(
-            "herdr-tasks list: {reason}\nusage: herdr-tasks list [-p <project> | --global | --all] [--done | --deleted] [--json] [--state-dir <dir>]\n"
+            "herdr-tasks list: {reason}\nusage: herdr-tasks list [<task-id>] [-p <project> | --global | --all] [--done | --deleted] [--json] [--state-dir <dir>]\n"
         ),
         code: 2,
     }
 }
 
 pub fn list_rejected(error: ListError) -> CliOutput {
-    let ListError::Store(detail) = error;
-    CliOutput {
-        stdout: String::new(),
-        stderr: format!("herdr-tasks list: {detail}\n"),
-        code: 3,
+    match error {
+        ListError::Store(detail) => CliOutput {
+            stdout: String::new(),
+            stderr: format!("herdr-tasks list: {detail}\n"),
+            code: 3,
+        },
+        // A well-formed id that addresses no task: the invocation is wrong, not the store.
+        ListError::UnknownTask(id) => list_usage(&format!("unknown task id {id}")),
     }
 }
 

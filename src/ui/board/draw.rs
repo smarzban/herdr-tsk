@@ -43,33 +43,40 @@ pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
         None
     };
     if let Some(task) = page_task {
-        let mut items = Vec::with_capacity(5);
-        items.push(VerbEntry {
+        let mut entries = Vec::with_capacity(6);
+        entries.push(VerbEntry {
             key: "e",
             label: "edit",
         });
-        match task.status {
-            HumanStatus::Ready => items.push(VerbEntry {
+        if model.has_live_step_cursor() {
+            entries.push(VerbEntry {
                 key: "space",
-                label: "start",
-            }),
-            HumanStatus::Done => items.push(VerbEntry {
-                key: "space",
-                label: "reopen",
-            }),
-            HumanStatus::Started | HumanStatus::Blocked | HumanStatus::Review => {}
+                label: "toggle step",
+            });
+        } else {
+            match task.status {
+                HumanStatus::Ready => entries.push(VerbEntry {
+                    key: "space",
+                    label: "start",
+                }),
+                HumanStatus::Done => entries.push(VerbEntry {
+                    key: "space",
+                    label: "reopen",
+                }),
+                HumanStatus::Started | HumanStatus::Blocked | HumanStatus::Review => {}
+            }
         }
         if task.status == HumanStatus::Done {
-            items.push(VerbEntry {
+            entries.push(VerbEntry {
                 key: "o",
                 label: help("o", "reopen"),
             });
         } else {
-            items.push(VerbEntry {
+            entries.push(VerbEntry {
                 key: "d",
                 label: help("d", "done"),
             });
-            items.push(VerbEntry {
+            entries.push(VerbEntry {
                 key: "b",
                 label: if task.status == HumanStatus::Blocked {
                     "unblock"
@@ -78,14 +85,24 @@ pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
                 },
             });
         }
-        items.push(VerbEntry {
+        entries.push(VerbEntry {
             key: "esc",
             label: "close",
         });
-        return items;
+        // AC-22: the footer verb bar lists the step-add verb while the page's task
+        // has at least one step. Last, like the board's capture entry, so the
+        // compact budget keeps the established verbs; the bar's prefix convention
+        // implies the modifier, exactly as for every other mutating key.
+        if !task.steps.is_empty() {
+            entries.push(VerbEntry {
+                key: "a",
+                label: "step",
+            });
+        }
+        return entries;
     }
 
-    let mut items = Vec::with_capacity(7);
+    let mut entries = Vec::with_capacity(7);
     let selected_task = model
         .selected_id()
         .and_then(|id| model.tasks.iter().find(|t| t.id == id));
@@ -93,13 +110,13 @@ pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
     if let Some(task) = selected_task {
         match task.status {
             HumanStatus::Ready => {
-                items.push(VerbEntry {
+                entries.push(VerbEntry {
                     key: "space",
                     label: "start",
                 });
             }
             HumanStatus::Done => {
-                items.push(VerbEntry {
+                entries.push(VerbEntry {
                     key: "space",
                     label: "reopen",
                 });
@@ -108,21 +125,21 @@ pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
             // available yet"): omit the entry rather than advertise a no-op.
             HumanStatus::Started | HumanStatus::Blocked | HumanStatus::Review => {}
         }
-        items.push(VerbEntry {
+        entries.push(VerbEntry {
             key: "enter",
             label: "open",
         });
         if task.status == HumanStatus::Done {
-            items.push(VerbEntry {
+            entries.push(VerbEntry {
                 key: "o",
                 label: help("o", "reopen"),
             });
         } else {
-            items.push(VerbEntry {
+            entries.push(VerbEntry {
                 key: "d",
                 label: help("d", "done"),
             });
-            items.push(VerbEntry {
+            entries.push(VerbEntry {
                 key: "b",
                 label: if task.status == HumanStatus::Blocked {
                     "unblock"
@@ -132,35 +149,66 @@ pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
             });
         }
     }
-    items.push(VerbEntry {
+    entries.push(VerbEntry {
         key: ":",
         label: help(":", "palette"),
     });
-    items.push(VerbEntry {
+    entries.push(VerbEntry {
         key: "?",
         label: help("?", "help"),
     });
     // Capture is last so the compact budget preserves the established board verbs.
-    items.push(VerbEntry {
+    entries.push(VerbEntry {
         key: "+",
         label: "capture",
     });
-    items
+    entries
 }
 
 /// Build the task page's paint payload from the open task form. View mode wraps the notes
 /// draft and windows it by the page scroll; field edits reuse the form's cursor windowing.
 fn build_task_page_overlay<'a>(
-    model: &BoardModel,
-    form: &BoardForm,
+    model: &'a BoardModel,
+    form: &'a BoardForm,
     geo: &tier::TierGeometry,
     scope_dropdown: Option<FormScopeDropdown<'a>>,
 ) -> QueueOverlay<'a> {
     let width = geo.row_width as usize;
-    let lay = render::task_page_layout(geo);
     let bound_task = form
         .task_id()
         .and_then(|id| model.tasks.iter().find(|task| task.id == id));
+    // The section consumes the extracted step views, never the raw storage; with
+    // steps the layout halves the content region (AC-24), so the notes window —
+    // and with it the notes scroll bound recorded below — keys off the same halved
+    // budget the painter lays out.
+    let step_views = bound_task.map(super::model::step_views).unwrap_or_default();
+    // A step draft is windowed for the shared bottom input slot: the row less
+    // the two-cell `▎ ` prompt that owns the terminal cursor.
+    let step_editor = form.steps.editor.as_ref().map(|editor| {
+        let avail = (geo.row_width as usize).saturating_sub(2);
+        let (text, cursor_col) = escaped_line_window(&editor.buffer, avail);
+        crate::ui::render::BottomInputSlot {
+            text,
+            cursor_col,
+            placeholder: "step…   enter save · ctrl+enter save+next · esc cancel",
+            refusal: editor.refusal.as_deref(),
+            // The bottom input replaces the shared status row. Forward recovery
+            // and record-refusal feedback to the surface that is actually visible.
+            message: model.message(),
+        }
+    });
+    // A notes edit always keeps one row: the layout reserves it (the section caps
+    // around it), so an active edit can never be scrolled/clamped out of the frame
+    // entirely. The step editor uses the shared bottom slot, so steps alone
+    // classify the page section.
+    let page_geo = render::bottom_input_geometry(*geo, step_editor.is_some());
+    let lay = render::task_page_layout(
+        &page_geo,
+        render::steps_section(step_views.len()),
+        u16::from(model.input_mode() == BoardInputMode::EditNotes),
+    );
+    // The renderer and input reducer share this viewport size for page scrolling.
+    form.steps.window_rows.set(lay.notes_rows as usize);
     let status = bound_task
         .map(|task| task.status)
         .unwrap_or(HumanStatus::Ready);
@@ -186,7 +234,8 @@ fn build_task_page_overlay<'a>(
         )
     };
 
-    // Notes body: wrapped + scrolled in view mode, cursor-windowed while editing.
+    // View mode supplies every wrapped note row. The shared page painter combines
+    // that stream with the steps, then windows it once against the fixed viewport.
     let notes_width = width.saturating_sub(3);
     let want = lay.notes_rows as usize;
     let (notes_rows, notes_cursor, more_lines) = if model.input_mode() == BoardInputMode::EditNotes
@@ -194,20 +243,13 @@ fn build_task_page_overlay<'a>(
         let (rows, row, col) = escaped_draft_rows(&form.notes, notes_width, want);
         (rows, Some((row, col)), 0)
     } else if form.notes.value().trim().is_empty() {
-        // The painter names this case ("no notes yet"); hand it no rows.
         (Vec::new(), None, 0)
     } else {
-        let all = wrapped_draft_rows(&form.notes, notes_width);
-        let total = all.len();
-        // Record what this frame could actually show, so the next scroll intent is bounded by
-        // rendered rows rather than logical lines (see `BoardForm::notes_max_scroll`).
-        let max_scroll = total.saturating_sub(want);
-        form.notes_max_scroll.set(max_scroll);
-        let scroll = form.notes_scroll.min(max_scroll);
-        let rows: Vec<String> = all.iter().skip(scroll).take(want).cloned().collect();
-        let more = total.saturating_sub(scroll + rows.len());
-        (rows, None, more)
+        (wrapped_draft_rows(&form.notes, notes_width), None, 0)
     };
+    let content = render::page_content_layout(notes_rows.len(), step_views.len(), lay.notes_rows);
+    form.notes_max_scroll.set(content.max_scroll);
+    form.steps.content_start.set(content.steps_start);
 
     // Meta footer: scope · created · updated (ages only while the bound task is present).
     let mut meta = match &form.scope {
@@ -237,6 +279,11 @@ fn build_task_page_overlay<'a>(
         notes_rows,
         notes_cursor,
         more_lines,
+        step_views,
+        step_cursor: form.steps.cursor,
+        step_scroll: form.notes_scroll,
+        step_marked: form.steps.delete_mark,
+        step_editor,
         meta,
         focus,
         scope_dropdown,
@@ -369,11 +416,19 @@ fn draw_board_impl(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap
         let input_width = (geo.row_width as usize).saturating_sub(2);
         let (title, title_cursor) = escaped_line_window(&quick_add.title, input_width);
         QueueOverlay::QuickAdd {
-            title,
-            title_cursor,
+            input: crate::ui::render::BottomInputSlot {
+                text: title,
+                cursor_col: title_cursor,
+                placeholder: "title…   !p global · !p name project · tab details",
+                refusal: None,
+                // Save recovery owns the verb row; ordinary quick-add refusals
+                // use the shared slot's reserved row above the cursor.
+                message: (model.input_mode() != BoardInputMode::SaveRecovery)
+                    .then(|| model.message())
+                    .flatten(),
+            },
             project_scope: matches!(quick_add.scope, TaskScope::Project { .. }),
             recovery: model.input_mode() == BoardInputMode::SaveRecovery,
-            message: model.message(),
         }
     } else if model.input_mode() == BoardInputMode::Help {
         QueueOverlay::Help { lines: &help_lines }

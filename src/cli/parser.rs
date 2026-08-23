@@ -2,6 +2,10 @@
 
 use std::path::PathBuf;
 
+use uuid::Uuid;
+
+use super::steps::StepsAction;
+
 /// Parsed add input. A plan source is selected by `file` or piped stdin.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FlagAdd {
@@ -112,6 +116,92 @@ pub fn parse_flag_add(args: &[String]) -> Result<FlagAdd, String> {
     }
     if parsed.has_item_flags && parsed.file.is_some() {
         return Err("item flags cannot be used with --file".into());
+    }
+    Ok(parsed)
+}
+
+/// Parsed `steps` input. Flags come first; the positionals are task id, action,
+/// and the action's operand.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FlagSteps {
+    pub task: Option<Uuid>,
+    pub action: Option<StepsAction>,
+    pub state_dir: Option<PathBuf>,
+    pub help: bool,
+}
+
+/// Parse `herdr-tasks steps` arguments, including argv0 and the `steps` subcommand.
+///
+/// Flags may appear anywhere; the positionals in order are task id, action, and
+/// the action's operand.
+pub fn parse_flag_steps(args: &[String]) -> Result<FlagSteps, String> {
+    if args.get(1).map(String::as_str) != Some("steps") {
+        return Err("expected steps command".into());
+    }
+
+    let mut parsed = FlagSteps {
+        task: None,
+        action: None,
+        state_dir: None,
+        help: false,
+    };
+    let mut positionals: Vec<&str> = Vec::new();
+    let mut index = 2;
+    while let Some(flag) = args.get(index).map(String::as_str) {
+        let value = |name: &str| match args.get(index + 1) {
+            Some(value) if !value.starts_with('-') => Ok(value.clone()),
+            _ => Err(format!("missing value for {name}")),
+        };
+        match flag {
+            "--help" => {
+                parsed.help = true;
+                index += 1;
+            }
+            flag if flag.starts_with("--state-dir=") => {
+                parsed.state_dir = Some(PathBuf::from(flag["--state-dir=".len()..].to_owned()));
+                index += 1;
+            }
+            "--state-dir" => {
+                parsed.state_dir = Some(PathBuf::from(value(flag)?));
+                index += 2;
+            }
+            flag if flag.starts_with('-') => return Err(format!("unknown steps argument {flag}")),
+            positional => {
+                if positionals.len() == 3 {
+                    return Err(format!("unexpected steps argument {positional}"));
+                }
+                positionals.push(positional);
+                index += 1;
+            }
+        }
+    }
+
+    if !parsed.help {
+        if positionals.len() < 2 {
+            return Err(if positionals.is_empty() {
+                "task id is required".into()
+            } else {
+                "steps action is required".into()
+            });
+        }
+        let task = positionals[0]
+            .parse::<Uuid>()
+            .map_err(|_| format!("invalid task id {}", positionals[0]))?;
+        let operand = positionals
+            .get(2)
+            .copied()
+            .map(str::to_owned)
+            .ok_or_else(|| match positionals[1] {
+                "add" => "step text is required".to_owned(),
+                "toggle" => "step short id is required".to_owned(),
+                other => format!("unknown steps action {other}"),
+            })?;
+        parsed.action = Some(match positionals[1] {
+            "add" => StepsAction::Add { text: operand },
+            "toggle" => StepsAction::Toggle { short_id: operand },
+            other => return Err(format!("unknown steps action {other}")),
+        });
+        parsed.task = Some(task);
     }
     Ok(parsed)
 }

@@ -312,6 +312,7 @@ fn verb_intent(model: &BoardModel, index: usize) -> Option<BoardIntent> {
         "u" => Some(BoardIntent::Undo),
         "e" => Some(BoardIntent::BeginEditTitle),
         "n" => Some(BoardIntent::BeginEditNotes),
+        "a" => Some(BoardIntent::BeginAddStep),
         "esc" => Some(BoardIntent::CloseLayer),
         ":" => Some(BoardIntent::OpenCommandPalette),
         "?" => Some(BoardIntent::OpenHelp),
@@ -371,8 +372,8 @@ fn hit_at(hits: &QueueHitMap, pos: Position) -> Option<QueueHitTarget> {
 fn wheel_board_intent(model: &BoardModel, kind: MouseEventKind) -> Option<BoardIntent> {
     match model.input_mode() {
         BoardInputMode::TaskPage => match kind {
-            MouseEventKind::ScrollUp => Some(BoardIntent::PageScrollUp),
-            MouseEventKind::ScrollDown => Some(BoardIntent::PageScrollDown),
+            MouseEventKind::ScrollUp => Some(BoardIntent::PageWheelScrollUp),
+            MouseEventKind::ScrollDown => Some(BoardIntent::PageWheelScrollDown),
             _ => None,
         },
         BoardInputMode::Normal => {
@@ -459,6 +460,9 @@ pub fn map_board_mouse(
         }
         BoardInputMode::TaskPage => match hit_at(hits, pos) {
             Some(QueueHitTarget::FormScope) => None,
+            // A click on an step row selects it (AC-21) — the board's click
+            // convention: a click selects, never mutates.
+            Some(QueueHitTarget::Step(index)) => Some(BoardIntent::SelectStep(index)),
             Some(QueueHitTarget::Verb(index)) => verb_intent(model, index),
             _ => None,
         },
@@ -469,7 +473,11 @@ pub fn map_board_mouse(
             Some(QueueHitTarget::Verb(index)) => form_verb_intent(model, index),
             _ => None,
         },
-        BoardInputMode::Recovery
+        // The step line editor is keyboard-only in this slice: the mouse has no hit
+        // region on the section's line yet, so every click is inert rather than
+        // reaching the page behind the editor.
+        BoardInputMode::EditStep
+        | BoardInputMode::Recovery
         | BoardInputMode::CleanupConfirm
         | BoardInputMode::SaveRecovery => None,
         BoardInputMode::Normal => match hit_at(hits, pos) {

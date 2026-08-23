@@ -10,6 +10,7 @@ pub mod list;
 pub mod parser;
 pub mod presenter;
 pub mod router;
+pub mod steps;
 
 /// Captured process output, used by the binary and headless integration tests.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -32,8 +33,26 @@ where
         .collect::<Vec<_>>();
     match args.get(1).map(String::as_str) {
         Some("add") => run_add(args, &mut stdin, stdin_is_tty),
+        Some("steps") => run_steps(args),
         Some("list") => run_list(args),
-        _ => presenter::usage("expected add or list command"),
+        _ => presenter::usage("expected add, steps, or list command"),
+    }
+}
+
+fn run_steps(args: Vec<String>) -> CliOutput {
+    let input = match parser::parse_flag_steps(&args) {
+        Ok(input) => input,
+        Err(reason) => return presenter::steps_usage(&reason),
+    };
+    if input.help {
+        return presenter::steps_help();
+    }
+    let (Some(task), Some(action)) = (input.task, input.action) else {
+        return presenter::steps_usage("task id and action are required");
+    };
+    match steps::run(task, action, input.state_dir) {
+        Ok(result) => presenter::steps(result),
+        Err(error) => presenter::steps_rejected(error),
     }
 }
 

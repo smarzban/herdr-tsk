@@ -127,6 +127,16 @@ pub enum ObservedStatus {
     Unknown,
 }
 
+/// One step in a task's flat, ordered steps collection.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Step {
+    /// Stable identity, addressable by id prefix like a task.
+    pub id: Uuid,
+    /// One line of text, trimmed at the boundaries.
+    pub text: String,
+    pub done: bool,
+}
+
 /// One unit of intended work.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Task {
@@ -152,6 +162,10 @@ pub struct Task {
     pub provenance: ProvenanceOrigin,
     /// Append-only domain event history.
     pub history: Vec<TaskEvent>,
+    /// Flat, ordered steps. Absent on pre-steps stores; never reordered by a verb.
+    /// Old stores name this field `checklist`; new writes use `steps` only.
+    #[serde(default, alias = "checklist", skip_serializing_if = "Vec::is_empty")]
+    pub steps: Vec<Step>,
     pub soft_deleted: bool,
     #[serde(with = "super::time_serde")]
     pub created_at: SystemTime,
@@ -202,6 +216,10 @@ pub enum DomainError {
     StaleUndo(Uuid),
     /// No active dispatch attempt with this id exists in the domain state.
     UnknownDispatchAttempt(Uuid),
+    /// Step text was empty or whitespace-only after trim.
+    EmptyStepText,
+    /// No step with this id exists on the task.
+    UnknownStep(Uuid),
     /// A task already owns an active dispatch attempt and cannot start another.
     ActiveDispatchAttempt { task_id: Uuid, attempt_id: Uuid },
     /// Dispatch-attempt transition was refused without changing the journal.
@@ -218,6 +236,8 @@ impl std::fmt::Display for DomainError {
                 write!(f, "task {id} changed since the undoable action")
             }
             DomainError::UnknownDispatchAttempt(id) => write!(f, "unknown dispatch attempt {id}"),
+            DomainError::EmptyStepText => write!(f, "step text must be non-empty after trim"),
+            DomainError::UnknownStep(id) => write!(f, "unknown step id {id}"),
             DomainError::ActiveDispatchAttempt {
                 task_id,
                 attempt_id,
@@ -416,6 +436,7 @@ impl DomainState {
                 kind: TaskEventKind::Created,
                 at: now,
             }],
+            steps: Vec::new(),
             soft_deleted: false,
             created_at: now,
             updated_at: now,
@@ -485,6 +506,85 @@ impl DomainState {
         task.notes = notes;
         task.scope = scope;
         record_mutation(task, TaskEventKind::Edited);
+        Ok(())
+    }
+
+    /// Add one step at the end of the task's steps.
+    ///
+    /// Trims text and refuses empty-after-trim. Returns the new step's id.
+    /// Never touches status, scope, or notes.
+    pub fn add_step(&mut self, task_id: Uuid, text: impl AsRef<str>) -> Result<Uuid, DomainError> {
+        let text = text.as_ref().trim();
+        if text.is_empty() {
+            return Err(DomainError::EmptyStepText);
+        }
+        let task = self.task_mut(task_id)?;
+        let step = Step {
+            id: Uuid::new_v4(),
+            text: text.to_string(),
+            done: false,
+        };
+        let step_id = step.id;
+        task.steps.push(step);
+        record_mutation(task, TaskEventKind::StepAdded);
+        Ok(step_id)
+    }
+
+    /// Flip one step's done flag.
+    ///
+    /// Journals `StepChecked` when the step turns done and `StepUnchecked`
+    /// when it turns open. Never touches status, scope, or notes; completing
+    /// the steps never completes the task.
+    pub fn toggle_step(&mut self, task_id: Uuid, step_id: Uuid) -> Result<(), DomainError> {
+        let task = self.task_mut(task_id)?;
+        let step = task
+            .steps
+            .iter_mut()
+            .find(|step| step.id == step_id)
+            .ok_or(DomainError::UnknownStep(step_id))?;
+        step.done = !step.done;
+        let kind = if step.done {
+            TaskEventKind::StepChecked
+        } else {
+            TaskEventKind::StepUnchecked
+        };
+        record_mutation(task, kind);
+        Ok(())
+    }
+
+    /// Rename one step. Trims text and refuses empty-after-trim.
+    /// Never touches status, scope, or notes.
+    pub fn rename_step(
+        &mut self,
+        task_id: Uuid,
+        step_id: Uuid,
+        text: impl AsRef<str>,
+    ) -> Result<(), DomainError> {
+        let text = text.as_ref().trim();
+        if text.is_empty() {
+            return Err(DomainError::EmptyStepText);
+        }
+        let task = self.task_mut(task_id)?;
+        let step = task
+            .steps
+            .iter_mut()
+            .find(|step| step.id == step_id)
+            .ok_or(DomainError::UnknownStep(step_id))?;
+        step.text = text.to_string();
+        record_mutation(task, TaskEventKind::StepRenamed);
+        Ok(())
+    }
+
+    /// Remove one step by id. Never touches status, scope, or notes.
+    pub fn remove_step(&mut self, task_id: Uuid, step_id: Uuid) -> Result<(), DomainError> {
+        let task = self.task_mut(task_id)?;
+        let index = task
+            .steps
+            .iter()
+            .position(|step| step.id == step_id)
+            .ok_or(DomainError::UnknownStep(step_id))?;
+        task.steps.remove(index);
+        record_mutation(task, TaskEventKind::StepRemoved);
         Ok(())
     }
 
@@ -1589,6 +1689,141 @@ mod tests {
         assert!(c.file.is_none());
         assert!(c.line.is_none());
         assert!(task.agent_meta.is_none());
+    }
+
+    #[test]
+    fn steps_mutations_journal_events_and_bump_revision() {
+        let mut state = DomainState::new();
+        let id = create_sample(&mut state);
+        let mut previous_revision = state.get(id).expect("task").revision.expect("revision");
+        let mut previous_len = state.get(id).expect("task").history.len();
+
+        let mut assert_journaled = |state: &DomainState, kind: TaskEventKind| {
+            let task = state.get(id).expect("task exists");
+            let revision = task.revision.expect("revision");
+            assert_ne!(revision, previous_revision, "revision must change");
+            previous_revision = revision;
+            assert_eq!(
+                task.history.len(),
+                previous_len + 1,
+                "exactly one history event must be appended"
+            );
+            previous_len = task.history.len();
+            assert_eq!(task.history.last().expect("event").kind, kind);
+        };
+
+        let step = state.add_step(id, "  First step  ").expect("add step");
+        assert_journaled(&state, TaskEventKind::StepAdded);
+        assert_eq!(
+            state.get(id).expect("task").steps,
+            vec![Step {
+                id: step,
+                text: "First step".into(),
+                done: false,
+            }],
+            "add must trim and append at the end"
+        );
+
+        state.toggle_step(id, step).expect("toggle on");
+        assert_journaled(&state, TaskEventKind::StepChecked);
+        assert!(state.get(id).expect("task").steps[0].done);
+
+        state.toggle_step(id, step).expect("toggle off");
+        assert_journaled(&state, TaskEventKind::StepUnchecked);
+        assert!(!state.get(id).expect("task").steps[0].done);
+
+        state
+            .rename_step(id, step, "  Renamed step  ")
+            .expect("rename steps step");
+        assert_journaled(&state, TaskEventKind::StepRenamed);
+        assert_eq!(
+            state.get(id).expect("task").steps[0].text,
+            "Renamed step",
+            "rename must trim"
+        );
+
+        state.remove_step(id, step).expect("remove step");
+        assert_journaled(&state, TaskEventKind::StepRemoved);
+        assert!(state.get(id).expect("task").steps.is_empty());
+    }
+
+    #[test]
+    fn toggle_step_keeps_human_status_including_completing_last_step() {
+        let mut state = DomainState::new();
+        let id = create_sample(&mut state);
+        state
+            .set_status(id, HumanStatus::Started)
+            .expect("set_status");
+        let step = state.add_step(id, "Only step").expect("add step");
+        state
+            .toggle_step(id, step)
+            .expect("toggle the only step done");
+        let task = state.get(id).expect("task exists");
+        assert!(task.steps[0].done, "the only step is now done");
+        assert_eq!(
+            task.status,
+            HumanStatus::Started,
+            "completing the steps must never change human status"
+        );
+    }
+
+    #[test]
+    fn step_commands_reject_unknown_ids_and_empty_text() {
+        let mut state = DomainState::new();
+        let id = create_sample(&mut state);
+        let step = state.add_step(id, "Step").expect("add step");
+        let missing_task = Uuid::new_v4();
+        let missing_item = Uuid::new_v4();
+
+        assert_eq!(
+            state.add_step(missing_task, "x"),
+            Err(DomainError::UnknownId(missing_task))
+        );
+        assert_eq!(
+            state.toggle_step(missing_task, step),
+            Err(DomainError::UnknownId(missing_task))
+        );
+        assert_eq!(
+            state.rename_step(missing_task, step, "x"),
+            Err(DomainError::UnknownId(missing_task))
+        );
+        assert_eq!(
+            state.remove_step(missing_task, step),
+            Err(DomainError::UnknownId(missing_task))
+        );
+        assert_eq!(
+            state.toggle_step(id, missing_item),
+            Err(DomainError::UnknownStep(missing_item))
+        );
+        assert_eq!(
+            state.rename_step(id, missing_item, "x"),
+            Err(DomainError::UnknownStep(missing_item))
+        );
+        assert_eq!(
+            state.remove_step(id, missing_item),
+            Err(DomainError::UnknownStep(missing_item))
+        );
+        assert_eq!(state.add_step(id, "   "), Err(DomainError::EmptyStepText));
+        assert_eq!(
+            state.rename_step(id, step, "  "),
+            Err(DomainError::EmptyStepText)
+        );
+
+        let task = state.get(id).expect("task exists");
+        assert_eq!(
+            task.steps,
+            vec![Step {
+                id: step,
+                text: "Step".into(),
+                done: false,
+            }],
+            "refused commands must not mutate the steps"
+        );
+        assert_eq!(
+            task.history.len(),
+            2,
+            "no journal writes for refused commands"
+        );
     }
 
     #[test]

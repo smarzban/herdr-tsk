@@ -19,6 +19,7 @@ use crate::ui::input::{
 };
 use crate::ui::mouse::BoardPopup;
 use crate::ui::queue::{self, DeckScope, QueueView, SectionKind};
+use crate::ui::render::StepView;
 use crate::ui::selection;
 use crate::ui::terminal_text;
 
@@ -44,6 +45,15 @@ pub enum BoardInputMode {
     /// click does NOT: field regions are inert in this state, and only move focus once one
     /// of the edit states is already open (see the mouse mapper's form-field arms).
     TaskPage,
+    /// The page footer's one-line add/rename step input owns input (AC-25). It is a
+    /// Title-like single-line draft ([`crate::ui::edit::EditBuffer`]) carried on the
+    /// page form's steps state, not one of the three task-form fields: Enter
+    /// applies the domain command (Ctrl+Enter adds and reopens the line empty), Esc
+    /// cancels. The applied line and this mode outlive the save call — only the
+    /// persistence boundary's confirmed sync closes (or reopens) the line, and a
+    /// failed save holds it until Retry/Cancel resolve; every close returns to
+    /// [`BoardInputMode::TaskPage`].
+    EditStep,
     /// Modal selection over the session project-scope options.
     ProjectPicker,
     /// Durable dispatch attempt recovery actions.
@@ -177,10 +187,12 @@ pub(super) struct BoardForm {
     pub(super) scope_options: Vec<TaskScope>,
     pub(super) scope_selected: usize,
     pub(super) binding: BoardFormBinding,
-    /// View-mode scroll of the task page's notes body (wrapped rows), never used by capture.
+    /// View-mode scroll of the task page's shared notes-and-steps body, never used by capture.
     pub(super) notes_scroll: usize,
-    /// The furthest `notes_scroll` the LAST painted frame could actually show, in wrapped
-    /// rows (`wrapped rows - visible rows`).
+    /// Page-session steps state (step cursor, window scroll, delete mark, step
+    /// editor). Carried by the form so it lives exactly as long as the page does.
+    pub(super) steps: StepsPageState,
+    /// The furthest shared-content scroll offset the last painted frame can show.
     ///
     /// The scroll bound depends on the wrap width, which only the renderer knows: the model
     /// is deliberately geometry-free and the render path takes `&BoardModel`. Bounding the
@@ -258,6 +270,7 @@ impl BoardForm {
             scope_selected,
             binding,
             notes_scroll: 0,
+            steps: StepsPageState::default(),
             notes_max_scroll: std::cell::Cell::new(0),
         }
     }
@@ -359,6 +372,57 @@ impl BoardForm {
     }
 }
 
+/// The one-line add/rename step input on the task page's footer row
+/// (page-session only).
+///
+/// `rename` names the step being edited; `None` is an add (the buffer starts empty).
+/// `refusal` is the line's own empty-text refusal (AC-13): painted on the line,
+/// never the board status row, and cleared when the line closes or its buffer
+/// changes.
+#[derive(Debug, Clone)]
+pub(super) struct StepEditor {
+    pub(super) buffer: EditBuffer,
+    pub(super) rename: Option<Uuid>,
+    pub(super) refusal: Option<String>,
+}
+
+/// An step-editor apply waiting for the app save boundary to confirm persistence
+/// (AC-14). `step` + `text` name the mutation that must land before the line may
+/// close — or, for Ctrl+Enter in add mode, reopen empty.
+#[derive(Debug, Clone)]
+pub(super) struct StepEditorSave {
+    pub(super) step: Uuid,
+    pub(super) text: String,
+    pub(super) reopen: bool,
+}
+
+/// Page-session steps state for the task page, never persisted.
+///
+/// The step cursor lifecycle (spec: resolved decisions, amended 2026-08-22):
+/// inactive when the page opens; a bare ↓ (re-)activates it on the first step —
+/// including after an earlier ↑-deactivation, so activation is never one-shot;
+/// ↑ from the first step deactivates it. While inactive ↑ scrolls the notes and
+/// ↓ re-activates; a click on an step row moves the cursor onto that step
+/// (AC-21). A task with no steps never activates a cursor.
+#[derive(Debug, Clone, Default)]
+pub(super) struct StepsPageState {
+    /// Highlighted step index; `None` = inactive.
+    pub(super) cursor: Option<usize>,
+    /// Absolute content row of the steps label, recorded by the renderer so cursor
+    /// movement can keep its selected step inside the shared viewport.
+    pub(super) content_start: std::cell::Cell<usize>,
+    /// Step index visibly marked by the first press of the delete verb. Any intervening
+    /// intent clears it; only the verb's second press removes.
+    pub(super) delete_mark: Option<usize>,
+    /// The open one-line add/rename editor, if any.
+    pub(super) editor: Option<StepEditor>,
+    /// An editor apply the save boundary has not confirmed yet (AC-14). While it is
+    /// set, the editor and its input mode are held exactly as the user left them.
+    pub(super) pending_save: Option<StepEditorSave>,
+    /// Shared-content rows the last painted viewport showed (renderer-recorded).
+    pub(super) window_rows: std::cell::Cell<usize>,
+}
+
 /// Scope choices shared by capture and task forms.
 ///
 /// The order is intentional: the form's initial scope, the current repository, project scopes
@@ -393,6 +457,22 @@ fn board_form_scope_options(
     }
     push(TaskScope::Global, &mut options);
     options
+}
+
+/// Extract the steps step views the task page paints: done flag + text per step,
+/// in storage order.
+///
+/// This is the one seam between the page payload and steps storage: the payload
+/// consumes these views and never reads `Task.steps` itself, so later page
+/// consumers (cursor, verbs, editor) swap the view, not the storage shape.
+pub(super) fn step_views(task: &Task) -> Vec<StepView> {
+    task.steps
+        .iter()
+        .map(|step| StepView {
+            done: step.done,
+            text: step.text.clone(),
+        })
+        .collect()
 }
 
 /// Pure board presentation state for one open session.
@@ -588,6 +668,25 @@ impl BoardModel {
             self.input_mode = BoardInputMode::QuickAdd;
             self.clear_message();
         }
+        // A held step line editor unwinds to page view on Cancel (AC-14): the
+        // baseline Cancel just restored rolled its mutation back, so nothing is left
+        // to hold the line for, and an edit mode whose editor is gone is the orphan
+        // no key can escape. The Cancel path's `sync_from_domain` ran first and left
+        // the pending save unresolved precisely because the mutation is not in the
+        // baseline; Retried resolves it there instead and never reaches this branch.
+        if resolution == SaveResolution::Cancelled
+            && self
+                .form
+                .as_ref()
+                .is_some_and(|form| form.steps.pending_save.is_some())
+        {
+            if let Some(form) = self.form.as_mut() {
+                form.steps.pending_save = None;
+                form.steps.editor = None;
+            }
+            self.input_mode = BoardInputMode::TaskPage;
+            self.clear_message();
+        }
         cancelled_quick_add
     }
 
@@ -610,6 +709,7 @@ impl BoardModel {
         });
         self.attempts = state.active_attempts().to_vec();
         self.finish_quick_add_save();
+        self.finish_step_editor_save();
         self.reanchor_selection(self.selection_id, &previous_visible);
         if self.attempts.is_empty()
             && matches!(
@@ -911,6 +1011,53 @@ impl BoardModel {
         self.clear_message();
     }
 
+    /// Release a held step line editor once persistence has confirmed its mutation
+    /// (AC-14's release side).
+    ///
+    /// Mirrors [`Self::finish_quick_add_save`]'s identity check: the touched step
+    /// must be present carrying its new text in the synced tasks before the line may
+    /// close — or reopen empty, for Ctrl+Enter in add mode. The Cancel path syncs the
+    /// rolled-back baseline first, where the step is absent (an add) or still carries
+    /// its old text (a rename), so the line stays held for [`Self::end_save_recovery`]
+    /// to unwind to page view instead. The editor and its input mode outlive the save
+    /// call precisely because nothing but this confirmed landing releases them.
+    fn finish_step_editor_save(&mut self) {
+        let Some(form) = self.form.as_ref().filter(|form| form.is_task()) else {
+            return;
+        };
+        let Some(task_id) = form.task_id() else {
+            return;
+        };
+        let Some(pending) = form.steps.pending_save.clone() else {
+            return;
+        };
+        let landed = self.tasks.iter().any(|task| {
+            task.id == task_id
+                && task
+                    .steps
+                    .iter()
+                    .any(|step| step.id == pending.step && step.text == pending.text)
+        });
+        if !landed {
+            return;
+        }
+        let form = self.form.as_mut().expect("task form checked above");
+        form.steps.pending_save = None;
+        if pending.reopen {
+            // The rapid-capture loop: the line reopens empty for the next step, its
+            // mode never having left it.
+            form.steps.editor = Some(StepEditor {
+                buffer: seeded_draft(""),
+                rename: None,
+                refusal: None,
+            });
+        } else {
+            form.steps.editor = None;
+            self.input_mode = BoardInputMode::TaskPage;
+        }
+        self.clear_message();
+    }
+
     /// Focused field of the shared board form, if one is open.
     pub fn form_focus(&self) -> Option<CaptureField> {
         self.form.as_ref().map(|form| form.focus)
@@ -935,11 +1082,24 @@ impl BoardModel {
         form.scope_options.get(form.scope_selected)
     }
 
+    /// Apply the shared cursor-window origin contract whenever form focus enters Notes.
+    fn set_form_focus(form: &mut BoardForm, focus: CaptureField) {
+        form.focus = focus;
+        // Notes drafts are cursor-windowed rather than a full copy of the shared
+        // content stream. Entering the editor therefore returns its window to the
+        // visible origin, so a prior reading scroll cannot hide the draft or put
+        // the terminal caret on a step row.
+        if focus == CaptureField::Notes && form.is_task() {
+            form.notes_scroll = 0;
+        }
+    }
+
     /// Enter field edit on the page's own focused field (Tab from view mode).
     pub(super) fn enter_page_field_focus(&mut self) {
-        let Some(form) = self.form.as_ref().filter(|form| form.is_task()) else {
+        let Some(form) = self.form.as_mut().filter(|form| form.is_task()) else {
             return;
         };
+        Self::set_form_focus(form, form.focus);
         self.input_mode = form.parent_mode();
     }
 
@@ -952,6 +1112,7 @@ impl BoardModel {
         } else {
             form.focus_prev();
         }
+        Self::set_form_focus(form, form.focus);
         self.input_mode = form.parent_mode();
     }
 
@@ -963,8 +1124,24 @@ impl BoardModel {
         if self.input_mode == BoardInputMode::FormScopeDropdown {
             return;
         }
-        form.focus = focus;
+        Self::set_form_focus(form, focus);
         self.input_mode = form.parent_mode();
+    }
+
+    /// Whether the task page cursor selects a current step in this synchronized snapshot.
+    pub(super) fn has_live_step_cursor(&self) -> bool {
+        if self.input_mode != BoardInputMode::TaskPage {
+            return false;
+        }
+        let Some(form) = self.form.as_ref().filter(|form| form.is_task()) else {
+            return false;
+        };
+        let Some(index) = form.steps.cursor else {
+            return false;
+        };
+        form.task_id()
+            .and_then(|id| self.tasks.iter().find(|task| task.id == id))
+            .is_some_and(|task| task.steps.get(index).is_some())
     }
 
     pub(super) fn cycle_form_scope(&mut self) {

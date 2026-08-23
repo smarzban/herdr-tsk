@@ -1,0 +1,269 @@
+//! Headless step creation and toggling by step short id.
+
+use std::path::PathBuf;
+
+use serde::Serialize;
+
+use crate::cli::add::has_c0_control;
+use crate::domain::{DomainError, DomainState, Step};
+use crate::store::{default_state_dir, TaskStore};
+use uuid::Uuid;
+
+/// The `steps` action parsed from argv.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StepsAction {
+    Add { text: String },
+    Toggle { short_id: String },
+}
+
+/// A steps failure after parsing and before presenting output.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StepsError {
+    UnknownTask(Uuid),
+    SoftDeletedTask(Uuid),
+    EmptyStepText,
+    InvalidStepText,
+    UnknownStep,
+    AmbiguousStep,
+    Store(String),
+}
+
+impl StepsError {
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::UnknownTask(_) => "unknown-task",
+            Self::SoftDeletedTask(_) => "soft-deleted-task",
+            Self::EmptyStepText => "empty-step-text",
+            Self::InvalidStepText => "invalid-step-text",
+            Self::UnknownStep => "unknown-step",
+            Self::AmbiguousStep => "ambiguous-step",
+            Self::Store(_) => "store-error",
+        }
+    }
+}
+
+/// A successful steps mutation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StepsResult {
+    Added {
+        short_id: String,
+        text: String,
+    },
+    Toggled {
+        short_id: String,
+        text: String,
+        done: bool,
+    },
+}
+
+/// Add one step or toggle one step, refusing before any mutation.
+///
+/// Refusals are resolved at the boundary under the store lock and never reach
+/// the durable write, so a refused steps command persists nothing.
+pub fn run(
+    task_id: Uuid,
+    action: StepsAction,
+    state_dir: Option<PathBuf>,
+) -> Result<StepsResult, StepsError> {
+    let store = TaskStore::new(state_dir.unwrap_or_else(default_state_dir));
+    store
+        .locked_transition_if_changed(|domain| {
+            let outcome = apply(domain, task_id, &action);
+            let changed = outcome.is_ok();
+            Ok((outcome, changed))
+        })
+        .map_err(StepsError::Store)?
+}
+
+fn apply(
+    domain: &mut DomainState,
+    task_id: Uuid,
+    action: &StepsAction,
+) -> Result<StepsResult, StepsError> {
+    // A deleted task's steps are not scriptable (park/link discipline, not edit's).
+    match domain.get(task_id) {
+        None => return Err(StepsError::UnknownTask(task_id)),
+        Some(task) if task.soft_deleted => return Err(StepsError::SoftDeletedTask(task_id)),
+        _ => {}
+    }
+    match action {
+        StepsAction::Add { text } => {
+            // Same boundary rule as task titles: any C0 control refuses before trimming.
+            if has_c0_control(text) {
+                return Err(StepsError::InvalidStepText);
+            }
+            let text = text.trim();
+            if text.is_empty() {
+                return Err(StepsError::EmptyStepText);
+            }
+            let step_id = domain.add_step(task_id, text).map_err(map_domain_error)?;
+            let steps = &domain.get(task_id).expect("task exists").steps;
+            Ok(StepsResult::Added {
+                short_id: step_short_id(steps, step_id),
+                text: text.to_owned(),
+            })
+        }
+        StepsAction::Toggle { short_id } => {
+            let steps = domain.get(task_id).expect("task exists").steps.clone();
+            let step_id = match resolve_step_short_id(&steps, short_id) {
+                ShortIdResolution::One(id) => id,
+                ShortIdResolution::Ambiguous => return Err(StepsError::AmbiguousStep),
+                ShortIdResolution::None => return Err(StepsError::UnknownStep),
+            };
+            domain
+                .toggle_step(task_id, step_id)
+                .map_err(map_domain_error)?;
+            let done = domain
+                .get(task_id)
+                .expect("task exists")
+                .steps
+                .iter()
+                .any(|step| step.id == step_id && step.done);
+            Ok(StepsResult::Toggled {
+                short_id: step_short_id(&steps, step_id),
+                text: steps
+                    .iter()
+                    .find(|step| step.id == step_id)
+                    .expect("toggled step exists")
+                    .text
+                    .clone(),
+                done,
+            })
+        }
+    }
+}
+
+/// Domain commands re-check what the boundary already validated; mirror the twins.
+fn map_domain_error(error: DomainError) -> StepsError {
+    match error {
+        DomainError::UnknownId(id) => StepsError::UnknownTask(id),
+        DomainError::EmptyStepText => StepsError::EmptyStepText,
+        DomainError::UnknownStep(_) => StepsError::UnknownStep,
+        other => StepsError::Store(other.to_string()),
+    }
+}
+
+/// The result of matching one short id against a task's steps.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ShortIdResolution {
+    One(Uuid),
+    Ambiguous,
+    None,
+}
+
+/// Resolve a step short id: an unambiguous prefix of one step id in the list.
+///
+/// A printed short id is never empty, so the empty operand addresses no step
+/// rather than whichever step a bare prefix match would hit.
+///
+/// SHORTCUT(T-5): linear scan per lookup; fine for typed step lists, index by
+/// prefix if lists ever grow unbounded.
+pub(crate) fn resolve_step_short_id(steps: &[Step], short_id: &str) -> ShortIdResolution {
+    if short_id.is_empty() {
+        return ShortIdResolution::None;
+    }
+    let mut found = None;
+    for step in steps {
+        if step.id.to_string().starts_with(short_id) {
+            if found.is_some() {
+                return ShortIdResolution::Ambiguous;
+            }
+            found = Some(step.id);
+        }
+    }
+    found.map_or(ShortIdResolution::None, ShortIdResolution::One)
+}
+
+/// The shortest prefix of one step id that no sibling step id shares.
+pub(crate) fn step_short_id(steps: &[Step], id: Uuid) -> String {
+    let full = id.to_string();
+    for length in 1..full.len() {
+        let prefix = &full[..length];
+        if steps
+            .iter()
+            .all(|step| step.id == id || !step.id.to_string().starts_with(prefix))
+        {
+            return prefix.to_owned();
+        }
+    }
+    full
+}
+
+/// One step view for single-task listing, in stored order.
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct StepLine {
+    pub(crate) id: Uuid,
+    pub(crate) done: bool,
+    pub(crate) short_id: String,
+    pub(crate) text: String,
+}
+
+/// The per-step views a single-task listing prints, in stored order.
+pub(crate) fn step_lines(steps: &[Step]) -> Vec<StepLine> {
+    steps
+        .iter()
+        .map(|step| StepLine {
+            id: step.id,
+            done: step.done,
+            short_id: step_short_id(steps, step.id),
+            text: step.text.clone(),
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn step(id: &str, text: &str, done: bool) -> Step {
+        Step {
+            id: Uuid::parse_str(id).expect("test step id"),
+            text: text.into(),
+            done,
+        }
+    }
+
+    #[test]
+    fn short_ids_stay_the_shortest_unambiguous_prefix() {
+        let steps = [
+            step("abcdef01-0000-4000-8000-000000000001", "one", false),
+            step("abcdef02-0000-4000-8000-000000000002", "two", true),
+        ];
+        assert_eq!(step_short_id(&steps, steps[0].id), "abcdef01");
+        assert_eq!(step_short_id(&steps, steps[1].id), "abcdef02");
+
+        let alone = [steps[0].clone()];
+        assert_eq!(step_short_id(&alone, steps[0].id), "a");
+    }
+
+    #[test]
+    fn prefix_resolution_is_one_ambiguous_or_none() {
+        let steps = [
+            step("abcdef01-0000-4000-8000-000000000001", "one", false),
+            step("abcdef01-0000-4000-8000-000000000002", "two", false),
+            step("99999999-0000-4000-8000-000000000003", "three", false),
+        ];
+        assert_eq!(
+            resolve_step_short_id(&steps, "abcdef01-0000-4000-8000-000000000001"),
+            ShortIdResolution::One(steps[0].id)
+        );
+        assert_eq!(
+            resolve_step_short_id(&steps, "abcdef01"),
+            ShortIdResolution::Ambiguous
+        );
+        assert_eq!(
+            resolve_step_short_id(&steps, "99999999-0000-4000-8000-000000000003"),
+            ShortIdResolution::One(steps[2].id)
+        );
+        assert_eq!(
+            resolve_step_short_id(&steps, "12341234"),
+            ShortIdResolution::None
+        );
+        let sole = [steps[2].clone()];
+        assert_eq!(
+            resolve_step_short_id(&sole, ""),
+            ShortIdResolution::None,
+            "the empty operand must address no step, not the sole one"
+        );
+    }
+}

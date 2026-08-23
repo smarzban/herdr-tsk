@@ -6,6 +6,7 @@ pub enum Surface {
     Board,
     Capture,
     Add,
+    Steps,
     List,
     FindBoardPane,
     GlobalHelp,
@@ -45,6 +46,7 @@ pub fn route<S: AsRef<str>>(
         return match arg {
             "capture" => Surface::Capture,
             "add" => Surface::Add,
+            "steps" => Surface::Steps,
             "list" => Surface::List,
             _ => Surface::Usage,
         };
@@ -103,6 +105,14 @@ mod tests {
     #[test]
     fn subcommand_wins_over_capture_env() {
         assert_eq!(route(["herdr-tasks", "add"], Some("capture")), Surface::Add);
+    }
+
+    #[test]
+    fn steps_positional_selects_steps_surface() {
+        assert_eq!(
+            route(["herdr-tasks", "steps", "id", "toggle", "abc"], None),
+            Surface::Steps
+        );
     }
 
     #[test]

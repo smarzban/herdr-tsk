@@ -124,6 +124,8 @@ pub enum BoardIntent {
     BeginEditNotes,
     /// Open the same bound task form as `e`, focused on Scope (palette Change scope).
     BeginEditScope,
+    /// Open the steps section's one-line editor empty to add an step (page `a`).
+    BeginAddStep,
     /// Move focus through the shared capture/task form fields.
     FormFocusNext,
     FormFocusPrev,
@@ -159,6 +161,10 @@ pub enum BoardIntent {
     EditMoveWordLeft,
     EditMoveWordRight,
     ConfirmEdit,
+    /// Ctrl+Enter in the steps step line editor (AC-12): save and continue — add
+    /// mode reopens the line empty for the next step, rename mode downgrades to a
+    /// plain save-and-close (decided by the reducer from the editor's own mode).
+    ConfirmEditNext,
     CancelEdit,
     /// Status-row quick-add edits and actions.
     QuickAddInsert(char),
@@ -197,6 +203,10 @@ pub enum BoardIntent {
     /// window run the same session-only scope jump choosing it in the selector dropdown
     /// would; no key produces it.
     SelectSectionProject(usize),
+    /// Move the task page's step cursor onto one steps step by its painted absolute
+    /// index (mouse click on an step row; AC-21). A click selects — it never toggles the
+    /// step, opens the editor, or arms the delete mark; no key produces it.
+    SelectStep(usize),
     /// Continue the selected durable dispatch attempt.
     RecoveryResume,
     /// Ask for explicit confirmation before removing recorded owned receipts.
@@ -250,6 +260,10 @@ pub enum BoardIntent {
     PageScrollUp,
     /// Task page view mode: scroll the notes body one wrapped row down.
     PageScrollDown,
+    /// Mouse-wheel scrolling is content-only: it never enters step-cursor navigation
+    /// when the shared page body has reached an edge.
+    PageWheelScrollUp,
+    PageWheelScrollDown,
     /// `z` — open/close the done drawer. Reducer lands in.
     ToggleDoneDrawer,
     /// `?` — open the help card. Surface wiring lands in.
@@ -542,7 +556,9 @@ pub fn map_key_with(
         BoardInputMode::QuickAdd => map_quick_add_key(key),
         BoardInputMode::FormScopeDropdown => map_board_form_key(CaptureField::Scope, true, key),
         BoardInputMode::EditScope => map_board_form_key(CaptureField::Scope, false, key),
-        BoardInputMode::EditTitle | BoardInputMode::EditNotes => map_edit(mode, key),
+        BoardInputMode::EditTitle | BoardInputMode::EditNotes | BoardInputMode::EditStep => {
+            map_edit(mode, key)
+        }
     }
 }
 
@@ -722,7 +738,7 @@ fn map_form_edit_key(
 pub fn map_edit_paste(mode: BoardInputMode, text: &str) -> Option<BoardIntent> {
     match mode {
         BoardInputMode::QuickAdd => Some(BoardIntent::QuickAddInsertText(text.to_string())),
-        BoardInputMode::EditTitle | BoardInputMode::EditNotes => {
+        BoardInputMode::EditTitle | BoardInputMode::EditNotes | BoardInputMode::EditStep => {
             Some(BoardIntent::EditInsertText(text.to_string()))
         }
         BoardInputMode::EditScope
@@ -753,6 +769,7 @@ pub fn intent_primary_action(intent: &BoardIntent) -> Option<PrimaryBoardAction>
         BoardIntent::SetStatus(_)
         | BoardIntent::BeginEditNotes
         | BoardIntent::BeginEditScope
+        | BoardIntent::BeginAddStep
         | BoardIntent::Quit
         | BoardIntent::EditInsert(_)
         | BoardIntent::EditInsertText(_)
@@ -766,6 +783,7 @@ pub fn intent_primary_action(intent: &BoardIntent) -> Option<PrimaryBoardAction>
         | BoardIntent::EditMoveWordLeft
         | BoardIntent::EditMoveWordRight
         | BoardIntent::ConfirmEdit
+        | BoardIntent::ConfirmEditNext
         | BoardIntent::CancelEdit
         | BoardIntent::QuickAddInsert(_)
         | BoardIntent::QuickAddInsertText(_)
@@ -799,6 +817,7 @@ pub fn intent_primary_action(intent: &BoardIntent) -> Option<PrimaryBoardAction>
         | BoardIntent::CancelProjectPicker
         | BoardIntent::SelectProjectOption(_)
         | BoardIntent::SelectSectionProject(_)
+        | BoardIntent::SelectStep(_)
         | BoardIntent::RecoveryResume
         | BoardIntent::BeginCleanup
         | BoardIntent::ConfirmCleanup
@@ -822,6 +841,8 @@ pub fn intent_primary_action(intent: &BoardIntent) -> Option<PrimaryBoardAction>
         | BoardIntent::CollapseDetail
         | BoardIntent::PageScrollUp
         | BoardIntent::PageScrollDown
+        | BoardIntent::PageWheelScrollUp
+        | BoardIntent::PageWheelScrollDown
         | BoardIntent::ToggleDoneDrawer
         | BoardIntent::OpenHelp
         | BoardIntent::CloseLayer
@@ -872,7 +893,13 @@ fn map_normal(key: KeyEvent, verbs: VerbModifier) -> Option<BoardIntent> {
 }
 
 /// Task page view mode: the page is a focused single-task surface. Verbs act on the
-/// page's task, `e`/`n`/Tab enter field edits, arrows scroll the notes, Esc closes.
+/// page's task, `e`/`n`/Tab enter field edits, `a` opens the steps step editor,
+/// bare arrows own the step cursor lifecycle (the reducer decides activation vs note
+/// scrolling from page state), Esc closes.
+///
+/// The steps verbs reuse this map's existing intents — `space`, `e`, `x` — because
+/// whether they act on the task or on the highlighted steps step depends on the step
+/// cursor state, which lives in the model, not the key event; the reducer disambiguates.
 fn map_task_page(key: KeyEvent, verbs: VerbModifier) -> Option<BoardIntent> {
     let mods = key.modifiers;
     if key.code == KeyCode::Char('c') && mods.contains(KeyModifiers::CONTROL) {
@@ -888,6 +915,7 @@ fn map_task_page(key: KeyEvent, verbs: VerbModifier) -> Option<BoardIntent> {
         KeyCode::Char('q') if verb => Some(BoardIntent::CloseLayer),
         KeyCode::Enter if !extra => Some(BoardIntent::OpenTaskPage),
         KeyCode::Char(' ') if verb => Some(BoardIntent::PrimaryVerb),
+        KeyCode::Char('a') if verb => Some(BoardIntent::BeginAddStep),
         KeyCode::Char('d') if verb => Some(BoardIntent::Complete),
         KeyCode::Char('o') if verb => Some(BoardIntent::Reopen),
         KeyCode::Char('b') if verb => Some(BoardIntent::ToggleBlock),
@@ -1009,8 +1037,23 @@ fn map_cleanup_confirmation(key: KeyEvent) -> Option<BoardIntent> {
 ///
 /// The live board carries a `CaptureField` and calls [`map_board_form_key`] directly.
 fn map_edit(mode: BoardInputMode, key: KeyEvent) -> Option<BoardIntent> {
+    // The step editor's Ctrl+Enter is the rapid-capture loop (AC-12): save and
+    // reopen the line empty in add mode; rename mode downgrades to a plain save in
+    // the reducer. Alt+Enter stays the equal save chord (ADR 0006), mapping to
+    // `ConfirmEdit` through the shared form map below — and so does any composite
+    // carrying Alt alongside Control, which the shared chord table already
+    // classifies; excluding it here keeps the two tables agreeing on such an event.
+    if mode == BoardInputMode::EditStep
+        && key.code == KeyCode::Enter
+        && key.modifiers.contains(KeyModifiers::CONTROL)
+        && !key.modifiers.contains(KeyModifiers::ALT)
+    {
+        return Some(BoardIntent::ConfirmEditNext);
+    }
+    // The steps step editor is a single-line draft: it takes Title's map (Enter
+    // confirms, Esc cancels, no line-break insertion) and no form-focus navigation.
     let focused = match mode {
-        BoardInputMode::EditTitle => CaptureField::Title,
+        BoardInputMode::EditTitle | BoardInputMode::EditStep => CaptureField::Title,
         BoardInputMode::EditNotes => CaptureField::Notes,
         _ => return None,
     };

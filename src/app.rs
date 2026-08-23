@@ -731,6 +731,8 @@ pub fn apply_board_intent_with_save_recovery(
             | BoardIntent::CollapseDetail
             | BoardIntent::PageScrollUp
             | BoardIntent::PageScrollDown
+            | BoardIntent::PageWheelScrollUp
+            | BoardIntent::PageWheelScrollDown
             | BoardIntent::ToggleDoneDrawer => {
                 return apply_intent(domain, model, intent, None, None)
             }
@@ -743,8 +745,13 @@ pub fn apply_board_intent_with_save_recovery(
 
     // decision 8: judged against the durable record, before the reducer runs, so no mutation
     // happens and the session (mode, draft, cursor, binding) survives the refusal intact. The
-    // caller presents the returned error on the message row.
-    if intent == BoardIntent::ConfirmEdit {
+    // caller presents the returned error on the message row. Both save chords on a line
+    // editor are this one surface, so they refuse identically: Enter (`ConfirmEdit`)
+    // and Ctrl+Enter (`ConfirmEditNext`).
+    if matches!(
+        intent,
+        BoardIntent::ConfirmEdit | BoardIntent::ConfirmEditNext
+    ) {
         if let Some(refusal) = confirm_edit_refusal_against_the_record(&baseline, model) {
             return Err(refusal);
         }
@@ -2164,6 +2171,7 @@ mod tests {
     fn every_board_mutation_uses_a_real_persisted_baseline() {
         for intent in [
             BoardIntent::ConfirmEdit,
+            BoardIntent::ConfirmEditNext,
             BoardIntent::SetStatus(HumanStatus::Blocked),
             BoardIntent::Complete,
             BoardIntent::Reopen,
@@ -2226,6 +2234,77 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.dir);
         }
+    }
+
+    #[test]
+    fn ctrl_enter_step_save_uses_the_real_app_save_boundary() {
+        let temp = TempStore::new("ctrl-enter-step");
+        let mut domain = DomainState::new();
+        let id = domain
+            .create(
+                "Ctrl Enter",
+                None,
+                TaskScope::Global,
+                None,
+                None,
+                ProvenanceOrigin::Manual,
+            )
+            .expect("seed task");
+        temp.store.save(&domain).expect("seed store");
+        let mut model = BoardModel::from_domain(&domain, None);
+        let mut pending_dispatch = None;
+        let mut recovery = SaveRecovery::new();
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::OpenTaskPage,
+            None,
+            None,
+        )
+        .expect("open");
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::BeginAddStep,
+            None,
+            None,
+        )
+        .expect("edit");
+        for ch in "next step".chars() {
+            apply_intent(
+                &mut domain,
+                &mut model,
+                BoardIntent::EditInsert(ch),
+                None,
+                None,
+            )
+            .expect("type");
+        }
+        handle_board_intent(
+            &temp.store,
+            &mut domain,
+            &mut model,
+            BoardIntent::ConfirmEditNext,
+            &mut pending_dispatch,
+            &mut recovery,
+        )
+        .expect("real ctrl-enter save");
+        assert_eq!(
+            temp.store
+                .load()
+                .expect("reload")
+                .get(id)
+                .expect("task")
+                .steps[0]
+                .text,
+            "next step"
+        );
+        assert!(!recovery.is_pending());
+        assert_eq!(
+            model.input_mode(),
+            BoardInputMode::EditStep,
+            "successful Ctrl+Enter reopens add editor"
+        );
     }
 
     /// fix2 B1: `a` on the real board must create a task through the exact intent

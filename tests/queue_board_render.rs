@@ -4,17 +4,21 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::{Duration, SystemTime};
 
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use herdr_tasks::config::VerbModifier;
 use herdr_tasks::domain::{
     DomainState, HumanStatus, ProvenanceOrigin, Task, TaskEvent, TaskEventKind, TaskScope,
 };
+use herdr_tasks::ui::input::map_key;
 use herdr_tasks::ui::queue::{self, DeckScope, QueueView};
 use herdr_tasks::ui::render::{
-    assert_buffer_mono, assert_no_color_sgr, draw_queue_frame, PaletteCommandRow, QueueFrameModel,
-    QueueOverlay, VerbEntry,
+    assert_buffer_mono, assert_no_color_sgr, draw_queue_frame, BottomInputSlot, PaletteCommandRow,
+    QueueFrameModel, QueueOverlay, VerbEntry,
 };
 use herdr_tasks::ui::tier::{self, Tier, TierGeometry};
-use herdr_tasks::ui::{apply_intent, board_verb_items, BoardIntent, BoardModel};
+use herdr_tasks::ui::{
+    apply_intent, board_verb_items, draw_board, BoardInputMode, BoardIntent, BoardModel,
+};
 use ratatui::backend::TestBackend;
 use ratatui::{Frame, Terminal};
 use uuid::Uuid;
@@ -50,6 +54,7 @@ fn task(id: u128, title: &str, status: HumanStatus, scope: TaskScope, secs_ago: 
             kind: TaskEventKind::Created,
             at,
         }],
+        steps: Vec::new(),
         soft_deleted: false,
         created_at: at,
         updated_at: at,
@@ -337,6 +342,26 @@ fn row_display_width(row: &str) -> usize {
     row.chars().count()
 }
 
+/// Paint a whole [`BoardModel`] through `draw_board` -- the payload-builder path
+/// (`build_task_page_overlay`) rather than a hand-composed `QueueFrameModel` -- so a
+/// test can assert what the page payload consumed from a real stored task.
+fn board_rows(model: &BoardModel, width: u16, height: u16) -> Vec<String> {
+    let backend = TestBackend::new(width, height);
+    let mut terminal = Terminal::new(backend).expect("test terminal");
+    terminal
+        .draw(|frame: &mut Frame| draw_board(frame, model))
+        .expect("draw board");
+    let buffer = terminal.backend().buffer();
+    assert_buffer_mono(buffer);
+    (0..height)
+        .map(|y| {
+            (0..width)
+                .map(|x| buffer[(x, y)].symbol().to_string())
+                .collect::<String>()
+        })
+        .collect()
+}
+
 fn trimmed(row: &str) -> String {
     row.trim_end().to_string()
 }
@@ -588,11 +613,15 @@ fn quick_add_refusal_message_uses_the_reserved_blank_row_without_color_or_overfl
     for &(width, height) in &[(80, 24), (40, 10)] {
         let mut model = fixture_model(&tasks, &view);
         model.overlay = QueueOverlay::QuickAdd {
-            title: String::new(),
-            title_cursor: 0,
+            input: BottomInputSlot {
+                text: String::new(),
+                cursor_col: 0,
+                placeholder: "title…",
+                refusal: None,
+                message: Some("Title required"),
+            },
             project_scope: false,
             recovery: false,
-            message: Some("Title required"),
         };
         let (rows, geo) = paint(width, height, &model);
         // Quick-add reserves two rows by shifting its input up one from ordinary status
@@ -844,6 +873,11 @@ fn task_page_renders_header_notes_and_meta_as_a_full_takeover_in_both_tiers() {
         ],
         notes_cursor: None,
         more_lines: 0,
+        step_views: Vec::new(),
+        step_cursor: None,
+        step_scroll: 0,
+        step_marked: None,
+        step_editor: None,
         meta: "herdr-tasks \u{b7} created 1h ago \u{b7} updated 1h ago".to_string(),
         focus: None,
         scope_dropdown: None,
@@ -884,6 +918,565 @@ fn task_page_renders_header_notes_and_meta_as_a_full_takeover_in_both_tiers() {
         );
         assert_visible_chrome(&rows, geo, &format!("{width}x{height}"));
     }
+}
+
+/// T-2 (AC-5/AC-7): the task page of a task with steps steps paints a steps
+/// section between the notes block and the meta footer. The fixture drives the real
+/// payload-builder path (`BoardModel` + `draw_board`) from stored steps (add + toggle),
+/// so the assertions cross the storage -> page-payload -> paint boundary: the label's
+/// done/total counts and the per-step glyphs must come from the extracted step views.
+#[test]
+fn task_page_paints_steps_section_between_notes_and_footer() {
+    let mut domain = DomainState::new();
+    let id = domain
+        .create(
+            "Page task with steps",
+            Some("the notes body".into()),
+            TaskScope::Global,
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("create task");
+    let first = domain.add_step(id, "first step").expect("step 1");
+    let second = domain.add_step(id, "second step").expect("step 2");
+    domain.add_step(id, "third step").expect("step 3");
+    domain.toggle_step(id, first).expect("toggle step 1");
+    domain.toggle_step(id, second).expect("toggle step 2");
+
+    let mut model = BoardModel::from_domain(&domain, None);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenTaskPage,
+        None,
+        None,
+    )
+    .expect("open task page");
+
+    let rows = board_rows(&model, 78, 24);
+    let shown: Vec<String> = rows.iter().map(|row| trimmed(row)).collect();
+    let find = |needle: &str, shown: &[String]| {
+        shown
+            .iter()
+            .position(|row| row.contains(needle))
+            .unwrap_or_else(|| panic!("{needle:?} missing from page:\n{rows:#?}"))
+    };
+    let notes_row = find("the notes body", &shown);
+    let label_row = find("steps 2/3", &shown);
+    let meta_row = find("created", &shown);
+    assert!(
+        notes_row < label_row,
+        "steps section must sit after the notes block:\n{}",
+        shown.join("\n")
+    );
+    assert!(
+        label_row < meta_row,
+        "steps section must sit before the meta footer:\n{}",
+        shown.join("\n")
+    );
+    // Steps render one per line below the label, in storage order: done `✓`, open `▪`.
+    let first_step = find("✓ first step", &shown);
+    let second_step = find("✓ second step", &shown);
+    let third_step = find("▪ third step", &shown);
+    assert!(
+        label_row < first_step && first_step < second_step && second_step < third_step,
+        "steps must paint one per line below the label in storage order:\n{}",
+        shown.join("\n")
+    );
+
+    // The compact tier stays operable: the section still paints and never reaches the
+    // bottom chrome rows, and every row stays width-bounded.
+    let compact = board_rows(&model, 40, 10);
+    let compact_shown: Vec<String> = compact.iter().map(|row| trimmed(row)).collect();
+    let compact_label = compact_shown
+        .iter()
+        .position(|row| row.contains("steps 2/3"))
+        .unwrap_or_else(|| panic!("compact page omitted the steps label:\n{compact:#?}"));
+    let geo = tier::resolve(40, 10);
+    assert!(
+        (compact_label as u16) < geo.rule_row.expect("compact rule row"),
+        "compact steps section must stay above the chrome rows:\n{}",
+        compact_shown.join("\n")
+    );
+    assert!(
+        compact.iter().all(|row| row_display_width(row) == 40),
+        "compact steps rows exceeded the frame width"
+    );
+}
+
+/// T-2 (AC-6): a task with no steps steps paints no steps section at all --
+/// the page is identical to pre-feature for such tasks.
+#[test]
+fn task_page_without_steps_paints_no_steps_section() {
+    let mut domain = DomainState::new();
+    domain
+        .create(
+            "Notes-only page task",
+            Some("still just notes".into()),
+            TaskScope::Global,
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("create task");
+    let mut model = BoardModel::from_domain(&domain, None);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenTaskPage,
+        None,
+        None,
+    )
+    .expect("open task page");
+
+    for &(width, height) in &[(78u16, 24u16), (40u16, 10u16)] {
+        let rows = board_rows(&model, width, height);
+        let shown: Vec<String> = rows.iter().map(|row| trimmed(row)).collect();
+        let body = shown.join("\n");
+        // Sanity first: the page itself rendered, so absence below is not a blank frame.
+        assert!(
+            body.contains("still just notes") && body.contains("created"),
+            "{width}x{height} page did not render notes + meta:\n{body}"
+        );
+        assert!(
+            !body.contains("steps"),
+            "{width}x{height} empty-steps page must paint no section label:\n{body}"
+        );
+        // `✓`/`▪` are step glyphs (the task is ready, so the header glyph is `○`).
+        assert!(
+            !body.contains('✓') && !body.contains('▪'),
+            "{width}x{height} empty-steps page must paint no step glyphs:\n{body}"
+        );
+    }
+}
+
+/// T-2 remediation 1 (review round 0, Important): at the 40x10 compact floor a >=3-step
+/// steps clamps to the whole content region, and the notes edit that shared those
+/// rows painted NOTHING -- keystrokes worked, nothing rendered. A notes edit must always
+/// keep at least one visible draft row; the steps section yields the row (it caps,
+/// it does not vanish).
+#[test]
+fn task_page_notes_edit_keeps_a_visible_row_at_the_compact_floor_alongside_steps() {
+    let mut domain = DomainState::new();
+    let id = domain
+        .create(
+            "Editing notes beside steps",
+            Some("draft line under edit".into()),
+            TaskScope::Global,
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("create task");
+    let first = domain.add_step(id, "first step").expect("step 1");
+    domain.add_step(id, "second step").expect("step 2");
+    domain.add_step(id, "third step").expect("step 3");
+    domain.toggle_step(id, first).expect("toggle step 1");
+
+    let mut model = BoardModel::from_domain(&domain, None);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenTaskPage,
+        None,
+        None,
+    )
+    .expect("open task page");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::BeginEditNotes,
+        None,
+        None,
+    )
+    .expect("begin notes edit");
+
+    let rows = board_rows(&model, 40, 10);
+    let shown: Vec<String> = rows.iter().map(|row| trimmed(row)).collect();
+    let body = shown.join("\n");
+    assert!(
+        body.contains("draft line under edit"),
+        "a notes edit must paint at least one draft row at 40x10:\n{body}"
+    );
+    assert!(
+        body.contains("steps 1/3"),
+        "the steps section must cap to make room, not vanish:\n{body}"
+    );
+    assert!(
+        rows.iter().all(|row| row_display_width(row) == 40),
+        "compact edit page exceeded the frame width"
+    );
+}
+
+/// T-10 (AC-27): a Notes caret uses the same shared-stream offset as its rows.
+#[test]
+fn notes_edit_caret_accounts_for_shared_stream_scroll() {
+    let mut domain = DomainState::new();
+    let id = domain
+        .create(
+            "Caret stream offset",
+            Some("first\nsecond\nthird".to_string()),
+            TaskScope::Global,
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("create task");
+    for index in 0..30 {
+        domain
+            .add_step(id, format!("step {index}"))
+            .expect("add step");
+    }
+    let mut model = BoardModel::from_domain(&domain, None);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenTaskPage,
+        None,
+        None,
+    )
+    .expect("open page");
+    board_rows(&model, 80, 24);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::PageWheelScrollDown,
+        None,
+        None,
+    )
+    .expect("scroll shared stream");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::BeginEditNotes,
+        None,
+        None,
+    )
+    .expect("edit notes");
+
+    let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("test terminal");
+    terminal
+        .draw(|frame| draw_board(frame, &model))
+        .expect("draw edit page");
+    let cursor = terminal.backend().cursor_position();
+    assert_eq!(
+        cursor.y, 5,
+        "entering Notes edit restores the cursor-windowed draft to the visible stream origin"
+    );
+}
+
+/// AC-27: entering Notes after a deep shared-stream read restores the cursor-windowed
+/// draft and keeps the terminal caret on its visible draft row.
+#[test]
+fn notes_edit_after_deep_stream_scroll_keeps_draft_and_caret_aligned() {
+    let mut domain = DomainState::new();
+    let notes = (0..20)
+        .map(|line| format!("note line {line}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let id = domain
+        .create(
+            "Deep Notes",
+            Some(notes),
+            TaskScope::Global,
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("create task");
+    for index in 0..30 {
+        domain
+            .add_step(id, format!("step {index}"))
+            .expect("add step");
+    }
+    let mut model = BoardModel::from_domain(&domain, None);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenTaskPage,
+        None,
+        None,
+    )
+    .expect("open");
+    board_rows(&model, 80, 24);
+    for _ in 0..20 {
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::PageWheelScrollDown,
+            None,
+            None,
+        )
+        .expect("deep wheel");
+    }
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::BeginEditNotes,
+        None,
+        None,
+    )
+    .expect("edit notes");
+    let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("terminal");
+    terminal
+        .draw(|frame| draw_board(frame, &model))
+        .expect("draw");
+    let text = board_rows(&model, 80, 24).join("\n");
+    assert!(
+        text.contains("note line 9"),
+        "draft window must remain visible:\n{text}"
+    );
+    assert_eq!(
+        terminal.backend().cursor_position().y,
+        19,
+        "caret must remain on the visible cursor-windowed draft row"
+    );
+}
+
+/// AC-27 applies to form navigation too: Shift+Tab from Scope enters Notes at the
+/// cursor-window origin, rather than preserving the reading position from the shared stream.
+#[test]
+fn shift_tab_from_scope_resets_notes_stream_origin_and_aligns_caret() {
+    let mut domain = DomainState::new();
+    let notes = (0..20)
+        .map(|line| format!("note line {line}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let id = domain
+        .create(
+            "Shift tab Notes",
+            Some(notes),
+            TaskScope::Global,
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("create task");
+    for index in 0..30 {
+        domain
+            .add_step(id, format!("step {index}"))
+            .expect("add step");
+    }
+    let mut model = BoardModel::from_domain(&domain, None);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenTaskPage,
+        None,
+        None,
+    )
+    .expect("open");
+    board_rows(&model, 80, 24);
+    for _ in 0..20 {
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::PageWheelScrollDown,
+            None,
+            None,
+        )
+        .expect("deep wheel");
+    }
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::BeginEditScope,
+        None,
+        None,
+    )
+    .expect("edit scope");
+    let shift_tab = map_key(
+        BoardInputMode::EditScope,
+        KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT),
+    );
+    assert_eq!(shift_tab, Some(BoardIntent::FormFocusPrev));
+    apply_intent(
+        &mut domain,
+        &mut model,
+        shift_tab.expect("Shift+Tab intent"),
+        None,
+        None,
+    )
+    .expect("Shift+Tab into Notes");
+    assert_eq!(model.input_mode(), BoardInputMode::EditNotes);
+
+    let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("terminal");
+    terminal
+        .draw(|frame| draw_board(frame, &model))
+        .expect("draw");
+    let text = board_rows(&model, 80, 24).join("\n");
+    assert!(
+        text.contains("note line 9"),
+        "Shift+Tab Notes draft must return to the visible cursor window:\n{text}"
+    );
+    assert_eq!(
+        terminal.backend().cursor_position().y,
+        19,
+        "Shift+Tab Notes caret must land on its painted draft row"
+    );
+}
+
+/// Long notes and steps form one scrollable page body. Notes use at least the
+/// first half of the viewport, then push the steps below the viewport instead of
+/// clipping them. The header and meta footer remain fixed while PageScroll reveals
+/// the deferred steps and the side scrollbar reports the overflow.
+#[test]
+fn task_page_scrolls_notes_and_steps_as_one_content_region() {
+    let notes = (0..20)
+        .map(|i| format!("N{i:02} filler line"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut domain = DomainState::new();
+    let id = domain
+        .create(
+            "Scrollable page",
+            Some(notes),
+            TaskScope::Global,
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("create task");
+    domain.add_step(id, "only step").expect("add step");
+    let mut model = BoardModel::from_domain(&domain, None);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenTaskPage,
+        None,
+        None,
+    )
+    .expect("open task page");
+
+    let initial = board_rows(&model, 78, 24);
+    let shown: Vec<String> = initial.iter().map(|row| trimmed(row)).collect();
+    assert!(
+        shown[1].contains("Scrollable page"),
+        "header must stay fixed"
+    );
+    assert!(shown[20].contains("created"), "footer must stay fixed");
+    assert!(
+        shown.iter().any(|row| row.contains('█')),
+        "overflow needs a scrollbar"
+    );
+    assert!(shown.iter().any(|row| row.contains("N16 filler line")));
+    assert!(
+        !shown.iter().any(|row| row.contains("steps 0/1")),
+        "long notes push the steps below the viewport:\n{}",
+        shown.join("\n")
+    );
+
+    for _ in 0..7 {
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::PageWheelScrollDown,
+            None,
+            None,
+        )
+        .expect("wheel scroll down");
+    }
+    let scrolled = board_rows(&model, 78, 24);
+    let shown: Vec<String> = scrolled.iter().map(|row| trimmed(row)).collect();
+    assert!(
+        shown[1].contains("Scrollable page"),
+        "header must stay fixed"
+    );
+    assert!(shown[20].contains("created"), "footer must stay fixed");
+    assert!(shown.iter().any(|row| row.contains("steps 0/1")));
+    let step_row = shown
+        .iter()
+        .position(|row| row.contains("▪ only step"))
+        .expect("step visible after scrolling");
+    assert!(
+        shown[step_row + 1]
+            .chars()
+            .all(|cell| matches!(cell, ' ' | '█' | '│')),
+        "the steps section needs its trailing blank row:\n{}",
+        shown.join("\n")
+    );
+    let note_row = initial
+        .iter()
+        .find(|row| row.contains("N00 filler line"))
+        .expect("first note row");
+    assert!(
+        note_row
+            .chars()
+            .rev()
+            .skip(1)
+            .take(2)
+            .all(|cell| cell == ' '),
+        "content needs the same two-cell gutter before the right-edge scrollbar: {note_row:?}"
+    );
+}
+
+/// T-6 (AC-24): steps stack from the TOP of the steps half — step 1 directly
+/// under the section label, each next step directly below the previous — so a
+/// fourth step lands below the third, never pinned to the row above the footer.
+#[test]
+fn steps_stack_from_the_top_below_the_divider() {
+    let mut domain = DomainState::new();
+    let id = domain
+        .create(
+            "Stacking page",
+            Some("the notes body".into()),
+            TaskScope::Global,
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("create task");
+    for text in ["first step", "second step", "third step"] {
+        domain.add_step(id, text).expect("add step");
+    }
+    let mut model = BoardModel::from_domain(&domain, None);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenTaskPage,
+        None,
+        None,
+    )
+    .expect("open task page");
+
+    // 78x24: label opens the bottom half on row 12; steps 1..3 stack downward
+    // from it while the footer-side rows of the half stay empty.
+    let rows = board_rows(&model, 78, 24);
+    let shown: Vec<String> = rows.iter().map(|row| trimmed(row)).collect();
+    let label = shown
+        .iter()
+        .position(|row| row.contains("steps 0/3"))
+        .unwrap_or_else(|| panic!("steps label missing:\n{}", shown.join("\n")));
+    assert_eq!(label, 12, "the half opens on the halfway row");
+    assert!(
+        shown[13].contains("▪ first step")
+            && shown[14].contains("▪ second step")
+            && shown[15].contains("▪ third step"),
+        "steps must stack one directly under another from the top of the half:\n{}",
+        shown.join("\n")
+    );
+    assert!(
+        shown[19].is_empty(),
+        "the row above the footer must stay empty — the block is not footer-anchored:\n{}",
+        shown.join("\n")
+    );
+
+    // A fourth step lands directly below the third, still far from the footer.
+    domain.add_step(id, "fourth step").expect("add step 4");
+    model.sync_from_domain(&domain);
+    let rows4 = board_rows(&model, 78, 24);
+    let shown4: Vec<String> = rows4.iter().map(|row| trimmed(row)).collect();
+    assert!(
+        shown4[16].contains("▪ fourth step"),
+        "the fourth step must land directly below the third:\n{}",
+        shown4.join("\n")
+    );
+    assert!(
+        shown4[19].is_empty(),
+        "the fourth step must not be pinned to the footer:\n{}",
+        shown4.join("\n")
+    );
 }
 
 /// Imp-1 (round 2 regression): the compact palette windowed its command list off a raw
@@ -1516,6 +2109,71 @@ fn palette_golden_scene_commands_are_bound_to_the_real_m1_catalog_and_exclude_di
             .all(|command| !command.label.contains("dispatch")),
         "AC-17 excludes dispatch from the M1 palette outright; the golden scene must never \
          show it: {commands:?}"
+    );
+}
+
+/// T-7 (AC-22): the task page's footer verb bar lists the step-add verb while the
+/// bound task has steps steps (view mode). A task with no steps keeps the
+/// pre-T-7 verb bar exactly: the with-steps bar is the without-steps bar plus the
+/// one step-add entry — modifier implied by the bar's prefix convention — and
+/// nothing else. The full listing is asserted at a width the whole bar fits; at
+/// the 78-column standard floor the bar's existing width clipping may take the
+/// entry's label tail but never its key chord.
+#[test]
+fn footer_lists_the_step_add_verb() {
+    let page_verb_row_with = |steps: &[&str], width: u16| -> String {
+        let mut domain = DomainState::new();
+        let id = domain
+            .create(
+                "Verb bar witness",
+                Some("the notes body".into()),
+                TaskScope::Global,
+                None,
+                None,
+                ProvenanceOrigin::Manual,
+            )
+            .expect("create task");
+        for text in steps {
+            domain.add_step(id, text).expect("add step");
+        }
+        let mut model = BoardModel::from_domain(&domain, None);
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::OpenTaskPage,
+            None,
+            None,
+        )
+        .expect("open task page");
+        let rows = board_rows(&model, width, 24);
+        let verb_row = tier::resolve(width, 24).verb_row.expect("verb row");
+        trimmed(&rows[verb_row as usize])
+    };
+
+    let with = page_verb_row_with(&["only step"], 100);
+    let without = page_verb_row_with(&[], 100);
+
+    assert!(
+        with.contains("alt+a step"),
+        "view mode + steps must list the step-add verb (modifier by the bar's convention):\n{with}"
+    );
+    assert!(
+        !without.contains("step"),
+        "view mode + no steps keeps the pre-T-7 verb bar:\n{without}"
+    );
+    let suffix = " · alt+a step";
+    let stripped = with
+        .strip_suffix(suffix)
+        .unwrap_or_else(|| panic!("the with-steps bar must end in the step-add entry:\n{with}"));
+    assert_eq!(
+        stripped, without,
+        "the step-add verb must be the footer verb bar's only change"
+    );
+
+    let floor = page_verb_row_with(&["only step"], 78);
+    assert!(
+        floor.contains("alt+a"),
+        "the step-add key chord must stay listed at the standard width floor:\n{floor}"
     );
 }
 

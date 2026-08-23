@@ -2,7 +2,7 @@
 
 id = "herdr-tasks"
 name = "herdr-tasks"
-version = "0.1.0"
+version = "0.2.0"
 description = "Queue board and quick capture inside herdr."
 min_herdr_version = "0.7.5"
 platforms = ["linux", "macos"]

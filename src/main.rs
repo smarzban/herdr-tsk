@@ -14,12 +14,12 @@ fn main() -> ExitCode {
         Surface::FindBoardPane => find_board_pane_main(),
         Surface::GlobalHelp => {
             println!(
-                "usage: herdr-tasks [capture] | add | list | --find-board-pane | --help\n\nCommands:\n  add   create one task or apply a JSON plan\n  list  inspect tasks\n\nRun `herdr-tasks add --help` or `herdr-tasks list --help` for command details."
+                "usage: herdr-tasks [capture] | add | steps | list | --find-board-pane | --help\n\nCommands:\n  add    create one task or apply a JSON plan\n  steps  add or toggle one step on a task\n  list   inspect tasks\n\nRun `herdr-tasks add --help`, `herdr-tasks steps --help`, or `herdr-tasks list --help` for command details."
             );
             ExitCode::SUCCESS
         }
         Surface::Usage => usage_exit(),
-        Surface::Add | Surface::List => headless_main(args),
+        Surface::Add | Surface::Steps | Surface::List => headless_main(args),
         Surface::Board | Surface::Capture => match herdr_tasks::run(args) {
             Ok(()) => ExitCode::SUCCESS,
             Err(err) => {
@@ -31,7 +31,7 @@ fn main() -> ExitCode {
 }
 
 fn usage_exit() -> ExitCode {
-    eprintln!("usage: herdr-tasks [capture] | add | list | --find-board-pane | --help");
+    eprintln!("usage: herdr-tasks [capture] | add | steps | list | --find-board-pane | --help");
     ExitCode::from(2)
 }
 
