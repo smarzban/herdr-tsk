@@ -558,7 +558,7 @@ pub fn apply_capture_intent(
             let baseline =
                 serde_json::from_value(serde_json::to_value(&*domain).expect("serialize domain"))
                     .expect("deserialize domain");
-            let mut working = std::mem::replace(domain, DomainState::new());
+            let mut working = std::mem::take(domain);
             let id = match capture_save(
                 &mut working,
                 None,

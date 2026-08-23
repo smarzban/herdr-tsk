@@ -2,7 +2,9 @@
 //!
 //! Atomic write: unique temp file in the same directory, then rename over the target.
 //! Concurrent writers take an exclusive lock on `tasks.json.lock` and merge by
-//! task/attempt id plus each record's `updated_at`, so writers do not drop sibling records.
+//! task/attempt id plus each record's revision, so writers do not drop sibling records.
+//! A store whose `format_version` is newer than this binary is refused rather than rewritten.
+//! Each successful replace retains the previous document as `tasks.json.1`.
 
 use std::env;
 use std::fs::{self, File, OpenOptions};
@@ -10,12 +12,12 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use fs2::FileExt;
-
-use crate::domain::DomainState;
+use crate::domain::{DomainState, LEGACY_STORE_FORMAT_VERSION, STORE_FORMAT_VERSION};
 
 /// On-disk document name under the state directory.
 const STATE_FILE: &str = "tasks.json";
+/// Previous successful document, retained by hard-link before replace.
+const BACKUP_FILE: &str = "tasks.json.1";
 /// Inter-process exclusive lock file (sibling of the state document).
 const LOCK_FILE: &str = "tasks.json.lock";
 
@@ -117,6 +119,7 @@ impl TaskStore {
         let _guard = self.lock_exclusive()?;
         let mut durable = state.clone();
         durable.clear_merge_bases();
+        durable.stamp_format_version();
         self.save_unlocked(&durable)
     }
 
@@ -129,6 +132,7 @@ impl TaskStore {
         let mut state = self.load_unlocked().map_err(|error| error.to_string())?;
         let result = transition(&mut state)?;
         state.clear_merge_bases();
+        state.stamp_format_version();
         self.save_unlocked(&state)
             .map_err(|error| error.to_string())?;
         Ok(result)
@@ -147,6 +151,7 @@ impl TaskStore {
         let (result, changed) = transition(&mut state)?;
         if changed {
             state.clear_merge_bases();
+            state.stamp_format_version();
             self.save_unlocked(&state)
                 .map_err(|error| error.to_string())?;
         }
@@ -171,22 +176,26 @@ impl TaskStore {
     ) -> Result<(), StoreError> {
         let _guard = self.lock_exclusive()?;
         let disk = self.load_unlocked()?;
+        check_format_version(disk.format_version())?;
         local
             .merge_for_save(&disk)
             .map_err(|message| StoreError::Io(io::Error::other(message)))?;
         let mut durable = local.clone();
         durable.clear_merge_bases();
+        durable.stamp_format_version();
         self.save_unlocked_with(&durable, filesystem)?;
         local.clear_merge_bases();
         Ok(())
     }
 
     fn load_unlocked(&self) -> Result<DomainState, StoreError> {
+        self.sweep_orphan_temps();
         let file = self.state_file();
         if !file.exists() {
             return Ok(DomainState::new());
         }
         let data = fs::read_to_string(&file)?;
+        check_format_version(peek_format_version(&data)?)?;
         let state = serde_json::from_str(&data)?;
         Ok(state)
     }
@@ -201,7 +210,19 @@ impl TaskStore {
         filesystem: &F,
     ) -> Result<(), StoreError> {
         fs::create_dir_all(&self.path)?;
+        self.sweep_orphan_temps();
         let file = self.state_file();
+        if file.exists() {
+            match peek_format_version(&fs::read_to_string(&file)?) {
+                Ok(version) => {
+                    check_format_version(version)?;
+                    retain_last_good(&file)?;
+                }
+                // A corrupt live document is replaced. Leave any last-good copy alone.
+                Err(StoreError::Json(_)) => {}
+                Err(error) => return Err(error),
+            }
+        }
         let tmp = self.unique_tmp_path();
         let data = serde_json::to_string_pretty(state)?;
         // A save is successful only after the replacement and containing directory are synced.
@@ -230,12 +251,26 @@ impl TaskStore {
             .write(true)
             .truncate(false)
             .open(&lock_path)?;
-        file.lock_exclusive()?;
+        file.lock()?;
         Ok(StoreLockGuard { file })
     }
 
     fn state_file(&self) -> PathBuf {
         self.path.join(STATE_FILE)
+    }
+
+    /// Remove leftover `.tasks.json.tmp.*` files. Safe only under the exclusive lock.
+    fn sweep_orphan_temps(&self) {
+        let Ok(entries) = fs::read_dir(&self.path) else {
+            return;
+        };
+        let prefix = format!(".{STATE_FILE}.tmp.");
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            if name.to_string_lossy().starts_with(&prefix) {
+                let _ = fs::remove_file(entry.path());
+            }
+        }
     }
 
     /// Unique temp path so concurrent writers never share `.tasks.json.tmp`.
@@ -266,7 +301,7 @@ impl TaskStateStore for TaskStore {
     }
 }
 
-/// RAII exclusive lock on the store lock file (released on drop via fs2 unlock).
+/// RAII exclusive lock on the store lock file (released on drop via `File::unlock`).
 struct StoreLockGuard {
     file: File,
 }
@@ -306,11 +341,47 @@ pub fn default_state_dir() -> PathBuf {
     PathBuf::from(".tsk-state")
 }
 
+fn peek_format_version(data: &str) -> Result<u32, StoreError> {
+    let value: serde_json::Value = serde_json::from_str(data)?;
+    match value.get("format_version") {
+        None => Ok(LEGACY_STORE_FORMAT_VERSION),
+        Some(version) => version
+            .as_u64()
+            .and_then(|n| u32::try_from(n).ok())
+            .ok_or_else(|| StoreError::Io(io::Error::other("format_version must be a u32"))),
+    }
+}
+
+fn check_format_version(found: u32) -> Result<(), StoreError> {
+    if found > STORE_FORMAT_VERSION {
+        Err(StoreError::UnsupportedFormat {
+            found,
+            supported: STORE_FORMAT_VERSION,
+        })
+    } else {
+        Ok(())
+    }
+}
+
+/// Keep the previous live document under `tasks.json.1` via hard-link so a crash
+/// between link and rename leaves the backup identical to the still-live file.
+fn retain_last_good(live: &Path) -> Result<(), StoreError> {
+    let backup = live.with_file_name(BACKUP_FILE);
+    match fs::remove_file(&backup) {
+        Ok(()) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.into()),
+    }
+    fs::hard_link(live, &backup)?;
+    Ok(())
+}
+
 /// Store I/O and JSON failures.
 #[derive(Debug)]
 pub enum StoreError {
     Io(io::Error),
     Json(serde_json::Error),
+    UnsupportedFormat { found: u32, supported: u32 },
 }
 
 impl std::fmt::Display for StoreError {
@@ -318,6 +389,10 @@ impl std::fmt::Display for StoreError {
         match self {
             StoreError::Io(e) => write!(f, "store I/O error: {e}"),
             StoreError::Json(e) => write!(f, "store JSON error: {e}"),
+            StoreError::UnsupportedFormat { found, supported } => write!(
+                f,
+                "store format {found} is newer than this tsk ({supported}); upgrade tsk"
+            ),
         }
     }
 }
@@ -327,6 +402,7 @@ impl std::error::Error for StoreError {
         match self {
             StoreError::Io(e) => Some(e),
             StoreError::Json(e) => Some(e),
+            StoreError::UnsupportedFormat { .. } => None,
         }
     }
 }
@@ -799,6 +875,186 @@ mod tests {
         assert!(
             fallback_s.contains("tsk") || fallback_s == ".tsk-state",
             "unexpected fallback: {fallback_s}"
+        );
+    }
+
+    fn write_state_json(dir: &Path, value: serde_json::Value) {
+        fs::create_dir_all(dir).expect("mkdir");
+        fs::write(
+            dir.join(STATE_FILE),
+            serde_json::to_vec_pretty(&value).expect("json"),
+        )
+        .expect("write store");
+    }
+
+    #[test]
+    fn save_stamps_format_version_one() {
+        let dir = temp_dir("format-stamp");
+        let _guard = TempDirGuard(dir.clone());
+        let store = TaskStore::new(&dir);
+        store.save(&DomainState::new()).expect("save");
+
+        let value: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(dir.join(STATE_FILE)).expect("read"))
+                .expect("json");
+        assert_eq!(value["format_version"], 1);
+    }
+
+    #[test]
+    fn load_accepts_legacy_document_without_format_version() {
+        let dir = temp_dir("format-legacy");
+        let _guard = TempDirGuard(dir.clone());
+        write_state_json(
+            &dir,
+            serde_json::json!({
+                "tasks": [],
+                "undo_stack": []
+            }),
+        );
+
+        let loaded = TaskStore::new(&dir).load().expect("legacy store must load");
+        assert_eq!(loaded.format_version(), 1);
+        assert!(loaded.tasks().is_empty());
+    }
+
+    #[test]
+    fn load_refuses_newer_format_without_rewriting() {
+        let dir = temp_dir("format-load-newer");
+        let _guard = TempDirGuard(dir.clone());
+        let newer = serde_json::json!({
+            "format_version": 2,
+            "tasks": [],
+            "undo_stack": []
+        });
+        write_state_json(&dir, newer.clone());
+
+        let error = TaskStore::new(&dir)
+            .load()
+            .expect_err("newer format must refuse");
+        assert!(
+            matches!(
+                error,
+                StoreError::UnsupportedFormat {
+                    found: 2,
+                    supported: 1
+                }
+            ),
+            "{error}"
+        );
+        let on_disk: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(dir.join(STATE_FILE)).expect("read"))
+                .expect("json");
+        assert_eq!(on_disk, newer);
+    }
+
+    #[test]
+    fn save_refuses_newer_format_and_leaves_the_document() {
+        let dir = temp_dir("format-save-newer");
+        let _guard = TempDirGuard(dir.clone());
+        let newer = serde_json::json!({
+            "format_version": 2,
+            "tasks": [],
+            "undo_stack": []
+        });
+        write_state_json(&dir, newer.clone());
+
+        let error = TaskStore::new(&dir)
+            .save(&DomainState::new())
+            .expect_err("must not overwrite a newer store");
+        assert!(
+            matches!(
+                error,
+                StoreError::UnsupportedFormat {
+                    found: 2,
+                    supported: 1
+                }
+            ),
+            "{error}"
+        );
+        let on_disk: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(dir.join(STATE_FILE)).expect("read"))
+                .expect("json");
+        assert_eq!(on_disk, newer);
+    }
+
+    #[test]
+    fn second_save_hard_links_the_previous_document() {
+        let dir = temp_dir("last-good");
+        let _guard = TempDirGuard(dir.clone());
+        let store = TaskStore::new(&dir);
+        let mut first = DomainState::new();
+        first
+            .create(
+                "first",
+                None,
+                TaskScope::Global,
+                None,
+                None,
+                ProvenanceOrigin::Manual,
+            )
+            .expect("create");
+        store.save(&first).expect("first save");
+        assert!(
+            !dir.join(BACKUP_FILE).exists(),
+            "the first save has no previous document to retain"
+        );
+
+        let second = DomainState::new();
+        store.save(&second).expect("second save");
+
+        let backup: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(dir.join(BACKUP_FILE)).expect("read backup"))
+                .expect("json");
+        assert_eq!(backup["tasks"][0]["title"], "first");
+        let live = store.load().expect("load live");
+        assert!(live.tasks().is_empty());
+    }
+
+    #[test]
+    fn corrupt_live_document_does_not_replace_the_last_good_copy() {
+        let dir = temp_dir("corrupt-keeps-backup");
+        let _guard = TempDirGuard(dir.clone());
+        let store = TaskStore::new(&dir);
+        let mut first = DomainState::new();
+        first
+            .create(
+                "keep me",
+                None,
+                TaskScope::Global,
+                None,
+                None,
+                ProvenanceOrigin::Manual,
+            )
+            .expect("create");
+        store.save(&first).expect("first save");
+        store.save(&DomainState::new()).expect("second save");
+
+        fs::write(dir.join(STATE_FILE), b"not valid json").expect("corrupt live");
+        store
+            .save(&DomainState::new())
+            .expect("replace the corrupt live document");
+
+        let backup: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(dir.join(BACKUP_FILE)).expect("read backup"))
+                .expect("backup must stay valid json");
+        assert_eq!(backup["tasks"][0]["title"], "keep me");
+    }
+
+    #[test]
+    fn save_sweeps_orphan_temp_files_under_the_lock() {
+        let dir = temp_dir("orphan-sweep");
+        let _guard = TempDirGuard(dir.clone());
+        fs::create_dir_all(&dir).expect("mkdir");
+        let orphan = dir.join(".tasks.json.tmp.1.1");
+        fs::write(&orphan, b"stale").expect("seed orphan");
+
+        TaskStore::new(&dir)
+            .save(&DomainState::new())
+            .expect("save");
+
+        assert!(
+            !orphan.exists(),
+            "a locked save must remove leftover temp files"
         );
     }
 }

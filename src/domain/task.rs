@@ -273,11 +273,26 @@ fn record_mutation(task: &mut Task, kind: TaskEventKind) {
     task.history.push(TaskEvent { kind, at: now });
 }
 
+/// Document version written by this binary.
+/// Bump when an older writer cannot round-trip a newly persisted field.
+pub const STORE_FORMAT_VERSION: u32 = 1;
+
+/// Version of documents written before `format_version` existed.
+/// Stay on 1 when [`STORE_FORMAT_VERSION`] is bumped.
+pub const LEGACY_STORE_FORMAT_VERSION: u32 = 1;
+
+fn default_store_format_version() -> u32 {
+    LEGACY_STORE_FORMAT_VERSION
+}
+
 /// In-memory task set. Persistence is Task Store.
 ///
 /// SHORTCUT: Vec scan by id; fine until store loads many tasks.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DomainState {
+    /// Store document version. Missing on older files loads as [`LEGACY_STORE_FORMAT_VERSION`].
+    #[serde(default = "default_store_format_version")]
+    format_version: u32,
     tasks: Vec<Task>,
     /// Active recovery records sharing the task store's lock and atomic replacement boundary.
     #[serde(default)]
@@ -286,13 +301,29 @@ pub struct DomainState {
     undo_stack: Vec<UndoEntry>,
 }
 
+impl Default for DomainState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DomainState {
     pub fn new() -> Self {
         Self {
+            format_version: STORE_FORMAT_VERSION,
             tasks: Vec::new(),
             active_attempts: Vec::new(),
             undo_stack: Vec::new(),
         }
+    }
+
+    pub fn format_version(&self) -> u32 {
+        self.format_version
+    }
+
+    /// Stamp this binary's format version before a durable write.
+    pub(crate) fn stamp_format_version(&mut self) {
+        self.format_version = STORE_FORMAT_VERSION;
     }
 
     /// Inspect the top undo entry without consuming it.
@@ -867,6 +898,17 @@ mod tests {
         local.merge_tasks_from_disk(&disk);
 
         assert_eq!(local.active_attempts(), &[incoming]);
+    }
+
+    #[test]
+    fn missing_format_version_loads_as_legacy() {
+        let state: DomainState = serde_json::from_value(serde_json::json!({
+            "tasks": [],
+            "undo_stack": []
+        }))
+        .expect("legacy document");
+        assert_eq!(state.format_version(), LEGACY_STORE_FORMAT_VERSION);
+        assert_eq!(state.format_version(), 1);
     }
 
     #[test]
