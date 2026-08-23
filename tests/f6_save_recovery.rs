@@ -1899,6 +1899,14 @@ fn failed_task_thread_edit_cancel_returns_to_task_page_with_a_retained_form() {
     apply_intent(
         &mut domain,
         &mut model,
+        BoardIntent::EditInsertText(" staged title".into()),
+        None,
+        None,
+    )
+    .expect("stage title");
+    apply_intent(
+        &mut domain,
+        &mut model,
         BoardIntent::FocusFormField(CaptureField::Thread),
         None,
         None,
