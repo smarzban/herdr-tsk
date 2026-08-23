@@ -1295,7 +1295,16 @@ fn shift_tab_from_scope_resets_notes_stream_origin_and_aligns_caret() {
     apply_intent(
         &mut domain,
         &mut model,
-        shift_tab.expect("Shift+Tab intent"),
+        shift_tab.clone().expect("Shift+Tab intent"),
+        None,
+        None,
+    )
+    .expect("Shift+Tab into Thread");
+    assert_eq!(model.input_mode(), BoardInputMode::EditThread);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        shift_tab.expect("second Shift+Tab intent"),
         None,
         None,
     )

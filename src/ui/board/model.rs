@@ -35,6 +35,8 @@ pub enum BoardInputMode {
     Normal,
     EditTitle,
     EditNotes,
+    /// The task page footer's optional thread name owns focus.
+    EditThread,
     /// The scope row of an open task form owns focus. The renderer adaptation remains
     /// deliberately thin until, but its keyboard state is a first-class form field.
     EditScope,
@@ -178,13 +180,25 @@ pub(super) struct QuickAddSave {
     keep_open: bool,
 }
 
+/// A task form mutation staged in the domain but not yet confirmed at the persistence boundary.
+#[derive(Debug, Clone)]
+pub(super) struct TaskEditSave {
+    pub(super) id: Uuid,
+    pub(super) title: String,
+    pub(super) notes: Option<String>,
+    pub(super) scope: TaskScope,
+    pub(super) thread: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub(super) struct BoardForm {
     pub(super) title: EditBuffer,
     pub(super) notes: EditBuffer,
     pub(super) scope: TaskScope,
-    /// Parsed from the quick-add line only. Task title and note editors treat `!t` literally.
-    pub(super) thread: Option<String>,
+    /// Optional thread draft shared by task-page and expanded-capture forms.
+    pub(super) thread: EditBuffer,
+    /// Field-local validation feedback, painted by the footer input rather than status chrome.
+    pub(super) thread_refusal: Option<String>,
     pub(super) focus: CaptureField,
     pub(super) scope_options: Vec<TaskScope>,
     pub(super) scope_selected: usize,
@@ -213,7 +227,7 @@ impl BoardForm {
         tasks: &[Task],
         focus: CaptureField,
     ) -> Self {
-        Self::new(
+        let mut form = Self::new(
             &task.title,
             task.notes.as_deref().unwrap_or_default(),
             task.scope.clone(),
@@ -221,7 +235,9 @@ impl BoardForm {
             BoardFormBinding::Task(task.id),
             this_repo,
             tasks,
-        )
+        );
+        form.thread = seeded_draft(task.thread.as_deref().unwrap_or_default());
+        form
     }
 
     pub(super) fn capture(
@@ -267,7 +283,8 @@ impl BoardForm {
             title: seeded_draft(title),
             notes: seeded_draft(notes),
             scope,
-            thread: None,
+            thread: seeded_draft(""),
+            thread_refusal: None,
             focus,
             scope_options,
             scope_selected,
@@ -300,6 +317,7 @@ impl BoardForm {
         match self.focus {
             CaptureField::Title => BoardInputMode::EditTitle,
             CaptureField::Notes => BoardInputMode::EditNotes,
+            CaptureField::Thread => BoardInputMode::EditThread,
             CaptureField::Scope => BoardInputMode::EditScope,
         }
     }
@@ -311,6 +329,10 @@ impl BoardForm {
             CaptureField::Notes => {
                 self.notes = seeded_draft(task.notes.as_deref().unwrap_or_default());
             }
+            CaptureField::Thread => {
+                self.thread = seeded_draft(task.thread.as_deref().unwrap_or_default());
+                self.thread_refusal = None;
+            }
             CaptureField::Scope => {
                 self.scope = task.scope.clone();
                 self.select_current_scope();
@@ -321,7 +343,8 @@ impl BoardForm {
     pub(super) fn focus_next(&mut self) {
         self.focus = match self.focus {
             CaptureField::Title => CaptureField::Notes,
-            CaptureField::Notes => CaptureField::Scope,
+            CaptureField::Notes => CaptureField::Thread,
+            CaptureField::Thread => CaptureField::Scope,
             CaptureField::Scope => CaptureField::Title,
         };
     }
@@ -330,7 +353,8 @@ impl BoardForm {
         self.focus = match self.focus {
             CaptureField::Title => CaptureField::Scope,
             CaptureField::Notes => CaptureField::Title,
-            CaptureField::Scope => CaptureField::Notes,
+            CaptureField::Thread => CaptureField::Notes,
+            CaptureField::Scope => CaptureField::Thread,
         };
     }
 
@@ -513,6 +537,10 @@ pub struct BoardModel {
     pub(super) saved_task: Option<Uuid>,
     /// A quick-add create waiting for the app save boundary to confirm persistence.
     pub(super) quick_add_save: Option<QuickAddSave>,
+    /// A task-form edit waiting for the app save boundary to confirm persistence.
+    pub(super) task_edit_save: Option<TaskEditSave>,
+    /// The app save boundary holds task-form release across its inner reducer sync.
+    pub(super) hold_task_edit_save: bool,
     /// Last board action feedback or empty-selection chrome message.
     pub(super) message: Option<String>,
     /// Title of the task the last soft-delete removed, captured at delete time.
@@ -578,6 +606,8 @@ impl BoardModel {
             quick_add: None,
             saved_task: None,
             quick_add_save: None,
+            task_edit_save: None,
+            hold_task_edit_save: false,
             message: None,
             delete_notice: None,
             suspended_delete_notice: None,
@@ -671,6 +701,28 @@ impl BoardModel {
             self.input_mode = BoardInputMode::QuickAdd;
             self.clear_message();
         }
+        // The restored baseline discards the staged task edit, but its task-page form remains
+        // open in view mode with every draft reset to the durable task.
+        if resolution == SaveResolution::Cancelled {
+            if let Some(pending) = self.task_edit_save.take() {
+                let task = self
+                    .tasks
+                    .iter()
+                    .find(|task| task.id == pending.id)
+                    .cloned();
+                if let (Some(form), Some(task)) = (self.form.as_mut(), task) {
+                    form.title = seeded_draft(&task.title);
+                    form.notes = seeded_draft(task.notes.as_deref().unwrap_or_default());
+                    form.thread = seeded_draft(task.thread.as_deref().unwrap_or_default());
+                    form.thread_refusal = None;
+                    form.scope = task.scope.clone();
+                    form.select_current_scope();
+                }
+                self.hold_task_edit_save = false;
+                self.input_mode = BoardInputMode::TaskPage;
+                self.clear_message();
+            }
+        }
         // A held step line editor unwinds to page view on Cancel (AC-14): the
         // baseline Cancel just restored rolled its mutation back, so nothing is left
         // to hold the line for, and an edit mode whose editor is gone is the orphan
@@ -712,6 +764,7 @@ impl BoardModel {
         });
         self.attempts = state.active_attempts().to_vec();
         self.finish_quick_add_save();
+        self.finish_task_edit_save();
         self.finish_step_editor_save();
         self.reanchor_selection(self.selection_id, &previous_visible);
         if self.attempts.is_empty()
@@ -933,6 +986,7 @@ impl BoardModel {
         match form.focus {
             CaptureField::Title | CaptureField::Scope => form.title.value(),
             CaptureField::Notes => form.notes.value(),
+            CaptureField::Thread => form.thread.value(),
         }
     }
 
@@ -944,6 +998,7 @@ impl BoardModel {
         match form.focus {
             CaptureField::Title | CaptureField::Scope => form.title.cursor(),
             CaptureField::Notes => form.notes.cursor(),
+            CaptureField::Thread => form.thread.cursor(),
         }
     }
 
@@ -1012,6 +1067,39 @@ impl BoardModel {
             self.input_mode = BoardInputMode::Normal;
         }
         self.clear_message();
+    }
+
+    fn finish_task_edit_save(&mut self) {
+        if self.hold_task_edit_save {
+            return;
+        }
+        let Some(pending) = self.task_edit_save.as_ref() else {
+            return;
+        };
+        let landed = self.tasks.iter().any(|task| {
+            task.id == pending.id
+                && task.title == pending.title
+                && task.notes == pending.notes
+                && task.scope == pending.scope
+                && task.thread == pending.thread
+        });
+        if !landed {
+            return;
+        }
+        self.task_edit_save = None;
+        self.form = None;
+        self.input_mode = BoardInputMode::Normal;
+        self.clear_message();
+    }
+
+    /// Hold a task form through the reducer's pre-persist sync.
+    pub fn hold_task_edit_save(&mut self) {
+        self.hold_task_edit_save = true;
+    }
+
+    /// Release a held form only after Retry or the initial persistence succeeds.
+    pub fn release_task_edit_save(&mut self) {
+        self.hold_task_edit_save = false;
     }
 
     /// Release a held step line editor once persistence has confirmed its mutation
@@ -1124,7 +1212,10 @@ impl BoardModel {
         let Some(form) = self.form.as_mut() else {
             return;
         };
-        if self.input_mode == BoardInputMode::FormScopeDropdown {
+        if matches!(
+            self.input_mode,
+            BoardInputMode::FormScopeDropdown | BoardInputMode::EditStep
+        ) {
             return;
         }
         Self::set_form_focus(form, focus);
@@ -1286,6 +1377,7 @@ impl BoardModel {
         match self.input_mode {
             mode @ (BoardInputMode::EditTitle
             | BoardInputMode::EditNotes
+            | BoardInputMode::EditThread
             | BoardInputMode::EditScope) => Some(mode),
             _ => None,
         }

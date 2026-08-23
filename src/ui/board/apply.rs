@@ -17,7 +17,7 @@ use crate::ui::mouse::BoardPopup;
 use super::commands::{resolve_board_command, CommandSurface};
 use super::model::{
     owned_resource_summary, BoardForm, BoardInputMode, BoardModel, IntentOutcome, OwnedDeckScope,
-    ProjectPickerState, ProjectScopeOption, StepEditor, StepEditorSave,
+    ProjectPickerState, ProjectScopeOption, StepEditor, StepEditorSave, TaskEditSave,
 };
 
 /// What the row says when an action that aims at the selection is asked for on a board that
@@ -387,7 +387,8 @@ fn apply_board_intent(
             let mut form = BoardForm::capture(snapshot, model.this_repo.as_deref(), &model.tasks);
             form.title = crate::ui::edit::seeded_draft(&lifted.title);
             form.scope = scope;
-            form.thread = lifted.thread;
+            form.thread =
+                crate::ui::edit::seeded_draft(lifted.thread.as_deref().unwrap_or_default());
             form.focus = CaptureField::Notes;
             form.select_current_scope();
             model.form = Some(form);
@@ -711,7 +712,15 @@ fn apply_board_intent(
                 let notes =
                     (!form.notes.value().trim().is_empty()).then(|| form.notes.value().to_string());
                 let scope_override = Some(form.scope.clone());
-                let thread = form.thread.clone();
+                let thread = match normalize_optional_thread(form.thread.value()) {
+                    Ok(thread) => thread,
+                    Err(()) => {
+                        if let Some(form) = model.form.as_mut() {
+                            form.thread_refusal = Some("invalid thread name".into());
+                        }
+                        return Ok(IntentOutcome::None);
+                    }
+                };
                 return match crate::capture::capture_save(
                     domain,
                     None,
@@ -1295,6 +1304,10 @@ fn edit_draft(model: &mut BoardModel, operation: impl FnOnce(&mut EditBuffer)) {
     match form.focus {
         CaptureField::Title => operation(&mut form.title),
         CaptureField::Notes => operation(&mut form.notes),
+        CaptureField::Thread => {
+            form.thread_refusal = None;
+            operation(&mut form.thread);
+        }
         CaptureField::Scope => {}
     }
 }
@@ -1446,6 +1459,15 @@ fn quick_add_token_argument<'a>(words: &'a [&str], index: usize) -> Option<&'a s
         .filter(|word| *word != "!p" && *word != "!t" && !word.starts_with('#'))
 }
 
+fn normalize_optional_thread(value: &str) -> Result<Option<String>, ()> {
+    let value = value.trim();
+    if value.is_empty() {
+        Ok(None)
+    } else {
+        normalize_thread(value).map(Some).map_err(|_| ())
+    }
+}
+
 fn confirm_edit(
     domain: &mut DomainState,
     model: &mut BoardModel,
@@ -1456,9 +1478,18 @@ fn confirm_edit(
         return Ok(IntentOutcome::None);
     };
     let id = form.task_id().expect("task form has immutable id");
-    let title = form.title.value().to_string();
+    let title = form.title.value().trim().to_string();
     let notes = (!form.notes.value().trim().is_empty()).then(|| form.notes.value().to_string());
     let scope = form.scope.clone();
+    let thread = match normalize_optional_thread(form.thread.value()) {
+        Ok(thread) => thread,
+        Err(()) => {
+            if let Some(form) = model.form.as_mut() {
+                form.thread_refusal = Some("invalid thread name".into());
+            }
+            return Ok(IntentOutcome::None);
+        }
+    };
     let task = domain.get(id).ok_or(DomainError::UnknownId(id))?.clone();
     // `DomainState::edit` does not reject a soft-deleted task itself. Refuse before touching
     // the form so's bound-task and draft-recovery guarantees remain intact.
@@ -1467,13 +1498,17 @@ fn confirm_edit(
     }
 
     // One existing DomainState::edit call updates title, Notes, scope, and thread together.
-    domain.edit(id, &title, notes, scope, task.thread.clone())?;
+    domain.edit(id, &title, notes.clone(), scope.clone(), thread.clone())?;
 
-    // Only a successful atomic domain edit releases the form. Validation and stale-task
-    // refusals leave its buffers, focus, scope choice, and immutable id untouched.
-    model.input_mode = BoardInputMode::Normal;
-    model.form = None;
-    model.clear_message();
+    // Retain the complete form and mode until the persistence boundary confirms this exact
+    // atomic edit. A failed save can then Retry or Cancel without orphaning the input state.
+    model.task_edit_save = Some(TaskEditSave {
+        id,
+        title,
+        notes,
+        scope,
+        thread,
+    });
     Ok(IntentOutcome::Persist)
 }
 

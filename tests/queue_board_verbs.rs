@@ -1431,7 +1431,7 @@ fn deleting_from_the_page_closes_it_and_undo_restores() {
 }
 
 #[test]
-fn tab_cycles_view_mode_through_title_notes_and_scope_edits() {
+fn tab_cycles_view_mode_through_title_notes_thread_and_scope_edits() {
     let (mut domain, mut model, _id) = board_with_noted_task();
     apply_intent(
         &mut domain,
@@ -1448,6 +1448,8 @@ fn tab_cycles_view_mode_through_title_notes_and_scope_edits() {
     assert_eq!(model.input_mode(), BoardInputMode::EditTitle);
     apply_intent(&mut domain, &mut model, tab.clone(), None, None).expect("focus notes");
     assert_eq!(model.input_mode(), BoardInputMode::EditNotes);
+    apply_intent(&mut domain, &mut model, tab.clone(), None, None).expect("focus thread");
+    assert_eq!(model.input_mode(), BoardInputMode::EditThread);
     apply_intent(&mut domain, &mut model, tab, None, None).expect("focus scope");
     assert_eq!(model.input_mode(), BoardInputMode::EditScope);
 }
@@ -3133,7 +3135,7 @@ fn t_token_capture_threads_while_item_text_stays_literal() {
     apply_intent(
         &mut domain,
         &mut model,
-        BoardIntent::BeginAddChecklistItem,
+        BoardIntent::BeginAddStep,
         None,
         None,
     )
@@ -3161,7 +3163,7 @@ fn t_token_capture_threads_while_item_text_stays_literal() {
     );
     model.sync_from_domain(&domain);
     assert_eq!(
-        domain.get(task_id).expect("capture").checklist[0].text,
+        domain.get(task_id).expect("capture").steps[0].text,
         "literal !t release-2026 #word"
     );
     assert_eq!(

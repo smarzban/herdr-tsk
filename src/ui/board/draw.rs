@@ -184,19 +184,38 @@ fn build_task_page_overlay<'a>(
     let step_views = bound_task.map(super::model::step_views).unwrap_or_default();
     // A step draft is windowed for the shared bottom input slot: the row less
     // the two-cell `▎ ` prompt that owns the terminal cursor.
-    let step_editor = form.steps.editor.as_ref().map(|editor| {
-        let avail = (geo.row_width as usize).saturating_sub(2);
-        let (text, cursor_col) = escaped_line_window(&editor.buffer, avail);
-        crate::ui::render::BottomInputSlot {
-            text,
-            cursor_col,
-            placeholder: "step…   enter save · ctrl+enter save+next · esc cancel",
-            refusal: editor.refusal.as_deref(),
-            // The bottom input replaces the shared status row. Forward recovery
-            // and record-refusal feedback to the surface that is actually visible.
-            message: model.message(),
-        }
-    });
+    let step_editor = form
+        .steps
+        .editor
+        .as_ref()
+        .map(|editor| {
+            let avail = (geo.row_width as usize).saturating_sub(2);
+            let (text, cursor_col) = escaped_line_window(&editor.buffer, avail);
+            crate::ui::render::BottomInputSlot {
+                text,
+                cursor_col,
+                placeholder: "step…   enter save · ctrl+enter save+next · esc cancel",
+                refusal: editor.refusal.as_deref(),
+                // The bottom input replaces the shared status row. Forward recovery
+                // and record-refusal feedback to the surface that is actually visible.
+                message: model.message(),
+            }
+        })
+        .or_else(|| {
+            (model.input_mode() == BoardInputMode::EditThread).then(|| {
+                let avail = (geo.row_width as usize).saturating_sub(2);
+                let (text, cursor_col) = escaped_line_window(&form.thread, avail);
+                crate::ui::render::BottomInputSlot {
+                    text,
+                    cursor_col,
+                    placeholder: "thread…   enter save · esc cancel",
+                    refusal: None,
+                    // The shared bottom slot owns this refusal while it is visible, so it
+                    // never leaks through the status row and remains legible at 40x10.
+                    message: form.thread_refusal.as_deref(),
+                }
+            })
+        });
     // A notes edit always keeps one row: the layout reserves it (the section caps
     // around it), so an active edit can never be scrolled/clamped out of the frame
     // entirely. The step editor uses the shared bottom slot, so steps alone
@@ -257,6 +276,9 @@ fn build_task_page_overlay<'a>(
         TaskScope::Global => "global".to_string(),
     };
     if let Some(task) = bound_task {
+        if let Some(thread) = task.thread.as_deref() {
+            meta.push_str(&format!(" · #{thread}"));
+        }
         let now = SystemTime::now();
         meta.push_str(&format!(
             " · created {} ago · updated {} ago",
@@ -268,6 +290,7 @@ fn build_task_page_overlay<'a>(
     let focus = match model.input_mode() {
         BoardInputMode::EditTitle => Some(CaptureField::Title),
         BoardInputMode::EditNotes => Some(CaptureField::Notes),
+        BoardInputMode::EditThread => Some(CaptureField::Thread),
         BoardInputMode::EditScope | BoardInputMode::FormScopeDropdown => Some(CaptureField::Scope),
         _ => None,
     };

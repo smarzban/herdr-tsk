@@ -651,6 +651,7 @@ fn board_keyboard_intent(
         mode,
         BoardInputMode::EditTitle
             | BoardInputMode::EditNotes
+            | BoardInputMode::EditThread
             | BoardInputMode::EditScope
             | BoardInputMode::FormScopeDropdown
     );
@@ -693,6 +694,7 @@ pub fn apply_board_intent_with_save_recovery(
                 model.close_command_surface();
                 if let Some(working) = recovery.retry(|working| persist(working)) {
                     *domain = working;
+                    model.release_task_edit_save();
                     model.sync_from_domain(domain);
                     model.end_save_recovery(SaveResolution::Retried);
                     if !model.has_saved_task() {
@@ -757,8 +759,26 @@ pub fn apply_board_intent_with_save_recovery(
         }
     }
 
-    let outcome = apply_intent(domain, model, intent, snapshot, host)?;
+    let holds_task_edit = matches!(
+        intent,
+        BoardIntent::ConfirmEdit | BoardIntent::ConfirmEditNext
+    ) && model.edit_target().is_some();
+    if holds_task_edit {
+        model.hold_task_edit_save();
+    }
+    let outcome = match apply_intent(domain, model, intent, snapshot, host) {
+        Ok(outcome) => outcome,
+        Err(error) => {
+            if holds_task_edit {
+                model.release_task_edit_save();
+            }
+            return Err(error);
+        }
+    };
     if outcome != IntentOutcome::Persist {
+        if holds_task_edit {
+            model.release_task_edit_save();
+        }
         return Ok(outcome);
     }
     if let Err(error) = persist(domain) {
@@ -767,6 +787,7 @@ pub fn apply_board_intent_with_save_recovery(
         model.begin_save_recovery(recovery.error().unwrap_or("save failed"));
         return Ok(IntentOutcome::None);
     }
+    model.release_task_edit_save();
     model.sync_from_domain(domain);
     Ok(IntentOutcome::Persisted)
 }

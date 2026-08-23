@@ -1171,6 +1171,14 @@ fn task_form_save_failure_retries_the_exact_atomic_title_notes_and_scope_mutatio
         None,
         None,
     )
+    .expect("focus Thread");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::FormFocusNext,
+        None,
+        None,
+    )
     .expect("focus Scope");
     apply_intent(
         &mut domain,
@@ -1742,5 +1750,222 @@ fn ctrl_enter_refuses_in_place_when_the_bound_task_was_concurrently_soft_deleted
         texts,
         vec!["alpha step"],
         "a refused chord must not mutate the working state"
+    );
+}
+
+#[test]
+fn successful_title_save_with_boundary_whitespace_releases_the_task_form_once() {
+    let (mut domain, mut model, id) = board_with_two_tasks();
+    let baseline = snapshot_of(&domain);
+    let history_before = domain.get(id).expect("task").history.len();
+    let mut recovery = SaveRecovery::new();
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::BeginEditTitle,
+        None,
+        None,
+    )
+    .expect("open title");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::EditInsert(' '),
+        None,
+        None,
+    )
+    .expect("append boundary whitespace");
+
+    assert_eq!(
+        apply_board_intent_with_save_recovery(
+            &mut domain,
+            &mut model,
+            &mut recovery,
+            BoardSaveContext {
+                baseline,
+                intent: BoardIntent::ConfirmEdit,
+                snapshot: None,
+                host: None,
+            },
+            |_| Ok(()),
+        )
+        .expect("save"),
+        IntentOutcome::Persisted
+    );
+    assert!(
+        !model.board_form_open(),
+        "successful save releases the form"
+    );
+    assert_eq!(model.input_mode(), BoardInputMode::Normal);
+    assert_eq!(domain.get(id).expect("task").title, "Delete me");
+    assert_eq!(
+        domain.get(id).expect("task").history.len(),
+        history_before + 1,
+        "the completed edit records exactly one event"
+    );
+    let saved_baseline = snapshot_of(&domain);
+    assert_eq!(
+        apply_board_intent_with_save_recovery(
+            &mut domain,
+            &mut model,
+            &mut recovery,
+            BoardSaveContext {
+                baseline: saved_baseline,
+                intent: BoardIntent::ConfirmEdit,
+                snapshot: None,
+                host: None,
+            },
+            |_| -> Result<(), String> { panic!("released form cannot save again") },
+        )
+        .expect("released ConfirmEdit is inert"),
+        IntentOutcome::None
+    );
+    assert_eq!(
+        domain.get(id).expect("task").history.len(),
+        history_before + 1,
+        "an inert confirm cannot repeat the edit event"
+    );
+}
+
+#[test]
+fn failed_task_thread_edit_cancel_returns_to_task_page_with_a_retained_form() {
+    let (mut domain, mut model, id) = board_with_two_tasks();
+    let baseline = snapshot_of(&domain);
+    let mut recovery = SaveRecovery::new();
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::BeginEditTitle,
+        None,
+        None,
+    )
+    .expect("open form");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::FocusFormField(CaptureField::Thread),
+        None,
+        None,
+    )
+    .expect("focus thread");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::EditInsertText("release-2026".into()),
+        None,
+        None,
+    )
+    .expect("type thread");
+    apply_board_intent_with_save_recovery(
+        &mut domain,
+        &mut model,
+        &mut recovery,
+        BoardSaveContext {
+            baseline,
+            intent: BoardIntent::ConfirmEdit,
+            snapshot: None,
+            host: None,
+        },
+        |_| Err(INJECTED.into()),
+    )
+    .expect("failure stays recoverable");
+
+    assert_eq!(
+        apply_board_intent_with_save_recovery(
+            &mut domain,
+            &mut model,
+            &mut recovery,
+            BoardSaveContext {
+                baseline: DomainState::new(),
+                intent: BoardIntent::CancelSave,
+                snapshot: None,
+                host: None,
+            },
+            |_| -> Result<(), String> { panic!("Cancel does not persist") },
+        )
+        .expect("cancel"),
+        IntentOutcome::None
+    );
+    assert!(model.board_form_open(), "Cancel retains the task page form");
+    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+    assert_eq!(domain.get(id).expect("task").thread, None);
+}
+
+#[test]
+fn failed_save_during_thread_edit_holds_form_until_retry_or_cancel() {
+    let (mut domain, mut model, id) = board_with_two_tasks();
+    let baseline = snapshot_of(&domain);
+    let mut recovery = SaveRecovery::new();
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::BeginEditTitle,
+        None,
+        None,
+    )
+    .expect("open form");
+    for _ in 0..2 {
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::FormFocusNext,
+            None,
+            None,
+        )
+        .expect("focus thread");
+    }
+    for character in "release-2026".chars() {
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::EditInsert(character),
+            None,
+            None,
+        )
+        .expect("type thread");
+    }
+
+    let failed = apply_board_intent_with_save_recovery(
+        &mut domain,
+        &mut model,
+        &mut recovery,
+        BoardSaveContext {
+            baseline,
+            intent: BoardIntent::ConfirmEdit,
+            snapshot: None,
+            host: None,
+        },
+        |_| Err(INJECTED.into()),
+    )
+    .expect("failure stays recoverable");
+    assert_eq!(failed, IntentOutcome::None);
+    assert!(recovery.is_pending());
+    assert!(model.board_form_open());
+    assert_eq!(model.input_mode(), BoardInputMode::SaveRecovery);
+
+    let retried = apply_board_intent_with_save_recovery(
+        &mut domain,
+        &mut model,
+        &mut recovery,
+        BoardSaveContext {
+            baseline: DomainState::new(),
+            intent: BoardIntent::RetrySave,
+            snapshot: None,
+            host: None,
+        },
+        |working| {
+            assert_eq!(
+                working.get(id).expect("task").thread.as_deref(),
+                Some("release-2026"),
+                "retry receives the held atomic task edit"
+            );
+            Ok(())
+        },
+    )
+    .expect("retry");
+    assert_eq!(retried, IntentOutcome::Persisted);
+    assert_eq!(
+        domain.get(id).expect("task").thread.as_deref(),
+        Some("release-2026")
     );
 }

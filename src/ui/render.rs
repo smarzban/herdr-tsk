@@ -423,6 +423,8 @@ pub enum QueueHitTarget {
     FormNotes(usize),
     /// Shared-form scope row. A click opens the pending scope dropdown, never cycles scope.
     FormScope,
+    /// Shared-form thread portion of the task-page footer.
+    FormThread,
     /// One painted steps step row on the open task page, indexed by the step's
     /// absolute position in the task's steps (storage order), whatever window
     /// scroll painted it — the same absolute-index discipline [`Command`] follows.
@@ -769,6 +771,20 @@ const FORM_NOTES_VERBS: &[VerbEntry<'static>] = &[
         label: "cancel",
     },
 ];
+const FORM_THREAD_VERBS: &[VerbEntry<'static>] = &[
+    VerbEntry {
+        key: "enter",
+        label: "save",
+    },
+    VerbEntry {
+        key: "tab",
+        label: "scope",
+    },
+    VerbEntry {
+        key: "esc",
+        label: "cancel",
+    },
+];
 const FORM_SCOPE_VERBS: &[VerbEntry<'static>] = &[
     VerbEntry {
         key: "enter",
@@ -808,6 +824,7 @@ pub(crate) fn form_verb_items(
     match focus {
         CaptureField::Title => FORM_TITLE_VERBS,
         CaptureField::Notes => FORM_NOTES_VERBS,
+        CaptureField::Thread => FORM_THREAD_VERBS,
         CaptureField::Scope => FORM_SCOPE_VERBS,
     }
 }
@@ -917,10 +934,10 @@ fn paint_overlay(
             step_cursor,
             step_scroll,
             step_marked,
+            ref step_editor,
             ref meta,
             focus,
             scope_dropdown,
-            ..
         } => {
             paint_task_page(
                 frame,
@@ -937,6 +954,7 @@ fn paint_overlay(
                 *step_marked,
                 meta,
                 *focus,
+                step_editor.is_some(),
                 hits,
             );
             if let Some(dropdown) = scope_dropdown {
@@ -1382,6 +1400,7 @@ fn paint_task_page(
     step_marked: Option<usize>,
     meta: &str,
     focus: Option<CaptureField>,
+    footer_input_open: bool,
     hits: &mut QueueHitMap,
 ) {
     let width = geo.row_width;
@@ -1548,7 +1567,7 @@ fn paint_task_page(
         paint_page_scrollbar(frame, &lay, width, scroll, content.total_rows);
     }
 
-    // Meta footer: scope · created · updated. It remains available while a step
+    // Meta footer: scope · thread · created · updated. It remains available while a step
     // draft uses the board's separate shared bottom input slot.
     if let Some(y) = lay.meta_y {
         put_line(
@@ -1557,7 +1576,30 @@ fn paint_task_page(
             width,
             paint_bounded_line(&format!("  {meta}"), width, style_dim()),
         );
-        hits.push(QueueHitTarget::FormScope, Rect::new(0, y, width, 1));
+        let (scope, thread) = match meta.split_once(" · #") {
+            Some((scope, tail)) => (
+                scope,
+                tail.split_once(" · created")
+                    .map_or(tail, |(thread, _)| thread),
+            ),
+            None => (meta, ""),
+        };
+        let thread_x = u16::try_from(2 + display_width(scope))
+            .unwrap_or(u16::MAX)
+            .min(width);
+        if footer_input_open {
+            return;
+        }
+        hits.push(QueueHitTarget::FormScope, Rect::new(0, y, thread_x, 1));
+        if !thread.is_empty() && thread_x < width {
+            let thread_width = u16::try_from(display_width(" · #") + display_width(thread))
+                .unwrap_or(u16::MAX)
+                .min(width.saturating_sub(thread_x));
+            hits.push(
+                QueueHitTarget::FormThread,
+                Rect::new(thread_x, y, thread_width, 1),
+            );
+        }
     }
 }
 

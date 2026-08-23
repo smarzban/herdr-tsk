@@ -620,6 +620,12 @@ fn expanded_page_stashes_notes_and_scope_across_esc_and_saves_like_quick_add() {
         "Tab in the page advances the form rather than re-expanding quick add"
     );
     apply(&mut domain, &mut model, BoardIntent::FormFocusNext, None);
+    assert_eq!(model.input_mode(), BoardInputMode::EditThread);
+    assert_eq!(
+        model.form_focus(),
+        Some(herdr_tasks::ui::capture::CaptureField::Thread)
+    );
+    apply(&mut domain, &mut model, BoardIntent::FormFocusNext, None);
     assert_eq!(model.input_mode(), BoardInputMode::EditScope);
     assert_eq!(model.form_scope(), Some(&TaskScope::Global));
 
