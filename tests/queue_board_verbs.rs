@@ -2255,6 +2255,65 @@ fn wheel_never_arms_cursor_and_up_deactivates_before_inactive_scroll_then_down_r
     );
 }
 
+/// A background refresh can leave the page cursor past an externally shortened step list.
+/// The footer must then describe the same task-status verb `PrimaryVerb` will apply.
+#[test]
+fn stale_step_cursor_falls_back_to_the_live_task_status_verb() {
+    let (mut domain, mut model, id) =
+        board_with_steps("Stale cursor", None, &["first step", "second step"]);
+    rendered_board(&model, 80, 24);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::PageScrollDown,
+        None,
+        None,
+    )
+    .expect("activate first step");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::PageScrollDown,
+        None,
+        None,
+    )
+    .expect("select second step");
+    let steps: Vec<_> = domain
+        .get(id)
+        .expect("task")
+        .steps
+        .iter()
+        .map(|step| step.id)
+        .collect();
+    for step in steps {
+        domain.remove_step(id, step).expect("external removal");
+    }
+    model.sync_from_domain(&domain);
+
+    let verbs = board_verb_items(&model);
+    assert!(
+        verbs
+            .iter()
+            .any(|entry| entry.key == "space" && entry.label == "start"),
+        "a stale cursor must not advertise toggle step: {verbs:?}"
+    );
+    assert!(
+        !verbs
+            .iter()
+            .any(|entry| entry.key == "space" && entry.label == "toggle step"),
+        "a stale cursor must not advertise a dead step: {verbs:?}"
+    );
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::PrimaryVerb,
+        None,
+        None,
+    )
+    .expect("primary verb");
+    assert_eq!(domain.get(id).expect("task").status, HumanStatus::Started);
+}
+
 /// Step cursor navigation stays available when the shared content already fits.
 #[test]
 fn down_activates_the_cursor_when_shared_content_does_not_overflow() {

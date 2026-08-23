@@ -48,11 +48,7 @@ pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
             key: "e",
             label: "edit",
         });
-        if model
-            .form
-            .as_ref()
-            .is_some_and(|form| form.steps.cursor.is_some())
-        {
+        if model.has_live_step_cursor() {
             entries.push(VerbEntry {
                 key: "space",
                 label: "toggle step",

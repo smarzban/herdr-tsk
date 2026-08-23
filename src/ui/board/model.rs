@@ -1082,11 +1082,24 @@ impl BoardModel {
         form.scope_options.get(form.scope_selected)
     }
 
+    /// Apply the shared cursor-window origin contract whenever form focus enters Notes.
+    fn set_form_focus(form: &mut BoardForm, focus: CaptureField) {
+        form.focus = focus;
+        // Notes drafts are cursor-windowed rather than a full copy of the shared
+        // content stream. Entering the editor therefore returns its window to the
+        // visible origin, so a prior reading scroll cannot hide the draft or put
+        // the terminal caret on a step row.
+        if focus == CaptureField::Notes && form.is_task() {
+            form.notes_scroll = 0;
+        }
+    }
+
     /// Enter field edit on the page's own focused field (Tab from view mode).
     pub(super) fn enter_page_field_focus(&mut self) {
-        let Some(form) = self.form.as_ref().filter(|form| form.is_task()) else {
+        let Some(form) = self.form.as_mut().filter(|form| form.is_task()) else {
             return;
         };
+        Self::set_form_focus(form, form.focus);
         self.input_mode = form.parent_mode();
     }
 
@@ -1099,6 +1112,7 @@ impl BoardModel {
         } else {
             form.focus_prev();
         }
+        Self::set_form_focus(form, form.focus);
         self.input_mode = form.parent_mode();
     }
 
@@ -1110,15 +1124,24 @@ impl BoardModel {
         if self.input_mode == BoardInputMode::FormScopeDropdown {
             return;
         }
-        form.focus = focus;
-        // Notes drafts are cursor-windowed rather than a full copy of the shared
-        // content stream. Entering the editor therefore returns its window to the
-        // visible origin, so a prior reading scroll cannot hide the draft or put
-        // the terminal caret on a step row.
-        if focus == CaptureField::Notes && form.is_task() {
-            form.notes_scroll = 0;
-        }
+        Self::set_form_focus(form, focus);
         self.input_mode = form.parent_mode();
+    }
+
+    /// Whether the task page cursor selects a current step in this synchronized snapshot.
+    pub(super) fn has_live_step_cursor(&self) -> bool {
+        if self.input_mode != BoardInputMode::TaskPage {
+            return false;
+        }
+        let Some(form) = self.form.as_ref().filter(|form| form.is_task()) else {
+            return false;
+        };
+        let Some(index) = form.steps.cursor else {
+            return false;
+        };
+        form.task_id()
+            .and_then(|id| self.tasks.iter().find(|task| task.id == id))
+            .is_some_and(|task| task.steps.get(index).is_some())
     }
 
     pub(super) fn cycle_form_scope(&mut self) {

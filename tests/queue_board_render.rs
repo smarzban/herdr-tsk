@@ -4,17 +4,21 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::{Duration, SystemTime};
 
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use herdr_tasks::config::VerbModifier;
 use herdr_tasks::domain::{
     DomainState, HumanStatus, ProvenanceOrigin, Task, TaskEvent, TaskEventKind, TaskScope,
 };
+use herdr_tasks::ui::input::map_key;
 use herdr_tasks::ui::queue::{self, DeckScope, QueueView};
 use herdr_tasks::ui::render::{
     assert_buffer_mono, assert_no_color_sgr, draw_queue_frame, BottomInputSlot, PaletteCommandRow,
     QueueFrameModel, QueueOverlay, VerbEntry,
 };
 use herdr_tasks::ui::tier::{self, Tier, TierGeometry};
-use herdr_tasks::ui::{apply_intent, board_verb_items, draw_board, BoardIntent, BoardModel};
+use herdr_tasks::ui::{
+    apply_intent, board_verb_items, draw_board, BoardInputMode, BoardIntent, BoardModel,
+};
 use ratatui::backend::TestBackend;
 use ratatui::{Frame, Terminal};
 use uuid::Uuid;
@@ -1227,6 +1231,89 @@ fn notes_edit_after_deep_stream_scroll_keeps_draft_and_caret_aligned() {
         terminal.backend().cursor_position().y,
         19,
         "caret must remain on the visible cursor-windowed draft row"
+    );
+}
+
+/// AC-27 applies to form navigation too: Shift+Tab from Scope enters Notes at the
+/// cursor-window origin, rather than preserving the reading position from the shared stream.
+#[test]
+fn shift_tab_from_scope_resets_notes_stream_origin_and_aligns_caret() {
+    let mut domain = DomainState::new();
+    let notes = (0..20)
+        .map(|line| format!("note line {line}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let id = domain
+        .create(
+            "Shift tab Notes",
+            Some(notes),
+            TaskScope::Global,
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("create task");
+    for index in 0..30 {
+        domain
+            .add_step(id, format!("step {index}"))
+            .expect("add step");
+    }
+    let mut model = BoardModel::from_domain(&domain, None);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenTaskPage,
+        None,
+        None,
+    )
+    .expect("open");
+    board_rows(&model, 80, 24);
+    for _ in 0..20 {
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::PageWheelScrollDown,
+            None,
+            None,
+        )
+        .expect("deep wheel");
+    }
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::BeginEditScope,
+        None,
+        None,
+    )
+    .expect("edit scope");
+    let shift_tab = map_key(
+        BoardInputMode::EditScope,
+        KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT),
+    );
+    assert_eq!(shift_tab, Some(BoardIntent::FormFocusPrev));
+    apply_intent(
+        &mut domain,
+        &mut model,
+        shift_tab.expect("Shift+Tab intent"),
+        None,
+        None,
+    )
+    .expect("Shift+Tab into Notes");
+    assert_eq!(model.input_mode(), BoardInputMode::EditNotes);
+
+    let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("terminal");
+    terminal
+        .draw(|frame| draw_board(frame, &model))
+        .expect("draw");
+    let text = board_rows(&model, 80, 24).join("\n");
+    assert!(
+        text.contains("note line 9"),
+        "Shift+Tab Notes draft must return to the visible cursor window:\n{text}"
+    );
+    assert_eq!(
+        terminal.backend().cursor_position().y,
+        19,
+        "Shift+Tab Notes caret must land on its painted draft row"
     );
 }
 
