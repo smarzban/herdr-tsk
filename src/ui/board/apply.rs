@@ -17,7 +17,7 @@ use crate::ui::mouse::BoardPopup;
 use super::commands::{resolve_board_command, CommandSurface};
 use super::model::{
     owned_resource_summary, BoardForm, BoardInputMode, BoardModel, IntentOutcome, OwnedDeckScope,
-    ProjectPickerState, ProjectScopeOption, StepEditor, StepEditorSave, StepsPageState,
+    ProjectPickerState, ProjectScopeOption, StepEditor, StepEditorSave,
 };
 
 /// What the row says when an action that aims at the selection is asked for on a board that
@@ -973,8 +973,23 @@ fn apply_board_intent(
                         .unwrap_or(0);
                     if index < steps {
                         form.steps.cursor = Some(index);
-                        steps_scroll_to_cursor(&mut form.steps, index);
+                        steps_scroll_to_cursor(form, index);
                     }
+                }
+            }
+            return Ok(IntentOutcome::None);
+        }
+        BoardIntent::PageWheelScrollUp | BoardIntent::PageWheelScrollDown => {
+            if let Some(form) = model.form.as_mut().filter(|form| form.is_task()) {
+                if model.input_mode == BoardInputMode::TaskPage {
+                    let horizon = form.notes_max_scroll.get();
+                    form.notes_scroll = match intent {
+                        BoardIntent::PageWheelScrollUp => form.notes_scroll.saturating_sub(1),
+                        BoardIntent::PageWheelScrollDown => {
+                            form.notes_scroll.saturating_add(1).min(horizon)
+                        }
+                        _ => unreachable!("wheel intents matched above"),
+                    };
                 }
             }
             return Ok(IntentOutcome::None);
@@ -982,6 +997,12 @@ fn apply_board_intent(
         BoardIntent::PageScrollUp => {
             if let Some(form) = model.form.as_mut().filter(|form| form.is_task()) {
                 if model.input_mode == BoardInputMode::TaskPage {
+                    // Shared content scroll takes priority while it can move, keeping
+                    // long notes and steps in one continuous viewport.
+                    if form.notes_scroll > 0 {
+                        form.notes_scroll -= 1;
+                        return Ok(IntentOutcome::None);
+                    }
                     // With the step cursor active, Up moves it through steps (AC-8);
                     // Up from the first step deactivates it, consuming the press so the
                     // notes keep their scroll (AC-18).
@@ -990,7 +1011,7 @@ fn apply_board_intent(
                         Some(index) => {
                             let cursor = index - 1;
                             form.steps.cursor = Some(cursor);
-                            steps_scroll_to_cursor(&mut form.steps, cursor);
+                            steps_scroll_to_cursor(form, cursor);
                         }
                         None => form.notes_scroll = form.notes_scroll.saturating_sub(1),
                     }
@@ -1001,6 +1022,13 @@ fn apply_board_intent(
         BoardIntent::PageScrollDown => {
             if let Some(form) = model.form.as_mut().filter(|form| form.is_task()) {
                 if model.input_mode == BoardInputMode::TaskPage {
+                    // Scroll the shared body before entering step-cursor navigation.
+                    // The renderer records the exact wrapped-row horizon for this pane.
+                    let horizon = form.notes_max_scroll.get();
+                    if form.notes_scroll < horizon {
+                        form.notes_scroll += 1;
+                        return Ok(IntentOutcome::None);
+                    }
                     let steps = form
                         .task_id()
                         .and_then(|id| domain.get(id))
@@ -1013,11 +1041,12 @@ fn apply_board_intent(
                         // re-activatable, never one-shot (AC-18, amended).
                         None if steps > 0 => {
                             form.steps.cursor = Some(0);
+                            steps_scroll_to_cursor(form, 0);
                         }
                         Some(index) if steps > 0 => {
                             let cursor = (index + 1).min(steps - 1);
                             form.steps.cursor = Some(cursor);
-                            steps_scroll_to_cursor(&mut form.steps, cursor);
+                            steps_scroll_to_cursor(form, cursor);
                         }
                         _ => {
                             // Bounded by the rows the last painted frame actually laid out, so the
@@ -1417,16 +1446,21 @@ fn cursor_step(domain: &DomainState, model: &BoardModel) -> Option<(Uuid, Uuid)>
     Some((task_id, step_id))
 }
 
-/// Keep the steps window's scroll showing `cursor`, using the step-row count the
-/// last painted frame recorded. Mirrors the notes window's renderer-recorded bound: the
-/// model is geometry-free, so the paint seam reports what actually fit.
-fn steps_scroll_to_cursor(state: &mut StepsPageState, cursor: usize) {
-    let rows = state.window_rows.get().max(1);
-    if cursor < state.scroll {
-        state.scroll = cursor;
-    } else if cursor >= state.scroll + rows {
-        state.scroll = cursor + 1 - rows;
+/// Keep the selected step in the renderer-recorded shared content viewport.
+fn steps_scroll_to_cursor(form: &mut BoardForm, cursor: usize) {
+    let target = form
+        .steps
+        .content_start
+        .get()
+        .saturating_add(1)
+        .saturating_add(cursor);
+    let rows = form.steps.window_rows.get().max(1);
+    if target < form.notes_scroll {
+        form.notes_scroll = target;
+    } else if target >= form.notes_scroll.saturating_add(rows) {
+        form.notes_scroll = target + 1 - rows;
     }
+    form.notes_scroll = form.notes_scroll.min(form.notes_max_scroll.get());
 }
 
 /// Outcome of routing the delete verb through the page's step cursor.
@@ -1489,11 +1523,10 @@ fn page_step_delete(
     form.steps.delete_mark = None;
     if len == 0 {
         form.steps.cursor = None;
-        form.steps.scroll = 0;
     } else {
         let cursor = form.steps.cursor.unwrap_or(0).min(len - 1);
         form.steps.cursor = Some(cursor);
-        steps_scroll_to_cursor(&mut form.steps, cursor);
+        steps_scroll_to_cursor(form, cursor);
     }
     Ok(PageStepDelete::Removed)
 }

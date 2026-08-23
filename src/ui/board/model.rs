@@ -187,13 +187,12 @@ pub(super) struct BoardForm {
     pub(super) scope_options: Vec<TaskScope>,
     pub(super) scope_selected: usize,
     pub(super) binding: BoardFormBinding,
-    /// View-mode scroll of the task page's notes body (wrapped rows), never used by capture.
+    /// View-mode scroll of the task page's shared notes-and-steps body, never used by capture.
     pub(super) notes_scroll: usize,
     /// Page-session steps state (step cursor, window scroll, delete mark, step
     /// editor). Carried by the form so it lives exactly as long as the page does.
     pub(super) steps: StepsPageState,
-    /// The furthest `notes_scroll` the LAST painted frame could actually show, in wrapped
-    /// rows (`wrapped rows - visible rows`).
+    /// The furthest shared-content scroll offset the last painted frame can show.
     ///
     /// The scroll bound depends on the wrap width, which only the renderer knows: the model
     /// is deliberately geometry-free and the render path takes `&BoardModel`. Bounding the
@@ -409,10 +408,9 @@ pub(super) struct StepEditorSave {
 pub(super) struct StepsPageState {
     /// Highlighted step index; `None` = inactive.
     pub(super) cursor: Option<usize>,
-    /// First step index the painted window shows; the renderer records how many step
-    /// rows it actually laid out in [`Self::window_rows`], the same seam
-    /// [`BoardForm::notes_max_scroll`] uses for the notes window.
-    pub(super) scroll: usize,
+    /// Absolute content row of the steps label, recorded by the renderer so cursor
+    /// movement can keep its selected step inside the shared viewport.
+    pub(super) content_start: std::cell::Cell<usize>,
     /// Step index visibly marked by the first press of the delete verb. Any intervening
     /// intent clears it; only the verb's second press removes.
     pub(super) delete_mark: Option<usize>,
@@ -421,7 +419,7 @@ pub(super) struct StepsPageState {
     /// An editor apply the save boundary has not confirmed yet (AC-14). While it is
     /// set, the editor and its input mode are held exactly as the user left them.
     pub(super) pending_save: Option<StepEditorSave>,
-    /// Step rows the last painted window actually showed (renderer-recorded).
+    /// Shared-content rows the last painted viewport showed (renderer-recorded).
     pub(super) window_rows: std::cell::Cell<usize>,
 }
 

@@ -1786,35 +1786,28 @@ fn wrapping_notes() -> String {
         .join("\n")
 }
 
-/// AC-8 / T-2 review Minor 1: bare arrows move the step cursor through steps,
-/// the steps window scrolls to keep the cursor visible, and the dim
-/// `+N more ↓` affordance appears and disappears with hidden steps.
+/// The page body scrolls as one stream: a long steps list no longer has a
+/// separate hidden-tail affordance, and PageScroll reaches the final step through
+/// the shared scrollbar.
 #[test]
-fn arrow_keys_move_step_cursor_and_drive_scroll() {
+fn arrow_keys_scroll_the_shared_notes_and_steps_content() {
     let steps: Vec<String> = (1..=30).map(|i| format!("step {i:02}")).collect();
     let step_refs: Vec<&str> = steps.iter().map(String::as_str).collect();
-    let (mut domain, mut model, id) =
+    let (mut domain, mut model, _) =
         board_with_steps("Window walker", Some("the notes body"), &step_refs);
-    let _ = domain.get(id).expect("task");
 
-    // Fresh page: no cursor yet, the window truncates 30 steps, the affordance
-    // names the hidden tail, and the steps past the fold are absent. T-6 halved the
-    // content region: the steps half at 80x24 is 8 rows (label + 7 step rows,
-    // the last of which the affordance takes), so 6 steps paint and 23 hide below.
     let frame = rendered_board(&model, 80, 24);
     assert!(
-        frame.contains("+23 more"),
-        "the truncated section must paint the hidden-steps affordance:\n{frame}"
+        frame.contains('█'),
+        "overflow must show the page scrollbar:\n{frame}"
+    );
+    assert!(
+        !frame.contains("+23 more"),
+        "there is no separate steps window:\n{frame}"
     );
     assert!(frame.contains("step 01"), "first step visible:\n{frame}");
-    assert!(
-        !frame.contains("step 16"),
-        "steps past the fold must not paint:\n{frame}"
-    );
 
-    // First Down activates the cursor on the first step; 29 more walk it to the
-    // last, driving the window scroll to keep it visible.
-    for _ in 0..30 {
+    for _ in 0..23 {
         apply_intent(
             &mut domain,
             &mut model,
@@ -1822,46 +1815,16 @@ fn arrow_keys_move_step_cursor_and_drive_scroll() {
             None,
             None,
         )
-        .expect("walk down");
+        .expect("scroll down");
     }
     let bottom = rendered_board(&model, 80, 24);
     assert!(
-        bottom.contains("▸ ▪ step 30"),
-        "the cursor must be visible on the last step:\n{bottom}"
+        bottom.contains("step 30"),
+        "the shared scroll reaches the final step:\n{bottom}"
     );
     assert!(
         !bottom.contains("step 01"),
-        "the window must have scrolled past the first step:\n{bottom}"
-    );
-    assert!(
-        !bottom.contains("more"),
-        "no hidden steps remain, so no affordance row:\n{bottom}"
-    );
-
-    // Walking back up drives the window the other way; hidden steps bring the
-    // affordance back.
-    for _ in 0..16 {
-        apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::PageScrollUp,
-            None,
-            None,
-        )
-        .expect("walk up");
-    }
-    let mid = rendered_board(&model, 80, 24);
-    assert!(
-        mid.contains("▸ ▪ step 14"),
-        "the cursor must be visible after walking up:\n{mid}"
-    );
-    assert!(
-        mid.contains("more"),
-        "hidden steps must restore the affordance:\n{mid}"
-    );
-    assert!(
-        !mid.contains("step 01"),
-        "the window is still scrolled: the first step stays hidden:\n{mid}"
+        "the first step leaves the viewport:\n{bottom}"
     );
 }
 
@@ -2100,25 +2063,17 @@ fn delete_verb_marks_then_removes_on_second_press() {
     );
 }
 
-/// AC-17: on a task with steps and the cursor inactive, a first bare Down
-/// activates the cursor on the first step instead of scrolling the notes.
+/// With overflowing notes and steps, Down scrolls the one shared body before
+/// any step-cursor navigation, so the note tail remains reachable.
 #[test]
-fn first_bare_down_activates_step_cursor_without_scrolling() {
+fn first_bare_down_scrolls_shared_content_before_steps() {
     let notes = wrapping_notes();
-    let (mut domain, mut model, _id) = board_with_steps(
+    let (mut domain, mut model, _) = board_with_steps(
         "Scroll witness",
         Some(&notes),
         &["alpha step", "bravo step"],
     );
-
-    // One painted frame establishes the wrap geometry the notes scroll bound uses.
     let before = rendered_board(&model, 80, 24);
-    let rows_before: Vec<&str> = before.lines().collect();
-    let label_at = rows_before
-        .iter()
-        .position(|row| row.contains("steps"))
-        .expect("steps section painted");
-
     apply_intent(
         &mut domain,
         &mut model,
@@ -2126,56 +2081,33 @@ fn first_bare_down_activates_step_cursor_without_scrolling() {
         None,
         None,
     )
-    .expect("first bare down");
-
+    .expect("scroll down");
     let after = rendered_board(&model, 80, 24);
-    let rows_after: Vec<&str> = after.lines().collect();
-    let label_after = rows_after
-        .iter()
-        .position(|row| row.contains("steps"))
-        .expect("steps section painted");
-    assert_eq!(
-        &rows_before[..label_at],
-        &rows_after[..label_after],
-        "the activating press must not scroll the notes"
-    );
+    assert_ne!(before, after, "Down must move the shared body");
     assert!(
-        after.contains("▸ ▪ alpha step"),
-        "the cursor must be active on the first step:\n{after}"
+        !after.contains("▸ ▪ alpha step"),
+        "scrolling must not skip to steps"
     );
 }
 
-/// AC-18 (amended): Up from the first step deactivates the cursor, consuming
-/// the press so the notes keep their scroll; while inactive, Up belongs to the
-/// notes (never the cursor). The amended claim that a bare Down re-activates
-/// after this deactivation lives in `down_reactivates_the_cursor_after_deactivation`.
+/// Up reverses the shared content scroll while the page chrome remains fixed.
 #[test]
-fn up_from_first_step_deactivates_cursor_and_restores_scroll() {
+fn page_scroll_up_reverses_the_shared_content_region() {
     let notes = wrapping_notes();
-    let (mut domain, mut model, _id) = board_with_steps(
-        "Deactivate witness",
-        Some(&notes),
-        &["alpha step", "bravo step"],
-    );
-
-    // One painted frame establishes the wrap geometry, so a scrolling press
-    // below would actually move the notes.
+    let (mut domain, mut model, _) =
+        board_with_steps("Deactivate witness", Some(&notes), &["alpha step"]);
     rendered_board(&model, 80, 24);
-
-    // Activate on the first step (visible cursor), then Up deactivates.
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::PageScrollDown,
-        None,
-        None,
-    )
-    .expect("activate");
-    let activated = rendered_board(&model, 80, 24);
-    assert!(
-        activated.contains("▸ ▪ alpha step"),
-        "the cursor must be active on the first step:\n{activated}"
-    );
+    for _ in 0..4 {
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::PageScrollDown,
+            None,
+            None,
+        )
+        .expect("scroll down");
+    }
+    let down = rendered_board(&model, 80, 24);
     apply_intent(
         &mut domain,
         &mut model,
@@ -2183,56 +2115,20 @@ fn up_from_first_step_deactivates_cursor_and_restores_scroll() {
         None,
         None,
     )
-    .expect("deactivate");
-    let deactivated = rendered_board(&model, 80, 24);
-    assert!(
-        !deactivated.contains("▸"),
-        "the cursor must be deactivated:\n{deactivated}"
-    );
-    assert!(
-        deactivated.contains("L0"),
-        "the deactivating press is consumed, notes stay put:\n{deactivated}"
-    );
-
-    // While inactive, Up is a notes press: it neither activates nor moves the
-    // cursor, and the notes stay pinned at their top row (the scroll clamps at
-    // zero — the same notes arm retreats a scrolled window, which the no-steps
-    // page proves directly).
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::PageScrollUp,
-        None,
-        None,
-    )
-    .expect("up while inactive");
-    let still_inactive = rendered_board(&model, 80, 24);
-    assert!(
-        !still_inactive.contains("▸"),
-        "an Up press while inactive must not touch the cursor:\n{still_inactive}"
-    );
-    assert!(
-        still_inactive.contains("L0"),
-        "the notes keep their top row while the scroll is clamped:\n{still_inactive}"
-    );
+    .expect("scroll up");
+    let up = rendered_board(&model, 80, 24);
+    assert_ne!(down, up, "Up must move the shared body back");
+    assert!(up.contains("Deactivate witness") && up.contains("created"));
 }
 
-/// AC-17/AC-18 (amended): after an Up-deactivation, a bare Down re-activates
-/// the cursor on the first step instead of scrolling — activation is
-/// re-activatable, never one-shot.
+/// Step cursor navigation stays available when the shared content already fits.
 #[test]
-fn down_reactivates_the_cursor_after_deactivation() {
-    let notes = wrapping_notes();
-    let (mut domain, mut model, _id) = board_with_steps(
+fn down_activates_the_cursor_when_shared_content_does_not_overflow() {
+    let (mut domain, mut model, _) = board_with_steps(
         "Reactivation witness",
-        Some(&notes),
+        Some("short note"),
         &["alpha step", "bravo step"],
     );
-
-    // One painted frame establishes the wrap geometry the notes window uses.
-    rendered_board(&model, 80, 24);
-
-    // Activate, then deactivate with Up from the first step.
     apply_intent(
         &mut domain,
         &mut model,
@@ -2240,73 +2136,9 @@ fn down_reactivates_the_cursor_after_deactivation() {
         None,
         None,
     )
-    .expect("activate");
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::PageScrollUp,
-        None,
-        None,
-    )
-    .expect("deactivate");
-    let inactive = rendered_board(&model, 80, 24);
-    assert!(
-        !inactive.contains("▸"),
-        "the cursor must be inactive before the re-activating press:\n{inactive}"
-    );
-
-    // While inactive, Up belongs to the notes (amended inactive state): the
-    // cursor stays down and the notes stay at their top row.
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::PageScrollUp,
-        None,
-        None,
-    )
-    .expect("up while inactive");
-    let still_inactive = rendered_board(&model, 80, 24);
-    assert!(
-        !still_inactive.contains("▸"),
-        "an Up press while inactive must not activate the cursor:\n{still_inactive}"
-    );
-    assert!(
-        still_inactive.contains("L0"),
-        "an Up press while inactive reaches the notes, clamped at their top:\n{still_inactive}"
-    );
-
-    // The amended claim: Down re-activates on the first step, not a scroll.
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::PageScrollDown,
-        None,
-        None,
-    )
-    .expect("re-activate");
-    let reactivated = rendered_board(&model, 80, 24);
-    assert!(
-        reactivated.contains("▸ ▪ alpha step"),
-        "a bare Down after deactivation must re-activate the cursor on the first step:\n{reactivated}"
-    );
-    // The notes window is exactly what it was before the press: the
-    // re-activating press never scrolls (same comparison shape the first
-    // activating press proves itself with).
-    let rows_before: Vec<&str> = still_inactive.lines().collect();
-    let rows_after: Vec<&str> = reactivated.lines().collect();
-    let label_before = rows_before
-        .iter()
-        .position(|row| row.contains("steps"))
-        .expect("steps section painted before the press");
-    let label_after = rows_after
-        .iter()
-        .position(|row| row.contains("steps"))
-        .expect("steps section painted after the press");
-    assert_eq!(
-        &rows_before[..label_before],
-        &rows_after[..label_after],
-        "the re-activating press must not scroll the notes"
-    );
+    .expect("activate cursor");
+    let activated = rendered_board(&model, 80, 24);
+    assert!(activated.contains("▸ ▪ alpha step"));
 }
 
 /// AC-19: a task with no steps steps never activates a cursor; bare
@@ -2729,13 +2561,13 @@ fn empty_step_text_refusal_paints_on_line_and_clears_on_close() {
     );
 }
 
-/// T-7 (AC-25): the step add/rename input paints in the page's FOOTER row on the
-/// quick-add line pattern — prompt glyph + mono line — never inside the steps
-/// section; Enter/Ctrl+Enter/Esc semantics hold through the footer surface, the
-/// line owns its empty-text refusal there, and nothing leaks to the board status
-/// message.
+/// A step add/rename uses the reusable quick-add slot: it reserves the two
+/// breathing rows around the input at the bottom of the frame, leaves the task
+/// page's meta footer visible above it, and never puts the editor in the steps
+/// section. Enter/Ctrl+Enter/Esc semantics hold through that shared surface, its
+/// empty-text refusal stays on the input line, and nothing leaks to board status.
 #[test]
-fn step_input_uses_the_footer_quick_add_line() {
+fn step_input_uses_the_shared_quick_add_slot() {
     let (mut domain, mut model, id) = board_with_steps("Footer witness", None, &["alpha step"]);
 
     // The footer row is the row the closed page paints its scope/meta footer on.
@@ -2746,8 +2578,11 @@ fn step_input_uses_the_footer_quick_add_line() {
         .position(|row| row.contains("created"))
         .expect("the closed page paints its meta footer");
 
-    // The add verb opens the line in the FOOTER row: quick-add pattern (prompt +
-    // line), the meta footer hidden while the line is up.
+    // The add verb uses the same status-row slot as board quick-add: two rows
+    // below the normal page footer, leaving a blank row around the input and
+    // retaining a relocated page footer above it.
+    let quick_add_row = footer_row + 1;
+    let open_meta_row = footer_row - 2;
     apply_intent(
         &mut domain,
         &mut model,
@@ -2769,12 +2604,16 @@ fn step_input_uses_the_footer_quick_add_line() {
     let open = rendered_board(&model, 80, 24);
     let open_rows: Vec<&str> = open.lines().collect();
     assert!(
-        open_rows[footer_row].contains("▎") && open_rows[footer_row].contains("bravo step"),
-        "the input line must paint on the footer row with the quick-add prompt pattern:\n{open}"
+        open_rows[quick_add_row].contains("▎") && open_rows[quick_add_row].contains("bravo step"),
+        "the input line must use the quick-add row with its prompt pattern:\n{open}"
     );
     assert!(
-        !open_rows[footer_row].contains("created"),
-        "the footer row is the input while the line is up:\n{open}"
+        open_rows[open_meta_row].contains("created"),
+        "the page meta footer must remain visible above the shared input slot:\n{open}"
+    );
+    assert!(
+        !open_rows[footer_row].contains("▎"),
+        "the old footer row must be reserved as spacing, not host the input:\n{open}"
     );
     // Not in the steps section: its label row keeps the plain counts, and no
     // section row carries the prompt or the draft.
@@ -2783,7 +2622,7 @@ fn step_input_uses_the_footer_quick_add_line() {
         .position(|row| row.contains("steps 0/1"))
         .expect("the section label still paints its counts");
     assert_ne!(
-        label_row, footer_row,
+        label_row, quick_add_row,
         "the editor line must not paint on the section's label row"
     );
     assert!(
@@ -2849,8 +2688,9 @@ fn step_input_uses_the_footer_quick_add_line() {
     let reopened = rendered_board(&model, 80, 24);
     let reopened_rows: Vec<&str> = reopened.lines().collect();
     assert!(
-        reopened_rows[footer_row].contains("▎") && !reopened_rows[footer_row].contains("charlie"),
-        "the reopened footer line is empty:\n{reopened}"
+        reopened_rows[quick_add_row].contains("▎")
+            && !reopened_rows[quick_add_row].contains("charlie"),
+        "the reopened shared quick-add line is empty:\n{reopened}"
     );
 
     // Esc cancels: the draft is discarded, the line closes, nothing is appended.
@@ -2874,8 +2714,8 @@ fn step_input_uses_the_footer_quick_add_line() {
         "Esc appends nothing"
     );
 
-    // The empty-text refusal paints on the footer line itself, never the board
-    // status message, and clears when the line closes.
+    // The empty-text refusal paints on the shared input line itself, never the
+    // board status message, and clears when the line closes.
     apply_intent(
         &mut domain,
         &mut model,
@@ -2896,9 +2736,9 @@ fn step_input_uses_the_footer_quick_add_line() {
     let refused = rendered_board(&model, 80, 24);
     let refused_rows: Vec<&str> = refused.lines().collect();
     assert!(
-        refused_rows[footer_row].contains("▎")
-            && refused_rows[footer_row].contains("text required"),
-        "the refusal paints on the footer line itself:\n{refused}"
+        refused_rows[quick_add_row].contains("▎")
+            && refused_rows[quick_add_row].contains("text required"),
+        "the refusal paints on the shared quick-add line itself:\n{refused}"
     );
     let esc = map_key(model.input_mode(), press(KeyCode::Esc)).expect("esc");
     apply_intent(&mut domain, &mut model, esc, None, None).expect("close the line");

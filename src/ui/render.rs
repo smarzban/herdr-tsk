@@ -253,16 +253,20 @@ pub struct StepView {
     pub text: String,
 }
 
-/// The steps step input as the page paints it on its FOOTER row (AC-25), on the
-/// quick-add line pattern: the draft already windowed around its cursor at the
-/// footer line's width (row width less the two-cell prompt), the terminal cursor
-/// column inside that window, and the line's own empty-text refusal (AC-13) — a
-/// short dim tail painted on the line itself, never the board status row.
+/// A focused one-line input in the board's shared bottom slot. The slot reserves
+/// breathing rows around the status-row input, places the cursor after the two-cell
+/// prompt, and keeps any refusal on the line itself. New one-line capture surfaces
+/// supply their text, placeholder, and optional message rather than creating their
+/// own footer geometry.
 #[derive(Debug, Clone)]
-pub struct StepEditorLine<'a> {
+pub struct BottomInputSlot<'a> {
     pub text: String,
     pub cursor_col: u16,
+    pub placeholder: &'static str,
     pub refusal: Option<&'a str>,
+    /// A contextual refusal that needs its own row above the input. Empty-text
+    /// refusals belong in `refusal` so they never cover the cursor.
+    pub message: Option<&'a str>,
 }
 
 /// Transient overlay painted above the queue frame (palette, help, scope dropdown).
@@ -293,11 +297,9 @@ pub enum QueueOverlay<'a> {
     },
     /// Single-line capture painted into the two bottom chrome rows, never covering the queue.
     QuickAdd {
-        title: String,
-        title_cursor: u16,
+        input: BottomInputSlot<'a>,
         project_scope: bool,
         recovery: bool,
-        message: Option<&'a str>,
     },
     /// The task page: a full-height, view-first takeover for one bound task. `focus` is
     /// `None` in view mode; field edits focus the same drafts the board form carries.
@@ -326,9 +328,9 @@ pub enum QueueOverlay<'a> {
         step_scroll: usize,
         /// Absolute index of the step the delete verb visibly marked, when armed.
         step_marked: Option<usize>,
-        /// The footer's one-line add/rename step input, painted on the meta
-        /// footer row (AC-25) on the quick-add line pattern.
-        step_editor: Option<StepEditorLine<'a>>,
+        /// The page's add/rename step draft. When present it uses the shared
+        /// bottom input slot, leaving the meta footer visible in the page above.
+        step_editor: Option<BottomInputSlot<'a>>,
         /// Footer: scope · created · updated.
         meta: String,
         /// Which field owns the cursor, if any (view mode: none).
@@ -487,8 +489,8 @@ pub fn draw_queue_frame(
     model: &QueueFrameModel<'_>,
     geo: &TierGeometry,
 ) -> QueueHitMap {
-    let quick_add_geo = quick_add_geometry(*geo, &model.overlay);
-    let geo = &quick_add_geo;
+    let input_slot_geo = bottom_input_slot_geometry(*geo, &model.overlay);
+    let geo = &input_slot_geo;
     let mut hits = QueueHitMap::default();
     let width = geo.row_width;
     let height = geo.height;
@@ -578,28 +580,21 @@ pub fn draw_queue_frame(
     }
 
     if let Some(row) = geo.status_row {
-        if let QueueOverlay::QuickAdd {
-            title,
-            title_cursor,
-            recovery,
-            message,
-            ..
-        } = &model.overlay
-        {
-            // Quick-add reserves this blank row above its input at every operable geometry.
-            // Validation and context refusals cannot use the ordinary status row because the
-            // input owns it, while save recovery already owns the verb row.
-            if !recovery {
-                if let Some(message_row) = row.checked_sub(1).filter(|message_row| {
-                    geo.rule_row.is_some_and(|rule_row| *message_row > rule_row)
-                }) {
-                    if let Some(message) = message {
-                        paint_quick_add_message(frame, message_row, width, message);
-                    }
+        if let Some(input) = bottom_input_slot(&model.overlay) {
+            // Every slot has the same reserved row above the cursor line. A surface
+            // can use it for a contextual refusal without replacing its input.
+            if let Some(message_row) = row
+                .checked_sub(1)
+                .filter(|message_row| geo.rule_row.is_some_and(|rule_row| *message_row > rule_row))
+            {
+                if let Some(message) = input.message {
+                    paint_bottom_input_message(frame, message_row, width, message);
                 }
             }
-            paint_quick_add_status(frame, row, width, title, *title_cursor);
-            hits.push(QueueHitTarget::QuickAddInput, Rect::new(0, row, width, 1));
+            paint_bottom_input_slot(frame, row, width, input);
+            if matches!(model.overlay, QueueOverlay::QuickAdd { .. }) {
+                hits.push(QueueHitTarget::QuickAddInput, Rect::new(0, row, width, 1));
+            }
         } else {
             let (line, undo_hit) = paint_status_line(
                 model.status_message,
@@ -645,11 +640,17 @@ pub fn draw_queue_frame(
         if let QueueOverlay::QuickAdd {
             project_scope,
             recovery: true,
-            message,
             ..
         } = &model.overlay
         {
-            paint_quick_add_hint(frame, row, width, *project_scope, *message, geo.tier);
+            paint_quick_add_hint(
+                frame,
+                row,
+                width,
+                *project_scope,
+                model.status_message,
+                geo.tier,
+            );
         } else {
             let (line, verb_hits) = paint_verb_bar(verb_items, budget, width, prefix_verbs);
             put_line(frame, row, width, line);
@@ -664,13 +665,20 @@ pub fn draw_queue_frame(
     hits
 }
 
-/// Reserve breathing room around the quick-add input by taking two rows from the list.
+/// Reserve breathing room around a shared bottom input by taking two rows from the list.
 ///
 /// At the 40×10 operating floor this leaves four list rows, so both blank rows remain. On
 /// shorter frames with fewer than two viewport rows we retain the ordinary compact geometry:
 /// functional chrome wins over decorative spacing.
-fn quick_add_geometry(mut geo: TierGeometry, overlay: &QueueOverlay<'_>) -> TierGeometry {
-    if !matches!(overlay, QueueOverlay::QuickAdd { .. }) || geo.viewport_height < 2 {
+fn bottom_input_slot_geometry(geo: TierGeometry, overlay: &QueueOverlay<'_>) -> TierGeometry {
+    bottom_input_geometry(geo, bottom_input_slot(overlay).is_some())
+}
+
+/// Return the frame geometry after reserving a shared bottom input slot. Payload
+/// builders use this too, so their wrapped content has the same row budget as the
+/// renderer that eventually paints it.
+pub(crate) fn bottom_input_geometry(mut geo: TierGeometry, active: bool) -> TierGeometry {
+    if !active || geo.viewport_height < 2 {
         return geo;
     }
 
@@ -678,6 +686,17 @@ fn quick_add_geometry(mut geo: TierGeometry, overlay: &QueueOverlay<'_>) -> Tier
     geo.rule_row = geo.rule_row.map(|row| row.saturating_sub(2));
     geo.status_row = geo.status_row.map(|row| row.saturating_sub(1));
     geo
+}
+
+/// Extract the input supplied by either current user of the shared bottom slot.
+/// Keeping this seam beside the geometry prevents a new capture surface from
+/// accidentally reserving rows differently from the line it paints.
+fn bottom_input_slot<'a>(overlay: &'a QueueOverlay<'a>) -> Option<&'a BottomInputSlot<'a>> {
+    match overlay {
+        QueueOverlay::QuickAdd { input, .. } => Some(input),
+        QueueOverlay::TaskPage { step_editor, .. } => step_editor.as_ref(),
+        _ => None,
+    }
 }
 
 pub(crate) const QUICK_ADD_VERBS: &[VerbEntry<'static>] = &[
@@ -896,10 +915,10 @@ fn paint_overlay(
             step_cursor,
             step_scroll,
             step_marked,
-            ref step_editor,
             ref meta,
             focus,
             scope_dropdown,
+            ..
         } => {
             paint_task_page(
                 frame,
@@ -914,7 +933,6 @@ fn paint_overlay(
                 *step_cursor,
                 *step_scroll,
                 *step_marked,
-                step_editor.as_ref(),
                 meta,
                 *focus,
                 hits,
@@ -1193,13 +1211,8 @@ fn paint_help_overlay(
     }
 }
 
-/// The task page's full-height geometry: row 0 down to (not including) the lowest bottom
-/// chrome row. Rows are budgeted title · divider · notes · steps · meta footer,
-/// dropping the divider and then the meta first as the pane shrinks. With steps on the
-/// page the content region halves (AC-24): notes own the top half, the steps
-/// section the bottom, and each half scrolls within its own window — the notes scroll
-/// bound and the step cursor's scroll window both key off this layout. Zero required
-/// rows (no steps) reserves nothing: such pages keep the exact pre-steps layout.
+/// The task page's fixed frame: header, divider, and meta footer surround one
+/// scrollable content viewport. Notes and steps flow through that viewport together.
 pub struct TaskPageLayout {
     /// First row the page must not paint (the lowest chrome row, or the frame height).
     pub bottom: u16,
@@ -1207,11 +1220,6 @@ pub struct TaskPageLayout {
     pub divider_y: Option<u16>,
     pub notes_y: u16,
     pub notes_rows: u16,
-    /// First row of the steps block (its label row); the notes window ends here.
-    pub steps_y: u16,
-    /// Rows the steps block may paint (label + step rows). Zero when there is no
-    /// section, in which case `steps_y` sits at the notes end.
-    pub steps_rows: u16,
     pub meta_y: Option<u16>,
 }
 
@@ -1256,6 +1264,38 @@ pub struct StepsWindow {
     pub affordance: bool,
 }
 
+/// A shared page-content flow: notes occupy at least the first half when steps
+/// exist, longer notes push the steps down, and the whole resulting stream scrolls.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PageContentLayout {
+    pub steps_start: usize,
+    pub total_rows: usize,
+    pub max_scroll: usize,
+}
+
+pub fn page_content_layout(
+    note_rows: usize,
+    steps: usize,
+    viewport_rows: u16,
+) -> PageContentLayout {
+    let note_rows = note_rows.max(1);
+    let viewport = viewport_rows as usize;
+    // The blank after notes is part of the flow, even when their natural height
+    // already exceeds half the viewport. A trailing blank similarly separates the
+    // final content section from the fixed footer when it scrolls into view.
+    let steps_start = if steps == 0 {
+        note_rows
+    } else {
+        note_rows.saturating_add(1).max(viewport.div_ceil(2))
+    };
+    let total_rows = steps_start + usize::from(steps > 0) + steps + 1;
+    PageContentLayout {
+        steps_start,
+        total_rows,
+        max_scroll: total_rows.saturating_sub(viewport),
+    }
+}
+
 pub fn steps_window(total: usize, scroll: usize, avail: u16) -> StepsWindow {
     let avail = avail as usize;
     if total == 0 || avail == 0 {
@@ -1280,18 +1320,13 @@ pub fn steps_window(total: usize, scroll: usize, avail: u16) -> StepsWindow {
     }
 }
 
-/// Build the task page's row budget. `section` (see [`steps_section`]) sizes the
-/// steps block: with steps the block is the bottom half of the content region
-/// (`content_rows / 2` rounded down, odd rows to the notes half, at least its label
-/// row); `notes_floor` is the minimum number of notes rows the page must keep
-/// visible. Callers pass 1 while a notes edit is active -- an edit that paints no row
-/// is a blind edit -- and 0 otherwise, and both layout callers must agree, because the
-/// payload builder windows the notes draft against the same budget the painter lays
-/// out.
+/// Build the fixed frame around the task page's shared content viewport. `section`
+/// remains an input for callers that classify a task, but the content itself owns
+/// the notes/steps allocation and scrolls as one region.
 pub fn task_page_layout(
     geo: &TierGeometry,
-    section: StepsSection,
-    notes_floor: u16,
+    _section: StepsSection,
+    _notes_floor: u16,
 ) -> TaskPageLayout {
     let height = geo.height;
     let bottom = [geo.rule_row, geo.status_row, geo.verb_row]
@@ -1316,23 +1351,12 @@ pub fn task_page_layout(
     };
     let content_end = meta_y.unwrap_or(bottom);
     let content_rows = content_end.saturating_sub(notes_y);
-    // `notes_floor` wins over the section (T-2 remediation): while a notes edit is
-    // active the block caps around the reserved row instead of displacing it, so the
-    // edit can never be scrolled or clamped out of the frame entirely.
-    let cap = content_rows.saturating_sub(notes_floor.min(content_rows));
-    let steps_rows = match section {
-        StepsSection::None => 0,
-        StepsSection::Steps => (content_rows / 2).max(1).min(cap),
-    };
-    let steps_y = content_end.saturating_sub(steps_rows);
     TaskPageLayout {
         bottom,
         title_y,
         divider_y,
         notes_y,
-        notes_rows: content_rows.saturating_sub(steps_rows),
-        steps_y,
-        steps_rows,
+        notes_rows: content_rows,
         meta_y,
     }
 }
@@ -1354,7 +1378,6 @@ fn paint_task_page(
     step_cursor: Option<usize>,
     step_scroll: usize,
     step_marked: Option<usize>,
-    step_editor: Option<&StepEditorLine>,
     meta: &str,
     focus: Option<CaptureField>,
     hits: &mut QueueHitMap,
@@ -1375,18 +1398,20 @@ fn paint_task_page(
     }
     frame.render_widget(Clear, Rect::new(0, 0, width, lay.bottom));
 
-    // Header: two-space gutter + glyph + title (bold), status word dim and right-aligned.
+    // Header: the title's left gutter and a matching two-cell right gutter frame
+    // the status word. The scrollbar belongs only to the content viewport below.
+    let header_width = width.saturating_sub(2);
     let header = format!("  {header}");
     let mut line = Line::from(Span::styled(header.clone(), style_bold()));
     let used = display_width(&header);
     let word = display_width(status_word);
-    if used + word < width as usize {
+    if used + word < header_width as usize {
         line.spans
-            .push(Span::raw(" ".repeat(width as usize - used - word)));
+            .push(Span::raw(" ".repeat(header_width as usize - used - word)));
         line.spans
             .push(Span::styled(status_word.to_string(), style_dim()));
     }
-    put_line(frame, lay.title_y, width, line);
+    put_line(frame, lay.title_y, header_width, line);
     hits.push(
         QueueHitTarget::FormTitle,
         Rect::new(0, lay.title_y, width, 1),
@@ -1403,12 +1428,15 @@ fn paint_task_page(
             String::new()
         };
         let tail_w = display_width(&tail);
-        let dash_count = (width as usize).saturating_sub(2).saturating_sub(tail_w);
+        let divider_width = width.saturating_sub(2);
+        let dash_count = (divider_width as usize)
+            .saturating_sub(2)
+            .saturating_sub(tail_w);
         let dashes = "─".repeat(dash_count);
         put_line(
             frame,
             y,
-            width,
+            divider_width,
             Line::from(vec![
                 Span::styled(format!("  {dashes}"), style_dim()),
                 Span::styled(tail, style_dim()),
@@ -1416,149 +1444,153 @@ fn paint_task_page(
         );
     }
 
-    // Notes body: wrapped rows in view mode, cursor-windowed draft rows while editing.
+    // Notes and steps form one vertical stream. With steps, short notes reserve the
+    // first half of the viewport; long notes take the rows they need and push the
+    // steps downward. The header and metadata footer never participate in this scroll.
+    let note_count = notes_rows.len().max(1);
+    let content = page_content_layout(note_count, step_views.len(), lay.notes_rows);
+    let scroll = step_scroll.min(content.max_scroll);
+    // Content has a two-cell gutter on both sides. An overflowing page keeps its
+    // scrollbar outside that right gutter at the frame edge.
+    let content_width = width.saturating_sub(if content.max_scroll > 0 { 3 } else { 2 });
     let notes_style = if focus == Some(CaptureField::Notes) {
         style_bold()
     } else {
         style_plain()
     };
-    if notes_rows.is_empty() && lay.notes_rows > 0 {
-        put_line(
-            frame,
-            lay.notes_y,
-            width,
-            paint_bounded_line("  no notes yet ", width, style_dim()),
-        );
-        hits.push(
-            QueueHitTarget::FormNotes(0),
-            Rect::new(0, lay.notes_y, width, 1),
-        );
-    }
-    for (index, row) in notes_rows.iter().enumerate().take(lay.notes_rows as usize) {
-        let y = lay.notes_y.saturating_add(index as u16);
-        put_line(
-            frame,
-            y,
-            width,
-            paint_bounded_line(&format!("  {row} "), width, notes_style),
-        );
-        hits.push(QueueHitTarget::FormNotes(index), Rect::new(0, y, width, 1));
+    let done = step_views.iter().filter(|step| step.done).count();
+    for visible in 0..lay.notes_rows as usize {
+        let absolute = scroll + visible;
+        if absolute >= content.total_rows {
+            break;
+        }
+        let y = lay.notes_y.saturating_add(visible as u16);
+        if absolute < note_count {
+            let text = notes_rows
+                .get(absolute)
+                .map(String::as_str)
+                .unwrap_or("no notes yet");
+            let style = if notes_rows.is_empty() {
+                style_dim()
+            } else {
+                notes_style
+            };
+            put_line(
+                frame,
+                y,
+                content_width,
+                paint_bounded_line(&format!("  {text} "), content_width, style),
+            );
+            hits.push(
+                QueueHitTarget::FormNotes(absolute),
+                Rect::new(0, y, content_width, 1),
+            );
+        } else if !step_views.is_empty() && absolute == content.steps_start {
+            put_line(
+                frame,
+                y,
+                content_width,
+                paint_bounded_line(
+                    &format!("  steps {done}/{}", step_views.len()),
+                    content_width,
+                    style_dim(),
+                ),
+            );
+        } else if absolute > content.steps_start {
+            let index = absolute - content.steps_start - 1;
+            if let Some(step) = step_views.get(index) {
+                let gutter = if Some(index) == step_cursor {
+                    "▸ "
+                } else {
+                    "  "
+                };
+                let glyph = if Some(index) == step_marked {
+                    "✗"
+                } else if step.done {
+                    "✓"
+                } else {
+                    "▪"
+                };
+                put_line(
+                    frame,
+                    y,
+                    content_width,
+                    paint_bounded_line(
+                        &format!("{gutter}{glyph} {} ", step.text),
+                        content_width,
+                        style_plain(),
+                    ),
+                );
+                hits.push(
+                    QueueHitTarget::Step(index),
+                    Rect::new(0, y, content_width, 1),
+                );
+            }
+        }
     }
     if let Some((row, col)) = notes_cursor {
         place_edit_cursor_at(
             frame,
-            Rect::new(2, lay.notes_y, width.saturating_sub(3), lay.notes_rows),
+            Rect::new(
+                2,
+                lay.notes_y,
+                content_width.saturating_sub(3),
+                lay.notes_rows,
+            ),
             row.min(lay.notes_rows.saturating_sub(1)),
-            col.min(width.saturating_sub(2)),
+            col.min(content_width.saturating_sub(2)),
         );
     }
+    if content.max_scroll > 0 {
+        paint_page_scrollbar(frame, &lay, width, scroll, content.total_rows);
+    }
 
-    // Steps section: the bottom half of the content region, its label row the
-    // divider between the halves (AC-24). The label names the done/total counts
-    // (derived from the same step views, so the label cannot drift from the states
-    // painted beside it). Steps stack from the top of the half, directly under the
-    // label (`step_scroll` windows them): the cursor's row is marked by a `▸`
-    // gutter, a delete-marked row by `✗` in place of its state glyph, and hidden
-    // steps are named by a dim `+N more ↓` row on the half's last row, mirroring the
-    // notes divider's style. Mono only. An empty steps paints no block at all:
-    // `steps_rows` is zero and the layout above kept the pre-steps page
-    // whole — the step input lives on the footer row, not here (AC-25).
-    if lay.steps_rows > 0 {
-        let done = step_views.iter().filter(|step| step.done).count();
-        let label = format!("  steps {}/{}", done, step_views.len());
+    // Meta footer: scope · created · updated. It remains available while a step
+    // draft uses the board's separate shared bottom input slot.
+    if let Some(y) = lay.meta_y {
         put_line(
             frame,
-            lay.steps_y,
+            y,
             width,
-            paint_bounded_line(&label, width, style_dim()),
+            paint_bounded_line(&format!("  {meta}"), width, style_dim()),
         );
-        let win = steps_window(
-            step_views.len(),
-            step_scroll,
-            lay.steps_rows.saturating_sub(1),
-        );
-        for (i, step) in step_views
-            .iter()
-            .skip(win.first)
-            .take(win.count)
-            .enumerate()
-        {
-            let absolute = win.first + i;
-            let y = lay.steps_y.saturating_add(1 + i as u16);
-            let gutter = if Some(absolute) == step_cursor {
-                "▸ "
-            } else {
-                "  "
-            };
-            let glyph = if Some(absolute) == step_marked {
-                "✗"
-            } else if step.done {
-                "✓"
-            } else {
-                "▪"
-            };
-            put_line(
-                frame,
-                y,
-                width,
-                paint_bounded_line(
-                    &format!("{gutter}{glyph} {} ", step.text),
-                    width,
-                    style_plain(),
-                ),
-            );
-            // Absolute index, so a click resolves to the same step whatever
-            // window the frame is showing (AC-21).
-            hits.push(QueueHitTarget::Step(absolute), Rect::new(0, y, width, 1));
-        }
-        if win.affordance {
-            // AC-24: the affordance owns the half's last row. Steps stack down from
-            // the label, so the row after the last painted step is no longer the
-            // block's foot; the half's own bottom row is.
-            let y = lay.steps_y.saturating_add(lay.steps_rows).saturating_sub(1);
-            put_line(
-                frame,
-                y,
-                width,
-                paint_bounded_line(
-                    &format!("  +{} more ↓ ", win.hidden_after),
-                    width,
-                    style_dim(),
-                ),
-            );
-        }
-    }
-
-    // Meta footer: scope · created · updated. The whole row is the scope control —
-    // except while the step input is open (AC-25): the footer row is then the
-    // quick-add-pattern input line (prompt + mono line + cursor, its own refusal
-    // tail), and the scope control is not painted, so it offers no click either.
-    if let Some(y) = lay.meta_y {
-        if let Some(editor) = step_editor {
-            paint_prompt_input_line(
-                frame,
-                y,
-                width,
-                &editor.text,
-                STEP_INPUT_PLACEHOLDER,
-                editor.cursor_col,
-                editor.refusal,
-            );
-        } else {
-            put_line(
-                frame,
-                y,
-                width,
-                paint_bounded_line(&format!("  {meta}"), width, style_dim()),
-            );
-            hits.push(QueueHitTarget::FormScope, Rect::new(0, y, width, 1));
-        }
+        hits.push(QueueHitTarget::FormScope, Rect::new(0, y, width, 1));
     }
 }
 
-/// What the footer step input paints while its draft is empty: the line's dim
-/// placeholder, mirroring the quick-add bar's hint-on-empty convention.
-const STEP_INPUT_PLACEHOLDER: &str = "step…   enter save · ctrl+enter save+next · esc cancel";
+/// Paint the shared-content scroll indicator on the viewport's right edge. The
+/// thumb reports the visible fraction and moves with the same row offset used to
+/// render notes and steps.
+fn paint_page_scrollbar(
+    frame: &mut Frame<'_>,
+    lay: &TaskPageLayout,
+    width: u16,
+    scroll: usize,
+    total_rows: usize,
+) {
+    let viewport = lay.notes_rows as usize;
+    if width == 0 || viewport == 0 || total_rows <= viewport {
+        return;
+    }
+    let thumb_rows = (viewport * viewport).div_ceil(total_rows).max(1);
+    let travel = viewport.saturating_sub(thumb_rows);
+    let max_scroll = total_rows.saturating_sub(viewport);
+    let thumb_start = scroll
+        .saturating_mul(travel)
+        .checked_div(max_scroll)
+        .unwrap_or(0);
+    for row in 0..viewport {
+        let glyph = if (thumb_start..thumb_start + thumb_rows).contains(&row) {
+            "█"
+        } else {
+            "│"
+        };
+        frame.render_widget(
+            Paragraph::new(Span::styled(glyph, style_dim())),
+            Rect::new(width - 1, lay.notes_y.saturating_add(row as u16), 1, 1),
+        );
+    }
+}
 
 /// The page's scope chooser stacks its options directly above the scope footer (left,
 /// indented like the footer), never in the selector's corner: the footer is the control
@@ -1903,40 +1935,19 @@ fn paint_rule_row(width: u16) -> Line<'static> {
 /// first in that text rather than the one actually painted -- Minor 1's regression. The one
 /// thing this function still verifies is that the control survived the row's own width
 /// clipping, exactly as the pre-fix code did for a control it had located by search.
-/// Paint the focused quick-add line in the row normally used for board feedback.
-fn paint_quick_add_status(
+/// Paint a shared bottom input: a bold prompt glyph, mono body, dim placeholder
+/// while empty, and an optional refusal tail. The caller supplies already-windowed
+/// text at `width - 2` cells, exactly matching the cursor budget below.
+pub(crate) fn paint_bottom_input_slot(
     frame: &mut Frame<'_>,
     row: u16,
     width: u16,
-    title: &str,
-    title_cursor: u16,
+    input: &BottomInputSlot<'_>,
 ) {
-    paint_prompt_input_line(
-        frame,
-        row,
-        width,
-        title,
-        "title…   !p global · !p name project · tab details",
-        title_cursor,
-        None,
-    );
-}
-
-/// The one-line input pattern the board's quick-add bar established (AC-25 reuses
-/// it for the task page's footer step input): a bold prompt glyph, the mono body —
-/// dim placeholder while the draft is empty, bold text otherwise — the surface's
-/// own dim refusal tail painted on the line itself, and the terminal cursor just
-/// past the prompt. `body` must already be windowed around its cursor at
-/// `width - 2` cells, exactly as the quick-add line hands its title over.
-pub(crate) fn paint_prompt_input_line(
-    frame: &mut Frame<'_>,
-    row: u16,
-    width: u16,
-    body: &str,
-    placeholder: &str,
-    cursor_col: u16,
-    refusal: Option<&str>,
-) {
+    let body = &input.text;
+    let placeholder = input.placeholder;
+    let cursor_col = input.cursor_col;
+    let refusal = input.refusal;
     let prefix = "▎ ";
     let prefix_width = display_width(prefix) as u16;
     let avail = width.saturating_sub(prefix_width) as usize;
@@ -1975,8 +1986,8 @@ pub(crate) fn paint_prompt_input_line(
     );
 }
 
-/// Paint an inline quick-add refusal in its reserved blank row, never over the input cursor.
-fn paint_quick_add_message(frame: &mut Frame<'_>, row: u16, width: u16, message: &str) {
+/// Paint a shared input-slot message in its reserved blank row, never over the cursor.
+fn paint_bottom_input_message(frame: &mut Frame<'_>, row: u16, width: u16, message: &str) {
     put_line(
         frame,
         row,

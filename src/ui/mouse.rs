@@ -371,8 +371,8 @@ fn hit_at(hits: &QueueHitMap, pos: Position) -> Option<QueueHitTarget> {
 fn wheel_board_intent(model: &BoardModel, kind: MouseEventKind) -> Option<BoardIntent> {
     match model.input_mode() {
         BoardInputMode::TaskPage => match kind {
-            MouseEventKind::ScrollUp => Some(BoardIntent::PageScrollUp),
-            MouseEventKind::ScrollDown => Some(BoardIntent::PageScrollDown),
+            MouseEventKind::ScrollUp => Some(BoardIntent::PageWheelScrollUp),
+            MouseEventKind::ScrollDown => Some(BoardIntent::PageWheelScrollDown),
             _ => None,
         },
         BoardInputMode::Normal => {

@@ -1408,10 +1408,10 @@ fn the_wheel_scrolls_the_page_notes_not_the_board_list() {
 
     let hits = board_hit_map(STANDARD, &model);
     let down = map_board_mouse(&model, &hits, wheel_down(5, 5)).expect("wheel down");
-    assert_eq!(down, BoardIntent::PageScrollDown);
+    assert_eq!(down, BoardIntent::PageWheelScrollDown);
     apply_intent(&mut domain, &mut model, down, None, None).expect("scroll down");
     let up = map_board_mouse(&model, &hits, wheel_up(5, 5)).expect("wheel up");
-    assert_eq!(up, BoardIntent::PageScrollUp);
+    assert_eq!(up, BoardIntent::PageWheelScrollUp);
     apply_intent(&mut domain, &mut model, up, None, None).expect("scroll up");
 
     assert_eq!(

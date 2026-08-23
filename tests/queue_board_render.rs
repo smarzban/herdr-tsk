@@ -10,8 +10,8 @@ use herdr_tasks::domain::{
 };
 use herdr_tasks::ui::queue::{self, DeckScope, QueueView};
 use herdr_tasks::ui::render::{
-    assert_buffer_mono, assert_no_color_sgr, draw_queue_frame, PaletteCommandRow, QueueFrameModel,
-    QueueOverlay, VerbEntry,
+    assert_buffer_mono, assert_no_color_sgr, draw_queue_frame, BottomInputSlot, PaletteCommandRow,
+    QueueFrameModel, QueueOverlay, VerbEntry,
 };
 use herdr_tasks::ui::tier::{self, Tier, TierGeometry};
 use herdr_tasks::ui::{apply_intent, board_verb_items, draw_board, BoardIntent, BoardModel};
@@ -609,11 +609,15 @@ fn quick_add_refusal_message_uses_the_reserved_blank_row_without_color_or_overfl
     for &(width, height) in &[(80, 24), (40, 10)] {
         let mut model = fixture_model(&tasks, &view);
         model.overlay = QueueOverlay::QuickAdd {
-            title: String::new(),
-            title_cursor: 0,
+            input: BottomInputSlot {
+                text: String::new(),
+                cursor_col: 0,
+                placeholder: "title…",
+                refusal: None,
+                message: Some("Title required"),
+            },
             project_scope: false,
             recovery: false,
-            message: Some("Title required"),
         };
         let (rows, geo) = paint(width, height, &model);
         // Quick-add reserves two rows by shifting its input up one from ordinary status
@@ -1101,21 +1105,12 @@ fn task_page_notes_edit_keeps_a_visible_row_at_the_compact_floor_alongside_steps
     );
 }
 
-/// T-6 (AC-24): once the first step lands, the content region between the page
-/// header and the footer halves — notes own the top half, the steps section
-/// the bottom — replacing the footer-hugging section block. With zero steps the
-/// page keeps the exact full-height notes window (AC-6 unchanged).
-///
-/// 78x24 standard: chrome bottoms at rule row 21, so the content region is rows
-/// 3..=19 (17 rows, below the title at 1 and the notes divider at 2, above the
-/// meta footer at 20). Halved, the steps block takes 17/2 = 8 rows (label on
-/// row 12 down to 19) and notes keep 9 (rows 3..=11). The notes window height is
-/// asserted through the divider's hidden-rows tail and the last painted wrapped
-/// row, both derived by the payload builder from the same layout the painter used.
+/// Long notes and steps form one scrollable page body. Notes use at least the
+/// first half of the viewport, then push the steps below the viewport instead of
+/// clipping them. The header and meta footer remain fixed while PageScroll reveals
+/// the deferred steps and the side scrollbar reports the overflow.
 #[test]
-fn content_splits_in_half_once_the_first_step_lands() {
-    // 20 short lines: none wraps at the 75-cell notes width, so the notes wrap
-    // count is exactly 20 whatever the window shows.
+fn task_page_scrolls_notes_and_steps_as_one_content_region() {
     let notes = (0..20)
         .map(|i| format!("N{i:02} filler line"))
         .collect::<Vec<_>>()
@@ -1123,7 +1118,7 @@ fn content_splits_in_half_once_the_first_step_lands() {
     let mut domain = DomainState::new();
     let id = domain
         .create(
-            "Halved page",
+            "Scrollable page",
             Some(notes),
             TaskScope::Global,
             None,
@@ -1131,6 +1126,7 @@ fn content_splits_in_half_once_the_first_step_lands() {
             ProvenanceOrigin::Manual,
         )
         .expect("create task");
+    domain.add_step(id, "only step").expect("add step");
     let mut model = BoardModel::from_domain(&domain, None);
     apply_intent(
         &mut domain,
@@ -1141,52 +1137,65 @@ fn content_splits_in_half_once_the_first_step_lands() {
     )
     .expect("open task page");
 
-    // Zero steps: the notes window is the whole content region (17 rows), so it
-    // hides only the last 3 of 20 wrapped rows and paints no section at all.
-    let bare = board_rows(&model, 78, 24);
-    let bare_shown: Vec<String> = bare.iter().map(|row| trimmed(row)).collect();
+    let initial = board_rows(&model, 78, 24);
+    let shown: Vec<String> = initial.iter().map(|row| trimmed(row)).collect();
     assert!(
-        bare_shown[2].contains("3 more"),
-        "a full-height notes window hides only the tail:\n{}",
-        bare_shown.join("\n")
+        shown[1].contains("Scrollable page"),
+        "header must stay fixed"
     );
+    assert!(shown[20].contains("created"), "footer must stay fixed");
     assert!(
-        bare_shown[19].contains("N16 filler line"),
-        "the full-height notes window paints down to the footer:\n{}",
-        bare_shown.join("\n")
+        shown.iter().any(|row| row.contains('█')),
+        "overflow needs a scrollbar"
     );
+    assert!(shown.iter().any(|row| row.contains("N16 filler line")));
     assert!(
-        !bare_shown.iter().any(|row| row.contains("steps")),
-        "no steps, no section:\n{}",
-        bare_shown.join("\n")
+        !shown.iter().any(|row| row.contains("steps 0/1")),
+        "long notes push the steps below the viewport:\n{}",
+        shown.join("\n")
     );
 
-    // The first step lands: the region halves. The section label opens the
-    // bottom half at the halfway row 12, the step sits directly under it, and the
-    // notes window now ends on row 11 (its 9th wrapped row) hiding 11.
-    domain.add_step(id, "only step").expect("add step");
-    model.sync_from_domain(&domain);
-    let rows = board_rows(&model, 78, 24);
-    let shown: Vec<String> = rows.iter().map(|row| trimmed(row)).collect();
+    for _ in 0..7 {
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::PageScrollDown,
+            None,
+            None,
+        )
+        .expect("scroll down");
+    }
+    let scrolled = board_rows(&model, 78, 24);
+    let shown: Vec<String> = scrolled.iter().map(|row| trimmed(row)).collect();
     assert!(
-        shown[12].contains("steps 0/1"),
-        "the steps half must open at the halfway row 12:\n{}",
+        shown[1].contains("Scrollable page"),
+        "header must stay fixed"
+    );
+    assert!(shown[20].contains("created"), "footer must stay fixed");
+    assert!(shown.iter().any(|row| row.contains("steps 0/1")));
+    let step_row = shown
+        .iter()
+        .position(|row| row.contains("▪ only step"))
+        .expect("step visible after scrolling");
+    assert!(
+        shown[step_row + 1]
+            .chars()
+            .all(|cell| matches!(cell, ' ' | '█' | '│')),
+        "the steps section needs its trailing blank row:\n{}",
         shown.join("\n")
     );
+    let note_row = initial
+        .iter()
+        .find(|row| row.contains("N00 filler line"))
+        .expect("first note row");
     assert!(
-        shown[13].contains("▪ only step"),
-        "the first step must land directly under the label, not pinned to the footer:\n{}",
-        shown.join("\n")
-    );
-    assert!(
-        shown[11].contains("N08 filler line") && !shown[12].contains("N0"),
-        "the notes half must end at row 11:\n{}",
-        shown.join("\n")
-    );
-    assert!(
-        shown[2].contains("11 more"),
-        "the halved notes window (9 rows of 20) must hide 11:\n{}",
-        shown.join("\n")
+        note_row
+            .chars()
+            .rev()
+            .skip(1)
+            .take(2)
+            .all(|cell| cell == ' '),
+        "content needs the same two-cell gutter before the right-edge scrollbar: {note_row:?}"
     );
 }
 

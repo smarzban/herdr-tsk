@@ -731,6 +731,8 @@ pub fn apply_board_intent_with_save_recovery(
             | BoardIntent::CollapseDetail
             | BoardIntent::PageScrollUp
             | BoardIntent::PageScrollDown
+            | BoardIntent::PageWheelScrollUp
+            | BoardIntent::PageWheelScrollDown
             | BoardIntent::ToggleDoneDrawer => {
                 return apply_intent(domain, model, intent, None, None)
             }

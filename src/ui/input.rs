@@ -260,6 +260,10 @@ pub enum BoardIntent {
     PageScrollUp,
     /// Task page view mode: scroll the notes body one wrapped row down.
     PageScrollDown,
+    /// Mouse-wheel scrolling is content-only: it never enters step-cursor navigation
+    /// when the shared page body has reached an edge.
+    PageWheelScrollUp,
+    PageWheelScrollDown,
     /// `z` — open/close the done drawer. Reducer lands in.
     ToggleDoneDrawer,
     /// `?` — open the help card. Surface wiring lands in.
@@ -837,6 +841,8 @@ pub fn intent_primary_action(intent: &BoardIntent) -> Option<PrimaryBoardAction>
         | BoardIntent::CollapseDetail
         | BoardIntent::PageScrollUp
         | BoardIntent::PageScrollDown
+        | BoardIntent::PageWheelScrollUp
+        | BoardIntent::PageWheelScrollDown
         | BoardIntent::ToggleDoneDrawer
         | BoardIntent::OpenHelp
         | BoardIntent::CloseLayer
