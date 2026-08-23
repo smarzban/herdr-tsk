@@ -3,9 +3,9 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use herdr_tasks::cli::run_with;
-use herdr_tasks::domain::{DomainState, ProvenanceOrigin, TaskScope};
-use herdr_tasks::store::TaskStore;
+use tsk_tui::cli::run_with;
+use tsk_tui::domain::{DomainState, ProvenanceOrigin, TaskScope};
+use tsk_tui::store::TaskStore;
 use uuid::Uuid;
 
 static TEMP_SEQ: AtomicU64 = AtomicU64::new(0);
@@ -16,7 +16,7 @@ fn temp_state_dir(label: &str) -> PathBuf {
         .expect("clock after epoch")
         .as_nanos();
     let seq = TEMP_SEQ.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!("herdr-tasks-cli-steps-{label}-{nanos}-{seq}"));
+    let dir = std::env::temp_dir().join(format!("tsk-cli-steps-{label}-{nanos}-{seq}"));
     std::fs::create_dir_all(&dir).expect("create state directory");
     dir
 }
@@ -25,7 +25,7 @@ fn state_dir_arg(dir: &std::path::Path) -> String {
     dir.to_string_lossy().into_owned()
 }
 
-fn steps(args: &[String]) -> herdr_tasks::cli::CliOutput {
+fn steps(args: &[String]) -> tsk_tui::cli::CliOutput {
     run_with(args, Cursor::new(Vec::<u8>::new()), true)
 }
 
@@ -47,7 +47,7 @@ fn seed_task(dir: &std::path::Path, title: &str) -> Uuid {
 
 fn steps_args(dir: &std::path::Path, task: Uuid) -> Vec<String> {
     vec![
-        "herdr-tasks".into(),
+        "tsk".into(),
         "steps".into(),
         task.to_string(),
         "--state-dir".into(),
@@ -97,7 +97,7 @@ fn steps_add_then_toggle_round_trips_step_state() {
     assert_eq!(add_second.code, 0, "add second step: {}", add_second.stderr);
 
     let listed = steps(&[
-        "herdr-tasks".into(),
+        "tsk".into(),
         "list".into(),
         task.to_string(),
         "--state-dir".into(),
@@ -121,7 +121,7 @@ fn steps_add_then_toggle_round_trips_step_state() {
     assert_eq!(toggle.code, 0, "toggle by short id: {}", toggle.stderr);
 
     let after_toggle = steps(&[
-        "herdr-tasks".into(),
+        "tsk".into(),
         "list".into(),
         task.to_string(),
         "--state-dir".into(),
@@ -346,11 +346,11 @@ fn steps_on_soft_deleted_task_refuses_without_mutation() {
 
 #[test]
 fn steps_help_documents_toggle_flip_and_verify_guidance() {
-    let output = steps(&["herdr-tasks".into(), "steps".into(), "--help".into()]);
+    let output = steps(&["tsk".into(), "steps".into(), "--help".into()]);
     assert_eq!(output.code, 0, "{}", output.stderr);
     assert!(output.stderr.is_empty());
     for term in [
-        "usage: herdr-tasks steps",
+        "usage: tsk steps",
         "toggle",
         "flips",
         "verify",

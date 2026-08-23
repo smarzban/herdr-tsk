@@ -2,8 +2,8 @@
 
 Canonical terms for this repo. No implementation detail.
 
-- **add command**: headless `herdr-tasks` subcommand that creates tasks without opening a TUI.
-- **list command**: headless `herdr-tasks` subcommand that prints tasks from the board store without changing them.
+- **add command**: headless `tsk add` subcommand that creates tasks without opening a TUI.
+- **list command**: headless `tsk list` subcommand that prints tasks from the board store without changing them.
 - **bulk add**: one `add` invocation that accepts many items, reports each, and makes one durable write of the successes.
 - **invocation default**: capture scope used when the caller omits `project` / `-p`. The cwd repo when known, otherwise global.
 - **tiny result**: JSON report from a plan-shaped `add`. `created` and `existing` rows carry index, id, title. `failed` rows carry index, title (string or null), error code, and human error text. Notes are not echoed.

@@ -751,10 +751,12 @@ fn validate_host_id(value: &str, kind: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// True when the pane is the Tasks board (label or stripped title).
+/// True when the pane carries the board label from the plugin manifest.
+///
+/// The stripped terminal title is not an identity: a standalone `tsk` process can use it
+/// in an unrelated pane.
 pub fn is_tasks_pane(pane: &PaneInfo) -> bool {
     pane.label.as_deref() == Some(BOARD_PANE_LABEL)
-        || pane.terminal_title_stripped.as_deref() == Some(BOARD_PANE_LABEL)
 }
 
 /// Pick one work pane in the board workspace (not the Tasks board).
@@ -865,7 +867,7 @@ mod tests {
             "result": {
                 "panes": [
                     {"pane_id": "w0:p1", "label": "Editor"},
-                    {"pane_id": "w0:p2", "label": "Tasks"}
+                    {"pane_id": "w0:p2", "label": "tsk"}
                 ]
             }
         }"#;
@@ -950,7 +952,7 @@ mod tests {
                     },
                     {
                         "pane_id": "w0:p2",
-                        "label": "Tasks",
+                        "label": "tsk",
                         "cwd": "/plugin",
                         "focused": false,
                         "workspace_id": "w0"
@@ -972,7 +974,7 @@ mod tests {
             "result": {
                 "pane": {
                     "pane_id": "w0:p2",
-                    "label": "Tasks",
+                    "label": "tsk",
                     "cwd": "/plugin",
                     "workspace_id": "w0"
                 }
@@ -981,6 +983,18 @@ mod tests {
         let cur = parse_pane_current(current_json).expect("current");
         assert_eq!(cur.pane_id, "w0:p2");
         assert!(is_tasks_pane(&cur));
+    }
+
+    #[test]
+    fn terminal_title_alone_does_not_identify_a_board_pane() {
+        let pane = PaneInfo {
+            pane_id: "w0:p1".into(),
+            label: Some("shell".into()),
+            terminal_title_stripped: Some("tsk".into()),
+            ..PaneInfo::default()
+        };
+
+        assert!(!is_tasks_pane(&pane));
     }
 
     #[test]
@@ -995,7 +1009,7 @@ mod tests {
             },
             PaneInfo {
                 pane_id: "w0:p2".into(),
-                label: Some("Tasks".into()),
+                label: Some("tsk".into()),
                 cwd: Some("/plugin".into()),
                 focused: false,
                 workspace_id: Some("w0".into()),
@@ -1018,7 +1032,7 @@ mod tests {
             },
             PaneInfo {
                 pane_id: "w0:p2".into(),
-                label: Some("Tasks".into()),
+                label: Some("tsk".into()),
                 focused: false,
                 workspace_id: Some("w0".into()),
                 ..PaneInfo::default()
@@ -1043,7 +1057,7 @@ mod tests {
             },
             PaneInfo {
                 pane_id: "w0:p2".into(),
-                label: Some("Tasks".into()),
+                label: Some("tsk".into()),
                 focused: false,
                 workspace_id: Some("w0".into()),
                 ..PaneInfo::default()
@@ -1068,8 +1082,8 @@ mod tests {
             },
             PaneInfo {
                 pane_id: "w0:p2".into(),
-                label: Some("Tasks".into()),
-                terminal_title_stripped: Some("Tasks".into()),
+                label: Some("tsk".into()),
+                terminal_title_stripped: Some("tsk".into()),
                 cwd: Some("/plugin-state".into()),
                 focused: true,
                 workspace_id: Some("w0".into()),
@@ -1085,7 +1099,7 @@ mod tests {
     fn select_work_pane_none_when_only_tasks() {
         let panes = vec![PaneInfo {
             pane_id: "w0:p2".into(),
-            label: Some("Tasks".into()),
+            label: Some("tsk".into()),
             focused: true,
             workspace_id: Some("w0".into()),
             ..PaneInfo::default()
@@ -1261,7 +1275,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .expect("clock")
             .as_nanos();
-        let dir = env::temp_dir().join(format!("herdr-tasks-host-{nanos}"));
+        let dir = env::temp_dir().join(format!("tsk-host-{nanos}"));
         fs::create_dir_all(&dir).expect("mkdir");
         dir
     }

@@ -367,7 +367,7 @@ mod tests {
             .expect("clock")
             .as_nanos();
         let seq = TEMP_SEQ.fetch_add(1, Ordering::Relaxed);
-        let dir = env::temp_dir().join(format!("herdr-tasks-t8-{label}-{nanos}-{seq}"));
+        let dir = env::temp_dir().join(format!("tsk-t8-{label}-{nanos}-{seq}"));
         fs::create_dir_all(&dir).expect("create temp dir");
         dir
     }
@@ -673,8 +673,8 @@ mod tests {
                     },
                     {
                         "pane_id": "w0:p2",
-                        "label": "Tasks",
-                        "terminal_title_stripped": "Tasks",
+                        "label": "tsk",
+                        "terminal_title_stripped": "tsk",
                         "cwd": "/plugin/board-cwd",
                         "foreground_cwd": "/plugin/board-cwd",
                         "focused": true,
@@ -687,7 +687,7 @@ mod tests {
             "result": {
                 "pane": {
                     "pane_id": "w0:p2",
-                    "label": "Tasks",
+                    "label": "tsk",
                     "cwd": "/plugin/board-cwd",
                     "workspace_id": "w0"
                 }
@@ -784,7 +784,7 @@ mod tests {
         PaneInfo {
             pane_id: format!("{workspace}:tasks"),
             workspace_id: Some(workspace.into()),
-            label: Some("Tasks".into()),
+            label: Some("tsk".into()),
             ..PaneInfo::default()
         }
     }

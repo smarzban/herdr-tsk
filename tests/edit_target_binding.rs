@@ -24,16 +24,16 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use herdr_tasks::app::{
+use tsk_tui::app::{
     apply_board_intent_with_save_recovery, confirm_edit_refusal_against_the_record,
     refresh_before_mutation, run_attention_cycle, BoardSaveContext,
 };
-use herdr_tasks::domain::{DomainError, DomainState, ProvenanceOrigin, TaskScope};
-use herdr_tasks::host::HostPorts;
-use herdr_tasks::save_recovery::SaveRecovery;
-use herdr_tasks::store::TaskStore;
-use herdr_tasks::ui::board::{apply_intent, BoardInputMode, BoardModel, IntentOutcome};
-use herdr_tasks::ui::input::{map_key, BoardIntent};
+use tsk_tui::domain::{DomainError, DomainState, ProvenanceOrigin, TaskScope};
+use tsk_tui::host::HostPorts;
+use tsk_tui::save_recovery::SaveRecovery;
+use tsk_tui::store::TaskStore;
+use tsk_tui::ui::board::{apply_intent, BoardInputMode, BoardModel, IntentOutcome};
+use tsk_tui::ui::input::{map_key, BoardIntent};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
@@ -52,9 +52,7 @@ fn temp_state_dir(tag: &str) -> PathBuf {
         .as_nanos();
     static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!(
-        "herdr-tasks-edit-target-binding-{tag}-{nanos}-{seq}"
-    ));
+    let dir = std::env::temp_dir().join(format!("tsk-edit-target-binding-{tag}-{nanos}-{seq}"));
     fs::create_dir_all(&dir).expect("create temp state dir");
     dir
 }
@@ -1160,7 +1158,7 @@ fn background_sync_cannot_redirect_a_bound_task_form_while_its_scope_dropdown_is
 
     // The same refresh shape the idle loop uses: Bravo moves ahead in queue order.
     domain
-        .set_status(bravo, herdr_tasks::domain::HumanStatus::Started)
+        .set_status(bravo, tsk_tui::domain::HumanStatus::Started)
         .expect("move Bravo");
     model.sync_from_domain(&domain);
     assert_eq!(model.edit_target(), Some(alpha));

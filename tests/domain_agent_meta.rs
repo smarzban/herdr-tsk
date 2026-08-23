@@ -7,8 +7,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use herdr_tasks::attention::ObservationMap;
-use herdr_tasks::domain::{
+use tsk_tui::attention::ObservationMap;
+use tsk_tui::domain::{
     AgentMeta, AgentSessionIdentity, ContextCapsule, DomainState, HumanStatus, ObservedStatus,
     ProvenanceOrigin, TaskEventKind, TaskScope,
 };

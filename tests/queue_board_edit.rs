@@ -3,16 +3,16 @@
 use std::path::PathBuf;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use herdr_tasks::domain::{DomainState, HumanStatus, ProvenanceOrigin, TaskScope};
-use herdr_tasks::ui::board::{
-    apply_intent, board_hit_map, draw_board, BoardInputMode, BoardModel, IntentOutcome,
-};
-use herdr_tasks::ui::capture::CaptureField;
-use herdr_tasks::ui::input::{map_board_form_key, BoardIntent};
-use herdr_tasks::ui::render::QueueHitTarget;
 use ratatui::backend::TestBackend;
 use ratatui::layout::Rect;
 use ratatui::Terminal;
+use tsk_tui::domain::{DomainState, HumanStatus, ProvenanceOrigin, TaskScope};
+use tsk_tui::ui::board::{
+    apply_intent, board_hit_map, draw_board, BoardInputMode, BoardModel, IntentOutcome,
+};
+use tsk_tui::ui::capture::CaptureField;
+use tsk_tui::ui::input::{map_board_form_key, BoardIntent};
+use tsk_tui::ui::render::QueueHitTarget;
 
 const THIS_REPO: &str = "/repos/app";
 
@@ -631,7 +631,7 @@ fn task_page_scope_dropdown_sits_above_the_footer_with_short_names() {
             "scoped task",
             None,
             TaskScope::Project {
-                path: "/repos/herdr-tasks".into(),
+                path: "/repos/tsk".into(),
             },
             None,
             None,
@@ -650,10 +650,7 @@ fn task_page_scope_dropdown_sits_above_the_footer_with_short_names() {
             ProvenanceOrigin::Manual,
         )
         .expect("create second project");
-    let mut model = BoardModel::from_domain(
-        &domain,
-        Some(std::path::PathBuf::from("/repos/herdr-tasks")),
-    );
+    let mut model = BoardModel::from_domain(&domain, Some(std::path::PathBuf::from("/repos/tsk")));
     apply_intent(
         &mut domain,
         &mut model,
@@ -688,7 +685,7 @@ fn task_page_scope_dropdown_sits_above_the_footer_with_short_names() {
     let option_rows: Vec<(usize, &String)> = rows[..footer_y]
         .iter()
         .enumerate()
-        .filter(|(_, row)| row.contains("herdr-tasks") || row.contains("other-project"))
+        .filter(|(_, row)| row.contains("tsk") || row.contains("other-project"))
         .collect();
     assert!(
         !option_rows.is_empty(),

@@ -3,6 +3,8 @@
 use std::fs;
 use std::path::PathBuf;
 
+use tsk_tui::board_pane::BOARD_PANE_LABEL;
+
 fn manifest_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("herdr-plugin.toml")
 }
@@ -22,11 +24,11 @@ fn table_section<'a>(text: &'a str, header: &str) -> &'a str {
 }
 
 #[test]
-fn id_contains_tasks_product_id() {
+fn id_keeps_the_herdr_tasks_plugin_id() {
     let text = read_manifest();
     assert!(
         text.contains(r#"id = "herdr-tasks""#),
-        "manifest id must be the tasks product id herdr-tasks"
+        "manifest id must stay herdr-tasks: the host keys injected state dirs and links by it"
     );
 }
 
@@ -49,10 +51,15 @@ fn platforms_include_linux_and_macos() {
 }
 
 #[test]
-fn panes_entry_has_tasks_title_and_split_placement() {
+fn panes_entry_has_board_pane_label_title_and_split_placement() {
     let text = read_manifest();
     assert!(text.contains("[[panes]]"), "must declare a [[panes]] entry");
-    assert!(text.contains("Tasks"), "pane title must contain Tasks");
+    assert!(
+        text.contains(&format!(r#"title = "{BOARD_PANE_LABEL}""#)),
+        "pane title must equal board_pane::BOARD_PANE_LABEL ({BOARD_PANE_LABEL:?}): the host \
+         labels the pane from this manifest title, and open-board focus plus host pane \
+         classification match on that label"
+    );
     assert!(
         text.contains(r#"placement = "split""#),
         "pane placement must be split"
@@ -80,12 +87,12 @@ fn actions_include_quick_capture() {
 }
 
 #[test]
-fn pane_command_references_herdr_tasks_binary() {
+fn pane_command_references_tsk_tui_binary() {
     let text = read_manifest();
     let panes = table_section(&text, "[[panes]]");
     assert!(
-        panes.contains(r#"command = ["./target/release/herdr-tasks"]"#),
-        "pane command must reference the release binary ./target/release/herdr-tasks \
+        panes.contains(r#"command = ["./target/release/tsk"]"#),
+        "pane command must reference the release binary ./target/release/tsk \
          (not merely the product id elsewhere in the file)"
     );
 }

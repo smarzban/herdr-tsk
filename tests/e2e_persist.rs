@@ -2,8 +2,8 @@
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use herdr_tasks::domain::{DomainState, ProvenanceOrigin, TaskScope};
-use herdr_tasks::store::TaskStore;
+use tsk_tui::domain::{DomainState, ProvenanceOrigin, TaskScope};
+use tsk_tui::store::TaskStore;
 
 fn temp_state_dir() -> std::path::PathBuf {
     static SEQ: AtomicUsize = AtomicUsize::new(0);
@@ -12,7 +12,7 @@ fn temp_state_dir() -> std::path::PathBuf {
         .duration_since(std::time::UNIX_EPOCH)
         .expect("clock after epoch")
         .as_nanos();
-    let dir = std::env::temp_dir().join(format!("herdr-tasks-e2e-persist-{nanos}-{seq}"));
+    let dir = std::env::temp_dir().join(format!("tsk-e2e-persist-{nanos}-{seq}"));
     std::fs::create_dir_all(&dir).expect("create state directory");
     dir
 }

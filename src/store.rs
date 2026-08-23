@@ -277,27 +277,33 @@ impl Drop for StoreLockGuard {
     }
 }
 
-/// State dir from `HERDR_PLUGIN_STATE_DIR`, else a per-user data directory.
+/// State dir from `HERDR_PLUGIN_STATE_DIR`, else `TSK_STATE_DIR`, else per-user data.
 ///
-/// Production herdr injects `HERDR_PLUGIN_STATE_DIR`. When unset (manual runs / tests
-/// without the host), use `$XDG_DATA_HOME/herdr-tasks` or `$HOME/.local/share/herdr-tasks`.
+/// Production herdr injects `HERDR_PLUGIN_STATE_DIR`. Standalone runs may set
+/// `TSK_STATE_DIR`. When neither is set (manual runs / tests without the host), use
+/// `$XDG_DATA_HOME/tsk` or `$HOME/.local/share/tsk`.
 /// Never falls back to a shared world path under `std::env::temp_dir()`.
 pub fn default_state_dir() -> PathBuf {
     if let Some(dir) = env::var_os("HERDR_PLUGIN_STATE_DIR") {
         return PathBuf::from(dir);
     }
+    if let Some(dir) = env::var_os("TSK_STATE_DIR") {
+        if !dir.is_empty() {
+            return PathBuf::from(dir);
+        }
+    }
     if let Some(xdg) = env::var_os("XDG_DATA_HOME") {
         if !xdg.is_empty() {
-            return PathBuf::from(xdg).join("herdr-tasks");
+            return PathBuf::from(xdg).join("tsk");
         }
     }
     if let Some(home) = env::var_os("HOME") {
         if !home.is_empty() {
-            return PathBuf::from(home).join(".local/share/herdr-tasks");
+            return PathBuf::from(home).join(".local/share/tsk");
         }
     }
-    // Last resort: relative per-process dir (still not shared /tmp/herdr-tasks-state).
-    PathBuf::from(".herdr-tasks-state")
+    // Last resort: relative per-process dir (still not shared /tmp/tsk-state).
+    PathBuf::from(".tsk-state")
 }
 
 /// Store I/O and JSON failures.
@@ -360,7 +366,7 @@ mod tests {
             .expect("clock")
             .as_nanos();
         let seq = TEMP_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        env::temp_dir().join(format!("herdr-tasks-store-{label}-{nanos}-{seq}"))
+        env::temp_dir().join(format!("tsk-store-{label}-{nanos}-{seq}"))
     }
 
     struct TempDirGuard(PathBuf);
@@ -763,16 +769,35 @@ mod tests {
         assert_eq!(default_state_dir(), marker);
         env::remove_var("HERDR_PLUGIN_STATE_DIR");
 
+        // The standalone override sits between the host variable and XDG.
+        let standalone = marker.join("standalone");
+        env::set_var("TSK_STATE_DIR", &standalone);
+        assert_eq!(default_state_dir(), standalone);
+        env::set_var("HERDR_PLUGIN_STATE_DIR", &marker);
+        assert_eq!(
+            default_state_dir(),
+            marker,
+            "host injection beats TSK_STATE_DIR"
+        );
+        env::remove_var("HERDR_PLUGIN_STATE_DIR");
+        env::set_var("TSK_STATE_DIR", "");
+        assert_ne!(
+            default_state_dir(),
+            PathBuf::from(""),
+            "empty falls through"
+        );
+        env::remove_var("TSK_STATE_DIR");
+
         let fallback = default_state_dir();
-        let shared_tmp = env::temp_dir().join("herdr-tasks-state");
+        let shared_tmp = env::temp_dir().join("tsk-state");
         assert_ne!(
             fallback, shared_tmp,
-            "fallback must not be shared /tmp/herdr-tasks-state"
+            "fallback must not be shared /tmp/tsk-state"
         );
         // Prefer XDG/HOME style paths when available.
         let fallback_s = fallback.to_string_lossy();
         assert!(
-            fallback_s.contains("herdr-tasks") || fallback_s == ".herdr-tasks-state",
+            fallback_s.contains("tsk") || fallback_s == ".tsk-state",
             "unexpected fallback: {fallback_s}"
         );
     }

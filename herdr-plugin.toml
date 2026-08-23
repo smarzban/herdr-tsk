@@ -13,15 +13,15 @@ command = ["cargo", "build", "--release"]
 
 [[panes]]
 id = "board"
-title = "Tasks"
+title = "tsk"
 placement = "split"
-command = ["./target/release/herdr-tasks"]
+command = ["./target/release/tsk"]
 
 [[actions]]
 id = "open-board"
 platforms = ["linux", "macos"]
-title = "Open Tasks board"
-description = "Open the Tasks board in a split pane beside the current work."
+title = "Open tsk board"
+description = "Open the tsk board in a split pane beside the current work."
 command = ["bash", "scripts/open-board.sh"]
 
 [[actions]]

@@ -1,28 +1,27 @@
 #!/usr/bin/env bash
 # Idempotent open-or-focus for the Tasks board.
 #
-# - No Tasks pane yet  -> plugin pane open --placement split --focus
-# - Tasks pane exists  -> plugin pane focus <pane_id> (no second board)
+# - No tsk board pane yet  -> plugin pane open --placement split --focus
+# - tsk board pane exists  -> plugin pane focus <pane_id> (no second board)
 #
 # herdr actions run a command (no declarative "open this pane" field), so this shells
 # out via $HERDR_BIN_PATH (herdr injects it; fall back to `herdr` on PATH).
-# Existing board is recognized by label/title "Tasks" from `pane list` JSON
+# Existing board is recognized only by its manifest label from `pane list` JSON
 # (matches [[panes]] title in herdr-plugin.toml).
 #
-# Focus selection is done by herdr-tasks --find-board-pane (Rust), not python3,
+# Focus selection is done by tsk --find-board-pane (Rust), not python3,
 # so this works on hosts without python3.
 #
-# Manual check: invoke open-board twice; the second focus keeps a single Tasks board.
+# Manual check: invoke open-board twice; the second focus keeps a single tsk board.
 set -uo pipefail
 
 herdr_bin="${HERDR_BIN_PATH:-herdr}"
 plugin_id="herdr-tasks"
 entrypoint="board"
-board_label="Tasks"
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Same relative layout as other herdr plugins: scripts/ next to target/release/.
-plugin_bin="${HERDR_TASKS_BIN:-$script_dir/../target/release/herdr-tasks}"
+plugin_bin="${TSK_BIN:-$script_dir/../target/release/tsk}"
 
 open_board() {
   exec "$herdr_bin" plugin pane open \
@@ -32,8 +31,8 @@ open_board() {
     --focus
 }
 
-# Extract first flag-safe pane_id whose label or stripped title is Tasks.
-# Uses herdr-tasks --find-board-pane (reads pane-list JSON on stdin).
+# Extract first flag-safe pane_id whose label is tsk.
+# Uses tsk --find-board-pane (reads pane-list JSON on stdin).
 find_board_pane_id() {
   local panes
   panes="$("$herdr_bin" pane list 2>/dev/null || true)"

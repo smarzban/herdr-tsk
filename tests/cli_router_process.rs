@@ -5,14 +5,13 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use herdr_tasks::domain::{DomainState, ProvenanceOrigin, TaskScope};
-use herdr_tasks::store::TaskStore;
+use tsk_tui::domain::{DomainState, ProvenanceOrigin, TaskScope};
+use tsk_tui::store::TaskStore;
 
 static TEMP_SEQ: AtomicU64 = AtomicU64::new(0);
 
 fn binary() -> String {
-    std::env::var("CARGO_BIN_EXE_herdr-tasks")
-        .expect("Cargo must provide the herdr-tasks binary path")
+    std::env::var("CARGO_BIN_EXE_tsk").expect("Cargo must provide the tsk binary path")
 }
 
 fn temp_state_dir(label: &str) -> PathBuf {
@@ -21,7 +20,7 @@ fn temp_state_dir(label: &str) -> PathBuf {
         .expect("clock after epoch")
         .as_nanos();
     let seq = TEMP_SEQ.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!("herdr-tasks-process-{label}-{nanos}-{seq}"));
+    let dir = std::env::temp_dir().join(format!("tsk-process-{label}-{nanos}-{seq}"));
     std::fs::create_dir_all(&dir).expect("create state directory");
     dir
 }
@@ -61,8 +60,8 @@ fn top_level_help_names_subcommands_and_their_help() {
     let stdout = String::from_utf8(output.stdout).expect("UTF-8 help");
     assert!(stdout.contains("add"));
     assert!(stdout.contains("list"));
-    assert!(stdout.contains("herdr-tasks add --help"));
-    assert!(stdout.contains("herdr-tasks list --help"));
+    assert!(stdout.contains("tsk add --help"));
+    assert!(stdout.contains("tsk list --help"));
 }
 
 #[test]
@@ -150,7 +149,7 @@ fn unknown_positional_exits_2_without_opening_the_board() {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
-        .expect("spawn herdr-tasks foo");
+        .expect("spawn tsk foo");
     let deadline = Instant::now() + Duration::from_secs(2);
     let status = loop {
         if let Some(status) = child.try_wait().expect("poll child process") {

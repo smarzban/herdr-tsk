@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+Rebrand to **tsk** ("a task board for your terminal"). The crate is now
+`tsk-tui` building the `tsk` binary. Standalone state and config default to
+`~/.local/share/tsk` and `~/.config/tsk`, with new `TSK_STATE_DIR` /
+`TSK_CONFIG_DIR` overrides beneath the injected herdr variables. The herdr
+plugin id stays `herdr-tasks`, so existing plugin state needs no migration.
+
 ## 0.3.0
 
 Tasks can carry an optional normalized thread. Headless add accepts `--thread`

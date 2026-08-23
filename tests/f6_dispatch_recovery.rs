@@ -5,17 +5,17 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use herdr_tasks::dispatch::{
+use tsk_tui::dispatch::{
     cleanup_dispatch_attempt, resume_dispatch_attempt, start_dispatch_attempt, DispatchMode,
     DispatchRecoveryAction, DispatchRecoveryResult,
 };
-use herdr_tasks::domain::{
+use tsk_tui::domain::{
     AgentReceipt, AgentSessionIdentity, DispatchAttemptPhase, DomainState, PaneReceipt,
     ProvenanceOrigin, TaskEventKind, TaskScope, WorktreeReceipt,
 };
-use herdr_tasks::host::HostPorts;
-use herdr_tasks::store::{StoreError, TaskStateStore, TaskStore};
-use herdr_tasks::ui::board::{apply_dispatch_recovery_result, BoardInputMode, BoardModel};
+use tsk_tui::host::HostPorts;
+use tsk_tui::store::{StoreError, TaskStateStore, TaskStore};
+use tsk_tui::ui::board::{apply_dispatch_recovery_result, BoardInputMode, BoardModel};
 
 fn temp_dir(label: &str) -> PathBuf {
     let nanos = SystemTime::now()
@@ -24,7 +24,7 @@ fn temp_dir(label: &str) -> PathBuf {
         .as_nanos();
     static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!("herdr-tasks-f6-{label}-{nanos}-{seq}"));
+    let dir = std::env::temp_dir().join(format!("tsk-f6-{label}-{nanos}-{seq}"));
     fs::create_dir_all(&dir).unwrap();
     dir
 }
@@ -272,19 +272,15 @@ impl TaskStateStore for ConcurrentBoardMutationStore {
 fn durable_dispatching_attempt(store: &TaskStore, task_id: uuid::Uuid) -> uuid::Uuid {
     let mut state = store.load().unwrap();
     let attempt_id = state
-        .start_dispatch_attempt(
-            task_id,
-            herdr_tasks::domain::DispatchAttemptMode::Here,
-            "grok",
-        )
+        .start_dispatch_attempt(task_id, tsk_tui::domain::DispatchAttemptMode::Here, "grok")
         .unwrap();
     let revision = state.active_attempt(attempt_id).unwrap().revision();
     state
         .transition_dispatch_attempt(
             attempt_id,
             revision,
-            herdr_tasks::domain::DispatchAttemptTransition::RecordReceipt(
-                herdr_tasks::domain::OwnedResourceReceipt::Pane(PaneReceipt {
+            tsk_tui::domain::DispatchAttemptTransition::RecordReceipt(
+                tsk_tui::domain::OwnedResourceReceipt::Pane(PaneReceipt {
                     pane_id: "pane-owned".into(),
                 }),
             ),
@@ -758,11 +754,11 @@ fn cleanup_persistence_failure_after_pane_removal_stops_before_later_resources()
     assert!(attempt
         .owned_resources()
         .iter()
-        .any(|receipt| matches!(receipt, herdr_tasks::domain::OwnedResourceReceipt::Pane(_))));
-    assert!(attempt.owned_resources().iter().any(|receipt| matches!(
-        receipt,
-        herdr_tasks::domain::OwnedResourceReceipt::Worktree(_)
-    )));
+        .any(|receipt| matches!(receipt, tsk_tui::domain::OwnedResourceReceipt::Pane(_))));
+    assert!(attempt
+        .owned_resources()
+        .iter()
+        .any(|receipt| matches!(receipt, tsk_tui::domain::OwnedResourceReceipt::Worktree(_))));
 }
 
 #[test]
@@ -963,11 +959,7 @@ fn persisted_dispatch_attempt_resurfaces_recovery_after_worker_error() {
         )
         .expect("create task");
     let attempt_id = domain
-        .start_dispatch_attempt(
-            task_id,
-            herdr_tasks::domain::DispatchAttemptMode::Here,
-            "grok",
-        )
+        .start_dispatch_attempt(task_id, tsk_tui::domain::DispatchAttemptMode::Here, "grok")
         .expect("start durable attempt");
     let mut model = BoardModel::from_domain(&domain, None);
     assert_eq!(model.input_mode(), BoardInputMode::Recovery);

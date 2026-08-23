@@ -11,19 +11,19 @@ use crate::ui::terminal_text;
 
 pub fn add_help() -> CliOutput {
     help_output(
-        "usage: herdr-tasks add -t <title> [-n <notes>] [-p <project> | --global] [--thread <name>] [--json] [--state-dir <dir>]\n       herdr-tasks add [--file <path|->] [--state-dir <dir>]",
+        "usage: tsk add -t <title> [-n <notes>] [-p <project> | --global] [--thread <name>] [--json] [--state-dir <dir>]\n       tsk add [--file <path|->] [--state-dir <dir>]",
     )
 }
 
 pub fn list_help() -> CliOutput {
     CliOutput {
         stdout: concat!(
-            "usage: herdr-tasks list [<task-id>] [-p <project> | --global | --all] [--thread <name>] [--done | --deleted] [--json] [--state-dir <dir>]\n\n",
+            "usage: tsk list [<task-id>] [-p <project> | --global | --all] [--thread <name>] [--done | --deleted] [--json] [--state-dir <dir>]\n\n",
             "Lists ready, started, blocked, and review tasks in the invocation project by default, or global scope outside a repository.\n",
             "With a task id (a task UUID from add --json or list --json), lists that one task alone and prints its steps: one line per step with its [x]/[ ] state and step short id. A task id cannot be combined with scope, thread, or status filters.\n",
             "--project uses the same basename-or-path scope resolution as add; --global selects global tasks; --all selects every scope. --thread normalizes a thread name and filters within the selected scope; an invalid name is a usage error (exit 2). For dash-leading project and state-directory values, use --project=<scope> and --state-dir=<dir>.\n",
             "--done lists done tasks only. --deleted lists soft-deleted tasks only, regardless of status.\n",
-            "To recover a typo scope, use herdr-tasks list --all --json.\n",
+            "To recover a typo scope, use tsk list --all --json.\n",
             "--json emits a flat array of id, title, status, project, and thread (or null) in displayed group order. Human --all groups rows by status, then project scope, using a unique concise trailing path or global.\n\n",
             "Exit contract:\n",
             "  exit 0: tasks were listed\n",
@@ -39,7 +39,7 @@ pub fn list_help() -> CliOutput {
 fn help_output(usage: &str) -> CliOutput {
     CliOutput {
         stdout: format!(
-            "{usage}\n\nExamples:\n  herdr-tasks add -t \"Draft release notes\"\n  herdr-tasks add -t \"Buy milk\" --global\n  herdr-tasks add -t \"Fix widget\" --project widget --thread release-2026\n  herdr-tasks add --title=\"-fix parser\" --notes=\"-5 degrees\" --project=\"-maintenance\"\n  herdr-tasks add --file plan.json\n  cat plan.json | herdr-tasks add\n\nValues beginning with - must use --title=<value>, --notes=<value>, --project=<value>, --state-dir=<dir>, or --file=<path>.\nItem flags plus --file are usage (exit 2, nothing persists). Piped stdin with item flags is ignored and not read. An add whose trimmed title, resolved project scope, and normalized thread already exist succeeds without changing the task. With --json, flag add emits one object with outcome, id, title, and project (or null).\nPlan JSON: [{{\"title\": \"...\", \"notes\": \"...\", \"project\": \"...\", \"thread\": \"...\"}}] (thread may also be null)\nPlan result: {{\"created\": [...], \"existing\": [...], \"failed\": [...]}}\n\nExit contract:\n  exit 0: every item was created or already existed\n  exit 1: one or more items were refused, retry failed only\n  exit 2: usage or parse error, nothing persisted\n  exit 3: store I/O, commit indeterminate, verify with list before retrying\n"
+            "{usage}\n\nExamples:\n  tsk add -t \"Draft release notes\"\n  tsk add -t \"Buy milk\" --global\n  tsk add -t \"Fix widget\" --project widget --thread release-2026\n  tsk add --title=\"-fix parser\" --notes=\"-5 degrees\" --project=\"-maintenance\"\n  tsk add --file plan.json\n  cat plan.json | tsk add\n\nValues beginning with - must use --title=<value>, --notes=<value>, --project=<value>, --state-dir=<dir>, or --file=<path>.\nItem flags plus --file are usage (exit 2, nothing persists). Piped stdin with item flags is ignored and not read. An add whose trimmed title, resolved project scope, and normalized thread already exist succeeds without changing the task. With --json, flag add emits one object with outcome, id, title, and project (or null).\nPlan JSON: [{{\"title\": \"...\", \"notes\": \"...\", \"project\": \"...\", \"thread\": \"...\"}}] (thread may also be null)\nPlan result: {{\"created\": [...], \"existing\": [...], \"failed\": [...]}}\n\nExit contract:\n  exit 0: every item was created or already existed\n  exit 1: one or more items were refused, retry failed only\n  exit 2: usage or parse error, nothing persisted\n  exit 3: store I/O, commit indeterminate, verify with list before retrying\n"
         ),
         stderr: String::new(),
         code: 0,
@@ -92,7 +92,7 @@ pub fn usage(reason: &str) -> CliOutput {
     CliOutput {
         stdout: String::new(),
         stderr: format!(
-            "herdr-tasks add: {reason}\nusage: herdr-tasks add -t <title> [-n <notes>] [-p <project> | --global] [--thread <name>] [--json] [--state-dir <dir>]\n"
+            "tsk add: {reason}\nusage: tsk add -t <title> [-n <notes>] [-p <project> | --global] [--thread <name>] [--json] [--state-dir <dir>]\n"
         ),
         code: 2,
     }
@@ -369,11 +369,11 @@ fn path_segments(path: &str) -> Vec<String> {
 pub fn steps_help() -> CliOutput {
     CliOutput {
         stdout: concat!(
-            "usage: herdr-tasks steps <task-id> add <text> [--state-dir <dir>]\n",
-            "       herdr-tasks steps <task-id> toggle <step-short-id> [--state-dir <dir>]\n\n",
-            "steps adds one step to a task or toggles one step's done flag. The task id is a task UUID from herdr-tasks list --json.\n",
-            "A step short id is the shortest unambiguous prefix of the step id, as printed by herdr-tasks list <task-id>.\n",
-            "toggle flips the step state: a blind retry after an unseen success flips it back, so verify with herdr-tasks list <task-id> before retrying.\n\n",
+            "usage: tsk steps <task-id> add <text> [--state-dir <dir>]\n",
+            "       tsk steps <task-id> toggle <step-short-id> [--state-dir <dir>]\n\n",
+            "steps adds one step to a task or toggles one step's done flag. The task id is a task UUID from tsk list --json.\n",
+            "A step short id is the shortest unambiguous prefix of the step id, as printed by tsk list <task-id>.\n",
+            "toggle flips the step state: a blind retry after an unseen success flips it back, so verify with tsk list <task-id> before retrying.\n\n",
             "Refusal tokens (exit 1): empty-step-text, invalid-step-text, unknown-task, soft-deleted-task, unknown-step, ambiguous-step.\n\n",
             "Exit contract:\n",
             "  exit 0: step created or toggled\n",
@@ -410,7 +410,7 @@ pub fn steps_usage(reason: &str) -> CliOutput {
     CliOutput {
         stdout: String::new(),
         stderr: format!(
-            "herdr-tasks steps: {reason}\nusage: herdr-tasks steps <task-id> add <text> | toggle <step-short-id> [--state-dir <dir>]\n"
+            "tsk steps: {reason}\nusage: tsk steps <task-id> add <text> | toggle <step-short-id> [--state-dir <dir>]\n"
         ),
         code: 2,
     }
@@ -423,7 +423,7 @@ pub fn steps_rejected(error: StepsError) -> CliOutput {
     };
     CliOutput {
         stdout: String::new(),
-        stderr: format!("herdr-tasks steps: {detail}\n"),
+        stderr: format!("tsk steps: {detail}\n"),
         code,
     }
 }
@@ -432,7 +432,7 @@ pub fn list_usage(reason: &str) -> CliOutput {
     CliOutput {
         stdout: String::new(),
         stderr: format!(
-            "herdr-tasks list: {reason}\nusage: herdr-tasks list [<task-id>] [-p <project> | --global | --all] [--thread <name>] [--done | --deleted] [--json] [--state-dir <dir>]\n"
+            "tsk list: {reason}\nusage: tsk list [<task-id>] [-p <project> | --global | --all] [--thread <name>] [--done | --deleted] [--json] [--state-dir <dir>]\n"
         ),
         code: 2,
     }
@@ -442,7 +442,7 @@ pub fn list_rejected(error: ListError) -> CliOutput {
     match error {
         ListError::Store(detail) => CliOutput {
             stdout: String::new(),
-            stderr: format!("herdr-tasks list: {detail}\n"),
+            stderr: format!("tsk list: {detail}\n"),
             code: 3,
         },
         // A well-formed id that addresses no task: the invocation is wrong, not the store.
@@ -457,7 +457,7 @@ pub fn rejected(error: AddError) -> CliOutput {
     };
     CliOutput {
         stdout: String::new(),
-        stderr: format!("herdr-tasks add: {detail}\n"),
+        stderr: format!("tsk add: {detail}\n"),
         code,
     }
 }

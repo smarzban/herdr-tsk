@@ -3,9 +3,11 @@
 //! (no live herdr). Manual: second open-board focuses the same Tasks board.
 
 use std::fs;
+
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use tsk_tui::app::MODE_ENV;
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -112,8 +114,8 @@ fn open_board_uses_herdr_cli_and_board_entrypoint() {
         "open-board must reference the board entrypoint id"
     );
     assert!(
-        text.contains("Tasks"),
-        "open-board must reference the Tasks board title/label"
+        text.contains("tsk"),
+        "open-board must reference the tsk board title/label"
     );
     assert!(
         text.contains("split"),
@@ -138,11 +140,11 @@ fn open_board_has_idempotent_focus_list_logic() {
     );
     assert!(
         active.contains("--find-board-pane"),
-        "open-board must pipe pane list through herdr-tasks --find-board-pane (no python3)"
+        "open-board must pipe pane list through tsk --find-board-pane (no python3)"
     );
     assert!(
-        active.contains("target/release/herdr-tasks") || active.contains("HERDR_TASKS_BIN"),
-        "open-board must locate plugin binary relative to script (or HERDR_TASKS_BIN)"
+        active.contains("target/release/tsk") || active.contains("TSK_BIN"),
+        "open-board must locate plugin binary relative to script (or TSK_BIN)"
     );
 
     // No bare python3 dependency for focus logic.
@@ -170,8 +172,22 @@ fn open_capture_uses_herdr_cli_and_capture_path() {
         "open-capture must open capture mode or a popup/overlay surface"
     );
     assert!(
-        text.contains("herdr-tasks") || text.contains("board"),
+        text.contains("tsk") || text.contains("board"),
         "open-capture must target this plugin / board entrypoint"
+    );
+}
+
+#[test]
+fn quick_capture_injects_the_mode_env_var_the_binary_reads() {
+    let text = read(&open_capture_path());
+    assert!(
+        text.contains(&format!("--env {}=capture", MODE_ENV)),
+        "open-capture must inject --env {MODE_ENV}=capture: the binary reads \
+         app::MODE_ENV, and any other variable name silently opens the full board instead"
+    );
+    assert!(
+        !text.contains("HERDR_TASKS_"),
+        "open-capture must not carry legacy HERDR_TASKS_* variable names"
     );
 }
 

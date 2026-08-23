@@ -1,4 +1,4 @@
-//! herdr-tasks library root.
+//! tsk library root.
 
 pub mod app;
 pub mod attention;
@@ -20,9 +20,9 @@ pub mod views;
 
 pub use board_pane::{find_board_pane_from_stdin, find_board_pane_id};
 
-/// Run the herdr-tasks binary entrypoint with argv-style arguments.
+/// Run the tsk binary entrypoint with argv-style arguments.
 ///
-/// Default mode is the Tasks board. Pass `capture` (or set `HERDR_TASKS_MODE=capture`)
+/// Default mode is the Tasks board. Pass `capture` (or set `TSK_MODE=capture`)
 /// for Capture UI mode (form; exits after save/cancel).
 ///
 /// `--find-board-pane` is handled by the binary (`main`) before this entry.
