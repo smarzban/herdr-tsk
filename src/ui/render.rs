@@ -1537,7 +1537,8 @@ fn paint_task_page(
                 content_width.saturating_sub(3),
                 lay.notes_rows,
             ),
-            row.min(lay.notes_rows.saturating_sub(1)),
+            row.saturating_sub(u16::try_from(scroll).unwrap_or(u16::MAX))
+                .min(lay.notes_rows.saturating_sub(1)),
             col.min(content_width.saturating_sub(2)),
         );
     }

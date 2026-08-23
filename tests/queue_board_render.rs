@@ -1105,6 +1105,63 @@ fn task_page_notes_edit_keeps_a_visible_row_at_the_compact_floor_alongside_steps
     );
 }
 
+/// T-10 (AC-27): a Notes caret uses the same shared-stream offset as its rows.
+#[test]
+fn notes_edit_caret_accounts_for_shared_stream_scroll() {
+    let mut domain = DomainState::new();
+    let id = domain
+        .create(
+            "Caret stream offset",
+            Some("first\nsecond\nthird".to_string()),
+            TaskScope::Global,
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("create task");
+    for index in 0..30 {
+        domain
+            .add_step(id, format!("step {index}"))
+            .expect("add step");
+    }
+    let mut model = BoardModel::from_domain(&domain, None);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenTaskPage,
+        None,
+        None,
+    )
+    .expect("open page");
+    board_rows(&model, 80, 24);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::PageWheelScrollDown,
+        None,
+        None,
+    )
+    .expect("scroll shared stream");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::BeginEditNotes,
+        None,
+        None,
+    )
+    .expect("edit notes");
+
+    let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("test terminal");
+    terminal
+        .draw(|frame| draw_board(frame, &model))
+        .expect("draw edit page");
+    let cursor = terminal.backend().cursor_position();
+    assert_eq!(
+        cursor.y, 4,
+        "the third Notes row appears one stream row above its unscrolled position"
+    );
+}
+
 /// Long notes and steps form one scrollable page body. Notes use at least the
 /// first half of the viewport, then push the steps below the viewport instead of
 /// clipping them. The header and meta footer remain fixed while PageScroll reveals
@@ -1159,11 +1216,11 @@ fn task_page_scrolls_notes_and_steps_as_one_content_region() {
         apply_intent(
             &mut domain,
             &mut model,
-            BoardIntent::PageScrollDown,
+            BoardIntent::PageWheelScrollDown,
             None,
             None,
         )
-        .expect("scroll down");
+        .expect("wheel scroll down");
     }
     let scrolled = board_rows(&model, 78, 24);
     let shown: Vec<String> = scrolled.iter().map(|row| trimmed(row)).collect();

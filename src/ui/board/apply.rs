@@ -997,15 +997,10 @@ fn apply_board_intent(
         BoardIntent::PageScrollUp => {
             if let Some(form) = model.form.as_mut().filter(|form| form.is_task()) {
                 if model.input_mode == BoardInputMode::TaskPage {
-                    // Shared content scroll takes priority while it can move, keeping
-                    // long notes and steps in one continuous viewport.
-                    if form.notes_scroll > 0 {
-                        form.notes_scroll -= 1;
-                        return Ok(IntentOutcome::None);
-                    }
-                    // With the step cursor active, Up moves it through steps (AC-8);
-                    // Up from the first step deactivates it, consuming the press so the
-                    // notes keep their scroll (AC-18).
+                    // Keyboard arrows own an active step cursor before they move the
+                    // shared stream. Wheel intents above remain the explicit reading
+                    // route, so an active cursor does not become inert just because
+                    // notes overflow (AC-18, AC-26).
                     match form.steps.cursor {
                         Some(0) => form.steps.cursor = None,
                         Some(index) => {
@@ -1022,13 +1017,6 @@ fn apply_board_intent(
         BoardIntent::PageScrollDown => {
             if let Some(form) = model.form.as_mut().filter(|form| form.is_task()) {
                 if model.input_mode == BoardInputMode::TaskPage {
-                    // Scroll the shared body before entering step-cursor navigation.
-                    // The renderer records the exact wrapped-row horizon for this pane.
-                    let horizon = form.notes_max_scroll.get();
-                    if form.notes_scroll < horizon {
-                        form.notes_scroll += 1;
-                        return Ok(IntentOutcome::None);
-                    }
                     let steps = form
                         .task_id()
                         .and_then(|id| domain.get(id))
@@ -1036,9 +1024,8 @@ fn apply_board_intent(
                         .unwrap_or(0);
                     match form.steps.cursor {
                         // A bare Down on a task with steps activates the cursor on
-                        // the first step instead of scrolling (AC-17) — including
-                        // after an earlier Up-deactivation: activation is
-                        // re-activatable, never one-shot (AC-18, amended).
+                        // the first step instead of scrolling, including after an
+                        // earlier Up-deactivation (AC-17, AC-18).
                         None if steps > 0 => {
                             form.steps.cursor = Some(0);
                             steps_scroll_to_cursor(form, 0);
@@ -1049,9 +1036,6 @@ fn apply_board_intent(
                             steps_scroll_to_cursor(form, cursor);
                         }
                         _ => {
-                            // Bounded by the rows the last painted frame actually laid out, so the
-                            // bottom of a wrapping note is reachable. Logical lines undercount every
-                            // wrapped row, which stranded the tail of long notes.
                             let horizon = form.notes_max_scroll.get();
                             form.notes_scroll = form.notes_scroll.saturating_add(1).min(horizon);
                         }

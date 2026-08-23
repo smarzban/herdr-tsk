@@ -1786,11 +1786,10 @@ fn wrapping_notes() -> String {
         .join("\n")
 }
 
-/// The page body scrolls as one stream: a long steps list no longer has a
-/// separate hidden-tail affordance, and PageScroll reaches the final step through
-/// the shared scrollbar.
+/// Keyboard arrows walk the active cursor through the shared stream, keeping the
+/// selected step visible while the cursor advances.
 #[test]
-fn arrow_keys_scroll_the_shared_notes_and_steps_content() {
+fn arrow_keys_move_the_cursor_through_shared_steps() {
     let steps: Vec<String> = (1..=30).map(|i| format!("step {i:02}")).collect();
     let step_refs: Vec<&str> = steps.iter().map(String::as_str).collect();
     let (mut domain, mut model, _) =
@@ -1807,7 +1806,7 @@ fn arrow_keys_scroll_the_shared_notes_and_steps_content() {
     );
     assert!(frame.contains("step 01"), "first step visible:\n{frame}");
 
-    for _ in 0..23 {
+    for _ in 0..30 {
         apply_intent(
             &mut domain,
             &mut model,
@@ -1819,8 +1818,8 @@ fn arrow_keys_scroll_the_shared_notes_and_steps_content() {
     }
     let bottom = rendered_board(&model, 80, 24);
     assert!(
-        bottom.contains("step 30"),
-        "the shared scroll reaches the final step:\n{bottom}"
+        bottom.contains("▸ ▪ step 30"),
+        "the cursor reaches the final step:\n{bottom}"
     );
     assert!(
         !bottom.contains("step 01"),
@@ -2063,10 +2062,10 @@ fn delete_verb_marks_then_removes_on_second_press() {
     );
 }
 
-/// With overflowing notes and steps, Down scrolls the one shared body before
-/// any step-cursor navigation, so the note tail remains reachable.
+/// With overflowing notes and steps, the first Down activates the cursor and
+/// leaves the shared content in place. Wheel input is the reading route.
 #[test]
-fn first_bare_down_scrolls_shared_content_before_steps() {
+fn first_bare_down_activates_cursor_before_shared_content() {
     let notes = wrapping_notes();
     let (mut domain, mut model, _) = board_with_steps(
         "Scroll witness",
@@ -2081,12 +2080,15 @@ fn first_bare_down_scrolls_shared_content_before_steps() {
         None,
         None,
     )
-    .expect("scroll down");
+    .expect("activate cursor");
     let after = rendered_board(&model, 80, 24);
-    assert_ne!(before, after, "Down must move the shared body");
     assert!(
-        !after.contains("▸ ▪ alpha step"),
-        "scrolling must not skip to steps"
+        after.contains("▸ ▪ alpha step"),
+        "Down must activate the first step cursor"
+    );
+    assert!(
+        before.contains("L0"),
+        "fixture must begin at the notes head"
     );
 }
 
@@ -2119,6 +2121,59 @@ fn page_scroll_up_reverses_the_shared_content_region() {
     let up = rendered_board(&model, 80, 24);
     assert_ne!(down, up, "Up must move the shared body back");
     assert!(up.contains("Deactivate witness") && up.contains("created"));
+}
+
+/// T-10 (AC-17, AC-18, AC-26): keys own the active cursor before they move the
+/// stream, while wheel input remains stream-only.
+#[test]
+fn active_cursor_up_precedes_shared_scroll() {
+    let (mut domain, mut model, _) = board_with_steps(
+        "Cursor priority",
+        Some(&wrapping_notes()),
+        &["first step", "second step"],
+    );
+    rendered_board(&model, 80, 24);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::SelectStep(1),
+        None,
+        None,
+    )
+    .expect("select second step");
+    let selected = rendered_board(&model, 80, 24);
+    assert!(
+        selected.contains("▸ ▪ second step"),
+        "second step selected:\n{selected}"
+    );
+
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::PageWheelScrollDown,
+        None,
+        None,
+    )
+    .expect("wheel scroll");
+    let after_wheel = rendered_board(&model, 80, 24);
+    assert!(
+        after_wheel.contains("▸ ▪ second step"),
+        "wheel scrolling must not move the step cursor:\n{after_wheel}"
+    );
+
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::PageScrollUp,
+        None,
+        None,
+    )
+    .expect("key up");
+    let after_key = rendered_board(&model, 80, 24);
+    assert!(
+        after_key.contains("▸ ▪ first step"),
+        "Up must move the active cursor before scrolling the stream:\n{after_key}"
+    );
 }
 
 /// Step cursor navigation stays available when the shared content already fits.

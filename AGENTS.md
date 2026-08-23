@@ -18,7 +18,7 @@ The committed `.gitignore` already covers it.
 **herdr-tasks** is a herdr plugin: a queue board for capture and human-status
 verbs. Park, resume, linking, and dispatch-start are not board or palette
 actions. Dispatch recovery can still open for a persisted attempt. Crate and
-plugin are `0.1.0`.
+plugin are `0.2.0`.
 
 A gitignored `HANDOFF.md` may hold this clone’s live working state.
 
