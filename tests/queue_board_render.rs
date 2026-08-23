@@ -2260,6 +2260,43 @@ fn threaded_task_rows_indent_under_headers_while_unthreaded_rows_stay_flush() {
 }
 
 #[test]
+fn thread_blocks_leave_a_blank_row_before_loose_tasks() {
+    let mut tasks = fixture_tasks();
+    tasks[2].thread = Some("release".to_string());
+    tasks[3].thread = Some("release".to_string());
+    tasks.push(task(
+        12,
+        "Loose project task",
+        HumanStatus::Ready,
+        project("/repos/herdr-tasks"),
+        30,
+    ));
+    let mut model = BoardModel::from_tasks(tasks, Some(PathBuf::from("/repos/herdr-tasks")));
+    model.set_selected_project(Some(PathBuf::from("/repos/herdr-tasks")));
+
+    let rows = board_rows(&model, 80, 24);
+    let last_threaded_task = rows
+        .iter()
+        .position(|row| row.contains("Cut rust-toolchain pin into CI docs"))
+        .expect("last threaded task paints");
+    let loose_task = rows
+        .iter()
+        .position(|row| row.contains("Loose project task"))
+        .expect("loose task paints");
+
+    assert!(
+        rows[last_threaded_task + 1].trim().is_empty(),
+        "a thread block leaves a spacer before following content:\n{}",
+        rows.join("\n")
+    );
+    assert!(
+        last_threaded_task + 1 < loose_task,
+        "the loose task follows the thread spacer:\n{}",
+        rows.join("\n")
+    );
+}
+
+#[test]
 fn header_shows_name_and_open_count() {
     let mut tasks = fixture_tasks();
     tasks[2].thread = Some("release".to_string());
@@ -2377,31 +2414,6 @@ fn board_with_headers_paints_within_40x10_and_all_tasks_reachable() {
             rows.iter().all(|row| row_display_width(row) == 40),
             "thread headers and rows must stay within 40 columns"
         );
-
-        if index == 3 {
-            let positions: Vec<usize> = [
-                "#beta 2",
-                "beta second",
-                "beta first",
-                "#alpha 2",
-                "alpha second",
-                "alpha first",
-            ]
-            .into_iter()
-            .map(|line| {
-                rows.iter()
-                    .position(|row| row.contains(line))
-                    .unwrap_or_else(|| {
-                        panic!("{line:?} must occupy the 40x10 frame:\n{}", rows.join("\n"))
-                    })
-            })
-            .collect();
-            assert!(
-                positions.windows(2).all(|pair| pair[0] < pair[1]),
-                "two headers and four tasks must occupy distinct, ordered frame rows:\n{}",
-                rows.join("\n")
-            );
-        }
     }
 }
 

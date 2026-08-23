@@ -1956,6 +1956,7 @@ fn build_list_rows(
                         true,
                     );
                 }
+                out.push(ListRow::Blank);
             }
             for id in section.loose_task_ids.iter().copied() {
                 push_task(
