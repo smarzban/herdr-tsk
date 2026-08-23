@@ -12,7 +12,7 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::domain::{DomainState, STORE_FORMAT_VERSION};
+use crate::domain::{DomainState, LEGACY_STORE_FORMAT_VERSION, STORE_FORMAT_VERSION};
 
 /// On-disk document name under the state directory.
 const STATE_FILE: &str = "tasks.json";
@@ -214,12 +214,14 @@ impl TaskStore {
         let file = self.state_file();
         if file.exists() {
             match peek_format_version(&fs::read_to_string(&file)?) {
-                Ok(version) => check_format_version(version)?,
-                // A corrupt document is replaced, not treated as a newer format.
+                Ok(version) => {
+                    check_format_version(version)?;
+                    retain_last_good(&file)?;
+                }
+                // A corrupt live document is replaced. Leave any last-good copy alone.
                 Err(StoreError::Json(_)) => {}
                 Err(error) => return Err(error),
             }
-            retain_last_good(&file)?;
         }
         let tmp = self.unique_tmp_path();
         let data = serde_json::to_string_pretty(state)?;
@@ -342,7 +344,7 @@ pub fn default_state_dir() -> PathBuf {
 fn peek_format_version(data: &str) -> Result<u32, StoreError> {
     let value: serde_json::Value = serde_json::from_str(data)?;
     match value.get("format_version") {
-        None => Ok(STORE_FORMAT_VERSION),
+        None => Ok(LEGACY_STORE_FORMAT_VERSION),
         Some(version) => version
             .as_u64()
             .and_then(|n| u32::try_from(n).ok())
@@ -911,7 +913,7 @@ mod tests {
         );
 
         let loaded = TaskStore::new(&dir).load().expect("legacy store must load");
-        assert_eq!(loaded.format_version(), STORE_FORMAT_VERSION);
+        assert_eq!(loaded.format_version(), 1);
         assert!(loaded.tasks().is_empty());
     }
 
@@ -1006,6 +1008,36 @@ mod tests {
         assert_eq!(backup["tasks"][0]["title"], "first");
         let live = store.load().expect("load live");
         assert!(live.tasks().is_empty());
+    }
+
+    #[test]
+    fn corrupt_live_document_does_not_replace_the_last_good_copy() {
+        let dir = temp_dir("corrupt-keeps-backup");
+        let _guard = TempDirGuard(dir.clone());
+        let store = TaskStore::new(&dir);
+        let mut first = DomainState::new();
+        first
+            .create(
+                "keep me",
+                None,
+                TaskScope::Global,
+                None,
+                None,
+                ProvenanceOrigin::Manual,
+            )
+            .expect("create");
+        store.save(&first).expect("first save");
+        store.save(&DomainState::new()).expect("second save");
+
+        fs::write(dir.join(STATE_FILE), b"not valid json").expect("corrupt live");
+        store
+            .save(&DomainState::new())
+            .expect("replace the corrupt live document");
+
+        let backup: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(dir.join(BACKUP_FILE)).expect("read backup"))
+                .expect("backup must stay valid json");
+        assert_eq!(backup["tasks"][0]["title"], "keep me");
     }
 
     #[test]
