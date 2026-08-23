@@ -1096,33 +1096,25 @@ fn list_uses_environment_state_dir_by_default() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
-/// One task whose checklist items carry chosen ids `aaa1…`/`aaa2…`, shaped through
-/// the store document because item ids are otherwise minted by the domain.
-fn state_with_checklist_items(
-    done_first: bool,
-) -> (DomainState, herdr_tasks::domain::ChecklistItem) {
+/// One task whose steps carry chosen ids `aaa1…`/`aaa2…`, shaped through
+/// the store document because step ids are otherwise minted by the domain.
+fn state_with_steps(done_first: bool) -> (DomainState, herdr_tasks::domain::Step) {
     let mut state = DomainState::new();
     let id = state
         .create(
-            "checklist target",
+            "steps target",
             None,
             TaskScope::Global,
             None,
             None,
             ProvenanceOrigin::Manual,
         )
-        .expect("seed checklist task");
-    state
-        .add_checklist_item(id, "First step")
-        .expect("seed first item");
-    state
-        .add_checklist_item(id, "Second step")
-        .expect("seed second item");
+        .expect("seed steps task");
+    state.add_step(id, "First step").expect("seed first step");
+    state.add_step(id, "Second step").expect("seed second step");
     if done_first {
-        let first = state.tasks()[0].checklist[0].id;
-        state
-            .toggle_checklist_item(id, first)
-            .expect("seed first item done");
+        let first = state.tasks()[0].steps[0].id;
+        state.toggle_step(id, first).expect("seed first step done");
     }
     let mut document = serde_json::to_value(&state).expect("serialize seed state");
     for (index, id) in [
@@ -1132,18 +1124,18 @@ fn state_with_checklist_items(
     .into_iter()
     .enumerate()
     {
-        document["tasks"][0]["checklist"][index]["id"] =
-            serde_json::json!(uuid::Uuid::parse_str(id).expect("shaped item id"));
+        document["tasks"][0]["steps"][index]["id"] =
+            serde_json::json!(uuid::Uuid::parse_str(id).expect("shaped step id"));
     }
-    let shaped: DomainState = serde_json::from_value(document).expect("state with shaped item ids");
-    let first_item = shaped.tasks()[0].checklist[0].clone();
-    (shaped, first_item)
+    let shaped: DomainState = serde_json::from_value(document).expect("state with shaped step ids");
+    let first_step = shaped.tasks()[0].steps[0].clone();
+    (shaped, first_step)
 }
 
 #[test]
-fn list_task_prints_checklist_lines_with_state_and_short_id() {
-    let dir = temp_state_dir("checklist-lines");
-    let (state, first_item) = state_with_checklist_items(true);
+fn list_task_prints_step_lines_with_state_and_short_id() {
+    let dir = temp_state_dir("step-lines");
+    let (state, first_step) = state_with_steps(true);
     let task = state.tasks()[0].id;
     TaskStore::new(&dir).save(&state).expect("seed store");
 
@@ -1159,12 +1151,12 @@ fn list_task_prints_checklist_lines_with_state_and_short_id() {
     assert!(output.stderr.is_empty());
     assert_eq!(
         output.stdout,
-        format!("READY\n - checklist target\n   [x] aaa1 First step\n   [ ] aaa2 Second step\n"),
-        "one line per item with state and unambiguous short id"
+        format!("READY\n - steps target\n   [x] aaa1 First step\n   [ ] aaa2 Second step\n"),
+        "one line per step with state and unambiguous short id"
     );
     assert!(
-        first_item.id.to_string().starts_with("aaa1"),
-        "printed short id must prefix the item identity"
+        first_step.id.to_string().starts_with("aaa1"),
+        "printed short id must prefix the step identity"
     );
 
     let json = list(&[
@@ -1182,10 +1174,10 @@ fn list_task_prints_checklist_lines_with_state_and_short_id() {
         assert!(rows[0].get(key).is_some(), "single-task row keeps {key}");
     }
     assert_eq!(
-        rows[0]["checklist"],
+        rows[0]["steps"],
         serde_json::json!([
             {
-                "id": first_item.id.to_string(),
+                "id": first_step.id.to_string(),
                 "done": true,
                 "short_id": "aaa1",
                 "text": "First step",
@@ -1197,15 +1189,15 @@ fn list_task_prints_checklist_lines_with_state_and_short_id() {
                 "text": "Second step",
             },
         ]),
-        "single-task JSON carries the checklist items with ids, state, and short ids"
+        "single-task JSON carries the steps with ids, state, and short ids"
     );
 
     let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
-fn list_task_without_items_keeps_task_rows_and_rejects_conflicting_flags() {
-    let dir = temp_state_dir("task-without-items");
+fn list_task_without_steps_keeps_task_rows_and_rejects_conflicting_flags() {
+    let dir = temp_state_dir("task-without-steps");
     let mut state = DomainState::new();
     create_task(
         &mut state,
@@ -1245,7 +1237,7 @@ fn list_task_without_items_keeps_task_rows_and_rejects_conflicting_flags() {
             .map(String::as_str)
             .collect::<Vec<_>>(),
         vec!["id", "project", "status", "title"],
-        "a task without items keeps today's exact JSON row shape"
+        "a task without steps keeps today's exact JSON row shape"
     );
 
     for extra in ["--global", "--all", "--done", "--deleted"] {

@@ -52,24 +52,24 @@ regardless of stored status. Scope selectors are mutually exclusive, as are `--d
 A typo in a project name silently files the task under a new scope. Use
 `herdr-tasks list --all --json` to recover the resulting scope.
 
-## Checklist items
+## Steps
 
 ```sh
-herdr-tasks check <task-id> add "Draft outline"
-herdr-tasks check <task-id> toggle <item-short-id>
+herdr-tasks steps <task-id> add "Draft outline"
+herdr-tasks steps <task-id> toggle <step-short-id>
 herdr-tasks list <task-id>
 ```
 
-`<task-id>` is a task UUID from `herdr-tasks list --json`. An item short id is
-the shortest unambiguous prefix of the item id. `herdr-tasks list <task-id>`
-prints one line per item with its `[x]`/`[ ]` state and short id; with `--json`
-the row's `checklist` array carries each item's `id`, `text`, `done`, and
+`<task-id>` is a task UUID from `herdr-tasks list --json`. A step short id is
+the shortest unambiguous prefix of the step id. `herdr-tasks list <task-id>`
+prints one line per step with its `[x]`/`[ ]` state and short id; with `--json`
+the row's `steps` array carries each step's `id`, `text`, `done`, and
 `short_id`.
 
-`toggle` flips the item state: a retry after an unseen success flips it back.
-Never blind-retry a `check` invocation — run `herdr-tasks list <task-id>`
-first and retry only a real refusal. `check` exits 0 when the item was created
-or toggled, 1 for a refusal (stable tokens `empty-item-text`,
-`invalid-item-text`, `unknown-task`, `soft-deleted-task`, `unknown-item`,
-`ambiguous-item`), 2 for a usage error, and 3 for store I/O — verify with
+`toggle` flips the step state: a retry after an unseen success flips it back.
+Never blind-retry a `steps` invocation — run `herdr-tasks list <task-id>`
+first and retry only a real refusal. `steps` exits 0 when the step was created
+or toggled, 1 for a refusal (stable tokens `empty-step-text`,
+`invalid-step-text`, `unknown-task`, `soft-deleted-task`, `unknown-step`,
+`ambiguous-step`), 2 for a usage error, and 3 for store I/O — verify with
 `list` before retrying an exit 3, same as add.

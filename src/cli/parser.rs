@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use uuid::Uuid;
 
-use super::check::CheckAction;
+use super::steps::StepsAction;
 
 /// Parsed add input. A plan source is selected by `file` or piped stdin.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -120,26 +120,26 @@ pub fn parse_flag_add(args: &[String]) -> Result<FlagAdd, String> {
     Ok(parsed)
 }
 
-/// Parsed `check` input. Flags come first; the positionals are task id, action,
+/// Parsed `steps` input. Flags come first; the positionals are task id, action,
 /// and the action's operand.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FlagCheck {
+pub struct FlagSteps {
     pub task: Option<Uuid>,
-    pub action: Option<CheckAction>,
+    pub action: Option<StepsAction>,
     pub state_dir: Option<PathBuf>,
     pub help: bool,
 }
 
-/// Parse `herdr-tasks check` arguments, including argv0 and the `check` subcommand.
+/// Parse `herdr-tasks steps` arguments, including argv0 and the `steps` subcommand.
 ///
 /// Flags may appear anywhere; the positionals in order are task id, action, and
 /// the action's operand.
-pub fn parse_flag_check(args: &[String]) -> Result<FlagCheck, String> {
-    if args.get(1).map(String::as_str) != Some("check") {
-        return Err("expected check command".into());
+pub fn parse_flag_steps(args: &[String]) -> Result<FlagSteps, String> {
+    if args.get(1).map(String::as_str) != Some("steps") {
+        return Err("expected steps command".into());
     }
 
-    let mut parsed = FlagCheck {
+    let mut parsed = FlagSteps {
         task: None,
         action: None,
         state_dir: None,
@@ -165,10 +165,10 @@ pub fn parse_flag_check(args: &[String]) -> Result<FlagCheck, String> {
                 parsed.state_dir = Some(PathBuf::from(value(flag)?));
                 index += 2;
             }
-            flag if flag.starts_with('-') => return Err(format!("unknown check argument {flag}")),
+            flag if flag.starts_with('-') => return Err(format!("unknown steps argument {flag}")),
             positional => {
                 if positionals.len() == 3 {
-                    return Err(format!("unexpected check argument {positional}"));
+                    return Err(format!("unexpected steps argument {positional}"));
                 }
                 positionals.push(positional);
                 index += 1;
@@ -181,7 +181,7 @@ pub fn parse_flag_check(args: &[String]) -> Result<FlagCheck, String> {
             return Err(if positionals.is_empty() {
                 "task id is required".into()
             } else {
-                "check action is required".into()
+                "steps action is required".into()
             });
         }
         let task = positionals[0]
@@ -192,14 +192,14 @@ pub fn parse_flag_check(args: &[String]) -> Result<FlagCheck, String> {
             .copied()
             .map(str::to_owned)
             .ok_or_else(|| match positionals[1] {
-                "add" => "item text is required".to_owned(),
-                "toggle" => "item short id is required".to_owned(),
-                other => format!("unknown check action {other}"),
+                "add" => "step text is required".to_owned(),
+                "toggle" => "step short id is required".to_owned(),
+                other => format!("unknown steps action {other}"),
             })?;
         parsed.action = Some(match positionals[1] {
-            "add" => CheckAction::Add { text: operand },
-            "toggle" => CheckAction::Toggle { short_id: operand },
-            other => return Err(format!("unknown check action {other}")),
+            "add" => StepsAction::Add { text: operand },
+            "toggle" => StepsAction::Toggle { short_id: operand },
+            other => return Err(format!("unknown steps action {other}")),
         });
         parsed.task = Some(task);
     }

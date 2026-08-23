@@ -19,7 +19,7 @@ pub struct ListInput {
     pub all: bool,
     pub done: bool,
     pub deleted: bool,
-    /// One task addressed by id: single-task listing with checklist lines.
+    /// One task addressed by id: single-task listing with step lines.
     pub task: Option<Uuid>,
     pub state_dir: Option<PathBuf>,
     pub help: bool,
@@ -56,8 +56,8 @@ pub struct ListResult {
     pub(crate) rows: Vec<ListRow>,
     pub(crate) view: ListView,
     pub(crate) include_scope: bool,
-    /// Checklist lines for single-task listing; empty for every other listing.
-    pub(crate) checklist: Vec<crate::cli::check::ChecklistLine>,
+    /// Step lines for single-task listing; empty for every other listing.
+    pub(crate) steps: Vec<crate::cli::steps::StepLine>,
 }
 
 /// Parse `herdr-tasks list` arguments, including argv0 and the `list` subcommand.
@@ -161,7 +161,7 @@ pub fn run(input: ListInput) -> Result<ListResult, ListError> {
         .load()
         .map_err(|error| ListError::Store(error.to_string()))?;
     if let Some(task_id) = input.task {
-        // Single-task listing: id addressing, no scope or filter, checklist lines included.
+        // Single-task listing: id addressing, no scope or filter, step lines included.
         let task = domain
             .tasks()
             .iter()
@@ -178,7 +178,7 @@ pub fn run(input: ListInput) -> Result<ListResult, ListError> {
             rows: vec![row_for(task)],
             view,
             include_scope: false,
-            checklist: crate::cli::check::checklist_lines(&task.checklist),
+            steps: crate::cli::steps::step_lines(&task.steps),
         });
     }
     let scope = (!input.all).then(|| {
@@ -212,7 +212,7 @@ pub fn run(input: ListInput) -> Result<ListResult, ListError> {
         rows,
         view,
         include_scope: input.all,
-        checklist: Vec::new(),
+        steps: Vec::new(),
     })
 }
 

@@ -99,12 +99,12 @@ fn ctrl_c_quits_from_normal_and_task_page_modes() {
     );
 }
 
-/// T-3 (AC-9): bare `a`/`space`/`x`/`e` on the task page view produce no checklist
-/// mutation. The guard runs with the item cursor active (the state the modifier-protected
+/// T-3 (AC-9): bare `a`/`space`/`x`/`e` on the task page view produce no steps
+/// mutation. The guard runs with the step cursor active (the state the modifier-protected
 /// verbs would target), so a bare key that slipped past the verb-modifier gate would be
-/// caught acting on the highlighted item.
+/// caught acting on the highlighted step.
 #[test]
-fn bare_page_keys_never_mutate_checklist() {
+fn bare_page_keys_never_mutate_steps() {
     let mut domain = DomainState::new();
     let id = domain
         .create(
@@ -116,8 +116,8 @@ fn bare_page_keys_never_mutate_checklist() {
             ProvenanceOrigin::Manual,
         )
         .expect("create");
-    domain.add_checklist_item(id, "alpha step").expect("item 1");
-    domain.add_checklist_item(id, "bravo step").expect("item 2");
+    domain.add_step(id, "alpha step").expect("step 1");
+    domain.add_step(id, "bravo step").expect("step 2");
     let mut model = BoardModel::from_domain(&domain, None);
     apply_intent(
         &mut domain,
@@ -127,7 +127,7 @@ fn bare_page_keys_never_mutate_checklist() {
         None,
     )
     .expect("open page");
-    // Activate the item cursor (the first bare Down on a task with items).
+    // Activate the step cursor (the first bare Down on a task with steps).
     apply_intent(
         &mut domain,
         &mut model,
@@ -155,8 +155,8 @@ fn bare_page_keys_never_mutate_checklist() {
     }
     let after = domain.get(id).expect("task");
     assert_eq!(
-        after.checklist, before.checklist,
-        "bare page keys must not mutate the checklist"
+        after.steps, before.steps,
+        "bare page keys must not mutate the steps"
     );
     assert_eq!(after.status, before.status, "status untouched");
     assert_eq!(after.revision, before.revision, "no journaled mutation");

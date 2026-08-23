@@ -19,7 +19,7 @@ use crate::ui::input::{
 };
 use crate::ui::mouse::BoardPopup;
 use crate::ui::queue::{self, DeckScope, QueueView, SectionKind};
-use crate::ui::render::ChecklistItemView;
+use crate::ui::render::StepView;
 use crate::ui::selection;
 use crate::ui::terminal_text;
 
@@ -45,15 +45,15 @@ pub enum BoardInputMode {
     /// click does NOT: field regions are inert in this state, and only move focus once one
     /// of the edit states is already open (see the mouse mapper's form-field arms).
     TaskPage,
-    /// The page footer's one-line add/rename item input owns input (AC-25). It is a
+    /// The page footer's one-line add/rename step input owns input (AC-25). It is a
     /// Title-like single-line draft ([`crate::ui::edit::EditBuffer`]) carried on the
-    /// page form's checklist state, not one of the three task-form fields: Enter
+    /// page form's steps state, not one of the three task-form fields: Enter
     /// applies the domain command (Ctrl+Enter adds and reopens the line empty), Esc
     /// cancels. The applied line and this mode outlive the save call — only the
     /// persistence boundary's confirmed sync closes (or reopens) the line, and a
     /// failed save holds it until Retry/Cancel resolve; every close returns to
     /// [`BoardInputMode::TaskPage`].
-    EditChecklistItem,
+    EditStep,
     /// Modal selection over the session project-scope options.
     ProjectPicker,
     /// Durable dispatch attempt recovery actions.
@@ -189,9 +189,9 @@ pub(super) struct BoardForm {
     pub(super) binding: BoardFormBinding,
     /// View-mode scroll of the task page's notes body (wrapped rows), never used by capture.
     pub(super) notes_scroll: usize,
-    /// Page-session checklist state (item cursor, window scroll, delete mark, item
+    /// Page-session steps state (step cursor, window scroll, delete mark, step
     /// editor). Carried by the form so it lives exactly as long as the page does.
-    pub(super) checklist: ChecklistPageState,
+    pub(super) steps: StepsPageState,
     /// The furthest `notes_scroll` the LAST painted frame could actually show, in wrapped
     /// rows (`wrapped rows - visible rows`).
     ///
@@ -271,7 +271,7 @@ impl BoardForm {
             scope_selected,
             binding,
             notes_scroll: 0,
-            checklist: ChecklistPageState::default(),
+            steps: StepsPageState::default(),
             notes_max_scroll: std::cell::Cell::new(0),
         }
     }
@@ -373,55 +373,55 @@ impl BoardForm {
     }
 }
 
-/// The one-line add/rename item input on the task page's footer row
+/// The one-line add/rename step input on the task page's footer row
 /// (page-session only).
 ///
-/// `rename` names the item being edited; `None` is an add (the buffer starts empty).
+/// `rename` names the step being edited; `None` is an add (the buffer starts empty).
 /// `refusal` is the line's own empty-text refusal (AC-13): painted on the line,
 /// never the board status row, and cleared when the line closes or its buffer
 /// changes.
 #[derive(Debug, Clone)]
-pub(super) struct ChecklistEditor {
+pub(super) struct StepEditor {
     pub(super) buffer: EditBuffer,
     pub(super) rename: Option<Uuid>,
     pub(super) refusal: Option<String>,
 }
 
-/// An item-editor apply waiting for the app save boundary to confirm persistence
-/// (AC-14). `item` + `text` name the mutation that must land before the line may
+/// An step-editor apply waiting for the app save boundary to confirm persistence
+/// (AC-14). `step` + `text` name the mutation that must land before the line may
 /// close — or, for Ctrl+Enter in add mode, reopen empty.
 #[derive(Debug, Clone)]
-pub(super) struct ChecklistEditorSave {
-    pub(super) item: Uuid,
+pub(super) struct StepEditorSave {
+    pub(super) step: Uuid,
     pub(super) text: String,
     pub(super) reopen: bool,
 }
 
-/// Page-session checklist state for the task page, never persisted.
+/// Page-session steps state for the task page, never persisted.
 ///
-/// The item cursor lifecycle (spec: resolved decisions, amended 2026-08-22):
-/// inactive when the page opens; a bare ↓ (re-)activates it on the first item —
+/// The step cursor lifecycle (spec: resolved decisions, amended 2026-08-22):
+/// inactive when the page opens; a bare ↓ (re-)activates it on the first step —
 /// including after an earlier ↑-deactivation, so activation is never one-shot;
-/// ↑ from the first item deactivates it. While inactive ↑ scrolls the notes and
-/// ↓ re-activates; a click on an item row moves the cursor onto that item
-/// (AC-21). A task with no items never activates a cursor.
+/// ↑ from the first step deactivates it. While inactive ↑ scrolls the notes and
+/// ↓ re-activates; a click on an step row moves the cursor onto that step
+/// (AC-21). A task with no steps never activates a cursor.
 #[derive(Debug, Clone, Default)]
-pub(super) struct ChecklistPageState {
-    /// Highlighted item index; `None` = inactive.
+pub(super) struct StepsPageState {
+    /// Highlighted step index; `None` = inactive.
     pub(super) cursor: Option<usize>,
-    /// First item index the painted window shows; the renderer records how many item
+    /// First step index the painted window shows; the renderer records how many step
     /// rows it actually laid out in [`Self::window_rows`], the same seam
     /// [`BoardForm::notes_max_scroll`] uses for the notes window.
     pub(super) scroll: usize,
-    /// Item index visibly marked by the first press of the delete verb. Any intervening
+    /// Step index visibly marked by the first press of the delete verb. Any intervening
     /// intent clears it; only the verb's second press removes.
     pub(super) delete_mark: Option<usize>,
     /// The open one-line add/rename editor, if any.
-    pub(super) editor: Option<ChecklistEditor>,
+    pub(super) editor: Option<StepEditor>,
     /// An editor apply the save boundary has not confirmed yet (AC-14). While it is
     /// set, the editor and its input mode are held exactly as the user left them.
-    pub(super) pending_save: Option<ChecklistEditorSave>,
-    /// Item rows the last painted window actually showed (renderer-recorded).
+    pub(super) pending_save: Option<StepEditorSave>,
+    /// Step rows the last painted window actually showed (renderer-recorded).
     pub(super) window_rows: std::cell::Cell<usize>,
 }
 
@@ -461,18 +461,18 @@ fn board_form_scope_options(
     options
 }
 
-/// Extract the checklist item views the task page paints: done flag + text per item,
+/// Extract the steps step views the task page paints: done flag + text per step,
 /// in storage order.
 ///
-/// This is the one seam between the page payload and checklist storage: the payload
-/// consumes these views and never reads `Task.checklist` itself, so later page
+/// This is the one seam between the page payload and steps storage: the payload
+/// consumes these views and never reads `Task.steps` itself, so later page
 /// consumers (cursor, verbs, editor) swap the view, not the storage shape.
-pub(super) fn checklist_item_views(task: &Task) -> Vec<ChecklistItemView> {
-    task.checklist
+pub(super) fn step_views(task: &Task) -> Vec<StepView> {
+    task.steps
         .iter()
-        .map(|item| ChecklistItemView {
-            done: item.done,
-            text: item.text.clone(),
+        .map(|step| StepView {
+            done: step.done,
+            text: step.text.clone(),
         })
         .collect()
 }
@@ -670,7 +670,7 @@ impl BoardModel {
             self.input_mode = BoardInputMode::QuickAdd;
             self.clear_message();
         }
-        // A held item line editor unwinds to page view on Cancel (AC-14): the
+        // A held step line editor unwinds to page view on Cancel (AC-14): the
         // baseline Cancel just restored rolled its mutation back, so nothing is left
         // to hold the line for, and an edit mode whose editor is gone is the orphan
         // no key can escape. The Cancel path's `sync_from_domain` ran first and left
@@ -680,11 +680,11 @@ impl BoardModel {
             && self
                 .form
                 .as_ref()
-                .is_some_and(|form| form.checklist.pending_save.is_some())
+                .is_some_and(|form| form.steps.pending_save.is_some())
         {
             if let Some(form) = self.form.as_mut() {
-                form.checklist.pending_save = None;
-                form.checklist.editor = None;
+                form.steps.pending_save = None;
+                form.steps.editor = None;
             }
             self.input_mode = BoardInputMode::TaskPage;
             self.clear_message();
@@ -711,7 +711,7 @@ impl BoardModel {
         });
         self.attempts = state.active_attempts().to_vec();
         self.finish_quick_add_save();
-        self.finish_checklist_editor_save();
+        self.finish_step_editor_save();
         self.reanchor_selection(self.selection_id, &previous_visible);
         if self.attempts.is_empty()
             && matches!(
@@ -1013,48 +1013,48 @@ impl BoardModel {
         self.clear_message();
     }
 
-    /// Release a held item line editor once persistence has confirmed its mutation
+    /// Release a held step line editor once persistence has confirmed its mutation
     /// (AC-14's release side).
     ///
-    /// Mirrors [`Self::finish_quick_add_save`]'s identity check: the touched item
+    /// Mirrors [`Self::finish_quick_add_save`]'s identity check: the touched step
     /// must be present carrying its new text in the synced tasks before the line may
     /// close — or reopen empty, for Ctrl+Enter in add mode. The Cancel path syncs the
-    /// rolled-back baseline first, where the item is absent (an add) or still carries
+    /// rolled-back baseline first, where the step is absent (an add) or still carries
     /// its old text (a rename), so the line stays held for [`Self::end_save_recovery`]
     /// to unwind to page view instead. The editor and its input mode outlive the save
     /// call precisely because nothing but this confirmed landing releases them.
-    fn finish_checklist_editor_save(&mut self) {
+    fn finish_step_editor_save(&mut self) {
         let Some(form) = self.form.as_ref().filter(|form| form.is_task()) else {
             return;
         };
         let Some(task_id) = form.task_id() else {
             return;
         };
-        let Some(pending) = form.checklist.pending_save.clone() else {
+        let Some(pending) = form.steps.pending_save.clone() else {
             return;
         };
         let landed = self.tasks.iter().any(|task| {
             task.id == task_id
                 && task
-                    .checklist
+                    .steps
                     .iter()
-                    .any(|item| item.id == pending.item && item.text == pending.text)
+                    .any(|step| step.id == pending.step && step.text == pending.text)
         });
         if !landed {
             return;
         }
         let form = self.form.as_mut().expect("task form checked above");
-        form.checklist.pending_save = None;
+        form.steps.pending_save = None;
         if pending.reopen {
-            // The rapid-capture loop: the line reopens empty for the next item, its
+            // The rapid-capture loop: the line reopens empty for the next step, its
             // mode never having left it.
-            form.checklist.editor = Some(ChecklistEditor {
+            form.steps.editor = Some(StepEditor {
                 buffer: seeded_draft(""),
                 rename: None,
                 refusal: None,
             });
         } else {
-            form.checklist.editor = None;
+            form.steps.editor = None;
             self.input_mode = BoardInputMode::TaskPage;
         }
         self.clear_message();

@@ -162,11 +162,11 @@ fn overlay_row_over_a_task(
 }
 
 fn verb_hit_for_chord<'a>(model: &BoardModel, hits: &'a QueueHitMap, chord: &str) -> &'a QueueHit {
-    let items = board_verb_items(model);
-    let index = items
+    let entries = board_verb_items(model);
+    let index = entries
         .iter()
         .position(|entry| entry.key == chord)
-        .unwrap_or_else(|| panic!("no verb entry for chord {chord:?}: {items:?}"));
+        .unwrap_or_else(|| panic!("no verb entry for chord {chord:?}: {entries:?}"));
     hits.regions
         .iter()
         .find(|hit| matches!(hit.target, QueueHitTarget::Verb(i) if i == index))
@@ -1477,15 +1477,15 @@ fn page_rows(model: &BoardModel) -> Vec<String> {
         .collect()
 }
 
-/// AC-21: a single click on a checklist item row moves the item cursor onto
-/// that item — a click selects, it never toggles, never opens the editor,
+/// AC-21: a single click on a step row moves the step cursor onto
+/// that step — a click selects, it never toggles, never opens the editor,
 /// never arms a delete mark — and a click on the notes half changes nothing
 /// about the cursor.
 #[test]
-fn clicking_an_item_row_selects_it() {
+fn clicking_a_step_row_selects_it() {
     let (mut domain, mut model, id) = board_with_task("Click target", HumanStatus::Ready);
     for text in ["alpha step", "bravo step", "charlie step"] {
-        domain.add_checklist_item(id, text).expect("add item");
+        domain.add_step(id, text).expect("add step");
     }
     model.sync_from_domain(&domain);
     apply_intent(
@@ -1498,23 +1498,23 @@ fn clicking_an_item_row_selects_it() {
     .expect("open the page");
     assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
 
-    // The click lands on item 3's painted row, located from the same frame the
+    // The click lands on step 3's painted row, located from the same frame the
     // hit map was recorded beside.
     let hits = board_hit_map(STANDARD, &model);
     let rows = page_rows(&model);
-    let item_y = rows
+    let step_y = rows
         .iter()
         .position(|row| row.contains("charlie step"))
-        .expect("item 3 paints a row");
-    let intent = map_board_mouse(&model, &hits, left_click(3, item_y as u16))
-        .expect("an item-row click must dispatch a select intent");
+        .expect("step 3 paints a row");
+    let intent = map_board_mouse(&model, &hits, left_click(3, step_y as u16))
+        .expect("a step-row click must dispatch a select intent");
     let revision_before = domain.get(id).expect("task").revision;
     apply_intent(&mut domain, &mut model, intent, None, None).expect("apply the click");
 
     let selected = page_rows(&model);
     assert!(
         selected.iter().any(|row| row.contains("▸ ▪ charlie step")),
-        "the cursor must sit on the clicked item:\n{}",
+        "the cursor must sit on the clicked step:\n{}",
         selected.join("\n")
     );
     assert_eq!(
@@ -1524,12 +1524,9 @@ fn clicking_an_item_row_selects_it() {
     );
     let task = domain.get(id).expect("task");
     assert_eq!(
-        task.checklist
-            .iter()
-            .map(|item| item.done)
-            .collect::<Vec<_>>(),
+        task.steps.iter().map(|step| step.done).collect::<Vec<_>>(),
         vec![false, false, false],
-        "a click never toggles an item"
+        "a click never toggles a step"
     );
     assert_eq!(task.revision, revision_before, "a click persists nothing");
     assert!(
@@ -1553,7 +1550,7 @@ fn clicking_an_item_row_selects_it() {
     let after = page_rows(&model);
     assert!(
         after.iter().any(|row| row.contains("▸ ▪ charlie step")),
-        "the cursor stays on the clicked item after a notes-half click:\n{}",
+        "the cursor stays on the clicked step after a notes-half click:\n{}",
         after.join("\n")
     );
 }

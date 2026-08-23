@@ -11,10 +11,10 @@ Peek, task page, project scope, done drawer, and undo are on the board.
 Park, resume, linking, and dispatch-start are not board actions. Dispatch
 recovery still opens if a persisted attempt is already in the store.
 
-Per-task checklists: a flat, ordered list on the task page (between notes and
-the meta footer) with an item cursor and modifier-protected add, toggle,
-rename, and delete verbs. Headless, `herdr-tasks check <task-id> add <text>`
-creates one item and `herdr-tasks check <task-id> toggle <item-short-id>`
-flips one item by unambiguous id prefix; single-task
-`herdr-tasks list <task-id>` prints one line per item with its `[x]`/`[ ]`
-state and item short id. Checklist progress never changes task status.
+Per-task steps: a flat, ordered list on the task page (between notes and
+the meta footer) with a step cursor and modifier-protected add, toggle,
+rename, and delete verbs. Headless, `herdr-tasks steps <task-id> add <text>`
+creates one step and `herdr-tasks steps <task-id> toggle <step-short-id>`
+flips one step by unambiguous id prefix; single-task
+`herdr-tasks list <task-id>` prints one line per step with its `[x]`/`[ ]`
+state and step short id. Step progress never changes task status.

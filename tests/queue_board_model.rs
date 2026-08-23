@@ -37,7 +37,7 @@ fn task(id: u128, title: &str, status: HumanStatus, scope: TaskScope, updated_se
             kind: TaskEventKind::Created,
             at,
         }],
-        checklist: Vec::new(),
+        steps: Vec::new(),
         soft_deleted: false,
         created_at: at,
         updated_at: at,

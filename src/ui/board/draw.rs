@@ -43,33 +43,33 @@ pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
         None
     };
     if let Some(task) = page_task {
-        let mut items = Vec::with_capacity(6);
-        items.push(VerbEntry {
+        let mut entries = Vec::with_capacity(6);
+        entries.push(VerbEntry {
             key: "e",
             label: "edit",
         });
         match task.status {
-            HumanStatus::Ready => items.push(VerbEntry {
+            HumanStatus::Ready => entries.push(VerbEntry {
                 key: "space",
                 label: "start",
             }),
-            HumanStatus::Done => items.push(VerbEntry {
+            HumanStatus::Done => entries.push(VerbEntry {
                 key: "space",
                 label: "reopen",
             }),
             HumanStatus::Started | HumanStatus::Blocked | HumanStatus::Review => {}
         }
         if task.status == HumanStatus::Done {
-            items.push(VerbEntry {
+            entries.push(VerbEntry {
                 key: "o",
                 label: help("o", "reopen"),
             });
         } else {
-            items.push(VerbEntry {
+            entries.push(VerbEntry {
                 key: "d",
                 label: help("d", "done"),
             });
-            items.push(VerbEntry {
+            entries.push(VerbEntry {
                 key: "b",
                 label: if task.status == HumanStatus::Blocked {
                     "unblock"
@@ -78,24 +78,24 @@ pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
                 },
             });
         }
-        items.push(VerbEntry {
+        entries.push(VerbEntry {
             key: "esc",
             label: "close",
         });
-        // AC-22: the footer verb bar lists the item-add verb while the page's task
-        // has at least one item. Last, like the board's capture entry, so the
+        // AC-22: the footer verb bar lists the step-add verb while the page's task
+        // has at least one step. Last, like the board's capture entry, so the
         // compact budget keeps the established verbs; the bar's prefix convention
         // implies the modifier, exactly as for every other mutating key.
-        if !task.checklist.is_empty() {
-            items.push(VerbEntry {
+        if !task.steps.is_empty() {
+            entries.push(VerbEntry {
                 key: "a",
-                label: "item",
+                label: "step",
             });
         }
-        return items;
+        return entries;
     }
 
-    let mut items = Vec::with_capacity(7);
+    let mut entries = Vec::with_capacity(7);
     let selected_task = model
         .selected_id()
         .and_then(|id| model.tasks.iter().find(|t| t.id == id));
@@ -103,13 +103,13 @@ pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
     if let Some(task) = selected_task {
         match task.status {
             HumanStatus::Ready => {
-                items.push(VerbEntry {
+                entries.push(VerbEntry {
                     key: "space",
                     label: "start",
                 });
             }
             HumanStatus::Done => {
-                items.push(VerbEntry {
+                entries.push(VerbEntry {
                     key: "space",
                     label: "reopen",
                 });
@@ -118,21 +118,21 @@ pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
             // available yet"): omit the entry rather than advertise a no-op.
             HumanStatus::Started | HumanStatus::Blocked | HumanStatus::Review => {}
         }
-        items.push(VerbEntry {
+        entries.push(VerbEntry {
             key: "enter",
             label: "open",
         });
         if task.status == HumanStatus::Done {
-            items.push(VerbEntry {
+            entries.push(VerbEntry {
                 key: "o",
                 label: help("o", "reopen"),
             });
         } else {
-            items.push(VerbEntry {
+            entries.push(VerbEntry {
                 key: "d",
                 label: help("d", "done"),
             });
-            items.push(VerbEntry {
+            entries.push(VerbEntry {
                 key: "b",
                 label: if task.status == HumanStatus::Blocked {
                     "unblock"
@@ -142,20 +142,20 @@ pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
             });
         }
     }
-    items.push(VerbEntry {
+    entries.push(VerbEntry {
         key: ":",
         label: help(":", "palette"),
     });
-    items.push(VerbEntry {
+    entries.push(VerbEntry {
         key: "?",
         label: help("?", "help"),
     });
     // Capture is last so the compact budget preserves the established board verbs.
-    items.push(VerbEntry {
+    entries.push(VerbEntry {
         key: "+",
         label: "capture",
     });
-    items
+    entries
 }
 
 /// Build the task page's paint payload from the open task form. View mode wraps the notes
@@ -170,20 +170,18 @@ fn build_task_page_overlay<'a>(
     let bound_task = form
         .task_id()
         .and_then(|id| model.tasks.iter().find(|task| task.id == id));
-    // The section consumes the extracted item views, never the raw storage; with
-    // items the layout halves the content region (AC-24), so the notes window —
+    // The section consumes the extracted step views, never the raw storage; with
+    // steps the layout halves the content region (AC-24), so the notes window —
     // and with it the notes scroll bound recorded below — keys off the same halved
     // budget the painter lays out.
-    let checklist_items = bound_task
-        .map(super::model::checklist_item_views)
-        .unwrap_or_default();
-    // The footer item input's draft, windowed around its cursor at the footer
+    let step_views = bound_task.map(super::model::step_views).unwrap_or_default();
+    // The footer step input's draft, windowed around its cursor at the footer
     // line's width — the quick-add line's budget: the row less the two-cell `▎ `
     // prompt the painter puts in front (AC-25).
-    let checklist_editor = form.checklist.editor.as_ref().map(|editor| {
+    let step_editor = form.steps.editor.as_ref().map(|editor| {
         let avail = (geo.row_width as usize).saturating_sub(2);
         let (text, cursor_col) = escaped_line_window(&editor.buffer, avail);
-        crate::ui::render::ChecklistEditorLine {
+        crate::ui::render::StepEditorLine {
             text,
             cursor_col,
             refusal: editor.refusal.as_deref(),
@@ -191,21 +189,21 @@ fn build_task_page_overlay<'a>(
     });
     // A notes edit always keeps one row: the layout reserves it (the section caps
     // around it), so an active edit can never be scrolled/clamped out of the frame
-    // entirely. The item editor no longer sizes the section: it paints on the
-    // footer row, so items alone classify the section (AC-25).
+    // entirely. The step editor no longer sizes the section: it paints on the
+    // footer row, so steps alone classify the section (AC-25).
     let lay = render::task_page_layout(
         geo,
-        render::checklist_section(checklist_items.len()),
+        render::steps_section(step_views.len()),
         u16::from(model.input_mode() == BoardInputMode::EditNotes),
     );
-    // Record the item rows this frame's window actually shows, so the next cursor-move
+    // Record the step rows this frame's window actually shows, so the next cursor-move
     // intent bounds its scroll by rendered rows (the same seam `notes_max_scroll` uses).
-    let checklist_win = render::checklist_window(
-        checklist_items.len(),
-        form.checklist.scroll,
-        lay.checklist_rows.saturating_sub(1),
+    let steps_win = render::steps_window(
+        step_views.len(),
+        form.steps.scroll,
+        lay.steps_rows.saturating_sub(1),
     );
-    form.checklist.window_rows.set(checklist_win.count);
+    form.steps.window_rows.set(steps_win.count);
     let status = bound_task
         .map(|task| task.status)
         .unwrap_or(HumanStatus::Ready);
@@ -250,7 +248,7 @@ fn build_task_page_overlay<'a>(
         form.notes_max_scroll.set(max_scroll);
         let scroll = form.notes_scroll.min(max_scroll);
         let rows: Vec<String> = all.iter().skip(scroll).take(want).cloned().collect();
-        // A 0-row window (view mode at the compact floor beside a long checklist) can
+        // A 0-row window (view mode at the compact floor beside a long steps) can
         // never reveal another row by scrolling, so the divider must not advertise
         // hidden lines it cannot show.
         let more = if rows.is_empty() {
@@ -289,11 +287,11 @@ fn build_task_page_overlay<'a>(
         notes_rows,
         notes_cursor,
         more_lines,
-        checklist_items,
-        checklist_cursor: form.checklist.cursor,
-        checklist_scroll: form.checklist.scroll,
-        checklist_marked: form.checklist.delete_mark,
-        checklist_editor,
+        step_views,
+        step_cursor: form.steps.cursor,
+        step_scroll: form.steps.scroll,
+        step_marked: form.steps.delete_mark,
+        step_editor,
         meta,
         focus,
         scope_dropdown,

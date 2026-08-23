@@ -459,11 +459,9 @@ pub fn map_board_mouse(
         }
         BoardInputMode::TaskPage => match hit_at(hits, pos) {
             Some(QueueHitTarget::FormScope) => None,
-            // A click on an item row selects it (AC-21) — the board's click
+            // A click on an step row selects it (AC-21) — the board's click
             // convention: a click selects, never mutates.
-            Some(QueueHitTarget::ChecklistItem(index)) => {
-                Some(BoardIntent::SelectChecklistItem(index))
-            }
+            Some(QueueHitTarget::Step(index)) => Some(BoardIntent::SelectStep(index)),
             Some(QueueHitTarget::Verb(index)) => verb_intent(model, index),
             _ => None,
         },
@@ -474,10 +472,10 @@ pub fn map_board_mouse(
             Some(QueueHitTarget::Verb(index)) => form_verb_intent(model, index),
             _ => None,
         },
-        // The item line editor is keyboard-only in this slice: the mouse has no hit
+        // The step line editor is keyboard-only in this slice: the mouse has no hit
         // region on the section's line yet, so every click is inert rather than
         // reaching the page behind the editor.
-        BoardInputMode::EditChecklistItem
+        BoardInputMode::EditStep
         | BoardInputMode::Recovery
         | BoardInputMode::CleanupConfirm
         | BoardInputMode::SaveRecovery => None,

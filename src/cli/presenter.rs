@@ -4,8 +4,8 @@ use std::collections::BTreeMap;
 
 use super::CliOutput;
 use crate::cli::add::{AddError, FlagAddResult};
-use crate::cli::check::{CheckError, CheckResult, ChecklistLine};
 use crate::cli::list::{ListError, ListResult, ListRow, ListView};
+use crate::cli::steps::{StepLine, StepsError, StepsResult};
 use crate::domain::HumanStatus;
 use crate::ui::terminal_text;
 
@@ -20,7 +20,7 @@ pub fn list_help() -> CliOutput {
         stdout: concat!(
             "usage: herdr-tasks list [<task-id>] [-p <project> | --global | --all] [--done | --deleted] [--json] [--state-dir <dir>]\n\n",
             "Lists ready, started, blocked, and review tasks in the invocation project by default, or global scope outside a repository.\n",
-            "With a task id (a task UUID from add --json or list --json), lists that one task alone and prints its checklist: one line per item with its [x]/[ ] state and item short id. A task id cannot be combined with scope or status filters.\n",
+            "With a task id (a task UUID from add --json or list --json), lists that one task alone and prints its steps: one line per step with its [x]/[ ] state and step short id. A task id cannot be combined with scope or status filters.\n",
             "--project uses the same basename-or-path scope resolution as add; --global selects global tasks; --all selects every scope. For dash-leading project and state-directory values, use --project=<scope> and --state-dir=<dir>.\n",
             "--done lists done tasks only. --deleted lists soft-deleted tasks only, regardless of status.\n",
             "To recover a typo scope, use herdr-tasks list --all --json.\n",
@@ -111,22 +111,22 @@ pub fn list(result: ListResult, json: bool) -> CliOutput {
     }
 }
 
-/// The flat row array. A single-task listing with items attaches them to its
-/// one row (`checklist`: id, done, short_id, text); every other listing keeps
+/// The flat row array. A single-task listing with steps attaches them to its
+/// one row (`steps`: id, done, short_id, text); every other listing keeps
 /// today's exact row shape.
 fn list_json(result: &ListResult) -> String {
     let mut value = serde_json::to_value(&result.rows).expect("list rows are serializable");
-    if !result.checklist.is_empty() {
+    if !result.steps.is_empty() {
         value
             .as_array_mut()
             .expect("rows serialize to an array")
             .get_mut(0)
-            .expect("a checklist implies the single task row")
+            .expect("a steps collection implies the single task row")
             .as_object_mut()
             .expect("row serializes to an object")
             .insert(
-                "checklist".into(),
-                serde_json::to_value(&result.checklist).expect("checklist is serializable"),
+                "steps".into(),
+                serde_json::to_value(&result.steps).expect("steps are serializable"),
             );
     }
     format!("{value}\n")
@@ -163,9 +163,9 @@ fn list_human(result: &ListResult) -> String {
             append_scope_groups(&mut output, rows, labels.as_ref().expect("scope labels"));
         } else {
             append_rows(&mut output, &rows, " ");
-            if !result.checklist.is_empty() {
-                // Single-task listing: the checklist lines belong under the one row above.
-                append_checklist_lines(&mut output, &result.checklist, " ");
+            if !result.steps.is_empty() {
+                // Single-task listing: the step lines belong under the one row above.
+                append_step_lines(&mut output, &result.steps, " ");
             }
         }
     }
@@ -209,16 +209,16 @@ fn append_rows(output: &mut String, rows: &[&ListRow], indent: &str) {
     }
 }
 
-/// One line per checklist item: state glyph, short id, text, one level under the row.
-fn append_checklist_lines(output: &mut String, checklist: &[ChecklistLine], indent: &str) {
-    for item in checklist {
+/// One line per step: state glyph, short id, text, one level under the row.
+fn append_step_lines(output: &mut String, steps: &[StepLine], indent: &str) {
+    for step in steps {
         output.push_str(indent);
         output.push_str("  [");
-        output.push(if item.done { 'x' } else { ' ' });
+        output.push(if step.done { 'x' } else { ' ' });
         output.push_str("] ");
-        output.push_str(&item.short_id);
+        output.push_str(&step.short_id);
         output.push(' ');
-        output.push_str(&terminal_text(&item.text));
+        output.push_str(&terminal_text(&step.text));
         output.push('\n');
     }
 }
@@ -362,18 +362,18 @@ fn path_segments(path: &str) -> Vec<String> {
         .collect()
 }
 
-pub fn check_help() -> CliOutput {
+pub fn steps_help() -> CliOutput {
     CliOutput {
         stdout: concat!(
-            "usage: herdr-tasks check <task-id> add <text> [--state-dir <dir>]\n",
-            "       herdr-tasks check <task-id> toggle <item-short-id> [--state-dir <dir>]\n\n",
-            "check adds one checklist item to a task or toggles one item's done flag. The task id is a task UUID from herdr-tasks list --json.\n",
-            "An item short id is the shortest unambiguous prefix of the item id, as printed by herdr-tasks list <task-id>.\n",
-            "toggle flips the item state: a blind retry after an unseen success flips it back, so verify with herdr-tasks list <task-id> before retrying.\n\n",
-            "Refusal tokens (exit 1): empty-item-text, invalid-item-text, unknown-task, soft-deleted-task, unknown-item, ambiguous-item.\n\n",
+            "usage: herdr-tasks steps <task-id> add <text> [--state-dir <dir>]\n",
+            "       herdr-tasks steps <task-id> toggle <step-short-id> [--state-dir <dir>]\n\n",
+            "steps adds one step to a task or toggles one step's done flag. The task id is a task UUID from herdr-tasks list --json.\n",
+            "A step short id is the shortest unambiguous prefix of the step id, as printed by herdr-tasks list <task-id>.\n",
+            "toggle flips the step state: a blind retry after an unseen success flips it back, so verify with herdr-tasks list <task-id> before retrying.\n\n",
+            "Refusal tokens (exit 1): empty-step-text, invalid-step-text, unknown-task, soft-deleted-task, unknown-step, ambiguous-step.\n\n",
             "Exit contract:\n",
-            "  exit 0: item created or toggled\n",
-            "  exit 1: item refusal; verify state with list before retrying\n",
+            "  exit 0: step created or toggled\n",
+            "  exit 1: step refusal; verify state with list before retrying\n",
             "  exit 2: usage or parse error, nothing persisted\n",
             "  exit 3: store I/O, commit indeterminate, verify with list before retrying\n"
         )
@@ -383,10 +383,10 @@ pub fn check_help() -> CliOutput {
     }
 }
 
-pub fn checked(result: CheckResult) -> CliOutput {
+pub fn steps(result: StepsResult) -> CliOutput {
     let stdout = match result {
-        CheckResult::Added { short_id, text } => format!("added {short_id} {text}\n"),
-        CheckResult::Toggled {
+        StepsResult::Added { short_id, text } => format!("added {short_id} {text}\n"),
+        StepsResult::Toggled {
             short_id,
             text,
             done,
@@ -402,24 +402,24 @@ pub fn checked(result: CheckResult) -> CliOutput {
     }
 }
 
-pub fn check_usage(reason: &str) -> CliOutput {
+pub fn steps_usage(reason: &str) -> CliOutput {
     CliOutput {
         stdout: String::new(),
         stderr: format!(
-            "herdr-tasks check: {reason}\nusage: herdr-tasks check <task-id> add <text> | toggle <item-short-id> [--state-dir <dir>]\n"
+            "herdr-tasks steps: {reason}\nusage: herdr-tasks steps <task-id> add <text> | toggle <step-short-id> [--state-dir <dir>]\n"
         ),
         code: 2,
     }
 }
 
-pub fn check_rejected(error: CheckError) -> CliOutput {
+pub fn steps_rejected(error: StepsError) -> CliOutput {
     let (detail, code) = match error {
-        CheckError::Store(detail) => (detail, 3),
+        StepsError::Store(detail) => (detail, 3),
         other => (other.code().into(), 1),
     };
     CliOutput {
         stdout: String::new(),
-        stderr: format!("herdr-tasks check: {detail}\n"),
+        stderr: format!("herdr-tasks steps: {detail}\n"),
         code,
     }
 }

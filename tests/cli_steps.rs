@@ -16,7 +16,7 @@ fn temp_state_dir(label: &str) -> PathBuf {
         .expect("clock after epoch")
         .as_nanos();
     let seq = TEMP_SEQ.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!("herdr-tasks-cli-check-{label}-{nanos}-{seq}"));
+    let dir = std::env::temp_dir().join(format!("herdr-tasks-cli-steps-{label}-{nanos}-{seq}"));
     std::fs::create_dir_all(&dir).expect("create state directory");
     dir
 }
@@ -25,7 +25,7 @@ fn state_dir_arg(dir: &std::path::Path) -> String {
     dir.to_string_lossy().into_owned()
 }
 
-fn check(args: &[String]) -> herdr_tasks::cli::CliOutput {
+fn steps(args: &[String]) -> herdr_tasks::cli::CliOutput {
     run_with(args, Cursor::new(Vec::<u8>::new()), true)
 }
 
@@ -45,10 +45,10 @@ fn seed_task(dir: &std::path::Path, title: &str) -> Uuid {
     id
 }
 
-fn check_args(dir: &std::path::Path, task: Uuid) -> Vec<String> {
+fn steps_args(dir: &std::path::Path, task: Uuid) -> Vec<String> {
     vec![
         "herdr-tasks".into(),
-        "check".into(),
+        "steps".into(),
         task.to_string(),
         "--state-dir".into(),
         state_dir_arg(dir),
@@ -56,13 +56,13 @@ fn check_args(dir: &std::path::Path, task: Uuid) -> Vec<String> {
 }
 
 /// One `[state] short-id text` line from single-task list output.
-struct ItemLine {
+struct StepLine {
     done: bool,
     short_id: String,
     text: String,
 }
 
-fn checklist_lines(output: &str) -> Vec<ItemLine> {
+fn step_lines(output: &str) -> Vec<StepLine> {
     output
         .lines()
         .filter(|line| line.contains("[x]") || line.contains("[ ]"))
@@ -71,7 +71,7 @@ fn checklist_lines(output: &str) -> Vec<ItemLine> {
             let done = trimmed.starts_with("[x]");
             let rest = trimmed[3..].trim_start();
             let (short_id, text) = rest.split_once(' ').unwrap_or((rest, ""));
-            ItemLine {
+            StepLine {
                 done,
                 short_id: short_id.to_owned(),
                 text: text.to_owned(),
@@ -81,22 +81,22 @@ fn checklist_lines(output: &str) -> Vec<ItemLine> {
 }
 
 #[test]
-fn check_add_then_toggle_round_trips_item_state() {
+fn steps_add_then_toggle_round_trips_step_state() {
     let dir = temp_state_dir("round-trip");
     let task = seed_task(&dir, "round trip target");
 
-    let mut add_first = check_args(&dir, task);
+    let mut add_first = steps_args(&dir, task);
     add_first.extend(["add".into(), "  first step  ".into()]);
-    let add_first = check(&add_first);
-    assert_eq!(add_first.code, 0, "add first item: {}", add_first.stderr);
+    let add_first = steps(&add_first);
+    assert_eq!(add_first.code, 0, "add first step: {}", add_first.stderr);
     assert!(add_first.stderr.is_empty());
 
-    let mut add_second = check_args(&dir, task);
+    let mut add_second = steps_args(&dir, task);
     add_second.extend(["add".into(), "second step".into()]);
-    let add_second = check(&add_second);
-    assert_eq!(add_second.code, 0, "add second item: {}", add_second.stderr);
+    let add_second = steps(&add_second);
+    assert_eq!(add_second.code, 0, "add second step: {}", add_second.stderr);
 
-    let listed = check(&[
+    let listed = steps(&[
         "herdr-tasks".into(),
         "list".into(),
         task.to_string(),
@@ -104,8 +104,8 @@ fn check_add_then_toggle_round_trips_item_state() {
         state_dir_arg(&dir),
     ]);
     assert_eq!(listed.code, 0, "list task: {}", listed.stderr);
-    let lines = checklist_lines(&listed.stdout);
-    assert_eq!(lines.len(), 2, "one line per item: {}", listed.stdout);
+    let lines = step_lines(&listed.stdout);
+    assert_eq!(lines.len(), 2, "one line per step: {}", listed.stdout);
     assert!(!lines[0].done);
     assert!(!lines[1].done);
     assert_eq!(
@@ -115,49 +115,49 @@ fn check_add_then_toggle_round_trips_item_state() {
     );
     assert_eq!(lines[1].text, "second step");
 
-    let mut toggle = check_args(&dir, task);
+    let mut toggle = steps_args(&dir, task);
     toggle.extend(["toggle".into(), lines[0].short_id.clone()]);
-    let toggle = check(&toggle);
+    let toggle = steps(&toggle);
     assert_eq!(toggle.code, 0, "toggle by short id: {}", toggle.stderr);
 
-    let after_toggle = check(&[
+    let after_toggle = steps(&[
         "herdr-tasks".into(),
         "list".into(),
         task.to_string(),
         "--state-dir".into(),
         state_dir_arg(&dir),
     ]);
-    let lines = checklist_lines(&after_toggle.stdout);
-    assert!(lines[0].done, "first item checked: {}", after_toggle.stdout);
+    let lines = step_lines(&after_toggle.stdout);
+    assert!(lines[0].done, "first step checked: {}", after_toggle.stdout);
     assert!(
         !lines[1].done,
-        "second item untouched: {}",
+        "second step untouched: {}",
         after_toggle.stdout
     );
-    assert_eq!(
-        lines[0].short_id,
-        checklist_lines(&listed.stdout)[0].short_id
-    );
+    assert_eq!(lines[0].short_id, step_lines(&listed.stdout)[0].short_id);
 
-    let mut toggle_back = check_args(&dir, task);
+    let mut toggle_back = steps_args(&dir, task);
     toggle_back.extend(["toggle".into(), lines[0].short_id.clone()]);
-    let toggle_back = check(&toggle_back);
+    let toggle_back = steps(&toggle_back);
     assert_eq!(toggle_back.code, 0, "toggle back: {}", toggle_back.stderr);
 
     let state = TaskStore::new(&dir).load().expect("reload store");
-    let items = &state.tasks()[0].checklist;
-    assert_eq!(items.len(), 2);
-    assert!(!items[0].done, "first item round-trips back to open");
-    assert!(!items[1].done);
-    assert_eq!(items[0].text, "first step");
-    assert_eq!(items[1].text, "second step");
+    let steps_on_task = &state.tasks()[0].steps;
+    assert_eq!(steps_on_task.len(), 2);
+    assert!(
+        !steps_on_task[0].done,
+        "first step round-trips back to open"
+    );
+    assert!(!steps_on_task[1].done);
+    assert_eq!(steps_on_task[0].text, "first step");
+    assert_eq!(steps_on_task[1].text, "second step");
 
     let _ = std::fs::remove_dir_all(dir);
 }
 
-/// Two checklist items whose ids share the prefix `abcdef01`, shaped through the
-/// store document because item ids are otherwise minted by the domain.
-fn state_with_shared_prefix_items() -> (DomainState, Uuid) {
+/// Two steps whose ids share the prefix `abcdef01`, shaped through the
+/// store document because step ids are otherwise minted by the domain.
+fn state_with_shared_prefix_steps() -> (DomainState, Uuid) {
     let mut state = DomainState::new();
     let task = state
         .create(
@@ -169,12 +169,10 @@ fn state_with_shared_prefix_items() -> (DomainState, Uuid) {
             ProvenanceOrigin::Manual,
         )
         .expect("seed task");
+    state.add_step(task, "shared one").expect("seed first step");
     state
-        .add_checklist_item(task, "shared one")
-        .expect("seed first item");
-    state
-        .add_checklist_item(task, "shared two")
-        .expect("seed second item");
+        .add_step(task, "shared two")
+        .expect("seed second step");
     let mut document = serde_json::to_value(&state).expect("serialize seed state");
     for (index, id) in [
         "abcdef01-0000-4000-8000-000000000001",
@@ -183,24 +181,24 @@ fn state_with_shared_prefix_items() -> (DomainState, Uuid) {
     .into_iter()
     .enumerate()
     {
-        document["tasks"][0]["checklist"][index]["id"] =
-            serde_json::json!(Uuid::parse_str(id).expect("shaped item id"));
+        document["tasks"][0]["steps"][index]["id"] =
+            serde_json::json!(Uuid::parse_str(id).expect("shaped step id"));
     }
-    let shaped = serde_json::from_value(document).expect("state with shaped item ids");
+    let shaped = serde_json::from_value(document).expect("state with shaped step ids");
     (shaped, task)
 }
 
 #[test]
-fn check_toggle_unknown_or_ambiguous_prefix_refuses_without_mutation() {
+fn steps_toggle_unknown_or_ambiguous_prefix_refuses_without_mutation() {
     let dir = temp_state_dir("prefix-refusal");
-    let (state, task) = state_with_shared_prefix_items();
+    let (state, task) = state_with_shared_prefix_steps();
     TaskStore::new(&dir).save(&state).expect("seed store");
     let state_file = dir.join("tasks.json");
     let before = std::fs::read(&state_file).expect("read seeded state");
 
-    let mut ambiguous = check_args(&dir, task);
+    let mut ambiguous = steps_args(&dir, task);
     ambiguous.extend(["toggle".into(), "abcdef01".into()]);
-    let ambiguous = check(&ambiguous);
+    let ambiguous = steps(&ambiguous);
     assert_eq!(ambiguous.code, 1);
     assert!(ambiguous.stdout.is_empty());
     assert!(
@@ -214,12 +212,12 @@ fn check_toggle_unknown_or_ambiguous_prefix_refuses_without_mutation() {
         "ambiguous prefix must persist nothing"
     );
 
-    let mut unknown = check_args(&dir, task);
+    let mut unknown = steps_args(&dir, task);
     unknown.extend(["toggle".into(), "12341234".into()]);
-    let unknown = check(&unknown);
+    let unknown = steps(&unknown);
     assert_eq!(unknown.code, 1);
     assert!(unknown.stdout.is_empty());
-    assert!(unknown.stderr.contains("unknown-item"));
+    assert!(unknown.stderr.contains("unknown-step"));
     assert_eq!(
         std::fs::read(&state_file).expect("read store after unknown"),
         before,
@@ -230,7 +228,7 @@ fn check_toggle_unknown_or_ambiguous_prefix_refuses_without_mutation() {
 }
 
 #[test]
-fn check_toggle_empty_operand_refuses_without_mutation() {
+fn steps_toggle_empty_operand_refuses_without_mutation() {
     let dir = temp_state_dir("empty-toggle");
     let mut state = DomainState::new();
     let task = state
@@ -243,49 +241,47 @@ fn check_toggle_empty_operand_refuses_without_mutation() {
             ProvenanceOrigin::Manual,
         )
         .expect("seed task");
-    state
-        .add_checklist_item(task, "only step")
-        .expect("seed one item");
+    state.add_step(task, "only step").expect("seed one step");
     TaskStore::new(&dir).save(&state).expect("seed store");
     let state_file = dir.join("tasks.json");
     let before = std::fs::read(&state_file).expect("read seeded state");
 
-    let mut empty = check_args(&dir, task);
+    let mut empty = steps_args(&dir, task);
     empty.extend(["toggle".into(), String::new()]);
-    let empty = check(&empty);
+    let empty = steps(&empty);
     assert_eq!(empty.code, 1);
     assert!(empty.stdout.is_empty());
     assert!(
-        empty.stderr.contains("unknown-item"),
+        empty.stderr.contains("unknown-step"),
         "empty operand must refuse with a stable token: {}",
         empty.stderr
     );
     assert_eq!(
         std::fs::read(&state_file).expect("read store after empty operand"),
         before,
-        "the empty operand must address no item, not the sole one"
+        "the empty operand must address no step, not the sole one"
     );
 
     let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
-fn check_add_refuses_empty_and_control_char_text_without_mutation() {
+fn steps_add_refuses_empty_and_control_char_text_without_mutation() {
     let dir = temp_state_dir("text-refusal");
     let task = seed_task(&dir, "text refusal target");
     let state_file = dir.join("tasks.json");
     let before = std::fs::read(&state_file).expect("read seeded state");
 
     for (text, token) in [
-        ("", "empty-item-text"),
-        ("   ", "empty-item-text"),
+        ("", "empty-step-text"),
+        ("   ", "empty-step-text"),
         // Controls refuse before trimming, same as task titles: a tab is C0.
-        ("   \t ", "invalid-item-text"),
-        ("line\nbreak", "invalid-item-text"),
+        ("   \t ", "invalid-step-text"),
+        ("line\nbreak", "invalid-step-text"),
     ] {
-        let mut args = check_args(&dir, task);
+        let mut args = steps_args(&dir, task);
         args.extend(["add".into(), text.into()]);
-        let output = check(&args);
+        let output = steps(&args);
         assert_eq!(output.code, 1, "refuse {text:?}");
         assert!(output.stdout.is_empty(), "refuse {text:?}");
         assert!(
@@ -295,7 +291,7 @@ fn check_add_refuses_empty_and_control_char_text_without_mutation() {
         );
         assert!(
             !output.stderr.contains("invalid-item\n") && !output.stderr.contains("invalid-item "),
-            "checklist refusals must not reuse the bulk-add invalid-item token: {}",
+            "step refusals must not reuse the bulk-add invalid-item token: {}",
             output.stderr
         );
     }
@@ -303,19 +299,19 @@ fn check_add_refuses_empty_and_control_char_text_without_mutation() {
     assert_eq!(
         std::fs::read(&state_file).expect("read store after refusals"),
         before,
-        "refused item text must persist nothing"
+        "refused step text must persist nothing"
     );
     let state = TaskStore::new(&dir).load().expect("reload store");
     assert!(
-        state.tasks()[0].checklist.is_empty(),
-        "no item may be created by a refused add"
+        state.tasks()[0].steps.is_empty(),
+        "no step may be created by a refused add"
     );
 
     let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
-fn check_on_soft_deleted_task_refuses_without_mutation() {
+fn steps_on_soft_deleted_task_refuses_without_mutation() {
     let dir = temp_state_dir("soft-deleted");
     let mut state = DomainState::new();
     let task = state
@@ -333,28 +329,28 @@ fn check_on_soft_deleted_task_refuses_without_mutation() {
     let state_file = dir.join("tasks.json");
     let before = std::fs::read(&state_file).expect("read seeded state");
 
-    let mut add = check_args(&dir, task);
+    let mut add = steps_args(&dir, task);
     add.extend(["add".into(), "no scripting deleted tasks".into()]);
-    let add = check(&add);
+    let add = steps(&add);
     assert_eq!(add.code, 1);
     assert!(add.stdout.is_empty());
     assert!(add.stderr.contains("soft-deleted-task"));
     assert_eq!(
         std::fs::read(&state_file).expect("read store after refusal"),
         before,
-        "a deleted task's checklist is not scriptable"
+        "a deleted task's steps are not scriptable"
     );
 
     let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
-fn check_help_documents_toggle_flip_and_verify_guidance() {
-    let output = check(&["herdr-tasks".into(), "check".into(), "--help".into()]);
+fn steps_help_documents_toggle_flip_and_verify_guidance() {
+    let output = steps(&["herdr-tasks".into(), "steps".into(), "--help".into()]);
     assert_eq!(output.code, 0, "{}", output.stderr);
     assert!(output.stderr.is_empty());
     for term in [
-        "usage: herdr-tasks check",
+        "usage: herdr-tasks steps",
         "toggle",
         "flips",
         "verify",
@@ -368,7 +364,7 @@ fn check_help_documents_toggle_flip_and_verify_guidance() {
     ] {
         assert!(
             output.stdout.contains(term),
-            "check help should contain {term:?}"
+            "steps help should contain {term:?}"
         );
     }
 }

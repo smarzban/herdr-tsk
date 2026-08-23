@@ -244,22 +244,22 @@ pub struct PaletteCommandRow<'a> {
     pub selected: bool,
 }
 
-/// One checklist item as the task page paints it: done flag + text, already extracted
+/// One steps step as the task page paints it: done flag + text, already extracted
 /// from storage by the view model. The page payload consumes these views and never the
-/// raw `Task.checklist`, so later surfaces swap consumers without touching storage.
+/// raw `Task.steps`, so later surfaces swap consumers without touching storage.
 #[derive(Debug, Clone)]
-pub struct ChecklistItemView {
+pub struct StepView {
     pub done: bool,
     pub text: String,
 }
 
-/// The checklist item input as the page paints it on its FOOTER row (AC-25), on the
+/// The steps step input as the page paints it on its FOOTER row (AC-25), on the
 /// quick-add line pattern: the draft already windowed around its cursor at the
 /// footer line's width (row width less the two-cell prompt), the terminal cursor
 /// column inside that window, and the line's own empty-text refusal (AC-13) — a
 /// short dim tail painted on the line itself, never the board status row.
 #[derive(Debug, Clone)]
-pub struct ChecklistEditorLine<'a> {
+pub struct StepEditorLine<'a> {
     pub text: String,
     pub cursor_col: u16,
     pub refusal: Option<&'a str>,
@@ -315,20 +315,20 @@ pub enum QueueOverlay<'a> {
         notes_cursor: Option<(u16, u16)>,
         /// Wrapped note rows hidden below the window, named by the divider's tail.
         more_lines: usize,
-        /// The extracted checklist item views, in storage order. Empty paints no
-        /// checklist section at all: the page is identical to pre-feature for a task
-        /// with no items.
-        checklist_items: Vec<ChecklistItemView>,
-        /// Absolute index of the item cursor's row, when active. The painter turns it
+        /// The extracted steps step views, in storage order. Empty paints no
+        /// steps section at all: the page is identical to pre-feature for a task
+        /// with no steps.
+        step_views: Vec<StepView>,
+        /// Absolute index of the step cursor's row, when active. The painter turns it
         /// into the row's `▸` gutter marker.
-        checklist_cursor: Option<usize>,
-        /// First item index the section's window shows (the cursor's scroll window).
-        checklist_scroll: usize,
-        /// Absolute index of the item the delete verb visibly marked, when armed.
-        checklist_marked: Option<usize>,
-        /// The footer's one-line add/rename item input, painted on the meta
+        step_cursor: Option<usize>,
+        /// First step index the section's window shows (the cursor's scroll window).
+        step_scroll: usize,
+        /// Absolute index of the step the delete verb visibly marked, when armed.
+        step_marked: Option<usize>,
+        /// The footer's one-line add/rename step input, painted on the meta
         /// footer row (AC-25) on the quick-add line pattern.
-        checklist_editor: Option<ChecklistEditorLine<'a>>,
+        step_editor: Option<StepEditorLine<'a>>,
         /// Footer: scope · created · updated.
         meta: String,
         /// Which field owns the cursor, if any (view mode: none).
@@ -421,11 +421,11 @@ pub enum QueueHitTarget {
     FormNotes(usize),
     /// Shared-form scope row. A click opens the pending scope dropdown, never cycles scope.
     FormScope,
-    /// One painted checklist item row on the open task page, indexed by the item's
-    /// absolute position in the task's checklist (storage order), whatever window
+    /// One painted steps step row on the open task page, indexed by the step's
+    /// absolute position in the task's steps (storage order), whatever window
     /// scroll painted it — the same absolute-index discipline [`Command`] follows.
-    /// A click moves the item cursor onto that item (AC-21): select, never toggle.
-    ChecklistItem(usize),
+    /// A click moves the step cursor onto that step (AC-21): select, never toggle.
+    Step(usize),
     /// One painted option in a shared form's scope dropdown, indexed into that form's own
     /// `TaskScope` choices. It cannot name the board selector's all-projects choice.
     FormScopeOption(usize),
@@ -892,11 +892,11 @@ fn paint_overlay(
             ref notes_rows,
             notes_cursor,
             more_lines,
-            ref checklist_items,
-            checklist_cursor,
-            checklist_scroll,
-            checklist_marked,
-            ref checklist_editor,
+            ref step_views,
+            step_cursor,
+            step_scroll,
+            step_marked,
+            ref step_editor,
             ref meta,
             focus,
             scope_dropdown,
@@ -910,11 +910,11 @@ fn paint_overlay(
                 notes_rows,
                 *notes_cursor,
                 *more_lines,
-                checklist_items,
-                *checklist_cursor,
-                *checklist_scroll,
-                *checklist_marked,
-                checklist_editor.as_ref(),
+                step_views,
+                *step_cursor,
+                *step_scroll,
+                *step_marked,
+                step_editor.as_ref(),
                 meta,
                 *focus,
                 hits,
@@ -1194,12 +1194,12 @@ fn paint_help_overlay(
 }
 
 /// The task page's full-height geometry: row 0 down to (not including) the lowest bottom
-/// chrome row. Rows are budgeted title · divider · notes · checklist · meta footer,
-/// dropping the divider and then the meta first as the pane shrinks. With items on the
-/// page the content region halves (AC-24): notes own the top half, the checklist
+/// chrome row. Rows are budgeted title · divider · notes · steps · meta footer,
+/// dropping the divider and then the meta first as the pane shrinks. With steps on the
+/// page the content region halves (AC-24): notes own the top half, the steps
 /// section the bottom, and each half scrolls within its own window — the notes scroll
-/// bound and the item cursor's scroll window both key off this layout. Zero required
-/// rows (no items) reserves nothing: such pages keep the exact pre-checklist layout.
+/// bound and the step cursor's scroll window both key off this layout. Zero required
+/// rows (no steps) reserves nothing: such pages keep the exact pre-steps layout.
 pub struct TaskPageLayout {
     /// First row the page must not paint (the lowest chrome row, or the frame height).
     pub bottom: u16,
@@ -1207,72 +1207,72 @@ pub struct TaskPageLayout {
     pub divider_y: Option<u16>,
     pub notes_y: u16,
     pub notes_rows: u16,
-    /// First row of the checklist block (its label row); the notes window ends here.
-    pub checklist_y: u16,
-    /// Rows the checklist block may paint (label + item rows). Zero when there is no
-    /// section, in which case `checklist_y` sits at the notes end.
-    pub checklist_rows: u16,
+    /// First row of the steps block (its label row); the notes window ends here.
+    pub steps_y: u16,
+    /// Rows the steps block may paint (label + step rows). Zero when there is no
+    /// section, in which case `steps_y` sits at the notes end.
+    pub steps_rows: u16,
     pub meta_y: Option<u16>,
 }
 
-/// What the page's checklist section asks of the layout (AC-24).
+/// What the page's steps section asks of the layout (AC-24).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ChecklistSection {
-    /// No items: no section paints, notes keep the full content region. The item
+pub enum StepsSection {
+    /// No steps: no section paints, notes keep the full content region. The step
     /// editor no longer reserves a section row — since T-7 it paints on the page
-    /// footer, so an open line over an empty checklist is still no section.
+    /// footer, so an open line over an empty steps is still no section.
     None,
-    /// At least one item: the content region halves and the section owns the bottom
-    /// half, however many items there are — the `+N more ↓` affordance names the
+    /// At least one step: the content region halves and the section owns the bottom
+    /// half, however many steps there are — the `+N more ↓` affordance names the
     /// tail the half cannot show.
-    Items,
+    Steps,
 }
 
-/// Classify the page's checklist section from its payload facts: items alone
+/// Classify the page's steps section from its payload facts: steps alone
 /// decide it.
-pub fn checklist_section(items: usize) -> ChecklistSection {
-    if items > 0 {
-        ChecklistSection::Items
+pub fn steps_section(steps: usize) -> StepsSection {
+    if steps > 0 {
+        StepsSection::Steps
     } else {
-        ChecklistSection::None
+        StepsSection::None
     }
 }
 
-/// The window of checklist items the section's item rows show.
+/// The window of steps steps the section's step rows show.
 ///
-/// `avail` is the row count the section has for items (its block minus the label). When
-/// items remain hidden below, the last row becomes the dim `+N more ↓` affordance —
-/// unless that would leave no item row at all, the one degenerate window (a single item
-/// row beside a long list) where the item wins and the affordance is dropped.
+/// `avail` is the row count the section has for steps (its block minus the label). When
+/// steps remain hidden below, the last row becomes the dim `+N more ↓` affordance —
+/// unless that would leave no step row at all, the one degenerate window (a single step
+/// row beside a long list) where the step wins and the affordance is dropped.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ChecklistWindow {
-    /// First painted item's absolute index.
+pub struct StepsWindow {
+    /// First painted step's absolute index.
     pub first: usize,
-    /// Item rows painted.
+    /// Step rows painted.
     pub count: usize,
-    /// Items hidden below the window.
+    /// Steps hidden below the window.
     pub hidden_after: usize,
-    /// Whether the last section row paints the affordance instead of an item.
+    /// Whether the last section row paints the affordance instead of an step.
     pub affordance: bool,
 }
 
-pub fn checklist_window(total: usize, scroll: usize, avail: u16) -> ChecklistWindow {
+pub fn steps_window(total: usize, scroll: usize, avail: u16) -> StepsWindow {
     let avail = avail as usize;
     if total == 0 || avail == 0 {
-        return ChecklistWindow {
+        return StepsWindow {
             first: 0,
             count: 0,
             hidden_after: 0,
             affordance: false,
         };
     }
-    // Never start past the last item, whatever a stale scroll offset claims.
+    // Never start past the last step, whatever a stale scroll offset claims.
     let first = scroll.min(total - 1);
     let fitting = avail.min(total - first);
     let hidden_after = total - first - fitting;
     let affordance = hidden_after > 0 && fitting >= 2;
     let count = if affordance { fitting - 1 } else { fitting };
-    ChecklistWindow {
+    StepsWindow {
         first,
         count,
         hidden_after,
@@ -1280,8 +1280,8 @@ pub fn checklist_window(total: usize, scroll: usize, avail: u16) -> ChecklistWin
     }
 }
 
-/// Build the task page's row budget. `section` (see [`checklist_section`]) sizes the
-/// checklist block: with items the block is the bottom half of the content region
+/// Build the task page's row budget. `section` (see [`steps_section`]) sizes the
+/// steps block: with steps the block is the bottom half of the content region
 /// (`content_rows / 2` rounded down, odd rows to the notes half, at least its label
 /// row); `notes_floor` is the minimum number of notes rows the page must keep
 /// visible. Callers pass 1 while a notes edit is active -- an edit that paints no row
@@ -1290,7 +1290,7 @@ pub fn checklist_window(total: usize, scroll: usize, avail: u16) -> ChecklistWin
 /// out.
 pub fn task_page_layout(
     geo: &TierGeometry,
-    section: ChecklistSection,
+    section: StepsSection,
     notes_floor: u16,
 ) -> TaskPageLayout {
     let height = geo.height;
@@ -1299,7 +1299,7 @@ pub fn task_page_layout(
         .flatten()
         .min()
         .unwrap_or(height);
-    // Blank row 0, title 1, divider 2, notes, checklist, meta last.
+    // Blank row 0, title 1, divider 2, notes, steps, meta last.
     let title_y: u16 = if bottom >= 2 { 1 } else { 0 };
     let meta_y = if bottom >= 4 { Some(bottom - 1) } else { None };
     let divider_y = if bottom >= 5 {
@@ -1320,19 +1320,19 @@ pub fn task_page_layout(
     // active the block caps around the reserved row instead of displacing it, so the
     // edit can never be scrolled or clamped out of the frame entirely.
     let cap = content_rows.saturating_sub(notes_floor.min(content_rows));
-    let checklist_rows = match section {
-        ChecklistSection::None => 0,
-        ChecklistSection::Items => (content_rows / 2).max(1).min(cap),
+    let steps_rows = match section {
+        StepsSection::None => 0,
+        StepsSection::Steps => (content_rows / 2).max(1).min(cap),
     };
-    let checklist_y = content_end.saturating_sub(checklist_rows);
+    let steps_y = content_end.saturating_sub(steps_rows);
     TaskPageLayout {
         bottom,
         title_y,
         divider_y,
         notes_y,
-        notes_rows: content_rows.saturating_sub(checklist_rows),
-        checklist_y,
-        checklist_rows,
+        notes_rows: content_rows.saturating_sub(steps_rows),
+        steps_y,
+        steps_rows,
         meta_y,
     }
 }
@@ -1350,11 +1350,11 @@ fn paint_task_page(
     notes_rows: &[String],
     notes_cursor: Option<(u16, u16)>,
     more_lines: usize,
-    checklist_items: &[ChecklistItemView],
-    checklist_cursor: Option<usize>,
-    checklist_scroll: usize,
-    checklist_marked: Option<usize>,
-    checklist_editor: Option<&ChecklistEditorLine>,
+    step_views: &[StepView],
+    step_cursor: Option<usize>,
+    step_scroll: usize,
+    step_marked: Option<usize>,
+    step_editor: Option<&StepEditorLine>,
     meta: &str,
     focus: Option<CaptureField>,
     hits: &mut QueueHitMap,
@@ -1367,7 +1367,7 @@ fn paint_task_page(
     // used, so both sides of the payload/paint seam budget the same notes floor.
     let lay = task_page_layout(
         geo,
-        checklist_section(checklist_items.len()),
+        steps_section(step_views.len()),
         u16::from(focus == Some(CaptureField::Notes)),
     );
     if lay.bottom == 0 {
@@ -1453,46 +1453,46 @@ fn paint_task_page(
         );
     }
 
-    // Checklist section: the bottom half of the content region, its label row the
+    // Steps section: the bottom half of the content region, its label row the
     // divider between the halves (AC-24). The label names the done/total counts
-    // (derived from the same item views, so the label cannot drift from the states
-    // painted beside it). Items stack from the top of the half, directly under the
-    // label (`checklist_scroll` windows them): the cursor's row is marked by a `▸`
+    // (derived from the same step views, so the label cannot drift from the states
+    // painted beside it). Steps stack from the top of the half, directly under the
+    // label (`step_scroll` windows them): the cursor's row is marked by a `▸`
     // gutter, a delete-marked row by `✗` in place of its state glyph, and hidden
-    // items are named by a dim `+N more ↓` row on the half's last row, mirroring the
-    // notes divider's style. Mono only. An empty checklist paints no block at all:
-    // `checklist_rows` is zero and the layout above kept the pre-checklist page
-    // whole — the item input lives on the footer row, not here (AC-25).
-    if lay.checklist_rows > 0 {
-        let done = checklist_items.iter().filter(|item| item.done).count();
-        let label = format!("  checklist {}/{}", done, checklist_items.len());
+    // steps are named by a dim `+N more ↓` row on the half's last row, mirroring the
+    // notes divider's style. Mono only. An empty steps paints no block at all:
+    // `steps_rows` is zero and the layout above kept the pre-steps page
+    // whole — the step input lives on the footer row, not here (AC-25).
+    if lay.steps_rows > 0 {
+        let done = step_views.iter().filter(|step| step.done).count();
+        let label = format!("  steps {}/{}", done, step_views.len());
         put_line(
             frame,
-            lay.checklist_y,
+            lay.steps_y,
             width,
             paint_bounded_line(&label, width, style_dim()),
         );
-        let win = checklist_window(
-            checklist_items.len(),
-            checklist_scroll,
-            lay.checklist_rows.saturating_sub(1),
+        let win = steps_window(
+            step_views.len(),
+            step_scroll,
+            lay.steps_rows.saturating_sub(1),
         );
-        for (i, item) in checklist_items
+        for (i, step) in step_views
             .iter()
             .skip(win.first)
             .take(win.count)
             .enumerate()
         {
             let absolute = win.first + i;
-            let y = lay.checklist_y.saturating_add(1 + i as u16);
-            let gutter = if Some(absolute) == checklist_cursor {
+            let y = lay.steps_y.saturating_add(1 + i as u16);
+            let gutter = if Some(absolute) == step_cursor {
                 "▸ "
             } else {
                 "  "
             };
-            let glyph = if Some(absolute) == checklist_marked {
+            let glyph = if Some(absolute) == step_marked {
                 "✗"
-            } else if item.done {
+            } else if step.done {
                 "✓"
             } else {
                 "▪"
@@ -1502,26 +1502,20 @@ fn paint_task_page(
                 y,
                 width,
                 paint_bounded_line(
-                    &format!("{gutter}{glyph} {} ", item.text),
+                    &format!("{gutter}{glyph} {} ", step.text),
                     width,
                     style_plain(),
                 ),
             );
-            // Absolute index, so a click resolves to the same item whatever
+            // Absolute index, so a click resolves to the same step whatever
             // window the frame is showing (AC-21).
-            hits.push(
-                QueueHitTarget::ChecklistItem(absolute),
-                Rect::new(0, y, width, 1),
-            );
+            hits.push(QueueHitTarget::Step(absolute), Rect::new(0, y, width, 1));
         }
         if win.affordance {
-            // AC-24: the affordance owns the half's last row. Items stack down from
-            // the label, so the row after the last painted item is no longer the
+            // AC-24: the affordance owns the half's last row. Steps stack down from
+            // the label, so the row after the last painted step is no longer the
             // block's foot; the half's own bottom row is.
-            let y = lay
-                .checklist_y
-                .saturating_add(lay.checklist_rows)
-                .saturating_sub(1);
+            let y = lay.steps_y.saturating_add(lay.steps_rows).saturating_sub(1);
             put_line(
                 frame,
                 y,
@@ -1536,17 +1530,17 @@ fn paint_task_page(
     }
 
     // Meta footer: scope · created · updated. The whole row is the scope control —
-    // except while the item input is open (AC-25): the footer row is then the
+    // except while the step input is open (AC-25): the footer row is then the
     // quick-add-pattern input line (prompt + mono line + cursor, its own refusal
     // tail), and the scope control is not painted, so it offers no click either.
     if let Some(y) = lay.meta_y {
-        if let Some(editor) = checklist_editor {
+        if let Some(editor) = step_editor {
             paint_prompt_input_line(
                 frame,
                 y,
                 width,
                 &editor.text,
-                ITEM_INPUT_PLACEHOLDER,
+                STEP_INPUT_PLACEHOLDER,
                 editor.cursor_col,
                 editor.refusal,
             );
@@ -1562,9 +1556,9 @@ fn paint_task_page(
     }
 }
 
-/// What the footer item input paints while its draft is empty: the line's dim
+/// What the footer step input paints while its draft is empty: the line's dim
 /// placeholder, mirroring the quick-add bar's hint-on-empty convention.
-const ITEM_INPUT_PLACEHOLDER: &str = "item…   enter save · ctrl+enter save+next · esc cancel";
+const STEP_INPUT_PLACEHOLDER: &str = "step…   enter save · ctrl+enter save+next · esc cancel";
 
 /// The page's scope chooser stacks its options directly above the scope footer (left,
 /// indented like the footer), never in the selector's corner: the footer is the control
@@ -1579,9 +1573,9 @@ fn paint_page_scope_dropdown(
     if width == 0 || dropdown.options.is_empty() {
         return;
     }
-    // The dropdown anchors on the meta footer, which never moves with the checklist,
+    // The dropdown anchors on the meta footer, which never moves with the steps,
     // and never opens while a field edit owns the page.
-    let lay = task_page_layout(geo, ChecklistSection::None, 0);
+    let lay = task_page_layout(geo, StepsSection::None, 0);
     let Some(meta_y) = lay.meta_y else {
         return;
     };
@@ -1929,7 +1923,7 @@ fn paint_quick_add_status(
 }
 
 /// The one-line input pattern the board's quick-add bar established (AC-25 reuses
-/// it for the task page's footer item input): a bold prompt glyph, the mono body —
+/// it for the task page's footer step input): a bold prompt glyph, the mono body —
 /// dim placeholder while the draft is empty, bold text otherwise — the surface's
 /// own dim refusal tail painted on the line itself, and the terminal cursor just
 /// past the prompt. `body` must already be windowed around its cursor at
@@ -2119,12 +2113,12 @@ fn mutating_verb_key(key: &str) -> bool {
 }
 
 fn paint_verb_bar(
-    items: &[VerbEntry<'_>],
+    entries: &[VerbEntry<'_>],
     budget: usize,
     width: u16,
     prefix: Option<crate::config::VerbModifier>,
 ) -> (Line<'static>, Vec<(usize, u16, u16)>) {
-    let shown: Vec<&VerbEntry<'_>> = items.iter().take(budget).collect();
+    let shown: Vec<&VerbEntry<'_>> = entries.iter().take(budget).collect();
     let mut spans: Vec<Span<'static>> = Vec::new();
     let mut hits = Vec::new();
     let mut x = 0u16;

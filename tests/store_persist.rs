@@ -7,11 +7,11 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use herdr_tasks::dispatch::DispatchRecoveryResult;
 use herdr_tasks::domain::{
-    AgentMeta, AgentReceipt, AgentSessionIdentity, ChecklistItem, ContextCapsule,
-    DispatchAttemptError, DispatchAttemptMode, DispatchAttemptPhase, DispatchAttemptStep,
-    DispatchAttemptStepState, DispatchAttemptTransition, DomainError, DomainState, HumanStatus,
-    ObservedStatus, OwnedResourceReceipt, PaneReceipt, ProvenanceOrigin, TaskEvent, TaskEventKind,
-    TaskScope, WorktreeReceipt,
+    AgentMeta, AgentReceipt, AgentSessionIdentity, ContextCapsule, DispatchAttemptError,
+    DispatchAttemptMode, DispatchAttemptPhase, DispatchAttemptStep, DispatchAttemptStepState,
+    DispatchAttemptTransition, DomainError, DomainState, HumanStatus, ObservedStatus,
+    OwnedResourceReceipt, PaneReceipt, ProvenanceOrigin, Step, TaskEvent, TaskEventKind, TaskScope,
+    WorktreeReceipt,
 };
 use herdr_tasks::store::TaskStore;
 use herdr_tasks::ui::board::{apply_dispatch_recovery_result, BoardInputMode, BoardModel};
@@ -146,15 +146,15 @@ fn assert_pre_stabilize_fixture_payload(state: &DomainState, task_id: Uuid, atte
     );
 }
 
-/// A store document exactly as a pre-checklist binary would have written it:
-/// task objects carry no `checklist` key anywhere.
-const PRE_CHECKLIST_TASKS_JSON: &str = r#"{
+/// A store document exactly as a pre-steps binary would have written it:
+/// task objects carry no `steps` key anywhere.
+const PRE_STEPS_TASKS_JSON: &str = r#"{
   "tasks": [
     {
       "id": "44444444-4444-4444-8444-444444444444",
       "revision": "55555555-5555-4555-8555-555555555555",
-      "title": "Written before checklists",
-      "notes": "old store, no checklist field",
+      "title": "Written before steps",
+      "notes": "old store, no steps field",
       "status": "ready",
       "scope": "global",
       "provenance": "manual",
@@ -168,7 +168,7 @@ const PRE_CHECKLIST_TASKS_JSON: &str = r#"{
     {
       "id": "66666666-6666-4666-8666-666666666666",
       "revision": "77777777-7777-4777-8777-777777777777",
-      "title": "Also written before checklists",
+      "title": "Also written before steps",
       "notes": null,
       "status": "started",
       "scope": "global",
@@ -185,29 +185,118 @@ const PRE_CHECKLIST_TASKS_JSON: &str = r#"{
   "undo_stack": []
 }"#;
 
+/// A store document exactly as a pre-rename binary would have written it: the
+/// collection field named `checklist` and one `checklist_item_checked` history
+/// event naming the old vocabulary.
+const PRE_RENAME_STEPS_JSON: &str = r#"{
+  "tasks": [
+    {
+      "id": "88888888-8888-4888-8888-888888888888",
+      "revision": "99999999-9999-4999-8999-999999999999",
+      "title": "Written before the rename",
+      "notes": "old store, checklist field and event names",
+      "status": "ready",
+      "scope": "global",
+      "provenance": "manual",
+      "history": [
+        { "kind": "created", "at": [1723852800, 0] },
+        { "kind": "checklist_item_checked", "at": [1723852900, 0] }
+      ],
+      "checklist": [
+        {
+          "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "text": "First step",
+          "done": true
+        },
+        {
+          "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          "text": "Second step",
+          "done": false
+        }
+      ],
+      "soft_deleted": false,
+      "created_at": [1723852800, 0],
+      "updated_at": [1723852900, 0]
+    }
+  ],
+  "undo_stack": []
+}"#;
+
 #[test]
-fn pre_checklist_store_decodes_with_empty_checklists() {
+fn steps_alias_decodes_pre_rename_store_events_and_field() {
     let dir = temp_state_dir();
     let _guard = TempDirGuard(dir.clone());
-    fs::write(dir.join("tasks.json"), PRE_CHECKLIST_TASKS_JSON)
-        .expect("install pre-checklist store");
+    fs::write(dir.join("tasks.json"), PRE_RENAME_STEPS_JSON).expect("install pre-rename store");
 
     let state = TaskStore::new(&dir)
         .load()
-        .expect("pre-checklist store loads without error");
+        .expect("pre-rename store loads without error");
+
+    // A save writes the NEW names only: the steps collection and the renamed
+    // event kind, with the steps and their done flags intact.
+    let document = serde_json::to_value(&state).expect("serialize reloaded state");
+    let task = &document["tasks"][0];
+    task["steps"]
+        .as_array()
+        .expect("a reloaded pre-rename store writes the steps field");
+    assert_eq!(
+        task["steps"],
+        serde_json::json!([
+            {
+                "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                "text": "First step",
+                "done": true,
+            },
+            {
+                "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+                "text": "Second step",
+                "done": false,
+            },
+        ]),
+        "steps and their done flags must decode intact from the old checklist name"
+    );
+    assert!(
+        task.as_object()
+            .expect("task object")
+            .get("checklist")
+            .is_none(),
+        "new writes must use the steps name only"
+    );
+    let kinds: Vec<&str> = task["history"]
+        .as_array()
+        .expect("history decodes")
+        .iter()
+        .map(|event| event["kind"].as_str().expect("kind is a string"))
+        .collect();
+    assert_eq!(
+        kinds,
+        vec!["created", "step_checked"],
+        "the renamed event must decode from its old-name alias and re-serialize under the new name"
+    );
+}
+
+#[test]
+fn pre_steps_store_decodes_with_empty_steps() {
+    let dir = temp_state_dir();
+    let _guard = TempDirGuard(dir.clone());
+    fs::write(dir.join("tasks.json"), PRE_STEPS_TASKS_JSON).expect("install pre-steps store");
+
+    let state = TaskStore::new(&dir)
+        .load()
+        .expect("pre-steps store loads without error");
     let tasks = state.tasks();
     assert_eq!(tasks.len(), 2, "both fixture tasks decode");
     for task in tasks {
         assert!(
-            task.checklist.is_empty(),
-            "task {} written before checklists must present an empty checklist",
+            task.steps.is_empty(),
+            "task {} written before steps must present an empty steps collection",
             task.id
         );
     }
 }
 
 #[test]
-fn checklist_round_trip_preserves_identity_flags_and_order() {
+fn steps_round_trip_preserves_identity_flags_and_order() {
     let dir = temp_state_dir();
     let _guard = TempDirGuard(dir.clone());
     let store = TaskStore::new(&dir);
@@ -215,7 +304,7 @@ fn checklist_round_trip_preserves_identity_flags_and_order() {
     let mut state = DomainState::new();
     let id = state
         .create(
-            "Checklist round trip",
+            "Steps round trip",
             None,
             TaskScope::Global,
             None,
@@ -223,34 +312,30 @@ fn checklist_round_trip_preserves_identity_flags_and_order() {
             ProvenanceOrigin::Manual,
         )
         .expect("create task");
-    let first = state.add_checklist_item(id, "First").expect("add first");
-    let second = state.add_checklist_item(id, "Second").expect("add second");
-    let third = state.add_checklist_item(id, "Third").expect("add third");
-    state
-        .toggle_checklist_item(id, first)
-        .expect("toggle first done");
-    state
-        .toggle_checklist_item(id, third)
-        .expect("toggle third done");
+    let first = state.add_step(id, "First").expect("add first");
+    let second = state.add_step(id, "Second").expect("add second");
+    let third = state.add_step(id, "Third").expect("add third");
+    state.toggle_step(id, first).expect("toggle first done");
+    state.toggle_step(id, third).expect("toggle third done");
 
-    store.save(&state).expect("save checklist state");
+    store.save(&state).expect("save steps state");
 
-    let loaded = store.load().expect("reload checklist state");
+    let loaded = store.load().expect("reload steps state");
     let task = loaded.get(id).expect("task survives reload");
     assert_eq!(
-        task.checklist,
+        task.steps,
         vec![
-            ChecklistItem {
+            Step {
                 id: first,
                 text: "First".into(),
                 done: true,
             },
-            ChecklistItem {
+            Step {
                 id: second,
                 text: "Second".into(),
                 done: false,
             },
-            ChecklistItem {
+            Step {
                 id: third,
                 text: "Third".into(),
                 done: true,

@@ -50,7 +50,7 @@ fn task(id: u128, title: &str, status: HumanStatus, scope: TaskScope, secs_ago: 
             kind: TaskEventKind::Created,
             at,
         }],
-        checklist: Vec::new(),
+        steps: Vec::new(),
         soft_deleted: false,
         created_at: at,
         updated_at: at,
@@ -865,11 +865,11 @@ fn task_page_renders_header_notes_and_meta_as_a_full_takeover_in_both_tiers() {
         ],
         notes_cursor: None,
         more_lines: 0,
-        checklist_items: Vec::new(),
-        checklist_cursor: None,
-        checklist_scroll: 0,
-        checklist_marked: None,
-        checklist_editor: None,
+        step_views: Vec::new(),
+        step_cursor: None,
+        step_scroll: 0,
+        step_marked: None,
+        step_editor: None,
         meta: "herdr-tasks \u{b7} created 1h ago \u{b7} updated 1h ago".to_string(),
         focus: None,
         scope_dropdown: None,
@@ -912,13 +912,13 @@ fn task_page_renders_header_notes_and_meta_as_a_full_takeover_in_both_tiers() {
     }
 }
 
-/// T-2 (AC-5/AC-7): the task page of a task with checklist items paints a checklist
+/// T-2 (AC-5/AC-7): the task page of a task with steps steps paints a steps
 /// section between the notes block and the meta footer. The fixture drives the real
-/// payload-builder path (`BoardModel` + `draw_board`) from stored items (add + toggle),
+/// payload-builder path (`BoardModel` + `draw_board`) from stored steps (add + toggle),
 /// so the assertions cross the storage -> page-payload -> paint boundary: the label's
-/// done/total counts and the per-item glyphs must come from the extracted item views.
+/// done/total counts and the per-step glyphs must come from the extracted step views.
 #[test]
-fn task_page_paints_checklist_section_between_notes_and_footer() {
+fn task_page_paints_steps_section_between_notes_and_footer() {
     let mut domain = DomainState::new();
     let id = domain
         .create(
@@ -930,17 +930,11 @@ fn task_page_paints_checklist_section_between_notes_and_footer() {
             ProvenanceOrigin::Manual,
         )
         .expect("create task");
-    let first = domain.add_checklist_item(id, "first step").expect("item 1");
-    let second = domain
-        .add_checklist_item(id, "second step")
-        .expect("item 2");
-    domain.add_checklist_item(id, "third step").expect("item 3");
-    domain
-        .toggle_checklist_item(id, first)
-        .expect("toggle item 1");
-    domain
-        .toggle_checklist_item(id, second)
-        .expect("toggle item 2");
+    let first = domain.add_step(id, "first step").expect("step 1");
+    let second = domain.add_step(id, "second step").expect("step 2");
+    domain.add_step(id, "third step").expect("step 3");
+    domain.toggle_step(id, first).expect("toggle step 1");
+    domain.toggle_step(id, second).expect("toggle step 2");
 
     let mut model = BoardModel::from_domain(&domain, None);
     apply_intent(
@@ -961,25 +955,25 @@ fn task_page_paints_checklist_section_between_notes_and_footer() {
             .unwrap_or_else(|| panic!("{needle:?} missing from page:\n{rows:#?}"))
     };
     let notes_row = find("the notes body", &shown);
-    let label_row = find("checklist 2/3", &shown);
+    let label_row = find("steps 2/3", &shown);
     let meta_row = find("created", &shown);
     assert!(
         notes_row < label_row,
-        "checklist section must sit after the notes block:\n{}",
+        "steps section must sit after the notes block:\n{}",
         shown.join("\n")
     );
     assert!(
         label_row < meta_row,
-        "checklist section must sit before the meta footer:\n{}",
+        "steps section must sit before the meta footer:\n{}",
         shown.join("\n")
     );
-    // Items render one per line below the label, in storage order: done `✓`, open `▪`.
-    let first_item = find("✓ first step", &shown);
-    let second_item = find("✓ second step", &shown);
-    let third_item = find("▪ third step", &shown);
+    // Steps render one per line below the label, in storage order: done `✓`, open `▪`.
+    let first_step = find("✓ first step", &shown);
+    let second_step = find("✓ second step", &shown);
+    let third_step = find("▪ third step", &shown);
     assert!(
-        label_row < first_item && first_item < second_item && second_item < third_item,
-        "items must paint one per line below the label in storage order:\n{}",
+        label_row < first_step && first_step < second_step && second_step < third_step,
+        "steps must paint one per line below the label in storage order:\n{}",
         shown.join("\n")
     );
 
@@ -989,28 +983,28 @@ fn task_page_paints_checklist_section_between_notes_and_footer() {
     let compact_shown: Vec<String> = compact.iter().map(|row| trimmed(row)).collect();
     let compact_label = compact_shown
         .iter()
-        .position(|row| row.contains("checklist 2/3"))
-        .unwrap_or_else(|| panic!("compact page omitted the checklist label:\n{compact:#?}"));
+        .position(|row| row.contains("steps 2/3"))
+        .unwrap_or_else(|| panic!("compact page omitted the steps label:\n{compact:#?}"));
     let geo = tier::resolve(40, 10);
     assert!(
         (compact_label as u16) < geo.rule_row.expect("compact rule row"),
-        "compact checklist section must stay above the chrome rows:\n{}",
+        "compact steps section must stay above the chrome rows:\n{}",
         compact_shown.join("\n")
     );
     assert!(
         compact.iter().all(|row| row_display_width(row) == 40),
-        "compact checklist rows exceeded the frame width"
+        "compact steps rows exceeded the frame width"
     );
 }
 
-/// T-2 (AC-6): a task with no checklist items paints no checklist section at all --
+/// T-2 (AC-6): a task with no steps steps paints no steps section at all --
 /// the page is identical to pre-feature for such tasks.
 #[test]
-fn task_page_without_items_paints_no_checklist_section() {
+fn task_page_without_steps_paints_no_steps_section() {
     let mut domain = DomainState::new();
     domain
         .create(
-            "Page task without steps",
+            "Notes-only page task",
             Some("still just notes".into()),
             TaskScope::Global,
             None,
@@ -1038,24 +1032,24 @@ fn task_page_without_items_paints_no_checklist_section() {
             "{width}x{height} page did not render notes + meta:\n{body}"
         );
         assert!(
-            !body.contains("checklist"),
-            "{width}x{height} empty-checklist page must paint no section label:\n{body}"
+            !body.contains("steps"),
+            "{width}x{height} empty-steps page must paint no section label:\n{body}"
         );
-        // `✓`/`▪` are item glyphs (the task is ready, so the header glyph is `○`).
+        // `✓`/`▪` are step glyphs (the task is ready, so the header glyph is `○`).
         assert!(
             !body.contains('✓') && !body.contains('▪'),
-            "{width}x{height} empty-checklist page must paint no item glyphs:\n{body}"
+            "{width}x{height} empty-steps page must paint no step glyphs:\n{body}"
         );
     }
 }
 
-/// T-2 remediation 1 (review round 0, Important): at the 40x10 compact floor a >=3-item
-/// checklist clamps to the whole content region, and the notes edit that shared those
+/// T-2 remediation 1 (review round 0, Important): at the 40x10 compact floor a >=3-step
+/// steps clamps to the whole content region, and the notes edit that shared those
 /// rows painted NOTHING -- keystrokes worked, nothing rendered. A notes edit must always
-/// keep at least one visible draft row; the checklist section yields the row (it caps,
+/// keep at least one visible draft row; the steps section yields the row (it caps,
 /// it does not vanish).
 #[test]
-fn task_page_notes_edit_keeps_a_visible_row_at_the_compact_floor_alongside_a_checklist() {
+fn task_page_notes_edit_keeps_a_visible_row_at_the_compact_floor_alongside_steps() {
     let mut domain = DomainState::new();
     let id = domain
         .create(
@@ -1067,14 +1061,10 @@ fn task_page_notes_edit_keeps_a_visible_row_at_the_compact_floor_alongside_a_che
             ProvenanceOrigin::Manual,
         )
         .expect("create task");
-    let first = domain.add_checklist_item(id, "first step").expect("item 1");
-    domain
-        .add_checklist_item(id, "second step")
-        .expect("item 2");
-    domain.add_checklist_item(id, "third step").expect("item 3");
-    domain
-        .toggle_checklist_item(id, first)
-        .expect("toggle item 1");
+    let first = domain.add_step(id, "first step").expect("step 1");
+    domain.add_step(id, "second step").expect("step 2");
+    domain.add_step(id, "third step").expect("step 3");
+    domain.toggle_step(id, first).expect("toggle step 1");
 
     let mut model = BoardModel::from_domain(&domain, None);
     apply_intent(
@@ -1102,8 +1092,8 @@ fn task_page_notes_edit_keeps_a_visible_row_at_the_compact_floor_alongside_a_che
         "a notes edit must paint at least one draft row at 40x10:\n{body}"
     );
     assert!(
-        body.contains("checklist 1/3"),
-        "the checklist section must cap to make room, not vanish:\n{body}"
+        body.contains("steps 1/3"),
+        "the steps section must cap to make room, not vanish:\n{body}"
     );
     assert!(
         rows.iter().all(|row| row_display_width(row) == 40),
@@ -1111,19 +1101,19 @@ fn task_page_notes_edit_keeps_a_visible_row_at_the_compact_floor_alongside_a_che
     );
 }
 
-/// T-6 (AC-24): once the first item lands, the content region between the page
-/// header and the footer halves — notes own the top half, the checklist section
-/// the bottom — replacing the footer-hugging section block. With zero items the
+/// T-6 (AC-24): once the first step lands, the content region between the page
+/// header and the footer halves — notes own the top half, the steps section
+/// the bottom — replacing the footer-hugging section block. With zero steps the
 /// page keeps the exact full-height notes window (AC-6 unchanged).
 ///
 /// 78x24 standard: chrome bottoms at rule row 21, so the content region is rows
 /// 3..=19 (17 rows, below the title at 1 and the notes divider at 2, above the
-/// meta footer at 20). Halved, the checklist block takes 17/2 = 8 rows (label on
+/// meta footer at 20). Halved, the steps block takes 17/2 = 8 rows (label on
 /// row 12 down to 19) and notes keep 9 (rows 3..=11). The notes window height is
 /// asserted through the divider's hidden-rows tail and the last painted wrapped
 /// row, both derived by the payload builder from the same layout the painter used.
 #[test]
-fn content_splits_in_half_once_the_first_item_lands() {
+fn content_splits_in_half_once_the_first_step_lands() {
     // 20 short lines: none wraps at the 75-cell notes width, so the notes wrap
     // count is exactly 20 whatever the window shows.
     let notes = (0..20)
@@ -1151,7 +1141,7 @@ fn content_splits_in_half_once_the_first_item_lands() {
     )
     .expect("open task page");
 
-    // Zero items: the notes window is the whole content region (17 rows), so it
+    // Zero steps: the notes window is the whole content region (17 rows), so it
     // hides only the last 3 of 20 wrapped rows and paints no section at all.
     let bare = board_rows(&model, 78, 24);
     let bare_shown: Vec<String> = bare.iter().map(|row| trimmed(row)).collect();
@@ -1166,28 +1156,26 @@ fn content_splits_in_half_once_the_first_item_lands() {
         bare_shown.join("\n")
     );
     assert!(
-        !bare_shown.iter().any(|row| row.contains("checklist")),
-        "no items, no section:\n{}",
+        !bare_shown.iter().any(|row| row.contains("steps")),
+        "no steps, no section:\n{}",
         bare_shown.join("\n")
     );
 
-    // The first item lands: the region halves. The section label opens the
-    // bottom half at the halfway row 12, the item sits directly under it, and the
+    // The first step lands: the region halves. The section label opens the
+    // bottom half at the halfway row 12, the step sits directly under it, and the
     // notes window now ends on row 11 (its 9th wrapped row) hiding 11.
-    domain
-        .add_checklist_item(id, "only step")
-        .expect("add item");
+    domain.add_step(id, "only step").expect("add step");
     model.sync_from_domain(&domain);
     let rows = board_rows(&model, 78, 24);
     let shown: Vec<String> = rows.iter().map(|row| trimmed(row)).collect();
     assert!(
-        shown[12].contains("checklist 0/1"),
-        "the checklist half must open at the halfway row 12:\n{}",
+        shown[12].contains("steps 0/1"),
+        "the steps half must open at the halfway row 12:\n{}",
         shown.join("\n")
     );
     assert!(
         shown[13].contains("▪ only step"),
-        "the first item must land directly under the label, not pinned to the footer:\n{}",
+        "the first step must land directly under the label, not pinned to the footer:\n{}",
         shown.join("\n")
     );
     assert!(
@@ -1202,11 +1190,11 @@ fn content_splits_in_half_once_the_first_item_lands() {
     );
 }
 
-/// T-6 (AC-24): items stack from the TOP of the checklist half — item 1 directly
-/// under the section label, each next item directly below the previous — so a
-/// fourth item lands below the third, never pinned to the row above the footer.
+/// T-6 (AC-24): steps stack from the TOP of the steps half — step 1 directly
+/// under the section label, each next step directly below the previous — so a
+/// fourth step lands below the third, never pinned to the row above the footer.
 #[test]
-fn items_stack_from_the_top_below_the_divider() {
+fn steps_stack_from_the_top_below_the_divider() {
     let mut domain = DomainState::new();
     let id = domain
         .create(
@@ -1219,7 +1207,7 @@ fn items_stack_from_the_top_below_the_divider() {
         )
         .expect("create task");
     for text in ["first step", "second step", "third step"] {
-        domain.add_checklist_item(id, text).expect("add item");
+        domain.add_step(id, text).expect("add step");
     }
     let mut model = BoardModel::from_domain(&domain, None);
     apply_intent(
@@ -1231,20 +1219,20 @@ fn items_stack_from_the_top_below_the_divider() {
     )
     .expect("open task page");
 
-    // 78x24: label opens the bottom half on row 12; items 1..3 stack downward
+    // 78x24: label opens the bottom half on row 12; steps 1..3 stack downward
     // from it while the footer-side rows of the half stay empty.
     let rows = board_rows(&model, 78, 24);
     let shown: Vec<String> = rows.iter().map(|row| trimmed(row)).collect();
     let label = shown
         .iter()
-        .position(|row| row.contains("checklist 0/3"))
-        .unwrap_or_else(|| panic!("checklist label missing:\n{}", shown.join("\n")));
+        .position(|row| row.contains("steps 0/3"))
+        .unwrap_or_else(|| panic!("steps label missing:\n{}", shown.join("\n")));
     assert_eq!(label, 12, "the half opens on the halfway row");
     assert!(
         shown[13].contains("▪ first step")
             && shown[14].contains("▪ second step")
             && shown[15].contains("▪ third step"),
-        "items must stack one directly under another from the top of the half:\n{}",
+        "steps must stack one directly under another from the top of the half:\n{}",
         shown.join("\n")
     );
     assert!(
@@ -1253,21 +1241,19 @@ fn items_stack_from_the_top_below_the_divider() {
         shown.join("\n")
     );
 
-    // A fourth item lands directly below the third, still far from the footer.
-    domain
-        .add_checklist_item(id, "fourth step")
-        .expect("add item 4");
+    // A fourth step lands directly below the third, still far from the footer.
+    domain.add_step(id, "fourth step").expect("add step 4");
     model.sync_from_domain(&domain);
     let rows4 = board_rows(&model, 78, 24);
     let shown4: Vec<String> = rows4.iter().map(|row| trimmed(row)).collect();
     assert!(
         shown4[16].contains("▪ fourth step"),
-        "the fourth item must land directly below the third:\n{}",
+        "the fourth step must land directly below the third:\n{}",
         shown4.join("\n")
     );
     assert!(
         shown4[19].is_empty(),
-        "the fourth item must not be pinned to the footer:\n{}",
+        "the fourth step must not be pinned to the footer:\n{}",
         shown4.join("\n")
     );
 }
@@ -1905,16 +1891,16 @@ fn palette_golden_scene_commands_are_bound_to_the_real_m1_catalog_and_exclude_di
     );
 }
 
-/// T-7 (AC-22): the task page's footer verb bar lists the item-add verb while the
-/// bound task has checklist items (view mode). A task with no items keeps the
-/// pre-T-7 verb bar exactly: the with-items bar is the without-items bar plus the
-/// one item-add entry — modifier implied by the bar's prefix convention — and
+/// T-7 (AC-22): the task page's footer verb bar lists the step-add verb while the
+/// bound task has steps steps (view mode). A task with no steps keeps the
+/// pre-T-7 verb bar exactly: the with-steps bar is the without-steps bar plus the
+/// one step-add entry — modifier implied by the bar's prefix convention — and
 /// nothing else. The full listing is asserted at a width the whole bar fits; at
 /// the 78-column standard floor the bar's existing width clipping may take the
 /// entry's label tail but never its key chord.
 #[test]
-fn footer_lists_the_item_add_verb() {
-    let page_verb_row_with = |items: &[&str], width: u16| -> String {
+fn footer_lists_the_step_add_verb() {
+    let page_verb_row_with = |steps: &[&str], width: u16| -> String {
         let mut domain = DomainState::new();
         let id = domain
             .create(
@@ -1926,8 +1912,8 @@ fn footer_lists_the_item_add_verb() {
                 ProvenanceOrigin::Manual,
             )
             .expect("create task");
-        for text in items {
-            domain.add_checklist_item(id, text).expect("add item");
+        for text in steps {
+            domain.add_step(id, text).expect("add step");
         }
         let mut model = BoardModel::from_domain(&domain, None);
         apply_intent(
@@ -1947,26 +1933,26 @@ fn footer_lists_the_item_add_verb() {
     let without = page_verb_row_with(&[], 100);
 
     assert!(
-        with.contains("alt+a item"),
-        "view mode + items must list the item-add verb (modifier by the bar's convention):\n{with}"
+        with.contains("alt+a step"),
+        "view mode + steps must list the step-add verb (modifier by the bar's convention):\n{with}"
     );
     assert!(
-        !without.contains("item"),
-        "view mode + no items keeps the pre-T-7 verb bar:\n{without}"
+        !without.contains("step"),
+        "view mode + no steps keeps the pre-T-7 verb bar:\n{without}"
     );
-    let suffix = " · alt+a item";
+    let suffix = " · alt+a step";
     let stripped = with
         .strip_suffix(suffix)
-        .unwrap_or_else(|| panic!("the with-items bar must end in the item-add entry:\n{with}"));
+        .unwrap_or_else(|| panic!("the with-steps bar must end in the step-add entry:\n{with}"));
     assert_eq!(
         stripped, without,
-        "the item-add verb must be the footer verb bar's only change"
+        "the step-add verb must be the footer verb bar's only change"
     );
 
     let floor = page_verb_row_with(&["only step"], 78);
     assert!(
         floor.contains("alt+a"),
-        "the item-add key chord must stay listed at the standard width floor:\n{floor}"
+        "the step-add key chord must stay listed at the standard width floor:\n{floor}"
     );
 }
 

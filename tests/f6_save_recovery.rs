@@ -1239,19 +1239,19 @@ fn save_recovery_unbinds_retired_lens_keys() {
     }
 }
 
-// ---- T-4 (AC-14): the checklist item line editor and the save boundary ----
+// ---- T-4 (AC-14): the step line editor and the save boundary ----
 
 /// Painted board text at the standard size, exactly as the board loop draws it.
 fn board_painted(model: &BoardModel) -> String {
     painted(|frame| draw_board(frame, model), (80, 24))
 }
 
-/// A task page opened on a task carrying one item, with the item line editor open
+/// A task page opened on a task carrying one step, with the step line editor open
 /// holding a typed draft, whose save through the boundary has just failed.
 ///
 /// Returns the pieces both resolution tests need: the driven domain/model/recovery,
-/// the bound task id, and the text of the item that existed before the failed add.
-fn failed_item_editor_save() -> (
+/// the bound task id, and the text of the step that existed before the failed add.
+fn failed_step_editor_save() -> (
     DomainState,
     BoardModel,
     SaveRecovery<DomainState>,
@@ -1270,9 +1270,7 @@ fn failed_item_editor_save() -> (
             ProvenanceOrigin::Manual,
         )
         .expect("create task");
-    domain
-        .add_checklist_item(id, "alpha step")
-        .expect("seed one item");
+    domain.add_step(id, "alpha step").expect("seed one step");
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/app")));
     apply_intent(
         &mut domain,
@@ -1285,11 +1283,11 @@ fn failed_item_editor_save() -> (
     apply_intent(
         &mut domain,
         &mut model,
-        BoardIntent::BeginAddChecklistItem,
+        BoardIntent::BeginAddStep,
         None,
         None,
     )
-    .expect("open item editor");
+    .expect("open step editor");
     for character in "zed step".chars() {
         apply_intent(
             &mut domain,
@@ -1332,13 +1330,13 @@ fn failed_item_editor_save() -> (
     (domain, model, recovery, id)
 }
 
-/// AC-14 (decisive): a failed save while the item editor is open holds the editor
+/// AC-14 (decisive): a failed save while the step editor is open holds the editor
 /// and its input mode until Retry/Cancel resolve it; `r`/`c`/Esc reach Retry/Cancel
 /// even with the form allocated; a cancelled failed save returns to page view with
 /// every surface intact and keys escaping normally — no orphan edit mode.
 #[test]
-fn cancelled_failed_item_editor_save_leaves_no_orphan_edit_mode() {
-    let (mut domain, mut model, mut recovery, id) = failed_item_editor_save();
+fn cancelled_failed_step_editor_save_leaves_no_orphan_edit_mode() {
+    let (mut domain, mut model, mut recovery, id) = failed_step_editor_save();
 
     // The recovery keys own the keyboard even with the page form allocated.
     assert_eq!(
@@ -1395,9 +1393,9 @@ fn cancelled_failed_item_editor_save_leaves_no_orphan_edit_mode() {
     let texts: Vec<&str> = domain
         .get(id)
         .expect("task")
-        .checklist
+        .steps
         .iter()
-        .map(|item| item.text.as_str())
+        .map(|step| step.text.as_str())
         .collect();
     assert_eq!(
         texts,
@@ -1431,7 +1429,7 @@ fn cancelled_failed_item_editor_save_leaves_no_orphan_edit_mode() {
     apply_intent(
         &mut domain,
         &mut model,
-        BoardIntent::BeginAddChecklistItem,
+        BoardIntent::BeginAddStep,
         None,
         None,
     )
@@ -1465,9 +1463,9 @@ fn cancelled_failed_item_editor_save_leaves_no_orphan_edit_mode() {
     let texts: Vec<&str> = domain
         .get(id)
         .expect("task")
-        .checklist
+        .steps
         .iter()
-        .map(|item| item.text.as_str())
+        .map(|step| step.text.as_str())
         .collect();
     assert_eq!(
         texts,
@@ -1477,11 +1475,11 @@ fn cancelled_failed_item_editor_save_leaves_no_orphan_edit_mode() {
 }
 
 /// AC-14: resolving the held editor's failed save through Retry, after the store
-/// accepts, applies exactly the held working state — the item lands and the editor
+/// accepts, applies exactly the held working state — the step lands and the editor
 /// closes cleanly.
 #[test]
-fn retried_item_editor_save_applies_and_closes() {
-    let (mut domain, mut model, mut recovery, id) = failed_item_editor_save();
+fn retried_step_editor_save_applies_and_closes() {
+    let (mut domain, mut model, mut recovery, id) = failed_step_editor_save();
 
     let mut retries = 0;
     let retried = apply_board_intent_with_save_recovery(
@@ -1499,9 +1497,9 @@ fn retried_item_editor_save_applies_and_closes() {
             let texts: Vec<&str> = working
                 .get(id)
                 .expect("task in retained working state")
-                .checklist
+                .steps
                 .iter()
-                .map(|item| item.text.as_str())
+                .map(|step| step.text.as_str())
                 .collect();
             assert_eq!(
                 texts,
@@ -1518,11 +1516,11 @@ fn retried_item_editor_save_applies_and_closes() {
     let texts: Vec<&str> = domain
         .get(id)
         .expect("task")
-        .checklist
+        .steps
         .iter()
-        .map(|item| item.text.as_str())
+        .map(|step| step.text.as_str())
         .collect();
-    assert_eq!(texts, vec!["alpha step", "zed step"], "the item lands");
+    assert_eq!(texts, vec!["alpha step", "zed step"], "the step lands");
     assert_eq!(
         model.input_mode(),
         BoardInputMode::TaskPage,
@@ -1535,11 +1533,11 @@ fn retried_item_editor_save_applies_and_closes() {
     );
     assert!(
         page.contains("zed step"),
-        "the retried item paints on the page:\n{page}"
+        "the retried step paints on the page:\n{page}"
     );
 }
 
-/// Remediation round 1 / Important 1: the item editor's two save chords share one
+/// Remediation round 1 / Important 1: the step editor's two save chords share one
 /// refusal discipline. When another actor soft-deleted the bound task on the
 /// durable record between open and confirm, Ctrl+Enter (`ConfirmEditNext`) must
 /// refuse in place exactly like Enter — the editor held with its draft, nothing
@@ -1560,9 +1558,7 @@ fn ctrl_enter_refuses_in_place_when_the_bound_task_was_concurrently_soft_deleted
             ProvenanceOrigin::Manual,
         )
         .expect("create task");
-    domain
-        .add_checklist_item(id, "alpha step")
-        .expect("seed one item");
+    domain.add_step(id, "alpha step").expect("seed one step");
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/app")));
     apply_intent(
         &mut domain,
@@ -1575,11 +1571,11 @@ fn ctrl_enter_refuses_in_place_when_the_bound_task_was_concurrently_soft_deleted
     apply_intent(
         &mut domain,
         &mut model,
-        BoardIntent::BeginAddChecklistItem,
+        BoardIntent::BeginAddStep,
         None,
         None,
     )
-    .expect("open item editor");
+    .expect("open step editor");
     for character in "zed step".chars() {
         apply_intent(
             &mut domain,
@@ -1627,7 +1623,7 @@ fn ctrl_enter_refuses_in_place_when_the_bound_task_was_concurrently_soft_deleted
     assert!(!recovery.is_pending(), "the refusal is not a failed save");
     assert_eq!(
         model.input_mode(),
-        BoardInputMode::EditChecklistItem,
+        BoardInputMode::EditStep,
         "the editor stays open through the refusal"
     );
     let held = board_painted(&model);
@@ -1639,9 +1635,9 @@ fn ctrl_enter_refuses_in_place_when_the_bound_task_was_concurrently_soft_deleted
     let texts: Vec<&str> = domain
         .get(id)
         .expect("task")
-        .checklist
+        .steps
         .iter()
-        .map(|item| item.text.as_str())
+        .map(|step| step.text.as_str())
         .collect();
     assert_eq!(
         texts,
