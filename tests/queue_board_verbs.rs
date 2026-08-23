@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use herdr_tasks::domain::{DomainState, HumanStatus, ProvenanceOrigin, TaskEventKind, TaskScope};
 use herdr_tasks::ui::board::{
-    apply_intent, board_intent_may_persist, draw_board, resolve_board_command, BoardInputMode,
-    BoardModel, CommandSurface, IntentOutcome, ProjectScopeOption,
+    apply_intent, board_intent_may_persist, board_verb_items, draw_board, resolve_board_command,
+    BoardInputMode, BoardModel, CommandSurface, IntentOutcome, ProjectScopeOption,
 };
 use herdr_tasks::ui::input::{map_key, normal_help_bindings, BoardIntent};
 use herdr_tasks::ui::mouse::BoardPopup;
@@ -2173,6 +2173,85 @@ fn active_cursor_up_precedes_shared_scroll() {
     assert!(
         after_key.contains("▸ ▪ first step"),
         "Up must move the active cursor before scrolling the stream:\n{after_key}"
+    );
+}
+
+/// AC-17/18/26: wheel stays stream-only, then the first cursor Up deactivates;
+/// the next inactive Up scrolls, and Down can activate the cursor again.
+#[test]
+fn wheel_never_arms_cursor_and_up_deactivates_before_inactive_scroll_then_down_reactivates() {
+    let (mut domain, mut model, _) = board_with_steps(
+        "Cursor lifecycle",
+        Some(&wrapping_notes()),
+        &["first step", "second step"],
+    );
+    rendered_board(&model, 80, 24);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::PageWheelScrollDown,
+        None,
+        None,
+    )
+    .expect("wheel stream");
+    let wheeled = rendered_board(&model, 80, 24);
+    assert!(
+        !wheeled.contains("▸"),
+        "wheel must not activate an inactive cursor:\n{wheeled}"
+    );
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::PageScrollDown,
+        None,
+        None,
+    )
+    .expect("activate");
+    let active_verbs = board_verb_items(&model);
+    assert!(
+        active_verbs
+            .iter()
+            .any(|entry| entry.key == "space" && entry.label == "toggle step"),
+        "active step cursor must not advertise task start/reopen"
+    );
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::PageScrollUp,
+        None,
+        None,
+    )
+    .expect("deactivate first step");
+    let deactivated = rendered_board(&model, 80, 24);
+    assert!(
+        !deactivated.contains("▸"),
+        "Up at step zero must deactivate, not scroll the cursor:\n{deactivated}"
+    );
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::PageScrollUp,
+        None,
+        None,
+    )
+    .expect("inactive up scroll");
+    let scrolled = rendered_board(&model, 80, 24);
+    assert_ne!(
+        deactivated, scrolled,
+        "inactive Up must scroll the shared content"
+    );
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::PageScrollDown,
+        None,
+        None,
+    )
+    .expect("reactivate");
+    let reactivated = rendered_board(&model, 80, 24);
+    assert!(
+        reactivated.contains("▸ ▪ first step"),
+        "Down must re-activate the first cursor:\n{reactivated}"
     );
 }
 

@@ -48,16 +48,27 @@ pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
             key: "e",
             label: "edit",
         });
-        match task.status {
-            HumanStatus::Ready => entries.push(VerbEntry {
+        if model
+            .form
+            .as_ref()
+            .is_some_and(|form| form.steps.cursor.is_some())
+        {
+            entries.push(VerbEntry {
                 key: "space",
-                label: "start",
-            }),
-            HumanStatus::Done => entries.push(VerbEntry {
-                key: "space",
-                label: "reopen",
-            }),
-            HumanStatus::Started | HumanStatus::Blocked | HumanStatus::Review => {}
+                label: "toggle step",
+            });
+        } else {
+            match task.status {
+                HumanStatus::Ready => entries.push(VerbEntry {
+                    key: "space",
+                    label: "start",
+                }),
+                HumanStatus::Done => entries.push(VerbEntry {
+                    key: "space",
+                    label: "reopen",
+                }),
+                HumanStatus::Started | HumanStatus::Blocked | HumanStatus::Review => {}
+            }
         }
         if task.status == HumanStatus::Done {
             entries.push(VerbEntry {
@@ -161,7 +172,7 @@ pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
 /// Build the task page's paint payload from the open task form. View mode wraps the notes
 /// draft and windows it by the page scroll; field edits reuse the form's cursor windowing.
 fn build_task_page_overlay<'a>(
-    model: &BoardModel,
+    model: &'a BoardModel,
     form: &'a BoardForm,
     geo: &tier::TierGeometry,
     scope_dropdown: Option<FormScopeDropdown<'a>>,
@@ -185,7 +196,9 @@ fn build_task_page_overlay<'a>(
             cursor_col,
             placeholder: "step…   enter save · ctrl+enter save+next · esc cancel",
             refusal: editor.refusal.as_deref(),
-            message: None,
+            // The bottom input replaces the shared status row. Forward recovery
+            // and record-refusal feedback to the surface that is actually visible.
+            message: model.message(),
         }
     });
     // A notes edit always keeps one row: the layout reserves it (the section caps

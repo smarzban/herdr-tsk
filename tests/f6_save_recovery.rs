@@ -1327,6 +1327,10 @@ fn failed_step_editor_save() -> (
             .any(|row| row.contains("▎") && row.contains("zed step")),
         "the failed save must hold the editor with its draft on the line:\n{held}"
     );
+    assert!(
+        held.contains("save failed") && held.contains("Retry or Cancel"),
+        "the footer input owns the recovery prompt while it replaces the status row:\n{held}"
+    );
     (domain, model, recovery, id)
 }
 
@@ -1535,6 +1539,101 @@ fn retried_step_editor_save_applies_and_closes() {
         page.contains("zed step"),
         "the retried step paints on the page:\n{page}"
     );
+}
+
+/// AC-14: the recovery boundary retains an existing-step rename, not only a new step.
+#[test]
+fn retried_step_rename_save_applies_the_held_rename() {
+    let mut domain = DomainState::new();
+    let id = domain
+        .create(
+            "Rename witness",
+            None,
+            TaskScope::Global,
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("task");
+    domain.add_step(id, "alpha step").expect("step");
+    let mut model = BoardModel::from_domain(&domain, None);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenTaskPage,
+        None,
+        None,
+    )
+    .expect("open");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::SelectStep(0),
+        None,
+        None,
+    )
+    .expect("select");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::BeginEditTitle,
+        None,
+        None,
+    )
+    .expect("contextual rename");
+    for _ in 0..10 {
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::EditBackspace,
+            None,
+            None,
+        )
+        .expect("clear old text");
+    }
+    for ch in "renamed step".chars() {
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::EditInsert(ch),
+            None,
+            None,
+        )
+        .expect("type rename");
+    }
+    let baseline = snapshot_of(&domain);
+    let mut recovery = SaveRecovery::new();
+    apply_board_intent_with_save_recovery(
+        &mut domain,
+        &mut model,
+        &mut recovery,
+        BoardSaveContext {
+            baseline,
+            intent: BoardIntent::ConfirmEdit,
+            snapshot: None,
+            host: None,
+        },
+        |_| Err(INJECTED.into()),
+    )
+    .expect("fail rename");
+    assert!(recovery.is_pending());
+    apply_board_intent_with_save_recovery(
+        &mut domain,
+        &mut model,
+        &mut recovery,
+        BoardSaveContext {
+            baseline: DomainState::new(),
+            intent: BoardIntent::RetrySave,
+            snapshot: None,
+            host: None,
+        },
+        |working| {
+            assert_eq!(working.get(id).expect("task").steps[0].text, "renamed step");
+            Ok(())
+        },
+    )
+    .expect("retry rename");
+    assert_eq!(domain.get(id).expect("task").steps[0].text, "renamed step");
 }
 
 /// Remediation round 1 / Important 1: the step editor's two save chords share one

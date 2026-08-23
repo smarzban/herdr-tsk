@@ -1459,6 +1459,38 @@ fn page_verb_clicks_resolve_through_the_page_legend() {
     assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
 }
 
+#[test]
+fn page_step_add_footer_chip_routes_to_begin_add_step() {
+    let (mut domain, mut model) = deck_of(1);
+    let id = model.selected_id().expect("task");
+    domain.add_step(id, "existing step").expect("add step");
+    model = BoardModel::from_domain(&domain, None);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenTaskPage,
+        None,
+        None,
+    )
+    .expect("open");
+    let verbs = board_verb_items(&model);
+    let step_index = verbs
+        .iter()
+        .position(|entry| entry.key == "a")
+        .expect("visible a step chip");
+    let hits = board_hit_map(STANDARD, &model);
+    let area = hits
+        .regions
+        .iter()
+        .find(|hit| hit.target == QueueHitTarget::Verb(step_index))
+        .expect("step chip hit")
+        .area;
+    assert_eq!(
+        map_board_mouse(&model, &hits, left_click(area.x + 1, area.y)),
+        Some(BoardIntent::BeginAddStep)
+    );
+}
+
 /// The task page painted row by row at the standard board size, so a test can
 /// click the coordinates a row actually painted at.
 fn page_rows(model: &BoardModel) -> Vec<String> {

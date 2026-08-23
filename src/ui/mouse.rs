@@ -312,6 +312,7 @@ fn verb_intent(model: &BoardModel, index: usize) -> Option<BoardIntent> {
         "u" => Some(BoardIntent::Undo),
         "e" => Some(BoardIntent::BeginEditTitle),
         "n" => Some(BoardIntent::BeginEditNotes),
+        "a" => Some(BoardIntent::BeginAddStep),
         "esc" => Some(BoardIntent::CloseLayer),
         ":" => Some(BoardIntent::OpenCommandPalette),
         "?" => Some(BoardIntent::OpenHelp),

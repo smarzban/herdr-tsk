@@ -1111,6 +1111,13 @@ impl BoardModel {
             return;
         }
         form.focus = focus;
+        // Notes drafts are cursor-windowed rather than a full copy of the shared
+        // content stream. Entering the editor therefore returns its window to the
+        // visible origin, so a prior reading scroll cannot hide the draft or put
+        // the terminal caret on a step row.
+        if focus == CaptureField::Notes && form.is_task() {
+            form.notes_scroll = 0;
+        }
         self.input_mode = form.parent_mode();
     }
 

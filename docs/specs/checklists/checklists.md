@@ -134,7 +134,9 @@ While inactive, ↑ scrolls notes and ↓ re-activates the cursor. *(Verificatio
 type: **test-backed** — unit)*
 
 **AC-19** On a task with no checklist items, bare ↑/↓ scroll the task page exactly
-as before this feature. *(Verification type: **test-backed** — unit)*
+as before this feature. The shared-flow separator row after Notes is intentional,
+including its scroll position, and is not a checklist section. *(Verification type:
+**test-backed** — unit)*
 
 **AC-20** `check <task> add` refuses item text that is empty after trimming or
 contains a C0 control character: non-zero exit, nothing persisted. *(Verification
@@ -171,8 +173,9 @@ activate, move, or deactivate the cursor. *(Verification type: **test-backed** �
 unit)*
 
 **AC-27** While Notes is being edited after the shared content stream has scrolled,
-the terminal caret remains on its matching visible draft row, accounting for the
-stream offset. *(Verification type: **test-backed** — unit)*
+the terminal caret remains on its matching visible draft row. Entering Notes edit
+returns the cursor-windowed draft to the stream origin, rather than retaining a
+reading offset that can hide it. *(Verification type: **test-backed** — unit)*
 
 ### Negative criteria
 
@@ -491,8 +494,8 @@ shared stream scroll so it lands on the draft row actually painted.
 
 - Files: `src/ui/board/apply.rs`, `src/ui/render.rs`, `tests/queue_board_verbs.rs`,
   `tests/queue_board_render.rs`.
-- Test first: `active_cursor_up_precedes_shared_scroll`,
-  `wheel_scroll_never_moves_step_cursor`, and
+- Test first: `wheel_never_arms_cursor_and_up_deactivates_before_inactive_scroll_then_down_reactivates`,
+  `notes_edit_after_deep_stream_scroll_keeps_draft_and_caret_aligned`, and
   `notes_edit_caret_accounts_for_shared_stream_scroll`.
 - *Advances:* AC-17, AC-18, AC-24, AC-26, AC-27. *Components:* Page key map,
   Task page view model, Task page renderer. *Deps:* T-9.

@@ -1157,8 +1157,76 @@ fn notes_edit_caret_accounts_for_shared_stream_scroll() {
         .expect("draw edit page");
     let cursor = terminal.backend().cursor_position();
     assert_eq!(
-        cursor.y, 4,
-        "the third Notes row appears one stream row above its unscrolled position"
+        cursor.y, 5,
+        "entering Notes edit restores the cursor-windowed draft to the visible stream origin"
+    );
+}
+
+/// AC-27: entering Notes after a deep shared-stream read restores the cursor-windowed
+/// draft and keeps the terminal caret on its visible draft row.
+#[test]
+fn notes_edit_after_deep_stream_scroll_keeps_draft_and_caret_aligned() {
+    let mut domain = DomainState::new();
+    let notes = (0..20)
+        .map(|line| format!("note line {line}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let id = domain
+        .create(
+            "Deep Notes",
+            Some(notes),
+            TaskScope::Global,
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("create task");
+    for index in 0..30 {
+        domain
+            .add_step(id, format!("step {index}"))
+            .expect("add step");
+    }
+    let mut model = BoardModel::from_domain(&domain, None);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenTaskPage,
+        None,
+        None,
+    )
+    .expect("open");
+    board_rows(&model, 80, 24);
+    for _ in 0..20 {
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::PageWheelScrollDown,
+            None,
+            None,
+        )
+        .expect("deep wheel");
+    }
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::BeginEditNotes,
+        None,
+        None,
+    )
+    .expect("edit notes");
+    let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("terminal");
+    terminal
+        .draw(|frame| draw_board(frame, &model))
+        .expect("draw");
+    let text = board_rows(&model, 80, 24).join("\n");
+    assert!(
+        text.contains("note line 9"),
+        "draft window must remain visible:\n{text}"
+    );
+    assert_eq!(
+        terminal.backend().cursor_position().y,
+        19,
+        "caret must remain on the visible cursor-windowed draft row"
     );
 }
 
