@@ -20,7 +20,7 @@ board for capture and human-status verbs. It ships as the herdr plugin
 `herdr-tasks`, and the built binary (`tsk`) also runs standalone. Park, resume,
 linking, and dispatch-start are not board or palette actions. Dispatch recovery
 can still open for a persisted attempt. Crate (`tsk-tui`) and plugin are
-`0.2.0`.
+`0.3.0`.
 
 A gitignored `HANDOFF.md` may hold this clone’s live working state.
 
