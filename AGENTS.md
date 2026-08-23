@@ -91,11 +91,10 @@ If `HERDR_ENV` is unset, say that live smoke was not run.
 ## Conventions
 
 - Human status is source of truth. Never auto-complete tasks from agent status.
-- State under `HERDR_PLUGIN_STATE_DIR`. Config under `HERDR_PLUGIN_CONFIG_DIR`.
-  Standalone runs default to `$XDG_DATA_HOME/tsk` / `~/.config/tsk`, overridable
-  with `TSK_STATE_DIR` / `TSK_CONFIG_DIR`; injected host variables keep
-  precedence.
-  Verb modifier is `settings.json` in that config dir; the palette flips it.
+- One store: state is `$HOME/.tsk/tasks.json`, config `$HOME/.tsk/settings.json`,
+  overridable with `TSK_STATE_DIR` / `TSK_CONFIG_DIR`. Injected host variables such as
+  `HERDR_PLUGIN_STATE_DIR` are deliberately ignored so every host edits the same board.
+  Verb modifier is `settings.json`; the palette flips it.
 - UI chrome lives in `src/ui/` (`board/` model·apply·commands·chrome·draw,
   `capture`, `mouse`, `input`, `render`).
 - `map_edit` and `map_board_form_key` share `map_form_edit_key`. Save-recovery

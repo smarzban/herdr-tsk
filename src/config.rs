@@ -17,9 +17,8 @@
 //!
 //! # Empty environment values
 //!
-//! Unlike [`crate::store::default_state_dir`], an empty `HERDR_PLUGIN_CONFIG_DIR` falls
-//! through rather than resolving to `""`, which would put `walkthrough.json` in whatever
-//! directory the board was launched from. Durable state stays in the plugin directories.
+//! An empty `TSK_CONFIG_DIR` falls through to `$HOME/.tsk` rather than resolving to `""`,
+//! which would put `walkthrough.json` in whatever directory the board was launched from.
 
 use std::env;
 use std::ffi::OsStr;
@@ -46,56 +45,34 @@ struct WalkthroughDocument {
     dismissed: bool,
 }
 
-/// Config dir from `HERDR_PLUGIN_CONFIG_DIR`, else `TSK_CONFIG_DIR`, else per-user config.
+/// Config dir from `TSK_CONFIG_DIR`, else `~/.tsk`.
 ///
-/// Production herdr injects `HERDR_PLUGIN_CONFIG_DIR`. Standalone runs may set
-/// `TSK_CONFIG_DIR`. When neither is set (manual runs / tests without the host), use
-/// `$XDG_CONFIG_HOME/tsk` or `$HOME/.config/tsk`.
-/// Mirrors [`crate::store::default_state_dir`], including its refusal to fall back to a
-/// shared world path under `std::env::temp_dir()`.
+/// One store everywhere: the herdr plugin pane and a bare terminal run resolve to the same
+/// files, so settings live beside the board's data. Herdr's injected
+/// `HERDR_PLUGIN_CONFIG_DIR` is deliberately ignored — see [`crate::store::default_state_dir`].
+/// Mirrors its refusal to fall back to a shared world path under `std::env::temp_dir()`.
 pub fn default_config_dir() -> PathBuf {
     resolve_config_dir(
-        env::var_os("HERDR_PLUGIN_CONFIG_DIR").as_deref(),
         env::var_os("TSK_CONFIG_DIR").as_deref(),
-        env::var_os("XDG_CONFIG_HOME").as_deref(),
         env::var_os("HOME").as_deref(),
     )
 }
 
-/// Pure resolution over the three candidate values, in precedence order.
+/// Pure resolution over the candidate values, in precedence order.
 ///
 /// Split out from [`default_config_dir`] so every branch is testable without mutating the
 /// process environment: `setenv` racing another thread's `getenv` is a data race, and this
-/// crate's tests run in threads inside one process. The fourth candidate (the relative
-/// last resort) is a constant and needs no input.
-///
-/// Empty values fall through, including an empty host variable. That last part is a
-/// deliberate divergence from [`crate::store::default_state_dir`], which returns `""` and
-/// would write into the current working directory: see the module doc.
-fn resolve_config_dir(
-    host: Option<&OsStr>,
-    tsk_env: Option<&OsStr>,
-    xdg_config_home: Option<&OsStr>,
-    home: Option<&OsStr>,
-) -> PathBuf {
-    if let Some(dir) = host {
-        if !dir.is_empty() {
-            return PathBuf::from(dir);
-        }
-    }
+/// crate's tests run in threads inside one process. The relative last resort is a constant
+/// and needs no input. Empty values fall through.
+fn resolve_config_dir(tsk_env: Option<&OsStr>, home: Option<&OsStr>) -> PathBuf {
     if let Some(dir) = tsk_env {
         if !dir.is_empty() {
             return PathBuf::from(dir);
         }
     }
-    if let Some(xdg) = xdg_config_home {
-        if !xdg.is_empty() {
-            return PathBuf::from(xdg).join("tsk");
-        }
-    }
     if let Some(home) = home {
         if !home.is_empty() {
-            return PathBuf::from(home).join(".config/tsk");
+            return PathBuf::from(home).join(".tsk");
         }
     }
     // Last resort: relative per-process dir (still not shared /tmp/tsk-config).
@@ -316,86 +293,50 @@ mod tests {
     }
 
     #[test]
-    fn host_variable_wins_over_every_other_candidate() {
+    fn empty_override_never_resolves_to_the_current_directory() {
         assert_eq!(
-            resolve_config_dir(
-                Some(os("/host")),
-                None,
-                Some(os("/xdg")),
-                Some(os("/home/u"))
-            ),
-            PathBuf::from("/host")
+            resolve_config_dir(Some(os("")), Some(os("/home/u"))),
+            PathBuf::from("/home/u/.tsk"),
+            "an empty override must not resolve to the current working directory"
         );
     }
 
     #[test]
-    fn empty_host_variable_falls_through_to_xdg() {
+    fn tsk_env_wins_over_home() {
         assert_eq!(
-            resolve_config_dir(Some(os("")), None, Some(os("/xdg")), Some(os("/home/u"))),
-            PathBuf::from("/xdg/tsk"),
-            "an empty host variable must not resolve to the current working directory"
-        );
-    }
-
-    #[test]
-    fn standalone_env_sits_between_host_and_xdg() {
-        assert_eq!(
-            resolve_config_dir(
-                None,
-                Some(os("/tsk-env")),
-                Some(os("/xdg")),
-                Some(os("/home/u"))
-            ),
+            resolve_config_dir(Some(os("/tsk-env")), Some(os("/home/u"))),
             PathBuf::from("/tsk-env")
         );
+    }
+
+    #[test]
+    fn empty_tsk_env_falls_through_to_home() {
         assert_eq!(
-            resolve_config_dir(
-                Some(os("/host")),
-                Some(os("/tsk-env")),
-                Some(os("/xdg")),
-                Some(os("/home/u"))
-            ),
-            PathBuf::from("/host"),
-            "host injection keeps precedence over the standalone override"
+            resolve_config_dir(Some(os("")), Some(os("/home/u"))),
+            PathBuf::from("/home/u/.tsk")
         );
     }
 
     #[test]
-    fn xdg_config_home_wins_over_home() {
+    fn home_resolves_to_the_dot_tsk_store_root() {
         assert_eq!(
-            resolve_config_dir(None, None, Some(os("/xdg")), Some(os("/home/u"))),
-            PathBuf::from("/xdg/tsk")
-        );
-    }
-
-    #[test]
-    fn empty_xdg_config_home_falls_through_to_home() {
-        assert_eq!(
-            resolve_config_dir(None, None, Some(os("")), Some(os("/home/u"))),
-            PathBuf::from("/home/u/.config/tsk")
-        );
-    }
-
-    #[test]
-    fn home_resolves_under_dot_config_not_dot_local_share() {
-        assert_eq!(
-            resolve_config_dir(None, None, None, Some(os("/home/u"))),
-            PathBuf::from("/home/u/.config/tsk"),
-            "this is the config record, not the state store"
+            resolve_config_dir(None, Some(os("/home/u"))),
+            PathBuf::from("/home/u/.tsk"),
+            "config lives beside the board's data in one store root"
         );
     }
 
     #[test]
     fn empty_home_falls_through_to_the_relative_fallback() {
         assert_eq!(
-            resolve_config_dir(None, None, None, Some(os(""))),
+            resolve_config_dir(None, Some(os(""))),
             PathBuf::from(".tsk-config")
         );
     }
 
     #[test]
     fn no_candidate_resolves_to_a_relative_dir_never_a_shared_temp_path() {
-        let fallback = resolve_config_dir(None, None, None, None);
+        let fallback = resolve_config_dir(None, None);
 
         assert_eq!(fallback, PathBuf::from(".tsk-config"));
         assert!(
@@ -411,9 +352,7 @@ mod tests {
         assert_eq!(
             default_config_dir(),
             resolve_config_dir(
-                env::var_os("HERDR_PLUGIN_CONFIG_DIR").as_deref(),
                 env::var_os("TSK_CONFIG_DIR").as_deref(),
-                env::var_os("XDG_CONFIG_HOME").as_deref(),
                 env::var_os("HOME").as_deref(),
             )
         );

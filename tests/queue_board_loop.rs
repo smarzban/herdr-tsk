@@ -25,7 +25,7 @@ impl Drop for TempDirGuard {
 }
 
 /// Restores an environment variable to whatever it held before the test touched it, so one
-/// test's `HERDR_PLUGIN_STATE_DIR` never leaks into the next.
+/// test's `TSK_STATE_DIR` never leaks into the next.
 struct EnvVarGuard {
     key: &'static str,
     previous: Option<OsString>,
@@ -161,7 +161,7 @@ fn instrumented_loop_idle_wait_never_sustained_below_25ms_without_animation() {
 fn load_board_and_draw_path_smoke_at_80x24() {
     let dir = temp_state_dir("smoke");
     let _dir_guard = TempDirGuard(dir.clone());
-    let _env_guard = EnvVarGuard::set("HERDR_PLUGIN_STATE_DIR", &dir);
+    let _env_guard = EnvVarGuard::set("TSK_STATE_DIR", &dir);
 
     let model = load_board_model().expect("load board model from an empty temp state dir");
 

@@ -29,9 +29,9 @@ The built binary is `target/release/tsk`.
 
 ### Standalone
 
-Run `tsk` directly. State lives in `$XDG_DATA_HOME/tsk`
-(`~/.local/share/tsk` by default), config in `~/.config/tsk`. Override either
-with `TSK_STATE_DIR` / `TSK_CONFIG_DIR`.
+Run `tsk` directly. The store is `~/.tsk`: `tasks.json` and `settings.json`
+live side by side. Override the locations with `TSK_STATE_DIR` /
+`TSK_CONFIG_DIR`.
 
 ```bash
 tsk add -t "Draft release notes"
@@ -66,9 +66,11 @@ board you already have.
 herdr plugin action invoke quick-capture --plugin herdr-tasks
 ```
 
-In plugin mode, state lives under `HERDR_PLUGIN_STATE_DIR` and config under
-`HERDR_PLUGIN_CONFIG_DIR`; the host injects both, so the plugin and a standalone
-CLI can be pointed at the same store deliberately but never collide by accident.
+In plugin mode herdr injects `HERDR_PLUGIN_STATE_DIR` / `HERDR_PLUGIN_CONFIG_DIR`, but
+tsk deliberately ignores them: there is one store (`~/.tsk`) whether the board runs in
+herdr, another multiplexer, or a bare terminal. Herdr documents plugin state as
+plugin-owned and never touches its contents, so the pane and the CLI edit the same
+board safely.
 
 ## Pane size
 
