@@ -1884,6 +1884,67 @@ fn failed_task_page_view_save_holds_a_dirty_form_for_recovery() {
 }
 
 #[test]
+fn failed_scope_dropdown_save_holds_the_task_form_for_recovery() {
+    let (mut domain, mut model, _) = board_with_two_tasks();
+    let baseline = snapshot_of(&domain);
+    let mut recovery = SaveRecovery::new();
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::BeginEditTitle,
+        None,
+        None,
+    )
+    .expect("open task form");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::EditInsert('!'),
+        None,
+        None,
+    )
+    .expect("dirty title draft");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::FocusFormField(CaptureField::Scope),
+        None,
+        None,
+    )
+    .expect("focus scope");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenFormScopeDropdown,
+        None,
+        None,
+    )
+    .expect("open scope dropdown");
+    assert_eq!(model.input_mode(), BoardInputMode::FormScopeDropdown);
+
+    apply_board_intent_with_save_recovery(
+        &mut domain,
+        &mut model,
+        &mut recovery,
+        BoardSaveContext {
+            baseline,
+            intent: BoardIntent::ConfirmEdit,
+            snapshot: None,
+            host: None,
+        },
+        |_| Err(INJECTED.into()),
+    )
+    .expect("failed dropdown save stays recoverable");
+
+    assert!(recovery.is_pending());
+    assert!(
+        model.board_form_open(),
+        "a failed scope-dropdown save retains the task form"
+    );
+    assert_eq!(model.input_mode(), BoardInputMode::SaveRecovery);
+}
+
+#[test]
 fn failed_task_thread_edit_cancel_returns_to_task_page_with_a_retained_form() {
     let (mut domain, mut model, id) = board_with_two_tasks();
     let baseline = snapshot_of(&domain);

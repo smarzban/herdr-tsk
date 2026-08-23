@@ -762,14 +762,10 @@ pub fn apply_board_intent_with_save_recovery(
     let holds_task_edit = matches!(
         intent,
         BoardIntent::ConfirmEdit | BoardIntent::ConfirmEditNext
-    ) && matches!(
-        model.input_mode(),
-        BoardInputMode::TaskPage
-            | BoardInputMode::EditTitle
-            | BoardInputMode::EditNotes
-            | BoardInputMode::EditThread
-            | BoardInputMode::EditScope
-    );
+    ) && model.edit_target().is_some()
+        // Step saves use the same intent but their own pending-save state. Holding the task
+        // form here would retain stale task-edit state that was never created.
+        && model.input_mode() != BoardInputMode::EditStep;
     if holds_task_edit {
         model.hold_task_edit_save();
     }
