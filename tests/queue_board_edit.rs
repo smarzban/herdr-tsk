@@ -1029,6 +1029,59 @@ fn canceling_thread_edit_keeps_the_task_page_and_resets_the_thread_draft() {
 }
 
 #[test]
+fn editing_an_unthreaded_task_paints_a_labeled_thread_footer_slot() {
+    let mut domain = DomainState::new();
+    domain
+        .create(
+            "Task",
+            None,
+            project(THIS_REPO),
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("create");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::BeginEditTitle,
+        None,
+        None,
+    )
+    .expect("open task form");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::FocusFormField(CaptureField::Thread),
+        None,
+        None,
+    )
+    .expect("focus thread");
+
+    let backend = TestBackend::new(80, 24);
+    let mut terminal = Terminal::new(backend).expect("terminal");
+    terminal
+        .draw(|frame| draw_board(frame, &model))
+        .expect("draw thread field");
+    let painted: String = terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect();
+    assert!(
+        painted.contains("app · thread · created"),
+        "the unthreaded edit footer must label the Thread target: {painted}"
+    );
+    assert!(
+        !painted.contains("app · # · created"),
+        "an empty thread must not render as a dangling hash: {painted}"
+    );
+}
+
+#[test]
 fn thread_field_is_inert_while_step_editor_owns_the_footer() {
     let mut domain = DomainState::new();
     domain

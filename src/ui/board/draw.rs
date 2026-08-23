@@ -282,12 +282,13 @@ fn build_task_page_overlay<'a>(
             model.input_mode(),
             BoardInputMode::EditTitle
                 | BoardInputMode::EditNotes
+                | BoardInputMode::EditThread
                 | BoardInputMode::EditScope
                 | BoardInputMode::FormScopeDropdown
         ) {
             // An empty thread still needs a visible field-sized footer target while the form
             // is editing, otherwise mouse users can only reach Thread after it already exists.
-            meta.push_str(" · #");
+            meta.push_str(" · thread");
         }
         let now = SystemTime::now();
         meta.push_str(&format!(
