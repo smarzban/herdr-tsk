@@ -296,6 +296,157 @@ fn pre_steps_store_decodes_with_empty_steps() {
 }
 
 #[test]
+fn pre_thread_store_decodes_with_no_thread() {
+    let dir = temp_state_dir();
+    let _guard = TempDirGuard(dir.clone());
+    fs::copy(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/pre_thread_tasks.json"),
+        dir.join("tasks.json"),
+    )
+    .expect("install pre-thread store");
+
+    let state = TaskStore::new(&dir)
+        .load()
+        .expect("pre-thread store loads without migration");
+    let task = state.tasks().first().expect("fixture task");
+    assert_eq!(task.thread, None);
+}
+
+#[test]
+fn thread_round_trips_through_save_and_load() {
+    let dir = temp_state_dir();
+    let _guard = TempDirGuard(dir.clone());
+    let store = TaskStore::new(&dir);
+    let mut state = DomainState::new();
+    let id = state
+        .create(
+            "Threaded task",
+            None,
+            TaskScope::Global,
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("create task");
+    state
+        .edit(
+            id,
+            "Threaded task",
+            None,
+            TaskScope::Global,
+            Some("release-2026".into()),
+        )
+        .expect("attach thread");
+
+    store.save(&state).expect("save threaded task");
+    let loaded = store.load().expect("reload threaded task");
+    assert_eq!(
+        loaded.get(id).and_then(|task| task.thread.as_deref()),
+        Some("release-2026")
+    );
+}
+
+#[test]
+fn edit_with_thread_persists_through_one_locked_merge() {
+    let dir = temp_state_dir();
+    let _guard = TempDirGuard(dir.clone());
+    let store = TaskStore::new(&dir);
+    let mut seed = DomainState::new();
+    let id = seed
+        .create(
+            "Merge thread",
+            None,
+            TaskScope::Global,
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("create task");
+    store.save(&seed).expect("seed task");
+
+    let mut local = store.load().expect("load local task");
+    local
+        .edit(
+            id,
+            "Merge thread",
+            None,
+            TaskScope::Global,
+            Some("release-2026".into()),
+        )
+        .expect("edit thread");
+    store
+        .reload_merge_save(&mut local)
+        .expect("one locked merge persists thread edit");
+
+    assert_eq!(
+        local.get(id).and_then(|task| task.thread.as_deref()),
+        Some("release-2026")
+    );
+    assert_eq!(
+        store
+            .load()
+            .expect("reload merged state")
+            .get(id)
+            .and_then(|task| task.thread.as_deref()),
+        Some("release-2026")
+    );
+}
+
+#[test]
+fn conflicting_concurrent_thread_edits_reject_via_revision_guard() {
+    let dir = temp_state_dir();
+    let _guard = TempDirGuard(dir.clone());
+    let store = TaskStore::new(&dir);
+    let mut seed = DomainState::new();
+    let id = seed
+        .create(
+            "Conflicting threads",
+            None,
+            TaskScope::Global,
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("create task");
+    store.save(&seed).expect("seed task");
+
+    let mut local = store.load().expect("load local writer");
+    let mut concurrent = store.load().expect("load concurrent writer");
+    local
+        .edit(
+            id,
+            "Conflicting threads",
+            None,
+            TaskScope::Global,
+            Some("local".into()),
+        )
+        .expect("stage local thread edit");
+    concurrent
+        .edit(
+            id,
+            "Conflicting threads",
+            None,
+            TaskScope::Global,
+            Some("concurrent".into()),
+        )
+        .expect("stage concurrent thread edit");
+    store.save(&concurrent).expect("save concurrent edit");
+
+    let error = store
+        .reload_merge_save(&mut local)
+        .expect_err("divergent thread edits must conflict");
+    assert!(error.to_string().contains("changed during save"));
+    assert_eq!(
+        store
+            .load()
+            .expect("reload durable concurrent edit")
+            .get(id)
+            .and_then(|task| task.thread.as_deref()),
+        Some("concurrent")
+    );
+}
+
+#[test]
 fn steps_round_trip_preserves_identity_flags_and_order() {
     let dir = temp_state_dir();
     let _guard = TempDirGuard(dir.clone());
@@ -542,6 +693,7 @@ fn stale_undo_refuses_newer_task_revision_without_popping_newer_state() {
             "Changed concurrently",
             Some("newer notes".into()),
             TaskScope::Global,
+            None,
         )
         .expect("newer semantic mutation");
     store.save(&newer_writer).expect("save newer task revision");

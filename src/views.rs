@@ -103,6 +103,7 @@ mod tests {
             merge_base_revision: None,
             title: format!("task-{id}"),
             notes: None,
+            thread: None,
             status,
             scope,
             capsule: None,

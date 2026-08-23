@@ -8,7 +8,7 @@ use std::rc::Rc;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use herdr_tasks::app::{apply_board_intent_with_save_recovery, BoardSaveContext};
 use herdr_tasks::context::InvocationSnapshot;
-use herdr_tasks::domain::{DomainState, ProvenanceOrigin, TaskScope};
+use herdr_tasks::domain::{DomainState, ProvenanceOrigin, TaskEventKind, TaskScope};
 use herdr_tasks::save_recovery::SaveRecovery;
 use herdr_tasks::ui::board::{
     apply_intent, board_hit_map, draw_board, BoardInputMode, BoardModel, IntentOutcome,
@@ -620,12 +620,18 @@ fn expanded_page_stashes_notes_and_scope_across_esc_and_saves_like_quick_add() {
         "Tab in the page advances the form rather than re-expanding quick add"
     );
     apply(&mut domain, &mut model, BoardIntent::FormFocusNext, None);
+    assert_eq!(model.input_mode(), BoardInputMode::EditThread);
+    assert_eq!(
+        model.form_focus(),
+        Some(herdr_tasks::ui::capture::CaptureField::Thread)
+    );
+    apply(&mut domain, &mut model, BoardIntent::FormFocusNext, None);
     assert_eq!(model.input_mode(), BoardInputMode::EditScope);
     assert_eq!(model.form_scope(), Some(&TaskScope::Global));
 
     apply(&mut domain, &mut model, BoardIntent::CancelEdit, None);
     assert_eq!(model.input_mode(), BoardInputMode::QuickAdd);
-    assert_eq!(model.quick_add_title_value(), "draft with details");
+    assert_eq!(model.quick_add_title_value(), "draft with details !p");
     apply(&mut domain, &mut model, BoardIntent::ExpandQuickAdd, None);
     assert_eq!(model.input_mode(), BoardInputMode::EditNotes);
     assert_eq!(model.edit_buffer(), "preserved note");
@@ -644,6 +650,243 @@ fn expanded_page_stashes_notes_and_scope_across_esc_and_saves_like_quick_add() {
     assert_eq!(task.title, "draft with details");
     assert_eq!(task.notes.as_deref(), Some("preserved note"));
     assert_eq!(task.scope, TaskScope::Global);
+}
+
+#[test]
+fn t_token_threads_while_hash_words_stay_title_text() {
+    let mut domain = DomainState::new();
+    let mut model = BoardModel::from_domain(&domain, None);
+    let snap = snapshot();
+
+    open(&mut domain, &mut model, &snap);
+    type_title(&mut domain, &mut model, "ship #urgent !t Release-2026");
+    assert_eq!(
+        apply(&mut domain, &mut model, BoardIntent::QuickAddSave, None),
+        IntentOutcome::Persist
+    );
+    model.sync_from_domain(&domain);
+
+    let task = domain.tasks().last().expect("saved task");
+    assert_eq!(task.title, "ship #urgent");
+    assert_eq!(task.thread.as_deref(), Some("release-2026"));
+}
+
+#[test]
+fn p_token_consumes_one_argument_and_leaves_later_words_in_the_title() {
+    let mut domain = DomainState::new();
+    let mut model = BoardModel::from_domain(&domain, None);
+
+    save_quick_add(&mut domain, &mut model, "ship !p /repos/one now");
+
+    let task = domain.tasks().last().expect("saved task");
+    assert_eq!(task.title, "ship now");
+    assert_eq!(
+        task.scope,
+        TaskScope::Project {
+            path: "/repos/one".into()
+        }
+    );
+}
+
+#[test]
+fn bare_t_token_saves_unthreaded_and_strips() {
+    let mut domain = DomainState::new();
+    let mut model = BoardModel::from_domain(&domain, None);
+    let snap = snapshot();
+
+    open(&mut domain, &mut model, &snap);
+    type_title(&mut domain, &mut model, "unthread this !t");
+    assert_eq!(
+        apply(&mut domain, &mut model, BoardIntent::QuickAddSave, None),
+        IntentOutcome::Persist
+    );
+    model.sync_from_domain(&domain);
+
+    let task = domain.tasks().last().expect("saved task");
+    assert_eq!(task.title, "unthread this");
+    assert_eq!(task.thread, None);
+}
+
+#[test]
+fn t_and_p_tokens_combine_in_either_order() {
+    let mut domain = DomainState::new();
+    let mut model = BoardModel::from_domain(&domain, None);
+
+    save_quick_add(
+        &mut domain,
+        &mut model,
+        "first !p /repos/one !t Release-2026",
+    );
+    save_quick_add(&mut domain, &mut model, "second !t Other !p /repos/two");
+
+    for (task, title, path, thread) in [
+        (&domain.tasks()[0], "first", "/repos/one", "release-2026"),
+        (&domain.tasks()[1], "second", "/repos/two", "other"),
+    ] {
+        assert_eq!(task.title, title);
+        assert_eq!(task.scope, TaskScope::Project { path: path.into() });
+        assert_eq!(task.thread.as_deref(), Some(thread));
+    }
+}
+
+#[test]
+fn malformed_t_token_refuses_on_open_line_and_clears_on_close() {
+    let mut domain = DomainState::new();
+    let mut model = BoardModel::from_domain(&domain, None);
+    let snap = snapshot();
+
+    open(&mut domain, &mut model, &snap);
+    type_title(
+        &mut domain,
+        &mut model,
+        "bad !t release_name !p /repos/other",
+    );
+    assert_eq!(
+        apply(&mut domain, &mut model, BoardIntent::QuickAddSave, None),
+        IntentOutcome::None
+    );
+    assert_eq!(model.input_mode(), BoardInputMode::QuickAdd);
+    assert!(model
+        .message()
+        .is_some_and(|message| message.contains("thread")));
+    assert!(
+        domain.tasks().is_empty(),
+        "a malformed token persists nothing"
+    );
+
+    apply(&mut domain, &mut model, BoardIntent::CancelQuickAdd, None);
+    assert_eq!(model.input_mode(), BoardInputMode::Normal);
+    assert_eq!(model.message(), None);
+}
+
+#[test]
+fn quick_add_without_t_does_not_inherit_a_prior_thread() {
+    let mut domain = DomainState::new();
+    let mut model = BoardModel::from_domain(&domain, None);
+
+    save_quick_add(&mut domain, &mut model, "threaded !t release-2026");
+    save_quick_add(&mut domain, &mut model, "unthreaded follow-up");
+
+    assert_eq!(domain.tasks()[0].thread.as_deref(), Some("release-2026"));
+    assert_eq!(domain.tasks()[1].thread, None);
+}
+
+#[test]
+fn over_length_t_token_refuses_without_applying_scope() {
+    let mut domain = DomainState::new();
+    let mut model = BoardModel::from_domain(&domain, None);
+    let snap = snapshot();
+    let too_long = "a".repeat(33);
+
+    open(&mut domain, &mut model, &snap);
+    type_title(
+        &mut domain,
+        &mut model,
+        &format!("bad !p /repos/other !t {too_long}"),
+    );
+    assert_eq!(
+        apply(&mut domain, &mut model, BoardIntent::QuickAddSave, None),
+        IntentOutcome::None
+    );
+    assert_eq!(model.input_mode(), BoardInputMode::QuickAdd);
+    assert!(model.message().is_some());
+    assert!(domain.tasks().is_empty());
+}
+
+#[test]
+fn malformed_t_token_keeps_quick_add_open_when_expanding() {
+    let mut domain = DomainState::new();
+    let mut model = BoardModel::from_domain(&domain, None);
+    let snap = snapshot();
+
+    open(&mut domain, &mut model, &snap);
+    type_title(&mut domain, &mut model, "bad !t release_name");
+    assert_eq!(
+        apply(&mut domain, &mut model, BoardIntent::ExpandQuickAdd, None),
+        IntentOutcome::None
+    );
+    assert_eq!(model.input_mode(), BoardInputMode::QuickAdd);
+    assert_eq!(model.quick_add_title_value(), "bad !t release_name");
+    assert!(model.message().is_some());
+    assert!(domain.tasks().is_empty());
+}
+
+#[test]
+fn draft_stash_round_trips_thread_through_tab_and_esc() {
+    let mut domain = DomainState::new();
+    let mut model = BoardModel::from_domain(&domain, None);
+    let snap = snapshot();
+
+    open(&mut domain, &mut model, &snap);
+    type_title(
+        &mut domain,
+        &mut model,
+        "threaded details !p /repos/draft !t Release-2026",
+    );
+    apply(&mut domain, &mut model, BoardIntent::ExpandQuickAdd, None);
+    for character in "preserved note".chars() {
+        apply(
+            &mut domain,
+            &mut model,
+            BoardIntent::EditInsert(character),
+            None,
+        );
+    }
+    apply(&mut domain, &mut model, BoardIntent::CancelEdit, None);
+    assert_eq!(model.input_mode(), BoardInputMode::QuickAdd);
+    assert_eq!(
+        model.quick_add_title_value(),
+        "threaded details !p /repos/draft !t Release-2026"
+    );
+
+    apply(&mut domain, &mut model, BoardIntent::ExpandQuickAdd, None);
+    assert_eq!(model.edit_buffer(), "preserved note");
+    assert_eq!(
+        apply(&mut domain, &mut model, BoardIntent::ConfirmEdit, None),
+        IntentOutcome::Persist
+    );
+    model.sync_from_domain(&domain);
+
+    let task = domain.tasks().last().expect("saved task");
+    assert_eq!(task.title, "threaded details");
+    assert_eq!(task.notes.as_deref(), Some("preserved note"));
+    assert_eq!(
+        task.scope,
+        TaskScope::Project {
+            path: "/repos/draft".into()
+        }
+    );
+    assert_eq!(task.thread.as_deref(), Some("release-2026"));
+}
+
+#[test]
+fn threaded_quick_add_produces_only_created_event_and_no_edited_event() {
+    let mut domain = DomainState::new();
+    let mut model = BoardModel::from_domain(&domain, None);
+
+    save_quick_add(&mut domain, &mut model, "ship it !t Release-2026");
+
+    let task = domain.tasks().last().expect("threaded task");
+    assert_eq!(task.thread.as_deref(), Some("release-2026"));
+    assert_eq!(
+        task.history
+            .iter()
+            .map(|event| event.kind)
+            .collect::<Vec<_>>(),
+        vec![TaskEventKind::Created]
+    );
+}
+
+#[test]
+fn bare_t_before_hash_word_unthreads_and_keeps_hash_word_in_title() {
+    let mut domain = DomainState::new();
+    let mut model = BoardModel::from_domain(&domain, None);
+
+    save_quick_add(&mut domain, &mut model, "ship !t #urgent");
+
+    let task = domain.tasks().last().expect("unthreaded task");
+    assert_eq!(task.title, "ship #urgent");
+    assert_eq!(task.thread, None);
 }
 
 #[test]
@@ -783,7 +1026,7 @@ fn capture_bar_renders_spaced_three_row_block_and_stays_bounded_without_color_sg
     let standard = render_text(&model, 80, 24);
     for text in [
         "visible task",
-        "title…   !p global · !p name project · tab details",
+        "title…   !p global · !p name project · !t thread · tab details",
         "enter save · ctrl+enter save+next · tab details · esc close",
     ] {
         assert!(standard.contains(text), "missing {text:?}: {standard}");

@@ -6,7 +6,7 @@ use serde::Serialize;
 use uuid::Uuid;
 
 use crate::context::snapshot_from_env;
-use crate::domain::{HumanStatus, TaskScope};
+use crate::domain::{normalize_thread, HumanStatus, TaskScope};
 use crate::scope::resolve_flag_scope;
 use crate::store::{default_state_dir, TaskStore};
 
@@ -19,6 +19,8 @@ pub struct ListInput {
     pub all: bool,
     pub done: bool,
     pub deleted: bool,
+    /// Normalized at the argv boundary so filtering only compares valid names.
+    pub thread: Option<String>,
     /// One task addressed by id: single-task listing with step lines.
     pub task: Option<Uuid>,
     pub state_dir: Option<PathBuf>,
@@ -48,6 +50,7 @@ pub(crate) struct ListRow {
     pub(crate) title: String,
     pub(crate) status: HumanStatus,
     pub(crate) project: Option<String>,
+    pub(crate) thread: Option<String>,
 }
 
 /// Read-only result for the list command.
@@ -73,6 +76,7 @@ pub fn parse(args: &[String]) -> Result<ListInput, String> {
         all: false,
         done: false,
         deleted: false,
+        thread: None,
         task: None,
         state_dir: None,
         help: false,
@@ -88,12 +92,26 @@ pub fn parse(args: &[String]) -> Result<ListInput, String> {
                 input.project = Some(flag["--project=".len()..].to_owned());
                 index += 1;
             }
+            flag if flag.starts_with("--thread=") => {
+                input.thread = Some(
+                    normalize_thread(&flag["--thread=".len()..])
+                        .map_err(|_| "invalid thread name".to_owned())?,
+                );
+                index += 1;
+            }
             "--json" => {
                 input.json = true;
                 index += 1;
             }
             "-p" | "--project" => {
                 input.project = Some(value(flag)?);
+                index += 2;
+            }
+            "--thread" => {
+                input.thread = Some(
+                    normalize_thread(&value(flag)?)
+                        .map_err(|_| "invalid thread name".to_owned())?,
+                );
                 index += 2;
             }
             "--global" => {
@@ -136,8 +154,10 @@ pub fn parse(args: &[String]) -> Result<ListInput, String> {
         }
     }
 
-    if input.task.is_some() && (input.all || input.global || input.project.is_some()) {
-        return Err("task id cannot be used with --project, --global, or --all".into());
+    if input.task.is_some()
+        && (input.all || input.global || input.project.is_some() || input.thread.is_some())
+    {
+        return Err("task id cannot be used with --project, --global, --all, or --thread".into());
     }
     if input.task.is_some() && (input.done || input.deleted) {
         return Err("task id cannot be used with --done or --deleted".into());
@@ -200,6 +220,12 @@ pub fn run(input: ListInput) -> Result<ListResult, ListError> {
         .tasks()
         .iter()
         .filter(|task| scope.as_ref().is_none_or(|scope| task.scope == *scope))
+        .filter(|task| {
+            input
+                .thread
+                .as_deref()
+                .is_none_or(|thread| task.thread.as_deref() == Some(thread))
+        })
         .filter(|task| match view {
             ListView::Open => !task.soft_deleted && is_open(task.status),
             ListView::Done => !task.soft_deleted && task.status == HumanStatus::Done,
@@ -225,6 +251,7 @@ fn row_for(task: &crate::domain::Task) -> ListRow {
             TaskScope::Global => None,
             TaskScope::Project { path } => Some(path.clone()),
         },
+        thread: task.thread.clone(),
     }
 }
 

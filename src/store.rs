@@ -609,7 +609,7 @@ mod tests {
         // Disk side creates the revision the stale local writer will base its mutation on.
         let mut disk_side = store.load().expect("load");
         disk_side
-            .edit(id, "From disk", None, TaskScope::Global)
+            .edit(id, "From disk", None, TaskScope::Global, None)
             .expect("edit disk");
         store.save(&disk_side).expect("save disk edit");
 
@@ -617,7 +617,7 @@ mod tests {
         // save precondition instead of relying on wall-clock ordering.
         let mut local = store.load().expect("load local base");
         local
-            .edit(id, "From local", None, TaskScope::Global)
+            .edit(id, "From local", None, TaskScope::Global, None)
             .expect("edit local");
 
         // The disk still has the base revision local changed from.
@@ -653,7 +653,7 @@ mod tests {
 
         let mut local = store.load().expect("load legacy task");
         local
-            .edit(id, "first mutation", None, TaskScope::Global)
+            .edit(id, "first mutation", None, TaskScope::Global, None)
             .expect("edit legacy task");
         store
             .reload_merge_save(&mut local)
@@ -690,9 +690,11 @@ mod tests {
         store.save(&seed).unwrap();
         let mut local = store.load().unwrap();
         let mut concurrent = store.load().unwrap();
-        local.edit(id, "local", None, TaskScope::Global).unwrap();
+        local
+            .edit(id, "local", None, TaskScope::Global, None)
+            .unwrap();
         concurrent
-            .edit(id, "concurrent", None, TaskScope::Global)
+            .edit(id, "concurrent", None, TaskScope::Global, None)
             .unwrap();
         store.save(&concurrent).unwrap();
 

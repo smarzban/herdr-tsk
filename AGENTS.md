@@ -27,8 +27,10 @@ For scriptable board work, use `herdr-tasks add` and `herdr-tasks list`; read
 
 ### Board
 
-- Sections are computed, never navigated: IN MOTION · project groups when showing
-  all projects, ON DECK when scoped · global last · done drawer (`z`)
+- Sections and scoped thread headers are computed, never navigated: IN MOTION · project
+  groups when showing all projects, ON DECK when scoped · global last · done drawer (`z`).
+  Scoped ON DECK thread blocks paint dim `#name` headers with open counts; headers consume
+  row budget but are not selectable or hit-testable.
 - Standard ≥78×24, compact below, operable to 40×10
 - Human status: `ready` · `started` · `blocked` · `review` · `done`. The store
   still reads old `todo`/`doing` values.
@@ -41,11 +43,14 @@ For scriptable board work, use `herdr-tasks add` and `herdr-tasks list`; read
   expands the draft onto the task page with a title·notes·scope stash, so Esc
   returns to the line and a second `Tab` restores what was typed. A project board
   defaults the draft to that project, a Global board defaults it to global, and All
-  keeps the invocation cwd-derived default. Scope tokens in the title: bare `!p`
-  global, `!p name` by project basename (case-insensitive),
-  `!p /path` verbatim; tokens are stripped from the saved title. A saved task
-  becomes the selection. Success has no status message: the row flash is the
-  feedback. Refusals paint while the line is open and clear when it closes.
+  keeps the invocation cwd-derived default. Capture tokens in the title: `!p` and
+  `!t` each consume one whitespace-delimited argument. Bare `!p` selects global,
+  `!p name` selects a project basename (case-insensitive), and `!p /path` uses that
+  path verbatim. Bare `!t` unthreads, while `!t name` assigns a normalized thread:
+  lowercase ASCII alphanumerics and hyphens, starting with an alphanumeric, at most
+  32 characters. Tokens are stripped from the saved title. A saved task becomes the
+  selection. Success has no status message: the row flash is the feedback. Refusals
+  paint while the line is open and clear when it closes.
 - There is no inline board capture form. Creation detail lives on the task page;
   the standalone Capture UI (`AppMode::Capture`, `src/ui/capture.rs`) is a
   separate surface reached through the host launcher.

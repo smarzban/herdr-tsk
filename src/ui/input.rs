@@ -556,6 +556,7 @@ pub fn map_key_with(
         BoardInputMode::QuickAdd => map_quick_add_key(key),
         BoardInputMode::FormScopeDropdown => map_board_form_key(CaptureField::Scope, true, key),
         BoardInputMode::EditScope => map_board_form_key(CaptureField::Scope, false, key),
+        BoardInputMode::EditThread => map_board_form_key(CaptureField::Thread, false, key),
         BoardInputMode::EditTitle | BoardInputMode::EditNotes | BoardInputMode::EditStep => {
             map_edit(mode, key)
         }
@@ -709,7 +710,7 @@ fn map_form_edit_key(
             }
             _ => None,
         },
-        CaptureField::Title | CaptureField::Notes => match key.code {
+        CaptureField::Title | CaptureField::Notes | CaptureField::Thread => match key.code {
             KeyCode::Enter if focused == CaptureField::Notes => {
                 Some(BoardIntent::EditInsertLineBreak)
             }
@@ -738,9 +739,10 @@ fn map_form_edit_key(
 pub fn map_edit_paste(mode: BoardInputMode, text: &str) -> Option<BoardIntent> {
     match mode {
         BoardInputMode::QuickAdd => Some(BoardIntent::QuickAddInsertText(text.to_string())),
-        BoardInputMode::EditTitle | BoardInputMode::EditNotes | BoardInputMode::EditStep => {
-            Some(BoardIntent::EditInsertText(text.to_string()))
-        }
+        BoardInputMode::EditTitle
+        | BoardInputMode::EditNotes
+        | BoardInputMode::EditThread
+        | BoardInputMode::EditStep => Some(BoardIntent::EditInsertText(text.to_string())),
         BoardInputMode::EditScope
         | BoardInputMode::FormScopeDropdown
         | BoardInputMode::TaskPage => None,
@@ -1055,6 +1057,7 @@ fn map_edit(mode: BoardInputMode, key: KeyEvent) -> Option<BoardIntent> {
     let focused = match mode {
         BoardInputMode::EditTitle | BoardInputMode::EditStep => CaptureField::Title,
         BoardInputMode::EditNotes => CaptureField::Notes,
+        BoardInputMode::EditThread => CaptureField::Thread,
         _ => return None,
     };
     map_form_edit_key(focused, FormEditNavigation::None, key)
@@ -1102,7 +1105,10 @@ pub fn map_capture_key_state(
     }
     // The two text fields carry the board's editing chords, so their table runs before the
     // modified-chord rejection below; the scope row is deliberately not part of it.
-    if matches!(focused, CaptureField::Title | CaptureField::Notes) {
+    if matches!(
+        focused,
+        CaptureField::Title | CaptureField::Notes | CaptureField::Thread
+    ) {
         if let Some(intent) = map_capture_edit_chord(key) {
             return Some(intent);
         }
@@ -1124,7 +1130,7 @@ pub fn map_capture_key_state(
     match focused {
         // Title is one line, so Enter saves the draft; Notes is multi-line, so Enter opens
         // a line and the chord pair above saves instead (ADR 0006).
-        CaptureField::Title | CaptureField::Notes => match key.code {
+        CaptureField::Title | CaptureField::Notes | CaptureField::Thread => match key.code {
             KeyCode::Enter => Some(match focused {
                 CaptureField::Notes => CaptureIntent::InsertLineBreak,
                 _ => CaptureIntent::Save,
@@ -1201,7 +1207,7 @@ pub fn map_capture_paste_state(
     text: &str,
 ) -> Option<CaptureIntent> {
     match focused {
-        CaptureField::Title | CaptureField::Notes => {
+        CaptureField::Title | CaptureField::Notes | CaptureField::Thread => {
             Some(CaptureIntent::InsertText(text.to_string()))
         }
         CaptureField::Scope if path_editing => Some(CaptureIntent::InsertText(text.to_string())),
@@ -1229,9 +1235,9 @@ pub fn intent_primary_capture_action(intent: &CaptureIntent) -> Option<PrimaryCa
         | CaptureIntent::MoveWordRight
         | CaptureIntent::FocusNext
         | CaptureIntent::FocusPrev
-        | CaptureIntent::FocusField(CaptureField::Title | CaptureField::Notes) => {
-            Some(PrimaryCaptureAction::EditField)
-        }
+        | CaptureIntent::FocusField(
+            CaptureField::Title | CaptureField::Notes | CaptureField::Thread,
+        ) => Some(PrimaryCaptureAction::EditField),
         // Scope row click cycles; path edit and focusing scope are scope interaction.
         CaptureIntent::FocusField(CaptureField::Scope)
         | CaptureIntent::CycleScope

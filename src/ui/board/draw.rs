@@ -184,19 +184,38 @@ fn build_task_page_overlay<'a>(
     let step_views = bound_task.map(super::model::step_views).unwrap_or_default();
     // A step draft is windowed for the shared bottom input slot: the row less
     // the two-cell `▎ ` prompt that owns the terminal cursor.
-    let step_editor = form.steps.editor.as_ref().map(|editor| {
-        let avail = (geo.row_width as usize).saturating_sub(2);
-        let (text, cursor_col) = escaped_line_window(&editor.buffer, avail);
-        crate::ui::render::BottomInputSlot {
-            text,
-            cursor_col,
-            placeholder: "step…   enter save · ctrl+enter save+next · esc cancel",
-            refusal: editor.refusal.as_deref(),
-            // The bottom input replaces the shared status row. Forward recovery
-            // and record-refusal feedback to the surface that is actually visible.
-            message: model.message(),
-        }
-    });
+    let step_editor = form
+        .steps
+        .editor
+        .as_ref()
+        .map(|editor| {
+            let avail = (geo.row_width as usize).saturating_sub(2);
+            let (text, cursor_col) = escaped_line_window(&editor.buffer, avail);
+            crate::ui::render::BottomInputSlot {
+                text,
+                cursor_col,
+                placeholder: "step…   enter save · ctrl+enter save+next · esc cancel",
+                refusal: editor.refusal.as_deref(),
+                // The bottom input replaces the shared status row. Forward recovery
+                // and record-refusal feedback to the surface that is actually visible.
+                message: model.message(),
+            }
+        })
+        .or_else(|| {
+            (model.input_mode() == BoardInputMode::EditThread).then(|| {
+                let avail = (geo.row_width as usize).saturating_sub(2);
+                let (text, cursor_col) = escaped_line_window(&form.thread, avail);
+                crate::ui::render::BottomInputSlot {
+                    text,
+                    cursor_col,
+                    placeholder: "thread…   enter save · esc cancel",
+                    refusal: None,
+                    // The shared bottom slot owns this refusal while it is visible, so it
+                    // never leaks through the status row and remains legible at 40x10.
+                    message: form.thread_refusal.as_deref(),
+                }
+            })
+        });
     // A notes edit always keeps one row: the layout reserves it (the section caps
     // around it), so an active edit can never be scrolled/clamped out of the frame
     // entirely. The step editor uses the shared bottom slot, so steps alone
@@ -251,12 +270,36 @@ fn build_task_page_overlay<'a>(
     form.notes_max_scroll.set(content.max_scroll);
     form.steps.content_start.set(content.steps_start);
 
-    // Meta footer: scope · created · updated (ages only while the bound task is present).
-    let mut meta = match &form.scope {
+    // Meta footer: scope · thread · created · updated (ages only while the bound task is
+    // present). Keep its clickable pieces separate from the painted string: a project basename
+    // is user-controlled and may contain the same separator or label text.
+    let meta_scope = match &form.scope {
         TaskScope::Project { path } => render::short_project(path).to_string(),
         TaskScope::Global => "global".to_string(),
     };
+    let meta_scope_width = u16::try_from(render::display_width(&meta_scope)).unwrap_or(u16::MAX);
+    let mut meta = meta_scope.clone();
+    let mut thread_slot = None;
     if let Some(task) = bound_task {
+        thread_slot = if let Some(thread) = task.thread.as_deref() {
+            Some(format!(" · #{thread}"))
+        } else if matches!(
+            model.input_mode(),
+            BoardInputMode::EditTitle
+                | BoardInputMode::EditNotes
+                | BoardInputMode::EditThread
+                | BoardInputMode::EditScope
+                | BoardInputMode::FormScopeDropdown
+        ) {
+            // An empty thread still needs a visible field-sized footer target while the form
+            // is editing, otherwise mouse users can only reach Thread after it already exists.
+            Some(" · thread".to_string())
+        } else {
+            None
+        };
+        if let Some(slot) = &thread_slot {
+            meta.push_str(slot);
+        }
         let now = SystemTime::now();
         meta.push_str(&format!(
             " · created {} ago · updated {} ago",
@@ -264,10 +307,15 @@ fn build_task_page_overlay<'a>(
             render::format_age(now, task.updated_at)
         ));
     }
+    let thread_slot_width = thread_slot
+        .as_deref()
+        .map(render::display_width)
+        .map(|width| u16::try_from(width).unwrap_or(u16::MAX));
 
     let focus = match model.input_mode() {
         BoardInputMode::EditTitle => Some(CaptureField::Title),
         BoardInputMode::EditNotes => Some(CaptureField::Notes),
+        BoardInputMode::EditThread => Some(CaptureField::Thread),
         BoardInputMode::EditScope | BoardInputMode::FormScopeDropdown => Some(CaptureField::Scope),
         _ => None,
     };
@@ -285,6 +333,8 @@ fn build_task_page_overlay<'a>(
         step_marked: form.steps.delete_mark,
         step_editor,
         meta,
+        meta_scope_width,
+        thread_slot_width,
         focus,
         scope_dropdown,
     }
@@ -419,7 +469,7 @@ fn draw_board_impl(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap
             input: crate::ui::render::BottomInputSlot {
                 text: title,
                 cursor_col: title_cursor,
-                placeholder: "title…   !p global · !p name project · tab details",
+                placeholder: "title…   !p global · !p name project · !t thread · tab details",
                 refusal: None,
                 // Save recovery owns the verb row; ordinary quick-add refusals
                 // use the shared slot's reserved row above the cursor.

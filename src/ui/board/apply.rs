@@ -7,7 +7,7 @@ use uuid::Uuid;
 use crate::config::{default_config_dir, SettingsRecord};
 use crate::context::InvocationSnapshot;
 use crate::dispatch::DispatchRecoveryResult;
-use crate::domain::{DomainError, DomainState, HumanStatus, TaskScope};
+use crate::domain::{normalize_thread, DomainError, DomainState, HumanStatus, TaskScope};
 use crate::host::HostPorts;
 use crate::ui::capture::{CaptureField, TITLE_REQUIRED_MESSAGE};
 use crate::ui::edit::{flatten_line_breaks, EditBuffer};
@@ -17,7 +17,7 @@ use crate::ui::mouse::BoardPopup;
 use super::commands::{resolve_board_command, CommandSurface};
 use super::model::{
     owned_resource_summary, BoardForm, BoardInputMode, BoardModel, IntentOutcome, OwnedDeckScope,
-    ProjectPickerState, ProjectScopeOption, StepEditor, StepEditorSave,
+    ProjectPickerState, ProjectScopeOption, StepEditor, StepEditorSave, TaskEditSave,
 };
 
 /// What the row says when an action that aims at the selection is asked for on a board that
@@ -371,20 +371,24 @@ fn apply_board_intent(
                 model.focus_form_field(CaptureField::Notes);
                 return Ok(IntentOutcome::None);
             }
-            let (title, token_scope) = quick_add_title_and_scope(
+            let lifted = match lift_quick_add_tokens(
                 quick_add.title.value(),
                 domain,
                 quick_add.snapshot.as_ref().as_ref(),
-            );
-            let scope = token_scope.unwrap_or_else(|| quick_add.scope.clone());
+            ) {
+                Ok(lifted) => lifted,
+                Err(message) => {
+                    model.set_message(message);
+                    return Ok(IntentOutcome::None);
+                }
+            };
+            let scope = lifted.scope.unwrap_or_else(|| quick_add.scope.clone());
             let snapshot = quick_add.snapshot.as_ref().clone();
-            if let Some(quick_add) = model.quick_add.as_mut() {
-                quick_add.title = crate::ui::edit::seeded_draft(&title);
-                quick_add.scope = scope.clone();
-            }
             let mut form = BoardForm::capture(snapshot, model.this_repo.as_deref(), &model.tasks);
-            form.title = crate::ui::edit::seeded_draft(&title);
+            form.title = crate::ui::edit::seeded_draft(&lifted.title);
             form.scope = scope;
+            form.thread =
+                crate::ui::edit::seeded_draft(lifted.thread.as_deref().unwrap_or_default());
             form.focus = CaptureField::Notes;
             form.select_current_scope();
             model.form = Some(form);
@@ -639,7 +643,10 @@ fn apply_board_intent(
             // fields survive; the second Esc closes the page.
             if matches!(
                 model.input_mode,
-                BoardInputMode::EditTitle | BoardInputMode::EditNotes | BoardInputMode::EditScope
+                BoardInputMode::EditTitle
+                    | BoardInputMode::EditNotes
+                    | BoardInputMode::EditThread
+                    | BoardInputMode::EditScope
             ) && model.form.as_ref().is_some_and(BoardForm::is_task)
             {
                 let field = model
@@ -708,6 +715,15 @@ fn apply_board_intent(
                 let notes =
                     (!form.notes.value().trim().is_empty()).then(|| form.notes.value().to_string());
                 let scope_override = Some(form.scope.clone());
+                let thread = match normalize_optional_thread(form.thread.value()) {
+                    Ok(thread) => thread,
+                    Err(()) => {
+                        if let Some(form) = model.form.as_mut() {
+                            form.thread_refusal = Some("invalid thread name".into());
+                        }
+                        return Ok(IntentOutcome::None);
+                    }
+                };
                 return match crate::capture::capture_save(
                     domain,
                     None,
@@ -715,6 +731,7 @@ fn apply_board_intent(
                     title,
                     notes,
                     scope_override,
+                    thread,
                 ) {
                     Ok(id) => {
                         let expanded_quick_add = model.quick_add.is_some();
@@ -1290,6 +1307,10 @@ fn edit_draft(model: &mut BoardModel, operation: impl FnOnce(&mut EditBuffer)) {
     match form.focus {
         CaptureField::Title => operation(&mut form.title),
         CaptureField::Notes => operation(&mut form.notes),
+        CaptureField::Thread => {
+            form.thread_refusal = None;
+            operation(&mut form.thread);
+        }
         CaptureField::Scope => {}
     }
 }
@@ -1332,13 +1353,27 @@ fn quick_add_save(
         model.set_message("capture context unavailable; press Esc and try again");
         return Ok(IntentOutcome::None);
     };
-    let (title, token_scope) = quick_add_title_and_scope(
+    let lifted = match lift_quick_add_tokens(
         quick_add.title.value(),
         domain,
         quick_add.snapshot.as_ref().as_ref(),
-    );
-    let scope = token_scope.unwrap_or_else(|| quick_add.scope.clone());
-    match crate::capture::capture_save(domain, None, &snapshot, title, None, Some(scope.clone())) {
+    ) {
+        Ok(lifted) => lifted,
+        Err(message) => {
+            model.set_message(message);
+            return Ok(IntentOutcome::None);
+        }
+    };
+    let scope = lifted.scope.unwrap_or_else(|| quick_add.scope.clone());
+    match crate::capture::capture_save(
+        domain,
+        None,
+        &snapshot,
+        lifted.title,
+        None,
+        Some(scope.clone()),
+        lifted.thread,
+    ) {
         Ok(id) => {
             // Do not discard the draft until the app save boundary confirms persistence. A
             // failed save keeps this exact state behind SaveRecovery for retry or cancel.
@@ -1357,26 +1392,83 @@ fn quick_add_save(
     }
 }
 
-/// Parse whitespace-delimited quick-add scope directives before creating a task.
-fn quick_add_title_and_scope(
+/// Directives lifted from a quick-add title before capture.
+///
+/// This parser is deliberately private to quick-add. Title, notes, and checklist editors retain
+/// their literal text, while the status-row capture can apply scope and thread together.
+struct QuickAddTokens {
+    title: String,
+    scope: Option<TaskScope>,
+    thread: Option<String>,
+}
+
+/// Lift whitespace-delimited `!p` and `!t` directives in either order.
+///
+/// A directive consumes only its immediate non-directive argument. Parsing completes before any
+/// value is returned, so a malformed thread cannot partially apply a preceding scope override.
+fn lift_quick_add_tokens(
     value: &str,
     domain: &DomainState,
     snapshot: Option<&InvocationSnapshot>,
-) -> (String, Option<TaskScope>) {
+) -> Result<QuickAddTokens, String> {
     let words: Vec<&str> = value.split_whitespace().collect();
-    if let Some(index) = words.iter().position(|word| *word == "!p") {
-        let title = words[..index].join(" ");
-        let path = words[index + 1..].join(" ");
-        let scope = if path.is_empty() {
-            TaskScope::Global
-        } else {
-            TaskScope::Project {
-                path: crate::scope::resolve_project_path(&path, domain, snapshot),
+    let mut title = Vec::new();
+    let mut scope = None;
+    let mut thread = None;
+    let mut index = 0;
+
+    while let Some(word) = words.get(index) {
+        match *word {
+            "!p" => {
+                let argument = quick_add_token_argument(&words, index);
+                scope = Some(match argument {
+                    Some(path) => TaskScope::Project {
+                        path: crate::scope::resolve_project_path(path, domain, snapshot),
+                    },
+                    None => TaskScope::Global,
+                });
+                index += usize::from(argument.is_some()) + 1;
             }
-        };
-        return (title, Some(scope));
+            "!t" => {
+                let argument = quick_add_token_argument(&words, index);
+                thread = match argument {
+                    Some(name) => Some(
+                        normalize_thread(name).map_err(|_| "invalid thread name".to_string())?,
+                    ),
+                    None => None,
+                };
+                index += usize::from(argument.is_some()) + 1;
+            }
+            _ => {
+                title.push(*word);
+                index += 1;
+            }
+        }
     }
-    (words.join(" "), None)
+
+    Ok(QuickAddTokens {
+        title: title.join(" "),
+        scope,
+        thread,
+    })
+}
+
+/// A directive consumes one argument only when the next word is neither another directive nor
+/// a literal `#` title word.
+fn quick_add_token_argument<'a>(words: &'a [&str], index: usize) -> Option<&'a str> {
+    words
+        .get(index + 1)
+        .copied()
+        .filter(|word| *word != "!p" && *word != "!t" && !word.starts_with('#'))
+}
+
+fn normalize_optional_thread(value: &str) -> Result<Option<String>, ()> {
+    let value = value.trim();
+    if value.is_empty() {
+        Ok(None)
+    } else {
+        normalize_thread(value).map(Some).map_err(|_| ())
+    }
 }
 
 fn confirm_edit(
@@ -1389,9 +1481,18 @@ fn confirm_edit(
         return Ok(IntentOutcome::None);
     };
     let id = form.task_id().expect("task form has immutable id");
-    let title = form.title.value().to_string();
+    let title = form.title.value().trim().to_string();
     let notes = (!form.notes.value().trim().is_empty()).then(|| form.notes.value().to_string());
     let scope = form.scope.clone();
+    let thread = match normalize_optional_thread(form.thread.value()) {
+        Ok(thread) => thread,
+        Err(()) => {
+            if let Some(form) = model.form.as_mut() {
+                form.thread_refusal = Some("invalid thread name".into());
+            }
+            return Ok(IntentOutcome::None);
+        }
+    };
     let task = domain.get(id).ok_or(DomainError::UnknownId(id))?.clone();
     // `DomainState::edit` does not reject a soft-deleted task itself. Refuse before touching
     // the form so's bound-task and draft-recovery guarantees remain intact.
@@ -1399,14 +1500,18 @@ fn confirm_edit(
         return Err(DomainError::SoftDeleted(id));
     }
 
-    // One existing DomainState::edit call updates title, Notes, and scope together.
-    domain.edit(id, &title, notes, scope)?;
+    // One existing DomainState::edit call updates title, Notes, scope, and thread together.
+    domain.edit(id, &title, notes.clone(), scope.clone(), thread.clone())?;
 
-    // Only a successful atomic domain edit releases the form. Validation and stale-task
-    // refusals leave its buffers, focus, scope choice, and immutable id untouched.
-    model.input_mode = BoardInputMode::Normal;
-    model.form = None;
-    model.clear_message();
+    // Retain the complete form and mode until the persistence boundary confirms this exact
+    // atomic edit. A failed save can then Retry or Cancel without orphaning the input state.
+    model.task_edit_save = Some(TaskEditSave {
+        id,
+        title,
+        notes,
+        scope,
+        thread,
+    });
     Ok(IntentOutcome::Persist)
 }
 

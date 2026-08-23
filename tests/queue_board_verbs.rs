@@ -3,6 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use herdr_tasks::context::InvocationSnapshot;
 use herdr_tasks::domain::{DomainState, HumanStatus, ProvenanceOrigin, TaskEventKind, TaskScope};
 use herdr_tasks::ui::board::{
     apply_intent, board_intent_may_persist, board_verb_items, draw_board, resolve_board_command,
@@ -1430,7 +1431,7 @@ fn deleting_from_the_page_closes_it_and_undo_restores() {
 }
 
 #[test]
-fn tab_cycles_view_mode_through_title_notes_and_scope_edits() {
+fn tab_cycles_view_mode_through_title_notes_thread_and_scope_edits() {
     let (mut domain, mut model, _id) = board_with_noted_task();
     apply_intent(
         &mut domain,
@@ -1447,6 +1448,8 @@ fn tab_cycles_view_mode_through_title_notes_and_scope_edits() {
     assert_eq!(model.input_mode(), BoardInputMode::EditTitle);
     apply_intent(&mut domain, &mut model, tab.clone(), None, None).expect("focus notes");
     assert_eq!(model.input_mode(), BoardInputMode::EditNotes);
+    apply_intent(&mut domain, &mut model, tab.clone(), None, None).expect("focus thread");
+    assert_eq!(model.input_mode(), BoardInputMode::EditThread);
     apply_intent(&mut domain, &mut model, tab, None, None).expect("focus scope");
     assert_eq!(model.input_mode(), BoardInputMode::EditScope);
 }
@@ -3070,4 +3073,101 @@ fn delete_mark_shows_press_again_footer_message() {
         "the hint goes with the mark:\n{removed}"
     );
     assert_eq!(model.message(), None);
+}
+
+#[test]
+fn t_token_capture_threads_while_item_text_stays_literal() {
+    let mut domain = DomainState::new();
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
+    let snapshot = InvocationSnapshot {
+        default_scope: project(THIS_REPO),
+        this_repo: Some(PathBuf::from(THIS_REPO)),
+        title_prefill: None,
+        provenance: ProvenanceOrigin::Capture,
+        capsule: None,
+        agent_meta: None,
+    };
+
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenCapture,
+        Some(&snapshot),
+        None,
+    )
+    .expect("open quick add");
+    for character in "capture !t Release-2026".chars() {
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::QuickAddInsert(character),
+            None,
+            None,
+        )
+        .expect("type capture");
+    }
+    assert_eq!(
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::QuickAddSave,
+            None,
+            None,
+        )
+        .expect("save quick add"),
+        IntentOutcome::Persist
+    );
+    model.sync_from_domain(&domain);
+    let task_id = domain.tasks()[0].id;
+    assert_eq!(
+        domain.get(task_id).expect("capture").thread.as_deref(),
+        Some("release-2026")
+    );
+
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenTaskPage,
+        None,
+        None,
+    )
+    .expect("open task page");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::BeginAddStep,
+        None,
+        None,
+    )
+    .expect("open item editor");
+    for character in "literal !t release-2026 #word".chars() {
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::EditInsert(character),
+            None,
+            None,
+        )
+        .expect("type item");
+    }
+    assert_eq!(
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::ConfirmEdit,
+            None,
+            None,
+        )
+        .expect("save item"),
+        IntentOutcome::Persist
+    );
+    model.sync_from_domain(&domain);
+    assert_eq!(
+        domain.get(task_id).expect("capture").steps[0].text,
+        "literal !t release-2026 #word"
+    );
+    assert_eq!(
+        domain.get(task_id).expect("capture").thread.as_deref(),
+        Some("release-2026")
+    );
 }

@@ -21,3 +21,9 @@ Canonical terms for this repo. No implementation detail.
 - **toggle**: flip one step's done flag. The only step state change that is not a text change.
 - **step cursor**: the task page's step-row focus. Inactive on page open; a bare ↓ activates it (again after any deactivation), ↑ from the first step deactivates it. While active, bare arrows move it and modifier-protected verbs act on it; a single click on a step row moves it.
 - **step short id**: an unambiguous prefix of a step's stable identity, the way tasks are addressed from the CLI.
+- **thread**: an optional single name a task carries, grouping it with same-named tasks in the same scope. Not an entity: no identity beyond the name, no status, no lifecycle. It presents on the board exactly while at least one open task in its scope carries it; the field itself persists on the task regardless of status.
+- **thread token**: the `!t name` capture directive, sibling of `!p`; bare `!t` means unthreaded. Stripped from the saved title.
+- **thread header**: a derived, non-selectable board row above a thread's open tasks in a scoped deck group, showing the thread name and open count. Chrome, not a task.
+- **unthreaded**: carrying no thread. Unthreaded tasks list after thread groups within their deck group.
+- **open task**: human status ready, blocked, or review, and not soft-deleted. The tasks a thread header groups and counts.
+- **thread block**: the derived unit of one thread's header plus its ordered open tasks inside a deck section. Exists only in query output, never in the store.

@@ -231,6 +231,7 @@ impl ConcurrentBoardMutationStore {
                         "edited by main board while dispatch runs",
                         None,
                         TaskScope::Global,
+                        None,
                     )
                     .map_err(|error| error.to_string())
             })

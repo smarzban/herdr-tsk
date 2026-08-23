@@ -107,6 +107,15 @@ pub struct TaskRowPaint<'a> {
 /// [`present_line`] so truncation always shows `…`. Compact geometry
 /// (`meta_column_width == 0`) drops meta and gives the title the full row.
 pub fn paint_task_row(row: &TaskRowPaint<'_>, geo: &TierGeometry) -> Line<'static> {
+    paint_task_row_with_indent(row, geo, 0)
+}
+
+/// Paint a task row with extra leading cells reserved for a containing visual group.
+fn paint_task_row_with_indent(
+    row: &TaskRowPaint<'_>,
+    geo: &TierGeometry,
+    leading_indent: usize,
+) -> Line<'static> {
     let row_w = geo.row_width as usize;
     let meta_budget = geo.meta_column_width as usize;
     let title_budget = if meta_budget == 0 {
@@ -116,7 +125,7 @@ pub fn paint_task_row(row: &TaskRowPaint<'_>, geo: &TierGeometry) -> Line<'stati
     };
 
     let glyph = super::terminal_text(row.glyph);
-    let prefix = format!("  {glyph} ");
+    let prefix = format!("{}  {glyph} ", " ".repeat(leading_indent));
     let title_room = title_budget.saturating_sub(display_width(&prefix));
     let title = present_line(row.title, title_room);
     let left = fit_left(&format!("{prefix}{title}"), title_budget);
@@ -331,8 +340,13 @@ pub enum QueueOverlay<'a> {
         /// The page's add/rename step draft. When present it uses the shared
         /// bottom input slot, leaving the meta footer visible in the page above.
         step_editor: Option<BottomInputSlot<'a>>,
-        /// Footer: scope · created · updated.
+        /// Footer: scope · thread · created · updated.
         meta: String,
+        /// Display width of scope inside `meta`, carried separately so mouse geometry never
+        /// parses user-controlled project names from rendered text.
+        meta_scope_width: u16,
+        /// Display width of the rendered Thread segment, including its separator.
+        thread_slot_width: Option<u16>,
         /// Which field owns the cursor, if any (view mode: none).
         focus: Option<CaptureField>,
         scope_dropdown: Option<FormScopeDropdown<'a>>,
@@ -423,6 +437,8 @@ pub enum QueueHitTarget {
     FormNotes(usize),
     /// Shared-form scope row. A click opens the pending scope dropdown, never cycles scope.
     FormScope,
+    /// Shared-form thread portion of the task-page footer.
+    FormThread,
     /// One painted steps step row on the open task page, indexed by the step's
     /// absolute position in the task's steps (storage order), whatever window
     /// scroll painted it — the same absolute-index discipline [`Command`] follows.
@@ -563,7 +579,9 @@ pub fn draw_queue_frame(
                         );
                     }
                 }
-                ListRow::Hint(line) => put_line(frame, y, width, line),
+                ListRow::Hint(line) | ListRow::ThreadHeader(line) => {
+                    put_line(frame, y, width, line)
+                }
                 ListRow::Task { id, line } => {
                     put_line(frame, y, width, line);
                     if base_list_interactive {
@@ -767,6 +785,20 @@ const FORM_NOTES_VERBS: &[VerbEntry<'static>] = &[
         label: "cancel",
     },
 ];
+const FORM_THREAD_VERBS: &[VerbEntry<'static>] = &[
+    VerbEntry {
+        key: "enter",
+        label: "save",
+    },
+    VerbEntry {
+        key: "tab",
+        label: "scope",
+    },
+    VerbEntry {
+        key: "esc",
+        label: "cancel",
+    },
+];
 const FORM_SCOPE_VERBS: &[VerbEntry<'static>] = &[
     VerbEntry {
         key: "enter",
@@ -806,6 +838,7 @@ pub(crate) fn form_verb_items(
     match focus {
         CaptureField::Title => FORM_TITLE_VERBS,
         CaptureField::Notes => FORM_NOTES_VERBS,
+        CaptureField::Thread => FORM_THREAD_VERBS,
         CaptureField::Scope => FORM_SCOPE_VERBS,
     }
 }
@@ -915,10 +948,12 @@ fn paint_overlay(
             step_cursor,
             step_scroll,
             step_marked,
+            ref step_editor,
             ref meta,
+            meta_scope_width,
+            thread_slot_width,
             focus,
             scope_dropdown,
-            ..
         } => {
             paint_task_page(
                 frame,
@@ -934,7 +969,10 @@ fn paint_overlay(
                 *step_scroll,
                 *step_marked,
                 meta,
+                *meta_scope_width,
+                *thread_slot_width,
                 *focus,
+                step_editor.is_some(),
                 hits,
             );
             if let Some(dropdown) = scope_dropdown {
@@ -1379,7 +1417,10 @@ fn paint_task_page(
     step_scroll: usize,
     step_marked: Option<usize>,
     meta: &str,
+    meta_scope_width: u16,
+    thread_slot_width: Option<u16>,
     focus: Option<CaptureField>,
+    footer_input_open: bool,
     hits: &mut QueueHitMap,
 ) {
     let width = geo.row_width;
@@ -1546,7 +1587,7 @@ fn paint_task_page(
         paint_page_scrollbar(frame, &lay, width, scroll, content.total_rows);
     }
 
-    // Meta footer: scope · created · updated. It remains available while a step
+    // Meta footer: scope · thread · created · updated. It remains available while a step
     // draft uses the board's separate shared bottom input slot.
     if let Some(y) = lay.meta_y {
         put_line(
@@ -1555,7 +1596,19 @@ fn paint_task_page(
             width,
             paint_bounded_line(&format!("  {meta}"), width, style_dim()),
         );
-        hits.push(QueueHitTarget::FormScope, Rect::new(0, y, width, 1));
+
+        let thread_x = 2u16.saturating_add(meta_scope_width).min(width);
+        if footer_input_open {
+            return;
+        }
+        hits.push(QueueHitTarget::FormScope, Rect::new(0, y, thread_x, 1));
+        if let Some(thread_slot_width) = thread_slot_width.filter(|_| thread_x < width) {
+            let thread_width = thread_slot_width.min(width.saturating_sub(thread_x));
+            hits.push(
+                QueueHitTarget::FormThread,
+                Rect::new(thread_x, y, thread_width, 1),
+            );
+        }
     }
 }
 
@@ -1729,6 +1782,9 @@ enum ListRow {
     /// project's own scope control.
     Header(SectionKind, usize, Line<'static>),
     Hint(Line<'static>),
+    /// Decorative scoped ON DECK thread-block label. It consumes a viewport row but
+    /// deliberately has no identity or mouse target, so selection remains task-only.
+    ThreadHeader(Line<'static>),
     Task {
         id: Uuid,
         line: Line<'static>,
@@ -1778,6 +1834,13 @@ fn detail_lines_for_task(task: &Task, now: SystemTime, width: u16) -> Vec<Line<'
             ));
         }
     }
+    if let Some(thread) = task.thread.as_deref() {
+        lines.push(paint_bounded_line(
+            &format!("{indent}thread #{thread}"),
+            width,
+            style_dim(),
+        ));
+    }
     let scope_text = match &task.scope {
         TaskScope::Project { path } => short_project(path).to_string(),
         TaskScope::Global => "global".to_string(),
@@ -1821,6 +1884,41 @@ fn build_list_rows(
         None
     };
 
+    let push_task = |id: Uuid,
+                     out: &mut Vec<ListRow>,
+                     selected_idx: &mut Option<usize>,
+                     anchor_last_idx: &mut Option<usize>,
+                     in_project_section: bool,
+                     indented_under_thread: bool| {
+        let Some(task) = model.tasks.iter().find(|task| task.id == id) else {
+            // Stale ids may outlive a snapshot refresh. Skip them without inventing a row.
+            return;
+        };
+        let meta = row_meta(task, model.now, in_project_section);
+        let line = paint_task_row_with_indent(
+            &TaskRowPaint {
+                glyph: status_glyph(task.status),
+                title: &task.title,
+                meta: &meta,
+                selected: model.selection_id == Some(task.id)
+                    && !matches!(model.overlay, QueueOverlay::ScopeDropdown { .. }),
+                title_bold: false,
+            },
+            geo,
+            usize::from(indented_under_thread) * 2,
+        );
+        if model.selection_id == Some(task.id) {
+            *selected_idx = Some(out.len());
+        }
+        out.push(ListRow::Task { id: task.id, line });
+        if detail_target == Some(task.id) {
+            for line in detail_lines_for_task(task, model.now, geo.row_width) {
+                out.push(ListRow::Detail(line));
+            }
+            *anchor_last_idx = Some(out.len() - 1);
+        }
+    };
+
     for (section_idx, section) in model.view.sections.iter().enumerate() {
         // A preceding section with no content already ends in its required below-header blank
         // row, which doubles as this heading's above-header row. Otherwise add one list row.
@@ -1841,36 +1939,60 @@ fn build_list_rows(
         }
         let in_project_section =
             section.kind == SectionKind::OnDeck && section.project_label.is_some();
-        for id in &section.task_ids {
-            let Some(task) = model.tasks.iter().find(|t| t.id == *id) else {
-                // Stale id: skip without panicking (Selection Anchor's problem).
-                continue;
-            };
-            let meta = row_meta(task, model.now, in_project_section);
-            let line = paint_task_row(
-                &TaskRowPaint {
-                    glyph: status_glyph(task.status),
-                    title: &task.title,
-                    meta: &meta,
-                    selected: model.selection_id == Some(task.id)
-                        && !matches!(model.overlay, QueueOverlay::ScopeDropdown { .. }),
-                    title_bold: false,
-                },
-                geo,
-            );
-            if model.selection_id == Some(task.id) {
-                selected_idx = Some(out.len());
-            }
-            out.push(ListRow::Task { id: task.id, line });
-            if detail_target == Some(task.id) {
-                for line in detail_lines_for_task(task, model.now, geo.row_width) {
-                    out.push(ListRow::Detail(line));
+        if !section.thread_blocks.is_empty() {
+            for block in &section.thread_blocks {
+                out.push(ListRow::ThreadHeader(paint_thread_header(
+                    &block.name,
+                    block.open_count,
+                    geo,
+                )));
+                for id in block.task_ids.iter().copied() {
+                    push_task(
+                        id,
+                        &mut out,
+                        &mut selected_idx,
+                        &mut anchor_last_idx,
+                        in_project_section,
+                        true,
+                    );
                 }
-                anchor_last_idx = Some(out.len() - 1);
+                out.push(ListRow::Blank);
+            }
+            for id in section.loose_task_ids.iter().copied() {
+                push_task(
+                    id,
+                    &mut out,
+                    &mut selected_idx,
+                    &mut anchor_last_idx,
+                    in_project_section,
+                    false,
+                );
+            }
+        } else {
+            for id in section.task_ids.iter().copied() {
+                push_task(
+                    id,
+                    &mut out,
+                    &mut selected_idx,
+                    &mut anchor_last_idx,
+                    in_project_section,
+                    false,
+                );
             }
         }
     }
     (out, anchor_last_idx, selected_idx)
+}
+
+/// Paint one scoped ON DECK thread block label. Headers are presentation-only: their
+/// associated ids stay in the task-only queue stream, so neither keyboard selection nor
+/// mouse hit testing can land on this row.
+fn paint_thread_header(name: &str, open_count: usize, geo: &TierGeometry) -> Line<'static> {
+    let text = match geo.tier {
+        Tier::Standard => format!("  #{name} · {open_count} open"),
+        Tier::Compact => format!("  #{name} {open_count}"),
+    };
+    paint_bounded_line(&text, geo.row_width, style_dim())
 }
 
 fn paint_section_header(section: &QueueSection, width: u16, all_projects: bool) -> Line<'static> {
@@ -2218,7 +2340,7 @@ fn put_line(frame: &mut Frame<'_>, row: u16, width: u16, line: Line<'static>) {
     frame.render_widget(Paragraph::new(padded), area);
 }
 
-fn display_width(s: &str) -> usize {
+pub(crate) fn display_width(s: &str) -> usize {
     Line::from(s).width()
 }
 

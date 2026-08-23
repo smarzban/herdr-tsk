@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use crate::cli::parser::FlagAdd;
 use crate::context::snapshot_from_env;
-use crate::domain::{DomainState, ProvenanceOrigin, TaskScope};
+use crate::domain::{normalize_thread, DomainState, ProvenanceOrigin, TaskScope};
 use crate::scope::{resolve_flag_scope, resolve_project_path};
 use crate::store::{default_state_dir, TaskStore};
 
@@ -71,6 +71,8 @@ struct PlanItem {
     notes: Option<String>,
     /// `None` is omitted, `Some(None)` is JSON null/global.
     project: Option<Option<String>>,
+    /// Missing and JSON null both leave the item unthreaded.
+    thread: Option<String>,
 }
 
 struct ResolvedPlanItem {
@@ -78,6 +80,7 @@ struct ResolvedPlanItem {
     title: String,
     notes: Option<String>,
     scope: TaskScope,
+    thread: Option<String>,
 }
 
 /// Result of one accepted flag add.
@@ -112,10 +115,11 @@ pub fn run(input: FlagAdd) -> Result<FlagAddResult, AddError> {
     let project = input.project;
     let global = input.global;
     let notes = input.notes.filter(|notes| !notes.trim().is_empty());
+    let thread = input.thread;
     store
         .locked_transition_if_changed(|domain| {
             let scope = resolve_flag_scope(project.as_deref(), global, domain, &snapshot);
-            if let Some(task) = existing_task(domain, &title, &scope) {
+            if let Some(task) = existing_task(domain, &title, &scope, thread.as_deref()) {
                 return Ok((
                     FlagAddResult::Existing {
                         id: task.id,
@@ -127,7 +131,15 @@ pub fn run(input: FlagAdd) -> Result<FlagAddResult, AddError> {
             }
             let project = scope_project(&scope);
             let id = domain
-                .create(&title, notes, scope, None, None, ProvenanceOrigin::Capture)
+                .create_with_thread(
+                    &title,
+                    notes,
+                    scope,
+                    None,
+                    None,
+                    ProvenanceOrigin::Capture,
+                    thread,
+                )
                 .map_err(|error| error.to_string())?;
             Ok((FlagAddResult::Created { id, title, project }, true))
         })
@@ -164,7 +176,9 @@ pub fn run_plan(
             let mut created = Vec::with_capacity(resolved.len());
             let mut existing = Vec::new();
             for item in resolved {
-                if let Some(task) = existing_task(domain, &item.title, &item.scope) {
+                if let Some(task) =
+                    existing_task(domain, &item.title, &item.scope, item.thread.as_deref())
+                {
                     existing.push(Existing {
                         i: item.i,
                         id: task.id,
@@ -173,15 +187,16 @@ pub fn run_plan(
                     continue;
                 }
                 let id = domain
-                    .create(
+                    .create_with_thread(
                         &item.title,
                         item.notes,
                         item.scope,
                         None,
                         None,
                         ProvenanceOrigin::Capture,
+                        item.thread,
                     )
-                    .expect("plan item titles are validated before domain creation");
+                    .expect("plan item titles and threads are validated before domain creation");
                 created.push(Created {
                     i: item.i,
                     id,
@@ -219,6 +234,7 @@ fn resolve_plan_items(
                 },
                 None => snapshot.default_scope.clone(),
             },
+            thread: item.thread,
         })
         .collect()
 }
@@ -234,11 +250,14 @@ fn existing_task<'a>(
     domain: &'a DomainState,
     title: &str,
     scope: &TaskScope,
+    thread: Option<&str>,
 ) -> Option<&'a crate::domain::Task> {
-    domain
-        .tasks()
-        .iter()
-        .find(|task| !task.soft_deleted && task.title == title && &task.scope == scope)
+    domain.tasks().iter().find(|task| {
+        !task.soft_deleted
+            && task.title == title
+            && &task.scope == scope
+            && task.thread.as_deref() == thread
+    })
 }
 
 fn parse_plan_item(i: usize, value: Value) -> Result<PlanItem, Failed> {
@@ -294,12 +313,32 @@ fn parse_plan_item(i: usize, value: Value) -> Result<PlanItem, Failed> {
             ));
         }
     };
+    let thread = match object.get("thread") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(thread)) => normalize_thread(thread).map(Some).map_err(|_| {
+            failed(
+                i,
+                Some(trimmed_title.clone()),
+                "invalid-thread",
+                "thread is invalid",
+            )
+        })?,
+        Some(_) => {
+            return Err(failed(
+                i,
+                Some(trimmed_title),
+                "invalid-thread",
+                "thread must be a string or null",
+            ));
+        }
+    };
 
     Ok(PlanItem {
         i,
         title: trimmed_title,
         notes,
         project,
+        thread,
     })
 }
 
@@ -327,6 +366,7 @@ mod tests {
             title: Some("hello\n".into()),
             notes: None,
             project: None,
+            thread: None,
             global: false,
             json: false,
             state_dir: None,

@@ -19,7 +19,10 @@ use herdr_tasks::ui::board::{
     BoardInputMode, BoardModel,
 };
 use herdr_tasks::ui::capture::CaptureField;
-use herdr_tasks::ui::input::{map_board_form_key, map_key, BoardIntent, PRIMARY_CAPTURE_ACTIONS};
+use herdr_tasks::ui::input::{
+    map_board_form_key, map_capture_key_state, map_capture_paste_state, map_key, BoardIntent,
+    CaptureIntent, PRIMARY_CAPTURE_ACTIONS,
+};
 use herdr_tasks::ui::mouse::{
     capture_layout, capture_mouse_paths_complete, left_click, map_board_mouse, map_capture_mouse,
     primary_capture_action_sample_mouse,
@@ -442,6 +445,7 @@ fn task_form_mouse_fields_dropdown_and_verbs_match_keyboard_while_scrolled() {
         (QueueHitTarget::FormTitle, CaptureField::Title),
         (QueueHitTarget::FormNotes(0), CaptureField::Notes),
         (QueueHitTarget::FormNotes(1), CaptureField::Notes),
+        (QueueHitTarget::FormThread, CaptureField::Thread),
     ] {
         let hit = hits
             .regions
@@ -841,6 +845,49 @@ fn click_and_wheel_match_keyboard_effects_for_each_control() {
 /// this rewrite (its `CaptureLayout`/`map_capture_mouse` route is separate from the board's
 /// hit-map, per the task's implementation boundary).
 #[test]
+fn empty_thread_target_follows_a_scope_name_containing_the_thread_label() {
+    let scope_path = "/repos/foo · thread";
+    let mut domain = DomainState::new();
+    domain
+        .create(
+            "Task",
+            None,
+            project(scope_path),
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("create");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(scope_path)));
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::BeginEditTitle,
+        None,
+        None,
+    )
+    .expect("open task form");
+
+    let hits = board_hit_map(STANDARD, &model);
+    let scope_hit = hits
+        .regions
+        .iter()
+        .find(|hit| hit.target == QueueHitTarget::FormScope)
+        .expect("scope hit");
+    let thread_hit = hits
+        .regions
+        .iter()
+        .find(|hit| hit.target == QueueHitTarget::FormThread)
+        .expect("empty thread target");
+    let expected_scope_width = 2 + "foo · thread".chars().count() as u16;
+    assert_eq!(
+        scope_hit.area.width, expected_scope_width,
+        "the entire project basename remains the scope target"
+    );
+    assert_eq!(thread_hit.area.x, expected_scope_width);
+}
+
+#[test]
 fn capture_popup_mouse_paths_unchanged() {
     let layout = capture_layout(Rect::new(0, 0, 80, 16));
     assert!(
@@ -858,6 +905,34 @@ fn capture_popup_mouse_paths_unchanged() {
     // The narrow capture width still keeps every control clickable.
     let narrow = capture_layout(Rect::new(0, 0, 40, 16));
     assert!(capture_mouse_paths_complete(&narrow));
+}
+
+#[test]
+fn capture_thread_row_click_and_input_paths_focus_and_edit_the_thread_field() {
+    let layout = capture_layout(Rect::new(0, 0, 80, 16));
+    assert_eq!(
+        map_capture_mouse(
+            &layout,
+            left_click(layout.thread_area.x.saturating_add(1), layout.thread_area.y),
+        ),
+        Some(CaptureIntent::FocusField(CaptureField::Thread)),
+        "the visible capture Thread row must take mouse focus"
+    );
+    assert_eq!(
+        map_capture_key_state(
+            CaptureField::Thread,
+            false,
+            false,
+            KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE),
+        ),
+        Some(CaptureIntent::Insert('r')),
+        "a focused Thread field accepts keyboard input"
+    );
+    assert_eq!(
+        map_capture_paste_state(CaptureField::Thread, false, "release"),
+        Some(CaptureIntent::InsertText("release".into())),
+        "a focused Thread field accepts paste"
+    );
 }
 
 /// C1: on a deck long enough for the palette's command panel to actually
@@ -1298,6 +1373,40 @@ fn non_left_clicks_over_a_live_control_are_ignored() {
 // Task page mouse parity: click peeks, double-click opens the page, page field
 // clicks focus their fields, the scope footer opens its dropdown, wheel scrolls.
 // ---------------------------------------------------------------------------
+
+#[test]
+fn header_line_registers_no_hit_target() {
+    let mut domain = DomainState::new();
+    domain
+        .create_with_thread(
+            "threaded row",
+            None,
+            project(THIS_REPO),
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+            Some("release".to_string()),
+        )
+        .expect("create threaded task");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
+    model.set_selected_project(Some(PathBuf::from(THIS_REPO)));
+    let rows = page_rows(&model);
+    let header_y = rows
+        .iter()
+        .position(|row| row.contains("#release"))
+        .expect("thread header paints");
+    let hits = board_hit_map(STANDARD, &model);
+
+    assert!(
+        hits.regions.iter().all(|hit| hit.area.y != header_y as u16),
+        "decorative thread header must register no hit target: {hits:?}"
+    );
+    assert_eq!(
+        map_board_mouse(&model, &hits, left_click(0, header_y as u16)),
+        None,
+        "clicking the decorative header must be inert"
+    );
+}
 
 #[test]
 fn a_row_click_selects_and_peeks_and_a_second_click_opens_the_task_page() {

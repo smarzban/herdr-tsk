@@ -54,6 +54,7 @@ pub struct CaptureLayout {
     pub subtitle_area: Rect,
     pub title_area: Rect,
     pub notes_area: Rect,
+    pub thread_area: Rect,
     pub scope_area: Rect,
     pub scope_chips: Vec<Chip<CaptureScopeChoice>>,
     pub this_project_available: bool,
@@ -188,12 +189,13 @@ pub fn capture_layout_state(
         1,
         notes_height,
         1,
+        1,
         u16::from(show_path),
         1,
         1,
         inner
             .height
-            .saturating_sub(6 + notes_height + u16::from(show_path)),
+            .saturating_sub(7 + notes_height + u16::from(show_path)),
         1,
     ];
     let mut y = inner.y;
@@ -203,10 +205,10 @@ pub fn capture_layout_state(
         areas.push(Rect::new(inner.x, y, inner.width, height));
         y = y.saturating_add(height);
     }
-    let scope_row = areas[3];
+    let scope_row = areas[4];
     let scope_chips = place_scope_chips(scope_row);
-    let scope_path_area = if show_path { areas[4] } else { Rect::default() };
-    let buttons = areas[6];
+    let scope_path_area = if show_path { areas[5] } else { Rect::default() };
+    let buttons = areas[7];
     let save_label = if save_recovery { " Retry " } else { " Save " };
     let cancel_label = " Cancel ";
     let save_width = save_label.chars().count() as u16;
@@ -235,11 +237,12 @@ pub fn capture_layout_state(
         subtitle_area: areas[0],
         title_area: areas[1],
         notes_area: areas[2],
+        thread_area: areas[3],
         scope_area: scope_row,
         scope_chips,
         this_project_available,
         scope_path_area,
-        message_area: areas[5],
+        message_area: areas[6],
         save_chip: Chip {
             rect: save_rect,
             label: save_label,
@@ -250,12 +253,12 @@ pub fn capture_layout_state(
             label: cancel_label,
             value: (),
         },
-        help_area: areas[8],
+        help_area: areas[9],
     }
 }
 
 pub const CAPTURE_NOTES_MAX_ROWS: u16 = 3;
-const CAPTURE_FIXED_ROWS: u16 = 6;
+const CAPTURE_FIXED_ROWS: u16 = 7;
 
 fn capture_notes_rows(inner_height: u16, show_path: bool) -> u16 {
     inner_height
@@ -445,21 +448,25 @@ pub fn map_board_mouse(
             // triggering a second board action behind the capture surface.
             _ => Some(BoardIntent::CancelQuickAdd),
         },
-        BoardInputMode::EditTitle | BoardInputMode::EditNotes | BoardInputMode::EditScope => {
-            match hit_at(hits, pos) {
-                Some(QueueHitTarget::FormTitle) => {
-                    Some(BoardIntent::FocusFormField(CaptureField::Title))
-                }
-                Some(QueueHitTarget::FormNotes(_)) => {
-                    Some(BoardIntent::FocusFormField(CaptureField::Notes))
-                }
-                Some(QueueHitTarget::FormScope) => Some(BoardIntent::OpenFormScopeDropdown),
-                Some(QueueHitTarget::Verb(index)) => form_verb_intent(model, index),
-                _ => None,
+        BoardInputMode::EditTitle
+        | BoardInputMode::EditNotes
+        | BoardInputMode::EditThread
+        | BoardInputMode::EditScope => match hit_at(hits, pos) {
+            Some(QueueHitTarget::FormTitle) => {
+                Some(BoardIntent::FocusFormField(CaptureField::Title))
             }
-        }
+            Some(QueueHitTarget::FormNotes(_)) => {
+                Some(BoardIntent::FocusFormField(CaptureField::Notes))
+            }
+            Some(QueueHitTarget::FormScope) => Some(BoardIntent::OpenFormScopeDropdown),
+            Some(QueueHitTarget::FormThread) => {
+                Some(BoardIntent::FocusFormField(CaptureField::Thread))
+            }
+            Some(QueueHitTarget::Verb(index)) => form_verb_intent(model, index),
+            _ => None,
+        },
         BoardInputMode::TaskPage => match hit_at(hits, pos) {
-            Some(QueueHitTarget::FormScope) => None,
+            Some(QueueHitTarget::FormScope) | Some(QueueHitTarget::FormThread) => None,
             // A click on an step row selects it (AC-21) — the board's click
             // convention: a click selects, never mutates.
             Some(QueueHitTarget::Step(index)) => Some(BoardIntent::SelectStep(index)),
@@ -526,6 +533,9 @@ pub fn map_capture_mouse(layout: &CaptureLayout, mouse: MouseEvent) -> Option<Ca
     }
     if layout.notes_area.contains(pos) {
         return Some(CaptureIntent::FocusField(CaptureField::Notes));
+    }
+    if layout.thread_area.contains(pos) {
+        return Some(CaptureIntent::FocusField(CaptureField::Thread));
     }
     for chip in &layout.scope_chips {
         if chip.rect.contains(pos) {
