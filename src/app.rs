@@ -764,7 +764,8 @@ pub fn apply_board_intent_with_save_recovery(
         BoardIntent::ConfirmEdit | BoardIntent::ConfirmEditNext
     ) && matches!(
         model.input_mode(),
-        BoardInputMode::EditTitle
+        BoardInputMode::TaskPage
+            | BoardInputMode::EditTitle
             | BoardInputMode::EditNotes
             | BoardInputMode::EditThread
             | BoardInputMode::EditScope

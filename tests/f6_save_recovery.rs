@@ -1828,6 +1828,62 @@ fn successful_title_save_with_boundary_whitespace_releases_the_task_form_once() 
 }
 
 #[test]
+fn failed_task_page_view_save_holds_a_dirty_form_for_recovery() {
+    let (mut domain, mut model, _) = board_with_two_tasks();
+    let baseline = snapshot_of(&domain);
+    let mut recovery = SaveRecovery::new();
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::BeginEditTitle,
+        None,
+        None,
+    )
+    .expect("open task form");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::EditInsert('!'),
+        None,
+        None,
+    )
+    .expect("dirty title draft");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::FocusFormField(CaptureField::Notes),
+        None,
+        None,
+    )
+    .expect("move to notes");
+    apply_intent(&mut domain, &mut model, BoardIntent::CancelEdit, None, None)
+        .expect("return to page while retaining title draft");
+    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+
+    let outcome = apply_board_intent_with_save_recovery(
+        &mut domain,
+        &mut model,
+        &mut recovery,
+        BoardSaveContext {
+            baseline,
+            intent: BoardIntent::ConfirmEdit,
+            snapshot: None,
+            host: None,
+        },
+        |_| Err(INJECTED.into()),
+    )
+    .expect("failed view-mode save stays recoverable");
+
+    assert_eq!(outcome, IntentOutcome::None);
+    assert!(recovery.is_pending());
+    assert!(
+        model.board_form_open(),
+        "a failed view-mode form save retains the page form"
+    );
+    assert_eq!(model.input_mode(), BoardInputMode::SaveRecovery);
+}
+
+#[test]
 fn failed_task_thread_edit_cancel_returns_to_task_page_with_a_retained_form() {
     let (mut domain, mut model, id) = board_with_two_tasks();
     let baseline = snapshot_of(&domain);
