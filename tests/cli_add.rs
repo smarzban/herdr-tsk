@@ -52,6 +52,333 @@ fn task_store(dir: &std::path::Path) -> TaskStore {
     TaskStore::new(dir)
 }
 
+#[test]
+fn add_thread_flag_applies_to_every_item_and_round_trips() {
+    let _env = env_lock();
+    let dir = temp_state_dir("thread-flag");
+    let output = add(
+        &[
+            "herdr-tasks".into(),
+            "add".into(),
+            "--state-dir".into(),
+            state_dir_arg(&dir),
+            "--title".into(),
+            "threaded task".into(),
+            "--thread".into(),
+            "Release-2026".into(),
+        ],
+        true,
+    );
+
+    assert_eq!(output.code, 0);
+    assert_eq!(output.stdout, "added threaded task\n");
+    let state = task_store(&dir).load().expect("reload threaded task");
+    assert_eq!(state.tasks().len(), 1);
+    assert_eq!(state.tasks()[0].thread.as_deref(), Some("release-2026"));
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn thread_flag_with_plan_input_is_usage_error_exit_2() {
+    let _env = env_lock();
+    let file_dir = temp_state_dir("thread-file-plan");
+    let plan = file_dir.join("plan.json");
+    std::fs::write(&plan, r#"[{"title":"from file"}]"#).expect("write plan");
+    let file = add(
+        &[
+            "herdr-tasks".into(),
+            "add".into(),
+            "--state-dir".into(),
+            state_dir_arg(&file_dir),
+            "--thread".into(),
+            "release".into(),
+            "--file".into(),
+            state_dir_arg(&plan),
+        ],
+        true,
+    );
+    assert_eq!(file.code, 2);
+    assert!(file.stdout.is_empty());
+    assert!(file
+        .stderr
+        .contains("item flags cannot be used with --file"));
+    assert!(task_store(&file_dir)
+        .load()
+        .expect("load file state")
+        .tasks()
+        .is_empty());
+
+    let stdin_dir = temp_state_dir("thread-stdin-plan");
+    let stdin = run_with(
+        [
+            "herdr-tasks",
+            "add",
+            "--state-dir",
+            &state_dir_arg(&stdin_dir),
+            "--thread",
+            "release",
+        ],
+        Cursor::new(r#"[{"title":"from stdin"}]"#),
+        false,
+    );
+    assert_eq!(stdin.code, 2);
+    assert!(stdin.stdout.is_empty());
+    assert!(task_store(&stdin_dir)
+        .load()
+        .expect("load stdin state")
+        .tasks()
+        .is_empty());
+
+    let _ = std::fs::remove_dir_all(file_dir);
+    let _ = std::fs::remove_dir_all(stdin_dir);
+}
+
+#[test]
+fn plan_item_thread_applies_per_item() {
+    let _env = env_lock();
+    let dir = temp_state_dir("plan-item-thread");
+    let plan = dir.join("plan.json");
+    std::fs::write(
+        &plan,
+        r#"[{"title":"threaded from file","thread":"Release-2026"},{"title":"unthreaded from file","thread":null}]"#,
+    )
+    .expect("write plan");
+    let output = add(
+        &[
+            "herdr-tasks".into(),
+            "add".into(),
+            "--state-dir".into(),
+            state_dir_arg(&dir),
+            "--file".into(),
+            state_dir_arg(&plan),
+        ],
+        true,
+    );
+
+    assert_eq!(output.code, 0);
+    let state = task_store(&dir).load().expect("load file plan state");
+    assert_eq!(state.tasks().len(), 2);
+    assert_eq!(state.tasks()[0].thread.as_deref(), Some("release-2026"));
+    assert_eq!(state.tasks()[1].thread, None);
+
+    let stdin_dir = temp_state_dir("plan-item-thread-stdin");
+    let stdin = run_with(
+        [
+            "herdr-tasks",
+            "add",
+            "--state-dir",
+            &state_dir_arg(&stdin_dir),
+        ],
+        Cursor::new(r#"[{"title":"threaded from stdin","thread":"ops"}]"#),
+        false,
+    );
+    assert_eq!(stdin.code, 0);
+    assert_eq!(
+        task_store(&stdin_dir)
+            .load()
+            .expect("load stdin plan state")
+            .tasks()[0]
+            .thread
+            .as_deref(),
+        Some("ops")
+    );
+
+    let _ = std::fs::remove_dir_all(dir);
+    let _ = std::fs::remove_dir_all(stdin_dir);
+}
+
+#[test]
+fn invalid_thread_flag_is_usage_error_exit_2_nothing_persisted() {
+    let _env = env_lock();
+    let dir = temp_state_dir("invalid-thread-flag");
+    let output = add(
+        &[
+            "herdr-tasks".into(),
+            "add".into(),
+            "--state-dir".into(),
+            state_dir_arg(&dir),
+            "--title".into(),
+            "valid title".into(),
+            "--thread".into(),
+            "not_valid".into(),
+        ],
+        true,
+    );
+
+    assert_eq!(output.code, 2);
+    assert!(output.stdout.is_empty());
+    assert!(output.stderr.contains("invalid thread"));
+    assert!(task_store(&dir)
+        .load()
+        .expect("load state")
+        .tasks()
+        .is_empty());
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn invalid_plan_item_thread_fails_item_exit_1_others_persist() {
+    let _env = env_lock();
+    let dir = temp_state_dir("invalid-plan-thread");
+    let output = run_with(
+        [
+            "herdr-tasks",
+            "add",
+            "--state-dir",
+            &state_dir_arg(&dir),
+            "--file",
+            "-",
+        ],
+        Cursor::new(
+            r#"[{"title":"valid thread","thread":"release"},{"title":"invalid thread","thread":"bad_name"},{"title":"valid unthreaded","thread":null}]"#,
+        ),
+        true,
+    );
+
+    assert_eq!(output.code, 1);
+    let result: serde_json::Value = serde_json::from_str(&output.stdout).expect("plan result");
+    assert_eq!(result["created"].as_array().expect("created").len(), 2);
+    assert_eq!(result["failed"][0]["i"], 1);
+    assert_eq!(result["failed"][0]["title"], "invalid thread");
+    assert_eq!(result["failed"][0]["code"], "invalid-thread");
+    let state = task_store(&dir).load().expect("load state");
+    assert_eq!(state.tasks().len(), 2);
+    assert_eq!(state.tasks()[0].thread.as_deref(), Some("release"));
+    assert_eq!(state.tasks()[1].thread, None);
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn idempotency_key_includes_thread_both_directions() {
+    let _env = env_lock();
+    let threaded_first_dir = temp_state_dir("thread-idempotency-threaded-first");
+    let threaded_first = add(
+        &[
+            "herdr-tasks".into(),
+            "add".into(),
+            "--state-dir".into(),
+            state_dir_arg(&threaded_first_dir),
+            "--title".into(),
+            "same title".into(),
+            "--global".into(),
+            "--thread".into(),
+            "Release".into(),
+        ],
+        true,
+    );
+    assert_eq!(threaded_first.code, 0);
+    let unthreaded_second = add(
+        &[
+            "herdr-tasks".into(),
+            "add".into(),
+            "--state-dir".into(),
+            state_dir_arg(&threaded_first_dir),
+            "--title".into(),
+            "same title".into(),
+            "--global".into(),
+        ],
+        true,
+    );
+    assert_eq!(unthreaded_second.code, 0);
+    assert_eq!(
+        task_store(&threaded_first_dir)
+            .load()
+            .expect("load threaded-first state")
+            .tasks()
+            .len(),
+        2
+    );
+
+    let unthreaded_first_dir = temp_state_dir("thread-idempotency-unthreaded-first");
+    let unthreaded_first = add(
+        &[
+            "herdr-tasks".into(),
+            "add".into(),
+            "--state-dir".into(),
+            state_dir_arg(&unthreaded_first_dir),
+            "--title".into(),
+            "same title".into(),
+            "--global".into(),
+        ],
+        true,
+    );
+    assert_eq!(unthreaded_first.code, 0);
+    let threaded_second = add(
+        &[
+            "herdr-tasks".into(),
+            "add".into(),
+            "--state-dir".into(),
+            state_dir_arg(&unthreaded_first_dir),
+            "--title".into(),
+            "same title".into(),
+            "--global".into(),
+            "--thread".into(),
+            "release".into(),
+        ],
+        true,
+    );
+    assert_eq!(threaded_second.code, 0);
+    let normalized_duplicate = add(
+        &[
+            "herdr-tasks".into(),
+            "add".into(),
+            "--state-dir".into(),
+            state_dir_arg(&unthreaded_first_dir),
+            "--title".into(),
+            "same title".into(),
+            "--global".into(),
+            "--thread".into(),
+            "RELEASE".into(),
+        ],
+        true,
+    );
+    assert_eq!(normalized_duplicate.code, 0);
+    assert_eq!(normalized_duplicate.stdout, "task already exists\n");
+    assert_eq!(
+        task_store(&unthreaded_first_dir)
+            .load()
+            .expect("load unthreaded-first state")
+            .tasks()
+            .len(),
+        2
+    );
+
+    let plan_dir = temp_state_dir("thread-plan-idempotency");
+    let plan = run_with(
+        [
+            "herdr-tasks",
+            "add",
+            "--state-dir",
+            &state_dir_arg(&plan_dir),
+            "--file",
+            "-",
+        ],
+        Cursor::new(
+            r#"[{"title":"plan title","project":null,"thread":null},{"title":"plan title","project":null,"thread":"Release"},{"title":"plan title","project":null,"thread":"release"}]"#,
+        ),
+        true,
+    );
+    assert_eq!(plan.code, 0);
+    let result: serde_json::Value = serde_json::from_str(&plan.stdout).expect("plan result");
+    assert_eq!(result["created"].as_array().expect("created").len(), 2);
+    assert_eq!(result["existing"][0]["i"], 2);
+    assert_eq!(
+        task_store(&plan_dir)
+            .load()
+            .expect("load plan state")
+            .tasks()
+            .len(),
+        2
+    );
+
+    let _ = std::fs::remove_dir_all(threaded_first_dir);
+    let _ = std::fs::remove_dir_all(unthreaded_first_dir);
+    let _ = std::fs::remove_dir_all(plan_dir);
+}
+
 #[cfg(unix)]
 struct ReadOnlyDir {
     path: PathBuf,

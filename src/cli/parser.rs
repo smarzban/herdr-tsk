@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use uuid::Uuid;
 
 use super::steps::StepsAction;
+use crate::domain::normalize_thread;
 
 /// Parsed add input. A plan source is selected by `file` or piped stdin.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -12,6 +13,8 @@ pub struct FlagAdd {
     pub title: Option<String>,
     pub notes: Option<String>,
     pub project: Option<String>,
+    /// Normalized at the argv boundary so add only receives valid thread names.
+    pub thread: Option<String>,
     pub global: bool,
     pub json: bool,
     pub state_dir: Option<PathBuf>,
@@ -30,6 +33,7 @@ pub fn parse_flag_add(args: &[String]) -> Result<FlagAdd, String> {
         title: None,
         notes: None,
         project: None,
+        thread: None,
         global: false,
         json: false,
         state_dir: None,
@@ -63,6 +67,14 @@ pub fn parse_flag_add(args: &[String]) -> Result<FlagAdd, String> {
                 parsed.has_item_flags = true;
                 index += 1;
             }
+            flag if flag.starts_with("--thread=") => {
+                parsed.thread = Some(
+                    normalize_thread(&flag["--thread=".len()..])
+                        .map_err(|_| "invalid thread name".to_owned())?,
+                );
+                parsed.has_item_flags = true;
+                index += 1;
+            }
             "-t" | "--title" => {
                 parsed.title = Some(value(flag)?);
                 parsed.has_item_flags = true;
@@ -75,6 +87,14 @@ pub fn parse_flag_add(args: &[String]) -> Result<FlagAdd, String> {
             }
             "-p" | "--project" => {
                 parsed.project = Some(value(flag)?);
+                parsed.has_item_flags = true;
+                index += 2;
+            }
+            "--thread" => {
+                parsed.thread = Some(
+                    normalize_thread(&value(flag)?)
+                        .map_err(|_| "invalid thread name".to_owned())?,
+                );
                 parsed.has_item_flags = true;
                 index += 2;
             }

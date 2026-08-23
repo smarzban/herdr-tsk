@@ -11,7 +11,7 @@ use crate::ui::terminal_text;
 
 pub fn add_help() -> CliOutput {
     help_output(
-        "usage: herdr-tasks add -t <title> [-n <notes>] [-p <project> | --global] [--json] [--state-dir <dir>]\n       herdr-tasks add [--file <path|->] [--state-dir <dir>]",
+        "usage: herdr-tasks add -t <title> [-n <notes>] [-p <project> | --global] [--thread <name>] [--json] [--state-dir <dir>]\n       herdr-tasks add [--file <path|->] [--state-dir <dir>]",
     )
 }
 
@@ -39,7 +39,7 @@ pub fn list_help() -> CliOutput {
 fn help_output(usage: &str) -> CliOutput {
     CliOutput {
         stdout: format!(
-            "{usage}\n\nExamples:\n  herdr-tasks add -t \"Draft release notes\"\n  herdr-tasks add -t \"Buy milk\" --global\n  herdr-tasks add -t \"Fix widget\" --project widget\n  herdr-tasks add --title=\"-fix parser\" --notes=\"-5 degrees\" --project=\"-maintenance\"\n  herdr-tasks add --file plan.json\n  cat plan.json | herdr-tasks add\n\nValues beginning with - must use --title=<value>, --notes=<value>, --project=<value>, --state-dir=<dir>, or --file=<path>.\nAn add whose trimmed title and resolved project scope already exist succeeds without changing the task. With --json, flag add emits one object with outcome, id, title, and project (or null).\nPlan JSON: [{{\"title\": \"...\", \"notes\": \"...\", \"project\": \"...\"}}]\nPlan result: {{\"created\": [...], \"existing\": [...], \"failed\": [...]}}\n\nExit contract:\n  exit 0: every item was created or already existed\n  exit 1: one or more items were refused, retry failed only\n  exit 2: usage or parse error, nothing persisted\n  exit 3: store I/O, commit indeterminate, verify with list before retrying\n"
+            "{usage}\n\nExamples:\n  herdr-tasks add -t \"Draft release notes\"\n  herdr-tasks add -t \"Buy milk\" --global\n  herdr-tasks add -t \"Fix widget\" --project widget --thread release-2026\n  herdr-tasks add --title=\"-fix parser\" --notes=\"-5 degrees\" --project=\"-maintenance\"\n  herdr-tasks add --file plan.json\n  cat plan.json | herdr-tasks add\n\nValues beginning with - must use --title=<value>, --notes=<value>, --project=<value>, --thread=<value>, --state-dir=<dir>, or --file=<path>.\n--thread is an item flag and cannot be combined with plan input. An add whose trimmed title, resolved project scope, and normalized thread already exist succeeds without changing the task. With --json, flag add emits one object with outcome, id, title, and project (or null).\nPlan JSON: [{{\"title\": \"...\", \"notes\": \"...\", \"project\": \"...\", \"thread\": \"...\"}}] (thread may also be null)\nPlan result: {{\"created\": [...], \"existing\": [...], \"failed\": [...]}}\n\nExit contract:\n  exit 0: every item was created or already existed\n  exit 1: one or more items were refused, retry failed only\n  exit 2: usage or parse error, nothing persisted\n  exit 3: store I/O, commit indeterminate, verify with list before retrying\n"
         ),
         stderr: String::new(),
         code: 0,
@@ -92,7 +92,7 @@ pub fn usage(reason: &str) -> CliOutput {
     CliOutput {
         stdout: String::new(),
         stderr: format!(
-            "herdr-tasks add: {reason}\nusage: herdr-tasks add -t <title> [-n <notes>] [-p <project> | --global] [--json] [--state-dir <dir>]\n"
+            "herdr-tasks add: {reason}\nusage: herdr-tasks add -t <title> [-n <notes>] [-p <project> | --global] [--thread <name>] [--json] [--state-dir <dir>]\n"
         ),
         code: 2,
     }
