@@ -880,6 +880,8 @@ fn task_page_renders_header_notes_and_meta_as_a_full_takeover_in_both_tiers() {
         step_marked: None,
         step_editor: None,
         meta: "herdr-tasks \u{b7} created 1h ago \u{b7} updated 1h ago".to_string(),
+        meta_scope_width: 11,
+        thread_slot_width: None,
         focus: None,
         scope_dropdown: None,
     };

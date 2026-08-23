@@ -340,8 +340,13 @@ pub enum QueueOverlay<'a> {
         /// The page's add/rename step draft. When present it uses the shared
         /// bottom input slot, leaving the meta footer visible in the page above.
         step_editor: Option<BottomInputSlot<'a>>,
-        /// Footer: scope · created · updated.
+        /// Footer: scope · thread · created · updated.
         meta: String,
+        /// Display width of scope inside `meta`, carried separately so mouse geometry never
+        /// parses user-controlled project names from rendered text.
+        meta_scope_width: u16,
+        /// Display width of the rendered Thread segment, including its separator.
+        thread_slot_width: Option<u16>,
         /// Which field owns the cursor, if any (view mode: none).
         focus: Option<CaptureField>,
         scope_dropdown: Option<FormScopeDropdown<'a>>,
@@ -945,6 +950,8 @@ fn paint_overlay(
             step_marked,
             ref step_editor,
             ref meta,
+            meta_scope_width,
+            thread_slot_width,
             focus,
             scope_dropdown,
         } => {
@@ -962,6 +969,8 @@ fn paint_overlay(
                 *step_scroll,
                 *step_marked,
                 meta,
+                *meta_scope_width,
+                *thread_slot_width,
                 *focus,
                 step_editor.is_some(),
                 hits,
@@ -1408,6 +1417,8 @@ fn paint_task_page(
     step_scroll: usize,
     step_marked: Option<usize>,
     meta: &str,
+    meta_scope_width: u16,
+    thread_slot_width: Option<u16>,
     focus: Option<CaptureField>,
     footer_input_open: bool,
     hits: &mut QueueHitMap,
@@ -1586,29 +1597,13 @@ fn paint_task_page(
             paint_bounded_line(&format!("  {meta}"), width, style_dim()),
         );
 
-        let (scope, thread_slot_width) = match meta.split_once(" · #") {
-            Some((scope, tail)) => {
-                let thread = tail
-                    .split_once(" · created")
-                    .map_or(tail, |(thread, _)| thread);
-                (scope, Some(display_width(" · #") + display_width(thread)))
-            }
-            None => match meta.split_once(" · thread") {
-                Some((scope, _)) => (scope, Some(display_width(" · thread"))),
-                None => (meta, None),
-            },
-        };
-        let thread_x = u16::try_from(2 + display_width(scope))
-            .unwrap_or(u16::MAX)
-            .min(width);
+        let thread_x = 2u16.saturating_add(meta_scope_width).min(width);
         if footer_input_open {
             return;
         }
         hits.push(QueueHitTarget::FormScope, Rect::new(0, y, thread_x, 1));
         if let Some(thread_slot_width) = thread_slot_width.filter(|_| thread_x < width) {
-            let thread_width = u16::try_from(thread_slot_width)
-                .unwrap_or(u16::MAX)
-                .min(width.saturating_sub(thread_x));
+            let thread_width = thread_slot_width.min(width.saturating_sub(thread_x));
             hits.push(
                 QueueHitTarget::FormThread,
                 Rect::new(thread_x, y, thread_width, 1),
@@ -2345,7 +2340,7 @@ fn put_line(frame: &mut Frame<'_>, row: u16, width: u16, line: Line<'static>) {
     frame.render_widget(Paragraph::new(padded), area);
 }
 
-fn display_width(s: &str) -> usize {
+pub(crate) fn display_width(s: &str) -> usize {
     Line::from(s).width()
 }
 

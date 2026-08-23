@@ -270,14 +270,19 @@ fn build_task_page_overlay<'a>(
     form.notes_max_scroll.set(content.max_scroll);
     form.steps.content_start.set(content.steps_start);
 
-    // Meta footer: scope · created · updated (ages only while the bound task is present).
-    let mut meta = match &form.scope {
+    // Meta footer: scope · thread · created · updated (ages only while the bound task is
+    // present). Keep its clickable pieces separate from the painted string: a project basename
+    // is user-controlled and may contain the same separator or label text.
+    let meta_scope = match &form.scope {
         TaskScope::Project { path } => render::short_project(path).to_string(),
         TaskScope::Global => "global".to_string(),
     };
+    let meta_scope_width = u16::try_from(render::display_width(&meta_scope)).unwrap_or(u16::MAX);
+    let mut meta = meta_scope.clone();
+    let mut thread_slot = None;
     if let Some(task) = bound_task {
-        if let Some(thread) = task.thread.as_deref() {
-            meta.push_str(&format!(" · #{thread}"));
+        thread_slot = if let Some(thread) = task.thread.as_deref() {
+            Some(format!(" · #{thread}"))
         } else if matches!(
             model.input_mode(),
             BoardInputMode::EditTitle
@@ -288,7 +293,12 @@ fn build_task_page_overlay<'a>(
         ) {
             // An empty thread still needs a visible field-sized footer target while the form
             // is editing, otherwise mouse users can only reach Thread after it already exists.
-            meta.push_str(" · thread");
+            Some(" · thread".to_string())
+        } else {
+            None
+        };
+        if let Some(slot) = &thread_slot {
+            meta.push_str(slot);
         }
         let now = SystemTime::now();
         meta.push_str(&format!(
@@ -297,6 +307,10 @@ fn build_task_page_overlay<'a>(
             render::format_age(now, task.updated_at)
         ));
     }
+    let thread_slot_width = thread_slot
+        .as_deref()
+        .map(render::display_width)
+        .map(|width| u16::try_from(width).unwrap_or(u16::MAX));
 
     let focus = match model.input_mode() {
         BoardInputMode::EditTitle => Some(CaptureField::Title),
@@ -319,6 +333,8 @@ fn build_task_page_overlay<'a>(
         step_marked: form.steps.delete_mark,
         step_editor,
         meta,
+        meta_scope_width,
+        thread_slot_width,
         focus,
         scope_dropdown,
     }

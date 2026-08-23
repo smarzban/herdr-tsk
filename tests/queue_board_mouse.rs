@@ -845,6 +845,49 @@ fn click_and_wheel_match_keyboard_effects_for_each_control() {
 /// this rewrite (its `CaptureLayout`/`map_capture_mouse` route is separate from the board's
 /// hit-map, per the task's implementation boundary).
 #[test]
+fn empty_thread_target_follows_a_scope_name_containing_the_thread_label() {
+    let scope_path = "/repos/foo · thread";
+    let mut domain = DomainState::new();
+    domain
+        .create(
+            "Task",
+            None,
+            project(scope_path),
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("create");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(scope_path)));
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::BeginEditTitle,
+        None,
+        None,
+    )
+    .expect("open task form");
+
+    let hits = board_hit_map(STANDARD, &model);
+    let scope_hit = hits
+        .regions
+        .iter()
+        .find(|hit| hit.target == QueueHitTarget::FormScope)
+        .expect("scope hit");
+    let thread_hit = hits
+        .regions
+        .iter()
+        .find(|hit| hit.target == QueueHitTarget::FormThread)
+        .expect("empty thread target");
+    let expected_scope_width = 2 + "foo · thread".chars().count() as u16;
+    assert_eq!(
+        scope_hit.area.width, expected_scope_width,
+        "the entire project basename remains the scope target"
+    );
+    assert_eq!(thread_hit.area.x, expected_scope_width);
+}
+
+#[test]
 fn capture_popup_mouse_paths_unchanged() {
     let layout = capture_layout(Rect::new(0, 0, 80, 16));
     assert!(
