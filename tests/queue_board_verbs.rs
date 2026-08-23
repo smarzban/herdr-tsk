@@ -2176,10 +2176,10 @@ fn active_cursor_up_precedes_shared_scroll() {
     );
 }
 
-/// AC-17/18/26: wheel stays stream-only, then the first cursor Up deactivates;
-/// the next inactive Up scrolls, and Down can activate the cursor again.
+/// AC-18: Up from the active first step deactivates without moving the shared
+/// body. Only a subsequent inactive Up scrolls, and Down reactivates the cursor.
 #[test]
-fn wheel_never_arms_cursor_and_up_deactivates_before_inactive_scroll_then_down_reactivates() {
+fn first_step_up_deactivates_before_inactive_up_scrolls_then_down_reactivates() {
     let (mut domain, mut model, _) = board_with_steps(
         "Cursor lifecycle",
         Some(&wrapping_notes()),
@@ -2199,6 +2199,7 @@ fn wheel_never_arms_cursor_and_up_deactivates_before_inactive_scroll_then_down_r
         !wheeled.contains("▸"),
         "wheel must not activate an inactive cursor:\n{wheeled}"
     );
+
     apply_intent(
         &mut domain,
         &mut model,
@@ -2206,7 +2207,12 @@ fn wheel_never_arms_cursor_and_up_deactivates_before_inactive_scroll_then_down_r
         None,
         None,
     )
-    .expect("activate");
+    .expect("activate first step");
+    let active = rendered_board(&model, 80, 24);
+    assert!(
+        active.contains("▸ ▪ first step"),
+        "fixture must have an active cursor on the first live step:\n{active}"
+    );
     let active_verbs = board_verb_items(&model);
     assert!(
         active_verbs
@@ -2214,6 +2220,7 @@ fn wheel_never_arms_cursor_and_up_deactivates_before_inactive_scroll_then_down_r
             .any(|entry| entry.key == "space" && entry.label == "toggle step"),
         "active step cursor must not advertise task start/reopen"
     );
+
     apply_intent(
         &mut domain,
         &mut model,
@@ -2225,8 +2232,26 @@ fn wheel_never_arms_cursor_and_up_deactivates_before_inactive_scroll_then_down_r
     let deactivated = rendered_board(&model, 80, 24);
     assert!(
         !deactivated.contains("▸"),
-        "Up at step zero must deactivate, not scroll the cursor:\n{deactivated}"
+        "Up at step zero must clear the active cursor:\n{deactivated}"
     );
+    // Page chrome changes from the active step verb to the task verb. Compare only
+    // the shared body, normalizing its sole cursor glyph, so this fails if Up scrolls.
+    let shared_body = |frame: &str| {
+        frame
+            .lines()
+            .skip(3)
+            .take(17)
+            .collect::<Vec<_>>()
+            .join("\n")
+            .replace("▸ ", "  ")
+    };
+    let deactivated_body = shared_body(&deactivated);
+    assert_eq!(
+        shared_body(&active),
+        deactivated_body,
+        "the deactivating Up must not also scroll shared content"
+    );
+
     apply_intent(
         &mut domain,
         &mut model,
@@ -2236,10 +2261,16 @@ fn wheel_never_arms_cursor_and_up_deactivates_before_inactive_scroll_then_down_r
     )
     .expect("inactive up scroll");
     let scrolled = rendered_board(&model, 80, 24);
+    assert!(
+        !scrolled.contains("▸"),
+        "inactive Up must leave the cursor inactive:\n{scrolled}"
+    );
     assert_ne!(
-        deactivated, scrolled,
+        deactivated_body,
+        shared_body(&scrolled),
         "inactive Up must scroll the shared content"
     );
+
     apply_intent(
         &mut domain,
         &mut model,
