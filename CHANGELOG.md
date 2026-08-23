@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.0
+
+Tasks can carry an optional normalized thread. Headless add accepts `--thread`
+and plan item `thread`; `herdr-tasks list --thread <name>` filters within the
+selected scope, JSON rows always include `thread`, and human rows append
+` #name` only for threaded tasks.
+
 ## 0.2.0
 
 Per-task steps: a flat, ordered list on the task page with a shared notes and
@@ -20,8 +27,3 @@ Peek, task page, project scope, done drawer, and undo are on the board.
 
 Park, resume, linking, and dispatch-start are not board actions. Dispatch
 recovery still opens if a persisted attempt is already in the store.
-
-Tasks can carry an optional normalized thread. Headless add accepts `--thread`
-and plan item `thread`; `herdr-tasks list --thread <name>` filters within the
-selected scope, JSON rows always include `thread`, and human rows append
-` #name` only for threaded tasks.
