@@ -44,7 +44,7 @@ struct PanicOnRead;
 
 impl Read for PanicOnRead {
     fn read(&mut self, _buffer: &mut [u8]) -> std::io::Result<usize> {
-        panic!("flag add must not read stdin")
+        panic!("stdin must not be read")
     }
 }
 
@@ -80,17 +80,17 @@ fn add_thread_flag_applies_to_every_item_and_round_trips() {
 }
 
 #[test]
-fn thread_flag_with_plan_input_is_usage_error_exit_2() {
+fn thread_flag_with_file_is_usage_error_exit_2() {
     let _env = env_lock();
-    let file_dir = temp_state_dir("thread-file-plan");
-    let plan = file_dir.join("plan.json");
+    let dir = temp_state_dir("thread-file-plan");
+    let plan = dir.join("plan.json");
     std::fs::write(&plan, r#"[{"title":"from file"}]"#).expect("write plan");
-    let file = add(
+    let output = add(
         &[
             "herdr-tasks".into(),
             "add".into(),
             "--state-dir".into(),
-            state_dir_arg(&file_dir),
+            state_dir_arg(&dir),
             "--thread".into(),
             "release".into(),
             "--file".into(),
@@ -98,40 +98,48 @@ fn thread_flag_with_plan_input_is_usage_error_exit_2() {
         ],
         true,
     );
-    assert_eq!(file.code, 2);
-    assert!(file.stdout.is_empty());
-    assert!(file
+    assert_eq!(output.code, 2);
+    assert!(output.stdout.is_empty());
+    assert!(output
         .stderr
         .contains("item flags cannot be used with --file"));
-    assert!(task_store(&file_dir)
+    assert!(task_store(&dir)
         .load()
         .expect("load file state")
         .tasks()
         .is_empty());
 
-    let stdin_dir = temp_state_dir("thread-stdin-plan");
-    let stdin = run_with(
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn thread_flag_ignores_piped_plan_and_creates_only_flag_task() {
+    let _env = env_lock();
+    let dir = temp_state_dir("thread-stdin-plan");
+    let output = run_with(
         [
             "herdr-tasks",
             "add",
             "--state-dir",
-            &state_dir_arg(&stdin_dir),
+            &state_dir_arg(&dir),
             "--thread",
             "release",
+            "-t",
+            "flag title",
         ],
         Cursor::new(r#"[{"title":"from stdin"}]"#),
         false,
     );
-    assert_eq!(stdin.code, 2);
-    assert!(stdin.stdout.is_empty());
-    assert!(task_store(&stdin_dir)
-        .load()
-        .expect("load stdin state")
-        .tasks()
-        .is_empty());
 
-    let _ = std::fs::remove_dir_all(file_dir);
-    let _ = std::fs::remove_dir_all(stdin_dir);
+    assert_eq!(output.code, 0);
+    assert_eq!(output.stdout, "added flag title\n");
+    let state = task_store(&dir).load().expect("load stdin state");
+    assert_eq!(state.tasks().len(), 1);
+    assert_eq!(state.tasks()[0].title, "flag title");
+    assert_eq!(state.tasks()[0].thread.as_deref(), Some("release"));
+    assert!(state.tasks().iter().all(|task| task.title != "from stdin"));
+
+    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]

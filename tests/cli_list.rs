@@ -88,6 +88,28 @@ fn create_task(state: &mut DomainState, title: &str, scope: TaskScope, status: H
     state.set_status(id, status).expect("set status");
 }
 
+fn create_task_with_thread(
+    state: &mut DomainState,
+    title: &str,
+    scope: TaskScope,
+    status: HumanStatus,
+    thread: Option<&str>,
+) -> uuid::Uuid {
+    let id = state
+        .create_with_thread(
+            title,
+            None,
+            scope,
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+            thread.map(str::to_owned),
+        )
+        .expect("create task");
+    state.set_status(id, status).expect("set status");
+    id
+}
+
 #[test]
 fn list_defaults_to_invocation_project_open_tasks_in_human_and_json_group_order() {
     let _env = env_lock();
@@ -507,7 +529,7 @@ fn list_all_groups_each_status_by_concise_scope_for_every_filter() {
                 .keys()
                 .map(String::as_str)
                 .collect::<Vec<_>>(),
-            vec!["id", "project", "status", "title"]
+            vec!["id", "project", "status", "thread", "title"]
         );
     }
     let done_human = list(&[
@@ -825,6 +847,49 @@ fn human_list_escapes_terminal_control_titles_without_changing_json() {
 }
 
 #[test]
+fn human_list_escapes_terminal_control_thread_markers_without_changing_json() {
+    let _env = env_lock();
+    let dir = temp_state_dir("terminal-control-thread");
+    let thread = "release\u{001b}]52;c;clipboard\u{0007}";
+    let escaped = "release\\u{001b}]52;c;clipboard\\u{0007}";
+    let mut state = DomainState::new();
+    create_task_with_thread(
+        &mut state,
+        "threaded task",
+        TaskScope::Global,
+        HumanStatus::Ready,
+        Some(thread),
+    );
+    TaskStore::new(&dir).save(&state).expect("seed store");
+
+    let human = list(&[
+        "herdr-tasks".into(),
+        "list".into(),
+        "--global".into(),
+        "--state-dir".into(),
+        state_dir_arg(&dir),
+    ]);
+    assert_eq!(human.code, 0);
+    assert!(human.stdout.contains(escaped));
+    assert!(!human.stdout.contains('\u{001b}'));
+    assert!(!human.stdout.contains('\u{0007}'));
+
+    let json = list(&[
+        "herdr-tasks".into(),
+        "list".into(),
+        "--global".into(),
+        "--json".into(),
+        "--state-dir".into(),
+        state_dir_arg(&dir),
+    ]);
+    assert_eq!(json.code, 0);
+    let rows: Vec<serde_json::Value> = serde_json::from_str(&json.stdout).expect("JSON rows");
+    assert_eq!(rows[0]["thread"], thread);
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn list_equals_state_dir_form_accepts_dash_leading_value() {
     let cwd = temp_state_dir("equals-dash-state");
     let state_dir = cwd.join("-state");
@@ -961,6 +1026,26 @@ fn list_rejects_conflicting_scope_and_filter_flags_and_missing_project_values() 
 }
 
 #[test]
+fn list_thread_parse_rejects_invalid_space_and_equals_forms() {
+    let _env = env_lock();
+    let dir = temp_state_dir("invalid-thread");
+
+    for thread in ["--thread", "--thread=bad_name"] {
+        let mut args = vec!["herdr-tasks".into(), "list".into(), thread.into()];
+        if thread == "--thread" {
+            args.push("bad_name".into());
+        }
+        args.extend(["--state-dir".into(), state_dir_arg(&dir)]);
+        let output = list(&args);
+        assert_eq!(output.code, 2, "{thread}");
+        assert!(output.stdout.is_empty(), "{thread}");
+        assert!(output.stderr.contains("invalid thread name"), "{thread}");
+    }
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn list_equals_project_form_accepts_dash_leading_scope() {
     let _env = env_lock();
     let dir = temp_state_dir("equals-project");
@@ -992,6 +1077,7 @@ fn list_equals_project_form_accepts_dash_leading_scope() {
             "title": "maintenance task",
             "status": "ready",
             "project": "-maintenance",
+            "thread": null,
         })]
     );
 
@@ -1170,7 +1256,7 @@ fn list_task_prints_step_lines_with_state_and_short_id() {
     assert_eq!(json.code, 0);
     let rows: Vec<serde_json::Value> = serde_json::from_str(&json.stdout).expect("JSON rows");
     assert_eq!(rows.len(), 1);
-    for key in ["id", "project", "status", "title"] {
+    for key in ["id", "project", "status", "thread", "title"] {
         assert!(rows[0].get(key).is_some(), "single-task row keeps {key}");
     }
     assert_eq!(
@@ -1236,7 +1322,7 @@ fn list_task_without_steps_keeps_task_rows_and_rejects_conflicting_flags() {
             .keys()
             .map(String::as_str)
             .collect::<Vec<_>>(),
-        vec!["id", "project", "status", "title"],
+        vec!["id", "project", "status", "thread", "title"],
         "a task without steps keeps today's exact JSON row shape"
     );
 
@@ -1253,6 +1339,18 @@ fn list_task_without_steps_keeps_task_rows_and_rejects_conflicting_flags() {
         assert!(output.stdout.is_empty());
         assert!(output.stderr.contains("usage: herdr-tasks list"));
     }
+    let threaded = list(&[
+        "herdr-tasks".into(),
+        "list".into(),
+        task.to_string(),
+        "--thread".into(),
+        "release".into(),
+        "--state-dir".into(),
+        state_dir_arg(&dir),
+    ]);
+    assert_eq!(threaded.code, 2, "task id with --thread is usage");
+    assert!(threaded.stdout.is_empty());
+    assert!(threaded.stderr.contains("usage: herdr-tasks list"));
 
     let invalid = list(&[
         "herdr-tasks".into(),
@@ -1265,5 +1363,206 @@ fn list_task_without_steps_keeps_task_rows_and_rejects_conflicting_flags() {
     assert!(invalid.stdout.is_empty());
     assert!(invalid.stderr.contains("invalid task id"));
 
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn list_thread_filters_after_scope_selection() {
+    let _env = env_lock();
+    let dir = temp_state_dir("thread-filter");
+    let mut state = DomainState::new();
+    create_task_with_thread(
+        &mut state,
+        "selected thread",
+        TaskScope::Project {
+            path: "/projects/selected".into(),
+        },
+        HumanStatus::Ready,
+        Some("release"),
+    );
+    create_task_with_thread(
+        &mut state,
+        "selected other thread",
+        TaskScope::Project {
+            path: "/projects/selected".into(),
+        },
+        HumanStatus::Ready,
+        Some("ops"),
+    );
+    create_task_with_thread(
+        &mut state,
+        "other scope same thread",
+        TaskScope::Project {
+            path: "/projects/other".into(),
+        },
+        HumanStatus::Ready,
+        Some("release"),
+    );
+    TaskStore::new(&dir).save(&state).expect("seed store");
+
+    let scoped = list(&[
+        "herdr-tasks".into(),
+        "list".into(),
+        "--project".into(),
+        "selected".into(),
+        "--thread".into(),
+        "Release".into(),
+        "--json".into(),
+        "--state-dir".into(),
+        state_dir_arg(&dir),
+    ]);
+
+    assert_eq!(scoped.code, 0, "{}", scoped.stderr);
+    assert_eq!(
+        serde_json::from_str::<Vec<serde_json::Value>>(&scoped.stdout)
+            .expect("scoped JSON rows")
+            .iter()
+            .map(|row| row["title"].as_str().expect("title"))
+            .collect::<Vec<_>>(),
+        vec!["selected thread"]
+    );
+
+    let all = list(&[
+        "herdr-tasks".into(),
+        "list".into(),
+        "--all".into(),
+        "--thread=RELEASE".into(),
+        "--json".into(),
+        "--state-dir".into(),
+        state_dir_arg(&dir),
+    ]);
+    assert_eq!(all.code, 0, "{}", all.stderr);
+    assert_eq!(
+        serde_json::from_str::<Vec<serde_json::Value>>(&all.stdout)
+            .expect("all JSON rows")
+            .iter()
+            .map(|row| row["title"].as_str().expect("title"))
+            .collect::<Vec<_>>(),
+        vec!["selected thread", "other scope same thread"]
+    );
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn json_rows_always_carry_thread_field() {
+    let _env = env_lock();
+    let dir = temp_state_dir("thread-json");
+    let mut state = DomainState::new();
+    create_task_with_thread(
+        &mut state,
+        "threaded",
+        TaskScope::Global,
+        HumanStatus::Ready,
+        Some("release"),
+    );
+    create_task(
+        &mut state,
+        "unthreaded",
+        TaskScope::Global,
+        HumanStatus::Ready,
+    );
+    TaskStore::new(&dir).save(&state).expect("seed store");
+
+    let output = list(&[
+        "herdr-tasks".into(),
+        "list".into(),
+        "--global".into(),
+        "--json".into(),
+        "--state-dir".into(),
+        state_dir_arg(&dir),
+    ]);
+
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    let rows: Vec<serde_json::Value> = serde_json::from_str(&output.stdout).expect("JSON rows");
+    assert_eq!(rows[0]["thread"], "release");
+    assert!(rows[1].get("thread").expect("unthreaded field").is_null());
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn human_output_appends_thread_marker_iff_row_threaded_snapshots() {
+    let _env = env_lock();
+    let repo = project_repo("thread-human");
+    let _context = EnvironmentGuard::context_for(&repo);
+    let dir = temp_state_dir("thread-human");
+    let project = TaskScope::Project {
+        path: repo.to_string_lossy().into_owned(),
+    };
+    let mut state = DomainState::new();
+    create_task_with_thread(
+        &mut state,
+        "scoped threaded",
+        project.clone(),
+        HumanStatus::Ready,
+        Some("alpha"),
+    );
+    create_task(
+        &mut state,
+        "scoped unthreaded",
+        project.clone(),
+        HumanStatus::Ready,
+    );
+    create_task_with_thread(
+        &mut state,
+        "global threaded",
+        TaskScope::Global,
+        HumanStatus::Ready,
+        Some("ops"),
+    );
+    let step = create_task_with_thread(
+        &mut state,
+        "step threaded",
+        TaskScope::Global,
+        HumanStatus::Done,
+        Some("steps"),
+    );
+    state.add_step(step, "Keep this line").expect("add step");
+    let step_short_id = state.get(step).expect("step task").steps[0].id.to_string()[..1].to_owned();
+    TaskStore::new(&dir).save(&state).expect("seed store");
+    let project_name = repo
+        .file_name()
+        .and_then(|name| name.to_str())
+        .expect("project basename");
+
+    let scoped = list(&[
+        "herdr-tasks".into(),
+        "list".into(),
+        "--state-dir".into(),
+        state_dir_arg(&dir),
+    ]);
+    assert_eq!(
+        scoped.stdout,
+        "READY\n - scoped threaded #alpha\n - scoped unthreaded\n"
+    );
+
+    let all = list(&[
+        "herdr-tasks".into(),
+        "list".into(),
+        "--all".into(),
+        "--state-dir".into(),
+        state_dir_arg(&dir),
+    ]);
+    assert_eq!(
+        all.stdout,
+        format!(
+            "READY\n  {project_name}\n    - scoped threaded #alpha\n    - scoped unthreaded\n  global\n    - global threaded #ops\n"
+        )
+    );
+
+    let single = list(&[
+        "herdr-tasks".into(),
+        "list".into(),
+        step.to_string(),
+        "--state-dir".into(),
+        state_dir_arg(&dir),
+    ]);
+    assert_eq!(
+        single.stdout,
+        format!("DONE\n - step threaded #steps\n   [ ] {step_short_id} Keep this line\n")
+    );
+
+    let _ = std::fs::remove_dir_all(repo);
     let _ = std::fs::remove_dir_all(dir);
 }
