@@ -11,9 +11,9 @@ Rebrand to **tsk** ("a task board for your terminal"). The crate is now
 `tsk-tui` building the `tsk` binary. The store unifies at `~/.tsk` (`tasks.json`
 and `settings.json` side by side), overridable with `TSK_STATE_DIR` /
 `TSK_CONFIG_DIR`; injected host variables like `HERDR_PLUGIN_STATE_DIR` are
-ignored so the herdr pane and a bare terminal edit one board. Existing data
-migrates by moving the old store directory's files into `~/.tsk`. The herdr
-plugin id stays `herdr-tasks`, so existing plugin state needs no migration.
+ignored so the herdr pane and a bare terminal edit one board. There is no
+automatic move from the old locations; a first run creates an empty `~/.tsk`.
+The herdr plugin id stays `herdr-tasks`.
 
 ## 0.3.0
 
