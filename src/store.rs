@@ -312,29 +312,23 @@ impl Drop for StoreLockGuard {
     }
 }
 
-/// State dir from `HERDR_PLUGIN_STATE_DIR`, else `TSK_STATE_DIR`, else per-user data.
+/// State dir from `TSK_STATE_DIR`, else `~/.tsk`.
 ///
-/// Production herdr injects `HERDR_PLUGIN_STATE_DIR`. Standalone runs may set
-/// `TSK_STATE_DIR`. When neither is set (manual runs / tests without the host), use
-/// `$XDG_DATA_HOME/tsk` or `$HOME/.local/share/tsk`.
-/// Never falls back to a shared world path under `std::env::temp_dir()`.
+/// One store everywhere: the herdr plugin pane and a bare terminal run resolve to the same
+/// files, so there is exactly one board regardless of host. Herdr's injected
+/// `HERDR_PLUGIN_STATE_DIR` is deliberately ignored — herdr documents plugin state as
+/// plugin-owned ("it does not validate, sync, or delete their contents") and only recommends
+/// the injected location. Empty values fall through. Never falls back to a shared world path
+/// under `std::env::temp_dir()`.
 pub fn default_state_dir() -> PathBuf {
-    if let Some(dir) = env::var_os("HERDR_PLUGIN_STATE_DIR") {
-        return PathBuf::from(dir);
-    }
     if let Some(dir) = env::var_os("TSK_STATE_DIR") {
         if !dir.is_empty() {
             return PathBuf::from(dir);
         }
     }
-    if let Some(xdg) = env::var_os("XDG_DATA_HOME") {
-        if !xdg.is_empty() {
-            return PathBuf::from(xdg).join("tsk");
-        }
-    }
     if let Some(home) = env::var_os("HOME") {
         if !home.is_empty() {
-            return PathBuf::from(home).join(".local/share/tsk");
+            return PathBuf::from(home).join(".tsk");
         }
     }
     // Last resort: relative per-process dir (still not shared /tmp/tsk-state).
@@ -839,23 +833,22 @@ mod tests {
         fs::create_dir_all(&marker).expect("mkdir");
         let _guard = TempDirGuard(marker.clone());
 
-        // When set, env wins.
+        // When set, the override wins.
         // SAFETY: single-threaded under ENV_LOCK for the duration of this test.
-        env::set_var("HERDR_PLUGIN_STATE_DIR", &marker);
+        env::set_var("TSK_STATE_DIR", &marker);
         assert_eq!(default_state_dir(), marker);
-        env::remove_var("HERDR_PLUGIN_STATE_DIR");
+        env::remove_var("TSK_STATE_DIR");
 
-        // The standalone override sits between the host variable and XDG.
-        let standalone = marker.join("standalone");
-        env::set_var("TSK_STATE_DIR", &standalone);
-        assert_eq!(default_state_dir(), standalone);
-        env::set_var("HERDR_PLUGIN_STATE_DIR", &marker);
-        assert_eq!(
-            default_state_dir(),
-            marker,
-            "host injection beats TSK_STATE_DIR"
-        );
+        // Host injection is deliberately ignored: herdr documents plugin state as
+        // plugin-owned, and one store must stay one store under every host.
+        env::set_var("HERDR_PLUGIN_STATE_DIR", "/herdr/injected");
+        let ignored = default_state_dir();
         env::remove_var("HERDR_PLUGIN_STATE_DIR");
+        assert_ne!(
+            ignored,
+            PathBuf::from("/herdr/injected"),
+            "injected host state dirs must not fragment the single store"
+        );
         env::set_var("TSK_STATE_DIR", "");
         assert_ne!(
             default_state_dir(),

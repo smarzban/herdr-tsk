@@ -1131,7 +1131,7 @@ fn list_state_dir_flag_wins_over_environment() {
     TaskStore::new(&argument_dir)
         .save(&argument_state)
         .expect("save argument state");
-    let _state_dir = EnvironmentGuard::set("HERDR_PLUGIN_STATE_DIR", &environment_dir);
+    let _state_dir = EnvironmentGuard::set("TSK_STATE_DIR", &environment_dir);
 
     let output = list(&[
         "tsk".into(),
@@ -1165,7 +1165,7 @@ fn list_uses_environment_state_dir_by_default() {
     TaskStore::new(&dir)
         .save(&state)
         .expect("save default state");
-    let _state_dir = EnvironmentGuard::set("HERDR_PLUGIN_STATE_DIR", &dir);
+    let _state_dir = EnvironmentGuard::set("TSK_STATE_DIR", &dir);
 
     let output = list(&[
         "tsk".into(),

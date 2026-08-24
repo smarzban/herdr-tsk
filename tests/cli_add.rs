@@ -1604,7 +1604,7 @@ fn flag_add_rejects_flag_like_state_dir_and_file_values_without_mutating() {
 
     let state_dir_output = Command::new(&binary)
         .current_dir(&cwd)
-        .env("HERDR_PLUGIN_STATE_DIR", &state_dir)
+        .env("TSK_STATE_DIR", &state_dir)
         .args(["add", "--state-dir", "--global", "--title", "junk"])
         .output()
         .expect("run flag-like state-dir value");
@@ -1616,7 +1616,7 @@ fn flag_add_rejects_flag_like_state_dir_and_file_values_without_mutating() {
 
     let file = Command::new(binary)
         .current_dir(&cwd)
-        .env("HERDR_PLUGIN_STATE_DIR", &state_dir)
+        .env("TSK_STATE_DIR", &state_dir)
         .args(["add", "--file", "--global"])
         .output()
         .expect("run flag-like file value");
@@ -1717,9 +1717,9 @@ fn state_dir_flag_wins_over_environment() {
     let _env = env_lock();
     let environment_dir = temp_state_dir("environment");
     let argument_dir = temp_state_dir("argument");
-    let prior = std::env::var_os("HERDR_PLUGIN_STATE_DIR");
+    let prior = std::env::var_os("TSK_STATE_DIR");
     // SAFETY: ENV_LOCK serializes this test's process-wide environment mutation.
-    unsafe { std::env::set_var("HERDR_PLUGIN_STATE_DIR", &environment_dir) };
+    unsafe { std::env::set_var("TSK_STATE_DIR", &environment_dir) };
 
     let output = add(
         &[
@@ -1736,11 +1736,11 @@ fn state_dir_flag_wins_over_environment() {
     match prior {
         Some(value) => {
             // SAFETY: ENV_LOCK serializes this test's process-wide environment mutation.
-            unsafe { std::env::set_var("HERDR_PLUGIN_STATE_DIR", value) };
+            unsafe { std::env::set_var("TSK_STATE_DIR", value) };
         }
         None => {
             // SAFETY: ENV_LOCK serializes this test's process-wide environment mutation.
-            unsafe { std::env::remove_var("HERDR_PLUGIN_STATE_DIR") };
+            unsafe { std::env::remove_var("TSK_STATE_DIR") };
         }
     }
 
