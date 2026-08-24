@@ -91,10 +91,11 @@ If `HERDR_ENV` is unset, say that live smoke was not run.
 ## Conventions
 
 - Human status is source of truth. Never auto-complete tasks from agent status.
-- One store: state is `$HOME/.tsk/tasks.json`, config `$HOME/.tsk/settings.json`,
-  overridable with `TSK_STATE_DIR` / `TSK_CONFIG_DIR`. Injected host variables such as
-  `HERDR_PLUGIN_STATE_DIR` are deliberately ignored so every host edits the same board.
-  Verb modifier is `settings.json`; the palette flips it.
+- State is `$HOME/.tsk/tasks.json`, config `$HOME/.tsk/settings.json`, overridable
+  with `TSK_STATE_DIR` / `TSK_CONFIG_DIR`. Host-injected `HERDR_PLUGIN_*` dirs are
+  ignored. Verb modifier is `settings.json`; the palette flips it.
+- Golden fixtures regenerate via `cargo test --test queue_board_render regenerate_golden_fixtures -- --ignored`; never hand-edit the `.txt` files.
+- Pane label matching is exact against `board_pane::BOARD_PANE_LABEL`; the manifest pane title must equal it.
 - UI chrome lives in `src/ui/` (`board/` model·apply·commands·chrome·draw,
   `capture`, `mouse`, `input`, `render`).
 - `map_edit` and `map_board_form_key` share `map_form_edit_key`. Save-recovery
