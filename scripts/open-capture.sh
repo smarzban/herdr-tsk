@@ -9,7 +9,7 @@
 set -uo pipefail
 
 herdr_bin="${HERDR_BIN_PATH:-herdr}"
-plugin_id="herdr-tasks"
+plugin_id="herdr-tsk"
 entrypoint="board"
 
 exec "$herdr_bin" plugin pane open \

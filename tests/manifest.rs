@@ -24,11 +24,11 @@ fn table_section<'a>(text: &'a str, header: &str) -> &'a str {
 }
 
 #[test]
-fn id_keeps_the_herdr_tasks_plugin_id() {
+fn id_is_the_herdr_tsk_plugin_id() {
     let text = read_manifest();
     assert!(
-        text.contains(r#"id = "herdr-tasks""#),
-        "manifest id must stay herdr-tasks: the host keys injected state dirs and links by it"
+        text.contains(r#"id = "herdr-tsk""#),
+        "manifest id must be herdr-tsk: scripts and the host look the plugin up by it"
     );
 }
 

@@ -21,7 +21,7 @@ Build from source:
 
 ```bash
 git clone git@github.com:smarzban/herdr-tsk.git
-cd herdr-tasks
+cd herdr-tsk
 cargo build --release
 ```
 
@@ -46,7 +46,7 @@ The plugin pane runs `./target/release/tsk`, so build before you link:
 herdr plugin link "$PWD"
 ```
 
-`herdr plugin list` should show `herdr-tasks` enabled against that path. Rebuild
+`herdr plugin list` should show `herdr-tsk` enabled against that path. Rebuild
 after you pull.
 
 ## Open the board
@@ -54,7 +54,7 @@ after you pull.
 From herdr, pick **Open tsk board**, or:
 
 ```bash
-herdr plugin action invoke open-board --plugin herdr-tasks
+herdr plugin action invoke open-board --plugin herdr-tsk
 ```
 
 It opens a **tsk** split beside the current pane. Invoking it again focuses the
@@ -63,7 +63,7 @@ board you already have.
 **Quick capture** opens the capture form without the board:
 
 ```bash
-herdr plugin action invoke quick-capture --plugin herdr-tasks
+herdr plugin action invoke quick-capture --plugin herdr-tsk
 ```
 
 In plugin mode herdr injects `HERDR_PLUGIN_STATE_DIR` / `HERDR_PLUGIN_CONFIG_DIR`, but

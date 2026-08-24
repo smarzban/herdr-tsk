@@ -16,7 +16,7 @@
 set -uo pipefail
 
 herdr_bin="${HERDR_BIN_PATH:-herdr}"
-plugin_id="herdr-tasks"
+plugin_id="herdr-tsk"
 entrypoint="board"
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

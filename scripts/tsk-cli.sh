@@ -12,11 +12,11 @@ import json
 import sys
 
 for plugin in json.load(sys.stdin)["result"]["plugins"]:
-    if plugin["plugin_id"] == "herdr-tasks" and plugin["enabled"]:
+    if plugin["plugin_id"] == "herdr-tsk" and plugin["enabled"]:
         print(plugin["plugin_root"])
         break
 else:
-    raise SystemExit("herdr-tasks plugin is not enabled")
+    raise SystemExit("herdr-tsk plugin is not enabled")
 '
 )
 binary="$plugin_root/target/release/tsk"

@@ -1,7 +1,7 @@
 # Tasks board and quick capture inside herdr. Explicit actions only.
 
-id = "herdr-tasks"
-name = "herdr-tasks"
+id = "herdr-tsk"
+name = "herdr-tsk"
 version = "0.3.0"
 description = "Queue board and quick capture inside herdr."
 min_herdr_version = "0.7.5"

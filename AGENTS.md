@@ -17,7 +17,7 @@ The committed `.gitignore` already covers it.
 
 **tsk** is a terminal task board ("a task board for your terminal"): a queue
 board for capture and human-status verbs. It ships as the herdr plugin
-`herdr-tasks`, and the built binary (`tsk`) also runs standalone. Park, resume,
+`herdr-tsk`, and the built binary (`tsk`) also runs standalone. Park, resume,
 linking, and dispatch-start are not board or palette actions. Dispatch recovery
 can still open for a persisted attempt. Crate (`tsk-tui`) and plugin are
 `0.3.0`.
