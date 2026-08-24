@@ -404,7 +404,7 @@ fn standard_78x24_fixture_has_selector_list_rule_status_verb_and_no_other_chrome
         "list must include IN MOTION header:\n{list}"
     );
     assert!(
-        list.contains("tsk") && list.contains("global"),
+        list.contains("tsk") && list.contains("desk"),
         "list must include project group headers:\n{list}"
     );
     assert!(
@@ -557,7 +557,7 @@ fn every_section_header_has_symmetric_spacing_and_scrolls_with_its_selected_task
             Uuid::from_u128(20),
             "Wire dispatch cleanup receipts",
         ),
-        ("global", Uuid::from_u128(30), "Global backlog note"),
+        ("desk", Uuid::from_u128(30), "Global backlog note"),
         (
             "DONE",
             Uuid::from_u128(40),
@@ -737,7 +737,7 @@ fn overlay_rows_are_padded_exact_no_base_bleed() {
     {
         let mut model = fixture_model(&tasks, &view);
         model.status_message = Some(status);
-        let scope_opts: Vec<String> = vec!["all projects".to_string(), "global".to_string()];
+        let scope_opts: Vec<String> = vec!["all projects".to_string(), "desk".to_string()];
         model.overlay = QueueOverlay::ScopeDropdown {
             options: &scope_opts,
             selected: 0,

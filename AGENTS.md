@@ -30,7 +30,7 @@ For scriptable board work, use `tsk add` and `tsk list`; read
 ### Board
 
 - Sections and scoped thread headers are computed, never navigated: IN MOTION · project
-  groups when showing all projects, ON DECK when scoped · global last · done drawer (`z`).
+  groups when showing all projects, ON DECK when scoped · desk last · done drawer (`z`).
   Scoped ON DECK thread blocks paint dim `#name` headers with open counts; headers consume
   row budget but are not selectable or hit-testable.
 - Standard ≥78×24, compact below, operable to 40×10
@@ -44,9 +44,9 @@ For scriptable board work, use `tsk add` and `tsk list`; read
   visible. `Enter` saves and closes, `Ctrl+Enter` saves and stays open, `Tab`
   expands the draft onto the task page with a title·notes·scope stash, so Esc
   returns to the line and a second `Tab` restores what was typed. A project board
-  defaults the draft to that project, a Global board defaults it to global, and All
+  defaults the draft to that project, a Global board defaults it to your desk, and All
   keeps the invocation cwd-derived default. Capture tokens in the title: `!p` and
-  `!t` each consume one whitespace-delimited argument. Bare `!p` selects global,
+  `!t` each consume one whitespace-delimited argument. Bare `!p` selects your desk,
   `!p name` selects a project basename (case-insensitive), and `!p /path` uses that
   path verbatim. Bare `!t` unthreads, while `!t name` assigns a normalized thread:
   lowercase ASCII alphanumerics and hyphens, starting with an alphanumeric, at most

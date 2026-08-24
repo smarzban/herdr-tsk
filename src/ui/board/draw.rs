@@ -275,7 +275,7 @@ fn build_task_page_overlay<'a>(
     // is user-controlled and may contain the same separator or label text.
     let meta_scope = match &form.scope {
         TaskScope::Project { path } => render::short_project(path).to_string(),
-        TaskScope::Global => "global".to_string(),
+        TaskScope::Global => "desk".to_string(),
     };
     let meta_scope_width = u16::try_from(render::display_width(&meta_scope)).unwrap_or(u16::MAX);
     let mut meta = meta_scope.clone();
@@ -376,7 +376,7 @@ fn draw_board_impl(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap
     let queue_view = model.queue_view();
     let scope_label = match &model.deck_scope {
         OwnedDeckScope::All => "all projects".to_string(),
-        OwnedDeckScope::Global => "global".to_string(),
+        OwnedDeckScope::Global => "desk".to_string(),
         OwnedDeckScope::Project(path) => project_option_label(Some(path.as_path())),
     };
     // Status line surfaces delete recovery notice (title + u undo hint) when armed;
@@ -441,7 +441,7 @@ fn draw_board_impl(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap
             .form_scope_options()
             .iter()
             .map(|scope| match scope {
-                TaskScope::Global => "global".to_string(),
+                TaskScope::Global => "desk".to_string(),
                 TaskScope::Project { path } => render::short_project(path).to_string(),
             })
             .collect()
@@ -469,7 +469,7 @@ fn draw_board_impl(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap
             input: crate::ui::render::BottomInputSlot {
                 text: title,
                 cursor_col: title_cursor,
-                placeholder: "title…   !p global · !p name project · !t thread · tab details",
+                placeholder: "title…   !p desk · !p name project · !t thread · tab details",
                 refusal: None,
                 // Save recovery owns the verb row; ordinary quick-add refusals
                 // use the shared slot's reserved row above the cursor.

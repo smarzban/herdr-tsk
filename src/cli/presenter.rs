@@ -11,20 +11,20 @@ use crate::ui::terminal_text;
 
 pub fn add_help() -> CliOutput {
     help_output(
-        "usage: tsk add -t <title> [-n <notes>] [-p <project> | --global] [--thread <name>] [--json] [--state-dir <dir>]\n       tsk add [--file <path|->] [--state-dir <dir>]",
+        "usage: tsk add -t <title> [-n <notes>] [-p <project> | --desk] [--thread <name>] [--json] [--state-dir <dir>]\n       tsk add [--file <path|->] [--state-dir <dir>]",
     )
 }
 
 pub fn list_help() -> CliOutput {
     CliOutput {
         stdout: concat!(
-            "usage: tsk list [<task-id>] [-p <project> | --global | --all] [--thread <name>] [--done | --deleted] [--json] [--state-dir <dir>]\n\n",
-            "Lists ready, started, blocked, and review tasks in the invocation project by default, or global scope outside a repository.\n",
+            "usage: tsk list [<task-id>] [-p <project> | --desk | --all] [--thread <name>] [--done | --deleted] [--json] [--state-dir <dir>]\n\n",
+            "Lists ready, started, blocked, and review tasks in the invocation project by default, or your desk outside a repository.\n",
             "With a task id (a task UUID from add --json or list --json), lists that one task alone and prints its steps: one line per step with its [x]/[ ] state and step short id. A task id cannot be combined with scope, thread, or status filters.\n",
-            "--project uses the same basename-or-path scope resolution as add; --global selects global tasks; --all selects every scope. --thread normalizes a thread name and filters within the selected scope; an invalid name is a usage error (exit 2). For dash-leading project and state-directory values, use --project=<scope> and --state-dir=<dir>.\n",
+            "--project uses the same basename-or-path scope resolution as add; --desk selects your desk, tasks not tied to a project (--global still works as an alias); --all selects every scope. --thread normalizes a thread name and filters within the selected scope; an invalid name is a usage error (exit 2). For dash-leading project and state-directory values, use --project=<scope> and --state-dir=<dir>.\n",
             "--done lists done tasks only. --deleted lists soft-deleted tasks only, regardless of status.\n",
             "To recover a typo scope, use tsk list --all --json.\n",
-            "--json emits a flat array of id, title, status, project, and thread (or null) in displayed group order. Human --all groups rows by status, then project scope, using a unique concise trailing path or global.\n\n",
+            "--json emits a flat array of id, title, status, project, and thread (or null) in displayed group order. Human --all groups rows by status, then project scope, using a unique concise trailing path or desk.\n\n",
             "Exit contract:\n",
             "  exit 0: tasks were listed\n",
             "  exit 2: usage or parse error, nothing persisted\n",
@@ -39,7 +39,7 @@ pub fn list_help() -> CliOutput {
 fn help_output(usage: &str) -> CliOutput {
     CliOutput {
         stdout: format!(
-            "{usage}\n\nExamples:\n  tsk add -t \"Draft release notes\"\n  tsk add -t \"Buy milk\" --global\n  tsk add -t \"Fix widget\" --project widget --thread release-2026\n  tsk add --title=\"-fix parser\" --notes=\"-5 degrees\" --project=\"-maintenance\"\n  tsk add --file plan.json\n  cat plan.json | tsk add\n\nValues beginning with - must use --title=<value>, --notes=<value>, --project=<value>, --state-dir=<dir>, or --file=<path>.\nItem flags plus --file are usage (exit 2, nothing persists). Piped stdin with item flags is ignored and not read. An add whose trimmed title, resolved project scope, and normalized thread already exist succeeds without changing the task. With --json, flag add emits one object with outcome, id, title, and project (or null).\nPlan JSON: [{{\"title\": \"...\", \"notes\": \"...\", \"project\": \"...\", \"thread\": \"...\"}}] (thread may also be null)\nPlan result: {{\"created\": [...], \"existing\": [...], \"failed\": [...]}}\n\nExit contract:\n  exit 0: every item was created or already existed\n  exit 1: one or more items were refused, retry failed only\n  exit 2: usage or parse error, nothing persisted\n  exit 3: store I/O, commit indeterminate, verify with list before retrying\n"
+            "{usage}\n\nExamples:\n  tsk add -t \"Draft release notes\"\n  tsk add -t \"Buy milk\" --desk\n  tsk add -t \"Fix widget\" --project widget --thread release-2026\n  tsk add --title=\"-fix parser\" --notes=\"-5 degrees\" --project=\"-maintenance\"\n  tsk add --file plan.json\n  cat plan.json | tsk add\n\nValues beginning with - must use --title=<value>, --notes=<value>, --project=<value>, --state-dir=<dir>, or --file=<path>.\nItem flags plus --file are usage (exit 2, nothing persists). Piped stdin with item flags is ignored and not read. An add whose trimmed title, resolved project scope, and normalized thread already exist succeeds without changing the task. With --json, flag add emits one object with outcome, id, title, and project (or null).\nPlan JSON: [{{\"title\": \"...\", \"notes\": \"...\", \"project\": \"...\", \"thread\": \"...\"}}] (thread may also be null)\nPlan result: {{\"created\": [...], \"existing\": [...], \"failed\": [...]}}\n\nExit contract:\n  exit 0: every item was created or already existed\n  exit 1: one or more items were refused, retry failed only\n  exit 2: usage or parse error, nothing persisted\n  exit 3: store I/O, commit indeterminate, verify with list before retrying\n"
         ),
         stderr: String::new(),
         code: 0,
@@ -92,7 +92,7 @@ pub fn usage(reason: &str) -> CliOutput {
     CliOutput {
         stdout: String::new(),
         stderr: format!(
-            "tsk add: {reason}\nusage: tsk add -t <title> [-n <notes>] [-p <project> | --global] [--thread <name>] [--json] [--state-dir <dir>]\n"
+            "tsk add: {reason}\nusage: tsk add -t <title> [-n <notes>] [-p <project> | --desk] [--thread <name>] [--json] [--state-dir <dir>]\n"
         ),
         code: 2,
     }
@@ -315,7 +315,7 @@ impl ScopeLabel {
 
     fn label(&self) -> String {
         let mut label = match self.scope.as_deref() {
-            None => "global".into(),
+            None => "desk".into(),
             Some(path) if path.trim().is_empty() => {
                 format!("project: <empty project {}>", self.empty_number)
             }
@@ -432,7 +432,7 @@ pub fn list_usage(reason: &str) -> CliOutput {
     CliOutput {
         stdout: String::new(),
         stderr: format!(
-            "tsk list: {reason}\nusage: tsk list [<task-id>] [-p <project> | --global | --all] [--thread <name>] [--done | --deleted] [--json] [--state-dir <dir>]\n"
+            "tsk list: {reason}\nusage: tsk list [<task-id>] [-p <project> | --desk | --all] [--thread <name>] [--done | --deleted] [--json] [--state-dir <dir>]\n"
         ),
         code: 2,
     }

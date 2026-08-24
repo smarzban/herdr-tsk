@@ -114,7 +114,7 @@ pub fn parse(args: &[String]) -> Result<ListInput, String> {
                 );
                 index += 2;
             }
-            "--global" => {
+            "--desk" | "--global" => {
                 input.global = true;
                 index += 1;
             }
@@ -157,13 +157,13 @@ pub fn parse(args: &[String]) -> Result<ListInput, String> {
     if input.task.is_some()
         && (input.all || input.global || input.project.is_some() || input.thread.is_some())
     {
-        return Err("task id cannot be used with --project, --global, --all, or --thread".into());
+        return Err("task id cannot be used with --project, --desk, --all, or --thread".into());
     }
     if input.task.is_some() && (input.done || input.deleted) {
         return Err("task id cannot be used with --done or --deleted".into());
     }
     if input.all && (input.global || input.project.is_some()) {
-        return Err("--all cannot be used with --project or --global".into());
+        return Err("--all cannot be used with --project or --desk".into());
     }
     if input.global && input.project.is_some() {
         return Err("--global cannot be used with --project".into());

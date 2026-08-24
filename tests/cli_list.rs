@@ -262,7 +262,7 @@ fn list_resolves_named_and_global_scopes() {
     let global = list(&[
         "tsk".into(),
         "list".into(),
-        "--global".into(),
+        "--desk".into(),
         "--json".into(),
         "--state-dir".into(),
         state_dir_arg(&dir),
@@ -475,7 +475,7 @@ fn list_all_groups_each_status_by_concise_scope_for_every_filter() {
     assert_eq!(
         open.stdout,
         format!(
-            "STARTED\n  global\n    - global started\n  {project_name}\n    - project started\n  other\n    - other started\n\nREADY\n  {project_name}\n    - project ready\n\nBLOCKED\n  other\n    - other blocked\n\nREVIEW\n  global\n    - global review\n"
+            "STARTED\n  desk\n    - global started\n  {project_name}\n    - project started\n  other\n    - other started\n\nREADY\n  {project_name}\n    - project ready\n\nBLOCKED\n  other\n    - other blocked\n\nREVIEW\n  desk\n    - global review\n"
         )
     );
 
@@ -542,7 +542,7 @@ fn list_all_groups_each_status_by_concise_scope_for_every_filter() {
     ]);
     assert_eq!(
         done_human.stdout,
-        format!("DONE\n  {project_name}\n    - project done\n  global\n    - global done\n")
+        format!("DONE\n  {project_name}\n    - project done\n  desk\n    - global done\n")
     );
 
     let deleted = list(&[
@@ -574,7 +574,7 @@ fn list_all_groups_each_status_by_concise_scope_for_every_filter() {
     ]);
     assert_eq!(
         deleted_human.stdout,
-        "DELETED\n  global\n    - global deleted\n  other\n    - other deleted\n"
+        "DELETED\n  desk\n    - global deleted\n  other\n    - other deleted\n"
     );
 
     let _ = std::fs::remove_dir_all(repo);
@@ -645,7 +645,7 @@ fn list_all_distinguishes_global_from_project_global_and_uses_visible_scope_labe
     assert_eq!(output.code, 0);
     assert_eq!(
         output.stdout,
-        "READY\n  global\n    - global task\n  project: global\n    - project global token\n  work/global\n    - project global path\n  work/api\n    - work api\n  personal/api\n    - personal api\n  project: <empty project 1>\n    - whitespace scope\n"
+        "READY\n  desk\n    - global task\n  project: global\n    - project global token\n  work/global\n    - project global path\n  work/api\n    - work api\n  personal/api\n    - personal api\n  project: <empty project 1>\n    - whitespace scope\n"
     );
 
     let _ = std::fs::remove_dir_all(dir);
@@ -706,7 +706,7 @@ fn list_all_uses_shortest_unique_trailing_scope_labels_across_statuses() {
     assert_eq!(output.code, 0);
     assert_eq!(
         output.stdout,
-        "STARTED\n  project: global\n    - project global\n  work/api\n    - work api\n\nREADY\n  global\n    - global\n  project: <empty project 1>\n    - blank one\n\nBLOCKED\n  personal/api\n    - personal api\n\nREVIEW\n  project: <empty project 2>\n    - blank two\n"
+        "STARTED\n  global\n    - project global\n  work/api\n    - work api\n\nREADY\n  desk\n    - global\n  project: <empty project 1>\n    - blank one\n\nBLOCKED\n  personal/api\n    - personal api\n\nREVIEW\n  project: <empty project 2>\n    - blank two\n"
     );
 
     let _ = std::fs::remove_dir_all(dir);
@@ -818,7 +818,7 @@ fn human_list_escapes_terminal_control_titles_without_changing_json() {
         let mut args = vec![
             "tsk".into(),
             "list".into(),
-            "--global".into(),
+            "--desk".into(),
             "--state-dir".into(),
             state_dir_arg(&dir),
         ];
@@ -834,7 +834,7 @@ fn human_list_escapes_terminal_control_titles_without_changing_json() {
     let json = list(&[
         "tsk".into(),
         "list".into(),
-        "--global".into(),
+        "--desk".into(),
         "--json".into(),
         "--state-dir".into(),
         state_dir_arg(&dir),
@@ -865,7 +865,7 @@ fn human_list_escapes_terminal_control_thread_markers_without_changing_json() {
     let human = list(&[
         "tsk".into(),
         "list".into(),
-        "--global".into(),
+        "--desk".into(),
         "--state-dir".into(),
         state_dir_arg(&dir),
     ]);
@@ -877,7 +877,7 @@ fn human_list_escapes_terminal_control_thread_markers_without_changing_json() {
     let json = list(&[
         "tsk".into(),
         "list".into(),
-        "--global".into(),
+        "--desk".into(),
         "--json".into(),
         "--state-dir".into(),
         state_dir_arg(&dir),
@@ -906,7 +906,7 @@ fn list_equals_state_dir_form_accepts_dash_leading_value() {
 
     let output = std::process::Command::new(binary)
         .current_dir(&cwd)
-        .args(["list", "--global", "--json", "--state-dir=-state"])
+        .args(["list", "--desk", "--json", "--state-dir=-state"])
         .output()
         .expect("run equals state directory");
 
@@ -978,14 +978,14 @@ fn list_rejects_conflicting_scope_and_filter_flags_and_missing_project_values() 
             "tsk".into(),
             "list".into(),
             "--all".into(),
-            "--global".into(),
+            "--desk".into(),
             "--state-dir".into(),
             state_dir_arg(&dir),
         ],
         vec![
             "tsk".into(),
             "list".into(),
-            "--global".into(),
+            "--desk".into(),
             "--project".into(),
             "/projects/a".into(),
             "--state-dir".into(),
@@ -1136,7 +1136,7 @@ fn list_state_dir_flag_wins_over_environment() {
     let output = list(&[
         "tsk".into(),
         "list".into(),
-        "--global".into(),
+        "--desk".into(),
         "--json".into(),
         "--state-dir".into(),
         state_dir_arg(&argument_dir),
@@ -1170,7 +1170,7 @@ fn list_uses_environment_state_dir_by_default() {
     let output = list(&[
         "tsk".into(),
         "list".into(),
-        "--global".into(),
+        "--desk".into(),
         "--json".into(),
     ]);
 
@@ -1326,7 +1326,7 @@ fn list_task_without_steps_keeps_task_rows_and_rejects_conflicting_flags() {
         "a task without steps keeps today's exact JSON row shape"
     );
 
-    for extra in ["--global", "--all", "--done", "--deleted"] {
+    for extra in ["--desk", "--all", "--done", "--deleted"] {
         let output = list(&[
             "tsk".into(),
             "list".into(),
@@ -1467,7 +1467,7 @@ fn json_rows_always_carry_thread_field() {
     let output = list(&[
         "tsk".into(),
         "list".into(),
-        "--global".into(),
+        "--desk".into(),
         "--json".into(),
         "--state-dir".into(),
         state_dir_arg(&dir),
@@ -1547,7 +1547,7 @@ fn human_output_appends_thread_marker_iff_row_threaded_snapshots() {
     assert_eq!(
         all.stdout,
         format!(
-            "READY\n  {project_name}\n    - scoped threaded #alpha\n    - scoped unthreaded\n  global\n    - global threaded #ops\n"
+            "READY\n  {project_name}\n    - scoped threaded #alpha\n    - scoped unthreaded\n  desk\n    - global threaded #ops\n"
         )
     );
 

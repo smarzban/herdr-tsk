@@ -1531,7 +1531,7 @@ pub fn project_option_label(option: Option<&Path>) -> String {
 pub(super) fn project_scope_option_label(option: &ProjectScopeOption) -> String {
     match option {
         ProjectScopeOption::All => "all projects".to_string(),
-        ProjectScopeOption::Global => "global".to_string(),
+        ProjectScopeOption::Global => "desk".to_string(),
         ProjectScopeOption::Project(path) => project_option_label(Some(path)),
     }
 }

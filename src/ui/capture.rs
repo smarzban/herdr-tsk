@@ -625,7 +625,7 @@ fn move_draft(model: &mut CaptureModel, operation: impl FnOnce(&mut EditBuffer))
 /// Human-readable scope for the form line.
 pub fn format_scope(scope: &TaskScope) -> String {
     match scope {
-        TaskScope::Global => "global".into(),
+        TaskScope::Global => "desk".into(),
         TaskScope::Project { path } => format!("project:{path}"),
     }
 }
@@ -871,7 +871,7 @@ pub fn draw_capture(frame: &mut Frame, model: &CaptureModel) {
         _ => {
             frame.render_widget(
                 Paragraph::new(present_line(
-                    "  1 this project  ·  2 global  ·  3 other path",
+                    "  1 this project  ·  2 desk  ·  3 other path",
                     layout.message_area.width as usize,
                 ))
                 .style(render::style_dim()),
