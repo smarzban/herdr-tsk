@@ -59,6 +59,9 @@ pub enum CaptureIntent {
     /// One character toward the start / end of the draft.
     MoveLeft,
     MoveRight,
+    /// One WRAPPED row up / down in the multiline Notes draft.
+    MoveUp,
+    MoveDown,
     /// Either end of the cursor's own line.
     MoveLineStart,
     MoveLineEnd,
@@ -154,6 +157,8 @@ pub enum BoardIntent {
     /// One character toward the start / end of the draft.
     EditMoveLeft,
     EditMoveRight,
+    EditMoveUp,
+    EditMoveDown,
     /// Either end of the cursor's own line.
     EditMoveLineStart,
     EditMoveLineEnd,
@@ -720,6 +725,10 @@ fn map_form_edit_key(
             KeyCode::Delete => Some(BoardIntent::EditDeleteForward),
             KeyCode::Left => Some(BoardIntent::EditMoveLeft),
             KeyCode::Right => Some(BoardIntent::EditMoveRight),
+            // Vertical arrows navigate WRAPPED rows in the multiline Notes draft;
+            // Title and Thread are one line, so they stay inert there.
+            KeyCode::Up if focused == CaptureField::Notes => Some(BoardIntent::EditMoveUp),
+            KeyCode::Down if focused == CaptureField::Notes => Some(BoardIntent::EditMoveDown),
             KeyCode::Home => Some(BoardIntent::EditMoveLineStart),
             KeyCode::End => Some(BoardIntent::EditMoveLineEnd),
             KeyCode::Char(character) if !character.is_control() => {
@@ -780,6 +789,8 @@ pub fn intent_primary_action(intent: &BoardIntent) -> Option<PrimaryBoardAction>
         | BoardIntent::EditDeleteForward
         | BoardIntent::EditMoveLeft
         | BoardIntent::EditMoveRight
+        | BoardIntent::EditMoveUp
+        | BoardIntent::EditMoveDown
         | BoardIntent::EditMoveLineStart
         | BoardIntent::EditMoveLineEnd
         | BoardIntent::EditMoveWordLeft
@@ -1139,6 +1150,10 @@ pub fn map_capture_key_state(
             KeyCode::Delete => Some(CaptureIntent::DeleteForward),
             KeyCode::Left => Some(CaptureIntent::MoveLeft),
             KeyCode::Right => Some(CaptureIntent::MoveRight),
+            // Vertical arrows navigate WRAPPED rows in the multiline Notes draft;
+            // Title and Thread are one line, so they stay inert there.
+            KeyCode::Up if focused == CaptureField::Notes => Some(CaptureIntent::MoveUp),
+            KeyCode::Down if focused == CaptureField::Notes => Some(CaptureIntent::MoveDown),
             KeyCode::Home => Some(CaptureIntent::MoveLineStart),
             KeyCode::End => Some(CaptureIntent::MoveLineEnd),
             KeyCode::Char(c) if !c.is_control() => Some(CaptureIntent::Insert(c)),
@@ -1229,6 +1244,8 @@ pub fn intent_primary_capture_action(intent: &CaptureIntent) -> Option<PrimaryCa
         | CaptureIntent::DeleteForward
         | CaptureIntent::MoveLeft
         | CaptureIntent::MoveRight
+        | CaptureIntent::MoveUp
+        | CaptureIntent::MoveDown
         | CaptureIntent::MoveLineStart
         | CaptureIntent::MoveLineEnd
         | CaptureIntent::MoveWordLeft

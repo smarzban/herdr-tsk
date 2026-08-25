@@ -7,7 +7,7 @@ use ratatui::Frame;
 
 use crate::domain::{HumanStatus, TaskScope};
 use crate::ui::capture::CaptureField;
-use crate::ui::edit::{escaped_draft_rows, escaped_line_window, wrapped_draft_rows};
+use crate::ui::edit::{escaped_line_window, wrap_text, wrapped_draft_rows, wrapped_edit_rows};
 use crate::ui::input::{help_card_lines, keymap_help_label};
 use crate::ui::mouse::BoardPopup;
 use crate::ui::present_line;
@@ -196,6 +196,8 @@ fn build_task_page_overlay<'a>(
                 cursor_col,
                 placeholder: "step…   enter save · ctrl+enter save+next · esc cancel",
                 refusal: editor.refusal.as_deref(),
+                above_rows: Vec::new(),
+                cursor_row_offset: 0,
                 // The bottom input replaces the shared status row. Forward recovery
                 // and record-refusal feedback to the surface that is actually visible.
                 message: model.message(),
@@ -210,6 +212,8 @@ fn build_task_page_overlay<'a>(
                     cursor_col,
                     placeholder: "thread…   enter save · esc cancel",
                     refusal: None,
+                    above_rows: Vec::new(),
+                    cursor_row_offset: 0,
                     // The shared bottom slot owns this refusal while it is visible, so it
                     // never leaks through the status row and remains legible at 40x10.
                     message: form.thread_refusal.as_deref(),
@@ -221,13 +225,6 @@ fn build_task_page_overlay<'a>(
     // entirely. The step editor uses the shared bottom slot, so steps alone
     // classify the page section.
     let page_geo = render::bottom_input_geometry(*geo, step_editor.is_some());
-    let lay = render::task_page_layout(
-        &page_geo,
-        render::steps_section(step_views.len()),
-        u16::from(model.input_mode() == BoardInputMode::EditNotes),
-    );
-    // The renderer and input reducer share this viewport size for page scrolling.
-    form.steps.window_rows.set(lay.notes_rows as usize);
     let status = bound_task
         .map(|task| task.status)
         .unwrap_or(HumanStatus::Ready);
@@ -240,35 +237,126 @@ fn build_task_page_overlay<'a>(
     };
     let glyph = render::status_glyph(status);
 
-    // Header: indent + glyph + title window + gap + right-aligned status word.
+    // Header: indent + glyph + the WRAPPED title rows + right-aligned status word
+    // on row 0. A long title wraps onto further bold rows indented under the
+    // glyph instead of truncating; edit mode wraps the draft with its cursor.
+    // The uniform budget keeps every row's wrap identical.
     let word_cells = status_word.chars().count() + 1;
     let title_avail = width.saturating_sub(4 + word_cells);
-    let (header, title_cursor) = if model.input_mode() == BoardInputMode::EditTitle {
-        let (window, col) = escaped_line_window(&form.title, title_avail);
-        (format!("{glyph} {window}"), Some(4 + col))
+    // The header may grow only inside the page body: it must stop one row short
+    // of the lowest chrome row with one note row still living under it, or a
+    // pathological title would eat the page (and the painter's chrome).
+    let page_bottom = [page_geo.rule_row, page_geo.status_row, page_geo.verb_row]
+        .into_iter()
+        .flatten()
+        .min()
+        .unwrap_or(page_geo.height);
+    let header_cap = page_bottom.saturating_sub(3).max(1) as usize;
+    let editing_title = model.input_mode() == BoardInputMode::EditTitle;
+    let mut header_rows: Vec<String> = Vec::new();
+    let mut title_cursor = None;
+    if editing_title {
+        let (mut rows, cursor_row, cursor_col) = wrapped_edit_rows(&form.title, title_avail);
+        let overflowed = rows.len() > header_cap;
+        rows.truncate(header_cap);
+        if overflowed {
+            if let Some(last) = rows.last_mut() {
+                *last = present_line(last, title_avail.saturating_sub(1));
+            }
+        }
+        for (offset, segment) in rows.iter().enumerate() {
+            if offset == 0 {
+                header_rows.push(format!("{glyph} {segment}"));
+            } else {
+                header_rows.push(segment.clone());
+            }
+        }
+        // A caret hidden below the cap parks at the END of the last shown row:
+        // its own hidden column would otherwise paint an unrelated position on
+        // the ellipsis row.
+        let shown_cursor_row = cursor_row.min(rows.len().saturating_sub(1));
+        let shown_cursor_col = if cursor_row > shown_cursor_row {
+            rows.last()
+                .map(|last| render::display_width(last))
+                .unwrap_or(0)
+        } else {
+            cursor_col
+        };
+        title_cursor = Some((
+            u16::try_from(shown_cursor_row).unwrap_or(u16::MAX),
+            u16::try_from(shown_cursor_col).unwrap_or(u16::MAX),
+        ));
+    } else {
+        let mut rows: Vec<String> = wrap_text(form.title.value(), title_avail)
+            .iter()
+            .map(|row| row.text.clone())
+            .collect();
+        let overflowed = rows.len() > header_cap;
+        rows.truncate(header_cap);
+        if overflowed {
+            if let Some(last) = rows.last_mut() {
+                *last = present_line(last, title_avail.saturating_sub(1));
+            }
+        }
+        for (offset, row) in rows.iter().enumerate() {
+            if offset == 0 {
+                header_rows.push(format!("{glyph} {row}"));
+            } else {
+                header_rows.push(row.clone());
+            }
+        }
+    }
+    let lay = render::task_page_layout(
+        &page_geo,
+        render::steps_section(step_views.len()),
+        u16::from(model.input_mode() == BoardInputMode::EditNotes),
+        header_rows.len().max(1) as u16,
+    );
+    // The renderer and input reducer share this viewport size for page scrolling.
+    form.steps.window_rows.set(lay.notes_rows as usize);
+
+    // View mode supplies every wrapped note row; Notes edit mode wraps too, with the
+    // caret mapped into wrapped coordinates. The shared page painter combines that
+    // stream with the steps, then windows it once against the fixed viewport.
+    // Wrap at the width the painter can show WHOLE: the content region less its
+    // two-cell gutter and one further reserved cell, taken in the scrollbar state
+    // (content_width - 3 there), so an overflowing page never re-wraps rows that
+    // were already painted -- and no wrapped row ever ends in the presenter's … .
+    let notes_width = width.saturating_sub(6);
+    let want = lay.notes_rows as usize;
+    let editing_notes = model.input_mode() == BoardInputMode::EditNotes;
+    let (notes_rows, notes_cursor, more_lines, notes_scroll) = if editing_notes {
+        let (all_rows, cursor_row, cursor_column) = wrapped_edit_rows(&form.notes, notes_width);
+        // Wheel and arrow scrolling are inert while the editor owns the page, so the
+        // frame's scroll may follow the caret without fighting a reading position:
+        // keep the minimal window that still shows the caret's wrapped row.
+        let follow = form.notes_scroll.clamp(
+            cursor_row.saturating_sub(want.saturating_sub(1)),
+            cursor_row,
+        );
+        (
+            all_rows,
+            Some((
+                u16::try_from(cursor_row).unwrap_or(u16::MAX),
+                u16::try_from(cursor_column).unwrap_or(u16::MAX),
+            )),
+            0,
+            follow,
+        )
+    } else if form.notes.value().trim().is_empty() {
+        (Vec::new(), None, 0, form.notes_scroll)
     } else {
         (
-            format!("{glyph} {}", present_line(form.title.value(), title_avail)),
+            wrapped_draft_rows(&form.notes, notes_width),
             None,
+            0,
+            form.notes_scroll,
         )
-    };
-
-    // View mode supplies every wrapped note row. The shared page painter combines
-    // that stream with the steps, then windows it once against the fixed viewport.
-    let notes_width = width.saturating_sub(3);
-    let want = lay.notes_rows as usize;
-    let (notes_rows, notes_cursor, more_lines) = if model.input_mode() == BoardInputMode::EditNotes
-    {
-        let (rows, row, col) = escaped_draft_rows(&form.notes, notes_width, want);
-        (rows, Some((row, col)), 0)
-    } else if form.notes.value().trim().is_empty() {
-        (Vec::new(), None, 0)
-    } else {
-        (wrapped_draft_rows(&form.notes, notes_width), None, 0)
     };
     let content = render::page_content_layout(notes_rows.len(), step_views.len(), lay.notes_rows);
     form.notes_max_scroll.set(content.max_scroll);
     form.steps.content_start.set(content.steps_start);
+    form.notes_width.set(notes_width);
 
     // Meta footer: scope · thread · created · updated (ages only while the bound task is
     // present). Keep its clickable pieces separate from the painted string: a project basename
@@ -321,7 +409,7 @@ fn build_task_page_overlay<'a>(
     };
 
     QueueOverlay::TaskPage {
-        header,
+        header_rows,
         title_cursor,
         status_word,
         notes_rows,
@@ -329,7 +417,7 @@ fn build_task_page_overlay<'a>(
         more_lines,
         step_views,
         step_cursor: form.steps.cursor,
-        step_scroll: form.notes_scroll,
+        step_scroll: notes_scroll,
         step_marked: form.steps.delete_mark,
         step_editor,
         meta,
@@ -464,18 +552,42 @@ fn draw_board_impl(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap
         )
     }) {
         let input_width = (geo.row_width as usize).saturating_sub(2);
-        let (title, title_cursor) = escaped_line_window(&quick_add.title, input_width);
+        // A long title wraps instead of scrolling sideways. Exactly ONE row above
+        // the input is reserved (the message row: the shifted rule sits two up),
+        // so the draft may span at most two painted rows, windowed by the
+        // minimum that keeps the caret's wrapped row visible. Longer drafts
+        // window vertically rather than touching chrome.
+        const QUICK_ADD_MAX_ROWS: usize = 2;
+        let (all_rows, cursor_row, cursor_column) =
+            wrapped_edit_rows(&quick_add.title, input_width);
+        let shown = all_rows.len().clamp(1, QUICK_ADD_MAX_ROWS);
+        let start = cursor_row
+            .min(all_rows.len().saturating_sub(1))
+            .saturating_sub(shown - 1);
+        let window: Vec<String> = all_rows[start..(start + shown).min(all_rows.len())].to_vec();
+        let caret_index = cursor_row.saturating_sub(start);
+        let title = window.last().cloned().unwrap_or_default();
+        // Continuations paint top-first (the painter stacks them upward by index).
+        let above_rows: Vec<String> = window[..window.len().saturating_sub(1)].to_vec();
+        let multiline = window.len() > 1;
         QueueOverlay::QuickAdd {
             input: crate::ui::render::BottomInputSlot {
                 text: title,
-                cursor_col: title_cursor,
+                cursor_col: u16::try_from(cursor_column).unwrap_or(u16::MAX),
                 placeholder: "title…   !p = desk · !p name = project · !t name = thread",
                 refusal: None,
                 // Save recovery owns the verb row; ordinary quick-add refusals
-                // use the shared slot's reserved row above the cursor.
-                message: (model.input_mode() != BoardInputMode::SaveRecovery)
+                // use the shared slot's reserved row above the cursor. A wrapped
+                // draft owns those rows itself, so the message yields while it is
+                // up and returns when the draft is back under the cap.
+                message: (!multiline && model.input_mode() != BoardInputMode::SaveRecovery)
                     .then(|| model.message())
                     .flatten(),
+                above_rows,
+                cursor_row_offset: u16::try_from(
+                    window.len().saturating_sub(1).saturating_sub(caret_index),
+                )
+                .unwrap_or(0),
             },
             project_scope: matches!(quick_add.scope, TaskScope::Project { .. }),
             recovery: model.input_mode() == BoardInputMode::SaveRecovery,

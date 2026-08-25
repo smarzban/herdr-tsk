@@ -318,29 +318,34 @@ fn title_edit_cursor_and_window_track_the_actual_paint_width_not_a_hardcoded_one
         );
     }
 
-    // Narrow (40 cols, compact): the draft overflows the header window, so it scrolls to
-    // keep the cursor (at the draft's end) visible — the tail must be on screen, not the
-    // head, and the cursor must land inside the painted field, not off past its right edge.
+    // Narrow (40 cols, compact): the draft overflows the header, so it WRAPS onto a
+    // second bold header row -- nothing is cut, and the caret follows onto that
+    // continuation row at its past-end column.
     {
         let backend = TestBackend::new(40, 10);
         let mut terminal = Terminal::new(backend).expect("terminal");
         terminal
             .draw(|frame| draw_board(frame, &model))
             .expect("draw 40x10");
-        let (title_y, row) = (0..10)
-            .map(|y| (y, row_text(&terminal, 40, y)))
-            .find(|(_, row)| row.contains("vwxyz"))
-            .expect("compact task page header row");
-        assert_eq!(title_y, 1, "the page header paints under one blank row");
+        // 62 whitespace-free characters at a 30-cell field wrap as 30 / 30 / 2.
+        let head_row = row_text(&terminal, 40, 1);
         assert!(
-            !row.contains("0123456789"),
-            "40-wide header must not still show the head once the window has scrolled: {row:?}"
+            head_row.contains("0123456789"),
+            "40-wide header keeps the head on its first wrapped row: {head_row:?}"
+        );
+        let tail_row = (0..10)
+            .map(|y| (y, row_text(&terminal, 40, y)))
+            .find(|(_, row)| row.trim_end().contains("yz"))
+            .expect("wrapped title continuation row");
+        assert_ne!(
+            tail_row.0, 1,
+            "the title's tail must wrap below the first header row"
         );
         let cursor = terminal.get_cursor_position().expect("cursor position");
         assert_eq!(
             cursor,
-            ratatui::layout::Position::new(4 + 29, title_y),
-            "cursor must land at the window's own last column, matching the text actually painted"
+            ratatui::layout::Position::new(4 + 2, tail_row.0),
+            "caret lands at the two-character tail's past-end column"
         );
     }
 }
