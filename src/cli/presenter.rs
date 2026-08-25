@@ -21,7 +21,7 @@ pub fn list_help() -> CliOutput {
             "usage: tsk list [<task-id>] [-p <project> | --desk | --all] [--thread <name>] [--done | --deleted] [--json] [--state-dir <dir>]\n\n",
             "Lists ready, started, blocked, and review tasks in the invocation project by default, or your desk outside a repository.\n",
             "With a task id (a task UUID from add --json or list --json), lists that one task alone and prints its steps: one line per step with its [x]/[ ] state and step short id. A task id cannot be combined with scope, thread, or status filters.\n",
-            "--project uses the same basename-or-path scope resolution as add; --desk selects your desk, tasks not tied to a project (--global still works as an alias); --all selects every scope. --thread normalizes a thread name and filters within the selected scope; an invalid name is a usage error (exit 2). For dash-leading project and state-directory values, use --project=<scope> and --state-dir=<dir>.\n",
+            "--project uses the same basename-or-path scope resolution as add; --desk selects your desk, tasks not tied to a project; --all selects every scope. --thread normalizes a thread name and filters within the selected scope; an invalid name is a usage error (exit 2). For dash-leading project and state-directory values, use --project=<scope> and --state-dir=<dir>.\n",
             "--done lists done tasks only. --deleted lists soft-deleted tasks only, regardless of status.\n",
             "To recover a typo scope, use tsk list --all --json.\n",
             "--json emits a flat array of id, title, status, project, and thread (or null) in displayed group order. Human --all groups rows by status, then project scope, using a unique concise trailing path or desk.\n\n",

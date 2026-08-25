@@ -50,8 +50,7 @@ reports it in `existing` with its `i`, `id`, and `title`.
 
 `tsk list` defaults to ready, started, blocked, and review tasks in the
 invocation project, or your desk outside a repository. Use `-p`/`--project <scope>`
-for the same basename-or-path resolution as add, `--desk` for desk tasks (`--global`
-still works as an alias), or `--all`
+for the same basename-or-path resolution as add, `--desk` for desk tasks, or `--all`
 for every scope. `--thread <name>` normalizes then filters tasks after scope
 selection. An invalid thread name is a usage error (exit 2), not an empty result.
 JSON rows always include `thread`, with `null` for unthreaded tasks. Use

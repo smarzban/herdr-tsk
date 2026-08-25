@@ -114,7 +114,7 @@ pub fn parse(args: &[String]) -> Result<ListInput, String> {
                 );
                 index += 2;
             }
-            "--desk" | "--global" => {
+            "--desk" => {
                 input.global = true;
                 index += 1;
             }

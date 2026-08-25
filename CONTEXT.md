@@ -6,7 +6,7 @@ Canonical terms for this repo. No implementation detail.
 - **list command**: headless `tsk list` subcommand that prints tasks from the board store without changing them.
 - **bulk add**: one `add` invocation that accepts many items, reports each, and makes one durable write of the successes.
 - **invocation default**: capture scope used when the caller omits `project` / `-p`. The cwd repo when known, otherwise the desk.
-- **desk**: your desk holds everything not tied to a project. Selected by `--desk` (`--global` remains an alias) and by bare `!p`. Stored as scope value `global`.
+- **desk**: your desk holds everything not tied to a project. Selected by `--desk` and by bare `!p`. Stored as scope value `global`.
 - **tiny result**: JSON report from a plan-shaped `add`. `created` and `existing` rows carry index, id, title. `failed` rows carry index, title (string or null), error code, and human error text. Notes are not echoed.
 - **exit contract**: `add`/`list` exit `0` means every item was created or already existed (or list succeeded). `1` means one or more item refusals: retry only the failed subset. `2` means usage or parse error: nothing persisted. `3` means store I/O: commit is indeterminate; verify with `list` and retry only what is missing.
 - **error code**: stable machine-matchable token on a failed item (`empty-title`, `invalid-title`, `invalid-item`). Any C0 control makes a title `invalid-title` before trimming, including a control-only title. The human `error` string is not a contract.

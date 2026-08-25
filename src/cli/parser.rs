@@ -98,7 +98,7 @@ pub fn parse_flag_add(args: &[String]) -> Result<FlagAdd, String> {
                 parsed.has_item_flags = true;
                 index += 2;
             }
-            "--desk" | "--global" => {
+            "--desk" => {
                 parsed.global = true;
                 parsed.has_item_flags = true;
                 index += 1;

@@ -3,7 +3,7 @@
 ## Unreleased
 
 The projectless scope is now **desk**: board header, `tsk list` labels, and the new
-`--desk` flag (`--global` still works as an alias). Stored scope values are unchanged,
+`--desk` flag. Stored scope values are unchanged,
 so no data migration is needed.
 
 Store hardening: `tasks.json` carries `format_version` (currently 1) and a

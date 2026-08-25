@@ -1022,7 +1022,7 @@ fn capture_bar_renders_spaced_three_row_block_and_stays_bounded_without_color_sg
     let standard = render_text(&model, 80, 24);
     for text in [
         "visible task",
-        "title…   !p desk · !p name project · !t thread · tab details",
+        "title…   !p = desk · !p name = project · !t name = thread",
         "enter save · ctrl+enter save+next · tab details · esc close",
     ] {
         assert!(standard.contains(text), "missing {text:?}: {standard}");
