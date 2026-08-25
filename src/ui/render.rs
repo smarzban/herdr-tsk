@@ -4,6 +4,7 @@
 //! `Modifier::{BOLD, DIM, UNDERLINED, REVERSED}`, plus [`draw_queue_frame`] for the
 //! the deck-only board skeleton.
 
+use std::collections::HashSet;
 use std::path::Path;
 use std::time::SystemTime;
 
@@ -18,7 +19,9 @@ use uuid::Uuid;
 use super::capture::CaptureField;
 use super::edit::{place_edit_cursor, place_edit_cursor_at};
 use super::present_line;
-use super::queue::{QueueSection, QueueView, SectionKind, StatusCounts};
+use super::queue::{
+    BoardTab, QueueSection, QueueView, SectionKind, StatusCounts, ThreadProjectCollapseKey,
+};
 use super::tier::{Tier, TierGeometry};
 use crate::domain::{HumanStatus, Task, TaskScope};
 
@@ -447,12 +450,18 @@ pub struct QueueFrameModel<'a> {
     pub view: &'a QueueView,
     /// Selected task id, if any.
     pub selection_id: Option<Uuid>,
-    /// Project chip label (`all projects` or a project name).
+    /// Home tabs are visible (project focus hides them).
+    pub at_home: bool,
+    /// Active home tab.
+    pub home_tab: BoardTab,
+    /// Project-focus label on the selector row's right chip.
     pub scope_label: &'a str,
-    /// Whether the session deck scope is structurally the all-projects scope. Kept
-    /// separate from `scope_label`, which is display text and can collide with a real
-    /// project name.
-    pub all_projects_scope: bool,
+    /// Collapsed project groups on the Projects tab.
+    pub collapsed_projects: &'a HashSet<String>,
+    /// Collapsed thread groups on the Threads tab.
+    pub collapsed_threads: &'a HashSet<String>,
+    /// Collapsed project rows under a thread group.
+    pub collapsed_thread_projects: &'a HashSet<ThreadProjectCollapseKey>,
     /// Optional status-line notice; replaces the default counts when set.
     pub status_message: Option<&'a str>,
     /// Column offset of the delete-notice `u Undo` control inside `status_message`, when
@@ -498,12 +507,17 @@ pub enum QueueHitTarget {
     /// One painted row of the open project-scope dropdown, indexed exactly as
     /// `BoardModel::project_options()` orders them.
     ProjectOption(usize),
-    /// One ON DECK project-group header in the all-projects view, indexed into
-    /// `QueueFrameModel::view.sections`. A double-click narrows the session deck scope to
-    /// that header's own project: the same session-only jump choosing it in the project
-    /// selector dropdown performs. Never pushed for IN MOTION, DONE, the global group,
-    /// or any header while the board is already scoped to one project.
+    /// One painted home tab on the selector row.
+    HomeTab(BoardTab),
+    /// One ON DECK project-group header on the Projects tab, indexed into sections.
     SectionProject(usize),
+    /// One thread-group header on the Threads tab, indexed into sections.
+    SectionThread(usize),
+    /// One project sub-header under a thread group.
+    SectionThreadProject {
+        section_idx: usize,
+        subgroup_idx: usize,
+    },
     /// The open help card: painted full-frame so any click inside it closes it, matching
     /// the keyboard's "any key closes".
     HelpDismiss,
@@ -633,25 +647,42 @@ pub fn draw_queue_frame(
             let y = top + offset as u16;
             match list_row {
                 ListRow::Blank => put_line(frame, y, width, Line::from("")),
-                ListRow::Header(kind, section_idx, line) => {
+                ListRow::Header(kind, _section_idx, line) => {
                     put_line(frame, y, width, line);
                     if kind == SectionKind::Done && base_list_interactive {
                         hits.push(QueueHitTarget::Drawer, Rect::new(0, y, width, 1));
                     }
-                    // An all-projects ON DECK group header names the project it groups;
-                    // offer the row as that project's own scope control. Scoped views
-                    // title the section plain ON DECK, so no target is pushed there.
-                    if kind == SectionKind::OnDeck
-                        && base_list_interactive
-                        && model.all_projects_scope
-                        && model
-                            .view
-                            .sections
-                            .get(section_idx)
-                            .is_some_and(|section| section.project_label.is_some())
-                    {
+                }
+                ListRow::ProjectGroupHeader { section_idx, line } => {
+                    put_line(frame, y, width, line);
+                    if base_list_interactive {
                         hits.push(
                             QueueHitTarget::SectionProject(section_idx),
+                            Rect::new(0, y, width, 1),
+                        );
+                    }
+                }
+                ListRow::ThreadGroupHeader { section_idx, line } => {
+                    put_line(frame, y, width, line);
+                    if base_list_interactive {
+                        hits.push(
+                            QueueHitTarget::SectionThread(section_idx),
+                            Rect::new(0, y, width, 1),
+                        );
+                    }
+                }
+                ListRow::ThreadProjectHeader {
+                    section_idx,
+                    subgroup_idx,
+                    line,
+                } => {
+                    put_line(frame, y, width, line);
+                    if base_list_interactive {
+                        hits.push(
+                            QueueHitTarget::SectionThreadProject {
+                                section_idx,
+                                subgroup_idx,
+                            },
                             Rect::new(0, y, width, 1),
                         );
                     }
@@ -1837,7 +1868,7 @@ fn paint_scope_dropdown(
         .map(|o| display_width(o))
         .max()
         .unwrap_or(0)
-        .max(display_width("all projects"));
+        .max(display_width("projects"));
     let col_w = (max_label + 4).min(geo.selector_chip_max as usize).max(8);
     let x0 = width.saturating_sub(col_w as u16);
     let top = geo.selector_row.map(|r| r.saturating_add(1)).unwrap_or(0);
@@ -1887,14 +1918,26 @@ fn paint_scope_dropdown(
 
 enum ListRow {
     Blank,
-    /// Section header row, carrying its section kind plus its index into
-    /// `QueueFrameModel::view.sections`, so the paint loop can offer the DONE header as
-    /// the drawer's own toggle control and an all-projects group header as that
-    /// project's own scope control.
+    /// Section header row for IN MOTION, DONE, desk ON DECK, or project focus ON DECK.
     Header(SectionKind, usize, Line<'static>),
+    /// Collapsible project-group header on the Projects tab.
+    ProjectGroupHeader {
+        section_idx: usize,
+        line: Line<'static>,
+    },
+    /// Collapsible thread-group header on the Threads tab.
+    ThreadGroupHeader {
+        section_idx: usize,
+        line: Line<'static>,
+    },
+    /// Collapsible project sub-header under a thread group.
+    ThreadProjectHeader {
+        section_idx: usize,
+        subgroup_idx: usize,
+        line: Line<'static>,
+    },
     Hint(Line<'static>),
-    /// Decorative scoped ON DECK thread-block label. It consumes a viewport row but
-    /// deliberately has no identity or mouse target, so selection remains task-only.
+    /// Decorative scoped ON DECK thread-block label inside project focus.
     ThreadHeader(Line<'static>),
     Task {
         id: Uuid,
@@ -2044,18 +2087,93 @@ fn build_list_rows(
     };
 
     for (section_idx, section) in model.view.sections.iter().enumerate() {
-        // A preceding section with no content already ends in its required below-header blank
-        // row, which doubles as this heading's above-header row. Otherwise add one list row.
         if !matches!(out.last(), Some(&ListRow::Blank)) {
             out.push(ListRow::Blank);
         }
+
+        if model.at_home && model.home_tab == BoardTab::Projects && section.project_label.is_some()
+        {
+            let path = section.project_label.clone().unwrap_or_default();
+            let collapsed = model.collapsed_projects.contains(&path);
+            out.push(ListRow::ProjectGroupHeader {
+                section_idx,
+                line: paint_project_group_header(section, geo.row_width, collapsed),
+            });
+            out.push(ListRow::Blank);
+            if collapsed {
+                continue;
+            }
+            if section.empty_hint {
+                out.push(ListRow::Hint(paint_empty_hint(geo.row_width)));
+                continue;
+            }
+            for id in section.task_ids.iter().copied() {
+                push_task(
+                    id,
+                    &mut out,
+                    &mut selected_idx,
+                    &mut anchor_last_idx,
+                    true,
+                    false,
+                );
+            }
+            continue;
+        }
+
+        if model.at_home && model.home_tab == BoardTab::Threads && section.thread_label.is_some() {
+            let thread = section.thread_label.clone().unwrap_or_default();
+            let collapsed = model.collapsed_threads.contains(&thread);
+            out.push(ListRow::ThreadGroupHeader {
+                section_idx,
+                line: paint_thread_group_header(section, geo.row_width, collapsed),
+            });
+            out.push(ListRow::Blank);
+            if collapsed {
+                continue;
+            }
+            if section.empty_hint {
+                out.push(ListRow::Hint(paint_empty_hint(geo.row_width)));
+                continue;
+            }
+            for (subgroup_idx, subgroup) in section.thread_subgroups.iter().enumerate() {
+                let key = ThreadProjectCollapseKey {
+                    thread: thread.clone(),
+                    project_path: subgroup.project_path.clone(),
+                };
+                let sub_collapsed = model.collapsed_thread_projects.contains(&key);
+                out.push(ListRow::ThreadProjectHeader {
+                    section_idx,
+                    subgroup_idx,
+                    line: paint_thread_project_header(
+                        subgroup.project_path.as_deref(),
+                        subgroup.task_ids.len(),
+                        geo.row_width,
+                        geo,
+                    ),
+                });
+                if sub_collapsed {
+                    continue;
+                }
+                for id in subgroup.task_ids.iter().copied() {
+                    push_task(
+                        id,
+                        &mut out,
+                        &mut selected_idx,
+                        &mut anchor_last_idx,
+                        true,
+                        true,
+                    );
+                }
+                out.push(ListRow::Blank);
+            }
+            continue;
+        }
+
         out.push(ListRow::Header(
             section.kind,
             section_idx,
-            paint_section_header(section, geo.row_width, model.all_projects_scope),
+            paint_section_header(section, geo.row_width, model.at_home, model.home_tab),
         ));
-        // every kind, in either tier, gets its below-header spacer before first
-        // content. It is a `ListRow`, not chrome, and therefore scrolls normally.
         out.push(ListRow::Blank);
         if section.empty_hint {
             out.push(ListRow::Hint(paint_empty_hint(geo.row_width)));
@@ -2119,8 +2237,84 @@ fn paint_thread_header(name: &str, open_count: usize, geo: &TierGeometry) -> Lin
     paint_bounded_line(&text, geo.row_width, style_dim())
 }
 
-fn paint_section_header(section: &QueueSection, width: u16, all_projects: bool) -> Line<'static> {
-    let title = section_title(section, all_projects);
+fn paint_project_group_header(
+    section: &QueueSection,
+    width: u16,
+    collapsed: bool,
+) -> Line<'static> {
+    let title = section
+        .project_label
+        .as_deref()
+        .map(short_project)
+        .unwrap_or("project");
+    paint_collapsible_header(
+        if collapsed { "▸" } else { "▾" },
+        title,
+        section.count,
+        width,
+    )
+}
+
+fn paint_thread_group_header(section: &QueueSection, width: u16, collapsed: bool) -> Line<'static> {
+    let title = section
+        .thread_label
+        .as_deref()
+        .map(|name| format!("#{name}"))
+        .unwrap_or_else(|| "#thread".to_string());
+    paint_collapsible_header(
+        if collapsed { "▸" } else { "▾" },
+        &title,
+        section.count,
+        width,
+    )
+}
+
+fn paint_thread_project_header(
+    project_path: Option<&str>,
+    count: usize,
+    width: u16,
+    geo: &TierGeometry,
+) -> Line<'static> {
+    let title = match project_path {
+        Some(path) => short_project(path).to_string(),
+        None => "desk".to_string(),
+    };
+    let text = match geo.tier {
+        Tier::Standard => format!("  {title} · {count} open"),
+        Tier::Compact => format!("  {title} {count}"),
+    };
+    paint_bounded_line(&text, width, style_dim())
+}
+
+fn paint_collapsible_header(chevron: &str, title: &str, count: usize, width: u16) -> Line<'static> {
+    let left = present_line(&format!(" {chevron} {title} "), width as usize);
+    let right_budget = (width as usize).saturating_sub(display_width(&left));
+    let right = if right_budget == 0 {
+        String::new()
+    } else {
+        present_line(&format!("{} ", count), right_budget)
+    };
+    let rule_w = (width as usize)
+        .saturating_sub(display_width(&left))
+        .saturating_sub(display_width(&right));
+    let rule = "─".repeat(rule_w);
+    bound_line(
+        Line::from(vec![
+            Span::styled(left, style_bold()),
+            Span::styled(rule, style_dim()),
+            Span::styled(right, style_dim()),
+        ]),
+        width as usize,
+    )
+}
+
+fn paint_section_header(
+    section: &QueueSection,
+    width: u16,
+    at_home: bool,
+    home_tab: BoardTab,
+) -> Line<'static> {
+    let title = section_title(section, at_home, home_tab);
     let left = present_line(&format!(" {title} "), width as usize);
     let right_budget = (width as usize).saturating_sub(display_width(&left));
     let right = if right_budget == 0 {
@@ -2142,14 +2336,15 @@ fn paint_section_header(section: &QueueSection, width: u16, all_projects: bool) 
     )
 }
 
-fn section_title(section: &QueueSection, all_projects: bool) -> String {
+fn section_title(section: &QueueSection, at_home: bool, home_tab: BoardTab) -> String {
     match section.kind {
         SectionKind::InMotion => "IN MOTION".to_string(),
         SectionKind::Done => "DONE".to_string(),
-        SectionKind::OnDeck if all_projects => match section.project_label.as_deref() {
-            Some(path) => short_project(path).to_string(),
-            None => "desk".to_string(),
-        },
+        SectionKind::OnDeck
+            if at_home && home_tab == BoardTab::Desk && section.project_label.is_none() =>
+        {
+            "desk".to_string()
+        }
         SectionKind::OnDeck => "ON DECK".to_string(),
     }
 }
@@ -2348,9 +2543,7 @@ fn paint_status_line(
     (line, None)
 }
 
-/// Selector: queue label left, project chip right.
-///
-/// Returns the line plus hit regions as (target, x, width).
+/// Selector: home tabs left, project picker chip right.
 fn paint_selector_row(
     model: &QueueFrameModel<'_>,
     geo: &TierGeometry,
@@ -2360,29 +2553,71 @@ fn paint_selector_row(
     if width == 0 {
         return (Line::from(""), hits);
     }
-    let chip_budget = (geo.selector_chip_max as usize).min(width);
-    let chip_raw = format!("{} ▾ ", model.scope_label);
-    let chip_text = present_line(&chip_raw, chip_budget);
-    let chip_w = display_width(&chip_text);
-    let label = String::new();
-    let spacer_w = width.saturating_sub(chip_w);
-    let chip_label = present_line(
-        model.scope_label,
-        chip_budget.saturating_sub(display_width(" ▾ ")),
-    );
-    let caret = present_line(
-        " ▾ ",
-        chip_budget.saturating_sub(display_width(&chip_label)),
-    );
-    let chip_x = (display_width(&label) + spacer_w) as u16;
-    let line = Line::from(vec![
-        Span::styled(label, style_bold()),
-        Span::styled(" ".repeat(spacer_w), style_plain()),
-        Span::styled(chip_label, style_bold()),
-        Span::styled(caret, style_dim()),
-    ]);
-    hits.push((QueueHitTarget::ProjectChip, chip_x, chip_w.max(1) as u16));
-    (bound_line(line, width), hits)
+
+    let mut left_spans: Vec<Span<'static>> = Vec::new();
+    let mut left_width = 0usize;
+
+    if model.at_home {
+        for (index, (tab, label)) in [
+            (BoardTab::Desk, "desk"),
+            (BoardTab::Projects, "projects"),
+            (BoardTab::Threads, "threads"),
+        ]
+        .iter()
+        .enumerate()
+        {
+            if index > 0 {
+                left_spans.push(Span::styled(" · ".to_string(), style_dim()));
+                left_width += 3;
+            }
+            let active = model.home_tab == *tab;
+            let text = format!(" {label} ");
+            let shown = present_line(&text, width.saturating_sub(left_width));
+            let w = display_width(&shown);
+            hits.push((
+                QueueHitTarget::HomeTab(*tab),
+                left_width as u16,
+                w.max(1) as u16,
+            ));
+            left_spans.push(Span::styled(
+                shown,
+                if active {
+                    style_reverse_bold()
+                } else {
+                    style_plain()
+                },
+            ));
+            left_width += w;
+        }
+    }
+
+    let mut spans = left_spans;
+    if model.at_home {
+        let pad = width.saturating_sub(left_width);
+        if pad > 0 {
+            spans.push(Span::styled(" ".repeat(pad), style_plain()));
+        }
+    } else {
+        let chip_label = model.scope_label;
+        let chip_budget = (geo.selector_chip_max as usize).min(width);
+        let chip_raw = format!("{chip_label} ▾ ");
+        let chip_text = present_line(&chip_raw, chip_budget);
+        let chip_w = display_width(&chip_text);
+        let spacer_w = width.saturating_sub(left_width).saturating_sub(chip_w);
+        let chip_x = (left_width + spacer_w) as u16;
+        spans.push(Span::styled(" ".repeat(spacer_w), style_plain()));
+        spans.push(Span::styled(
+            present_line(chip_label, chip_budget.saturating_sub(display_width(" ▾ "))),
+            style_bold(),
+        ));
+        spans.push(Span::styled(
+            present_line(" ▾ ", chip_budget.saturating_sub(display_width(chip_label))),
+            style_dim(),
+        ));
+        hits.push((QueueHitTarget::ProjectChip, chip_x, chip_w.max(1) as u16));
+    }
+
+    (bound_line(Line::from(spans), width), hits)
 }
 
 /// Verb bar: ` key label · key label …`, trimmed to `budget` entries.

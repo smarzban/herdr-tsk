@@ -87,8 +87,10 @@ is the standard board.
 One urgency-ordered list. Sections are computed, not navigated.
 
 - **IN MOTION**: work you have started
-- When showing all projects: one group per project, your desk last. Your desk holds
-  everything not tied to a project.
+- **Home** (`P` → desk, or the default when you open the board): three tabs —
+  **desk** (`1`), **projects** (`2`), **threads** (`3`). Desk shows global in-motion
+  work and your desk ON DECK. Projects groups by repo path (collapsible; double-click
+  a header to focus that project). Threads groups by thread name across projects.
 - When scoped to one project: **ON DECK** for that project, with derived thread
   headers above their open tasks
 - **z** opens the done drawer
@@ -113,7 +115,8 @@ letters do nothing, so typing in a focused board cannot complete or delete work.
 | `z` | done drawer |
 | `:` | command palette |
 | `?` | help |
-| `P` | project scope |
+| `P` | project scope (home or a project) |
+| `1` `2` `3` | home tabs: desk · projects · threads |
 | `Esc` | close the open surface |
 | `alt+q` | quit |
 

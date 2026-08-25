@@ -10,7 +10,7 @@ use crate::attention::{AttentionClassification, RefreshResult};
 use crate::config::VerbModifier;
 use crate::context::InvocationSnapshot;
 use crate::domain::{
-    is_linked, DispatchAttempt, DomainState, OwnedResourceReceipt, Task, TaskScope,
+    is_linked, DispatchAttempt, DomainState, HumanStatus, OwnedResourceReceipt, Task, TaskScope,
 };
 use crate::ui::capture::CaptureField;
 use crate::ui::edit::{seeded_draft, EditBuffer};
@@ -18,7 +18,10 @@ use crate::ui::input::{
     BOARD_HELP_LINE, COMMAND_SURFACE_HELP_LINE, HELP_SURFACE_HELP_LINE, SAVE_RECOVERY_HELP_LINE,
 };
 use crate::ui::mouse::BoardPopup;
-use crate::ui::queue::{self, DeckScope, QueueView, SectionKind};
+pub use crate::ui::queue::BoardTab;
+use crate::ui::queue::{
+    self, visible_task_ids, BoardLens, QueueView, SectionKind, ThreadProjectCollapseKey,
+};
 use crate::ui::render::StepView;
 use crate::ui::selection;
 use crate::ui::terminal_text;
@@ -105,30 +108,31 @@ pub(super) struct ProjectPickerState {
     pub(super) selected: usize,
 }
 
-/// One session-only ON DECK scope offered by the project selector.
+/// One session-only destination offered by the project selector (`P`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProjectScopeOption {
-    All,
-    Global,
+    /// Home board on the Desk tab.
+    Home,
     Project(PathBuf),
 }
 
-/// Session-owned ON DECK filter (owned form of [`DeckScope`]).
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub(super) enum OwnedDeckScope {
-    #[default]
-    All,
-    Global,
+/// Session-only board location: home tabs or one focused project.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum BoardLocation {
+    Home { tab: BoardTab },
     Project(PathBuf),
 }
 
-impl OwnedDeckScope {
-    fn as_query(&self) -> DeckScope<'_> {
+impl BoardLocation {
+    pub(super) fn lens(&self) -> BoardLens<'_> {
         match self {
-            Self::All => DeckScope::All,
-            Self::Global => DeckScope::Global,
-            Self::Project(path) => DeckScope::Project(path.as_path()),
+            Self::Home { tab } => BoardLens::Home(*tab),
+            Self::Project(path) => BoardLens::Project(path.as_path()),
         }
+    }
+
+    pub(super) fn at_home(&self) -> bool {
+        matches!(self, Self::Home { .. })
     }
 }
 /// The immutable value a board form carries for its whole lifetime.
@@ -516,8 +520,14 @@ pub(super) fn step_views(task: &Task) -> Vec<StepView> {
 pub struct BoardModel {
     pub(super) tasks: Vec<Task>,
     pub(super) this_repo: Option<PathBuf>,
-    /// Session ON DECK scope filter. Not durable.
-    pub(super) deck_scope: OwnedDeckScope,
+    /// Session board location (home tab or focused project). Not durable.
+    pub(super) board_location: BoardLocation,
+    /// Project-group headers collapsed on the Projects tab.
+    pub(super) collapsed_projects: HashSet<String>,
+    /// Thread-group headers collapsed on the Threads tab.
+    pub(super) collapsed_threads: HashSet<String>,
+    /// Project sub-headers collapsed under a thread on the Threads tab.
+    pub(super) collapsed_thread_projects: HashSet<ThreadProjectCollapseKey>,
     /// Whether the done drawer lists completed tasks. Session-only.
     pub(super) drawer_open: bool,
     /// Accordion/takeover detail open on this task id, if any. Session-only.
@@ -600,7 +610,12 @@ impl BoardModel {
         let mut model = Self {
             tasks,
             this_repo,
-            deck_scope: OwnedDeckScope::All,
+            board_location: BoardLocation::Home {
+                tab: BoardTab::Desk,
+            },
+            collapsed_projects: HashSet::new(),
+            collapsed_threads: HashSet::new(),
+            collapsed_thread_projects: HashSet::new(),
             drawer_open: false,
             detail_open: None,
             selection_id: None,
@@ -626,7 +641,32 @@ impl BoardModel {
             verb_modifier: VerbModifier::Alt,
         };
         model.seed_selection();
+        model.ensure_home_tab_has_visible_tasks();
         model
+    }
+
+    /// When the default desk tab would show no rows, open on projects (then threads) instead.
+    fn ensure_home_tab_has_visible_tasks(&mut self) {
+        if !self.board_location.at_home() || !self.visible_ids().is_empty() {
+            return;
+        }
+        let has_open = self
+            .tasks
+            .iter()
+            .any(|task| !task.soft_deleted && task.status != HumanStatus::Done);
+        if !has_open {
+            return;
+        }
+        self.board_location = BoardLocation::Home {
+            tab: BoardTab::Projects,
+        };
+        self.seed_selection();
+        if self.visible_ids().is_empty() {
+            self.board_location = BoardLocation::Home {
+                tab: BoardTab::Threads,
+            };
+            self.seed_selection();
+        }
     }
 
     /// Current detail popup (status picker or more menu).
@@ -758,10 +798,56 @@ impl BoardModel {
         model
     }
 
+    /// Switch the home tab, when needed, so `id` would appear in [`Self::visible_ids`].
+    pub(super) fn reveal_task_on_home(&mut self, id: Uuid) {
+        if !self.board_location.at_home() || self.visible_ids().contains(&id) {
+            return;
+        }
+        let Some(task) = self
+            .tasks
+            .iter()
+            .find(|task| task.id == id && !task.soft_deleted)
+        else {
+            return;
+        };
+        let tab = if task.thread.is_some() {
+            BoardTab::Threads
+        } else if matches!(task.scope, TaskScope::Project { .. }) {
+            BoardTab::Projects
+        } else {
+            BoardTab::Desk
+        };
+        self.board_location = BoardLocation::Home { tab };
+    }
+
+    fn ensure_selection_visible(&mut self) {
+        let Some(id) = self.selection_id else {
+            return;
+        };
+        self.reveal_task_on_home(id);
+    }
+
     /// Replace task snapshot from domain (after mutation) and reanchor selection by id.
     pub fn sync_from_domain(&mut self, state: &DomainState) {
-        let previous_visible = self.visible_ids();
+        let previous_ids: HashSet<Uuid> = self.tasks.iter().map(|task| task.id).collect();
         self.tasks = state.tasks().to_vec();
+        let new_ids: Vec<Uuid> = self
+            .tasks
+            .iter()
+            .filter(|task| !previous_ids.contains(&task.id))
+            .map(|task| task.id)
+            .collect();
+        let select_if_empty = self.selection_id.is_none();
+        for id in new_ids {
+            self.reveal_task_on_home(id);
+            if select_if_empty {
+                self.selection_id = Some(id);
+            }
+        }
+        let previous = self.selection_id;
+        let previous_visible = self.visible_ids();
+        let pinned_edit = self.task_edit_save.as_ref().map(|pending| pending.id);
+        let pinned_quick_add = self.quick_add_save.as_ref().map(|pending| pending.id);
         self.stale_links.retain(|id| {
             self.tasks
                 .iter()
@@ -771,7 +857,13 @@ impl BoardModel {
         self.finish_quick_add_save();
         self.finish_task_edit_save();
         self.finish_step_editor_save();
-        self.reanchor_selection(self.selection_id, &previous_visible);
+        if let Some(id) = pinned_edit.or(pinned_quick_add) {
+            self.reveal_task_on_home(id);
+            self.selection_id = Some(id);
+        } else {
+            self.reanchor_selection(previous, &previous_visible);
+            self.ensure_selection_visible();
+        }
         if self.attempts.is_empty()
             && matches!(
                 self.popup,
@@ -818,20 +910,45 @@ impl BoardModel {
         self.this_repo.as_deref()
     }
 
-    /// The selected project scope, when the session filter is narrowed to one project.
-    pub fn selected_project(&self) -> Option<&Path> {
-        match &self.deck_scope {
-            OwnedDeckScope::Project(path) => Some(path.as_path()),
-            OwnedDeckScope::All | OwnedDeckScope::Global => None,
+    /// Whether the home tabs are visible (false in project focus).
+    pub fn at_home(&self) -> bool {
+        self.board_location.at_home()
+    }
+
+    /// Active home tab when at home; otherwise [`BoardTab::Desk`].
+    pub fn home_tab(&self) -> BoardTab {
+        match &self.board_location {
+            BoardLocation::Home { tab } => *tab,
+            BoardLocation::Project(_) => BoardTab::Desk,
         }
     }
 
-    /// Non-All session scope used as a quick-add default at open.
+    pub(super) fn set_home_tab(&mut self, tab: BoardTab) {
+        let BoardLocation::Home { tab: current } = self.board_location else {
+            return;
+        };
+        if current == tab {
+            return;
+        }
+        let previous_visible = self.visible_ids();
+        let previous = self.selection_id;
+        self.board_location = BoardLocation::Home { tab };
+        self.reanchor_selection(previous, &previous_visible);
+    }
+
+    /// The selected project scope, when the session is focused on one project.
+    pub fn selected_project(&self) -> Option<&Path> {
+        match &self.board_location {
+            BoardLocation::Project(path) => Some(path.as_path()),
+            BoardLocation::Home { .. } => None,
+        }
+    }
+
+    /// Home boards use the invocation default; project focus defaults to that project.
     pub(super) fn quick_add_scope(&self) -> Option<TaskScope> {
-        match &self.deck_scope {
-            OwnedDeckScope::All => None,
-            OwnedDeckScope::Global => Some(TaskScope::Global),
-            OwnedDeckScope::Project(path) => Some(TaskScope::Project {
+        match &self.board_location {
+            BoardLocation::Home { .. } => None,
+            BoardLocation::Project(path) => Some(TaskScope::Project {
                 path: path.to_string_lossy().into_owned(),
             }),
         }
@@ -845,7 +962,7 @@ impl BoardModel {
 
     /// Options the session project selector offers, in presentation order.
     ///
-    /// All projects and Global are always available. Project entries are paths that really
+    /// Home and desk are always available. Project entries are paths that really
     /// carry a non-soft-deleted project-scoped task in the current snapshot, plus the
     /// resolved invocation repository and current selection: no path is ever invented.
     pub fn project_options(&self) -> Vec<ProjectScopeOption> {
@@ -872,9 +989,8 @@ impl BoardModel {
             push(path, &mut paths);
         }
 
-        let mut options = Vec::with_capacity(paths.len() + 2);
-        options.push(ProjectScopeOption::All);
-        options.push(ProjectScopeOption::Global);
+        let mut options = Vec::with_capacity(paths.len() + 1);
+        options.push(ProjectScopeOption::Home);
         options.extend(paths.into_iter().map(ProjectScopeOption::Project));
         options
     }
@@ -884,14 +1000,38 @@ impl BoardModel {
         self.project_picker.as_ref().map(|picker| picker.selected)
     }
 
-    /// Queue sections + counts for the current session filters.
+    /// Queue sections + counts for the current session location.
     pub fn queue_view(&self) -> QueueView {
-        queue::query(
+        queue::query_lens(
             &self.tasks,
             self.this_repo.as_deref(),
-            self.deck_scope.as_query(),
+            self.board_location.lens(),
             self.drawer_open,
         )
+    }
+
+    pub(super) fn toggle_project_collapsed(&mut self, path: &str) {
+        if self.collapsed_projects.contains(path) {
+            self.collapsed_projects.remove(path);
+        } else {
+            self.collapsed_projects.insert(path.to_string());
+        }
+    }
+
+    pub(super) fn toggle_thread_collapsed(&mut self, name: &str) {
+        if self.collapsed_threads.contains(name) {
+            self.collapsed_threads.remove(name);
+        } else {
+            self.collapsed_threads.insert(name.to_string());
+        }
+    }
+
+    pub(super) fn toggle_thread_project_collapsed(&mut self, key: ThreadProjectCollapseKey) {
+        if self.collapsed_thread_projects.contains(&key) {
+            self.collapsed_thread_projects.remove(&key);
+        } else {
+            self.collapsed_thread_projects.insert(key);
+        }
     }
 
     /// Whether the done drawer is open (session-only).
@@ -911,11 +1051,13 @@ impl BoardModel {
 
     /// Visible task ids from the queue section query (flat section order).
     pub fn visible_ids(&self) -> Vec<Uuid> {
-        self.queue_view()
-            .sections
-            .iter()
-            .flat_map(|section| section.task_ids.iter().copied())
-            .collect()
+        visible_task_ids(
+            &self.queue_view(),
+            self.board_location.lens(),
+            &self.collapsed_projects,
+            &self.collapsed_threads,
+            &self.collapsed_thread_projects,
+        )
     }
 
     /// Visible tasks in queue section order.
@@ -1059,6 +1201,7 @@ impl BoardModel {
         let pending = self.quick_add_save.take().expect("checked quick-add save");
         self.saved_task = Some(pending.id);
         self.selection_id = Some(pending.id);
+        self.reveal_task_on_home(pending.id);
         // The pending create is now durable. This is the only point an expanded quick-add
         // may release its complete form, so a failed save can still return to that stash.
         self.form = None;
@@ -1499,45 +1642,42 @@ impl BoardModel {
         }
     }
 
-    /// Set the session-only project chip selection and narrow ON DECK scope.
+    /// Set the session-only project focus. `None` returns home on the Desk tab.
     pub fn set_selected_project(&mut self, project: Option<PathBuf>) {
-        self.set_deck_scope(match project {
-            None => ProjectScopeOption::All,
+        self.set_board_scope(match project {
+            None => ProjectScopeOption::Home,
             Some(path) => ProjectScopeOption::Project(path),
         });
     }
 
-    pub(super) fn set_deck_scope(&mut self, scope: ProjectScopeOption) {
+    pub(super) fn set_board_scope(&mut self, scope: ProjectScopeOption) {
         self.close_popup();
         let previous_visible = self.visible_ids();
         let previous = self.selection_id;
-        self.deck_scope = match scope {
-            ProjectScopeOption::All => OwnedDeckScope::All,
-            ProjectScopeOption::Global => OwnedDeckScope::Global,
-            ProjectScopeOption::Project(path) => OwnedDeckScope::Project(path),
+        self.board_location = match scope {
+            ProjectScopeOption::Home => BoardLocation::Home {
+                tab: BoardTab::Desk,
+            },
+            ProjectScopeOption::Project(path) => BoardLocation::Project(path),
         };
         self.reanchor_selection(previous, &previous_visible);
     }
 }
-/// Compact label for one project option; `None` is every project.
+/// Compact label for one project path.
 ///
 /// Prefers the last path segment so the Projects header stays readable on narrow panes.
-pub fn project_option_label(option: Option<&Path>) -> String {
-    match option {
-        None => "all projects".to_string(),
-        Some(path) => terminal_text(
-            path.file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or(&path.to_string_lossy()),
-        ),
-    }
+pub fn project_option_label(path: &Path) -> String {
+    terminal_text(
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or(&path.to_string_lossy()),
+    )
 }
 
 pub(super) fn project_scope_option_label(option: &ProjectScopeOption) -> String {
     match option {
-        ProjectScopeOption::All => "all projects".to_string(),
-        ProjectScopeOption::Global => "desk".to_string(),
-        ProjectScopeOption::Project(path) => project_option_label(Some(path)),
+        ProjectScopeOption::Home => "desk".to_string(),
+        ProjectScopeOption::Project(path) => project_option_label(path.as_path()),
     }
 }
 

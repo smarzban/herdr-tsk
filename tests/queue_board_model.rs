@@ -12,7 +12,7 @@ use tsk_tui::domain::{
 use tsk_tui::store::TaskStore;
 use tsk_tui::ui::board::{apply_intent, draw_board, BoardModel, ProjectScopeOption};
 use tsk_tui::ui::input::BoardIntent;
-use tsk_tui::ui::queue::{query, DeckScope, SectionKind};
+use tsk_tui::ui::queue::{query_lens, BoardLens, BoardTab, SectionKind};
 use uuid::Uuid;
 
 const THIS_REPO: &str = "/repos/app";
@@ -136,7 +136,12 @@ fn from_domain_seeds_selection_on_first_in_motion_else_first_deck_row() {
     let deck = task(3, "deck", HumanStatus::Ready, project(THIS_REPO), 200);
     let tasks = vec![motion_newer.clone(), motion_older.clone(), deck.clone()];
     let model = BoardModel::from_tasks(tasks.clone(), Some(PathBuf::from(THIS_REPO)));
-    let view = query(&tasks, Some(Path::new(THIS_REPO)), DeckScope::All, false);
+    let view = query_lens(
+        &tasks,
+        Some(Path::new(THIS_REPO)),
+        BoardLens::Home(BoardTab::Desk),
+        false,
+    );
     let first_motion = view
         .sections
         .iter()
@@ -192,15 +197,21 @@ fn from_domain_seeds_selection_on_first_in_motion_else_first_deck_row() {
         "from_domain seeds an IN MOTION task when any exist"
     );
 
-    // Case B: no motion → first ON DECK row in query order (current repo first).
+    // Case B: desk tab with only project ON DECK rows opens on Projects instead.
     let deck_a = task(10, "a", HumanStatus::Ready, project("/repos/a"), 30);
     let deck_b = task(11, "b", HumanStatus::Ready, project(THIS_REPO), 40);
     let deck_tasks = vec![deck_a.clone(), deck_b.clone()];
     let model = BoardModel::from_tasks(deck_tasks.clone(), Some(PathBuf::from(THIS_REPO)));
-    let view = query(
+    assert_eq!(model.home_tab(), BoardTab::Projects);
+    assert_eq!(
+        model.selected_id(),
+        Some(Uuid::from_u128(11)),
+        "project-only boards open on Projects and seed the first ON DECK row"
+    );
+    let view = query_lens(
         &deck_tasks,
         Some(Path::new(THIS_REPO)),
-        DeckScope::All,
+        BoardLens::Home(BoardTab::Projects),
         false,
     );
     let first_deck = view
@@ -210,11 +221,6 @@ fn from_domain_seeds_selection_on_first_in_motion_else_first_deck_row() {
         .flat_map(|s| s.task_ids.iter().copied())
         .next();
     assert_eq!(first_deck, Some(Uuid::from_u128(11)));
-    assert_eq!(
-        model.selected_id(),
-        first_deck,
-        "open without motion seeds the first deck row"
-    );
 
     // Case C: empty → no selection.
     let empty = BoardModel::from_tasks(vec![], Some(PathBuf::from(THIS_REPO)));
@@ -316,6 +322,14 @@ fn sync_from_domain_reanchors_by_id() {
         .unwrap();
 
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::SelectHomeTab(BoardTab::Projects),
+        None,
+        None,
+    )
+    .unwrap();
     let visible = model.visible_ids();
     assert!(visible.contains(&id_doing));
     assert!(visible.contains(&id_todo));
@@ -378,10 +392,10 @@ fn deck_group_emits_thread_blocks_with_open_counts_iff_open_tasks() {
         ),
     ];
 
-    let view = query(
+    let view = query_lens(
         &tasks,
         Some(Path::new(THIS_REPO)),
-        DeckScope::Project(Path::new(THIS_REPO)),
+        BoardLens::Project(Path::new(THIS_REPO)),
         true,
     );
     let deck = on_deck(&view);
@@ -419,10 +433,10 @@ fn unthreaded_tasks_list_after_thread_blocks() {
         ),
     ];
 
-    let view = query(
+    let view = query_lens(
         &tasks,
         Some(Path::new(THIS_REPO)),
-        DeckScope::Project(Path::new(THIS_REPO)),
+        BoardLens::Project(Path::new(THIS_REPO)),
         false,
     );
     let deck = on_deck(&view);
@@ -467,10 +481,10 @@ fn thread_blocks_order_by_recency_and_tasks_within_by_updated_desc() {
         ),
     ];
 
-    let view = query(
+    let view = query_lens(
         &tasks,
         Some(Path::new(THIS_REPO)),
-        DeckScope::Project(Path::new(THIS_REPO)),
+        BoardLens::Project(Path::new(THIS_REPO)),
         false,
     );
     let deck = on_deck(&view);
@@ -510,10 +524,10 @@ fn flat_task_ids_equal_block_then_loose_concatenation() {
         task(3, "loose", HumanStatus::Ready, project(THIS_REPO), 40),
     ];
 
-    let view = query(
+    let view = query_lens(
         &tasks,
         Some(Path::new(THIS_REPO)),
-        DeckScope::Project(Path::new(THIS_REPO)),
+        BoardLens::Project(Path::new(THIS_REPO)),
         false,
     );
     let deck = on_deck(&view);
@@ -548,13 +562,13 @@ fn same_thread_name_in_two_scopes_forms_independent_groups() {
         ),
     ];
 
-    let project_view = query(
+    let project_view = query_lens(
         &tasks,
         Some(Path::new(THIS_REPO)),
-        DeckScope::Project(Path::new(THIS_REPO)),
+        BoardLens::Project(Path::new(THIS_REPO)),
         false,
     );
-    let global_view = query(&tasks, None, DeckScope::Global, false);
+    let global_view = query_lens(&tasks, None, BoardLens::Home(BoardTab::Desk), false);
     let project_deck = on_deck(&project_view);
     let global_deck = on_deck(&global_view);
 
@@ -597,16 +611,21 @@ fn all_scope_in_motion_and_drawer_emit_no_blocks() {
         ),
     ];
 
-    let all = query(&tasks, Some(Path::new(THIS_REPO)), DeckScope::All, true);
-    assert!(all
+    let home_projects = query_lens(
+        &tasks,
+        Some(Path::new(THIS_REPO)),
+        BoardLens::Home(BoardTab::Projects),
+        true,
+    );
+    assert!(home_projects
         .sections
         .iter()
         .all(|section| section.thread_blocks.is_empty() && section.loose_task_ids.is_empty()));
 
-    let scoped = query(
+    let scoped = query_lens(
         &tasks,
         Some(Path::new(THIS_REPO)),
-        DeckScope::Project(Path::new(THIS_REPO)),
+        BoardLens::Project(Path::new(THIS_REPO)),
         true,
     );
     assert!(scoped

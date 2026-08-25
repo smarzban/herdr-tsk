@@ -9,7 +9,7 @@ use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::thread;
 use std::time::{Duration, SystemTime};
 
-use crossterm::event::{self, Event, KeyEventKind};
+use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::layout::Rect;
 use ratatui::DefaultTerminal;
 
@@ -37,6 +37,7 @@ use crate::ui::mouse::{
     capture_layout_for_model, enable_terminal_input, keyboard_enhancement_supported,
     map_capture_mouse,
 };
+use crate::ui::queue::BoardTab;
 use crate::ui::scheduler;
 
 /// In-flight off-thread host dispatch.
@@ -659,6 +660,25 @@ fn board_keyboard_intent(
     // not worth an `expect` here: this runs on every keypress inside the raw-mode event loop, so
     // a panic would abort with the terminal still in raw mode and take the user's shell with it.
     // Falling through to `map_key` degrades to normal-mode routing instead of dying.
+    if mode == BoardInputMode::Normal && model.at_home() {
+        if key
+            .modifiers
+            .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER)
+        {
+            // fall through
+        } else if let KeyCode::Char(c) = key.code {
+            let tab = match c {
+                '1' => Some(BoardTab::Desk),
+                '2' => Some(BoardTab::Projects),
+                '3' => Some(BoardTab::Threads),
+                _ => None,
+            };
+            if let Some(tab) = tab {
+                return Some(BoardIntent::SelectHomeTab(tab));
+            }
+        }
+    }
+
     match model.form_focus().filter(|_| form_field_mode) {
         Some(focus) => map_board_form_key(focus, mode == BoardInputMode::FormScopeDropdown, key),
         None => map_key_with(mode, key, model.verb_modifier),
@@ -1759,6 +1779,7 @@ mod tests {
     use crate::ui::capture::CaptureField;
     use crate::ui::input::map_key;
     use crate::ui::mouse::map_board_mouse;
+    use crate::ui::queue::BoardTab;
 
     static TEMP_DIR_SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
@@ -2055,15 +2076,52 @@ mod tests {
                 "click between headers",
                 None,
                 TaskScope::Project {
-                    path: "/repos/app".into(),
+                    path: "/repos/alpha".into(),
                 },
                 None,
                 None,
                 ProvenanceOrigin::Manual,
             )
             .expect("create task");
-        let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/app")));
+        domain
+            .create(
+                "other project task",
+                None,
+                TaskScope::Project {
+                    path: "/repos/beta".into(),
+                },
+                None,
+                None,
+                ProvenanceOrigin::Manual,
+            )
+            .expect("create other");
+        let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/alpha")));
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::SelectHomeTab(BoardTab::Projects),
+            None,
+            None,
+        )
+        .expect("projects tab");
         let area = Rect::new(0, 0, 80, 24);
+
+        fn header_for<'a>(
+            hits: &'a crate::ui::render::QueueHitMap,
+            view: &crate::ui::queue::QueueView,
+            path: &str,
+        ) -> &'a crate::ui::render::QueueHit {
+            hits.regions
+                .iter()
+                .find(|hit| {
+                    matches!(hit.target, QueueHitTarget::SectionProject(index) if view
+                    .sections
+                    .get(index)
+                    .and_then(|section| section.project_label.as_deref())
+                    == Some(path))
+                })
+                .unwrap_or_else(|| panic!("missing header for {path} in {hits:?}"))
+        }
 
         fn target_mouse(
             area: Rect,
@@ -2085,14 +2143,16 @@ mod tests {
             apply_intent(domain, model, intent, None, None).expect("click applies");
         };
 
-        let mouse = target_mouse(area, &model, |target| {
-            matches!(target, QueueHitTarget::SectionProject(_))
-        });
+        let mouse = {
+            let hits = board_hit_map(area, &model);
+            let hit = header_for(&hits, &model.queue_view(), "/repos/beta");
+            left_click(hit.area.x, hit.area.y)
+        };
         drive_click(&mut domain, &mut model, mouse);
         assert_eq!(
             model.selected_project(),
             None,
-            "first header click only arms"
+            "first header click collapses/arm only"
         );
 
         let mouse = target_mouse(
@@ -2101,9 +2161,11 @@ mod tests {
             |target| matches!(target, QueueHitTarget::Task(task_id) if task_id == id),
         );
         drive_click(&mut domain, &mut model, mouse);
-        let mouse = target_mouse(area, &model, |target| {
-            matches!(target, QueueHitTarget::SectionProject(_))
-        });
+        let mouse = {
+            let hits = board_hit_map(area, &model);
+            let hit = header_for(&hits, &model.queue_view(), "/repos/beta");
+            left_click(hit.area.x, hit.area.y)
+        };
         drive_click(&mut domain, &mut model, mouse);
         assert_eq!(
             model.selected_project(),
@@ -2111,13 +2173,15 @@ mod tests {
             "header click after an intervening task click must be a new first click"
         );
 
-        let mouse = target_mouse(area, &model, |target| {
-            matches!(target, QueueHitTarget::SectionProject(_))
-        });
+        let mouse = {
+            let hits = board_hit_map(area, &model);
+            let hit = header_for(&hits, &model.queue_view(), "/repos/beta");
+            left_click(hit.area.x, hit.area.y)
+        };
         drive_click(&mut domain, &mut model, mouse);
         assert_eq!(
             model.selected_project(),
-            Some(Path::new("/repos/app")),
+            Some(Path::new("/repos/beta")),
             "only two consecutive header clicks scope the board"
         );
     }
@@ -2143,7 +2207,8 @@ mod tests {
                 ProvenanceOrigin::Manual,
             )
             .expect("create task");
-        let model = BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/app")));
+        let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/app")));
+        model.set_selected_project(Some(PathBuf::from("/repos/app")));
 
         for area in [
             Rect::new(0, 0, 120, 24),
@@ -2780,7 +2845,8 @@ mod tests {
                 ProvenanceOrigin::Capture,
             )
             .expect("create task");
-        let model = BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/app")));
+        let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/app")));
+        model.set_selected_project(Some(PathBuf::from("/repos/app")));
         (domain, model)
     }
 

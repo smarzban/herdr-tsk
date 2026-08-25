@@ -1,5 +1,6 @@
 //! Queue Board Renderer frame goldens.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::{Duration, SystemTime};
@@ -12,7 +13,7 @@ use tsk_tui::domain::{
     DomainState, HumanStatus, ProvenanceOrigin, Task, TaskEvent, TaskEventKind, TaskScope,
 };
 use tsk_tui::ui::input::map_key;
-use tsk_tui::ui::queue::{self, DeckScope, QueueView};
+use tsk_tui::ui::queue::{self, BoardLens, BoardTab, QueueView, ThreadProjectCollapseKey};
 use tsk_tui::ui::render::{
     assert_buffer_mono, assert_no_color_sgr, draw_queue_frame, BottomInputSlot, PaletteCommandRow,
     QueueFrameModel, QueueOverlay, VerbEntry,
@@ -169,6 +170,14 @@ fn fixture_verbs() -> &'static [VerbEntry<'static>] {
 fn todo_verbs() -> Vec<VerbEntry<'static>> {
     let mut model = base_board_model();
     let mut domain = DomainState::new();
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::SelectHomeTab(BoardTab::Projects),
+        None,
+        None,
+    )
+    .expect("projects tab for fixture todo task");
     let target = Uuid::from_u128(10);
     let visible = model.visible_ids();
     for _ in 0..visible.len() {
@@ -287,22 +296,58 @@ fn palette_commands() -> Vec<PaletteCommandRow<'static>> {
         .collect()
 }
 
+fn empty_projects() -> &'static HashSet<String> {
+    static SET: OnceLock<HashSet<String>> = OnceLock::new();
+    SET.get_or_init(HashSet::new)
+}
+
+fn empty_threads() -> &'static HashSet<String> {
+    static SET: OnceLock<HashSet<String>> = OnceLock::new();
+    SET.get_or_init(HashSet::new)
+}
+
+fn empty_thread_projects() -> &'static HashSet<ThreadProjectCollapseKey> {
+    static SET: OnceLock<HashSet<ThreadProjectCollapseKey>> = OnceLock::new();
+    SET.get_or_init(HashSet::new)
+}
+
 fn fixture_view(tasks: &[Task], drawer_open: bool) -> QueueView {
-    queue::query(
+    queue::query_lens(
         tasks,
         Some(Path::new("/repos/tsk")),
-        DeckScope::All,
+        BoardLens::Home(BoardTab::Desk),
+        drawer_open,
+    )
+}
+
+fn fixture_view_projects(tasks: &[Task], drawer_open: bool) -> QueueView {
+    queue::query_lens(
+        tasks,
+        Some(Path::new("/repos/tsk")),
+        BoardLens::Home(BoardTab::Projects),
         drawer_open,
     )
 }
 
 fn fixture_model<'a>(tasks: &'a [Task], view: &'a QueueView) -> QueueFrameModel<'a> {
+    fixture_model_on_tab(tasks, view, BoardTab::Desk)
+}
+
+fn fixture_model_on_tab<'a>(
+    tasks: &'a [Task],
+    view: &'a QueueView,
+    home_tab: BoardTab,
+) -> QueueFrameModel<'a> {
     QueueFrameModel {
         tasks,
         view,
         selection_id: Some(Uuid::from_u128(1)),
-        scope_label: "all projects",
-        all_projects_scope: true,
+        at_home: true,
+        home_tab,
+        scope_label: "",
+        collapsed_projects: empty_projects(),
+        collapsed_threads: empty_threads(),
+        collapsed_thread_projects: empty_thread_projects(),
         status_message: None,
         status_undo_offset: None,
         verb_items: fixture_verbs(),
@@ -375,26 +420,33 @@ fn standard_78x24_fixture_has_selector_list_rule_status_verb_and_no_other_chrome
     let (rows, geo) = paint(78, 24, &model);
 
     assert_eq!(geo.tier, Tier::Standard);
-    assert_eq!(geo.selector_row, Some(0));
+    assert_eq!(geo.selector_row, Some(1));
     assert_eq!(geo.rule_row, Some(21));
     assert_eq!(geo.status_row, Some(22));
     assert_eq!(geo.verb_row, Some(23));
-    assert_eq!(geo.viewport_top, 1);
-    assert_eq!(geo.viewport_height, 20);
+    assert_eq!(geo.viewport_top, 2);
+    assert_eq!(geo.viewport_height, 19);
     assert_eq!(geo.meta_column_width, 28);
     assert_eq!(geo.title_width, 50);
 
-    let selector = trimmed(&rows[0]);
+    assert!(trimmed(&rows[0]).is_empty(), "row above tabs stays blank");
+
+    let selector = trimmed(&rows[1]);
     assert!(
         !selector.contains("queue") && !selector.contains("board"),
         "selector must not paint a view switcher: {selector:?}"
     );
     assert!(
-        selector.contains("all projects") && selector.contains('▾'),
-        "selector must show project chip: {selector:?}"
+        selector.contains("desk") && selector.contains("projects") && selector.contains("threads"),
+        "selector must show home tabs: {selector:?}"
+    );
+    assert!(
+        !selector.contains('▾'),
+        "home tabs do not paint the project chip: {selector:?}"
     );
 
-    let list: String = rows[1..21]
+    let list: String = rows
+        [geo.viewport_top as usize..(geo.viewport_top + geo.viewport_height) as usize]
         .iter()
         .map(|r| trimmed(r))
         .collect::<Vec<_>>()
@@ -405,14 +457,11 @@ fn standard_78x24_fixture_has_selector_list_rule_status_verb_and_no_other_chrome
     );
     assert!(
         list.lines()
-            .any(|line| line.trim_start().starts_with("tsk ─"))
-            && list
-                .lines()
-                .any(|line| line.trim_start().starts_with("desk ─")),
-        "list must include project group headers as painted header rows:\n{list}"
+            .any(|line| line.trim_start().starts_with("desk ─")),
+        "desk tab must include the desk ON DECK header:\n{list}"
     );
     assert!(
-        list.contains('▸') && list.contains('○') && list.contains('■') && list.contains('▲'),
+        list.contains('▸') && list.contains('○') && list.contains('✓'),
         "status glyphs must appear:\n{list}"
     );
     assert!(
@@ -463,14 +512,14 @@ fn standard_78x24_fixture_has_selector_list_rule_status_verb_and_no_other_chrome
     // (headers/tasks/spacers), never a second status/verb/rule band.
     for (idx, row) in rows.iter().enumerate() {
         let t = trimmed(row);
-        if idx == 0 || idx == 21 || idx == 22 || idx == 23 {
+        if idx == 1 || idx == 21 || idx == 22 || idx == 23 {
             continue;
         }
         assert!(
             !t.contains("all projects ▾") && !t.starts_with(" space "),
             "non-chrome row {idx} must not repeat selector/verb chrome: {t:?}"
         );
-        if idx != 21 {
+        if idx != 21 && idx != 0 {
             let rule_like = t.chars().filter(|&c| c == '─').count() >= 60
                 && !t.contains("IN MOTION")
                 && !t.contains("DONE")
@@ -544,22 +593,13 @@ fn assert_exact_header_spacing(
 #[test]
 fn every_section_header_has_symmetric_spacing_and_scrolls_with_its_selected_task() {
     let tasks = fixture_tasks();
-    let view = fixture_view(&tasks, true);
-    let cases = [
+    let desk_view = fixture_view(&tasks, true);
+    let projects_view = fixture_view_projects(&tasks, true);
+    let desk_cases = [
         (
             "IN MOTION",
             Uuid::from_u128(1),
             "Smoke-test worktree dispatch",
-        ),
-        (
-            "tsk",
-            Uuid::from_u128(10),
-            "Prototype the queue-style board UI",
-        ),
-        (
-            "herdr",
-            Uuid::from_u128(20),
-            "Wire dispatch cleanup receipts",
         ),
         ("desk", Uuid::from_u128(30), "Global backlog note"),
         (
@@ -568,11 +608,34 @@ fn every_section_header_has_symmetric_spacing_and_scrolls_with_its_selected_task
             "Ship the queue board milestone",
         ),
     ];
+    let project_cases = [
+        ("tsk", Uuid::from_u128(1), "Smoke-test worktree dispatch"),
+        ("herdr", Uuid::from_u128(2), "Edit target binding pin"),
+    ];
 
     for &(width, height) in &[(78u16, 24u16), (77u16, 24u16), (40u16, 10u16)] {
         let dimensions = format!("{width}x{height}");
-        for &(header, selected_id, selected_title) in &cases {
-            let mut model = fixture_model(&tasks, &view);
+        for &(header, selected_id, selected_title) in &desk_cases {
+            let mut model = fixture_model(&tasks, &desk_view);
+            model.selection_id = Some(selected_id);
+            let (rows, geo) = paint(width, height, &model);
+            assert_exact_header_spacing(&rows, geo, header, selected_title, &dimensions);
+
+            let top = geo.viewport_top as usize;
+            let bottom = top + geo.viewport_height as usize;
+            let viewport = rows[top..bottom]
+                .iter()
+                .map(|row| trimmed(row))
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(
+                viewport.contains(selected_title),
+                "{dimensions}: selected {selected_title:?} must remain visible through normal list scrolling:\n{viewport}"
+            );
+            assert_visible_chrome(&rows, geo, &dimensions);
+        }
+        for &(header, selected_id, selected_title) in &project_cases {
+            let mut model = fixture_model_on_tab(&tasks, &projects_view, BoardTab::Projects);
             model.selection_id = Some(selected_id);
             let (rows, geo) = paint(width, height, &model);
             assert_exact_header_spacing(&rows, geo, header, selected_title, &dimensions);
@@ -596,10 +659,10 @@ fn every_section_header_has_symmetric_spacing_and_scrolls_with_its_selected_task
 #[test]
 fn empty_board_hint_advertises_the_live_quick_add_key() {
     let tasks = fixture_tasks();
-    let view = queue::query(
+    let view = queue::query_lens(
         &tasks,
         None,
-        DeckScope::Project(Path::new("/no-tasks")),
+        BoardLens::Project(Path::new("/no-tasks")),
         false,
     );
     let model = fixture_model(&tasks, &view);
@@ -743,7 +806,7 @@ fn overlay_rows_are_padded_exact_no_base_bleed() {
     {
         let mut model = fixture_model(&tasks, &view);
         model.status_message = Some(status);
-        let scope_opts: Vec<String> = vec!["all projects".to_string(), "desk".to_string()];
+        let scope_opts: Vec<String> = vec!["desk".to_string(), "tsk".to_string()];
         model.overlay = QueueOverlay::ScopeDropdown {
             options: &scope_opts,
             selected: 0,
@@ -759,17 +822,15 @@ fn overlay_rows_are_padded_exact_no_base_bleed() {
                 // Distinctive status won't be here, but task meta or rule chars could.
                 // Check the right-hand side of the row for our marker/text.
                 assert!(
-                    row.contains("▸ all projects") || row.contains("  all projects"),
+                    row.contains("▸ desk") || row.contains("  desk"),
                     "scope dropdown must paint option text: {row:?}"
                 );
                 // The desk option must be painted as its own dropdown row, not merely
                 // satisfied by task titles or meta elsewhere on the frame.
                 assert!(
-                    rows.iter()
-                        .skip(y as usize + 1)
-                        .take(2)
-                        .any(|option_row| option_row.contains("desk")),
-                    "scope dropdown must paint the desk option as its own row"
+                    rows.get(y as usize + 1)
+                        .is_some_and(|option_row| option_row.contains("tsk")),
+                    "scope dropdown must paint each option on its own row"
                 );
                 // Ensure no stray count/meta tail attached inside the option cells.
                 // Since we pad to col_w in paint, the rendered cells are clean.
@@ -1721,10 +1782,10 @@ fn standard_accordion_expands_full_width_under_selection_without_mutating_domain
         .join("\n");
     for still_present in [
         "IN MOTION",
-        "tsk",
+        "desk",
         "DONE",
         "Edit target binding pin",
-        "Prototype the queue-style board UI",
+        "Global backlog note",
         "Ship the queue board milestone",
     ] {
         assert!(
@@ -1837,8 +1898,8 @@ fn standard_accordion_on_a_task_below_the_fold_scrolls_the_whole_block_into_view
         ));
     }
     let last_id = Uuid::from_u128(2000 + 29);
-    let view = fixture_view(&tasks, false);
-    let mut model = fixture_model(&tasks, &view);
+    let view = fixture_view_projects(&tasks, false);
+    let mut model = fixture_model_on_tab(&tasks, &view, BoardTab::Projects);
     model.detail_open = Some(last_id);
 
     let (rows, geo) = paint(80, 24, &model);
@@ -1882,8 +1943,8 @@ fn plain_selection_on_a_task_below_the_fold_scrolls_it_into_view_in_both_tiers()
         })
         .collect();
     let last_id = Uuid::from_u128(5000 + 39);
-    let view = fixture_view(&tasks, false);
-    let mut model = fixture_model(&tasks, &view);
+    let view = fixture_view_projects(&tasks, false);
+    let mut model = fixture_model_on_tab(&tasks, &view, BoardTab::Projects);
     model.selection_id = Some(last_id);
 
     for &(width, height) in &[(80u16, 24u16), (77u16, 24u16), (40u16, 10u16)] {
@@ -1998,10 +2059,10 @@ fn compact_paints_no_takeover_for_a_detail_open_task_excluded_by_the_current_sco
         tasks.iter().any(|t| t.id == excluded_id),
         "fixture must still carry the excluded task in model.tasks"
     );
-    let scoped_view = queue::query(
+    let scoped_view = queue::query_lens(
         &tasks,
         Some(Path::new("/repos/tsk")),
-        DeckScope::Project(Path::new("/repos/tsk")),
+        BoardLens::Project(Path::new("/repos/tsk")),
         false,
     );
     assert!(
@@ -2014,8 +2075,8 @@ fn compact_paints_no_takeover_for_a_detail_open_task_excluded_by_the_current_sco
     );
     let model = QueueFrameModel {
         detail_open: Some(excluded_id),
+        at_home: false,
         scope_label: "tsk",
-        all_projects_scope: false,
         ..fixture_model(&tasks, &scoped_view)
     };
 
@@ -2470,7 +2531,7 @@ fn header_shows_name_and_open_count() {
         standard.contains("#release") && standard.contains("2 open"),
         "standard thread header must name its block and its open count:\n{standard}"
     );
-    let compact = board_rows(&model, 40, 10).join("\n");
+    let compact = board_rows(&model, 40, 12).join("\n");
     assert!(
         compact.contains("#release 2") && !compact.contains("2 open"),
         "compact thread header must retain name/count in its compressed form:\n{compact}"

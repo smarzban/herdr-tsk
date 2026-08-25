@@ -1,5 +1,6 @@
 //! Board intent reducer and dispatch-recovery result application.
 
+use std::path::PathBuf;
 use std::time::Instant;
 
 use uuid::Uuid;
@@ -13,10 +14,11 @@ use crate::ui::capture::{CaptureField, TITLE_REQUIRED_MESSAGE};
 use crate::ui::edit::{flatten_line_breaks, EditBuffer};
 use crate::ui::input::BoardIntent;
 use crate::ui::mouse::BoardPopup;
+use crate::ui::queue::ThreadProjectCollapseKey;
 
 use super::commands::{resolve_board_command, CommandSurface};
 use super::model::{
-    owned_resource_summary, BoardForm, BoardInputMode, BoardModel, IntentOutcome, OwnedDeckScope,
+    owned_resource_summary, BoardForm, BoardInputMode, BoardLocation, BoardModel, IntentOutcome,
     ProjectPickerState, ProjectScopeOption, StepEditor, StepEditorSave, TaskEditSave,
 };
 
@@ -800,10 +802,9 @@ fn apply_board_intent(
             }
             let options = model.project_options();
             // Highlight the option that matches the current deck scope (session filter).
-            let selected = match &model.deck_scope {
-                OwnedDeckScope::All => 0,
-                OwnedDeckScope::Global => 1,
-                OwnedDeckScope::Project(path) => options
+            let selected = match &model.board_location {
+                BoardLocation::Home { .. } => 0,
+                BoardLocation::Project(path) => options
                     .iter()
                     .position(|option| option == &ProjectScopeOption::Project(path.clone()))
                     .unwrap_or(0),
@@ -829,7 +830,7 @@ fn apply_board_intent(
                 return Ok(IntentOutcome::None);
             };
             let chosen = picker.options.get(picker.selected).cloned();
-            model.set_deck_scope(chosen.unwrap_or(ProjectScopeOption::All));
+            model.set_board_scope(chosen.unwrap_or(ProjectScopeOption::Home));
             model.clear_message();
             return Ok(IntentOutcome::None);
         }
@@ -854,23 +855,82 @@ fn apply_board_intent(
                 model.project_picker = Some(picker);
                 return Ok(IntentOutcome::None);
             };
-            model.set_deck_scope(chosen);
+            model.set_board_scope(chosen);
+            model.clear_message();
+            return Ok(IntentOutcome::None);
+        }
+        BoardIntent::SelectHomeTab(tab) => {
+            model.set_home_tab(tab);
             model.clear_message();
             return Ok(IntentOutcome::None);
         }
         BoardIntent::SelectSectionProject(index) => {
-            // Mouse-only jump: an all-projects ON DECK group header names its own project.
-            // The first click only arms that path; a second click on the same header within
-            // the task-row double-click window adopts it exactly the way choosing it in the
-            // selector dropdown would. Session-only navigation: nothing durable is touched.
-            // A stale section index or a header without a project remains inert.
             let Some(path) = model
                 .queue_view()
                 .sections
                 .get(index)
                 .and_then(|section| section.project_label.clone())
-                .map(Into::into)
             else {
+                return Ok(IntentOutcome::None);
+            };
+            let path_buf = PathBuf::from(path.clone());
+            let now = Instant::now();
+            let is_double = model
+                .last_project_header_click
+                .as_ref()
+                .is_some_and(|(at, last)| {
+                    last == &path_buf && now.duration_since(*at) <= ROW_DOUBLE_CLICK_WINDOW
+                });
+            if is_double {
+                model.last_project_header_click = None;
+                model.set_board_scope(ProjectScopeOption::Project(path_buf));
+            } else {
+                let previous_visible = model.visible_ids();
+                let previous = model.selection_id;
+                model.toggle_project_collapsed(&path);
+                model.last_project_header_click = Some((now, path_buf));
+                model.reanchor_selection(previous, &previous_visible);
+            }
+            model.clear_message();
+            return Ok(IntentOutcome::None);
+        }
+        BoardIntent::SelectSectionThread(index) => {
+            let Some(thread) = model
+                .queue_view()
+                .sections
+                .get(index)
+                .and_then(|section| section.thread_label.clone())
+            else {
+                return Ok(IntentOutcome::None);
+            };
+            let previous_visible = model.visible_ids();
+            let previous = model.selection_id;
+            model.toggle_thread_collapsed(&thread);
+            model.reanchor_selection(previous, &previous_visible);
+            model.clear_message();
+            return Ok(IntentOutcome::None);
+        }
+        BoardIntent::SelectSectionThreadProject {
+            section_idx,
+            subgroup_idx,
+        } => {
+            let view = model.queue_view();
+            let Some(section) = view.sections.get(section_idx) else {
+                return Ok(IntentOutcome::None);
+            };
+            let Some(subgroup) = section.thread_subgroups.get(subgroup_idx) else {
+                return Ok(IntentOutcome::None);
+            };
+            let Some(path) = subgroup.project_path.clone().map(PathBuf::from) else {
+                let previous_visible = model.visible_ids();
+                let previous = model.selection_id;
+                let key = ThreadProjectCollapseKey {
+                    thread: section.thread_label.clone().unwrap_or_default(),
+                    project_path: None,
+                };
+                model.toggle_thread_project_collapsed(key);
+                model.reanchor_selection(previous, &previous_visible);
+                model.clear_message();
                 return Ok(IntentOutcome::None);
             };
             let now = Instant::now();
@@ -882,11 +942,19 @@ fn apply_board_intent(
                 });
             if is_double {
                 model.last_project_header_click = None;
-                model.set_deck_scope(ProjectScopeOption::Project(path));
-                model.clear_message();
+                model.set_board_scope(ProjectScopeOption::Project(path));
             } else {
+                let previous_visible = model.visible_ids();
+                let previous = model.selection_id;
+                let key = ThreadProjectCollapseKey {
+                    thread: section.thread_label.clone().unwrap_or_default(),
+                    project_path: Some(path.to_string_lossy().into_owned()),
+                };
+                model.toggle_thread_project_collapsed(key);
                 model.last_project_header_click = Some((now, path));
+                model.reanchor_selection(previous, &previous_visible);
             }
+            model.clear_message();
             return Ok(IntentOutcome::None);
         }
         BoardIntent::RecoveryResume => {

@@ -1010,20 +1010,17 @@ fn project_scope_chip_and_dropdown_filter_all_visible_sections_matching_ac5() {
     assert_eq!(model.popup(), BoardPopup::ProjectPicker);
 
     let frame = rendered_board(&model, 80, 24);
-    let all_projects_row = frame
+    let home_row = frame
         .lines()
-        .position(|line| line.contains("all projects"))
-        .expect("scope dropdown must paint the all-projects option");
-    // The desk option paints as its own dropdown row directly under the first
-    // option; a bounded window keeps this from being satisfied by a far-away
-    // desk section header or a task title elsewhere on the frame.
+        .position(|line| line.contains("desk") && line.contains('▸'))
+        .expect("scope dropdown must paint the home/desk option");
     assert!(
         frame
             .lines()
-            .skip(all_projects_row + 1)
-            .take(2)
-            .any(|line| line.contains("desk")),
-        "scope dropdown must paint the desk option: {frame:?}"
+            .skip(home_row + 1)
+            .take(3)
+            .any(|line| line.contains("other") || line.contains("app") || line.contains("empty")),
+        "scope dropdown must paint project options after home: {frame:?}"
     );
 
     // Move to /repos/other and confirm (session-only deck scope).
@@ -1075,7 +1072,7 @@ fn project_scope_chip_and_dropdown_filter_all_visible_sections_matching_ac5() {
     assert!(!model.visible_ids().contains(&motion_app));
     assert!(!model.visible_ids().contains(&deck_app));
 
-    // Global is a real selector option, not an alias for all projects.
+    // Home returns to the desk tab with global IN MOTION and desk-scoped ON DECK.
     apply_intent(
         &mut domain,
         &mut model,
@@ -1083,14 +1080,14 @@ fn project_scope_chip_and_dropdown_filter_all_visible_sections_matching_ac5() {
         None,
         None,
     )
-    .expect("reopen for global");
-    let global_idx = model
+    .expect("reopen for home");
+    let home_idx = model
         .project_options()
         .iter()
-        .position(|option| option == &ProjectScopeOption::Global)
-        .expect("global option");
+        .position(|option| option == &ProjectScopeOption::Home)
+        .expect("home option");
     for _ in 0..model.project_options().len() {
-        if model.project_picker_index() == Some(global_idx) {
+        if model.project_picker_index() == Some(home_idx) {
             break;
         }
         apply_intent(
@@ -1100,9 +1097,9 @@ fn project_scope_chip_and_dropdown_filter_all_visible_sections_matching_ac5() {
             None,
             None,
         )
-        .expect("next global");
+        .expect("next home");
     }
-    assert_eq!(model.project_picker_index(), Some(global_idx));
+    assert_eq!(model.project_picker_index(), Some(home_idx));
     apply_intent(
         &mut domain,
         &mut model,
@@ -1110,20 +1107,20 @@ fn project_scope_chip_and_dropdown_filter_all_visible_sections_matching_ac5() {
         None,
         None,
     )
-    .expect("scope global");
-    let global_view = model.queue_view();
-    assert_eq!(global_view.counts.in_motion, 1);
-    assert_eq!(global_view.counts.done, 1);
-    assert_eq!(
-        model.visible_ids(),
-        vec![motion_global, deck_global, done_global],
-        "Global scope leaves no project-scoped task visible"
-    );
+    .expect("scope home");
+    assert!(model.at_home());
+    assert_eq!(model.home_tab(), tsk_tui::ui::board::BoardTab::Desk);
+    let home_view = model.queue_view();
+    assert_eq!(home_view.counts.in_motion, 3);
+    assert!(model.visible_ids().contains(&motion_global));
+    assert!(model.visible_ids().contains(&motion_app));
+    assert!(model.visible_ids().contains(&deck_global));
+    assert!(!model.visible_ids().contains(&deck_app));
     model.clear_message();
-    let global_status = board_chrome_row(&model, (80, 24));
+    let home_status = board_chrome_row(&model, (80, 24));
     assert!(
-        global_status.contains("1 done") && !global_status.contains("in motion"),
-        "global status counts must be painted: {global_status:?}"
+        home_status.contains("4 done") && !home_status.contains("in motion"),
+        "home status counts must be painted: {home_status:?}"
     );
 
     // Scoped project with zero open deck tasks → header + empty hint, no invented row.

@@ -19,8 +19,8 @@ use crate::ui::tier;
 use super::chrome::{notice_framed, row_width, DELETE_NOTICE_UNDO};
 use super::commands::CommandSurface;
 use super::model::{
-    project_option_label, project_scope_option_label, BoardForm, BoardInputMode, BoardModel,
-    OwnedDeckScope,
+    project_option_label, project_scope_option_label, BoardForm, BoardInputMode, BoardLocation,
+    BoardModel,
 };
 
 /// Verb bar for the base board list: labels follow the selected task.
@@ -462,10 +462,9 @@ fn draw_board_impl(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap
     let area = frame.area();
     let geo = tier::resolve(area.width, area.height);
     let queue_view = model.queue_view();
-    let scope_label = match &model.deck_scope {
-        OwnedDeckScope::All => "all projects".to_string(),
-        OwnedDeckScope::Global => "desk".to_string(),
-        OwnedDeckScope::Project(path) => project_option_label(Some(path.as_path())),
+    let scope_label = match &model.board_location {
+        BoardLocation::Home { .. } => String::new(),
+        BoardLocation::Project(path) => project_option_label(path.as_path()),
     };
     // Status line surfaces delete recovery notice (title + u undo hint) when armed;
     // otherwise the last action message, otherwise counts.
@@ -620,8 +619,12 @@ fn draw_board_impl(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap
         tasks: &model.tasks,
         view: &queue_view,
         selection_id: model.saved_task.or(model.selection_id),
+        at_home: model.at_home(),
+        home_tab: model.home_tab(),
         scope_label: &scope_label,
-        all_projects_scope: matches!(&model.deck_scope, OwnedDeckScope::All),
+        collapsed_projects: &model.collapsed_projects,
+        collapsed_threads: &model.collapsed_threads,
+        collapsed_thread_projects: &model.collapsed_thread_projects,
         status_message: status_owned.as_deref(),
         status_undo_offset,
         verb_items: &verbs,

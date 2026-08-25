@@ -1,20 +1,20 @@
 ┌────────────────────────────────────────────────────────────────────────────────┐
-│                                                                 all projects ▾ │
+│                                                                                │
+│ desk  ·  projects  ·  threads                                                  │
 │                                                                                │
 │ IN MOTION ───────────────────────────────────────────────────────────────────2 │
 │                                                                                │
 │  ▸ Smoke-test worktree dispatch                                       tsk · 3m │
 │  ▸ Edit target binding pin                                         herdr · 12m │
 │                                                                                │
-│ tsk ─────────────────────────────────────────────────────────────────────────2 │
+│ desk ────────────────────────────────────────────────────────────────────────1 │
 │                                                                                │
-│  ○ Prototype the queue-style board UI                                       1h │
-│  ○ Cut rust-toolchain pin into CI docs                                      1d │
+│  ○ Global backlog note                                                      2d │
 │                                                                                │
-│ herdr ───────────────────────────────────────────────────────────────────────2 │
 │                                                                                │
-│  ■ Wire dispatch cleanup receipts                                          41m │
-│  ▲ Docs refresh pass after F9 ships                                         3h │
+│                                                                                │
+│                                                                                │
+│                                                                                │
 │ command                                                                        │
 │   set status: ready                                                            │
 │   set status: started                                                          │

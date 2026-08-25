@@ -1124,6 +1124,7 @@ fn background_sync_cannot_redirect_a_bound_task_form_while_its_scope_dropdown_is
         )
         .expect("create Bravo");
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
+    model.set_selected_project(Some(PathBuf::from(THIS_REPO)));
     let alpha_index = model
         .visible_ids()
         .iter()

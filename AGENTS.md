@@ -29,22 +29,29 @@ For scriptable board work, use `tsk add` and `tsk list`; read
 
 ### Board
 
-- Sections and scoped thread headers are computed, never navigated: IN MOTION · project
-  groups when showing all projects, ON DECK when scoped · desk last · done drawer (`z`).
-  Scoped ON DECK thread blocks paint dim `#name` headers with open counts; headers consume
-  row budget but are not selectable or hit-testable.
+- Home is a tabbed board: **desk** · **projects** · **threads** (`1`/`2`/`3`). Tabs
+  show only at home; project focus (`P` → project) hides them and paints the project
+  name chip (`P ▾` on the right). At home the chip is hidden — tabs already say where
+  you are; `P` still opens the scope picker from the keyboard. **desk**: global IN MOTION
+  plus desk/global ON DECK. **projects**: one collapsible group per project (single-click
+  collapse, double-click → project focus); in motion under each project, then review,
+  blocked, open. **threads**: cross-project thread names with collapsible project
+  sub-groups; same status order. Collapse state is session-only. IN MOTION · ON DECK when
+  project-scoped · done drawer (`z`). Scoped ON DECK thread blocks paint dim `#name`
+  headers with open counts; headers consume row budget but are not selectable or
+  hit-testable.
 - Standard ≥78×24, compact below, operable to 40×10
 - Human status: `ready` · `started` · `blocked` · `review` · `done`. The store
   still reads old `todo`/`doing` values.
 - Mutating verbs (`space` `d` `o` `b` `e` `n` `x` `u` `q`) need Alt, or Ctrl
   if the user flipped it in the palette. Bare letters do nothing. Nav, peek,
-  `Enter`, `P`, `z`, `:`, `?`, `+`, and `Esc` stay bare.
+  `Enter`, `P`, `1`/`2`/`3`, `z`, `:`, `?`, `+`, and `Esc` stay bare.
 - Task creation is the quick-add bar, never a form takeover. `+` opens a one-line
   title input on the status-row slot with a blank row above and below, list still
   visible. `Enter` saves and closes, `Ctrl+Enter` saves and stays open, `Tab`
   expands the draft onto the task page with a title·notes·scope stash, so Esc
   returns to the line and a second `Tab` restores what was typed. A project board
-  defaults the draft to that project, a project-less board defaults it to your desk, and All
+  defaults the draft to that project, a project-less board defaults it to your desk, and home
   keeps the invocation cwd-derived default. Capture tokens in the title: `!p` and
   `!t` each consume one whitespace-delimited argument. Bare `!p` selects your desk,
   `!p name` selects a project basename (case-insensitive), and `!p /path` uses that
