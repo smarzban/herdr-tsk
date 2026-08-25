@@ -87,7 +87,8 @@ is the standard board.
 One urgency-ordered list. Sections are computed, not navigated.
 
 - **IN MOTION**: work you have started
-- When showing all projects: one group per project, global last
+- When showing all projects: one group per project, your desk last. Your desk holds
+  everything not tied to a project.
 - When scoped to one project: **ON DECK** for that project, with derived thread
   headers above their open tasks
 - **z** opens the done drawer
@@ -139,8 +140,8 @@ Page `Esc` closes the page.
 | `Ctrl+Enter` or `Alt+Enter` | save from any field |
 | `Esc` | cancel |
 
-Title is required. Scope defaults to the repo the board was opened from, or Global
-if there is no repo.
+Title is required. Scope defaults to the repo the board was opened from, or your
+desk if there is no repo.
 
 Notes are multiline, so `Enter` inserts a line. `Ctrl+Enter` saves when the
 terminal reports it; `Alt+Enter` saves everywhere else. Both save. Neither inserts

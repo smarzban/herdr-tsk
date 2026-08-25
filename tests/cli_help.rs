@@ -29,7 +29,7 @@ fn add_help_documents_plan_shape_and_exit_contract() {
         "list",
         "--json",
         "tsk add -t",
-        "--global",
+        "--desk",
         "--project",
         "--title=<value>",
         "--notes=<value>",
@@ -55,7 +55,7 @@ fn add_help_documents_plan_shape_and_exit_contract() {
     assert!(list.stderr.is_empty());
     for term in [
         "project",
-        "global",
+        "desk",
         "done",
         "deleted",
         "soft-deleted",

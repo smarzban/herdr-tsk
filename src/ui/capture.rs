@@ -60,7 +60,7 @@ pub enum CaptureScopeChoice {
 /// dropping one, which would make it mouse-unreachable.
 pub const CAPTURE_SCOPE_CONTROLS: &[(&str, &str, CaptureScopeChoice)] = &[
     ("This project", "Proj", CaptureScopeChoice::ThisProject),
-    ("Global", "Glob", CaptureScopeChoice::Global),
+    ("Desk", "Desk", CaptureScopeChoice::Global),
     ("Other\u{2026}", "Other\u{2026}", CaptureScopeChoice::Other),
 ];
 
@@ -625,7 +625,7 @@ fn move_draft(model: &mut CaptureModel, operation: impl FnOnce(&mut EditBuffer))
 /// Human-readable scope for the form line.
 pub fn format_scope(scope: &TaskScope) -> String {
     match scope {
-        TaskScope::Global => "global".into(),
+        TaskScope::Global => "desk".into(),
         TaskScope::Project { path } => format!("project:{path}"),
     }
 }
@@ -871,7 +871,7 @@ pub fn draw_capture(frame: &mut Frame, model: &CaptureModel) {
         _ => {
             frame.render_widget(
                 Paragraph::new(present_line(
-                    "  1 this project  ·  2 global  ·  3 other path",
+                    "  1 this project  ·  2 desk  ·  3 other path",
                     layout.message_area.width as usize,
                 ))
                 .style(render::style_dim()),
@@ -1195,7 +1195,7 @@ mod tests {
             "Notes:",
             "Scope:",
             "This project",
-            "Global",
+            "Desk",
             "Other",
         ] {
             assert!(plain.contains(token), "missing {token:?}: {plain}");
@@ -1246,7 +1246,7 @@ mod tests {
         assert_eq!(model.scope_choice(), CaptureScopeChoice::Global);
         assert!(!model.shows_project_path());
         let plain = render_plain(&model, 80, 14);
-        assert!(plain.contains("(•) Global"), "global not marked: {plain}");
+        assert!(plain.contains("(•) Desk"), "desk not marked: {plain}");
         assert!(!plain.contains("/repos/app"), "path leaked: {plain}");
 
         // This project: durable scope value is the resolved repository path.

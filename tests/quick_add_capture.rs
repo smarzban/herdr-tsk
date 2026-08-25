@@ -590,7 +590,7 @@ fn expanded_page_stashes_notes_and_scope_across_esc_and_saves_like_quick_add() {
     );
     let page = render_text(&model, 80, 24);
     assert!(page.contains("draft with details"));
-    assert!(page.contains("global"));
+    assert!(page.contains("desk"));
     assert!(
         !page.contains("title…"),
         "expanded draft uses the task page, not the quick-add row"
@@ -1022,7 +1022,7 @@ fn capture_bar_renders_spaced_three_row_block_and_stays_bounded_without_color_sg
     let standard = render_text(&model, 80, 24);
     for text in [
         "visible task",
-        "title…   !p global · !p name project · !t thread · tab details",
+        "title…   !p = desk · !p name = project · !t name = thread",
         "enter save · ctrl+enter save+next · tab details · esc close",
     ] {
         assert!(standard.contains(text), "missing {text:?}: {standard}");

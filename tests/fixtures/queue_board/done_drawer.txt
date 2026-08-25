@@ -16,7 +16,7 @@
 │  ■ Wire dispatch cleanup receipts                                          41m │
 │  ▲ Docs refresh pass after F9 ships                                         3h │
 │                                                                                │
-│ global ──────────────────────────────────────────────────────────────────────1 │
+│ desk ────────────────────────────────────────────────────────────────────────1 │
 │                                                                                │
 │  ○ Global backlog note                                                      2d │
 │                                                                                │

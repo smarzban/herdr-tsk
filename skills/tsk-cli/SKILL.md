@@ -12,7 +12,7 @@ inspect the shared board store before and after adding work.
 
 ```sh
 tsk add -t "Draft release notes"
-tsk add -t "Buy milk" --global
+tsk add -t "Buy milk" --desk
 tsk add -t "Fix widget" --project widget --thread release-2026
 tsk add --title="-fix parser" --notes="-5 degrees" --project="-maintenance"
 tsk add --file plan.json
@@ -25,7 +25,7 @@ Use `--title=<value>`, `--notes=<value>`, `--project=<value>`,
 plus `--file` are usage (exit 2, nothing persists). Piped stdin with item flags
 is ignored and not read. Use `--json` with a flag add when another
 tool needs one result object. It contains `outcome` (`created` or `existing`),
-`id`, trimmed `title`, and resolved `project` (or `null` for global).
+`id`, trimmed `title`, and resolved `project` (or `null` for the desk).
 
 Plan JSON accepts a per-item `thread` string or `null`, for example
 `[{"title":"Release notes","thread":"release-2026"}]`. Invalid plan thread
@@ -49,8 +49,8 @@ reports it in `existing` with its `i`, `id`, and `title`.
 ## Listing scope and filters
 
 `tsk list` defaults to ready, started, blocked, and review tasks in the
-invocation project, or global scope outside a repository. Use `-p`/`--project <scope>`
-for the same basename-or-path resolution as add, `--global` for global tasks, or `--all`
+invocation project, or your desk outside a repository. Use `-p`/`--project <scope>`
+for the same basename-or-path resolution as add, `--desk` for desk tasks, or `--all`
 for every scope. `--thread <name>` normalizes then filters tasks after scope
 selection. An invalid thread name is a usage error (exit 2), not an empty result.
 JSON rows always include `thread`, with `null` for unthreaded tasks. Use

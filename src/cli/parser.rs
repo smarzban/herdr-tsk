@@ -98,7 +98,7 @@ pub fn parse_flag_add(args: &[String]) -> Result<FlagAdd, String> {
                 parsed.has_item_flags = true;
                 index += 2;
             }
-            "--global" => {
+            "--desk" => {
                 parsed.global = true;
                 parsed.has_item_flags = true;
                 index += 1;
@@ -132,7 +132,7 @@ pub fn parse_flag_add(args: &[String]) -> Result<FlagAdd, String> {
     }
 
     if parsed.global && parsed.project.is_some() {
-        return Err("--global cannot be used with --project".into());
+        return Err("--desk cannot be used with --project".into());
     }
     if parsed.has_item_flags && parsed.file.is_some() {
         return Err("item flags cannot be used with --file".into());

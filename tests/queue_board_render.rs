@@ -404,8 +404,12 @@ fn standard_78x24_fixture_has_selector_list_rule_status_verb_and_no_other_chrome
         "list must include IN MOTION header:\n{list}"
     );
     assert!(
-        list.contains("tsk") && list.contains("global"),
-        "list must include project group headers:\n{list}"
+        list.lines()
+            .any(|line| line.trim_start().starts_with("tsk ─"))
+            && list
+                .lines()
+                .any(|line| line.trim_start().starts_with("desk ─")),
+        "list must include project group headers as painted header rows:\n{list}"
     );
     assert!(
         list.contains('▸') && list.contains('○') && list.contains('■') && list.contains('▲'),
@@ -557,7 +561,7 @@ fn every_section_header_has_symmetric_spacing_and_scrolls_with_its_selected_task
             Uuid::from_u128(20),
             "Wire dispatch cleanup receipts",
         ),
-        ("global", Uuid::from_u128(30), "Global backlog note"),
+        ("desk", Uuid::from_u128(30), "Global backlog note"),
         (
             "DONE",
             Uuid::from_u128(40),
@@ -737,7 +741,7 @@ fn overlay_rows_are_padded_exact_no_base_bleed() {
     {
         let mut model = fixture_model(&tasks, &view);
         model.status_message = Some(status);
-        let scope_opts: Vec<String> = vec!["all projects".to_string(), "global".to_string()];
+        let scope_opts: Vec<String> = vec!["all projects".to_string(), "desk".to_string()];
         model.overlay = QueueOverlay::ScopeDropdown {
             options: &scope_opts,
             selected: 0,
@@ -755,6 +759,15 @@ fn overlay_rows_are_padded_exact_no_base_bleed() {
                 assert!(
                     row.contains("▸ all projects") || row.contains("  all projects"),
                     "scope dropdown must paint option text: {row:?}"
+                );
+                // The desk option must be painted as its own dropdown row, not merely
+                // satisfied by task titles or meta elsewhere on the frame.
+                assert!(
+                    rows.iter()
+                        .skip(y as usize + 1)
+                        .take(2)
+                        .any(|option_row| option_row.contains("desk")),
+                    "scope dropdown must paint the desk option as its own row"
                 );
                 // Ensure no stray count/meta tail attached inside the option cells.
                 // Since we pad to col_w in paint, the rendered cells are clean.

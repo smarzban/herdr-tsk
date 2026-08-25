@@ -7,7 +7,7 @@ fn skill_documents_retry_and_misfiling() {
 
     for term in [
         "tsk add -t",
-        "--global",
+        "--desk",
         "--project",
         "--file plan.json",
         "--file=<path>",

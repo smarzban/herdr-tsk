@@ -1843,7 +1843,7 @@ fn detail_lines_for_task(task: &Task, now: SystemTime, width: u16) -> Vec<Line<'
     }
     let scope_text = match &task.scope {
         TaskScope::Project { path } => short_project(path).to_string(),
-        TaskScope::Global => "global".to_string(),
+        TaskScope::Global => "desk".to_string(),
     };
     let age_text = format!(
         "created {} ago · updated {} ago",
@@ -2024,7 +2024,7 @@ fn section_title(section: &QueueSection, all_projects: bool) -> String {
         SectionKind::Done => "DONE".to_string(),
         SectionKind::OnDeck if all_projects => match section.project_label.as_deref() {
             Some(path) => short_project(path).to_string(),
-            None => "global".to_string(),
+            None => "desk".to_string(),
         },
         SectionKind::OnDeck => "ON DECK".to_string(),
     }
@@ -2142,12 +2142,12 @@ fn paint_quick_add_hint(
                 if project_scope {
                     "this project"
                 } else {
-                    "global"
+                    "desk"
                 }
             ),
             Tier::Compact => format!(
                 "⏎ save · esc · tab · {}",
-                if project_scope { "proj" } else { "glob" }
+                if project_scope { "proj" } else { "desk" }
             ),
         };
         (text, style_dim())

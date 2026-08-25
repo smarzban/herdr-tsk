@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+The projectless scope is now **desk**: board header, `tsk list` labels, and the new
+`--desk` flag. Stored scope values are unchanged,
+so no data migration is needed.
+
 Store hardening: `tasks.json` carries `format_version` (currently 1) and a
 newer document is refused rather than rewritten; each replace keeps the previous
 file as `tasks.json.1`; leftover `.tasks.json.tmp.*` files are swept under the

@@ -266,7 +266,7 @@ fn idempotency_key_includes_thread_both_directions() {
             state_dir_arg(&threaded_first_dir),
             "--title".into(),
             "same title".into(),
-            "--global".into(),
+            "--desk".into(),
             "--thread".into(),
             "Release".into(),
         ],
@@ -281,7 +281,7 @@ fn idempotency_key_includes_thread_both_directions() {
             state_dir_arg(&threaded_first_dir),
             "--title".into(),
             "same title".into(),
-            "--global".into(),
+            "--desk".into(),
         ],
         true,
     );
@@ -304,7 +304,7 @@ fn idempotency_key_includes_thread_both_directions() {
             state_dir_arg(&unthreaded_first_dir),
             "--title".into(),
             "same title".into(),
-            "--global".into(),
+            "--desk".into(),
         ],
         true,
     );
@@ -317,7 +317,7 @@ fn idempotency_key_includes_thread_both_directions() {
             state_dir_arg(&unthreaded_first_dir),
             "--title".into(),
             "same title".into(),
-            "--global".into(),
+            "--desk".into(),
             "--thread".into(),
             "release".into(),
         ],
@@ -332,7 +332,7 @@ fn idempotency_key_includes_thread_both_directions() {
             state_dir_arg(&unthreaded_first_dir),
             "--title".into(),
             "same title".into(),
-            "--global".into(),
+            "--desk".into(),
             "--thread".into(),
             "RELEASE".into(),
         ],
@@ -456,7 +456,7 @@ fn flag_add_existing_trimmed_title_and_scope_is_a_successful_noop() {
             "same task".into(),
             "--notes".into(),
             "original notes".into(),
-            "--global".into(),
+            "--desk".into(),
         ],
         true,
     );
@@ -487,7 +487,7 @@ fn flag_add_existing_trimmed_title_and_scope_is_a_successful_noop() {
             "  same task  ".into(),
             "--notes".into(),
             "different notes".into(),
-            "--global".into(),
+            "--desk".into(),
         ],
         true,
     );
@@ -545,7 +545,7 @@ fn flag_add_ignores_soft_deleted_title_and_scope_matches() {
             state_dir_arg(&dir),
             "--title".into(),
             "same task".into(),
-            "--global".into(),
+            "--desk".into(),
         ],
         true,
     );
@@ -642,7 +642,7 @@ fn flag_add_resolves_global_and_project_basename_scopes() {
             state_dir_arg(&global_dir),
             "-t".into(),
             "global task".into(),
-            "--global".into(),
+            "--desk".into(),
         ],
         true,
     );
@@ -878,7 +878,7 @@ fn flag_add_rejects_global_with_project() {
             state_dir_arg(&dir),
             "-t".into(),
             "conflict".into(),
-            "--global".into(),
+            "--desk".into(),
             "-p".into(),
             "/projects/a".into(),
         ],
@@ -1493,14 +1493,14 @@ fn flag_add_rejects_flag_like_item_values_without_persisting() {
     let _env = env_lock();
 
     for (label, item_flags) in [
-        ("title", vec!["--title", "--global"]),
+        ("title", vec!["--title", "--desk"]),
         (
             "notes",
-            vec!["--title", "ordinary title", "--notes", "--global"],
+            vec!["--title", "ordinary title", "--notes", "--desk"],
         ),
         (
             "project",
-            vec!["--title", "ordinary title", "--project", "--global"],
+            vec!["--title", "ordinary title", "--project", "--desk"],
         ),
     ] {
         let dir = temp_state_dir(label);
@@ -1605,24 +1605,24 @@ fn flag_add_rejects_flag_like_state_dir_and_file_values_without_mutating() {
     let state_dir_output = Command::new(&binary)
         .current_dir(&cwd)
         .env("TSK_STATE_DIR", &state_dir)
-        .args(["add", "--state-dir", "--global", "--title", "junk"])
+        .args(["add", "--state-dir", "--desk", "--title", "junk"])
         .output()
         .expect("run flag-like state-dir value");
     assert_eq!(state_dir_output.status.code(), Some(2));
     assert!(
         String::from_utf8_lossy(&state_dir_output.stderr).contains("missing value for --state-dir")
     );
-    assert!(!cwd.join("--global").exists());
+    assert!(!cwd.join("--desk").exists());
 
     let file = Command::new(binary)
         .current_dir(&cwd)
         .env("TSK_STATE_DIR", &state_dir)
-        .args(["add", "--file", "--global"])
+        .args(["add", "--file", "--desk"])
         .output()
         .expect("run flag-like file value");
     assert_eq!(file.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&file.stderr).contains("missing value for --file"));
-    assert!(!cwd.join("--global").exists());
+    assert!(!cwd.join("--desk").exists());
 
     let _ = std::fs::remove_dir_all(cwd);
     let _ = std::fs::remove_dir_all(state_dir);
@@ -1674,7 +1674,7 @@ fn flag_add_json_reports_created_and_existing_resolved_tasks() {
             state_dir_arg(&dir),
             "-t".into(),
             "global JSON task".into(),
-            "--global".into(),
+            "--desk".into(),
         ],
         true,
     );

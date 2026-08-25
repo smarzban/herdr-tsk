@@ -118,7 +118,7 @@ fn executable_list_json_reads_state_without_opening_the_board() {
         Command::new(binary())
             .args([
                 "list",
-                "--global",
+                "--desk",
                 "--json",
                 "--state-dir",
                 dir.to_str().expect("UTF-8 state dir"),
