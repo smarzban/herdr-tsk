@@ -2147,7 +2147,7 @@ fn paint_quick_add_hint(
             ),
             Tier::Compact => format!(
                 "⏎ save · esc · tab · {}",
-                if project_scope { "proj" } else { "glob" }
+                if project_scope { "proj" } else { "desk" }
             ),
         };
         (text, style_dim())

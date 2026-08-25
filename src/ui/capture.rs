@@ -60,7 +60,7 @@ pub enum CaptureScopeChoice {
 /// dropping one, which would make it mouse-unreachable.
 pub const CAPTURE_SCOPE_CONTROLS: &[(&str, &str, CaptureScopeChoice)] = &[
     ("This project", "Proj", CaptureScopeChoice::ThisProject),
-    ("Global", "Glob", CaptureScopeChoice::Global),
+    ("Desk", "Desk", CaptureScopeChoice::Global),
     ("Other\u{2026}", "Other\u{2026}", CaptureScopeChoice::Other),
 ];
 
@@ -1195,7 +1195,7 @@ mod tests {
             "Notes:",
             "Scope:",
             "This project",
-            "Global",
+            "Desk",
             "Other",
         ] {
             assert!(plain.contains(token), "missing {token:?}: {plain}");
@@ -1246,7 +1246,7 @@ mod tests {
         assert_eq!(model.scope_choice(), CaptureScopeChoice::Global);
         assert!(!model.shows_project_path());
         let plain = render_plain(&model, 80, 14);
-        assert!(plain.contains("(•) Global"), "global not marked: {plain}");
+        assert!(plain.contains("(•) Desk"), "desk not marked: {plain}");
         assert!(!plain.contains("/repos/app"), "path leaked: {plain}");
 
         // This project: durable scope value is the resolved repository path.

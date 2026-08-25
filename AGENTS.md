@@ -44,7 +44,7 @@ For scriptable board work, use `tsk add` and `tsk list`; read
   visible. `Enter` saves and closes, `Ctrl+Enter` saves and stays open, `Tab`
   expands the draft onto the task page with a title·notes·scope stash, so Esc
   returns to the line and a second `Tab` restores what was typed. A project board
-  defaults the draft to that project, a Global board defaults it to your desk, and All
+  defaults the draft to that project, a project-less board defaults it to your desk, and All
   keeps the invocation cwd-derived default. Capture tokens in the title: `!p` and
   `!t` each consume one whitespace-delimited argument. Bare `!p` selects your desk,
   `!p name` selects a project basename (case-insensitive), and `!p /path` uses that

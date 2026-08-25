@@ -166,7 +166,7 @@ pub fn parse(args: &[String]) -> Result<ListInput, String> {
         return Err("--all cannot be used with --project or --desk".into());
     }
     if input.global && input.project.is_some() {
-        return Err("--global cannot be used with --project".into());
+        return Err("--desk cannot be used with --project".into());
     }
     if input.done && input.deleted {
         return Err("--done cannot be used with --deleted".into());

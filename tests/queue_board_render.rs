@@ -404,8 +404,12 @@ fn standard_78x24_fixture_has_selector_list_rule_status_verb_and_no_other_chrome
         "list must include IN MOTION header:\n{list}"
     );
     assert!(
-        list.contains("tsk") && list.contains("desk"),
-        "list must include project group headers:\n{list}"
+        list.lines()
+            .any(|line| line.trim_start().starts_with("tsk ─"))
+            && list
+                .lines()
+                .any(|line| line.trim_start().starts_with("desk ─")),
+        "list must include project group headers as painted header rows:\n{list}"
     );
     assert!(
         list.contains('▸') && list.contains('○') && list.contains('■') && list.contains('▲'),
@@ -755,6 +759,14 @@ fn overlay_rows_are_padded_exact_no_base_bleed() {
                 assert!(
                     row.contains("▸ all projects") || row.contains("  all projects"),
                     "scope dropdown must paint option text: {row:?}"
+                );
+                // The desk option must be painted as its own dropdown row, not merely
+                // satisfied by task titles or meta elsewhere on the frame.
+                assert!(
+                    rows.iter()
+                        .skip(y as usize + 1)
+                        .any(|option_row| option_row.contains("desk")),
+                    "scope dropdown must list the desk option"
                 );
                 // Ensure no stray count/meta tail attached inside the option cells.
                 // Since we pad to col_w in paint, the rendered cells are clean.
