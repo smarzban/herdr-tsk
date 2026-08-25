@@ -64,6 +64,12 @@ For scriptable board work, use `tsk add` and `tsk list`; read
   footer is inert until an edit has started.
 - Mono modifiers only. No color theme module.
 - No live attention poll on the board.
+- Text wraps, never truncates: one wrap engine (`edit::wrap_text`, word-boundary,
+  display-cell measured) feeds notes, task-page titles, list rows, quick-add, capture
+  Notes, and peek. Task-page notes wrap at `row_width - 6` (paint capacity); the
+  capped task-page header and the verb bar's tier-budget ellipsis are chrome limits,
+  not task text. `escaped_draft_rows` remains only for the single-line Title/Thread
+  editors.
 
 ## Build / test / verify
 
