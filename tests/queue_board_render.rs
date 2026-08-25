@@ -765,8 +765,9 @@ fn overlay_rows_are_padded_exact_no_base_bleed() {
                 assert!(
                     rows.iter()
                         .skip(y as usize + 1)
+                        .take(2)
                         .any(|option_row| option_row.contains("desk")),
-                    "scope dropdown must list the desk option"
+                    "scope dropdown must paint the desk option as its own row"
                 );
                 // Ensure no stray count/meta tail attached inside the option cells.
                 // Since we pad to col_w in paint, the rendered cells are clean.

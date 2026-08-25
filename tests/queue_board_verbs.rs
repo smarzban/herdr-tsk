@@ -1010,13 +1010,20 @@ fn project_scope_chip_and_dropdown_filter_all_visible_sections_matching_ac5() {
     assert_eq!(model.popup(), BoardPopup::ProjectPicker);
 
     let frame = rendered_board(&model, 80, 24);
+    let all_projects_row = frame
+        .lines()
+        .position(|line| line.contains("all projects"))
+        .expect("scope dropdown must paint the all-projects option");
+    // The desk option paints as its own dropdown row directly under the first
+    // option; a bounded window keeps this from being satisfied by a far-away
+    // desk section header or a task title elsewhere on the frame.
     assert!(
-        frame.lines().any(|line| line.contains("all projects")),
-        "scope dropdown must paint the all-projects option: {frame:?}"
-    );
-    assert!(
-        frame.lines().any(|line| line.contains("global")),
-        "scope dropdown must paint the global option: {frame:?}"
+        frame
+            .lines()
+            .skip(all_projects_row + 1)
+            .take(2)
+            .any(|line| line.contains("desk")),
+        "scope dropdown must paint the desk option: {frame:?}"
     );
 
     // Move to /repos/other and confirm (session-only deck scope).
