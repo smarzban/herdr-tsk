@@ -271,9 +271,20 @@ fn build_task_page_overlay<'a>(
                 header_rows.push(segment.clone());
             }
         }
+        // A caret hidden below the cap parks at the END of the last shown row:
+        // its own hidden column would otherwise paint an unrelated position on
+        // the ellipsis row.
+        let shown_cursor_row = cursor_row.min(rows.len().saturating_sub(1));
+        let shown_cursor_col = if cursor_row > shown_cursor_row {
+            rows.last()
+                .map(|last| render::display_width(last))
+                .unwrap_or(0)
+        } else {
+            cursor_col
+        };
         title_cursor = Some((
-            u16::try_from(cursor_row.min(rows.len().saturating_sub(1))).unwrap_or(u16::MAX),
-            u16::try_from(cursor_col).unwrap_or(u16::MAX),
+            u16::try_from(shown_cursor_row).unwrap_or(u16::MAX),
+            u16::try_from(shown_cursor_col).unwrap_or(u16::MAX),
         ));
     } else {
         let mut rows: Vec<String> = wrap_text(form.title.value(), title_avail)

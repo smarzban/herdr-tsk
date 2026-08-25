@@ -2942,3 +2942,63 @@ fn step_cursor_moves_do_not_rescroll_the_page_when_steps_fit() {
         "the walked-to step must be visible:\\n{text}"
     );
 }
+
+/// A title-edit caret hidden below the capped header parks at the END of the
+/// last shown row, never at its hidden column on the ellipsis row.
+#[test]
+fn edit_title_caret_parks_at_the_capped_headers_end() {
+    let mut domain = DomainState::new();
+    let title = "word ".repeat(120);
+    domain
+        .create(
+            &title,
+            None,
+            TaskScope::Global,
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("create task");
+    let mut model = BoardModel::from_domain(&domain, None);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenTaskPage,
+        None,
+        None,
+    )
+    .expect("open page");
+    board_rows(&model, 40, 10);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::BeginEditTitle,
+        None,
+        None,
+    )
+    .expect("edit title");
+
+    let mut terminal = Terminal::new(TestBackend::new(40, 10)).expect("terminal");
+    terminal
+        .draw(|frame| draw_board(frame, &model))
+        .expect("draw edit page");
+    let rows = board_rows(&model, 40, 10);
+    // The capped header's last row carries the marker; the caret must sit at
+    // that row's past-end column, immediately after the "…".
+    let last_header = (1..7)
+        .rev()
+        .find(|&y| rows[y].contains("wor…"))
+        .expect("capped header row");
+    let cursor = terminal.backend().cursor_position();
+    assert_eq!(
+        cursor.y, last_header as u16,
+        "caret left the last header row"
+    );
+    let painted = rows[last_header].trim_end();
+    assert_eq!(
+        cursor.x as usize,
+        painted.chars().count(),
+        "caret must sit immediately after the marker, not at a hidden column:\n{}",
+        rows.join("\n")
+    );
+}
