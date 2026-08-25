@@ -243,11 +243,27 @@ fn build_task_page_overlay<'a>(
     // The uniform budget keeps every row's wrap identical.
     let word_cells = status_word.chars().count() + 1;
     let title_avail = width.saturating_sub(4 + word_cells);
+    // The header may grow only inside the page body: it must stop one row short
+    // of the lowest chrome row with one note row still living under it, or a
+    // pathological title would eat the page (and the painter's chrome).
+    let page_bottom = [page_geo.rule_row, page_geo.status_row, page_geo.verb_row]
+        .into_iter()
+        .flatten()
+        .min()
+        .unwrap_or(page_geo.height);
+    let header_cap = page_bottom.saturating_sub(3).max(1) as usize;
     let editing_title = model.input_mode() == BoardInputMode::EditTitle;
     let mut header_rows: Vec<String> = Vec::new();
     let mut title_cursor = None;
     if editing_title {
-        let (rows, cursor_row, cursor_col) = wrapped_edit_rows(&form.title, title_avail);
+        let (mut rows, cursor_row, cursor_col) = wrapped_edit_rows(&form.title, title_avail);
+        let overflowed = rows.len() > header_cap;
+        rows.truncate(header_cap);
+        if overflowed {
+            if let Some(last) = rows.last_mut() {
+                *last = present_line(last, title_avail.saturating_sub(1));
+            }
+        }
         for (offset, segment) in rows.iter().enumerate() {
             if offset == 0 {
                 header_rows.push(format!("{glyph} {segment}"));
@@ -260,14 +276,22 @@ fn build_task_page_overlay<'a>(
             u16::try_from(cursor_col).unwrap_or(u16::MAX),
         ));
     } else {
-        for (offset, row) in wrap_text(form.title.value(), title_avail)
+        let mut rows: Vec<String> = wrap_text(form.title.value(), title_avail)
             .iter()
-            .enumerate()
-        {
+            .map(|row| row.text.clone())
+            .collect();
+        let overflowed = rows.len() > header_cap;
+        rows.truncate(header_cap);
+        if overflowed {
+            if let Some(last) = rows.last_mut() {
+                *last = present_line(last, title_avail.saturating_sub(1));
+            }
+        }
+        for (offset, row) in rows.iter().enumerate() {
             if offset == 0 {
-                header_rows.push(format!("{glyph} {}", row.text));
+                header_rows.push(format!("{glyph} {row}"));
             } else {
-                header_rows.push(row.text.clone());
+                header_rows.push(row.clone());
             }
         }
     }
@@ -277,6 +301,8 @@ fn build_task_page_overlay<'a>(
         u16::from(model.input_mode() == BoardInputMode::EditNotes),
         header_rows.len().max(1) as u16,
     );
+    // The renderer and input reducer share this viewport size for page scrolling.
+    form.steps.window_rows.set(lay.notes_rows as usize);
 
     // View mode supplies every wrapped note row; Notes edit mode wraps too, with the
     // caret mapped into wrapped coordinates. The shared page painter combines that
@@ -515,10 +541,12 @@ fn draw_board_impl(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap
         )
     }) {
         let input_width = (geo.row_width as usize).saturating_sub(2);
-        // A long title wraps instead of scrolling sideways: up to three rows fill
-        // the status-row slot and its reserved blanks, windowed by the minimum
-        // that keeps the caret's wrapped row visible.
-        const QUICK_ADD_MAX_ROWS: usize = 3;
+        // A long title wraps instead of scrolling sideways. Exactly ONE row above
+        // the input is reserved (the message row: the shifted rule sits two up),
+        // so the draft may span at most two painted rows, windowed by the
+        // minimum that keeps the caret's wrapped row visible. Longer drafts
+        // window vertically rather than touching chrome.
+        const QUICK_ADD_MAX_ROWS: usize = 2;
         let (all_rows, cursor_row, cursor_column) =
             wrapped_edit_rows(&quick_add.title, input_width);
         let shown = all_rows.len().clamp(1, QUICK_ADD_MAX_ROWS);

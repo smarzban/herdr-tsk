@@ -1529,6 +1529,12 @@ fn paint_task_page(
     let word = display_width(status_word);
     for (offset, row_text) in header_rows.iter().enumerate() {
         let y = lay.title_y.saturating_add(offset as u16);
+        // The builder caps `header_rows` to the page body; this clamp holds even
+        // if a future caller forgets, because painting past `bottom` would
+        // overwrite the rule/status/verb chrome the page must keep.
+        if y >= lay.bottom {
+            break;
+        }
         let line = if offset == 0 {
             let header = format!("  {row_text}");
             let mut line = Line::from(Span::styled(header.clone(), style_bold()));

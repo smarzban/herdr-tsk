@@ -2707,30 +2707,31 @@ fn quick_add_wraps_a_long_title_into_the_reserved_rows() {
         .expect("draw quick add");
     let rows = board_rows(&model, 80, 24);
     let prompt_rows: Vec<&String> = rows.iter().filter(|row| row.contains("▎")).collect();
-    assert!(
-        prompt_rows.len() > 1,
-        "a long quick-add draft must wrap past one row:\n{}",
+    assert_eq!(
+        prompt_rows.len(),
+        2,
+        "exactly one continuation row fits the reserved blank above the input:\n{}",
         rows.join("\n")
     );
     let text = rows.join("\n");
-    assert!(
-        !text.contains('…'),
-        "a wrapped quick-add draft never truncates:\n{text}"
-    );
-    // Reading order survives wrapping: the draft's head (w0) paints above its
-    // tail (w39), each on its own ▎ row.
-    let head = rows
-        .iter()
-        .position(|row| row.contains("w0 "))
-        .expect("head segment painted");
+    // Reading order survives wrapping: an earlier segment paints above the tail,
+    // and the rule row two above the input stays chrome, never draft text.
     let tail = rows
         .iter()
         .position(|row| row.contains("w39"))
         .expect("tail segment painted");
-    assert_ne!(head, tail, "the draft must span more than one row:\n{text}");
+    let above = rows
+        .iter()
+        .position(|row| row.contains("▎") && !row.contains("w39"))
+        .expect("continuation row painted");
     assert!(
-        head < tail,
+        above < tail,
         "the draft reads top-down across its wrapped rows:\n{text}"
+    );
+    assert!(
+        rows[tail - 2].starts_with('─'),
+        "the rule row stays a rule row:\n{}",
+        rows.join("\n")
     );
 }
 
@@ -2833,5 +2834,111 @@ fn notes_edit_arrows_move_across_logical_and_wrapped_rows() {
     assert!(
         after < before,
         "Up must climb from the wrapped tail row ({before}) onto the head row, got {after}"
+    );
+}
+
+/// A pathological title cannot eat the page: at the compact floor the wrapped
+/// header stops inside the page body, the last shown row carries the omission
+/// marker, and the rule/status/verb chrome survives untouched.
+#[test]
+fn task_page_caps_a_wrapped_header_inside_the_page_body() {
+    let mut domain = DomainState::new();
+    let title = "word ".repeat(120);
+    domain
+        .create(
+            &title,
+            None,
+            TaskScope::Global,
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("create task");
+    let mut model = BoardModel::from_domain(&domain, None);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenTaskPage,
+        None,
+        None,
+    )
+    .expect("open page");
+
+    let rows = board_rows(&model, 40, 10);
+    // Chrome rows keep their own content: rule dashes at 7, status at 8, verbs at 9.
+    assert!(
+        rows[7].starts_with('─'),
+        "the rule row was overwritten by the header:\n{}",
+        rows.join("\n")
+    );
+    assert!(
+        rows[8].contains("done"),
+        "the status row was overwritten by the header:\n{}",
+        rows.join("\n")
+    );
+    assert!(
+        rows[9].contains("alt+e"),
+        "the verb row was overwritten by the header:\n{}",
+        rows.join("\n")
+    );
+    // The header itself is bounded and honest about what it hides.
+    assert!(
+        (1..7).any(|y| rows[y].contains("wor…")),
+        "a capped header names the rows it cannot show:\n{}",
+        rows.join("\n")
+    );
+}
+
+/// Step navigation must not re-scroll the whole page on every cursor move: the
+/// viewport height the renderer records (`window_rows`) bounds the scroll math,
+/// and losing it collapses the window to one row.
+#[test]
+fn step_cursor_moves_do_not_rescroll_the_page_when_steps_fit() {
+    let mut domain = DomainState::new();
+    let id = domain
+        .create(
+            "Steps page",
+            Some("n".to_string()),
+            TaskScope::Global,
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("create task");
+    for index in 0..20 {
+        domain
+            .add_step(id, format!("step {index}"))
+            .expect("add step");
+    }
+    let mut model = BoardModel::from_domain(&domain, None);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenTaskPage,
+        None,
+        None,
+    )
+    .expect("open page");
+    // One painted frame records the viewport; then walk the step cursor down.
+    board_rows(&model, 80, 24);
+    for _ in 0..4 {
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::PageScrollDown,
+            None,
+            None,
+        )
+        .expect("advance step cursor");
+    }
+    let rows = board_rows(&model, 80, 24);
+    let text = rows.join("\n");
+    assert!(
+        text.contains("step 0"),
+        "a fitting steps window must not scroll its head away:\\n{text}"
+    );
+    assert!(
+        text.contains("step 3"),
+        "the walked-to step must be visible:\\n{text}"
     );
 }

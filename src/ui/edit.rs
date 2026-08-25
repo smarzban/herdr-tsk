@@ -403,10 +403,13 @@ pub(crate) struct WrappedRow {
 }
 
 impl WrappedRow {
-    /// Raw cursor index for a target column on this row, clamped into it. Columns
-    /// past the row's end resolve past its last character -- and past its whole
-    /// break when the row closes the line, so a caret parked at a row's end never
-    /// sits inside a `\r\n` pair.
+    /// Raw cursor index for a target column on this row, clamped into it. A
+    /// column past the row's end resolves past its last character -- and past
+    /// its whole break when the row closes the line, so a caret parked at a
+    /// row's end never sits inside a `\r\n` pair. A row that continues the
+    /// line instead clamps ONTO its last character: its `end_cursor` names the
+    /// NEXT row's first character, and returning it would make locate paint the
+    /// caret on that row, skipping the one the move targeted.
     fn cursor_at(&self, column: usize) -> usize {
         if self.cell_of.is_empty() || column < self.cell_of[0] {
             return self.first_raw;
@@ -417,7 +420,11 @@ impl WrappedRow {
             .rposition(|start| *start <= column)
             .unwrap_or(0);
         if offset == self.cell_of.len() - 1 && column >= self.width {
-            self.end_cursor
+            if self.ends_line {
+                self.end_cursor
+            } else {
+                self.last_raw
+            }
         } else {
             self.first_raw + offset
         }
@@ -498,7 +505,10 @@ pub(crate) fn wrap_text(value: &str, width: usize) -> Vec<WrappedRow> {
                     break;
                 }
             }
-            // Pass two builds the escaped text and per-character cell offsets.
+            // Pass two builds the escaped text, per-character cell offsets, and the
+            // row's PAINTED width: pass one's `used` keeps scanning past the soft
+            // break it rewinds to, so only the text actually emitted here is a
+            // truthful width for `cursor_at` and past-end columns.
             let mut text = String::new();
             let mut cell_of: Vec<usize> = Vec::new();
             let mut column = 0usize;
@@ -515,7 +525,7 @@ pub(crate) fn wrap_text(value: &str, width: usize) -> Vec<WrappedRow> {
                 first_raw: items[next].0,
                 last_raw,
                 cell_of,
-                width: used,
+                width: column,
                 starts_line: next == 0,
                 ends_line: false,
                 break_width: 0,
@@ -673,17 +683,6 @@ pub(crate) fn place_edit_cursor_at(frame: &mut Frame, region: Rect, row: u16, co
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn dbg_wrap() {
-        let value = "alpha beta gamma";
-        for row in crate::ui::edit::wrap_text(value, 6) {
-            println!(
-                "text={:?} first={} last={} width={}",
-                row.text, row.first_raw, row.last_raw, row.width
-            );
-        }
-    }
-
     use super::{
         escaped_draft_rows, field_viewport, seeded_draft, wrapped_draft_rows, wrapped_edit_rows,
         EditBuffer,
@@ -778,6 +777,48 @@ mod tests {
             wrapped_edit_rows(&seeded_draft("abc"), 0),
             (Vec::<String>::new(), 0, 0)
         );
+    }
+
+    /// A row shortened by a soft word break reports its PAINTED width, not the
+    /// pre-rewind scan total: `cursor_at` and past-end columns read that width,
+    /// and an inflated one both misplaces the caret and lets Down/Up skip rows.
+    #[test]
+    fn a_soft_broken_row_reports_its_painted_width() {
+        // "aa bb cc" at 5 cells: pass one scans 5 cells before rewinding to the
+        // space, so the row paints "aa " -- three cells, not five.
+        let rows = super::wrap_text("aa bb cc", 5);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].text, "aa ");
+        assert_eq!(rows[0].width, 3, "the soft-broken row over-reported width");
+        assert_eq!(rows[1].text, "bb cc");
+        assert_eq!(rows[1].width, 5);
+
+        // Down from the end (col 5) clamps onto row 0's last character rather
+        // than resolving past it to row 1's first char, which would pin the
+        // caret to row 1 and skip row 0 on the way back up.
+        let at_end = EditBuffer::new("aa bb cc", 8);
+        assert_eq!(super::wrapped_vertical_move(&at_end, 5, -1), Some(2));
+        assert_eq!(super::wrapped_vertical_move(&at_end, 5, -1), Some(2));
+        let on_row0 = EditBuffer::new("aa bb cc", 2);
+        assert_eq!(
+            super::wrapped_vertical_move(&on_row0, 5, -1),
+            None,
+            "already on the first row"
+        );
+    }
+
+    /// The same rewind applies across the break: a second line's first row keeps
+    /// an honest width after its own soft break (the F-8 shape).
+    #[test]
+    fn wrapped_widths_stay_honest_after_every_soft_break() {
+        let rows = super::wrap_text("12345\nabc defgh", 6);
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0].text, "12345");
+        assert!(rows[0].ends_line);
+        assert_eq!(rows[1].text, "abc ");
+        assert_eq!(rows[1].width, 4, "row kept the pre-rewind total of 6");
+        assert_eq!(rows[2].text, "defgh");
+        assert_eq!(rows[2].width, 5);
     }
 
     /// Words are not cut: a row that cannot fit its next character breaks after
@@ -1493,15 +1534,5 @@ mod tests {
         let (tail, tail_column) = field_viewport("你好世界", 4, 5);
         assert!(width_of(&tail) <= 5, "tail window overflowed: {tail:?}");
         assert!(tail_column <= width_of(&tail));
-    }
-}
-#[test]
-fn dbg_wrap() {
-    let value = "alpha beta gamma";
-    for row in crate::ui::edit::wrap_text(value, 6) {
-        println!(
-            "text={:?} first={} last={} width={}",
-            row.text, row.first_raw, row.last_raw, row.width
-        );
     }
 }
