@@ -115,6 +115,10 @@ pub struct CaptureModel {
     save_recovery: SaveRecovery<DomainState>,
     /// The id allocated in the staged working state, returned only after persistence succeeds.
     pending_saved_id: Option<Uuid>,
+    /// The Notes wrap width the last painted frame used. The renderer records it
+    /// because vertical arrow movement wraps at the painted width, which only the
+    /// render path knows; zero until then keeps the arrows inert.
+    pub notes_width: std::cell::Cell<usize>,
 }
 
 impl CaptureModel {
@@ -140,6 +144,7 @@ impl CaptureModel {
             message: None,
             save_recovery: SaveRecovery::new(),
             pending_saved_id: None,
+            notes_width: std::cell::Cell::new(0),
         }
     }
 
@@ -525,6 +530,26 @@ pub fn apply_capture_intent(
             move_draft(model, EditBuffer::move_word_right);
             Ok(CaptureOutcome::None)
         }
+        CaptureIntent::MoveUp | CaptureIntent::MoveDown => {
+            let delta: isize = if matches!(intent, CaptureIntent::MoveDown) {
+                1
+            } else {
+                -1
+            };
+            let target = (model.focused == CaptureField::Notes)
+                .then(|| {
+                    crate::ui::edit::wrapped_vertical_move(
+                        &model.notes,
+                        model.notes_width.get(),
+                        delta,
+                    )
+                })
+                .flatten();
+            if let Some(target) = target {
+                edit_draft(model, |draft| draft.set_cursor(target));
+            }
+            Ok(CaptureOutcome::None)
+        }
         CaptureIntent::Save => {
             // Enter while path-editing confirms Project{path}.
             if model.is_path_editing() {
@@ -741,6 +766,66 @@ fn text_field_block(
     (lines, cursor)
 }
 
+/// The Notes field: the draft wrapped to word boundaries across the field's rows,
+/// with a vertical window. Focus follows the caret so typing at the end is always
+/// visible; reading windows from the top and names hidden rows on a dim tail.
+fn notes_field_block(
+    draft: &EditBuffer,
+    row: ratatui::layout::Rect,
+    focused: bool,
+) -> (
+    Vec<Line<'static>>,
+    Option<(ratatui::layout::Rect, u16, u16)>,
+) {
+    let region = edit_block_region(row, CAPTURE_FIELD_LABEL_WIDTH);
+    let width = region.width as usize;
+    let height = region.height as usize;
+    if width == 0 || height == 0 {
+        return (Vec::new(), None);
+    }
+    let rows = crate::ui::edit::wrap_text(draft.value(), width);
+    let (start, cursor) = if focused {
+        let (cursor_row, cursor_col) =
+            crate::ui::edit::locate_wrapped_cursor(&rows, draft.cursor());
+        (
+            cursor_row.saturating_sub(height - 1),
+            Some((cursor_row, cursor_col)),
+        )
+    } else {
+        (0, None)
+    };
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    let hidden = rows.len().saturating_sub(start + height);
+    for (index, wrapped) in rows.iter().skip(start).take(height).enumerate() {
+        let absolute = start + index;
+        let last_shown = index + 1 == height;
+        let text = if last_shown && hidden > 0 && !focused {
+            // Reading window: name what does not fit instead of implying an end.
+            let suffix = format!(" \u{2026} {hidden} more");
+            let budget = width.saturating_sub(render::display_width(&suffix));
+            format!("{}{suffix}", present_line(&wrapped.text, budget))
+        } else {
+            wrapped.text.clone()
+        };
+        lines.push(field_row_presented(
+            if absolute == 0 { Some("Notes:") } else { None },
+            text,
+            focused,
+        ));
+    }
+    if lines.is_empty() {
+        lines.push(field_row_presented(Some("Notes:"), String::new(), focused));
+    }
+    let cursor = cursor.map(|(cursor_row, cursor_col)| {
+        (
+            region,
+            u16::try_from(cursor_row.saturating_sub(start)).unwrap_or(u16::MAX),
+            u16::try_from(cursor_col).unwrap_or(u16::MAX),
+        )
+    });
+    (lines, cursor)
+}
+
 /// Draw the capture form into any ratatui frame (live TTY or TestBackend).
 ///
 /// Field and button positions match [`super::mouse::capture_layout`] for hit-testing.
@@ -769,9 +854,17 @@ pub fn draw_capture(frame: &mut Frame, model: &CaptureModel) {
     let thread_focused = model.focused == CaptureField::Thread;
     let (title_lines, title_cursor) =
         text_field_block("Title:", &model.title, layout.title_area, title_focused);
-    // a multiline Notes draft occupies the whole Notes field, one line per row.
+    // A multiline Notes draft occupies the whole Notes field, wrapped at word
+    // boundaries; the focused window follows the caret, an unfocused one reads
+    // from the top with a dim tail naming what does not fit.
+    model.notes_width.set(
+        layout
+            .notes_area
+            .width
+            .saturating_sub(CAPTURE_FIELD_LABEL_WIDTH) as usize,
+    );
     let (notes_lines, notes_cursor) =
-        text_field_block("Notes:", &model.notes, layout.notes_area, notes_focused);
+        notes_field_block(&model.notes, layout.notes_area, notes_focused);
     let (thread_lines, thread_cursor) =
         text_field_block("Thread:", &model.thread, layout.thread_area, thread_focused);
 
@@ -2205,7 +2298,7 @@ mod tests {
 
         let (unfocused, _) = rendered_notes(&model, area, notes_area);
         assert!(
-            unfocused[rows - 1].trim_end().ends_with('…'),
+            unfocused[rows - 1].contains("2 more"),
             "the omitted lines were dropped silently: {unfocused:?}"
         );
         assert!(
@@ -2222,6 +2315,43 @@ mod tests {
         );
         assert_eq!(cursor.y, notes_area.y + notes_area.height - 1);
         assert_eq!(cursor.x, notes_area.x + CAPTURE_FIELD_LABEL_WIDTH + 4);
+    }
+
+    /// Up and Down walk the WRAPPED rows of the Notes draft: over logical lines
+    /// (blank lines included) once the renderer has recorded the field width.
+    #[test]
+    fn notes_arrows_walk_wrapped_rows_once_the_paint_width_is_known() {
+        let snap = project_snapshot("/repos/app");
+        let mut domain = DomainState::new();
+        let mut model = CaptureModel::from_snapshot(&snap);
+        model.focused = CaptureField::Notes;
+        model.notes = EditBuffer::new("aa\n\nbb", 0);
+        // No frame painted yet: the arrows stay inert rather than guessing a width.
+        apply(&mut domain, &snap, &mut model, CaptureIntent::MoveDown);
+        assert_eq!(model.notes.cursor(), 0);
+
+        // Paint one frame at 60x14 so the model records the field's width, then
+        // move: Down crosses onto the blank middle row, Down again onto "bb".
+        let mut terminal = Terminal::new(TestBackend::new(60, 14)).expect("terminal");
+        terminal
+            .draw(|frame| draw_capture(frame, &model))
+            .expect("draw");
+        assert!(model.notes_width.get() > 0, "the frame recorded the width");
+
+        apply(&mut domain, &snap, &mut model, CaptureIntent::MoveDown);
+        assert_eq!(
+            model.notes.cursor(),
+            3,
+            "Down lands on the blank middle row"
+        );
+        apply(&mut domain, &snap, &mut model, CaptureIntent::MoveDown);
+        assert_eq!(model.notes.cursor(), 4, "Down lands on the last line");
+        apply(&mut domain, &snap, &mut model, CaptureIntent::MoveUp);
+        assert_eq!(model.notes.cursor(), 3, "Up returns to the blank row");
+        // Title keeps its single-line map: the intents are Notes-only there.
+        model.focused = CaptureField::Title;
+        apply(&mut domain, &snap, &mut model, CaptureIntent::MoveDown);
+        assert_eq!(model.title.cursor(), model.title.char_count());
     }
 
     /// The taller Notes field only claims rows the form does not otherwise need: at every

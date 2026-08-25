@@ -101,6 +101,57 @@ pub struct TaskRowPaint<'a> {
     pub title_bold: bool,
 }
 
+/// Paint one task as ONE OR MORE list lines: the first is the classic glyph + title +
+/// right-aligned meta row; a title too wide for its budget wraps at word boundaries onto
+/// continuation lines indented into its own column, with no meta. Nothing is cut.
+pub fn paint_task_row_lines(
+    row: &TaskRowPaint<'_>,
+    geo: &TierGeometry,
+    leading_indent: usize,
+) -> Vec<Line<'static>> {
+    // The title room `paint_task_row_with_indent` derives must match here, so both
+    // share one computation of the prefix cells.
+    let row_w = geo.row_width as usize;
+    let meta_budget = geo.meta_column_width as usize;
+    let title_budget = if meta_budget == 0 {
+        row_w
+    } else {
+        geo.title_width as usize
+    };
+    let glyph_cells = display_width(&super::terminal_text(row.glyph));
+    let prefix_cells = leading_indent + 2 + glyph_cells + 1;
+    let room = title_budget.saturating_sub(prefix_cells).max(1);
+    let segments: Vec<String> = crate::ui::edit::wrap_text(row.title, room)
+        .into_iter()
+        .map(|wrapped| wrapped.text)
+        .collect();
+
+    let mut lines = Vec::with_capacity(segments.len());
+    // The first line reuses the classic painter verbatim with segment 0.
+    let head = TaskRowPaint {
+        title: &segments[0],
+        ..*row
+    };
+    lines.push(paint_task_row_with_indent(&head, geo, leading_indent));
+    // Continuations indent into the title column (past glyph and space).
+    let indent = " ".repeat(prefix_cells);
+    let continuation_style = if row.selected {
+        style_reverse()
+    } else {
+        style_plain()
+    };
+    for segment in segments.iter().skip(1) {
+        lines.push(bound_line(
+            Line::from(Span::styled(
+                format!("{indent}{segment}"),
+                continuation_style,
+            )),
+            row_w,
+        ));
+    }
+    lines
+}
+
 /// Paint one task row: glyph+title on the left, right-aligned meta in the meta budget.
 ///
 /// Title and meta never share cells. Over-budget text is clipped through
@@ -276,9 +327,33 @@ pub struct BottomInputSlot<'a> {
     /// A contextual refusal that needs its own row above the input. Empty-text
     /// refusals belong in `refusal` so they never cover the cursor.
     pub message: Option<&'a str>,
+    /// Wrapped continuation rows painting ABOVE the input line, top row first.
+    /// Empty for single-line drafts; a multiline draft also suppresses `message`,
+    /// which shares those rows.
+    pub above_rows: Vec<String>,
+    /// Vertical offset of the terminal caret above the input line (0 = on it).
+    pub cursor_row_offset: u16,
+}
+
+impl<'a> BottomInputSlot<'a> {
+    /// The single-line shape every existing editor paints.
+    pub fn single_line(text: String, cursor_col: u16, placeholder: &'static str) -> Self {
+        Self {
+            text,
+            cursor_col,
+            placeholder,
+            refusal: None,
+            message: None,
+            above_rows: Vec::new(),
+            cursor_row_offset: 0,
+        }
+    }
 }
 
 /// Transient overlay painted above the queue frame (palette, help, scope dropdown).
+/// Variant payloads live one per frame and rebuild each paint, so the size
+/// difference between them is not worth boxing.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Default)]
 pub enum QueueOverlay<'a> {
     #[default]
@@ -313,10 +388,12 @@ pub enum QueueOverlay<'a> {
     /// The task page: a full-height, view-first takeover for one bound task. `focus` is
     /// `None` in view mode; field edits focus the same drafts the board form carries.
     TaskPage {
-        /// Status glyph + space + the title draft, windowed to fit beside the status word.
-        header: String,
-        /// Terminal cursor column inside `header` while the title is being edited.
-        title_cursor: Option<u16>,
+        /// The title's wrapped rows. Row 0 carries the status glyph; later rows are
+        /// bare segments the painter indents under it. View mode wraps the stored
+        /// title; edit mode wraps the draft.
+        header_rows: Vec<String>,
+        /// Terminal cursor (row, col) inside `header_rows` while the title is edited.
+        title_cursor: Option<(u16, u16)>,
         /// The task's status word, dim and right-aligned on the header row.
         status_word: &'static str,
         /// View mode: the wrapped notes windowed by the page scroll. Edit mode: the
@@ -938,8 +1015,8 @@ fn paint_overlay(
         }
         QueueOverlay::QuickAdd { .. } => {}
         QueueOverlay::TaskPage {
-            ref header,
-            title_cursor,
+            ref header_rows,
+            ref title_cursor,
             status_word,
             ref notes_rows,
             notes_cursor,
@@ -958,7 +1035,7 @@ fn paint_overlay(
             paint_task_page(
                 frame,
                 geo,
-                header,
+                header_rows,
                 *title_cursor,
                 status_word,
                 notes_rows,
@@ -1365,6 +1442,7 @@ pub fn task_page_layout(
     geo: &TierGeometry,
     _section: StepsSection,
     _notes_floor: u16,
+    title_rows: u16,
 ) -> TaskPageLayout {
     let height = geo.height;
     let bottom = [geo.rule_row, geo.status_row, geo.verb_row]
@@ -1372,18 +1450,20 @@ pub fn task_page_layout(
         .flatten()
         .min()
         .unwrap_or(height);
-    // Blank row 0, title 1, divider 2, notes, steps, meta last.
+    // Blank row 0, the title's wrapped rows from 1, divider, notes, steps, meta last.
+    let title_rows = title_rows.max(1);
     let title_y: u16 = if bottom >= 2 { 1 } else { 0 };
+    let title_end = title_y.saturating_add(title_rows);
     let meta_y = if bottom >= 4 { Some(bottom - 1) } else { None };
-    let divider_y = if bottom >= 5 {
-        Some(title_y.saturating_add(1))
+    // The divider shows only when a note row survives under it; otherwise the
+    // notes body starts directly under the title.
+    let divider_y = if bottom >= title_end.saturating_add(3) {
+        Some(title_end)
     } else {
         None
     };
-    let notes_y = if bottom >= 3 {
-        divider_y
-            .map(|y| y + 1)
-            .unwrap_or(title_y.saturating_add(1))
+    let notes_y = if bottom > title_end {
+        divider_y.map(|y| y + 1).unwrap_or(title_end)
     } else {
         bottom
     };
@@ -1406,8 +1486,8 @@ pub fn task_page_layout(
 fn paint_task_page(
     frame: &mut Frame<'_>,
     geo: &TierGeometry,
-    header: &str,
-    title_cursor: Option<u16>,
+    header_rows: &[String],
+    title_cursor: Option<(u16, u16)>,
     status_word: &str,
     notes_rows: &[String],
     notes_cursor: Option<(u16, u16)>,
@@ -1429,36 +1509,61 @@ fn paint_task_page(
     }
     // `focus == Notes` arrives from the same frame's input mode the payload builder
     // used, so both sides of the payload/paint seam budget the same notes floor.
+    let title_row_count = header_rows.len().max(1) as u16;
     let lay = task_page_layout(
         geo,
         steps_section(step_views.len()),
         u16::from(focus == Some(CaptureField::Notes)),
+        title_row_count,
     );
     if lay.bottom == 0 {
         return;
     }
     frame.render_widget(Clear, Rect::new(0, 0, width, lay.bottom));
 
-    // Header: the title's left gutter and a matching two-cell right gutter frame
-    // the status word. The scrollbar belongs only to the content viewport below.
+    // Header: every wrapped title row paints bold under a shared left gutter;
+    // row 0 carries the status glyph and frames the dim right-aligned status
+    // word, later rows indent into the glyph column. The scrollbar belongs only
+    // to the content viewport below.
     let header_width = width.saturating_sub(2);
-    let header = format!("  {header}");
-    let mut line = Line::from(Span::styled(header.clone(), style_bold()));
-    let used = display_width(&header);
     let word = display_width(status_word);
-    if used + word < header_width as usize {
-        line.spans
-            .push(Span::raw(" ".repeat(header_width as usize - used - word)));
-        line.spans
-            .push(Span::styled(status_word.to_string(), style_dim()));
+    for (offset, row_text) in header_rows.iter().enumerate() {
+        let y = lay.title_y.saturating_add(offset as u16);
+        let line = if offset == 0 {
+            let header = format!("  {row_text}");
+            let mut line = Line::from(Span::styled(header.clone(), style_bold()));
+            let used = display_width(&header);
+            if used + word < header_width as usize {
+                line.spans
+                    .push(Span::raw(" ".repeat(header_width as usize - used - word)));
+                line.spans
+                    .push(Span::styled(status_word.to_string(), style_dim()));
+            }
+            line
+        } else {
+            Line::from(Span::styled(format!("    {row_text}"), style_bold()))
+        };
+        put_line(frame, y, header_width, line);
     }
-    put_line(frame, lay.title_y, header_width, line);
     hits.push(
         QueueHitTarget::FormTitle,
-        Rect::new(0, lay.title_y, width, 1),
+        Rect::new(0, lay.title_y, width, title_row_count),
     );
-    if let Some(col) = title_cursor {
-        place_edit_cursor(frame, Rect::new(0, lay.title_y, width, 1), col);
+    if let Some((cursor_row, cursor_col)) = title_cursor {
+        // Every title row shares the four-cell gutter (two leading blanks plus
+        // glyph and space), so the wrapped field starts at column 4 on all of them.
+        let field_x = 4u16.min(width.saturating_sub(1));
+        place_edit_cursor_at(
+            frame,
+            Rect::new(
+                field_x,
+                lay.title_y,
+                width.saturating_sub(field_x),
+                title_row_count,
+            ),
+            cursor_row.min(title_row_count.saturating_sub(1)),
+            cursor_col.min(width.saturating_sub(field_x).saturating_sub(1)),
+        );
     }
 
     // Divider, its right end naming wrapped note rows the window does not show.
@@ -1661,7 +1766,7 @@ fn paint_page_scope_dropdown(
     }
     // The dropdown anchors on the meta footer, which never moves with the steps,
     // and never opens while a field edit owns the page.
-    let lay = task_page_layout(geo, StepsSection::None, 0);
+    let lay = task_page_layout(geo, StepsSection::None, 0, 1);
     let Some(meta_y) = lay.meta_y else {
         return;
     };
@@ -1812,12 +1917,15 @@ fn detail_lines_for_task(task: &Task, now: SystemTime, width: u16) -> Vec<Line<'
             style_dim(),
         ));
     } else {
+        // Preview rows wrap at word boundaries like every other note surface, so
+        // a long line continues under itself instead of being cut at the edge.
+        let room = (width as usize).saturating_sub(display_width(indent) + 1);
         let mut shown = 0usize;
         let mut remaining = 0usize;
-        for note_line in notes_text.lines() {
+        for note_row in crate::ui::edit::wrap_text(notes_text, room) {
             if shown < PEEK_NOTES_LINE_LIMIT {
                 lines.push(paint_bounded_line(
-                    &format!("{indent}{note_line}"),
+                    &format!("{indent}{}", note_row.text),
                     width,
                     style_dim(),
                 ));
@@ -1895,22 +2003,32 @@ fn build_list_rows(
             return;
         };
         let meta = row_meta(task, model.now, in_project_section);
-        let line = paint_task_row_with_indent(
+        let selected = model.selection_id == Some(task.id)
+            && !matches!(model.overlay, QueueOverlay::ScopeDropdown { .. });
+        // A long title wraps onto continuation lines indented under its own first
+        // row; every painted line carries the task's hit target and selection.
+        let lines = paint_task_row_lines(
             &TaskRowPaint {
                 glyph: status_glyph(task.status),
                 title: &task.title,
                 meta: &meta,
-                selected: model.selection_id == Some(task.id)
-                    && !matches!(model.overlay, QueueOverlay::ScopeDropdown { .. }),
+                selected,
                 title_bold: false,
             },
             geo,
             usize::from(indented_under_thread) * 2,
         );
-        if model.selection_id == Some(task.id) {
+        if selected {
             *selected_idx = Some(out.len());
         }
-        out.push(ListRow::Task { id: task.id, line });
+        for line in lines {
+            out.push(ListRow::Task { id: task.id, line });
+        }
+        if selected {
+            // Selection follow anchors the whole block, so a two-line selection
+            // never leaves its tail below the fold.
+            *selected_idx = Some(out.len() - 1);
+        }
         if detail_target == Some(task.id) {
             for line in detail_lines_for_task(task, model.now, geo.row_width) {
                 out.push(ListRow::Detail(line));
@@ -2067,6 +2185,28 @@ pub(crate) fn paint_bottom_input_slot(
     width: u16,
     input: &BottomInputSlot<'_>,
 ) {
+    // Wrapped continuation rows stack upward from the input line, inside the
+    // reserved blank rows; anything past the frame top is dropped rather than
+    // overwriting chrome above them.
+    let above_count = input.above_rows.len() as u16;
+    for (index, above) in input.above_rows.iter().enumerate() {
+        let offset = above_count - index as u16;
+        let Some(y) = row.checked_sub(offset) else {
+            break;
+        };
+        if y == 0 && offset > 0 {
+            break;
+        }
+        put_line(
+            frame,
+            y,
+            width,
+            bound_line(
+                Line::from(Span::styled(format!("\u{258e} {above}"), style_bold())),
+                width as usize,
+            ),
+        );
+    }
     let body = &input.text;
     let placeholder = input.placeholder;
     let cursor_col = input.cursor_col;
@@ -2097,11 +2237,14 @@ pub(crate) fn paint_bottom_input_slot(
         width,
         bound_line(Line::from(spans), width as usize),
     );
+    let caret_row = row
+        .checked_sub(input.cursor_row_offset.min(above_count))
+        .unwrap_or(row);
     place_edit_cursor(
         frame,
         Rect::new(
             prefix_width.min(width.saturating_sub(1)),
-            row,
+            caret_row,
             width.saturating_sub(prefix_width),
             1,
         ),

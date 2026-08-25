@@ -613,6 +613,33 @@ fn apply_board_intent(
             edit_draft(model, EditBuffer::move_right);
             return Ok(IntentOutcome::None);
         }
+        BoardIntent::EditMoveUp | BoardIntent::EditMoveDown => {
+            // Vertical movement wraps at the painted notes width the renderer
+            // recorded; until a frame has been drawn (width 0) it stays inert.
+            let delta: isize = if matches!(intent, BoardIntent::EditMoveDown) {
+                1
+            } else {
+                -1
+            };
+            let target = model
+                .form
+                .as_ref()
+                .filter(|form| {
+                    form.focus == CaptureField::Notes
+                        && model.input_mode == BoardInputMode::EditNotes
+                })
+                .and_then(|form| {
+                    crate::ui::edit::wrapped_vertical_move(
+                        &form.notes,
+                        form.notes_width.get(),
+                        delta,
+                    )
+                });
+            if let Some(target) = target {
+                edit_draft(model, |draft| draft.set_cursor(target));
+            }
+            return Ok(IntentOutcome::None);
+        }
         BoardIntent::EditMoveLineStart => {
             edit_draft(model, EditBuffer::move_line_start);
             return Ok(IntentOutcome::None);

@@ -218,6 +218,10 @@ pub(super) struct BoardForm {
     /// renderer record what it actually laid out, without making the whole render path `&mut`
     /// or pushing geometry into every scroll intent.
     pub(super) notes_max_scroll: std::cell::Cell<usize>,
+    /// The notes wrap width the last painted frame used, recorded by the immutable
+    /// renderer for the same reason as `notes_max_scroll`: vertical arrow movement
+    /// wraps at the painted width, which only the renderer knows.
+    pub(super) notes_width: std::cell::Cell<usize>,
 }
 
 impl BoardForm {
@@ -292,6 +296,7 @@ impl BoardForm {
             notes_scroll: 0,
             steps: StepsPageState::default(),
             notes_max_scroll: std::cell::Cell::new(0),
+            notes_width: std::cell::Cell::new(0),
         }
     }
 

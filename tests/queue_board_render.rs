@@ -624,6 +624,8 @@ fn quick_add_refusal_message_uses_the_reserved_blank_row_without_color_or_overfl
                 placeholder: "title…",
                 refusal: None,
                 message: Some("Title required"),
+                above_rows: Vec::new(),
+                cursor_row_offset: 0,
             },
             project_scope: false,
             recovery: false,
@@ -878,7 +880,7 @@ fn task_page_renders_header_notes_and_meta_as_a_full_takeover_in_both_tiers() {
     let view = fixture_view(&tasks, false);
     let mut model = fixture_model(&tasks, &view);
     model.overlay = QueueOverlay::TaskPage {
-        header: "\u{25cb} Rename this task".to_string(),
+        header_rows: vec!["\u{25cb} Rename this task".to_string()],
         title_cursor: None,
         status_word: "ready",
         notes_rows: vec![
@@ -1339,6 +1341,104 @@ fn shift_tab_from_scope_resets_notes_stream_origin_and_aligns_caret() {
         terminal.backend().cursor_position().y,
         19,
         "Shift+Tab Notes caret must land on its painted draft row"
+    );
+}
+
+/// A long single-line note wraps onto continuation rows while the Notes editor is
+/// open: both ends of the draft stay on the page instead of the cursor's row
+/// scrolling sideways under a fixed-width window.
+#[test]
+fn notes_edit_wraps_a_long_line_instead_of_scrolling_horizontally() {
+    let mut domain = DomainState::new();
+    let note = format!("HEAD{}TAIL", "w".repeat(200));
+    domain
+        .create(
+            "Long line",
+            Some(note),
+            TaskScope::Global,
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("create task");
+    let mut model = BoardModel::from_domain(&domain, None);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenTaskPage,
+        None,
+        None,
+    )
+    .expect("open page");
+    board_rows(&model, 80, 24);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::BeginEditNotes,
+        None,
+        None,
+    )
+    .expect("edit notes");
+
+    let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("terminal");
+    terminal
+        .draw(|frame| draw_board(frame, &model))
+        .expect("draw edit page");
+    let rows = board_rows(&model, 80, 24);
+    assert!(
+        rows.iter().any(|row| row.contains("HEAD")),
+        "the note's head must stay visible while editing:\n{}",
+        rows.join("\n")
+    );
+    let tail_row = rows
+        .iter()
+        .position(|row| row.contains("TAIL"))
+        .unwrap_or_else(|| panic!("the note's tail must wrap into view:\n{}", rows.join("\n")))
+        as u16;
+    assert_eq!(
+        terminal.backend().cursor_position().y,
+        tail_row,
+        "the caret must sit on the wrapped continuation row carrying the draft's end:\n{}",
+        rows.join("\n")
+    );
+}
+
+/// View mode already wraps stored notes (`wrapped_draft_rows`); this pins that
+/// contract so a later presenter change cannot quietly reintroduce truncation.
+#[test]
+fn task_page_view_wraps_long_notes_instead_of_truncating() {
+    let mut domain = DomainState::new();
+    let note = format!("HEAD{}TAIL", "w".repeat(200));
+    domain
+        .create(
+            "Long line",
+            Some(note),
+            TaskScope::Global,
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("create task");
+    let mut model = BoardModel::from_domain(&domain, None);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenTaskPage,
+        None,
+        None,
+    )
+    .expect("open page");
+
+    let rows = board_rows(&model, 80, 24);
+    assert!(
+        rows.iter().any(|row| row.contains("HEAD")),
+        "view mode lost the note's head:\n{}",
+        rows.join("\n")
+    );
+    assert!(
+        rows.iter().any(|row| row.contains("TAIL")),
+        "view mode truncated the note instead of wrapping it:\n{}",
+        rows.join("\n")
     );
 }
 
@@ -2528,5 +2628,210 @@ fn all_golden_frames_pass_no_color_sgr_scan() {
     assert_eq!(
         scanned, 6,
         "expected the six board surface goldens (board, board_default_split_78, accordion, palette, help, done_drawer) in {dir:?}"
+    );
+}
+
+/// The main list wraps a long title onto continuation lines indented under the
+/// task's own first row: nothing is cut, and no row ends in an omission marker.
+#[test]
+fn board_list_wraps_a_long_title_onto_a_continuation_row() {
+    let mut domain = DomainState::new();
+    let title = "alpha bravo charlie delta echo foxtrot golf hotel".to_string();
+    domain
+        .create(
+            &title,
+            None,
+            TaskScope::Global,
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("create task");
+    let model = BoardModel::from_domain(&domain, None);
+
+    let rows = board_rows(&model, 80, 24);
+    // The head row keeps the classic shape (gutter + glyph + title head).
+    assert!(
+        rows.iter().any(|row| row.contains("○ alpha")),
+        "head row must keep the glyph + title shape:\n{}",
+        rows.join("\n")
+    );
+    // A continuation line indents exactly four cells into the title column.
+    let continuation = rows
+        .iter()
+        .find(|row| row.contains("hotel"))
+        .unwrap_or_else(|| panic!("no wrapped continuation row:\n{}", rows.join("\n")));
+    assert!(
+        continuation.starts_with("    ") && !continuation.starts_with("     "),
+        "continuation rows indent four cells under the title column: {continuation:?}"
+    );
+    // Neither of the task's own rows may carry an omission marker (the verb bar's
+    // own tier budget is a different surface).
+    let head = rows
+        .iter()
+        .find(|row| row.contains("○ alpha"))
+        .expect("head row");
+    assert!(
+        !head.contains('…') && !continuation.contains('…'),
+        "a wrapped task row carried an omission marker"
+    );
+}
+
+/// Quick-add wraps its draft into the reserved blank rows instead of scrolling
+/// sideways: every typed word stays visible above or on the input line.
+#[test]
+fn quick_add_wraps_a_long_title_into_the_reserved_rows() {
+    let mut domain = DomainState::new();
+    let mut model = BoardModel::from_domain(&domain, None);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenCapture,
+        None,
+        None,
+    )
+    .expect("open quick add");
+    let title: String = (0..40).map(|index| format!("w{index} ")).collect();
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::QuickAddInsertText(title),
+        None,
+        None,
+    )
+    .expect("type long title");
+
+    let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("terminal");
+    terminal
+        .draw(|frame| draw_board(frame, &model))
+        .expect("draw quick add");
+    let rows = board_rows(&model, 80, 24);
+    let prompt_rows: Vec<&String> = rows.iter().filter(|row| row.contains("▎")).collect();
+    assert!(
+        prompt_rows.len() > 1,
+        "a long quick-add draft must wrap past one row:\n{}",
+        rows.join("\n")
+    );
+    let text = rows.join("\n");
+    assert!(
+        !text.contains('…'),
+        "a wrapped quick-add draft never truncates:\n{text}"
+    );
+    // Reading order survives wrapping: the draft's head (w0) paints above its
+    // tail (w39), each on its own ▎ row.
+    let head = rows
+        .iter()
+        .position(|row| row.contains("w0 "))
+        .expect("head segment painted");
+    let tail = rows
+        .iter()
+        .position(|row| row.contains("w39"))
+        .expect("tail segment painted");
+    assert_ne!(head, tail, "the draft must span more than one row:\n{text}");
+    assert!(
+        head < tail,
+        "the draft reads top-down across its wrapped rows:\n{text}"
+    );
+}
+
+/// Arrow keys move the Notes caret across WRAPPED rows on the task page: down
+/// crosses logical lines and wrapped continuations alike; up returns it.
+#[test]
+fn notes_edit_arrows_move_across_logical_and_wrapped_rows() {
+    let mut domain = DomainState::new();
+    domain
+        .create(
+            "Arrow nav",
+            Some("one\n\ntwo".to_string()),
+            TaskScope::Global,
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("create task");
+    let mut model = BoardModel::from_domain(&domain, None);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenTaskPage,
+        None,
+        None,
+    )
+    .expect("open page");
+    board_rows(&model, 80, 24);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::BeginEditNotes,
+        None,
+        None,
+    )
+    .expect("edit notes");
+
+    let caret_at = |model: &BoardModel, width: u16, height: u16| {
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("terminal");
+        terminal
+            .draw(|frame| draw_board(frame, model))
+            .expect("draw");
+        terminal.backend().cursor_position().y
+    };
+    let caret_y = |model: &BoardModel| caret_at(model, 80, 24);
+
+    // Seeded at the end of "two" (row 2). Up twice walks back over the blank row.
+    assert_eq!(caret_y(&model), 5);
+    apply_intent(&mut domain, &mut model, BoardIntent::EditMoveUp, None, None)
+        .expect("up to blank row");
+    assert_eq!(caret_y(&model), 4, "up lands on the blank middle row");
+    apply_intent(&mut domain, &mut model, BoardIntent::EditMoveUp, None, None)
+        .expect("up to first row");
+    assert_eq!(caret_y(&model), 3, "up reaches the first note row");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::EditMoveDown,
+        None,
+        None,
+    )
+    .expect("down again");
+    assert_eq!(caret_y(&model), 4);
+
+    // Wrapped rows: at the compact floor the same draft wraps at word boundaries,
+    // and Up from the tail row climbs onto the wrapped head row.
+    let mut domain = DomainState::new();
+    domain
+        .create(
+            "Wrapped arrows",
+            Some("aaaaa bbbbb ccccc ddddd eeeee fffff ggggg".to_string()),
+            TaskScope::Global,
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("create task");
+    let mut model = BoardModel::from_domain(&domain, None);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenTaskPage,
+        None,
+        None,
+    )
+    .expect("open page");
+    board_rows(&model, 40, 10);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::BeginEditNotes,
+        None,
+        None,
+    )
+    .expect("edit notes");
+    let before = caret_at(&model, 40, 10);
+    apply_intent(&mut domain, &mut model, BoardIntent::EditMoveUp, None, None)
+        .expect("up across the wrap");
+    let after = caret_at(&model, 40, 10);
+    assert!(
+        after < before,
+        "Up must climb from the wrapped tail row ({before}) onto the head row, got {after}"
     );
 }

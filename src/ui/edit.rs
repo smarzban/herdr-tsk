@@ -41,6 +41,11 @@ impl EditBuffer {
         self.cursor
     }
 
+    /// Park the cursor at `index`, clamped into the value's character range.
+    pub(crate) fn set_cursor(&mut self, index: usize) {
+        self.cursor = index.min(self.char_count());
+    }
+
     // SHORTCUT: character indexing rescans the value -- fine for one-line titles and
     // short notes; carry a cached char index if this ever backs a large document.
     pub(crate) fn char_count(&self) -> usize {
@@ -315,52 +320,6 @@ pub(crate) fn escaped_line_window(draft: &EditBuffer, width: usize) -> (String, 
 /// keeps the cursor's line visible, which is [`field_viewport`]'s horizontal rule applied
 /// to rows. No line is dropped: unlike a stored note, every line here is reachable by
 /// moving the cursor, so the rows carry no omission marker.
-/// The whole draft wrapped to `width` cells, escaped, one row per wrapped line. View-only
-/// presentation (the task page's read mode): no cursor anchors any line, so every line
-/// One character's width in terminal cells, measured the same way the painter measures a row.
-fn char_cells(ch: char) -> usize {
-    Line::from(ch.to_string()).width()
-}
-
-/// wraps and nothing is dropped. An empty draft yields one empty row.
-pub(crate) fn wrapped_draft_rows(draft: &EditBuffer, width: usize) -> Vec<String> {
-    if width == 0 {
-        return Vec::new();
-    }
-    let mut rows: Vec<String> = Vec::new();
-    for line in split_line_breaks(draft.value()) {
-        let escaped: Vec<char> = terminal_text(line).chars().collect();
-        if escaped.is_empty() {
-            rows.push(String::new());
-            continue;
-        }
-        // Wrap on accumulated DISPLAY WIDTH, not scalar count. `width` is terminal cells, so
-        // chunking `escaped` (a Vec<char>) by count overflowed the row for any wide character:
-        // the painter then ellipsized the overflow instead of carrying it to the next row, and
-        // that text was lost from the page entirely rather than merely misdrawn.
-        let mut current = String::new();
-        let mut used = 0usize;
-        for ch in escaped {
-            let cells = char_cells(ch);
-            // A lone character wider than the whole column still gets its own row: pushing it
-            // keeps progress (an empty `current` must never be flushed) and the painter clips it.
-            if used + cells > width && !current.is_empty() {
-                rows.push(std::mem::take(&mut current));
-                used = 0;
-            }
-            current.push(ch);
-            used += cells;
-        }
-        if !current.is_empty() {
-            rows.push(current);
-        }
-    }
-    if rows.is_empty() {
-        rows.push(String::new());
-    }
-    rows
-}
-
 pub(crate) fn escaped_draft_rows(
     draft: &EditBuffer,
     width: usize,
@@ -410,6 +369,273 @@ pub(crate) fn escaped_draft_rows(
     )
 }
 
+/// One character's width in terminal cells, measured the same way the painter measures a row.
+fn char_cells(character: char) -> usize {
+    Line::from(character.to_string()).width()
+}
+
+/// One wrapped row of a value: the escaped text as painted, plus everything cursor
+/// mapping and vertical navigation need to translate between raw character positions
+/// and painted cells.
+#[derive(Debug, Clone)]
+pub(crate) struct WrappedRow {
+    /// Escaped text as painted.
+    pub text: String,
+    /// Raw scalar index of this row's first and last characters (inclusive).
+    /// A blank line's row carries no characters: both equal the line's start.
+    pub first_raw: usize,
+    pub last_raw: usize,
+    /// Cell offset of each raw character on this row, in row order; length equals
+    /// the number of raw characters living here.
+    pub cell_of: Vec<usize>,
+    /// Total display width of the row in terminal cells.
+    pub width: usize,
+    /// The row opens a logical line (its own line's first row).
+    pub starts_line: bool,
+    /// The row closes a logical line: the next row begins a new line.
+    pub ends_line: bool,
+    /// Width of the break following a line-closing row: 0 mid-line, 1 for a lone
+    /// `\n`/`\r`, 2 for a consumed `\r\n` pair.
+    pub break_width: usize,
+    /// Insertion index just past this row: `last_raw + 1`, or past the whole break
+    /// when the row closes its line (a pair counts as two).
+    pub end_cursor: usize,
+}
+
+impl WrappedRow {
+    /// Raw cursor index for a target column on this row, clamped into it. Columns
+    /// past the row's end resolve past its last character -- and past its whole
+    /// break when the row closes the line, so a caret parked at a row's end never
+    /// sits inside a `\r\n` pair.
+    fn cursor_at(&self, column: usize) -> usize {
+        if self.cell_of.is_empty() || column < self.cell_of[0] {
+            return self.first_raw;
+        }
+        let offset = self
+            .cell_of
+            .iter()
+            .rposition(|start| *start <= column)
+            .unwrap_or(0);
+        if offset == self.cell_of.len() - 1 && column >= self.width {
+            self.end_cursor
+        } else {
+            self.first_raw + offset
+        }
+    }
+}
+
+/// Wrap `value` into rows of at most `width` display cells, preferring word
+/// boundaries: a row that cannot fit the next character breaks after its last
+/// whitespace character, and only a run with no whitespace at all (or a single
+/// character wider than the whole allocation) hard-breaks at the cell edge.
+///
+/// Splitting on breaks happens first and escaping second, over the crate's one
+/// definition of a break ([`super::split_line_breaks`]); wrapping measures
+/// accumulated DISPLAY WIDTH, not scalar count, so double-width glyphs move whole
+/// to the next row instead of being clipped away.
+pub(crate) fn wrap_text(value: &str, width: usize) -> Vec<WrappedRow> {
+    let mut out: Vec<WrappedRow> = Vec::new();
+    if width == 0 {
+        return out;
+    }
+    let chars: Vec<char> = value.chars().collect();
+    // Cut into logical lines over chars, consuming a `\r\n` pair as one break:
+    // the same lines [`super::split_line_breaks`] yields, kept as char slices so
+    // raw cursor indices survive without byte/char translation.
+    let mut lines: Vec<&[char]> = Vec::new();
+    let mut from = 0usize;
+    let mut scan = 0usize;
+    while scan < chars.len() {
+        if chars[scan] == '\r' || chars[scan] == '\n' {
+            lines.push(&chars[from..scan]);
+            scan += if chars[scan] == '\r' && chars.get(scan + 1) == Some(&'\n') {
+                2
+            } else {
+                1
+            };
+            from = scan;
+        } else {
+            scan += 1;
+        }
+    }
+    lines.push(&chars[from..]);
+
+    let mut line_start = 0usize;
+    for line in &lines {
+        let line_opened_at = out.len();
+        // (raw index, character) pairs in line order.
+        let items: Vec<(usize, char)> = line
+            .iter()
+            .enumerate()
+            .map(|(offset, character)| (line_start + offset, *character))
+            .collect();
+        let mut next = 0usize;
+        while next < items.len() {
+            // Pass one finds this row's exclusive end: fill until the next
+            // character would overflow, then prefer the last whitespace already
+            // scanned -- a run with none hard-breaks, excluding the overflowing
+            // character. A single character wider than the whole allocation keeps
+            // its own row (an empty row is never flushed); the painter clips it.
+            let mut end = next;
+            let mut used = 0usize;
+            let mut soft_break: Option<usize> = None;
+            while end < items.len() {
+                let character = items[end].1;
+                let add: usize = terminal_text(&character.to_string())
+                    .chars()
+                    .map(char_cells)
+                    .sum();
+                if used + add > width && end > next {
+                    end = soft_break.unwrap_or(end);
+                    break;
+                }
+                used += add;
+                if character.is_whitespace() {
+                    soft_break = Some(end + 1);
+                }
+                end += 1;
+                if used > width {
+                    break;
+                }
+            }
+            // Pass two builds the escaped text and per-character cell offsets.
+            let mut text = String::new();
+            let mut cell_of: Vec<usize> = Vec::new();
+            let mut column = 0usize;
+            for (_, character) in &items[next..end] {
+                cell_of.push(column);
+                for painted in terminal_text(&character.to_string()).chars() {
+                    text.push(painted);
+                    column += char_cells(painted);
+                }
+            }
+            let last_raw = items[end - 1].0;
+            out.push(WrappedRow {
+                text,
+                first_raw: items[next].0,
+                last_raw,
+                cell_of,
+                width: used,
+                starts_line: next == 0,
+                ends_line: false,
+                break_width: 0,
+                end_cursor: last_raw + 1,
+            });
+            next = end;
+        }
+        if out.len() == line_opened_at {
+            // A blank logical line paints its own empty row.
+            out.push(WrappedRow {
+                text: String::new(),
+                first_raw: line_start,
+                last_raw: line_start,
+                cell_of: Vec::new(),
+                width: 0,
+                starts_line: true,
+                ends_line: false,
+                break_width: 0,
+                end_cursor: line_start,
+            });
+        }
+        // Close the line: mark its last row and advance past content plus break.
+        let end = line_start + line.len();
+        let break_width = if end < chars.len() {
+            usize::from(chars[end] == '\r' && chars.get(end + 1) == Some(&'\n')) + 1
+        } else {
+            0
+        };
+        if let Some(last) = out.last_mut() {
+            last.ends_line = true;
+            last.break_width = break_width;
+            last.end_cursor = end + break_width;
+        }
+        line_start = end + break_width;
+    }
+    out
+}
+
+/// Map a raw cursor index onto the wrapped layout: the row it paints on and the
+/// cell column within that row.
+///
+/// Conventions shared with the line movements and [`escaped_draft_rows`]: a cursor
+/// sitting ON a break reads as the line before it at its past-end column, except
+/// inside a `\r\n` pair, where it is pinned to the line that follows at column 0.
+pub(crate) fn locate_wrapped_cursor(rows: &[WrappedRow], cursor: usize) -> (usize, usize) {
+    // 1. A character carries its cursor: the first row owning this raw index.
+    for (index, row) in rows.iter().enumerate() {
+        if !row.cell_of.is_empty() && row.first_raw <= cursor && cursor <= row.last_raw {
+            let offset = cursor - row.first_raw;
+            return (index, row.cell_of[offset]);
+        }
+    }
+    // 2. A cursor sitting on the break itself -- on a lone `\n`, a lone `\r`, or
+    // the `\r` that opens a consumed pair -- reads as the line's past-end column.
+    for (index, row) in rows.iter().enumerate() {
+        if row.ends_line && cursor == row.last_raw + 1 {
+            return (index, row.width);
+        }
+    }
+    // 3. At or before a line's start -- value start, right after a break, blank
+    // line, or inside a `\r\n` pair (pinned forward): that line's first row, column 0.
+    for (index, row) in rows.iter().enumerate() {
+        if row.starts_line && cursor <= row.first_raw {
+            return (index, 0);
+        }
+    }
+    // 4. The value's very end.
+    let last = rows.len().saturating_sub(1);
+    (last, rows.get(last).map_or(0, |row| row.width))
+}
+
+/// The whole draft wrapped to `width` display cells, escaped, one row per wrapped
+/// line, plus the wrapped row and column where the draft's cursor belongs. Both are
+/// absolute: the row counts from the first returned row, and the column counts
+/// terminal cells from that row's first painted cell.
+///
+/// Wrapping prefers word boundaries ([`wrap_text`]) and nothing is dropped; an
+/// empty draft yields one empty row.
+pub(crate) fn wrapped_edit_rows(draft: &EditBuffer, width: usize) -> (Vec<String>, usize, usize) {
+    let rows = wrap_text(draft.value(), width);
+    let (row, column) = locate_wrapped_cursor(&rows, draft.cursor());
+    (
+        rows.into_iter().map(|wrapped| wrapped.text).collect(),
+        row,
+        column,
+    )
+}
+
+/// The whole draft wrapped to `width` display cells, escaped, one row per wrapped
+/// line. View-only presentation: no cursor anchors any line, so this is
+/// [`wrapped_edit_rows`] without its cursor report.
+pub(crate) fn wrapped_draft_rows(draft: &EditBuffer, width: usize) -> Vec<String> {
+    wrap_text(draft.value(), width)
+        .into_iter()
+        .map(|row| row.text)
+        .collect()
+}
+
+/// Move the draft's cursor vertically by `delta` wrapped rows, preserving the
+/// target column in cells as far as the destination row allows. Clamps at the
+/// first and last wrapped rows; `None` means nothing changed (zero width).
+pub(crate) fn wrapped_vertical_move(
+    draft: &EditBuffer,
+    width: usize,
+    delta: isize,
+) -> Option<usize> {
+    if width == 0 {
+        return None;
+    }
+    let rows = wrap_text(draft.value(), width);
+    let (current_row, column) = locate_wrapped_cursor(&rows, draft.cursor());
+    let target = current_row as isize + delta;
+    let target = target.clamp(0, rows.len().saturating_sub(1) as isize) as usize;
+    let cursor = rows
+        .get(target)
+        .map(|row| row.cursor_at(column))
+        .unwrap_or_else(|| draft.cursor());
+    (cursor != draft.cursor()).then_some(cursor)
+}
+
 /// The label columns off the front of every row of an edit region, keeping the region's
 /// full height for a draft spread over rows.
 ///
@@ -447,8 +673,187 @@ pub(crate) fn place_edit_cursor_at(frame: &mut Frame, region: Rect, row: u16, co
 
 #[cfg(test)]
 mod tests {
-    use super::{escaped_draft_rows, field_viewport, seeded_draft, wrapped_draft_rows, EditBuffer};
+    #[test]
+    fn dbg_wrap() {
+        let value = "alpha beta gamma";
+        for row in crate::ui::edit::wrap_text(value, 6) {
+            println!(
+                "text={:?} first={} last={} width={}",
+                row.text, row.first_raw, row.last_raw, row.width
+            );
+        }
+    }
+
+    use super::{
+        escaped_draft_rows, field_viewport, seeded_draft, wrapped_draft_rows, wrapped_edit_rows,
+        EditBuffer,
+    };
     use ratatui::text::Line;
+
+    /// `wrapped_edit_rows` wraps exactly as view mode does (it is the same
+    /// function with a cursor report), so the wide-character sweep covers both.
+    #[test]
+    fn wrapped_edit_rows_wrap_wide_characters_and_drop_nothing() {
+        let text = "日".repeat(30);
+        let width = 20;
+        let draft = seeded_draft(&text);
+        let (rows, row, column) = wrapped_edit_rows(&draft, width);
+
+        for wrapped in &rows {
+            assert!(
+                Line::from(wrapped.as_str()).width() <= width,
+                "row wider than {width} cells: {wrapped:?}"
+            );
+        }
+        assert_eq!(rows.concat(), text, "wide-character text was lost");
+        assert!(
+            rows.len() > 1,
+            "expected the wide run to wrap, got {rows:?}"
+        );
+
+        // The end cursor sits past the final glyph on the last wrapped row: ten
+        // double-width glyphs per row fill 20 cells exactly.
+        assert_eq!((row, column), (2, 20));
+        // And view mode is precisely this wrapping without the cursor report.
+        assert_eq!(wrapped_draft_rows(&draft, width), rows);
+    }
+
+    /// A long single-line draft wraps onto continuation rows and the cursor maps
+    /// into wrapped coordinates: an interior cursor lands on its own cell of the
+    /// continuation row, and the end cursor on the final chunk's past-end column.
+    #[test]
+    fn wrapped_edit_rows_map_the_cursor_onto_its_wrapped_row() {
+        let value = format!("{}xyz", "a".repeat(25));
+
+        // Cursor at 22: two characters into the second wrapped chunk (20 + 2).
+        let (rows, row, column) = wrapped_edit_rows(&EditBuffer::new(&value, 22), 20);
+        assert_eq!(rows, vec!["a".repeat(20), "aaaaaxyz".to_string()]);
+        assert_eq!((row, column), (1, 2));
+
+        // Cursor at the value's end: the last chunk's past-end column.
+        let (rows, row, column) = wrapped_edit_rows(&seeded_draft(&value), 20);
+        assert_eq!(rows, vec!["a".repeat(20), "aaaaaxyz".to_string()]);
+        assert_eq!((row, column), (1, 8));
+    }
+
+    /// Breaks spread over rows over one definition, and a cursor sitting ON a break
+    /// reads as the line before it at its past-end column -- except inside a CRLF
+    /// pair, pinned to the following line, matching [`escaped_draft_rows`].
+    #[test]
+    fn wrapped_edit_rows_read_one_definition_of_a_line_break() {
+        for value in [
+            "first\nsecond\nthird",
+            "first\r\nsecond\r\nthird",
+            "first\rsecond\rthird",
+        ] {
+            let (rows, row, column) = wrapped_edit_rows(&seeded_draft(value), 20);
+            assert_eq!(rows, vec!["first", "second", "third"], "{value:?}");
+            assert_eq!((row, column), (2, 5), "{value:?}");
+        }
+
+        // A cursor parked between a `\r` and its `\n` paints where the renderer
+        // already puts it: column 0 of the following row.
+        let (_, row, column) = wrapped_edit_rows(&EditBuffer::new("one\r\ntwo", 4), 20);
+        assert_eq!((row, column), (1, 0));
+
+        // A trailing break yields the final empty line, and the end cursor is on it.
+        let (rows, row, column) = wrapped_edit_rows(&seeded_draft("ab\n"), 20);
+        assert_eq!(rows, vec!["ab", ""]);
+        assert_eq!((row, column), (1, 0));
+
+        // While a cursor before that break stays on "ab" at its past-end column.
+        let (_, row, column) = wrapped_edit_rows(&EditBuffer::new("ab\n", 2), 20);
+        assert_eq!((row, column), (0, 2));
+    }
+
+    /// Degenerate shapes stay defined: an empty draft is one empty row with the
+    /// cursor at its origin; a zero-width allocation paints nothing.
+    #[test]
+    fn wrapped_edit_rows_handle_empty_drafts_and_zero_widths() {
+        assert_eq!(
+            wrapped_edit_rows(&seeded_draft(""), 20),
+            (vec![String::new()], 0, 0)
+        );
+        assert_eq!(
+            wrapped_edit_rows(&seeded_draft("abc"), 0),
+            (Vec::<String>::new(), 0, 0)
+        );
+    }
+
+    /// Words are not cut: a row that cannot fit its next character breaks after
+    /// the last whitespace it already holds, and only a whitespace-free run
+    /// hard-breaks at the cell edge. The break's trailing space stays row-end.
+    #[test]
+    fn wrap_text_prefers_word_boundaries_over_cell_edges() {
+        let rows_of = |value: &str, width| {
+            super::wrap_text(value, width)
+                .into_iter()
+                .map(|row| row.text)
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(
+            rows_of("the quick brown fox", 10),
+            vec!["the quick ", "brown fox"]
+        );
+        // A word longer than the whole allocation still hard-breaks...
+        assert_eq!(
+            rows_of("aaaaaaaaaaaa bb", 5),
+            vec!["aaaaa", "aaaaa", "aa bb"]
+        );
+        // ...and a whitespace-free value behaves exactly as before.
+        assert_eq!(rows_of("abcdefgh", 3), vec!["abc", "def", "gh"]);
+        // Multiple spaces collapse onto the row they end.
+        assert_eq!(rows_of("aa    bb", 4), vec!["aa  ", "  bb"]);
+    }
+
+    /// Vertical movement walks WRAPPED rows, preserving the target column in cells
+    /// and clamping at the first and last row.
+    #[test]
+    fn wrapped_vertical_move_walks_wrapped_rows_and_preserves_the_column() {
+        // "alpha beta gamma" at 6 cells wraps as "alpha ", "beta ", "gamma".
+        let value = "alpha beta gamma";
+        let rows = || {
+            super::wrap_text(value, 6)
+                .into_iter()
+                .map(|row| row.text)
+                .collect::<Vec<String>>()
+        };
+        assert_eq!(rows(), vec!["alpha ", "beta ", "gamma"]);
+
+        // Down from (0, col 3) lands on raw index 9 (the 'a' of "beta"); up again
+        // restores (0, col 3).
+        assert_eq!(
+            super::wrapped_vertical_move(&EditBuffer::new(value, 3), 6, 1),
+            Some(9)
+        );
+        assert_eq!(
+            super::wrapped_vertical_move(&EditBuffer::new(value, 9), 6, -1),
+            Some(3)
+        );
+
+        // Clamped at both ends rather than wrapping around.
+        assert_eq!(
+            super::wrapped_vertical_move(&EditBuffer::new(value, 1), 6, -1),
+            None
+        );
+        let at_end = EditBuffer::new(value, value.chars().count());
+        assert_eq!(
+            super::wrapped_vertical_move(&at_end, 6, 1),
+            None,
+            "the caret already sits on the last wrapped row"
+        );
+
+        // Blank logical lines are real rows: down crosses them column-zero.
+        assert_eq!(
+            super::wrapped_vertical_move(&EditBuffer::new("a\n\nb", 0), 10, 1),
+            Some(2)
+        );
+        assert_eq!(
+            super::wrapped_vertical_move(&EditBuffer::new("a\n\nb", 2), 10, 1),
+            Some(3)
+        );
+    }
 
     /// Wide characters must WRAP, never be clipped away.
     ///
@@ -1088,5 +1493,15 @@ mod tests {
         let (tail, tail_column) = field_viewport("你好世界", 4, 5);
         assert!(width_of(&tail) <= 5, "tail window overflowed: {tail:?}");
         assert!(tail_column <= width_of(&tail));
+    }
+}
+#[test]
+fn dbg_wrap() {
+    let value = "alpha beta gamma";
+    for row in crate::ui::edit::wrap_text(value, 6) {
+        println!(
+            "text={:?} first={} last={} width={}",
+            row.text, row.first_raw, row.last_raw, row.width
+        );
     }
 }
