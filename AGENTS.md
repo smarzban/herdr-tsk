@@ -91,6 +91,9 @@ If `HERDR_ENV` is unset, say that live smoke was not run.
 ## Conventions
 
 - Human status is source of truth. Never auto-complete tasks from agent status.
+- The projectless scope displays as `desk` but serializes as `global` in tasks.json and
+  keeps its internal name `TaskScope::Global`; do not "fix" either without a store
+  migration.
 - State is `$HOME/.tsk/tasks.json`, config `$HOME/.tsk/settings.json`, overridable
   with `TSK_STATE_DIR` / `TSK_CONFIG_DIR`. Host-injected `HERDR_PLUGIN_*` dirs are
   ignored. Verb modifier is `settings.json`; the palette flips it.
