@@ -84,6 +84,9 @@ For scriptable board work, use `tsk add` and `tsk list`; read
 - `herdr-plugin.toml` launches `./target/release/tsk`. Rebuild in-repo
   before live smoke. A running board keeps the old binary until you quit it.
 - Test: `cargo test` (plain, parallel)
+- `clippy::if_same_then_else` does not fire on the pinned 1.96.0 toolchain, even when
+  explicitly enabled: byte-identical if/else branches pass `-D warnings`. Do not count on
+  clippy to catch them.
 - A regression test must fail without its fix. Write it, revert the fix, watch it
   fail, restore the fix. Use content that actually crosses the boundary under test.
 - Temp state dirs need a per-binary atomic counter, not just `SystemTime::now()`.
@@ -123,3 +126,11 @@ If `HERDR_ENV` is unset, say that live smoke was not run.
 - Anything painted on the status-row slot hides `status_message` while it is up.
   A surface that lives there owns showing its own refusals and clearing them on
   close, or the message is invisible and then leaks onto the board afterwards.
+- Selection may only ever rest on a row the current lens paints; the collapse sets
+  count as visibility, so `seed_selection` and reanchor fallbacks must never pin an
+  invisible task.
+- `sync_from_domain` never moves the user's home tab or selection for tasks merged
+  in from disk; the one exception is an otherwise-empty view surfacing the first
+  arriving task (the idle-merge tests pin that visibility). A pinned save pins the
+  selection only when the current lens renders the saved task; otherwise it
+  reanchors near the saved task's old position.
