@@ -859,7 +859,15 @@ impl BoardModel {
             if self.visible_ids().contains(&id) {
                 self.selection_id = Some(id);
             } else {
-                self.reanchor_selection(Some(id), &previous_visible);
+                // Anchor on the saved id's old position when it had one (an edit that
+                // left this lens); otherwise fall back to the pre-sync selection so an
+                // externally invisible save cannot jump the pin to the first row.
+                let anchor = if previous_visible.contains(&id) {
+                    Some(id)
+                } else {
+                    previous
+                };
+                self.reanchor_selection(anchor, &previous_visible);
             }
         } else {
             // Tasks merged in from disk are somebody else's work: never yank the home tab
@@ -1844,7 +1852,7 @@ mod tests {
         assert_eq!(
             model.selected_id(),
             Some(in_a),
-            "under project focus a save outside the scope must not pin an invisible row"
+            "under project focus a save outside the scope must not pin an invisible row,              and must keep instead of jumping to the first row"
         );
     }
 }
