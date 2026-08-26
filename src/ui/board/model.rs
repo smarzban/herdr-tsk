@@ -829,23 +829,18 @@ impl BoardModel {
 
     /// Replace task snapshot from domain (after mutation) and reanchor selection by id.
     pub fn sync_from_domain(&mut self, state: &DomainState) {
-        let previous_ids: HashSet<Uuid> = self.tasks.iter().map(|task| task.id).collect();
+        // Capture the prior visible order before the snapshot is replaced, so reanchoring
+        // can still see where the selection used to live.
+        let previous = self.selection_id;
+        let previous_visible = self.visible_ids();
+        let previous_id_set: HashSet<Uuid> = self.tasks.iter().map(|task| task.id).collect();
         self.tasks = state.tasks().to_vec();
         let new_ids: Vec<Uuid> = self
             .tasks
             .iter()
-            .filter(|task| !previous_ids.contains(&task.id))
+            .filter(|task| !previous_id_set.contains(&task.id))
             .map(|task| task.id)
             .collect();
-        let select_if_empty = self.selection_id.is_none();
-        for id in new_ids {
-            self.reveal_task_on_home(id);
-            if select_if_empty {
-                self.selection_id = Some(id);
-            }
-        }
-        let previous = self.selection_id;
-        let previous_visible = self.visible_ids();
         let pinned_edit = self.task_edit_save.as_ref().map(|pending| pending.id);
         let pinned_quick_add = self.quick_add_save.as_ref().map(|pending| pending.id);
         self.stale_links.retain(|id| {
@@ -858,9 +853,23 @@ impl BoardModel {
         self.finish_task_edit_save();
         self.finish_step_editor_save();
         if let Some(id) = pinned_edit.or(pinned_quick_add) {
+            // A save this surface just made owns the selection, but only when the current
+            // lens actually renders it (project focus never reveals across scopes).
             self.reveal_task_on_home(id);
-            self.selection_id = Some(id);
+            if self.visible_ids().contains(&id) {
+                self.selection_id = Some(id);
+            } else {
+                self.reanchor_selection(Some(id), &previous_visible);
+            }
         } else {
+            // Tasks merged in from disk are somebody else's work: never yank the home tab
+            // or selection toward them. An otherwise-empty view may surface the first one,
+            // so a board opened on nothing still lights up when captures arrive.
+            if previous_visible.is_empty() {
+                if let Some(id) = new_ids.first() {
+                    self.reveal_task_on_home(*id);
+                }
+            }
             self.reanchor_selection(previous, &previous_visible);
             self.ensure_selection_visible();
         }
@@ -1538,24 +1547,26 @@ impl BoardModel {
     /// Browse), and the notice is stated **without** its `u Undo` control, because `u` types
     /// a `u` into the draft here and there is no hit region on this row. The deletion stays
     /// visible; the route it names comes back with the row when the edit closes.
-    /// Seed selection on open: first IN MOTION id, else first ON DECK id.
+    /// Seed selection on open: first visible IN MOTION id, else first visible ON DECK id.
+    ///
+    /// Honors collapse state via [`Self::visible_ids`]: a seeded row must be one the
+    /// renderer painted, or verbs would mutate a task the user cannot see.
     pub(super) fn seed_selection(&mut self) {
+        let visible: HashSet<Uuid> = self.visible_ids().into_iter().collect();
         let view = self.queue_view();
-        if let Some(id) = view
-            .sections
-            .iter()
-            .find(|section| section.kind == SectionKind::InMotion)
-            .and_then(|section| section.task_ids.first().copied())
-        {
-            self.selection_id = Some(id);
-            return;
+        for kind in [SectionKind::InMotion, SectionKind::OnDeck] {
+            if let Some(id) = view
+                .sections
+                .iter()
+                .filter(|section| section.kind == kind)
+                .flat_map(|section| section.task_ids.iter().copied())
+                .find(|id| visible.contains(id))
+            {
+                self.selection_id = Some(id);
+                return;
+            }
         }
-        self.selection_id = view
-            .sections
-            .iter()
-            .filter(|section| section.kind == SectionKind::OnDeck)
-            .flat_map(|section| section.task_ids.iter().copied())
-            .next();
+        self.selection_id = None;
     }
 
     /// Re-pin selection after the visible set changes (edit bind wins while still visible).
@@ -1703,5 +1714,137 @@ pub(super) fn owned_resource_summary(attempt: &DispatchAttempt) -> String {
             .map(owned_resource_label)
             .collect::<Vec<_>>()
             .join(" · ")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::ProvenanceOrigin;
+
+    const REPO_A: &str = "/repos/a";
+    const REPO_B: &str = "/repos/b";
+
+    fn project(path: &str) -> TaskScope {
+        TaskScope::Project {
+            path: path.to_string(),
+        }
+    }
+
+    fn create(domain: &mut DomainState, title: &str, scope: TaskScope) -> Uuid {
+        domain
+            .create(title, None, scope, None, None, ProvenanceOrigin::Manual)
+            .expect("create")
+    }
+
+    #[test]
+    fn seed_selection_skips_rows_hidden_by_collapse() {
+        let mut domain = DomainState::new();
+        let in_a = create(&mut domain, "task-a", project(REPO_A));
+        let in_b = create(&mut domain, "task-b", project(REPO_B));
+
+        let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(REPO_A)));
+        model.board_location = BoardLocation::Home {
+            tab: BoardTab::Projects,
+        };
+        model.toggle_project_collapsed(REPO_A);
+        model.selection_id = None;
+
+        model.seed_selection();
+
+        assert_eq!(
+            model.selected_id(),
+            Some(in_b),
+            "seed must land on a painted row, never inside a collapsed group"
+        );
+        assert_ne!(model.selected_id(), Some(in_a));
+    }
+
+    #[test]
+    fn sync_from_domain_reanchors_by_prior_order_not_new_order() {
+        let mut domain = DomainState::new();
+        let t1 = create(&mut domain, "task-1", project(REPO_A));
+        let t2 = create(&mut domain, "task-2", project(REPO_A));
+        let t3 = create(&mut domain, "task-3", project(REPO_A));
+        let t4 = create(&mut domain, "task-4", project(REPO_A));
+
+        let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(REPO_A)));
+        model.board_location = BoardLocation::Home {
+            tab: BoardTab::Projects,
+        };
+        model.selection_id = Some(t3);
+
+        // One sync carries both an external removal of the rows before the selection
+        // (t1, t2 gone) and the local completion of the selection itself (t3 done).
+        domain.soft_delete(t2).expect("soft delete");
+        domain.soft_delete(t1).expect("soft delete");
+        domain.set_status(t3, HumanStatus::Done).expect("status");
+        model.sync_from_domain(&domain);
+
+        assert_eq!(
+            model.selected_id(),
+            Some(t4),
+            "selection must reanchor to the old-order neighbor, not the first new row"
+        );
+    }
+
+    #[test]
+    fn sync_from_domain_does_not_yank_home_tab_for_externally_created_tasks() {
+        let mut domain = DomainState::new();
+        let desk_task = create(&mut domain, "desk task", TaskScope::Global);
+
+        let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(REPO_A)));
+        assert_eq!(model.home_tab(), BoardTab::Desk);
+
+        // Another process adds a project task between two syncs.
+        create(&mut domain, "external task", project(REPO_B));
+        model.sync_from_domain(&domain);
+
+        assert_eq!(
+            model.home_tab(),
+            BoardTab::Desk,
+            "a background merge must not move the user's home tab"
+        );
+        assert_eq!(model.selected_id(), Some(desk_task));
+    }
+
+    #[test]
+    fn sync_from_domain_surfaces_externally_created_tasks_on_an_empty_board() {
+        let domain = DomainState::new();
+        let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(REPO_A)));
+
+        // Another process captures the first task while this board shows nothing.
+        let mut domain = DomainState::new();
+        let captured = create(&mut domain, "first capture", project(REPO_B));
+        model.sync_from_domain(&domain);
+
+        assert_eq!(
+            model.home_tab(),
+            BoardTab::Projects,
+            "an otherwise-empty view follows the arriving task so it renders"
+        );
+        assert_eq!(model.selected_id(), Some(captured));
+    }
+
+    #[test]
+    fn pinned_quick_add_save_does_not_pin_invisible_row_under_project_focus() {
+        let mut domain = DomainState::new();
+        let in_a = create(&mut domain, "focus task", project(REPO_A));
+        let in_b = create(&mut domain, "other task", project(REPO_B));
+
+        let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(REPO_A)));
+        model.board_location = BoardLocation::Project(PathBuf::from(REPO_A));
+        model.selection_id = Some(in_a);
+
+        // A quick-add draft saved with a !p token for another project: the saved task
+        // exists but the focused lens does not render it.
+        model.begin_quick_add_save(in_b, false);
+        model.sync_from_domain(&domain);
+
+        assert_eq!(
+            model.selected_id(),
+            Some(in_a),
+            "under project focus a save outside the scope must not pin an invisible row"
+        );
     }
 }

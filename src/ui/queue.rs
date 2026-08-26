@@ -152,7 +152,10 @@ pub fn visible_task_ids(
                 push_section_tasks(&mut out, section);
             }
             BoardLens::Home(BoardTab::Threads) => {
+                // Sections without a thread label are the DONE drawer; its rows
+                // paint on this tab, so they must stay selectable.
                 let Some(thread) = section.thread_label.as_deref() else {
+                    push_section_tasks(&mut out, section);
                     continue;
                 };
                 if collapsed_threads.contains(thread) {
@@ -847,5 +850,38 @@ mod tests {
             &HashSet::new(),
         );
         assert!(visible_threads.is_empty());
+    }
+
+    #[test]
+    fn visible_task_ids_threads_keeps_done_drawer_rows_selectable() {
+        let tasks = vec![
+            task_with_thread(
+                1,
+                HumanStatus::Ready,
+                project("/repos/a"),
+                false,
+                10,
+                Some("release"),
+            ),
+            task(2, HumanStatus::Done, project("/repos/a"), false, 40),
+        ];
+        let threads = query_lens(&tasks, None, BoardLens::Home(BoardTab::Threads), true);
+        assert_eq!(
+            section_ids(&threads, SectionKind::Done),
+            vec![Uuid::from_u128(2)]
+        );
+
+        let visible = visible_task_ids(
+            &threads,
+            BoardLens::Home(BoardTab::Threads),
+            &HashSet::new(),
+            &HashSet::new(),
+            &HashSet::new(),
+        );
+        assert_eq!(
+            visible,
+            vec![Uuid::from_u128(1), Uuid::from_u128(2)],
+            "painted DONE drawer rows must stay in the selectable set"
+        );
     }
 }

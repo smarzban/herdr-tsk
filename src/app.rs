@@ -908,9 +908,14 @@ fn board_mouse_intent(
     };
     let intent = crate::ui::mouse::map_board_mouse(model, &hits, mouse);
     if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
-        && !matches!(intent, Some(BoardIntent::SelectSectionProject(_)))
+        && !matches!(
+            intent,
+            Some(BoardIntent::SelectSectionProject(_))
+                | Some(BoardIntent::SelectSectionThreadProject { .. })
+        )
     {
-        // A double-click is two consecutive clicks on the same project header. Any other
+        // A double-click is two consecutive clicks on the same project header (a
+        // projects-tab group header, or a threads-tab project sub-group header). Any other
         // pointer target, including inert board space, cancels the armed first click before
         // the next event can be mistaken for its second half.
         model.cancel_project_header_double_click();
@@ -3844,6 +3849,95 @@ mod tests {
             board_rejection_message(&unmapped),
             unmapped.to_string(),
             "a refusal this boundary has never seen must still be explained"
+        );
+    }
+}
+
+#[cfg(test)]
+mod thread_project_double_click_tests {
+    use super::board_mouse_intent;
+    use crate::domain::{DomainState, ProvenanceOrigin};
+    use crate::ui::board::{apply_intent, board_hit_map, BoardTab};
+    use crate::ui::input::BoardIntent;
+    use crate::ui::mouse::left_click;
+    use crate::ui::render::QueueHitTarget;
+    use std::path::{Path, PathBuf};
+
+    /// A threads-tab project sub-header must adopt its second click into project focus.
+    /// The router cancels the armed first click for any pointer target that is not a
+    /// scope control, and `SelectSectionThreadProject` is one, so the armed state has to
+    /// survive it exactly as it does `SelectSectionProject`.
+    #[test]
+    fn thread_project_header_double_click_scopes_the_board_to_that_project() {
+        let mut domain = DomainState::new();
+        for (title, path) in [
+            ("alpha release task", "/repos/alpha"),
+            ("beta release task", "/repos/beta"),
+        ] {
+            domain
+                .create_with_thread(
+                    title,
+                    None,
+                    crate::domain::TaskScope::Project { path: path.into() },
+                    None,
+                    None,
+                    ProvenanceOrigin::Manual,
+                    Some("release".into()),
+                )
+                .expect("create threaded task");
+        }
+        let mut model =
+            crate::ui::board::BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/alpha")));
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::SelectHomeTab(BoardTab::Threads),
+            None,
+            None,
+        )
+        .expect("open threads tab");
+
+        let area = ratatui::layout::Rect::new(0, 0, 80, 24);
+        // Whichever project paints first under the thread group is the header we drive.
+        let targeted_path = model.queue_view().sections[0].thread_subgroups[0]
+            .project_path
+            .clone()
+            .expect("subgroup names a project");
+        let sub_header = |model: &crate::ui::board::BoardModel| {
+            let hits = board_hit_map(area, model);
+            let hit = hits
+                .regions
+                .iter()
+                .find(|hit| {
+                    matches!(
+                        hit.target,
+                        QueueHitTarget::SectionThreadProject {
+                            section_idx: 0,
+                            subgroup_idx: 0,
+                        }
+                    )
+                })
+                .unwrap_or_else(|| panic!("no thread project sub-header hit region: {hits:?}"));
+            left_click(hit.area.x, hit.area.y)
+        };
+
+        let first = sub_header(&model);
+        let intent = board_mouse_intent(area, &mut model, first).expect("first click maps");
+        apply_intent(&mut domain, &mut model, intent.clone(), None, None)
+            .expect("apply first click");
+        assert_eq!(
+            model.selected_project(),
+            None,
+            "one sub-header click collapses the subgroup but stays at home"
+        );
+
+        let second = sub_header(&model);
+        let intent = board_mouse_intent(area, &mut model, second).expect("second click maps");
+        apply_intent(&mut domain, &mut model, intent, None, None).expect("apply second click");
+        assert_eq!(
+            model.selected_project().map(Path::to_path_buf),
+            Some(PathBuf::from(&targeted_path)),
+            "sub-header double-click must narrow the session to the clicked project"
         );
     }
 }
