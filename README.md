@@ -29,7 +29,7 @@ The built binary is `target/release/tsk`.
 
 ### Standalone
 
-Run `tsk` directly. The store is `~/.tsk`: `tasks.json` and `settings.json`
+Run `tsk` directly. The store is `~/.tsk`: `tsk.json` and `settings.json`
 live side by side. Override the locations with `TSK_STATE_DIR` /
 `TSK_CONFIG_DIR`.
 

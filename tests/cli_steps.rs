@@ -193,7 +193,7 @@ fn steps_toggle_unknown_or_ambiguous_prefix_refuses_without_mutation() {
     let dir = temp_state_dir("prefix-refusal");
     let (state, task) = state_with_shared_prefix_steps();
     TaskStore::new(&dir).save(&state).expect("seed store");
-    let state_file = dir.join("tasks.json");
+    let state_file = dir.join("tsk.json");
     let before = std::fs::read(&state_file).expect("read seeded state");
 
     let mut ambiguous = steps_args(&dir, task);
@@ -243,7 +243,7 @@ fn steps_toggle_empty_operand_refuses_without_mutation() {
         .expect("seed task");
     state.add_step(task, "only step").expect("seed one step");
     TaskStore::new(&dir).save(&state).expect("seed store");
-    let state_file = dir.join("tasks.json");
+    let state_file = dir.join("tsk.json");
     let before = std::fs::read(&state_file).expect("read seeded state");
 
     let mut empty = steps_args(&dir, task);
@@ -269,7 +269,7 @@ fn steps_toggle_empty_operand_refuses_without_mutation() {
 fn steps_add_refuses_empty_and_control_char_text_without_mutation() {
     let dir = temp_state_dir("text-refusal");
     let task = seed_task(&dir, "text refusal target");
-    let state_file = dir.join("tasks.json");
+    let state_file = dir.join("tsk.json");
     let before = std::fs::read(&state_file).expect("read seeded state");
 
     for (text, token) in [
@@ -326,7 +326,7 @@ fn steps_on_soft_deleted_task_refuses_without_mutation() {
         .expect("seed task");
     state.soft_delete(task).expect("soft delete seed");
     TaskStore::new(&dir).save(&state).expect("seed store");
-    let state_file = dir.join("tasks.json");
+    let state_file = dir.join("tsk.json");
     let before = std::fs::read(&state_file).expect("read seeded state");
 
     let mut add = steps_args(&dir, task);

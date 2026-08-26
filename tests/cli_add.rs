@@ -467,7 +467,7 @@ fn flag_add_existing_trimmed_title_and_scope_is_a_successful_noop() {
         .set_status(id, HumanStatus::Done)
         .expect("set existing task status");
     task_store(&dir).save(&state).expect("save status");
-    let state_file = dir.join("tasks.json");
+    let state_file = dir.join("tsk.json");
     let before = std::fs::read(&state_file).expect("read seeded state");
     let before_mtime = std::fs::metadata(&state_file)
         .expect("stat seeded state")
@@ -987,7 +987,7 @@ fn plan_with_only_existing_tasks_is_a_successful_read_only_noop() {
         .set_status(id, HumanStatus::Review)
         .expect("set status");
     store.save(&seeded).expect("save seed");
-    let state_file = dir.join("tasks.json");
+    let state_file = dir.join("tsk.json");
     let before = std::fs::read(&state_file).expect("read seeded state");
     let before_mtime = std::fs::metadata(&state_file)
         .expect("stat seeded state")
