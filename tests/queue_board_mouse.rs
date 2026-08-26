@@ -182,8 +182,9 @@ fn click(region: &QueueHit, model: &BoardModel, hits: &QueueHitMap) -> Option<Bo
 
 #[test]
 fn hit_map_covers_selection_rows_verbs_drawer_selector_chip_dropdown_palette_rows_help() {
-    // Base list: selection row, verbs, selector chip.
-    let (_domain, model, id) = board_with_task("Fix flake", HumanStatus::Ready);
+    // Base list: selection row, verbs, selector chip (project focus only).
+    let (_domain, mut model, id) = board_with_task("Fix flake", HumanStatus::Ready);
+    model.set_selected_project(Some(PathBuf::from(THIS_REPO)));
     let hits = board_hit_map(STANDARD, &model);
     assert!(
         hits.regions
@@ -271,12 +272,17 @@ fn hit_map_covers_selection_rows_verbs_drawer_selector_chip_dropdown_palette_row
 }
 
 #[test]
-fn all_projects_group_header_double_click_scopes_the_board_to_that_project() {
-    // All-projects view (the default): each ON DECK project group's header is that
-    // project's own scope control, resolved through the same queue view the frame
-    // painted rather than by searching rendered text.
+fn projects_tab_group_header_double_click_scopes_the_board_to_that_project() {
     let (mut domain, mut model, _id) = scoped_board();
-    assert_eq!(model.selected_project(), None, "fixture starts unscoped");
+    assert_eq!(model.selected_project(), None, "fixture starts at home");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::SelectHomeTab(tsk_tui::ui::board::BoardTab::Projects),
+        None,
+        None,
+    )
+    .expect("open projects tab");
     let hits = board_hit_map(STANDARD, &model);
     let view = model.queue_view();
     let header = hits
@@ -298,7 +304,7 @@ fn all_projects_group_header_double_click_scopes_the_board_to_that_project() {
     assert_eq!(
         model.selected_project(),
         None,
-        "one header click must leave the all-projects scope unchanged"
+        "one header click collapses the group but stays at home"
     );
     apply_intent(&mut domain, &mut model, intent, None, None).expect("apply second header click");
     assert_eq!(
@@ -735,6 +741,8 @@ fn click_and_wheel_match_keyboard_effects_for_each_control() {
     // any future key bound to it, on an independently built, otherwise-identical board.
     let (mut domain_direct, mut model_direct, _id3) = board_with_task("chip a", HumanStatus::Ready);
     let (mut domain_mouse, mut model_mouse, _id4) = board_with_task("chip b", HumanStatus::Ready);
+    model_direct.set_selected_project(Some(PathBuf::from(THIS_REPO)));
+    model_mouse.set_selected_project(Some(PathBuf::from(THIS_REPO)));
     apply_intent(
         &mut domain_direct,
         &mut model_direct,
@@ -991,6 +999,17 @@ fn a_palette_row_over_a_full_deck_still_runs_its_own_command_not_the_task_row_un
 #[test]
 fn a_dropdown_option_over_a_task_row_still_selects_that_option_not_the_task_under_it() {
     let (mut domain, mut model, _id) = scoped_board();
+    domain
+        .create(
+            "third repo",
+            None,
+            project("/repos/third"),
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("create third project for a longer selector");
+    model.sync_from_domain(&domain);
     apply_intent(
         &mut domain,
         &mut model,

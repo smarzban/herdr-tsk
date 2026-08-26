@@ -154,7 +154,7 @@ fn all_projects_quick_add_keeps_the_invocation_default_scope() {
 }
 
 #[test]
-fn global_board_quick_add_defaults_to_global_scope() {
+fn home_board_quick_add_keeps_the_invocation_default_scope() {
     let mut domain = DomainState::new();
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/project-y")));
     let mut snap = snapshot();
@@ -162,26 +162,8 @@ fn global_board_quick_add_defaults_to_global_scope() {
         path: "/repos/project-y".into(),
     };
 
-    apply(
-        &mut domain,
-        &mut model,
-        BoardIntent::OpenProjectSelector,
-        None,
-    );
-    apply(
-        &mut domain,
-        &mut model,
-        BoardIntent::ProjectPickerNext,
-        None,
-    );
-    apply(
-        &mut domain,
-        &mut model,
-        BoardIntent::ConfirmProjectChoice,
-        None,
-    );
     open(&mut domain, &mut model, &snap);
-    type_title(&mut domain, &mut model, "global board task");
+    type_title(&mut domain, &mut model, "home board task");
     assert_eq!(
         apply(&mut domain, &mut model, BoardIntent::QuickAddSave, None),
         IntentOutcome::Persist
@@ -190,7 +172,9 @@ fn global_board_quick_add_defaults_to_global_scope() {
 
     assert_eq!(
         domain.tasks().last().expect("saved task").scope,
-        TaskScope::Global
+        TaskScope::Project {
+            path: "/repos/project-y".into()
+        }
     );
 }
 

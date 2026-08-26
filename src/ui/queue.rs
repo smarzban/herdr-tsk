@@ -1,12 +1,22 @@
 //! Queue Section Query: pure derivation of the board sections from a task snapshot.
 
 use std::cmp::Reverse;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::Path;
+use std::time::SystemTime;
 
 use uuid::Uuid;
 
 use crate::domain::{HumanStatus, Task, TaskScope};
+
+/// Home-board tab lenses. Tabs are visible only at home; project focus hides them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BoardTab {
+    #[default]
+    Desk,
+    Projects,
+    Threads,
+}
 
 /// Which list region a section belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -16,16 +26,17 @@ pub enum SectionKind {
     Done,
 }
 
-/// Session filter applied to every visible queue section.
-///
-/// `All` shows every task. `Project` / `Global` narrow IN MOTION, ON DECK, and
-/// the done drawer to one scope (emitting an empty-hint deck section when that
-/// scope has no open tasks).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+/// Session filter for project focus (today's scoped project board).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeckScope<'a> {
-    #[default]
-    All,
     Global,
+    Project(&'a Path),
+}
+
+/// How the board query is scoped for one paint/selection pass.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BoardLens<'a> {
+    Home(BoardTab),
     Project(&'a Path),
 }
 
@@ -37,20 +48,33 @@ pub struct ThreadBlock {
     pub task_ids: Vec<Uuid>,
 }
 
+/// Project-scoped tasks under one thread group on the Threads tab.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ThreadProjectSubgroup {
+    /// `None` is the desk/global scope under this thread.
+    pub project_path: Option<String>,
+    pub task_ids: Vec<Uuid>,
+}
+
 /// One ordered section of the queue board.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QueueSection {
     pub kind: SectionKind,
-    /// Project path for an ON DECK project group. `None` for IN MOTION, DONE, and the global ON DECK group.
+    /// Project path for a project-group section. `None` for IN MOTION, DONE, desk ON DECK, and
+    /// thread-group sections.
     pub project_label: Option<String>,
+    /// Thread name for a thread-group section on the Threads tab.
+    pub thread_label: Option<String>,
     /// Thread groups for scoped ON DECK sections only, newest group first.
     pub thread_blocks: Vec<ThreadBlock>,
+    /// Project sub-groups for one thread on the Threads tab.
+    pub thread_subgroups: Vec<ThreadProjectSubgroup>,
     /// Unthreaded scoped ON DECK tasks, after every thread block.
     pub loose_task_ids: Vec<Uuid>,
-    /// Exact thread-blocks-then-loose flattening, retained for task-only consumers.
+    /// Exact flattening for task-only consumers and selection.
     pub task_ids: Vec<Uuid>,
     pub count: usize,
-    /// True when a scoped deck group has zero open tasks (renderer paints the empty hint; no invented ids).
+    /// True when a scoped deck group has zero open tasks (renderer paints the empty hint).
     pub empty_hint: bool,
 }
 
@@ -69,18 +93,215 @@ pub struct QueueView {
     pub counts: StatusCounts,
 }
 
-/// Derive the queue sections from a task snapshot.
-///
-/// Pure: no I/O, no clock. Soft-deleted tasks never appear. Under `DeckScope::All`, an empty
-/// snapshot yields empty sections. A selected scope filters IN MOTION, ON DECK, the done drawer,
-/// and their status-line counts.
+/// Derive queue sections for the active board lens.
+pub fn query_lens(
+    tasks: &[Task],
+    current_repo: Option<&Path>,
+    lens: BoardLens<'_>,
+    drawer_open: bool,
+) -> QueueView {
+    match lens {
+        BoardLens::Home(BoardTab::Desk) => query_home_desk(tasks, drawer_open),
+        BoardLens::Home(BoardTab::Projects) => {
+            query_home_projects(tasks, current_repo, drawer_open)
+        }
+        BoardLens::Home(BoardTab::Threads) => query_home_threads(tasks, drawer_open),
+        BoardLens::Project(path) => query_project_focus(tasks, path, drawer_open),
+    }
+}
+
+/// Legacy entry retained for tests that still speak in deck-scope terms.
 pub fn query(
     tasks: &[Task],
     current_repo: Option<&Path>,
     scope: DeckScope<'_>,
     drawer_open: bool,
 ) -> QueueView {
-    // SHORTCUT: linear scan + sort -- fine to ~1k tasks; index when the board can grow unbounded.
+    match scope {
+        DeckScope::Global => query_lens(
+            tasks,
+            current_repo,
+            BoardLens::Home(BoardTab::Desk),
+            drawer_open,
+        ),
+        DeckScope::Project(path) => {
+            query_lens(tasks, current_repo, BoardLens::Project(path), drawer_open)
+        }
+    }
+}
+
+/// Task ids visible for selection, honoring home-tab collapse state.
+pub fn visible_task_ids(
+    view: &QueueView,
+    lens: BoardLens<'_>,
+    collapsed_projects: &HashSet<String>,
+    collapsed_threads: &HashSet<String>,
+    collapsed_thread_projects: &HashSet<ThreadProjectCollapseKey>,
+) -> Vec<Uuid> {
+    let mut out = Vec::new();
+    for section in &view.sections {
+        match lens {
+            BoardLens::Home(BoardTab::Projects) => {
+                let Some(path) = section.project_label.as_deref() else {
+                    push_section_tasks(&mut out, section);
+                    continue;
+                };
+                if collapsed_projects.contains(path) {
+                    continue;
+                }
+                push_section_tasks(&mut out, section);
+            }
+            BoardLens::Home(BoardTab::Threads) => {
+                // Sections without a thread label are the DONE drawer; its rows
+                // paint on this tab, so they must stay selectable.
+                let Some(thread) = section.thread_label.as_deref() else {
+                    push_section_tasks(&mut out, section);
+                    continue;
+                };
+                if collapsed_threads.contains(thread) {
+                    continue;
+                }
+                if section.thread_subgroups.is_empty() {
+                    push_section_tasks(&mut out, section);
+                    continue;
+                }
+                for subgroup in &section.thread_subgroups {
+                    let key = ThreadProjectCollapseKey {
+                        thread: thread.to_string(),
+                        project_path: subgroup.project_path.clone(),
+                    };
+                    if collapsed_thread_projects.contains(&key) {
+                        continue;
+                    }
+                    out.extend(subgroup.task_ids.iter().copied());
+                }
+            }
+            _ => push_section_tasks(&mut out, section),
+        }
+    }
+    out
+}
+
+/// Session-only collapse identity for a project row under a thread group.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ThreadProjectCollapseKey {
+    pub thread: String,
+    pub project_path: Option<String>,
+}
+
+fn push_section_tasks(out: &mut Vec<Uuid>, section: &QueueSection) {
+    out.extend(section.task_ids.iter().copied());
+}
+
+fn query_home_desk(tasks: &[Task], drawer_open: bool) -> QueueView {
+    let live: Vec<&Task> = tasks.iter().filter(|task| !task.soft_deleted).collect();
+
+    let mut motion: Vec<&Task> = live
+        .iter()
+        .copied()
+        .filter(|t| t.status == HumanStatus::Started)
+        .collect();
+    sort_by_updated_desc(&mut motion);
+
+    let mut desk: Vec<&Task> = live
+        .iter()
+        .copied()
+        .filter(|t| {
+            matches!(
+                t.status,
+                HumanStatus::Ready | HumanStatus::Blocked | HumanStatus::Review
+            ) && matches!(t.scope, TaskScope::Global)
+        })
+        .collect();
+    sort_by_updated_desc(&mut desk);
+
+    let mut sections = Vec::new();
+    if !motion.is_empty() {
+        sections.push(section_from(SectionKind::InMotion, None, None, &motion));
+    }
+    sections.push(deck_section(None, &desk));
+
+    append_done(&mut sections, &live, drawer_open);
+
+    QueueView {
+        sections,
+        counts: status_counts(&live, drawer_open),
+    }
+}
+
+fn query_home_projects(
+    tasks: &[Task],
+    current_repo: Option<&Path>,
+    drawer_open: bool,
+) -> QueueView {
+    let live: Vec<&Task> = tasks.iter().filter(|task| !task.soft_deleted).collect();
+    let project_paths = open_project_paths(&live, current_repo);
+
+    let mut sections = Vec::new();
+    for path in project_paths {
+        let group: Vec<&Task> = live
+            .iter()
+            .copied()
+            .filter(|t| t.status != HumanStatus::Done)
+            .filter(|t| matches!(&t.scope, TaskScope::Project { path: p } if p == &path))
+            .collect();
+        let mut ordered = group;
+        sort_by_status_then_updated(&mut ordered);
+        sections.push(project_group_section(path, &ordered));
+    }
+
+    append_done(&mut sections, &live, drawer_open);
+
+    QueueView {
+        sections,
+        counts: status_counts(&live, drawer_open),
+    }
+}
+
+fn query_home_threads(tasks: &[Task], drawer_open: bool) -> QueueView {
+    let live: Vec<&Task> = tasks.iter().filter(|task| !task.soft_deleted).collect();
+
+    let mut by_thread: BTreeMap<String, Vec<&Task>> = BTreeMap::new();
+    for task in live
+        .iter()
+        .copied()
+        .filter(|t| t.status != HumanStatus::Done)
+    {
+        if let Some(name) = task.thread.as_deref() {
+            by_thread
+                .entry(name.to_ascii_lowercase())
+                .or_default()
+                .push(task);
+        }
+    }
+
+    let mut thread_names: Vec<String> = by_thread.keys().cloned().collect();
+    thread_names.sort_by_key(|name| {
+        Reverse(
+            by_thread[name]
+                .iter()
+                .map(|task| task.updated_at)
+                .max()
+                .unwrap_or(SystemTime::UNIX_EPOCH),
+        )
+    });
+
+    let mut sections = Vec::new();
+    for name in thread_names {
+        let group = &by_thread[&name];
+        sections.push(thread_group_section(name, group));
+    }
+
+    append_done(&mut sections, &live, drawer_open);
+
+    QueueView {
+        sections,
+        counts: status_counts(&live, drawer_open),
+    }
+}
+
+fn query_project_focus(tasks: &[Task], path: &Path, drawer_open: bool) -> QueueView {
+    let scope = DeckScope::Project(path);
     let live: Vec<&Task> = tasks
         .iter()
         .filter(|task| !task.soft_deleted && task_matches_scope(task, scope))
@@ -93,93 +314,155 @@ pub fn query(
         .collect();
     sort_by_updated_desc(&mut motion);
 
+    let mut open: Vec<&Task> = live
+        .iter()
+        .copied()
+        .filter(|t| !matches!(t.status, HumanStatus::Started | HumanStatus::Done))
+        .collect();
+    sort_by_updated_desc(&mut open);
+
+    let (label, _) = live
+        .iter()
+        .find_map(|task| match &task.scope {
+            TaskScope::Project { path: stored } if Path::new(stored) == path => {
+                Some(stored.clone())
+            }
+            _ => None,
+        })
+        .map(|stored| (stored, ()))
+        .unwrap_or_else(|| (path.to_string_lossy().into_owned(), ()));
+
+    let mut sections = Vec::new();
+    if !motion.is_empty() {
+        sections.push(section_from(SectionKind::InMotion, None, None, &motion));
+    }
+    sections.push(deck_section(Some(label), &open));
+    append_done(&mut sections, &live, drawer_open);
+
+    QueueView {
+        sections,
+        counts: status_counts(&live, drawer_open),
+    }
+}
+
+fn open_project_paths(live: &[&Task], current_repo: Option<&Path>) -> Vec<String> {
+    let mut paths: BTreeSet<String> = BTreeSet::new();
+    for task in live
+        .iter()
+        .copied()
+        .filter(|t| t.status != HumanStatus::Done)
+    {
+        if let TaskScope::Project { path } = &task.scope {
+            paths.insert(path.clone());
+        }
+    }
+    let mut ordered: Vec<String> = paths.into_iter().collect();
+    if let Some(repo) = current_repo {
+        if let Some(pos) = ordered.iter().position(|path| Path::new(path) == repo) {
+            let current = ordered.remove(pos);
+            ordered.insert(0, current);
+        }
+    }
+    ordered
+}
+
+fn project_group_section(path: String, tasks: &[&Task]) -> QueueSection {
+    let task_ids: Vec<Uuid> = tasks.iter().map(|t| t.id).collect();
+    let count = task_ids.len();
+    QueueSection {
+        kind: SectionKind::OnDeck,
+        project_label: Some(path),
+        thread_label: None,
+        thread_blocks: Vec::new(),
+        thread_subgroups: Vec::new(),
+        loose_task_ids: Vec::new(),
+        task_ids,
+        count,
+        empty_hint: count == 0,
+    }
+}
+
+fn thread_group_section(name: String, tasks: &[&Task]) -> QueueSection {
+    let mut by_scope: BTreeMap<Option<String>, Vec<&Task>> = BTreeMap::new();
+    for task in tasks {
+        let key = match &task.scope {
+            TaskScope::Global => None,
+            TaskScope::Project { path } => Some(path.clone()),
+        };
+        by_scope.entry(key).or_default().push(*task);
+    }
+
+    let mut scope_keys: Vec<Option<String>> = by_scope.keys().cloned().collect();
+    scope_keys.sort_by_key(|path| match path {
+        None => (1u8, String::new()),
+        Some(path) => (0u8, path.clone()),
+    });
+
+    let mut thread_subgroups = Vec::new();
+    let mut task_ids = Vec::new();
+    for path in scope_keys {
+        let mut group = by_scope.remove(&path).unwrap_or_default();
+        sort_by_status_then_updated(&mut group);
+        let ids: Vec<Uuid> = group.iter().map(|t| t.id).collect();
+        task_ids.extend(ids.iter().copied());
+        thread_subgroups.push(ThreadProjectSubgroup {
+            project_path: path,
+            task_ids: ids,
+        });
+    }
+
+    let count = task_ids.len();
+    QueueSection {
+        kind: SectionKind::OnDeck,
+        project_label: None,
+        thread_label: Some(name),
+        thread_blocks: Vec::new(),
+        thread_subgroups,
+        loose_task_ids: Vec::new(),
+        task_ids,
+        count,
+        empty_hint: count == 0,
+    }
+}
+
+fn append_done(sections: &mut Vec<QueueSection>, live: &[&Task], drawer_open: bool) {
+    if !drawer_open {
+        return;
+    }
     let mut done: Vec<&Task> = live
         .iter()
         .copied()
         .filter(|t| t.status == HumanStatus::Done)
         .collect();
     sort_by_updated_desc(&mut done);
+    if !done.is_empty() {
+        sections.push(section_from(SectionKind::Done, None, None, &done));
+    }
+}
 
-    // ON DECK: non-done, non-doing (todo / blocked / review), grouped by project.
-    let mut project_groups: BTreeMap<&str, Vec<&Task>> = BTreeMap::new();
-    let mut global: Vec<&Task> = Vec::new();
-    for task in live
+fn status_counts(live: &[&Task], drawer_open: bool) -> StatusCounts {
+    let in_motion = live
         .iter()
-        .copied()
-        .filter(|t| !matches!(t.status, HumanStatus::Started | HumanStatus::Done))
-    {
-        match &task.scope {
-            TaskScope::Project { path } => {
-                project_groups.entry(path.as_str()).or_default().push(task)
-            }
-            TaskScope::Global => global.push(task),
-        }
-    }
-    for group in project_groups.values_mut() {
-        sort_by_updated_desc(group);
-    }
-    sort_by_updated_desc(&mut global);
-
-    let mut sections = Vec::new();
-
-    if !motion.is_empty() {
-        sections.push(section_from(SectionKind::InMotion, None, &motion));
-    }
-
-    match scope {
-        DeckScope::All => {
-            let mut project_order: Vec<&str> = project_groups.keys().copied().collect();
-            if let Some(repo) = current_repo {
-                if let Some(pos) = project_order.iter().position(|p| Path::new(*p) == repo) {
-                    let current = project_order.remove(pos);
-                    project_order.insert(0, current);
-                }
-            }
-            // Remaining keys stay alphabetical via BTreeMap; current (if any) was moved to front.
-            for path in project_order {
-                let group = &project_groups[path];
-                if !group.is_empty() {
-                    sections.push(section_from(
-                        SectionKind::OnDeck,
-                        Some(path.to_string()),
-                        group,
-                    ));
-                }
-            }
-            if !global.is_empty() {
-                sections.push(section_from(SectionKind::OnDeck, None, &global));
-            }
-        }
-        DeckScope::Project(path) => {
-            let (label, group) = project_groups
-                .iter()
-                .find(|(stored_path, _)| Path::new(*stored_path) == path)
-                .map(|(stored_path, group)| ((*stored_path).to_string(), group.as_slice()))
-                .unwrap_or_else(|| (path.to_string_lossy().into_owned(), &[]));
-            sections.push(deck_section(Some(label), group));
-        }
-        DeckScope::Global => {
-            sections.push(deck_section(None, &global));
-        }
-    }
-
-    if drawer_open && !done.is_empty() {
-        sections.push(section_from(SectionKind::Done, None, &done));
-    }
-
-    QueueView {
-        sections,
-        counts: StatusCounts {
-            in_motion: motion.len(),
-            done: done.len(),
-            need: 0,
-        },
+        .filter(|t| t.status == HumanStatus::Started)
+        .count();
+    let done = if drawer_open {
+        live.iter()
+            .filter(|t| t.status == HumanStatus::Done)
+            .count()
+    } else {
+        live.iter()
+            .filter(|t| t.status == HumanStatus::Done)
+            .count()
+    };
+    StatusCounts {
+        in_motion,
+        done,
+        need: 0,
     }
 }
 
 fn task_matches_scope(task: &Task, scope: DeckScope<'_>) -> bool {
     match scope {
-        DeckScope::All => true,
         DeckScope::Global => matches!(task.scope, TaskScope::Global),
         DeckScope::Project(selected) => matches!(
             &task.scope,
@@ -192,13 +475,38 @@ fn sort_by_updated_desc(tasks: &mut [&Task]) {
     tasks.sort_by_key(|t| Reverse(t.updated_at));
 }
 
-fn section_from(kind: SectionKind, project_label: Option<String>, tasks: &[&Task]) -> QueueSection {
+fn status_rank(status: HumanStatus) -> u8 {
+    match status {
+        HumanStatus::Started => 0,
+        HumanStatus::Review => 1,
+        HumanStatus::Blocked => 2,
+        HumanStatus::Ready => 3,
+        HumanStatus::Done => 4,
+    }
+}
+
+fn sort_by_status_then_updated(tasks: &mut [&Task]) {
+    tasks.sort_by(|a, b| {
+        status_rank(a.status)
+            .cmp(&status_rank(b.status))
+            .then_with(|| b.updated_at.cmp(&a.updated_at))
+    });
+}
+
+fn section_from(
+    kind: SectionKind,
+    project_label: Option<String>,
+    thread_label: Option<String>,
+    tasks: &[&Task],
+) -> QueueSection {
     let task_ids: Vec<Uuid> = tasks.iter().map(|t| t.id).collect();
     let count = task_ids.len();
     QueueSection {
         kind,
         project_label,
+        thread_label,
         thread_blocks: Vec::new(),
+        thread_subgroups: Vec::new(),
         loose_task_ids: Vec::new(),
         task_ids,
         count,
@@ -249,7 +557,9 @@ fn deck_section(project_label: Option<String>, tasks: &[&Task]) -> QueueSection 
     QueueSection {
         kind: SectionKind::OnDeck,
         project_label,
+        thread_label: None,
         thread_blocks,
+        thread_subgroups: Vec::new(),
         loose_task_ids,
         task_ids,
         count,
@@ -260,7 +570,6 @@ fn deck_section(project_label: Option<String>, tasks: &[&Task]) -> QueueSection 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
     use std::time::{Duration, SystemTime};
 
     use crate::domain::{HumanStatus, ProvenanceOrigin, TaskEvent, TaskEventKind, TaskScope};
@@ -272,6 +581,17 @@ mod tests {
         soft_deleted: bool,
         updated_secs: u64,
     ) -> Task {
+        task_with_thread(id, status, scope, soft_deleted, updated_secs, None)
+    }
+
+    fn task_with_thread(
+        id: u128,
+        status: HumanStatus,
+        scope: TaskScope,
+        soft_deleted: bool,
+        updated_secs: u64,
+        thread: Option<&str>,
+    ) -> Task {
         let at = SystemTime::UNIX_EPOCH + Duration::from_secs(updated_secs);
         Task {
             id: Uuid::from_u128(id),
@@ -279,7 +599,7 @@ mod tests {
             merge_base_revision: None,
             title: format!("task-{id}"),
             notes: None,
-            thread: None,
+            thread: thread.map(str::to_string),
             status,
             scope,
             capsule: None,
@@ -323,7 +643,7 @@ mod tests {
     }
 
     #[test]
-    fn in_motion_is_non_deleted_doing_sorted_by_updated_at_desc() {
+    fn home_desk_in_motion_is_global_started_sorted_by_updated_desc() {
         let tasks = vec![
             task(1, HumanStatus::Started, TaskScope::Global, false, 10),
             task(2, HumanStatus::Started, project("/repos/a"), false, 30),
@@ -332,357 +652,236 @@ mod tests {
             task(5, HumanStatus::Started, project("/repos/b"), false, 20),
         ];
 
-        let view = query(&tasks, None, DeckScope::All, false);
+        let view = query_lens(&tasks, None, BoardLens::Home(BoardTab::Desk), false);
 
         let motion: Vec<_> = view
             .sections
             .iter()
             .filter(|s| s.kind == SectionKind::InMotion)
             .collect();
-        assert_eq!(motion.len(), 1, "exactly one IN MOTION section");
-        assert_eq!(motion[0].project_label, None);
+        assert_eq!(motion.len(), 1);
         assert_eq!(
             ids(motion[0]),
             vec![Uuid::from_u128(2), Uuid::from_u128(5), Uuid::from_u128(1),]
         );
-        assert_eq!(motion[0].count, 3);
-        assert_eq!(view.counts.in_motion, 3);
-        assert_eq!(view.counts.need, 0);
-        assert!(!section_ids(&view, SectionKind::InMotion).contains(&Uuid::from_u128(3)));
-        assert!(!section_ids(&view, SectionKind::InMotion).contains(&Uuid::from_u128(4)));
-    }
 
-    #[test]
-    fn on_deck_groups_current_repo_first_then_alpha_projects_then_global_within_group_updated_desc()
-    {
-        let current = PathBuf::from("/repos/current");
-        let tasks = vec![
-            // current repo: newer first
-            task(
-                10,
-                HumanStatus::Ready,
-                project("/repos/current"),
-                false,
-                100,
-            ),
-            task(
-                11,
-                HumanStatus::Blocked,
-                project("/repos/current"),
-                false,
-                50,
-            ),
-            // alpha later project
-            task(20, HumanStatus::Ready, project("/repos/zebra"), false, 80),
-            task(21, HumanStatus::Review, project("/repos/zebra"), false, 90),
-            // alpha earlier project
-            task(30, HumanStatus::Ready, project("/repos/alpha"), false, 70),
-            // global
-            task(40, HumanStatus::Ready, TaskScope::Global, false, 60),
-            task(41, HumanStatus::Blocked, TaskScope::Global, false, 65),
-            // not on deck
-            task(
-                50,
-                HumanStatus::Started,
-                project("/repos/current"),
-                false,
-                200,
-            ),
-            task(51, HumanStatus::Done, project("/repos/alpha"), false, 200),
-            task(52, HumanStatus::Ready, project("/repos/ghost"), true, 200),
-        ];
-
-        let view = query(&tasks, Some(current.as_path()), DeckScope::All, false);
-
-        let deck: Vec<_> = view
+        let desk: Vec<_> = view
             .sections
             .iter()
-            .filter(|s| s.kind == SectionKind::OnDeck)
+            .filter(|s| s.kind == SectionKind::OnDeck && s.project_label.is_none())
             .collect();
-        assert_eq!(deck.len(), 4, "current, alpha, zebra, global");
-
-        assert_eq!(deck[0].project_label.as_deref(), Some("/repos/current"));
-        assert_eq!(ids(deck[0]), vec![Uuid::from_u128(10), Uuid::from_u128(11)]);
-        assert_eq!(deck[0].count, 2);
-
-        assert_eq!(deck[1].project_label.as_deref(), Some("/repos/alpha"));
-        assert_eq!(ids(deck[1]), vec![Uuid::from_u128(30)]);
-
-        assert_eq!(deck[2].project_label.as_deref(), Some("/repos/zebra"));
-        assert_eq!(ids(deck[2]), vec![Uuid::from_u128(21), Uuid::from_u128(20)]);
-
-        assert_eq!(
-            deck[3].project_label, None,
-            "global group has no project label"
-        );
-        assert_eq!(ids(deck[3]), vec![Uuid::from_u128(41), Uuid::from_u128(40)]);
-
-        // doing stays in motion, done nowhere when drawer closed
-        assert_eq!(
-            section_ids(&view, SectionKind::InMotion),
-            vec![Uuid::from_u128(50)]
-        );
-        assert!(section_ids(&view, SectionKind::Done).is_empty());
-        assert!(!all_listed_ids(&view).contains(&Uuid::from_u128(51)));
-        assert!(!all_listed_ids(&view).contains(&Uuid::from_u128(52)));
+        assert_eq!(desk.len(), 1);
+        assert_eq!(ids(desk[0]), vec![Uuid::from_u128(4)]);
+        assert!(section_ids(&view, SectionKind::InMotion).contains(&Uuid::from_u128(2)));
+        assert!(!section_ids(&view, SectionKind::OnDeck).contains(&Uuid::from_u128(2)));
     }
 
     #[test]
-    fn done_drawer_lists_non_deleted_done_updated_desc_and_closed_drawer_excludes_them_from_sections(
-    ) {
+    fn home_projects_keeps_started_under_project_ordered_by_status() {
+        let tasks = vec![
+            task(1, HumanStatus::Ready, project("/repos/a"), false, 10),
+            task(2, HumanStatus::Started, project("/repos/a"), false, 20),
+            task(3, HumanStatus::Blocked, project("/repos/a"), false, 30),
+            task(4, HumanStatus::Review, project("/repos/a"), false, 40),
+            task(5, HumanStatus::Started, project("/repos/b"), false, 50),
+        ];
+
+        let view = query_lens(
+            &tasks,
+            Some(Path::new("/repos/a")),
+            BoardLens::Home(BoardTab::Projects),
+            false,
+        );
+
+        assert!(view
+            .sections
+            .iter()
+            .all(|section| section.kind != SectionKind::InMotion));
+
+        let a = view
+            .sections
+            .iter()
+            .find(|s| s.project_label.as_deref() == Some("/repos/a"))
+            .expect("project a");
+        assert_eq!(
+            ids(a),
+            vec![
+                Uuid::from_u128(2),
+                Uuid::from_u128(4),
+                Uuid::from_u128(3),
+                Uuid::from_u128(1),
+            ]
+        );
+    }
+
+    #[test]
+    fn home_threads_groups_cross_project_by_name_with_project_subgroups() {
+        let tasks = vec![
+            task_with_thread(
+                1,
+                HumanStatus::Started,
+                project("/repos/a"),
+                false,
+                30,
+                Some("release"),
+            ),
+            task_with_thread(
+                2,
+                HumanStatus::Ready,
+                TaskScope::Global,
+                false,
+                20,
+                Some("release"),
+            ),
+            task_with_thread(
+                3,
+                HumanStatus::Review,
+                project("/repos/b"),
+                false,
+                10,
+                Some("release"),
+            ),
+            task_with_thread(
+                4,
+                HumanStatus::Ready,
+                project("/repos/a"),
+                false,
+                5,
+                Some("other"),
+            ),
+        ];
+
+        let view = query_lens(&tasks, None, BoardLens::Home(BoardTab::Threads), false);
+        let release = view
+            .sections
+            .iter()
+            .find(|s| s.thread_label.as_deref() == Some("release"))
+            .expect("release thread");
+        assert_eq!(release.thread_subgroups.len(), 3);
+        assert_eq!(
+            ids(release),
+            vec![Uuid::from_u128(1), Uuid::from_u128(3), Uuid::from_u128(2),]
+        );
+    }
+
+    #[test]
+    fn done_drawer_lists_non_deleted_done_updated_desc() {
         let tasks = vec![
             task(1, HumanStatus::Done, TaskScope::Global, false, 10),
             task(2, HumanStatus::Done, project("/repos/a"), false, 30),
             task(3, HumanStatus::Done, TaskScope::Global, true, 40),
             task(4, HumanStatus::Ready, TaskScope::Global, false, 50),
-            task(5, HumanStatus::Done, project("/repos/b"), false, 20),
         ];
 
-        let closed = query(&tasks, None, DeckScope::All, false);
-        assert!(
-            closed.sections.iter().all(|s| s.kind != SectionKind::Done),
-            "closed drawer emits no DONE section"
-        );
-        assert!(
-            !all_listed_ids(&closed).contains(&Uuid::from_u128(1))
-                && !all_listed_ids(&closed).contains(&Uuid::from_u128(2))
-                && !all_listed_ids(&closed).contains(&Uuid::from_u128(5)),
-            "done ids absent from every section while drawer closed"
-        );
-        assert_eq!(closed.counts.done, 3, "status-line still counts done");
+        let closed = query_lens(&tasks, None, BoardLens::Home(BoardTab::Desk), false);
+        assert!(closed.sections.iter().all(|s| s.kind != SectionKind::Done));
 
-        let open = query(&tasks, None, DeckScope::All, true);
+        let open = query_lens(&tasks, None, BoardLens::Home(BoardTab::Desk), true);
         let done: Vec<_> = open
             .sections
             .iter()
             .filter(|s| s.kind == SectionKind::Done)
             .collect();
         assert_eq!(done.len(), 1);
-        assert_eq!(done[0].project_label, None);
-        assert_eq!(
-            ids(done[0]),
-            vec![Uuid::from_u128(2), Uuid::from_u128(5), Uuid::from_u128(1),]
-        );
-        assert_eq!(done[0].count, 3);
-        assert_eq!(open.counts.done, 3);
-        assert!(!ids(done[0]).contains(&Uuid::from_u128(3)));
-        assert!(!ids(done[0]).contains(&Uuid::from_u128(4)));
+        assert_eq!(ids(done[0]), vec![Uuid::from_u128(2), Uuid::from_u128(1),]);
     }
 
     #[test]
-    fn blocked_and_review_sit_in_deck_groups_with_no_non_deleted_task_absent_from_sections_and_drawer(
-    ) {
-        let tasks = vec![
-            task(1, HumanStatus::Blocked, project("/repos/a"), false, 10),
-            task(2, HumanStatus::Review, TaskScope::Global, false, 20),
-            task(3, HumanStatus::Ready, project("/repos/a"), false, 30),
-            task(4, HumanStatus::Started, project("/repos/b"), false, 40),
-            task(5, HumanStatus::Done, TaskScope::Global, false, 50),
-            task(6, HumanStatus::Blocked, TaskScope::Global, true, 60),
-        ];
-
-        let view = query(&tasks, Some(Path::new("/repos/a")), DeckScope::All, true);
-
-        let listed = all_listed_ids(&view);
-        assert!(listed.contains(&Uuid::from_u128(1)), "blocked on deck");
-        assert!(listed.contains(&Uuid::from_u128(2)), "review on deck");
-        assert!(section_ids(&view, SectionKind::InMotion).contains(&Uuid::from_u128(4)));
-        assert!(section_ids(&view, SectionKind::Done).contains(&Uuid::from_u128(5)));
-
-        let non_deleted: Vec<Uuid> = tasks
-            .iter()
-            .filter(|t| !t.soft_deleted)
-            .map(|t| t.id)
-            .collect();
-        for id in &non_deleted {
-            assert!(
-                listed.contains(id),
-                "non-deleted task {id} must appear in some section or drawer"
-            );
-        }
-        assert!(!listed.contains(&Uuid::from_u128(6)));
-
-        // blocked/review are deck, not motion
-        assert!(!section_ids(&view, SectionKind::InMotion).contains(&Uuid::from_u128(1)));
-        assert!(!section_ids(&view, SectionKind::InMotion).contains(&Uuid::from_u128(2)));
-        assert!(section_ids(&view, SectionKind::OnDeck).contains(&Uuid::from_u128(1)));
-        assert!(section_ids(&view, SectionKind::OnDeck).contains(&Uuid::from_u128(2)));
-    }
-
-    #[test]
-    fn soft_deleted_tasks_appear_in_no_section_or_drawer() {
-        let tasks = vec![
-            task(1, HumanStatus::Started, TaskScope::Global, true, 10),
-            task(2, HumanStatus::Ready, project("/repos/a"), true, 20),
-            task(3, HumanStatus::Blocked, TaskScope::Global, true, 30),
-            task(4, HumanStatus::Review, project("/repos/a"), true, 40),
-            task(5, HumanStatus::Done, TaskScope::Global, true, 50),
-            task(6, HumanStatus::Ready, TaskScope::Global, false, 60),
-        ];
-
-        let view = query(&tasks, None, DeckScope::All, true);
-        let listed = all_listed_ids(&view);
-        for id in 1..=5_u128 {
-            assert!(
-                !listed.contains(&Uuid::from_u128(id)),
-                "soft-deleted {id} must not appear"
-            );
-        }
-        assert_eq!(listed, vec![Uuid::from_u128(6)]);
-        assert_eq!(view.counts.in_motion, 0);
-        assert_eq!(view.counts.done, 0);
-    }
-
-    #[test]
-    fn project_scope_filters_in_motion_on_deck_and_done_to_matching_project() {
+    fn project_focus_filters_sections_to_matching_project() {
         let tasks = vec![
             task(1, HumanStatus::Started, project("/repos/a"), false, 100),
             task(2, HumanStatus::Started, project("/repos/b"), false, 90),
-            task(3, HumanStatus::Started, TaskScope::Global, false, 80),
             task(10, HumanStatus::Ready, project("/repos/a"), false, 70),
-            task(11, HumanStatus::Blocked, project("/repos/b"), false, 60),
-            task(12, HumanStatus::Review, TaskScope::Global, false, 50),
             task(20, HumanStatus::Done, project("/repos/a"), false, 40),
-            task(21, HumanStatus::Done, project("/repos/b"), false, 30),
-            task(22, HumanStatus::Done, TaskScope::Global, false, 20),
         ];
 
-        let scoped_a = query(
-            &tasks,
-            Some(Path::new("/repos/a")),
-            DeckScope::Project(Path::new("/repos/a")),
-            true,
-        );
-        let scoped_global = query(&tasks, Some(Path::new("/repos/a")), DeckScope::Global, true);
-
-        assert_eq!(
-            section_ids(&scoped_a, SectionKind::InMotion),
-            vec![Uuid::from_u128(1)]
-        );
-        assert_eq!(
-            section_ids(&scoped_a, SectionKind::Done),
-            vec![Uuid::from_u128(20)]
-        );
-        assert_eq!(scoped_a.counts.in_motion, 1);
-        assert_eq!(scoped_a.counts.done, 1);
-
-        assert_eq!(
-            section_ids(&scoped_global, SectionKind::InMotion),
-            vec![Uuid::from_u128(3)]
-        );
-        assert_eq!(
-            section_ids(&scoped_global, SectionKind::Done),
-            vec![Uuid::from_u128(22)]
-        );
-        assert_eq!(scoped_global.counts.in_motion, 1);
-        assert_eq!(scoped_global.counts.done, 1);
-
-        let deck_a: Vec<_> = scoped_a
-            .sections
-            .iter()
-            .filter(|s| s.kind == SectionKind::OnDeck)
-            .collect();
-        assert_eq!(deck_a.len(), 1);
-        assert_eq!(deck_a[0].project_label.as_deref(), Some("/repos/a"));
-        assert_eq!(ids(deck_a[0]), vec![Uuid::from_u128(10)]);
-        assert!(!deck_a[0].empty_hint);
-        assert!(!section_ids(&scoped_a, SectionKind::OnDeck).contains(&Uuid::from_u128(11)));
-        assert!(!section_ids(&scoped_a, SectionKind::OnDeck).contains(&Uuid::from_u128(12)));
-
-        let deck_g: Vec<_> = scoped_global
-            .sections
-            .iter()
-            .filter(|s| s.kind == SectionKind::OnDeck)
-            .collect();
-        assert_eq!(deck_g.len(), 1);
-        assert_eq!(deck_g[0].project_label, None);
-        assert_eq!(ids(deck_g[0]), vec![Uuid::from_u128(12)]);
-        assert!(!deck_g[0].empty_hint);
-    }
-
-    #[test]
-    fn scoped_project_matches_stored_path_with_trailing_slash() {
-        let tasks = vec![task(
-            1,
-            HumanStatus::Ready,
-            project("/repos/a/"),
-            false,
-            100,
-        )];
-
-        let view = query(
+        let view = query_lens(
             &tasks,
             None,
-            DeckScope::Project(Path::new("/repos/a")),
-            false,
-        );
-
-        let deck = view
-            .sections
-            .iter()
-            .find(|section| section.kind == SectionKind::OnDeck)
-            .expect("scoped ON DECK section");
-        assert_eq!(deck.project_label.as_deref(), Some("/repos/a/"));
-        assert_eq!(ids(deck), vec![Uuid::from_u128(1)]);
-        assert!(!deck.empty_hint);
-    }
-
-    #[test]
-    fn scoped_project_with_zero_open_deck_tasks_yields_header_plus_empty_hint_flag_never_invented_row(
-    ) {
-        let tasks = vec![
-            // project a has only doing + done — zero open deck tasks
-            task(1, HumanStatus::Started, project("/repos/a"), false, 100),
-            task(2, HumanStatus::Done, project("/repos/a"), false, 90),
-            // other scopes still have deck work
-            task(10, HumanStatus::Ready, project("/repos/b"), false, 80),
-            task(11, HumanStatus::Ready, TaskScope::Global, false, 70),
-        ];
-
-        let view = query(
-            &tasks,
-            Some(Path::new("/repos/a")),
-            DeckScope::Project(Path::new("/repos/a")),
+            BoardLens::Project(Path::new("/repos/a")),
             true,
         );
 
-        let deck: Vec<_> = view
-            .sections
-            .iter()
-            .filter(|s| s.kind == SectionKind::OnDeck)
-            .collect();
-        assert_eq!(deck.len(), 1, "scoped empty project still emits its header");
-        assert_eq!(deck[0].project_label.as_deref(), Some("/repos/a"));
-        assert_eq!(deck[0].count, 0);
-        assert!(deck[0].task_ids.is_empty(), "no invented task ids");
-        assert!(deck[0].empty_hint);
-
-        // other projects' deck tasks must not leak in
-        assert!(!all_listed_ids(&view).contains(&Uuid::from_u128(10)));
-        assert!(!all_listed_ids(&view).contains(&Uuid::from_u128(11)));
-
-        // motion + done still present and unfiltered
         assert_eq!(
             section_ids(&view, SectionKind::InMotion),
             vec![Uuid::from_u128(1)]
         );
         assert_eq!(
             section_ids(&view, SectionKind::Done),
+            vec![Uuid::from_u128(20)]
+        );
+        assert!(!all_listed_ids(&view).contains(&Uuid::from_u128(2)));
+    }
+
+    #[test]
+    fn visible_task_ids_honors_project_and_thread_collapse() {
+        let tasks = vec![
+            task(1, HumanStatus::Ready, project("/repos/a"), false, 10),
+            task(2, HumanStatus::Ready, project("/repos/b"), false, 20),
+            task_with_thread(
+                3,
+                HumanStatus::Ready,
+                project("/repos/a"),
+                false,
+                30,
+                Some("release"),
+            ),
+        ];
+        let view = query_lens(&tasks, None, BoardLens::Home(BoardTab::Projects), false);
+        let mut collapsed_projects = HashSet::new();
+        collapsed_projects.insert("/repos/a".to_string());
+        let visible = visible_task_ids(
+            &view,
+            BoardLens::Home(BoardTab::Projects),
+            &collapsed_projects,
+            &HashSet::new(),
+            &HashSet::new(),
+        );
+        assert_eq!(visible, vec![Uuid::from_u128(2)]);
+
+        let threads = query_lens(&tasks, None, BoardLens::Home(BoardTab::Threads), false);
+        let mut collapsed_threads = HashSet::new();
+        collapsed_threads.insert("release".to_string());
+        let visible_threads = visible_task_ids(
+            &threads,
+            BoardLens::Home(BoardTab::Threads),
+            &HashSet::new(),
+            &collapsed_threads,
+            &HashSet::new(),
+        );
+        assert!(visible_threads.is_empty());
+    }
+
+    #[test]
+    fn visible_task_ids_threads_keeps_done_drawer_rows_selectable() {
+        let tasks = vec![
+            task_with_thread(
+                1,
+                HumanStatus::Ready,
+                project("/repos/a"),
+                false,
+                10,
+                Some("release"),
+            ),
+            task(2, HumanStatus::Done, project("/repos/a"), false, 40),
+        ];
+        let threads = query_lens(&tasks, None, BoardLens::Home(BoardTab::Threads), true);
+        assert_eq!(
+            section_ids(&threads, SectionKind::Done),
             vec![Uuid::from_u128(2)]
         );
 
-        // global scope with zero global deck tasks: same empty-hint contract
-        let only_project_deck = vec![task(30, HumanStatus::Ready, project("/repos/a"), false, 50)];
-        let global_empty = query(&only_project_deck, None, DeckScope::Global, false);
-        let gdeck: Vec<_> = global_empty
-            .sections
-            .iter()
-            .filter(|s| s.kind == SectionKind::OnDeck)
-            .collect();
-        assert_eq!(gdeck.len(), 1);
-        assert_eq!(gdeck[0].project_label, None);
-        assert_eq!(gdeck[0].count, 0);
-        assert!(gdeck[0].task_ids.is_empty());
-        assert!(gdeck[0].empty_hint);
+        let visible = visible_task_ids(
+            &threads,
+            BoardLens::Home(BoardTab::Threads),
+            &HashSet::new(),
+            &HashSet::new(),
+            &HashSet::new(),
+        );
+        assert_eq!(
+            visible,
+            vec![Uuid::from_u128(1), Uuid::from_u128(2)],
+            "painted DONE drawer rows must stay in the selectable set"
+        );
     }
 }

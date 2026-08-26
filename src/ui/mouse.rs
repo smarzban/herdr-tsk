@@ -489,9 +489,20 @@ pub fn map_board_mouse(
         | BoardInputMode::SaveRecovery => None,
         BoardInputMode::Normal => match hit_at(hits, pos) {
             Some(QueueHitTarget::ProjectChip) => Some(BoardIntent::OpenProjectSelector),
+            Some(QueueHitTarget::HomeTab(tab)) => Some(BoardIntent::SelectHomeTab(tab)),
             Some(QueueHitTarget::SectionProject(index)) => {
                 Some(BoardIntent::SelectSectionProject(index))
             }
+            Some(QueueHitTarget::SectionThread(index)) => {
+                Some(BoardIntent::SelectSectionThread(index))
+            }
+            Some(QueueHitTarget::SectionThreadProject {
+                section_idx,
+                subgroup_idx,
+            }) => Some(BoardIntent::SelectSectionThreadProject {
+                section_idx,
+                subgroup_idx,
+            }),
             Some(QueueHitTarget::Drawer) => Some(BoardIntent::ToggleDoneDrawer),
             Some(QueueHitTarget::Task(id)) => model
                 .visible_ids()

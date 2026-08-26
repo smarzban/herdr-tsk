@@ -11,7 +11,7 @@ use crate::domain::{is_linked, HumanStatus, ObservedStatus, Task, TaskScope};
 pub enum ViewId {
     /// Work needing the human across every scope.
     Focus,
-    /// Project-scoped work in the selected project, or all projects.
+    /// Project-scoped work in the selected project, or every project on the home board.
     Projects,
     /// Work without a project scope.
     Global,

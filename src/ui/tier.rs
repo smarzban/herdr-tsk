@@ -101,7 +101,7 @@ pub fn resolve(width: u16, height: u16) -> TierGeometry {
 
 /// Place chrome from the outside in so indices never overlap.
 ///
-/// height ≥ 4: selector · viewport · rule · status · verb.
+/// height ≥ 4: blank · selector · viewport · rule · status · verb.
 /// height == 3: selector · status · verb.
 /// height == 2: selector · verb.
 /// height ≤ 1: selector only (or nothing when height == 0).
@@ -111,9 +111,17 @@ fn chrome_rows(height: u16) -> (Option<u16>, u16, u16, Option<u16>, Option<u16>,
         1 => (Some(0), 0, 0, None, None, None),
         2 => (Some(0), 0, 0, None, None, Some(1)),
         3 => (Some(0), 0, 0, None, Some(1), Some(2)),
+        4 => (Some(0), 1, 0, Some(1), Some(2), Some(3)),
         h => {
-            // rows 1..h-4 list; h-3 rule; h-2 status; h-1 verbs
-            (Some(0), 1, h - 4, Some(h - 3), Some(h - 2), Some(h - 1))
+            // row 0 blank; row 1 selector; rows 2..h-4 list; h-3 rule; h-2 status; h-1 verbs
+            (
+                Some(1),
+                2,
+                h.saturating_sub(5),
+                Some(h - 3),
+                Some(h - 2),
+                Some(h - 1),
+            )
         }
     }
 }
@@ -135,9 +143,9 @@ mod tests {
         ] {
             let g = resolve(w, h);
             assert_eq!(g.tier, Tier::Standard, "{w}x{h}");
-            assert_eq!(g.selector_row, Some(0), "{w}x{h}");
-            assert_eq!(g.viewport_top, 1, "{w}x{h}");
-            assert_eq!(g.viewport_height, h - 4, "{w}x{h}");
+            assert_eq!(g.selector_row, Some(1), "{w}x{h}");
+            assert_eq!(g.viewport_top, 2, "{w}x{h}");
+            assert_eq!(g.viewport_height, h.saturating_sub(5), "{w}x{h}");
             assert_eq!(g.rule_row, Some(h - 3), "{w}x{h}");
             assert_eq!(g.status_row, Some(h - 2), "{w}x{h}");
             assert_eq!(g.verb_row, Some(h - 1), "{w}x{h}");
@@ -191,8 +199,9 @@ mod tests {
             );
             assert_eq!(g.selector_chip_max, SELECTOR_CHIP_MAX_CELLS, "{w}x{h}");
             if h >= 4 {
-                assert_eq!(g.selector_row, Some(0), "{w}x{h}");
-                assert_eq!(g.viewport_height, h - 4, "{w}x{h}");
+                assert_eq!(g.selector_row, Some(1), "{w}x{h}");
+                assert_eq!(g.viewport_top, 2, "{w}x{h}");
+                assert_eq!(g.viewport_height, h.saturating_sub(5), "{w}x{h}");
                 assert_eq!(g.rule_row, Some(h - 3), "{w}x{h}");
                 assert_eq!(g.status_row, Some(h - 2), "{w}x{h}");
                 assert_eq!(g.verb_row, Some(h - 1), "{w}x{h}");
