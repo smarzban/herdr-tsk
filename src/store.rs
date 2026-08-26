@@ -989,7 +989,7 @@ mod tests {
             .expect("create");
         store.save(&first).expect("first save");
         assert!(
-            !dir.join(BACKUP_FILE).exists(),
+            !dir.join("tsk.json.1").exists(),
             "the first save has no previous document to retain"
         );
 
@@ -997,9 +997,13 @@ mod tests {
         store.save(&second).expect("second save");
 
         let backup: serde_json::Value =
-            serde_json::from_str(&fs::read_to_string(dir.join(BACKUP_FILE)).expect("read backup"))
+            serde_json::from_str(&fs::read_to_string(dir.join("tsk.json.1")).expect("read backup"))
                 .expect("json");
         assert_eq!(backup["tasks"][0]["title"], "first");
+        assert!(
+            !dir.join("tasks.json.1").exists(),
+            "the pre-rebrand last-good name must not be written"
+        );
         let live = store.load().expect("load live");
         assert!(live.tasks().is_empty());
     }
@@ -1029,7 +1033,7 @@ mod tests {
             .expect("replace the corrupt live document");
 
         let backup: serde_json::Value =
-            serde_json::from_str(&fs::read_to_string(dir.join(BACKUP_FILE)).expect("read backup"))
+            serde_json::from_str(&fs::read_to_string(dir.join("tsk.json.1")).expect("read backup"))
                 .expect("backup must stay valid json");
         assert_eq!(backup["tasks"][0]["title"], "keep me");
     }
@@ -1058,10 +1062,69 @@ mod tests {
         let _guard = TempDirGuard(dir.clone());
         let store = TaskStore::new(&dir);
         store.save(&DomainState::new()).expect("save");
-        assert!(store.state_file().exists(), "the live document is tsk.json");
+        assert!(
+            dir.join("tsk.json").exists(),
+            "the live document is tsk.json"
+        );
         assert!(
             !dir.join("tasks.json").exists(),
             "the pre-rebrand name must not be written"
+        );
+    }
+
+    #[test]
+    fn save_creates_literal_tsk_json_lock() {
+        let dir = temp_dir("lock-name");
+        let _guard = TempDirGuard(dir.clone());
+        TaskStore::new(&dir)
+            .save(&DomainState::new())
+            .expect("save");
+        assert!(
+            dir.join("tsk.json.lock").exists(),
+            "the lock file is tsk.json.lock"
+        );
+        assert!(
+            !dir.join("tasks.json.lock").exists(),
+            "the pre-rebrand lock name must not be written"
+        );
+    }
+
+    #[test]
+    fn load_returns_empty_when_only_legacy_tasks_json_exists() {
+        let dir = temp_dir("legacy-filename");
+        let _guard = TempDirGuard(dir.clone());
+        fs::create_dir_all(&dir).expect("mkdir");
+        let mut leftover = DomainState::new();
+        leftover
+            .create(
+                "only in leftover tasks.json",
+                None,
+                TaskScope::Global,
+                None,
+                None,
+                ProvenanceOrigin::Manual,
+            )
+            .expect("create");
+        leftover.stamp_format_version();
+        let payload = serde_json::to_vec_pretty(&leftover).expect("json");
+        let legacy = dir.join("tasks.json");
+        fs::write(&legacy, &payload).expect("write leftover");
+
+        let loaded = TaskStore::new(&dir)
+            .load()
+            .expect("missing tsk.json is a first run");
+        assert!(
+            loaded.tasks().is_empty(),
+            "leftover tasks.json must not be read"
+        );
+        assert!(
+            !dir.join("tsk.json").exists(),
+            "load must not promote the leftover file"
+        );
+        assert_eq!(
+            fs::read(&legacy).expect("read leftover"),
+            payload,
+            "leftover tasks.json must be left untouched"
         );
     }
 }
