@@ -226,7 +226,7 @@ const PRE_RENAME_STEPS_JSON: &str = r#"{
 fn steps_alias_decodes_pre_rename_store_events_and_field() {
     let dir = temp_state_dir();
     let _guard = TempDirGuard(dir.clone());
-    fs::write(dir.join("tasks.json"), PRE_RENAME_STEPS_JSON).expect("install pre-rename store");
+    fs::write(dir.join("tsk.json"), PRE_RENAME_STEPS_JSON).expect("install pre-rename store");
 
     let state = TaskStore::new(&dir)
         .load()
@@ -279,7 +279,7 @@ fn steps_alias_decodes_pre_rename_store_events_and_field() {
 fn pre_steps_store_decodes_with_empty_steps() {
     let dir = temp_state_dir();
     let _guard = TempDirGuard(dir.clone());
-    fs::write(dir.join("tasks.json"), PRE_STEPS_TASKS_JSON).expect("install pre-steps store");
+    fs::write(dir.join("tsk.json"), PRE_STEPS_TASKS_JSON).expect("install pre-steps store");
 
     let state = TaskStore::new(&dir)
         .load()
@@ -301,7 +301,7 @@ fn pre_thread_store_decodes_with_no_thread() {
     let _guard = TempDirGuard(dir.clone());
     fs::copy(
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/pre_thread_tasks.json"),
-        dir.join("tasks.json"),
+        dir.join("tsk.json"),
     )
     .expect("install pre-thread store");
 
@@ -502,7 +502,7 @@ fn pre_stabilize_fixture_survives_mutation_undo_and_dispatch_recovery_resurface(
     let _guard = TempDirGuard(dir.clone());
     fs::copy(
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/pre_stabilize_tasks.json"),
-        dir.join("tasks.json"),
+        dir.join("tsk.json"),
     )
     .expect("install pre-stabilize fixture");
     let store = TaskStore::new(&dir);
@@ -747,7 +747,7 @@ fn legacy_serialized_tasks_and_undo_entries_decode_safely() {
         .expect("undo fields");
     undo.remove("expected_revision");
     fs::write(
-        dir.join("tasks.json"),
+        dir.join("tsk.json"),
         serde_json::to_string_pretty(&legacy).expect("encode legacy state"),
     )
     .expect("write legacy state");
@@ -785,7 +785,7 @@ fn legacy_serialized_domain_without_active_attempts_round_trips() {
         .expect("domain object")
         .remove("active_attempts");
     fs::write(
-        dir.join("tasks.json"),
+        dir.join("tsk.json"),
         serde_json::to_string_pretty(&legacy).expect("encode legacy state"),
     )
     .expect("write legacy state");

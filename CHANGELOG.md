@@ -2,17 +2,20 @@
 
 ## Unreleased
 
+The live document is **`tsk.json`** (lock `tsk.json.lock`, previous `tsk.json.1`).
+A first run creates an empty `~/.tsk`; leftover `tasks.json` is not read.
+
 The projectless scope is now **desk**: board header, `tsk list` labels, and the new
 `--desk` flag. Stored scope values are unchanged,
 so no data migration is needed.
 
-Store hardening: `tasks.json` carries `format_version` (currently 1) and a
+Store hardening: `tsk.json` carries `format_version` (currently 1) and a
 newer document is refused rather than rewritten; each replace keeps the previous
-file as `tasks.json.1`; leftover `.tasks.json.tmp.*` files are swept under the
+file as `tsk.json.1`; leftover `.tsk.json.tmp.*` files are swept under the
 lock; the exclusive lock uses `std::fs::File::lock` instead of `fs2`.
 
 Rebrand to **tsk** ("a task board for your terminal"). The crate is now
-`tsk-tui` building the `tsk` binary. The store unifies at `~/.tsk` (`tasks.json`
+`tsk-tui` building the `tsk` binary. The store unifies at `~/.tsk` (`tsk.json`
 and `settings.json` side by side), overridable with `TSK_STATE_DIR` /
 `TSK_CONFIG_DIR`; injected host variables like `HERDR_PLUGIN_STATE_DIR` are
 ignored so the herdr pane and a bare terminal edit one board. There is no

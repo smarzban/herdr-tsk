@@ -355,7 +355,7 @@ fn run_board() -> Result<(), Box<dyn Error>> {
     // drive them directly -- this loop simply stops calling them.
     //
     // the Idle branch below is not pure silence, though. Every idle tick revalidates the
-    // store -- a `stat` on tasks.json, and only when its mtime/size changed does it pay for
+    // store -- a `stat` on tsk.json, and only when its mtime/size changed does it pay for
     // `store.load()` + `merge_tasks_from_disk` + `sync_from_domain` (see
     // [`revalidate_board_from_store`]) -- so a quick-capture popup (a separate process writing
     // the same file) becomes visible on an open, idle board without this board ever running a
@@ -489,7 +489,7 @@ fn board_background_work_allowed(recovery: &SaveRecovery<DomainState>) -> bool {
 
 /// Cheap idle-tick change detector for the store's on-disk document.
 ///
-/// Holds only `tasks.json`'s last-seen modification time + length, so the frame loop's Idle
+/// Holds only `tsk.json`'s last-seen modification time + length, so the frame loop's Idle
 /// branch -- which runs about 4 times a second --
 /// pays for a `stat`, not a parse, on every tick where nothing changed.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -532,14 +532,14 @@ impl StoreWatch {
     }
 }
 
-/// `tasks.json`'s modification time + length. `None` when the file does not exist yet (a
+/// `tsk.json`'s modification time + length. `None` when the file does not exist yet (a
 /// fresh, never-saved store) or its metadata could not be read.
 ///
 /// Store internals (the lock protocol, the atomic-write path) are frozen; this only stats the
 /// document store.rs already names in its own doc comment, it does not reimplement any of
 /// store.rs's load/save/lock contract.
 fn store_state_signature(store: &TaskStore) -> Option<(SystemTime, u64)> {
-    let metadata = fs::metadata(store.path().join("tasks.json")).ok()?;
+    let metadata = fs::metadata(store.state_file()).ok()?;
     let modified = metadata.modified().ok()?;
     Some((modified, metadata.len()))
 }
@@ -548,7 +548,7 @@ fn store_state_signature(store: &TaskStore) -> Option<(SystemTime, u64)> {
 ///
 /// Only when [`StoreWatch::changed`] reports a changed mtime/size does this pay for
 /// `store.load()` + [`DomainState::merge_tasks_from_disk`] + [`BoardModel::sync_from_domain`],
-/// so a quick-capture popup (a separate process writing the same `tasks.json`) becomes
+/// so a quick-capture popup (a separate process writing the same `tsk.json`) becomes
 /// visible on an open, idle board without a persisting intent from this board and without a
 /// host call.
 ///
@@ -1323,7 +1323,7 @@ mod idle_store_revalidation_tests {
     }
 
     /// an open, idle board picks up a task a *separate* store writer (the standalone
-    /// quick-capture popup, per the manifest) saved to the same `tasks.json`, with no
+    /// quick-capture popup, per the manifest) saved to the same `tsk.json`, with no
     /// persisting intent run on this board at all.
     #[test]
     fn idle_tick_revalidates_task_written_by_a_separate_store_writer() {
@@ -1463,7 +1463,7 @@ mod idle_store_revalidation_tests {
     /// a failed `store.load()` must not burn the changed signature it never got to use --
     /// otherwise a single transient read failure leaves the board stale until some *later*
     /// write happens to produce yet another distinct signature, which is the exact failure
-    /// this watch exists to survive. Corrupts `tasks.json` in place (a stand-in for any
+    /// this watch exists to survive. Corrupts `tsk.json` in place (a stand-in for any
     /// transient read failure) so `store.load()` errors while the on-disk signature has
     /// already changed, then proves the watch still reports that same signature as changed on
     /// the next poll (it was never recorded), and that a later, valid write is picked up.
@@ -1481,7 +1481,7 @@ mod idle_store_revalidation_tests {
         // Corrupt the document in place: the signature changes (different length), but
         // `store.load()` fails to parse it -- standing in for any transient read failure on
         // an already-changed document.
-        let state_file = dir.join("tasks.json");
+        let state_file = store.state_file();
         fs::write(&state_file, b"not valid json").unwrap();
 
         let merged = revalidate_board_from_store(
@@ -3218,8 +3218,8 @@ mod tests {
             .unwrap();
         store.save(&domain).unwrap();
         let mut model = BoardModel::from_domain(&domain, None);
-        fs::remove_file(dir.join("tasks.json")).unwrap();
-        fs::create_dir(dir.join("tasks.json")).unwrap();
+        fs::remove_file(store.state_file()).unwrap();
+        fs::create_dir(store.state_file()).unwrap();
 
         let result = run_attention_cycle(
             &store,

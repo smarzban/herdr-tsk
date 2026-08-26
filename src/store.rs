@@ -1,10 +1,10 @@
 //! Task Store: durable JSON under the plugin state dir.
 //!
 //! Atomic write: unique temp file in the same directory, then rename over the target.
-//! Concurrent writers take an exclusive lock on `tasks.json.lock` and merge by
+//! Concurrent writers take an exclusive lock on `tsk.json.lock` and merge by
 //! task/attempt id plus each record's revision, so writers do not drop sibling records.
 //! A store whose `format_version` is newer than this binary is refused rather than rewritten.
-//! Each successful replace retains the previous document as `tasks.json.1`.
+//! Each successful replace retains the previous document as `tsk.json.1`.
 
 use std::env;
 use std::fs::{self, File, OpenOptions};
@@ -15,11 +15,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::domain::{DomainState, LEGACY_STORE_FORMAT_VERSION, STORE_FORMAT_VERSION};
 
 /// On-disk document name under the state directory.
-const STATE_FILE: &str = "tasks.json";
+const STATE_FILE: &str = "tsk.json";
 /// Previous successful document, retained by hard-link before replace.
-const BACKUP_FILE: &str = "tasks.json.1";
+const BACKUP_FILE: &str = "tsk.json.1";
 /// Inter-process exclusive lock file (sibling of the state document).
-const LOCK_FILE: &str = "tasks.json.lock";
+const LOCK_FILE: &str = "tsk.json.lock";
 
 /// Filesystem operations that make atomic replacement durable.
 ///
@@ -103,6 +103,11 @@ impl TaskStore {
 
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// Live document path (`tsk.json` under the state directory).
+    pub fn state_file(&self) -> PathBuf {
+        self.path.join(STATE_FILE)
     }
 
     /// Load domain state. Missing file yields an empty state (first run).
@@ -255,11 +260,7 @@ impl TaskStore {
         Ok(StoreLockGuard { file })
     }
 
-    fn state_file(&self) -> PathBuf {
-        self.path.join(STATE_FILE)
-    }
-
-    /// Remove leftover `.tasks.json.tmp.*` files. Safe only under the exclusive lock.
+    /// Remove leftover `.tsk.json.tmp.*` files. Safe only under the exclusive lock.
     fn sweep_orphan_temps(&self) {
         let Ok(entries) = fs::read_dir(&self.path) else {
             return;
@@ -273,7 +274,7 @@ impl TaskStore {
         }
     }
 
-    /// Unique temp path so concurrent writers never share `.tasks.json.tmp`.
+    /// Unique temp path so concurrent writers never share `.tsk.json.tmp`.
     fn unique_tmp_path(&self) -> PathBuf {
         let pid = std::process::id();
         let nanos = SystemTime::now()
@@ -357,7 +358,7 @@ fn check_format_version(found: u32) -> Result<(), StoreError> {
     }
 }
 
-/// Keep the previous live document under `tasks.json.1` via hard-link so a crash
+/// Keep the previous live document under `tsk.json.1` via hard-link so a crash
 /// between link and rename leaves the backup identical to the still-live file.
 fn retain_last_good(live: &Path) -> Result<(), StoreError> {
     let backup = live.with_file_name(BACKUP_FILE);
@@ -1038,7 +1039,7 @@ mod tests {
         let dir = temp_dir("orphan-sweep");
         let _guard = TempDirGuard(dir.clone());
         fs::create_dir_all(&dir).expect("mkdir");
-        let orphan = dir.join(".tasks.json.tmp.1.1");
+        let orphan = dir.join(".tsk.json.tmp.1.1");
         fs::write(&orphan, b"stale").expect("seed orphan");
 
         TaskStore::new(&dir)
@@ -1048,6 +1049,19 @@ mod tests {
         assert!(
             !orphan.exists(),
             "a locked save must remove leftover temp files"
+        );
+    }
+
+    #[test]
+    fn save_writes_tsk_json_and_not_tasks_json() {
+        let dir = temp_dir("live-name");
+        let _guard = TempDirGuard(dir.clone());
+        let store = TaskStore::new(&dir);
+        store.save(&DomainState::new()).expect("save");
+        assert!(store.state_file().exists(), "the live document is tsk.json");
+        assert!(
+            !dir.join("tasks.json").exists(),
+            "the pre-rebrand name must not be written"
         );
     }
 }
