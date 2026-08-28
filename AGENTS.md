@@ -17,10 +17,9 @@ The committed `.gitignore` already covers it.
 
 **tsk** is a terminal task board ("a task board for your terminal"): a queue
 board for capture and human-status verbs. It ships as the herdr plugin
-`herdr-tsk`, and the built binary (`tsk`) also runs standalone. Park, resume,
-linking, and dispatch-start are not board or palette actions. Dispatch recovery
-can still open for a persisted attempt. Crate (`tsk-tui`) and plugin are
-`0.3.0`.
+`herdr-tsk`, and the built binary (`tsk`) also runs standalone. Attention,
+park/resume, linking, and dispatch are not in this tree; local reference only
+on `archive/dark-engine-pre-v1`. Crate (`tsk-tui`) and plugin are `0.3.0`.
 
 A gitignored `HANDOFF.md` may hold this clone’s live working state.
 
@@ -70,7 +69,7 @@ For scriptable board work, use `tsk add` and `tsk list`; read
   straight into Notes edit mode because a draft has nothing to view. The scope
   footer is inert until an edit has started.
 - Mono modifiers only. No color theme module.
-- No live attention poll on the board.
+- No host attention poll, park/resume, linking, or dispatch recovery on the board.
 - Text wraps, never truncates: one wrap engine (`edit::wrap_text`, word-boundary,
   display-cell measured) feeds notes, task-page titles, list rows, quick-add, capture
   Notes, and peek. Task-page notes wrap at `row_width - 6` (paint capacity); the

@@ -26,7 +26,7 @@ use super::model::{
 /// Verb bar for the base board list: labels follow the selected task.
 ///
 /// `space` starts a ready task or reopens a done one. On started/blocked/review it is
-/// omitted (`PrimaryVerb` does not act yet). `b` reads `unblock` only on a blocked task.
+/// omitted (`PrimaryVerb` is inert on started/blocked/review). `b` reads `unblock` only on a blocked task.
 /// Done tasks show `o reopen` instead of `d`/`b`. `:` / `?` take their word from the keymap.
 pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
     let help = |chord: &str, fallback: &'static str| keymap_help_label(chord).unwrap_or(fallback);
@@ -121,7 +121,7 @@ pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
                     label: "reopen",
                 });
             }
-            // `PrimaryVerb` does not act on Doing/Blocked/Review yet ("resume not
+            // `PrimaryVerb` is a no-op on Started/Blocked/Review ("nothing to do
             // available yet"): omit the entry rather than advertise a no-op.
             HumanStatus::Started | HumanStatus::Blocked | HumanStatus::Review => {}
         }

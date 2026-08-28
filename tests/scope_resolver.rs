@@ -39,28 +39,16 @@ fn board_quick_add_scope(
     title: &str,
 ) -> TaskScope {
     assert_eq!(
-        apply_intent(
-            domain,
-            model,
-            BoardIntent::OpenCapture,
-            Some(snapshot),
-            None,
-        )
-        .expect("open quick add"),
+        apply_intent(domain, model, BoardIntent::OpenCapture, Some(snapshot),)
+            .expect("open quick add"),
         IntentOutcome::None
     );
     for character in title.chars() {
-        apply_intent(
-            domain,
-            model,
-            BoardIntent::QuickAddInsert(character),
-            None,
-            None,
-        )
-        .expect("type quick-add title");
+        apply_intent(domain, model, BoardIntent::QuickAddInsert(character), None)
+            .expect("type quick-add title");
     }
     assert_eq!(
-        apply_intent(domain, model, BoardIntent::QuickAddSave, None, None).expect("save quick add"),
+        apply_intent(domain, model, BoardIntent::QuickAddSave, None).expect("save quick add"),
         IntentOutcome::Persist
     );
     model.sync_from_domain(domain);

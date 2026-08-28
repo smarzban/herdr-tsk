@@ -56,14 +56,8 @@ fn space_on_todo_sets_doing_via_domain() {
     let (mut domain, mut model, id) = board_with_task("start me", HumanStatus::Ready);
     assert_eq!(model.selected_id(), Some(id));
 
-    let outcome = apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::PrimaryVerb,
-        None,
-        None,
-    )
-    .expect("primary");
+    let outcome =
+        apply_intent(&mut domain, &mut model, BoardIntent::PrimaryVerb, None).expect("primary");
     assert_eq!(outcome, IntentOutcome::Persist);
     assert_eq!(domain.get(id).expect("task").status, HumanStatus::Started);
     assert_eq!(
@@ -84,14 +78,7 @@ fn space_on_todo_sets_doing_via_domain() {
 fn space_on_done_reopens() {
     let (mut domain, mut model, id) = board_with_task("reopen me", HumanStatus::Done);
     // Done tasks live in the drawer; open it so selection can hold the done id.
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::ToggleDoneDrawer,
-        None,
-        None,
-    )
-    .expect("drawer");
+    apply_intent(&mut domain, &mut model, BoardIntent::ToggleDoneDrawer, None).expect("drawer");
     // Re-select the done task if reanchor moved off it.
     if model.selected_id() != Some(id) {
         let idx = model
@@ -99,50 +86,28 @@ fn space_on_done_reopens() {
             .iter()
             .position(|&row| row == id)
             .expect("done row visible with drawer open");
-        apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::SelectIndex(idx),
-            None,
-            None,
-        )
-        .expect("select done");
+        apply_intent(&mut domain, &mut model, BoardIntent::SelectIndex(idx), None)
+            .expect("select done");
     }
 
-    let outcome = apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::PrimaryVerb,
-        None,
-        None,
-    )
-    .expect("primary");
+    let outcome =
+        apply_intent(&mut domain, &mut model, BoardIntent::PrimaryVerb, None).expect("primary");
     assert_eq!(outcome, IntentOutcome::Persist);
     assert_eq!(domain.get(id).expect("task").status, HumanStatus::Ready);
 }
 
 #[test]
-fn space_on_doing_is_noop_with_visible_notice() {
+fn space_on_doing_is_silent_noop() {
     let (mut domain, mut model, id) = board_with_task("already going", HumanStatus::Started);
     let before = domain.get(id).expect("task").clone();
 
-    let outcome = apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::PrimaryVerb,
-        None,
-        None,
-    )
-    .expect("primary");
+    let outcome =
+        apply_intent(&mut domain, &mut model, BoardIntent::PrimaryVerb, None).expect("primary");
     assert_eq!(outcome, IntentOutcome::None);
     let after = domain.get(id).expect("task");
     assert_eq!(after.status, before.status);
     assert_eq!(after.revision, before.revision);
-    let notice = model.message().expect("visible notice");
-    assert!(
-        !notice.is_empty(),
-        "doing primary must leave a status-line notice"
-    );
+    assert_eq!(model.message(), None, "started primary stays silent");
 }
 
 #[test]
@@ -150,36 +115,21 @@ fn d_completes_non_done_and_o_reopens_done() {
     // d completes non-done
     let (mut domain, mut model, id) = board_with_task("finish me", HumanStatus::Ready);
     let outcome =
-        apply_intent(&mut domain, &mut model, BoardIntent::Complete, None, None).expect("complete");
+        apply_intent(&mut domain, &mut model, BoardIntent::Complete, None).expect("complete");
     assert_eq!(outcome, IntentOutcome::Persist);
     assert_eq!(domain.get(id).expect("task").status, HumanStatus::Done);
 
     // o reopens done (drawer so the done row stays addressable)
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::ToggleDoneDrawer,
-        None,
-        None,
-    )
-    .expect("drawer");
+    apply_intent(&mut domain, &mut model, BoardIntent::ToggleDoneDrawer, None).expect("drawer");
     if model.selected_id() != Some(id) {
         let idx = model
             .visible_ids()
             .iter()
             .position(|&row| row == id)
             .expect("done visible");
-        apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::SelectIndex(idx),
-            None,
-            None,
-        )
-        .expect("select");
+        apply_intent(&mut domain, &mut model, BoardIntent::SelectIndex(idx), None).expect("select");
     }
-    let outcome =
-        apply_intent(&mut domain, &mut model, BoardIntent::Reopen, None, None).expect("reopen");
+    let outcome = apply_intent(&mut domain, &mut model, BoardIntent::Reopen, None).expect("reopen");
     assert_eq!(outcome, IntentOutcome::Persist);
     assert_eq!(domain.get(id).expect("task").status, HumanStatus::Ready);
 
@@ -191,14 +141,8 @@ fn d_completes_non_done_and_o_reopens_done() {
 fn b_on_blocked_sets_todo_and_keeps_task_on_deck_not_in_motion() {
     let (mut domain, mut model, id) = board_with_task("unblock me", HumanStatus::Blocked);
 
-    let outcome = apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::ToggleBlock,
-        None,
-        None,
-    )
-    .expect("unblock");
+    let outcome =
+        apply_intent(&mut domain, &mut model, BoardIntent::ToggleBlock, None).expect("unblock");
 
     assert_eq!(outcome, IntentOutcome::Persist);
     assert_eq!(domain.get(id).expect("task").status, HumanStatus::Ready);
@@ -223,14 +167,8 @@ fn b_blocks_todo_doing_and_review() {
     ] {
         let (mut domain, mut model, id) = board_with_task("block me", status);
 
-        let outcome = apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::ToggleBlock,
-            None,
-            None,
-        )
-        .expect("block");
+        let outcome =
+            apply_intent(&mut domain, &mut model, BoardIntent::ToggleBlock, None).expect("block");
 
         assert_eq!(outcome, IntentOutcome::Persist, "{status:?}");
         assert_eq!(
@@ -247,28 +185,16 @@ fn enter_opens_the_task_page_and_enter_again_closes_it_without_mutating() {
     let rev_before = domain.get(id).expect("task").revision;
     assert_eq!(model.input_mode(), BoardInputMode::Normal);
 
-    let outcome = apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::OpenTaskPage,
-        None,
-        None,
-    )
-    .expect("open task page");
+    let outcome = apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None)
+        .expect("open task page");
     assert_eq!(outcome, IntentOutcome::None);
     assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
     assert_eq!(model.detail_open(), None, "the page replaces any peek");
     assert_eq!(domain.get(id).expect("task").revision, rev_before);
     assert_eq!(domain.get(id).expect("task").status, HumanStatus::Ready);
 
-    let outcome = apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::OpenTaskPage,
-        None,
-        None,
-    )
-    .expect("close task page");
+    let outcome = apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None)
+        .expect("close task page");
     assert_eq!(outcome, IntentOutcome::None);
     assert_eq!(model.input_mode(), BoardInputMode::Normal);
     assert_eq!(domain.get(id).expect("task").revision, rev_before);
@@ -282,37 +208,25 @@ fn right_arrow_peeks_detail_and_left_arrow_collapses_it() {
     assert_eq!(model.detail_open(), None);
 
     // Right opens the peek on the selected row without touching the domain.
-    let outcome = apply_intent(&mut domain, &mut model, BoardIntent::PeekDetail, None, None)
-        .expect("peek detail");
+    let outcome =
+        apply_intent(&mut domain, &mut model, BoardIntent::PeekDetail, None).expect("peek detail");
     assert_eq!(outcome, IntentOutcome::None);
     assert_eq!(model.detail_open(), Some(id));
     assert_eq!(domain.get(id).expect("task").revision, rev_before);
 
     // Right again is idempotent: still open, still no mutation.
-    apply_intent(&mut domain, &mut model, BoardIntent::PeekDetail, None, None).expect("peek again");
+    apply_intent(&mut domain, &mut model, BoardIntent::PeekDetail, None).expect("peek again");
     assert_eq!(model.detail_open(), Some(id));
 
     // Left collapses the open peek.
-    let outcome = apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::CollapseDetail,
-        None,
-        None,
-    )
-    .expect("collapse detail");
+    let outcome = apply_intent(&mut domain, &mut model, BoardIntent::CollapseDetail, None)
+        .expect("collapse detail");
     assert_eq!(outcome, IntentOutcome::None);
     assert_eq!(model.detail_open(), None);
 
     // Left with nothing open is a clean no-op.
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::CollapseDetail,
-        None,
-        None,
-    )
-    .expect("collapse no-op");
+    apply_intent(&mut domain, &mut model, BoardIntent::CollapseDetail, None)
+        .expect("collapse no-op");
     assert_eq!(model.detail_open(), None);
     assert_eq!(domain.get(id).expect("task").revision, rev_before);
 
@@ -323,7 +237,7 @@ fn right_arrow_peeks_detail_and_left_arrow_collapses_it() {
 #[test]
 fn detail_closes_when_its_task_leaves_the_visible_set() {
     let (mut domain, mut model, id) = board_with_task("inspect then remove", HumanStatus::Ready);
-    apply_intent(&mut domain, &mut model, BoardIntent::PeekDetail, None, None).expect("open peek");
+    apply_intent(&mut domain, &mut model, BoardIntent::PeekDetail, None).expect("open peek");
     assert_eq!(model.detail_open(), Some(id));
 
     domain.soft_delete(id).expect("soft delete");
@@ -353,14 +267,8 @@ fn z_toggles_done_drawer_membership_on_list() {
     );
     assert!(model.visible_ids().contains(&open_id));
 
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::ToggleDoneDrawer,
-        None,
-        None,
-    )
-    .expect("open drawer");
+    apply_intent(&mut domain, &mut model, BoardIntent::ToggleDoneDrawer, None)
+        .expect("open drawer");
     assert!(model.drawer_open());
     assert!(
         model.visible_ids().contains(&done_id),
@@ -373,14 +281,8 @@ fn z_toggles_done_drawer_membership_on_list() {
         .any(|s| s.kind == SectionKind::Done && s.task_ids.contains(&done_id));
     assert!(has_done_section);
 
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::ToggleDoneDrawer,
-        None,
-        None,
-    )
-    .expect("close drawer");
+    apply_intent(&mut domain, &mut model, BoardIntent::ToggleDoneDrawer, None)
+        .expect("close drawer");
     assert!(!model.drawer_open());
     assert!(!model.visible_ids().contains(&done_id));
 }
@@ -388,14 +290,8 @@ fn z_toggles_done_drawer_membership_on_list() {
 #[test]
 fn block_on_done_and_verbs_without_selection_leave_visible_notices() {
     let (mut domain, mut model, id) = board_with_task("finished", HumanStatus::Done);
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::ToggleDoneDrawer,
-        None,
-        None,
-    )
-    .expect("open drawer");
+    apply_intent(&mut domain, &mut model, BoardIntent::ToggleDoneDrawer, None)
+        .expect("open drawer");
     let index = model
         .visible_ids()
         .iter()
@@ -406,18 +302,11 @@ fn block_on_done_and_verbs_without_selection_leave_visible_notices() {
         &mut model,
         BoardIntent::SelectIndex(index),
         None,
-        None,
     )
     .expect("select done task");
 
-    let outcome = apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::ToggleBlock,
-        None,
-        None,
-    )
-    .expect("block done");
+    let outcome =
+        apply_intent(&mut domain, &mut model, BoardIntent::ToggleBlock, None).expect("block done");
     assert_eq!(outcome, IntentOutcome::None);
     assert_eq!(domain.get(id).expect("done task").status, HumanStatus::Done);
     assert!(model.message().is_some_and(|message| !message.is_empty()));
@@ -425,7 +314,7 @@ fn block_on_done_and_verbs_without_selection_leave_visible_notices() {
     let mut empty_domain = DomainState::new();
     let mut empty_model = BoardModel::from_domain(&empty_domain, Some(PathBuf::from(THIS_REPO)));
     for intent in [BoardIntent::PrimaryVerb, BoardIntent::ToggleBlock] {
-        let outcome = apply_intent(&mut empty_domain, &mut empty_model, intent, None, None)
+        let outcome = apply_intent(&mut empty_domain, &mut empty_model, intent, None)
             .expect("verb without selection");
         assert_eq!(outcome, IntentOutcome::None);
         assert!(empty_model
@@ -439,10 +328,10 @@ fn esc_closes_transient_then_detail_then_quit_and_q_quits_only_in_normal() {
     let (mut domain, mut model, id) = board_with_task("layered", HumanStatus::Ready);
 
     // Transient: help card
-    apply_intent(&mut domain, &mut model, BoardIntent::OpenHelp, None, None).expect("help");
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenHelp, None).expect("help");
     assert_eq!(model.input_mode(), BoardInputMode::Help);
-    let outcome = apply_intent(&mut domain, &mut model, BoardIntent::CloseLayer, None, None)
-        .expect("esc help");
+    let outcome =
+        apply_intent(&mut domain, &mut model, BoardIntent::CloseLayer, None).expect("esc help");
     assert_eq!(outcome, IntentOutcome::None);
     assert_eq!(model.input_mode(), BoardInputMode::Normal);
 
@@ -452,26 +341,25 @@ fn esc_closes_transient_then_detail_then_quit_and_q_quits_only_in_normal() {
         &mut model,
         BoardIntent::OpenCommandPalette,
         None,
-        None,
     )
     .expect("palette");
     assert_ne!(model.command_surface(), CommandSurface::None);
-    let outcome = apply_intent(&mut domain, &mut model, BoardIntent::CloseLayer, None, None)
-        .expect("esc palette");
+    let outcome =
+        apply_intent(&mut domain, &mut model, BoardIntent::CloseLayer, None).expect("esc palette");
     assert_eq!(outcome, IntentOutcome::None);
     assert_eq!(model.command_surface(), CommandSurface::None);
 
     // Peek / accordion
-    apply_intent(&mut domain, &mut model, BoardIntent::PeekDetail, None, None).expect("peek");
+    apply_intent(&mut domain, &mut model, BoardIntent::PeekDetail, None).expect("peek");
     assert_eq!(model.detail_open(), Some(id));
-    let outcome = apply_intent(&mut domain, &mut model, BoardIntent::CloseLayer, None, None)
-        .expect("esc detail");
+    let outcome =
+        apply_intent(&mut domain, &mut model, BoardIntent::CloseLayer, None).expect("esc detail");
     assert_eq!(outcome, IntentOutcome::None);
     assert_eq!(model.detail_open(), None);
 
     // Nothing open → quit
-    let outcome = apply_intent(&mut domain, &mut model, BoardIntent::CloseLayer, None, None)
-        .expect("esc quit");
+    let outcome =
+        apply_intent(&mut domain, &mut model, BoardIntent::CloseLayer, None).expect("esc quit");
     assert_eq!(outcome, IntentOutcome::Quit);
 
     // alt+q quits from normal only; bare q is dead
@@ -546,7 +434,6 @@ fn palette_lists_exactly_m1_commands_for_selection_filters_by_subsequence_and_di
         &mut model,
         BoardIntent::OpenCommandPalette,
         None,
-        None,
     )
     .expect("open palette");
     assert_eq!(model.command_surface(), CommandSurface::Palette);
@@ -585,7 +472,6 @@ fn palette_lists_exactly_m1_commands_for_selection_filters_by_subsequence_and_di
             &mut model,
             BoardIntent::CommandQueryInsert(ch),
             None,
-            None,
         )
         .expect("type");
     }
@@ -603,7 +489,7 @@ fn palette_lists_exactly_m1_commands_for_selection_filters_by_subsequence_and_di
     // Confirm dispatches the same intent as SetStatus(Doing) would.
     let resolved = resolve_board_command(&mut model, BoardIntent::ConfirmCommand).expect("resolve");
     assert_eq!(resolved, BoardIntent::SetStatus(HumanStatus::Started));
-    apply_intent(&mut domain, &mut model, resolved, None, None).expect("apply");
+    apply_intent(&mut domain, &mut model, resolved, None).expect("apply");
     assert_eq!(domain.get(id).expect("task").status, HumanStatus::Started);
 
     // a doing selection still has nothing to reopen (SetStatus closed the palette
@@ -612,7 +498,6 @@ fn palette_lists_exactly_m1_commands_for_selection_filters_by_subsequence_and_di
         &mut domain,
         &mut model,
         BoardIntent::OpenCommandPalette,
-        None,
         None,
     )
     .expect("palette while doing");
@@ -624,35 +509,20 @@ fn palette_lists_exactly_m1_commands_for_selection_filters_by_subsequence_and_di
     // Key-equivalent: `o` reopen vs palette "reopen".
     domain.set_status(id, HumanStatus::Done).expect("done");
     model.sync_from_domain(&domain);
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::ToggleDoneDrawer,
-        None,
-        None,
-    )
-    .expect("drawer");
+    apply_intent(&mut domain, &mut model, BoardIntent::ToggleDoneDrawer, None).expect("drawer");
     if model.selected_id() != Some(id) {
         let idx = model
             .visible_ids()
             .iter()
             .position(|&row| row == id)
             .expect("done visible");
-        apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::SelectIndex(idx),
-            None,
-            None,
-        )
-        .expect("select");
+        apply_intent(&mut domain, &mut model, BoardIntent::SelectIndex(idx), None).expect("select");
     }
 
     apply_intent(
         &mut domain,
         &mut model,
         BoardIntent::OpenCommandPalette,
-        None,
         None,
     )
     .expect("palette again");
@@ -667,14 +537,13 @@ fn palette_lists_exactly_m1_commands_for_selection_filters_by_subsequence_and_di
             &mut model,
             BoardIntent::CommandQueryInsert(ch),
             None,
-            None,
         )
         .expect("type reopen");
     }
     let via_palette =
         resolve_board_command(&mut model, BoardIntent::ConfirmCommand).expect("reopen cmd");
     assert_eq!(via_palette, BoardIntent::Reopen);
-    apply_intent(&mut domain, &mut model, via_palette, None, None).expect("reopen");
+    apply_intent(&mut domain, &mut model, via_palette, None).expect("reopen");
     assert_eq!(domain.get(id).expect("task").status, HumanStatus::Ready);
 
     // Direct key route lands on the same intent.
@@ -689,7 +558,6 @@ fn palette_lists_exactly_m1_commands_for_selection_filters_by_subsequence_and_di
         &mut model,
         BoardIntent::OpenCommandPalette,
         None,
-        None,
     )
     .expect("paint palette");
     let frame = rendered_board(&model, 80, 24);
@@ -699,12 +567,11 @@ fn palette_lists_exactly_m1_commands_for_selection_filters_by_subsequence_and_di
     );
 }
 
-/// park / resume / link / dispatch never appear in the the palette.
+/// park / resume / link / dispatch never appear in the palette.
 ///
-/// The dispatch-recovery entries (`RecoveryResume`/`BeginCleanup`) only ever reach the
-/// catalog when the selected task carries an active attempt, so a fixture with no attempt
-/// would pass this test whether or not the catalog is fixed: the second block below builds
-/// that state so the assertion is load-bearing.
+/// The second block builds the strongest old-store state (a selected task carrying a
+/// durable dispatch attempt) so the exclusion stays load-bearing even though the
+/// recovery surface is gone from this tree.
 #[test]
 fn palette_excludes_park_resume_link_dispatch() {
     let (mut domain, mut model, _id) = board_with_task("no classic tail", HumanStatus::Ready);
@@ -712,7 +579,6 @@ fn palette_excludes_park_resume_link_dispatch() {
         &mut domain,
         &mut model,
         BoardIntent::OpenCommandPalette,
-        None,
         None,
     )
     .expect("palette");
@@ -755,7 +621,6 @@ fn palette_excludes_park_resume_link_dispatch() {
         &mut model,
         BoardIntent::OpenCommandPalette,
         None,
-        None,
     )
     .expect("palette with active attempt");
     for cmd in model.visible_commands() {
@@ -779,17 +644,10 @@ fn palette_window_keeps_wrapped_last_command_visible() {
         &mut model,
         BoardIntent::OpenCommandPalette,
         None,
-        None,
     )
     .expect("open palette");
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::CommandPrev,
-        None,
-        None,
-    )
-    .expect("wrap to last command");
+    apply_intent(&mut domain, &mut model, BoardIntent::CommandPrev, None)
+        .expect("wrap to last command");
     assert_eq!(
         model.selected_command().expect("last command").label,
         "quit"
@@ -806,7 +664,7 @@ fn palette_window_keeps_wrapped_last_command_visible() {
 #[test]
 fn help_card_lists_every_active_tier_binding_and_closes_on_any_key() {
     let (mut domain, mut model, _id) = board_with_task("help me", HumanStatus::Ready);
-    apply_intent(&mut domain, &mut model, BoardIntent::OpenHelp, None, None).expect("help");
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenHelp, None).expect("help");
     assert_eq!(model.input_mode(), BoardInputMode::Help);
 
     let frame = rendered_board(&model, 80, 24);
@@ -852,7 +710,7 @@ fn help_card_lists_every_active_tier_binding_and_closes_on_any_key() {
     // Any key closes (including a letter that would quit in normal mode).
     let close = map_key(BoardInputMode::Help, press(KeyCode::Char('q'))).expect("any key");
     assert_eq!(close, BoardIntent::CloseLayer);
-    apply_intent(&mut domain, &mut model, close, None, None).expect("close");
+    apply_intent(&mut domain, &mut model, close, None).expect("close");
     assert_eq!(model.input_mode(), BoardInputMode::Normal);
     assert_eq!(
         map_key(BoardInputMode::Help, press(KeyCode::Char('x'))),
@@ -988,21 +846,14 @@ fn project_scope_chip_and_dropdown_filter_all_visible_sections_matching_ac5() {
         .expect("done");
 
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::ToggleDoneDrawer,
-        None,
-        None,
-    )
-    .expect("open done drawer");
+    apply_intent(&mut domain, &mut model, BoardIntent::ToggleDoneDrawer, None)
+        .expect("open done drawer");
 
     // Chip path: open selector without needing the classic Projects lens.
     apply_intent(
         &mut domain,
         &mut model,
         BoardIntent::OpenProjectSelector,
-        None,
         None,
     )
     .expect("open scope dropdown");
@@ -1038,7 +889,6 @@ fn project_scope_chip_and_dropdown_filter_all_visible_sections_matching_ac5() {
             &mut model,
             BoardIntent::ProjectPickerNext,
             None,
-            None,
         )
         .expect("next");
     }
@@ -1047,7 +897,6 @@ fn project_scope_chip_and_dropdown_filter_all_visible_sections_matching_ac5() {
         &mut domain,
         &mut model,
         BoardIntent::ConfirmProjectChoice,
-        None,
         None,
     )
     .expect("confirm scope");
@@ -1078,7 +927,6 @@ fn project_scope_chip_and_dropdown_filter_all_visible_sections_matching_ac5() {
         &mut model,
         BoardIntent::OpenProjectSelector,
         None,
-        None,
     )
     .expect("reopen for home");
     let home_idx = model
@@ -1095,7 +943,6 @@ fn project_scope_chip_and_dropdown_filter_all_visible_sections_matching_ac5() {
             &mut model,
             BoardIntent::ProjectPickerNext,
             None,
-            None,
         )
         .expect("next home");
     }
@@ -1104,7 +951,6 @@ fn project_scope_chip_and_dropdown_filter_all_visible_sections_matching_ac5() {
         &mut domain,
         &mut model,
         BoardIntent::ConfirmProjectChoice,
-        None,
         None,
     )
     .expect("scope home");
@@ -1129,7 +975,6 @@ fn project_scope_chip_and_dropdown_filter_all_visible_sections_matching_ac5() {
         &mut model,
         BoardIntent::OpenProjectSelector,
         None,
-        None,
     )
     .expect("reopen");
     let empty_idx = model
@@ -1148,7 +993,6 @@ fn project_scope_chip_and_dropdown_filter_all_visible_sections_matching_ac5() {
             &mut model,
             BoardIntent::ProjectPickerNext,
             None,
-            None,
         )
         .expect("next empty");
     }
@@ -1157,7 +1001,6 @@ fn project_scope_chip_and_dropdown_filter_all_visible_sections_matching_ac5() {
         &mut domain,
         &mut model,
         BoardIntent::ConfirmProjectChoice,
-        None,
         None,
     )
     .expect("scope empty");
@@ -1215,19 +1058,13 @@ fn x_soft_deletes_and_status_line_names_task_with_undo_hint() {
     // pin the one we will delete
     if model.selected_id() != Some(id) {
         if let Some(idx) = model.visible_ids().iter().position(|&rid| rid == id) {
-            let _ = apply_intent(
-                &mut domain,
-                &mut model,
-                BoardIntent::SelectIndex(idx),
-                None,
-                None,
-            );
+            let _ = apply_intent(&mut domain, &mut model, BoardIntent::SelectIndex(idx), None);
         }
     }
     assert_eq!(model.selected_id(), Some(id));
 
-    let outcome = apply_intent(&mut domain, &mut model, BoardIntent::SoftDelete, None, None)
-        .expect("soft delete");
+    let outcome =
+        apply_intent(&mut domain, &mut model, BoardIntent::SoftDelete, None).expect("soft delete");
     assert_eq!(outcome, IntentOutcome::Persist);
     assert!(domain.get(id).expect("task").soft_deleted);
     assert!(!model.visible_ids().contains(&id));
@@ -1261,13 +1098,12 @@ fn u_undoes_with_domain_coverage_and_stale_undo_refused_visibly() {
         )
         .expect("create");
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
-    apply_intent(&mut domain, &mut model, BoardIntent::SoftDelete, None, None).expect("delete");
+    apply_intent(&mut domain, &mut model, BoardIntent::SoftDelete, None).expect("delete");
     assert!(domain.get(id).expect("task").soft_deleted);
     assert!(!model.visible_ids().contains(&id));
 
     // undo restores
-    let outcome =
-        apply_intent(&mut domain, &mut model, BoardIntent::Undo, None, None).expect("undo");
+    let outcome = apply_intent(&mut domain, &mut model, BoardIntent::Undo, None).expect("undo");
     assert_eq!(outcome, IntentOutcome::Persist);
     assert!(!domain.get(id).expect("task").soft_deleted);
     assert!(model.visible_ids().contains(&id));
@@ -1276,11 +1112,11 @@ fn u_undoes_with_domain_coverage_and_stale_undo_refused_visibly() {
 
     // stale undo: delete again (records entry with current rev), then direct-restore (advances rev
     // without popping the entry). Next undo must refuse visibly.
-    apply_intent(&mut domain, &mut model, BoardIntent::SoftDelete, None, None).expect("delete2");
+    apply_intent(&mut domain, &mut model, BoardIntent::SoftDelete, None).expect("delete2");
     assert!(domain.get(id).expect("task").soft_deleted);
     let _ = domain.restore(id);
     let outcome =
-        apply_intent(&mut domain, &mut model, BoardIntent::Undo, None, None).expect("stale undo");
+        apply_intent(&mut domain, &mut model, BoardIntent::Undo, None).expect("stale undo");
     assert_eq!(outcome, IntentOutcome::None);
     // refusal visible on status line (with notice also armed); domain state unchanged.
     // Read the painted status row, not only model.message().
@@ -1328,18 +1164,11 @@ fn esc_and_q_close_the_task_page_from_view_mode() {
         (KeyCode::Char('q'), KeyModifiers::ALT),
     ] {
         let (mut domain, mut model, _id) = board_with_noted_task();
-        apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::OpenTaskPage,
-            None,
-            None,
-        )
-        .expect("open page");
+        apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
         assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
         let close = map_key(BoardInputMode::TaskPage, KeyEvent::new(key, mods)).expect("close key");
         assert_eq!(close, BoardIntent::CloseLayer);
-        apply_intent(&mut domain, &mut model, close, None, None).expect("close page");
+        apply_intent(&mut domain, &mut model, close, None).expect("close page");
         assert_eq!(model.input_mode(), BoardInputMode::Normal);
     }
 }
@@ -1379,50 +1208,36 @@ fn task_page_navigation_ignores_unrelated_modifier_chords() {
 #[test]
 fn page_verbs_act_on_the_page_task_and_the_page_stays_open() {
     let (mut domain, mut model, id) = board_with_noted_task();
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::OpenTaskPage,
-        None,
-        None,
-    )
-    .expect("open page");
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
 
     // `d` completes the page's task; the page remains its surface.
     let complete = map_key(BoardInputMode::TaskPage, alt(KeyCode::Char('d'))).expect("d");
     assert_eq!(complete, BoardIntent::Complete);
-    apply_intent(&mut domain, &mut model, complete, None, None).expect("complete");
+    apply_intent(&mut domain, &mut model, complete, None).expect("complete");
     assert_eq!(domain.get(id).expect("task").status, HumanStatus::Done);
     assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
 
     // `o` reopens it, still from the page.
     let reopen = map_key(BoardInputMode::TaskPage, alt(KeyCode::Char('o'))).expect("o");
-    apply_intent(&mut domain, &mut model, reopen, None, None).expect("reopen");
+    apply_intent(&mut domain, &mut model, reopen, None).expect("reopen");
     assert_eq!(domain.get(id).expect("task").status, HumanStatus::Ready);
     assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
 
     // `b` blocks, `b` again unblocks.
     let block = map_key(BoardInputMode::TaskPage, alt(KeyCode::Char('b'))).expect("b");
-    apply_intent(&mut domain, &mut model, block.clone(), None, None).expect("block");
+    apply_intent(&mut domain, &mut model, block.clone(), None).expect("block");
     assert_eq!(domain.get(id).expect("task").status, HumanStatus::Blocked);
-    apply_intent(&mut domain, &mut model, block, None, None).expect("unblock");
+    apply_intent(&mut domain, &mut model, block, None).expect("unblock");
     assert_eq!(domain.get(id).expect("task").status, HumanStatus::Ready);
 }
 
 #[test]
 fn deleting_from_the_page_closes_it_and_undo_restores() {
     let (mut domain, mut model, id) = board_with_noted_task();
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::OpenTaskPage,
-        None,
-        None,
-    )
-    .expect("open page");
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
     let delete = map_key(BoardInputMode::TaskPage, alt(KeyCode::Char('x'))).expect("x");
     assert_eq!(delete, BoardIntent::SoftDelete);
-    apply_intent(&mut domain, &mut model, delete, None, None).expect("delete");
+    apply_intent(&mut domain, &mut model, delete, None).expect("delete");
     assert!(domain.get(id).expect("task").soft_deleted);
     assert_eq!(
         model.input_mode(),
@@ -1430,117 +1245,55 @@ fn deleting_from_the_page_closes_it_and_undo_restores() {
         "the page closes"
     );
     // The undo route back works from the board.
-    apply_intent(&mut domain, &mut model, BoardIntent::Undo, None, None).expect("undo");
+    apply_intent(&mut domain, &mut model, BoardIntent::Undo, None).expect("undo");
     assert!(!domain.get(id).expect("task").soft_deleted);
 }
 
 #[test]
 fn tab_cycles_view_mode_through_title_notes_thread_and_scope_edits() {
     let (mut domain, mut model, _id) = board_with_noted_task();
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::OpenTaskPage,
-        None,
-        None,
-    )
-    .expect("open page");
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
     let tab = map_key(BoardInputMode::TaskPage, press(KeyCode::Tab)).expect("tab");
     assert_eq!(tab, BoardIntent::FormFocusNext);
 
-    apply_intent(&mut domain, &mut model, tab.clone(), None, None).expect("focus title");
+    apply_intent(&mut domain, &mut model, tab.clone(), None).expect("focus title");
     assert_eq!(model.input_mode(), BoardInputMode::EditTitle);
-    apply_intent(&mut domain, &mut model, tab.clone(), None, None).expect("focus notes");
+    apply_intent(&mut domain, &mut model, tab.clone(), None).expect("focus notes");
     assert_eq!(model.input_mode(), BoardInputMode::EditNotes);
-    apply_intent(&mut domain, &mut model, tab.clone(), None, None).expect("focus thread");
+    apply_intent(&mut domain, &mut model, tab.clone(), None).expect("focus thread");
     assert_eq!(model.input_mode(), BoardInputMode::EditThread);
-    apply_intent(&mut domain, &mut model, tab, None, None).expect("focus scope");
+    apply_intent(&mut domain, &mut model, tab, None).expect("focus scope");
     assert_eq!(model.input_mode(), BoardInputMode::EditScope);
 }
 
 #[test]
 fn field_entry_intents_refocus_an_open_page_without_recreating_its_drafts() {
     let (mut domain, mut model, _id) = board_with_noted_task();
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::OpenTaskPage,
-        None,
-        None,
-    )
-    .expect("open page");
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::BeginEditTitle,
-        None,
-        None,
-    )
-    .expect("edit title");
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::EditInsert('!'),
-        None,
-        None,
-    )
-    .expect("type");
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None).expect("edit title");
+    apply_intent(&mut domain, &mut model, BoardIntent::EditInsert('!'), None).expect("type");
     // Moving into Notes must keep the title draft alive (no form recreation).
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::BeginEditNotes,
-        None,
-        None,
-    )
-    .expect("edit notes");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditNotes, None).expect("edit notes");
     assert_eq!(model.input_mode(), BoardInputMode::EditNotes);
     assert_eq!(model.edit_buffer(), "line one\nline two");
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::BeginEditTitle,
-        None,
-        None,
-    )
-    .expect("back to title");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+        .expect("back to title");
     assert_eq!(model.edit_buffer(), "paged task!");
 }
 
 #[test]
 fn ctrl_enter_from_the_page_saves_and_returns_to_the_board() {
     let (mut domain, mut model, id) = board_with_noted_task();
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::OpenTaskPage,
-        None,
-        None,
-    )
-    .expect("open page");
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::BeginEditTitle,
-        None,
-        None,
-    )
-    .expect("edit title");
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::EditInsert('!'),
-        None,
-        None,
-    )
-    .expect("type");
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None).expect("edit title");
+    apply_intent(&mut domain, &mut model, BoardIntent::EditInsert('!'), None).expect("type");
     let save = map_key(
         BoardInputMode::EditTitle,
         KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL),
     )
     .expect("ctrl+enter");
     assert_eq!(save, BoardIntent::ConfirmEdit);
-    let outcome = apply_intent(&mut domain, &mut model, save, None, None).expect("save");
+    let outcome = apply_intent(&mut domain, &mut model, save, None).expect("save");
     assert_eq!(outcome, IntentOutcome::Persist);
     assert_eq!(domain.get(id).expect("task").title, "paged task!");
     assert_eq!(model.input_mode(), BoardInputMode::Normal);
@@ -1550,30 +1303,16 @@ fn ctrl_enter_from_the_page_saves_and_returns_to_the_board() {
 fn page_scroll_intents_are_session_only_and_bounded() {
     let (mut domain, mut model, id) = board_with_noted_task();
     let rev_before = domain.get(id).expect("task").revision;
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::OpenTaskPage,
-        None,
-        None,
-    )
-    .expect("open page");
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
     for intent in [BoardIntent::PageScrollUp, BoardIntent::PageScrollDown] {
-        let outcome =
-            apply_intent(&mut domain, &mut model, intent.clone(), None, None).expect("scroll");
+        let outcome = apply_intent(&mut domain, &mut model, intent.clone(), None).expect("scroll");
         assert_eq!(outcome, IntentOutcome::None);
         assert!(!board_intent_may_persist(&intent));
     }
     // Far more downs than the notes have lines must stay bounded and mutation-free.
     for _ in 0..50 {
-        apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::PageScrollDown,
-            None,
-            None,
-        )
-        .expect("scroll down");
+        apply_intent(&mut domain, &mut model, BoardIntent::PageScrollDown, None)
+            .expect("scroll down");
     }
     assert_eq!(domain.get(id).expect("task").revision, rev_before);
 }
@@ -1606,14 +1345,7 @@ fn page_scroll_reaches_the_bottom_of_a_wrapping_note() {
         )
         .expect("create task");
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::OpenTaskPage,
-        None,
-        None,
-    )
-    .expect("open page");
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
 
     // One painted frame establishes the wrap geometry the scroll bound is derived from.
     let paint = |model: &BoardModel| {
@@ -1635,14 +1367,8 @@ fn page_scroll_reaches_the_bottom_of_a_wrapping_note() {
 
     // Scroll far past any plausible row count; the bound must clamp, not strand content.
     for _ in 0..400 {
-        apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::PageScrollDown,
-            None,
-            None,
-        )
-        .expect("scroll down");
+        apply_intent(&mut domain, &mut model, BoardIntent::PageScrollDown, None)
+            .expect("scroll down");
     }
     let rows = paint(&model);
 
@@ -1658,14 +1384,7 @@ fn page_scroll_reaches_the_bottom_of_a_wrapping_note() {
 fn opening_the_page_without_a_selection_is_a_no_op() {
     let mut domain = DomainState::new();
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::OpenTaskPage,
-        None,
-        None,
-    )
-    .expect("no-op open");
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("no-op open");
     assert_eq!(model.input_mode(), BoardInputMode::Normal);
 }
 
@@ -1705,25 +1424,12 @@ fn closing_the_page_after_completing_its_task_reanchors_to_a_visible_row() {
         .iter()
         .position(|id| *id == target)
         .expect("target visible");
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::SelectIndex(idx),
-        None,
-        None,
-    )
-    .expect("select target");
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::OpenTaskPage,
-        None,
-        None,
-    )
-    .expect("open page");
-    apply_intent(&mut domain, &mut model, BoardIntent::Complete, None, None)
+    apply_intent(&mut domain, &mut model, BoardIntent::SelectIndex(idx), None)
+        .expect("select target");
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
+    apply_intent(&mut domain, &mut model, BoardIntent::Complete, None)
         .expect("complete from the page");
-    apply_intent(&mut domain, &mut model, BoardIntent::CloseLayer, None, None).expect("close page");
+    apply_intent(&mut domain, &mut model, BoardIntent::CloseLayer, None).expect("close page");
 
     assert_eq!(model.input_mode(), BoardInputMode::Normal);
     let visible = model.visible_ids();
@@ -1772,14 +1478,7 @@ fn board_with_steps(
         domain.add_step(id, step).expect("add step");
     }
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::OpenTaskPage,
-        None,
-        None,
-    )
-    .expect("open task page");
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open task page");
     (domain, model, id)
 }
 
@@ -1814,14 +1513,8 @@ fn arrow_keys_move_the_cursor_through_shared_steps() {
     assert!(frame.contains("step 01"), "first step visible:\n{frame}");
 
     for _ in 0..30 {
-        apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::PageScrollDown,
-            None,
-            None,
-        )
-        .expect("scroll down");
+        apply_intent(&mut domain, &mut model, BoardIntent::PageScrollDown, None)
+            .expect("scroll down");
     }
     let bottom = rendered_board(&model, 80, 24);
     assert!(
@@ -1848,12 +1541,12 @@ fn modifier_toggle_flips_step_under_cursor() {
 
     // Activate + one Down: cursor on "bravo step".
     for intent in [BoardIntent::PageScrollDown, BoardIntent::PageScrollDown] {
-        apply_intent(&mut domain, &mut model, intent, None, None).expect("cursor down");
+        apply_intent(&mut domain, &mut model, intent, None).expect("cursor down");
     }
 
     let toggle = map_key(BoardInputMode::TaskPage, alt(KeyCode::Char(' '))).expect("alt+space");
     assert_eq!(toggle, BoardIntent::PrimaryVerb);
-    let outcome = apply_intent(&mut domain, &mut model, toggle, None, None).expect("toggle");
+    let outcome = apply_intent(&mut domain, &mut model, toggle, None).expect("toggle");
     assert_eq!(
         outcome,
         IntentOutcome::Persist,
@@ -1902,17 +1595,11 @@ fn rename_verb_targets_step_or_title_by_cursor() {
         board_with_steps("Rename target", None, &["alpha step", "bravo step"]);
 
     // Cursor on the first step, then Alt+e opens the step editor seeded with it.
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::PageScrollDown,
-        None,
-        None,
-    )
-    .expect("activate cursor");
+    apply_intent(&mut domain, &mut model, BoardIntent::PageScrollDown, None)
+        .expect("activate cursor");
     let rename = map_key(BoardInputMode::TaskPage, alt(KeyCode::Char('e'))).expect("alt+e");
     assert_eq!(rename, BoardIntent::BeginEditTitle);
-    apply_intent(&mut domain, &mut model, rename.clone(), None, None).expect("open step editor");
+    apply_intent(&mut domain, &mut model, rename.clone(), None).expect("open step editor");
 
     assert_ne!(
         model.input_mode(),
@@ -1928,17 +1615,11 @@ fn rename_verb_targets_step_or_title_by_cursor() {
     );
 
     // Edit the draft, then Enter applies the rename to the step, not the title.
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::EditInsert('!'),
-        None,
-        None,
-    )
-    .expect("type into step editor");
+    apply_intent(&mut domain, &mut model, BoardIntent::EditInsert('!'), None)
+        .expect("type into step editor");
     let save = map_key(model.input_mode(), press(KeyCode::Enter)).expect("enter");
     assert_eq!(save, BoardIntent::ConfirmEdit);
-    let outcome = apply_intent(&mut domain, &mut model, save, None, None).expect("rename step");
+    let outcome = apply_intent(&mut domain, &mut model, save, None).expect("rename step");
     assert_eq!(outcome, IntentOutcome::Persist);
     // The app boundary persisted; its confirmed sync closes the held line (T-4).
     model.sync_from_domain(&domain);
@@ -1956,23 +1637,9 @@ fn rename_verb_targets_step_or_title_by_cursor() {
     assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
 
     // Cursor inactive (fresh page session): Alt+e is the existing title edit.
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::OpenTaskPage,
-        None,
-        None,
-    )
-    .expect("close page");
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::OpenTaskPage,
-        None,
-        None,
-    )
-    .expect("reopen page");
-    apply_intent(&mut domain, &mut model, rename, None, None).expect("alt+e inactive cursor");
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("close page");
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("reopen page");
+    apply_intent(&mut domain, &mut model, rename, None).expect("alt+e inactive cursor");
     assert_eq!(
         model.input_mode(),
         BoardInputMode::EditTitle,
@@ -1993,20 +1660,13 @@ fn delete_verb_marks_then_removes_on_second_press() {
     );
     let revision_before = domain.get(id).expect("task").revision;
 
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::PageScrollDown,
-        None,
-        None,
-    )
-    .expect("activate cursor");
+    apply_intent(&mut domain, &mut model, BoardIntent::PageScrollDown, None)
+        .expect("activate cursor");
     let delete = map_key(BoardInputMode::TaskPage, alt(KeyCode::Char('x'))).expect("alt+x");
     assert_eq!(delete, BoardIntent::SoftDelete);
 
     // First press: visible mark, no mutation.
-    let outcome =
-        apply_intent(&mut domain, &mut model, delete.clone(), None, None).expect("mark step");
+    let outcome = apply_intent(&mut domain, &mut model, delete.clone(), None).expect("mark step");
     assert_eq!(
         outcome,
         IntentOutcome::None,
@@ -2023,14 +1683,8 @@ fn delete_verb_marks_then_removes_on_second_press() {
     );
 
     // An intervening key (a cursor move) clears the mark without removing.
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::PageScrollDown,
-        None,
-        None,
-    )
-    .expect("intervening key");
+    apply_intent(&mut domain, &mut model, BoardIntent::PageScrollDown, None)
+        .expect("intervening key");
     let cleared = rendered_board(&model, 80, 24);
     assert!(
         !cleared.contains("✗"),
@@ -2043,13 +1697,13 @@ fn delete_verb_marks_then_removes_on_second_press() {
     );
 
     // Mark again, then confirm with a second Alt+x and nothing between.
-    apply_intent(&mut domain, &mut model, delete.clone(), None, None).expect("mark again");
+    apply_intent(&mut domain, &mut model, delete.clone(), None).expect("mark again");
     let removed = rendered_board(&model, 80, 24);
     assert!(
         removed.contains("✗ bravo step"),
         "the mark follows the cursor's step:\n{removed}"
     );
-    let outcome = apply_intent(&mut domain, &mut model, delete, None, None).expect("remove step");
+    let outcome = apply_intent(&mut domain, &mut model, delete, None).expect("remove step");
     assert_eq!(outcome, IntentOutcome::Persist);
     let task = domain.get(id).expect("task");
     let texts: Vec<&str> = task.steps.iter().map(|step| step.text.as_str()).collect();
@@ -2080,14 +1734,8 @@ fn first_bare_down_activates_cursor_before_shared_content() {
         &["alpha step", "bravo step"],
     );
     let before = rendered_board(&model, 80, 24);
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::PageScrollDown,
-        None,
-        None,
-    )
-    .expect("activate cursor");
+    apply_intent(&mut domain, &mut model, BoardIntent::PageScrollDown, None)
+        .expect("activate cursor");
     let after = rendered_board(&model, 80, 24);
     assert!(
         after.contains("▸ ▪ alpha step"),
@@ -2107,24 +1755,11 @@ fn page_scroll_up_reverses_the_shared_content_region() {
         board_with_steps("Deactivate witness", Some(&notes), &["alpha step"]);
     rendered_board(&model, 80, 24);
     for _ in 0..4 {
-        apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::PageScrollDown,
-            None,
-            None,
-        )
-        .expect("scroll down");
+        apply_intent(&mut domain, &mut model, BoardIntent::PageScrollDown, None)
+            .expect("scroll down");
     }
     let down = rendered_board(&model, 80, 24);
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::PageScrollUp,
-        None,
-        None,
-    )
-    .expect("scroll up");
+    apply_intent(&mut domain, &mut model, BoardIntent::PageScrollUp, None).expect("scroll up");
     let up = rendered_board(&model, 80, 24);
     assert_ne!(down, up, "Up must move the shared body back");
     assert!(up.contains("Deactivate witness") && up.contains("created"));
@@ -2140,14 +1775,8 @@ fn active_cursor_up_precedes_shared_scroll() {
         &["first step", "second step"],
     );
     rendered_board(&model, 80, 24);
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::SelectStep(1),
-        None,
-        None,
-    )
-    .expect("select second step");
+    apply_intent(&mut domain, &mut model, BoardIntent::SelectStep(1), None)
+        .expect("select second step");
     let selected = rendered_board(&model, 80, 24);
     assert!(
         selected.contains("▸ ▪ second step"),
@@ -2159,7 +1788,6 @@ fn active_cursor_up_precedes_shared_scroll() {
         &mut model,
         BoardIntent::PageWheelScrollDown,
         None,
-        None,
     )
     .expect("wheel scroll");
     let after_wheel = rendered_board(&model, 80, 24);
@@ -2168,14 +1796,7 @@ fn active_cursor_up_precedes_shared_scroll() {
         "wheel scrolling must not move the step cursor:\n{after_wheel}"
     );
 
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::PageScrollUp,
-        None,
-        None,
-    )
-    .expect("key up");
+    apply_intent(&mut domain, &mut model, BoardIntent::PageScrollUp, None).expect("key up");
     let after_key = rendered_board(&model, 80, 24);
     assert!(
         after_key.contains("▸ ▪ first step"),
@@ -2198,7 +1819,6 @@ fn first_step_up_deactivates_before_inactive_up_scrolls_then_down_reactivates() 
         &mut model,
         BoardIntent::PageWheelScrollDown,
         None,
-        None,
     )
     .expect("wheel stream");
     let wheeled = rendered_board(&model, 80, 24);
@@ -2207,14 +1827,8 @@ fn first_step_up_deactivates_before_inactive_up_scrolls_then_down_reactivates() 
         "wheel must not activate an inactive cursor:\n{wheeled}"
     );
 
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::PageScrollDown,
-        None,
-        None,
-    )
-    .expect("activate first step");
+    apply_intent(&mut domain, &mut model, BoardIntent::PageScrollDown, None)
+        .expect("activate first step");
     let active = rendered_board(&model, 80, 24);
     assert!(
         active.contains("▸ ▪ first step"),
@@ -2228,14 +1842,8 @@ fn first_step_up_deactivates_before_inactive_up_scrolls_then_down_reactivates() 
         "active step cursor must not advertise task start/reopen"
     );
 
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::PageScrollUp,
-        None,
-        None,
-    )
-    .expect("deactivate first step");
+    apply_intent(&mut domain, &mut model, BoardIntent::PageScrollUp, None)
+        .expect("deactivate first step");
     let deactivated = rendered_board(&model, 80, 24);
     assert!(
         !deactivated.contains("▸"),
@@ -2259,14 +1867,8 @@ fn first_step_up_deactivates_before_inactive_up_scrolls_then_down_reactivates() 
         "the deactivating Up must not also scroll shared content"
     );
 
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::PageScrollUp,
-        None,
-        None,
-    )
-    .expect("inactive up scroll");
+    apply_intent(&mut domain, &mut model, BoardIntent::PageScrollUp, None)
+        .expect("inactive up scroll");
     let scrolled = rendered_board(&model, 80, 24);
     assert!(
         !scrolled.contains("▸"),
@@ -2278,14 +1880,7 @@ fn first_step_up_deactivates_before_inactive_up_scrolls_then_down_reactivates() 
         "inactive Up must scroll the shared content"
     );
 
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::PageScrollDown,
-        None,
-        None,
-    )
-    .expect("reactivate");
+    apply_intent(&mut domain, &mut model, BoardIntent::PageScrollDown, None).expect("reactivate");
     let reactivated = rendered_board(&model, 80, 24);
     assert!(
         reactivated.contains("▸ ▪ first step"),
@@ -2300,22 +1895,10 @@ fn stale_step_cursor_falls_back_to_the_live_task_status_verb() {
     let (mut domain, mut model, id) =
         board_with_steps("Stale cursor", None, &["first step", "second step"]);
     rendered_board(&model, 80, 24);
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::PageScrollDown,
-        None,
-        None,
-    )
-    .expect("activate first step");
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::PageScrollDown,
-        None,
-        None,
-    )
-    .expect("select second step");
+    apply_intent(&mut domain, &mut model, BoardIntent::PageScrollDown, None)
+        .expect("activate first step");
+    apply_intent(&mut domain, &mut model, BoardIntent::PageScrollDown, None)
+        .expect("select second step");
     let steps: Vec<_> = domain
         .get(id)
         .expect("task")
@@ -2341,14 +1924,7 @@ fn stale_step_cursor_falls_back_to_the_live_task_status_verb() {
             .any(|entry| entry.key == "space" && entry.label == "toggle step"),
         "a stale cursor must not advertise a dead step: {verbs:?}"
     );
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::PrimaryVerb,
-        None,
-        None,
-    )
-    .expect("primary verb");
+    apply_intent(&mut domain, &mut model, BoardIntent::PrimaryVerb, None).expect("primary verb");
     assert_eq!(domain.get(id).expect("task").status, HumanStatus::Started);
 }
 
@@ -2360,14 +1936,8 @@ fn down_activates_the_cursor_when_shared_content_does_not_overflow() {
         Some("short note"),
         &["alpha step", "bravo step"],
     );
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::PageScrollDown,
-        None,
-        None,
-    )
-    .expect("activate cursor");
+    apply_intent(&mut domain, &mut model, BoardIntent::PageScrollDown, None)
+        .expect("activate cursor");
     let activated = rendered_board(&model, 80, 24);
     assert!(activated.contains("▸ ▪ alpha step"));
 }
@@ -2387,27 +1957,14 @@ fn no_step_task_arrows_scroll_notes_unchanged() {
     );
 
     // Exactly pre-feature behavior: every arrow press scrolls the notes by one row.
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::PageScrollDown,
-        None,
-        None,
-    )
-    .expect("scroll down one");
+    apply_intent(&mut domain, &mut model, BoardIntent::PageScrollDown, None)
+        .expect("scroll down one");
     let down = rendered_board(&model, 80, 24);
     assert!(
         !down.contains("L0") && down.contains("L1"),
         "a bare Down must scroll the notes exactly one row:\n{down}"
     );
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::PageScrollUp,
-        None,
-        None,
-    )
-    .expect("scroll up one");
+    apply_intent(&mut domain, &mut model, BoardIntent::PageScrollUp, None).expect("scroll up one");
     let up = rendered_board(&model, 80, 24);
     assert!(
         up.contains("L0"),
@@ -2427,7 +1984,7 @@ fn add_verb_opens_editor_enter_applies_esc_cancels() {
 
     let add = map_key(BoardInputMode::TaskPage, alt(KeyCode::Char('a')))
         .expect("alt+a must open the step editor");
-    apply_intent(&mut domain, &mut model, add, None, None).expect("open add editor");
+    apply_intent(&mut domain, &mut model, add, None).expect("open add editor");
     assert_ne!(
         model.input_mode(),
         BoardInputMode::TaskPage,
@@ -2440,18 +1997,11 @@ fn add_verb_opens_editor_enter_applies_esc_cancels() {
     );
 
     for ch in "zed step".chars() {
-        apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::EditInsert(ch),
-            None,
-            None,
-        )
-        .expect("type");
+        apply_intent(&mut domain, &mut model, BoardIntent::EditInsert(ch), None).expect("type");
     }
     let save = map_key(model.input_mode(), press(KeyCode::Enter)).expect("enter");
     assert_eq!(save, BoardIntent::ConfirmEdit);
-    let outcome = apply_intent(&mut domain, &mut model, save, None, None).expect("add step");
+    let outcome = apply_intent(&mut domain, &mut model, save, None).expect("add step");
     assert_eq!(outcome, IntentOutcome::Persist);
     // The app boundary persisted; its confirmed sync closes the held line (T-4).
     model.sync_from_domain(&domain);
@@ -2471,20 +2021,14 @@ fn add_verb_opens_editor_enter_applies_esc_cancels() {
     // Esc cancels: the draft is discarded, nothing is appended.
     let add = map_key(BoardInputMode::TaskPage, alt(KeyCode::Char('a')))
         .expect("alt+a reopens the editor");
-    apply_intent(&mut domain, &mut model, add, None, None).expect("reopen add editor");
+    apply_intent(&mut domain, &mut model, add, None).expect("reopen add editor");
     for ch in "junk".chars() {
-        apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::EditInsert(ch),
-            None,
-            None,
-        )
-        .expect("type junk");
+        apply_intent(&mut domain, &mut model, BoardIntent::EditInsert(ch), None)
+            .expect("type junk");
     }
     let cancel = map_key(model.input_mode(), press(KeyCode::Esc)).expect("esc");
     assert_eq!(cancel, BoardIntent::CancelEdit);
-    let outcome = apply_intent(&mut domain, &mut model, cancel, None, None).expect("cancel");
+    let outcome = apply_intent(&mut domain, &mut model, cancel, None).expect("cancel");
     assert_eq!(outcome, IntentOutcome::None);
     assert_eq!(
         domain.get(id).expect("task").steps.len(),
@@ -2509,31 +2053,19 @@ fn step_editor_enter_saves_ctrl_enter_reopens_esc_cancels() {
     let (mut domain, mut model, id) = board_with_steps("Loop witness", None, &["alpha step"]);
 
     // Alt+a opens the add line; type, then Ctrl+Enter saves and reopens it empty.
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::BeginAddStep,
-        None,
-        None,
-    )
-    .expect("open add editor");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginAddStep, None)
+        .expect("open add editor");
     for ch in "bravo step".chars() {
-        apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::EditInsert(ch),
-            None,
-            None,
-        )
-        .expect("type first step");
+        apply_intent(&mut domain, &mut model, BoardIntent::EditInsert(ch), None)
+            .expect("type first step");
     }
     let ctrl_enter = map_key(
         model.input_mode(),
         KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL),
     )
     .expect("ctrl+enter maps in the step editor");
-    let outcome = apply_intent(&mut domain, &mut model, ctrl_enter, None, None)
-        .expect("save and reopen the line");
+    let outcome =
+        apply_intent(&mut domain, &mut model, ctrl_enter, None).expect("save and reopen the line");
     assert_eq!(outcome, IntentOutcome::Persist);
     model.sync_from_domain(&domain);
     assert_eq!(
@@ -2549,18 +2081,12 @@ fn step_editor_enter_saves_ctrl_enter_reopens_esc_cancels() {
 
     // The reopened line is empty: the second step is exactly what is typed next.
     for ch in "charlie step".chars() {
-        apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::EditInsert(ch),
-            None,
-            None,
-        )
-        .expect("type second step");
+        apply_intent(&mut domain, &mut model, BoardIntent::EditInsert(ch), None)
+            .expect("type second step");
     }
     let enter = map_key(model.input_mode(), press(KeyCode::Enter)).expect("enter");
     let outcome =
-        apply_intent(&mut domain, &mut model, enter.clone(), None, None).expect("save and close");
+        apply_intent(&mut domain, &mut model, enter.clone(), None).expect("save and close");
     assert_eq!(outcome, IntentOutcome::Persist);
     model.sync_from_domain(&domain);
     assert_eq!(
@@ -2582,27 +2108,15 @@ fn step_editor_enter_saves_ctrl_enter_reopens_esc_cancels() {
     );
 
     // Esc discards: reopen, type junk, Esc — nothing is appended.
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::BeginAddStep,
-        None,
-        None,
-    )
-    .expect("reopen add editor");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginAddStep, None)
+        .expect("reopen add editor");
     for ch in "junk".chars() {
-        apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::EditInsert(ch),
-            None,
-            None,
-        )
-        .expect("type junk");
+        apply_intent(&mut domain, &mut model, BoardIntent::EditInsert(ch), None)
+            .expect("type junk");
     }
     let esc = map_key(model.input_mode(), press(KeyCode::Esc)).expect("esc");
     assert_eq!(esc, BoardIntent::CancelEdit);
-    let outcome = apply_intent(&mut domain, &mut model, esc, None, None).expect("cancel");
+    let outcome = apply_intent(&mut domain, &mut model, esc, None).expect("cancel");
     assert_eq!(outcome, IntentOutcome::None);
     assert_eq!(
         domain.get(id).expect("task").steps.len(),
@@ -2619,34 +2133,22 @@ fn rename_mode_ctrl_enter_saves_and_closes() {
     let (mut domain, mut model, id) =
         board_with_steps("Rename ctrl witness", None, &["alpha step"]);
 
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::PageScrollDown,
-        None,
-        None,
-    )
-    .expect("activate cursor");
+    apply_intent(&mut domain, &mut model, BoardIntent::PageScrollDown, None)
+        .expect("activate cursor");
     let rename = map_key(BoardInputMode::TaskPage, alt(KeyCode::Char('e'))).expect("alt+e");
-    apply_intent(&mut domain, &mut model, rename, None, None).expect("open rename editor");
+    apply_intent(&mut domain, &mut model, rename, None).expect("open rename editor");
     assert_eq!(model.input_mode(), BoardInputMode::EditStep);
     for ch in " twice".chars() {
-        apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::EditInsert(ch),
-            None,
-            None,
-        )
-        .expect("extend step text");
+        apply_intent(&mut domain, &mut model, BoardIntent::EditInsert(ch), None)
+            .expect("extend step text");
     }
     let ctrl_enter = map_key(
         model.input_mode(),
         KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL),
     )
     .expect("ctrl+enter maps in the step editor");
-    let outcome = apply_intent(&mut domain, &mut model, ctrl_enter, None, None)
-        .expect("rename via ctrl+enter");
+    let outcome =
+        apply_intent(&mut domain, &mut model, ctrl_enter, None).expect("rename via ctrl+enter");
     assert_eq!(outcome, IntentOutcome::Persist);
     assert_eq!(
         model.input_mode(),
@@ -2678,16 +2180,10 @@ fn rename_mode_ctrl_enter_saves_and_closes() {
 fn empty_step_text_refusal_paints_on_line_and_clears_on_close() {
     let (mut domain, mut model, id) = board_with_steps("Refusal witness", None, &["alpha step"]);
 
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::BeginAddStep,
-        None,
-        None,
-    )
-    .expect("open add editor");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginAddStep, None)
+        .expect("open add editor");
     let enter = map_key(model.input_mode(), press(KeyCode::Enter)).expect("enter");
-    let outcome = apply_intent(&mut domain, &mut model, enter.clone(), None, None)
+    let outcome = apply_intent(&mut domain, &mut model, enter.clone(), None)
         .expect("an empty draft is refused on the line, not by a propagated error");
     assert_eq!(
         outcome,
@@ -2719,16 +2215,10 @@ fn empty_step_text_refusal_paints_on_line_and_clears_on_close() {
 
     // Whitespace-only text is refused the same way.
     for ch in "   ".chars() {
-        apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::EditInsert(ch),
-            None,
-            None,
-        )
-        .expect("type whitespace");
+        apply_intent(&mut domain, &mut model, BoardIntent::EditInsert(ch), None)
+            .expect("type whitespace");
     }
-    let outcome = apply_intent(&mut domain, &mut model, enter.clone(), None, None)
+    let outcome = apply_intent(&mut domain, &mut model, enter.clone(), None)
         .expect("whitespace is refused on the line too");
     assert_eq!(outcome, IntentOutcome::None);
     let whitespace = rendered_board(&model, 80, 24);
@@ -2741,7 +2231,7 @@ fn empty_step_text_refusal_paints_on_line_and_clears_on_close() {
 
     // Closing the line with Esc clears the refusal; nothing leaks to the board.
     let esc = map_key(model.input_mode(), press(KeyCode::Esc)).expect("esc");
-    apply_intent(&mut domain, &mut model, esc, None, None).expect("cancel the line");
+    apply_intent(&mut domain, &mut model, esc, None).expect("cancel the line");
     assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
     assert_eq!(
         model.message(),
@@ -2755,28 +2245,15 @@ fn empty_step_text_refusal_paints_on_line_and_clears_on_close() {
     );
 
     // A successful save clears it too: refuse once, type valid text, Enter saves.
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::BeginAddStep,
-        None,
-        None,
-    )
-    .expect("reopen add editor");
-    apply_intent(&mut domain, &mut model, enter.clone(), None, None)
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginAddStep, None)
+        .expect("reopen add editor");
+    apply_intent(&mut domain, &mut model, enter.clone(), None)
         .expect("refuse the empty line again");
     for ch in "zed step".chars() {
-        apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::EditInsert(ch),
-            None,
-            None,
-        )
-        .expect("type valid text");
+        apply_intent(&mut domain, &mut model, BoardIntent::EditInsert(ch), None)
+            .expect("type valid text");
     }
-    let outcome =
-        apply_intent(&mut domain, &mut model, enter, None, None).expect("save the valid text");
+    let outcome = apply_intent(&mut domain, &mut model, enter, None).expect("save the valid text");
     assert_eq!(outcome, IntentOutcome::Persist);
     model.sync_from_domain(&domain);
     assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
@@ -2814,23 +2291,10 @@ fn step_input_uses_the_shared_quick_add_slot() {
     // retaining a relocated page footer above it.
     let quick_add_row = footer_row + 1;
     let open_meta_row = footer_row - 2;
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::BeginAddStep,
-        None,
-        None,
-    )
-    .expect("open add editor");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginAddStep, None)
+        .expect("open add editor");
     for ch in "bravo step".chars() {
-        apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::EditInsert(ch),
-            None,
-            None,
-        )
-        .expect("type");
+        apply_intent(&mut domain, &mut model, BoardIntent::EditInsert(ch), None).expect("type");
     }
     let open = rendered_board(&model, 80, 24);
     let open_rows: Vec<&str> = open.lines().collect();
@@ -2863,7 +2327,7 @@ fn step_input_uses_the_shared_quick_add_slot() {
 
     // Enter saves and closes through the footer surface.
     let enter = map_key(model.input_mode(), press(KeyCode::Enter)).expect("enter");
-    let outcome = apply_intent(&mut domain, &mut model, enter, None, None).expect("save");
+    let outcome = apply_intent(&mut domain, &mut model, enter, None).expect("save");
     assert_eq!(outcome, IntentOutcome::Persist);
     model.sync_from_domain(&domain);
     assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
@@ -2884,31 +2348,19 @@ fn step_input_uses_the_shared_quick_add_slot() {
     );
 
     // Ctrl+Enter saves and reopens the line empty in add mode, on the footer.
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::BeginAddStep,
-        None,
-        None,
-    )
-    .expect("reopen add editor");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginAddStep, None)
+        .expect("reopen add editor");
     for ch in "charlie step".chars() {
-        apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::EditInsert(ch),
-            None,
-            None,
-        )
-        .expect("type second step");
+        apply_intent(&mut domain, &mut model, BoardIntent::EditInsert(ch), None)
+            .expect("type second step");
     }
     let ctrl_enter = map_key(
         model.input_mode(),
         KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL),
     )
     .expect("ctrl+enter maps in the step editor");
-    let outcome = apply_intent(&mut domain, &mut model, ctrl_enter, None, None)
-        .expect("save and reopen the line");
+    let outcome =
+        apply_intent(&mut domain, &mut model, ctrl_enter, None).expect("save and reopen the line");
     assert_eq!(outcome, IntentOutcome::Persist);
     model.sync_from_domain(&domain);
     assert_eq!(
@@ -2926,17 +2378,11 @@ fn step_input_uses_the_shared_quick_add_slot() {
 
     // Esc cancels: the draft is discarded, the line closes, nothing is appended.
     for ch in "junk".chars() {
-        apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::EditInsert(ch),
-            None,
-            None,
-        )
-        .expect("type junk");
+        apply_intent(&mut domain, &mut model, BoardIntent::EditInsert(ch), None)
+            .expect("type junk");
     }
     let esc = map_key(model.input_mode(), press(KeyCode::Esc)).expect("esc");
-    let outcome = apply_intent(&mut domain, &mut model, esc, None, None).expect("cancel");
+    let outcome = apply_intent(&mut domain, &mut model, esc, None).expect("cancel");
     assert_eq!(outcome, IntentOutcome::None);
     assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
     assert_eq!(
@@ -2947,16 +2393,10 @@ fn step_input_uses_the_shared_quick_add_slot() {
 
     // The empty-text refusal paints on the shared input line itself, never the
     // board status message, and clears when the line closes.
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::BeginAddStep,
-        None,
-        None,
-    )
-    .expect("reopen add editor");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginAddStep, None)
+        .expect("reopen add editor");
     let enter = map_key(model.input_mode(), press(KeyCode::Enter)).expect("enter");
-    let outcome = apply_intent(&mut domain, &mut model, enter, None, None).expect("refuse");
+    let outcome = apply_intent(&mut domain, &mut model, enter, None).expect("refuse");
     assert_eq!(outcome, IntentOutcome::None);
     assert_eq!(model.input_mode(), BoardInputMode::EditStep);
     assert_eq!(
@@ -2972,7 +2412,7 @@ fn step_input_uses_the_shared_quick_add_slot() {
         "the refusal paints on the shared quick-add line itself:\n{refused}"
     );
     let esc = map_key(model.input_mode(), press(KeyCode::Esc)).expect("esc");
-    apply_intent(&mut domain, &mut model, esc, None, None).expect("close the line");
+    apply_intent(&mut domain, &mut model, esc, None).expect("close the line");
     assert_eq!(
         model.message(),
         None,
@@ -2999,20 +2439,13 @@ fn delete_mark_shows_press_again_footer_message() {
     let (mut domain, mut model, id) =
         board_with_steps("Hint witness", None, &["alpha step", "bravo step"]);
 
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::PageScrollDown,
-        None,
-        None,
-    )
-    .expect("activate cursor");
+    apply_intent(&mut domain, &mut model, BoardIntent::PageScrollDown, None)
+        .expect("activate cursor");
     let delete = map_key(BoardInputMode::TaskPage, alt(KeyCode::Char('x'))).expect("alt+x");
     assert_eq!(delete, BoardIntent::SoftDelete);
 
     // First press: the mark is visible AND the footer hint is painted.
-    let outcome =
-        apply_intent(&mut domain, &mut model, delete.clone(), None, None).expect("mark step");
+    let outcome = apply_intent(&mut domain, &mut model, delete.clone(), None).expect("mark step");
     assert_eq!(outcome, IntentOutcome::None);
     let marked = rendered_board(&model, 80, 24);
     assert!(
@@ -3029,14 +2462,8 @@ fn delete_mark_shows_press_again_footer_message() {
     );
 
     // An intervening key clears the mark AND the hint.
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::PageScrollDown,
-        None,
-        None,
-    )
-    .expect("intervening key");
+    apply_intent(&mut domain, &mut model, BoardIntent::PageScrollDown, None)
+        .expect("intervening key");
     let cleared = rendered_board(&model, 80, 24);
     assert!(!cleared.contains("✗"), "the mark clears:\n{cleared}");
     assert!(
@@ -3051,8 +2478,8 @@ fn delete_mark_shows_press_again_footer_message() {
     );
 
     // Second press with nothing between: the step is removed, the hint is gone.
-    apply_intent(&mut domain, &mut model, delete.clone(), None, None).expect("mark again");
-    let outcome = apply_intent(&mut domain, &mut model, delete, None, None).expect("remove step");
+    apply_intent(&mut domain, &mut model, delete.clone(), None).expect("mark again");
+    let outcome = apply_intent(&mut domain, &mut model, delete, None).expect("remove step");
     assert_eq!(outcome, IntentOutcome::Persist);
     let texts: Vec<&str> = domain
         .get(id)
@@ -3097,7 +2524,6 @@ fn t_token_capture_threads_while_item_text_stays_literal() {
         &mut model,
         BoardIntent::OpenCapture,
         Some(&snapshot),
-        None,
     )
     .expect("open quick add");
     for character in "capture !t Release-2026".chars() {
@@ -3106,19 +2532,12 @@ fn t_token_capture_threads_while_item_text_stays_literal() {
             &mut model,
             BoardIntent::QuickAddInsert(character),
             None,
-            None,
         )
         .expect("type capture");
     }
     assert_eq!(
-        apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::QuickAddSave,
-            None,
-            None,
-        )
-        .expect("save quick add"),
+        apply_intent(&mut domain, &mut model, BoardIntent::QuickAddSave, None,)
+            .expect("save quick add"),
         IntentOutcome::Persist
     );
     model.sync_from_domain(&domain);
@@ -3128,41 +2547,20 @@ fn t_token_capture_threads_while_item_text_stays_literal() {
         Some("release-2026")
     );
 
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::OpenTaskPage,
-        None,
-        None,
-    )
-    .expect("open task page");
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::BeginAddStep,
-        None,
-        None,
-    )
-    .expect("open item editor");
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open task page");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginAddStep, None)
+        .expect("open item editor");
     for character in "literal !t release-2026 #word".chars() {
         apply_intent(
             &mut domain,
             &mut model,
             BoardIntent::EditInsert(character),
             None,
-            None,
         )
         .expect("type item");
     }
     assert_eq!(
-        apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::ConfirmEdit,
-            None,
-            None,
-        )
-        .expect("save item"),
+        apply_intent(&mut domain, &mut model, BoardIntent::ConfirmEdit, None,).expect("save item"),
         IntentOutcome::Persist
     );
     model.sync_from_domain(&domain);

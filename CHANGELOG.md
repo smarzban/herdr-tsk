@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+Removed dark engines from the live tree: attention / NEEDS YOU poll, park/resume,
+dispatch/worktree recovery UI, and agent-link board plumbing. Store fields that
+old documents may still carry (`capsule`, `agent_meta`, `last_observed`,
+`active_attempts`, related event kinds) keep loading. Local reference only:
+`archive/dark-engine-pre-v1`.
+
 The live document is **`tsk.json`** (lock `tsk.json.lock`, previous `tsk.json.1`).
 A first run creates an empty `~/.tsk`; leftover `tasks.json` is not read.
 

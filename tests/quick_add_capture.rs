@@ -37,7 +37,7 @@ fn apply(
     intent: BoardIntent,
     snapshot: Option<&InvocationSnapshot>,
 ) -> IntentOutcome {
-    apply_intent(domain, model, intent, snapshot, None).expect("apply capture-bar intent")
+    apply_intent(domain, model, intent, snapshot).expect("apply capture-bar intent")
 }
 
 fn open(domain: &mut DomainState, model: &mut BoardModel, snapshot: &InvocationSnapshot) {
@@ -886,7 +886,6 @@ fn failed_save_keeps_the_draft_for_retry_or_cancel() {
             baseline: DomainState::new(),
             intent: BoardIntent::QuickAddSave,
             snapshot: None,
-            host: None,
         },
         |_| Err("injected failure".into()),
     )
@@ -904,7 +903,6 @@ fn failed_save_keeps_the_draft_for_retry_or_cancel() {
             baseline: DomainState::new(),
             intent: BoardIntent::RetrySave,
             snapshot: None,
-            host: None,
         },
         |_| Ok(()),
     )
@@ -930,7 +928,6 @@ fn failed_save_keeps_the_draft_for_retry_or_cancel() {
             baseline: DomainState::new(),
             intent: BoardIntent::QuickAddSave,
             snapshot: None,
-            host: None,
         },
         |_| Err("injected failure".into()),
     )
@@ -943,7 +940,6 @@ fn failed_save_keeps_the_draft_for_retry_or_cancel() {
             baseline: DomainState::new(),
             intent: BoardIntent::CancelSave,
             snapshot: None,
-            host: None,
         },
         |_| Ok(()),
     )

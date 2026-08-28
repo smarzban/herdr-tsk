@@ -6,12 +6,9 @@ use std::time::Instant;
 
 use uuid::Uuid;
 
-use crate::attention::{AttentionClassification, RefreshResult};
 use crate::config::VerbModifier;
 use crate::context::InvocationSnapshot;
-use crate::domain::{
-    is_linked, DispatchAttempt, DomainState, HumanStatus, OwnedResourceReceipt, Task, TaskScope,
-};
+use crate::domain::{DomainState, HumanStatus, Task, TaskScope};
 use crate::ui::capture::CaptureField;
 use crate::ui::edit::{seeded_draft, EditBuffer};
 use crate::ui::input::{
@@ -61,10 +58,6 @@ pub enum BoardInputMode {
     EditStep,
     /// Modal selection over the session project-scope options.
     ProjectPicker,
-    /// Durable dispatch attempt recovery actions.
-    Recovery,
-    /// Explicit confirmation before cleanup touches recorded owned receipts.
-    CleanupConfirm,
     /// Board persistence failed; only navigation plus Retry/Cancel are available.
     SaveRecovery,
     /// Searchable command palette is open.
@@ -86,10 +79,6 @@ pub enum IntentOutcome {
     Persisted,
     /// Leave the board UI.
     Quit,
-    /// Resume an existing durable attempt on the worker.
-    ResumeDispatch { attempt_id: Uuid },
-    /// Clean an existing durable attempt after explicit confirmation.
-    CleanupDispatch { attempt_id: Uuid },
 }
 
 /// Retained outcome vocabulary for the no-op walkthrough seam.
@@ -572,10 +561,8 @@ pub struct BoardModel {
     /// it; but Retry can still make it durable, and then the way back has to come with it.
     /// See [`BoardModel::begin_save_recovery`] and [`BoardModel::end_save_recovery`].
     pub(super) suspended_delete_notice: Option<String>,
-    /// Open recovery, cleanup, project-picker, or save-recovery presentation.
+    /// Open project-picker or save-recovery presentation.
     pub(super) popup: BoardPopup,
-    /// Presentation-only stale linked-session ids from the latest successful snapshot.
-    pub(super) stale_links: HashSet<Uuid>,
     /// Open session project selector; never persisted.
     pub(super) project_picker: Option<ProjectPickerState>,
     /// Open palette (presentation only).
@@ -586,8 +573,6 @@ pub struct BoardModel {
     pub(super) command_selected: usize,
     /// No separate capture/title/notes state lives beside [`Self::form`]: one board form owns
     /// all field drafts and either its task binding or its immutable capture snapshot.
-    /// Durable attempts hydrated from the store with the current domain snapshot.
-    pub(super) attempts: Vec<DispatchAttempt>,
     /// Chord required for mutating verbs. Loaded from settings; flipped from the palette.
     pub verb_modifier: VerbModifier,
 }
@@ -632,12 +617,10 @@ impl BoardModel {
             delete_notice: None,
             suspended_delete_notice: None,
             popup: BoardPopup::None,
-            stale_links: HashSet::new(),
             project_picker: None,
             surface: CommandSurface::None,
             command_query: String::new(),
             command_selected: 0,
-            attempts: Vec::new(),
             verb_modifier: VerbModifier::Alt,
         };
         model.seed_selection();
@@ -792,10 +775,7 @@ impl BoardModel {
 
     /// Snapshot tasks from domain state (default agent kind; seed env at open).
     pub fn from_domain(state: &DomainState, this_repo: Option<PathBuf>) -> Self {
-        let mut model = Self::from_tasks(state.tasks().to_vec(), this_repo);
-        model.attempts = state.active_attempts().to_vec();
-        model.present_existing_dispatch_recovery();
-        model
+        Self::from_tasks(state.tasks().to_vec(), this_repo)
     }
 
     /// Switch the home tab, when needed, so `id` would appear in [`Self::visible_ids`].
@@ -843,12 +823,6 @@ impl BoardModel {
             .collect();
         let pinned_edit = self.task_edit_save.as_ref().map(|pending| pending.id);
         let pinned_quick_add = self.quick_add_save.as_ref().map(|pending| pending.id);
-        self.stale_links.retain(|id| {
-            self.tasks
-                .iter()
-                .any(|task| task.id == *id && !task.soft_deleted && is_linked(task))
-        });
-        self.attempts = state.active_attempts().to_vec();
         self.finish_quick_add_save();
         self.finish_task_edit_save();
         self.finish_step_editor_save();
@@ -880,40 +854,6 @@ impl BoardModel {
             }
             self.reanchor_selection(previous, &previous_visible);
             self.ensure_selection_visible();
-        }
-        if self.attempts.is_empty()
-            && matches!(
-                self.popup,
-                BoardPopup::Recovery | BoardPopup::CleanupConfirm
-            )
-        {
-            self.close_popup();
-        }
-    }
-
-    pub fn mark_stale(&mut self, id: Uuid) {
-        self.stale_links.insert(id);
-    }
-
-    pub fn clear_stale(&mut self, id: Uuid) {
-        self.stale_links.remove(&id);
-    }
-
-    pub fn is_stale(&self, id: Uuid) -> bool {
-        self.stale_links.contains(&id)
-    }
-
-    pub fn apply_attention_result(&mut self, result: &RefreshResult) {
-        for (id, classification) in &result.classifications {
-            match classification {
-                AttentionClassification::Matched => {
-                    self.stale_links.remove(id);
-                }
-                AttentionClassification::Stale => {
-                    self.stale_links.insert(*id);
-                }
-                AttentionClassification::Unavailable => {}
-            }
         }
     }
 
@@ -1111,35 +1051,10 @@ impl BoardModel {
             return BoardInputMode::Palette;
         }
         match self.popup {
-            BoardPopup::Recovery => BoardInputMode::Recovery,
-            BoardPopup::CleanupConfirm => BoardInputMode::CleanupConfirm,
             BoardPopup::SaveRecovery => BoardInputMode::SaveRecovery,
             _ if self.project_picker.is_some() => BoardInputMode::ProjectPicker,
             _ => self.input_mode,
         }
-    }
-
-    /// Surface recovery for a persisted attempt without restoring any dispatch-start action.
-    pub(super) fn present_existing_dispatch_recovery(&mut self) {
-        let Some(attempt) = self.attempts.first() else {
-            return;
-        };
-        let task_id = attempt.task_id();
-        let message = format!(
-            "dispatch recovery · {} · {}",
-            attempt.last_error().unwrap_or("interrupted dispatch"),
-            owned_resource_summary(attempt)
-        );
-        self.selection_id = Some(task_id);
-        self.popup = BoardPopup::Recovery;
-        self.set_message(message);
-    }
-
-    pub(super) fn selected_attempt(&self) -> Option<&DispatchAttempt> {
-        let task_id = self.selected_id()?;
-        self.attempts
-            .iter()
-            .find(|attempt| attempt.task_id() == task_id)
     }
 
     /// Edit buffer contents for the focused board-page text field.
@@ -1697,31 +1612,6 @@ pub(super) fn project_scope_option_label(option: &ProjectScopeOption) -> String 
     match option {
         ProjectScopeOption::Home => "desk".to_string(),
         ProjectScopeOption::Project(path) => project_option_label(path.as_path()),
-    }
-}
-
-pub(super) fn owned_resource_label(receipt: &OwnedResourceReceipt) -> String {
-    match receipt {
-        OwnedResourceReceipt::Worktree(receipt) => {
-            format!("worktree {}", terminal_text(&receipt.path))
-        }
-        OwnedResourceReceipt::Pane(receipt) => format!("pane {}", terminal_text(&receipt.pane_id)),
-        OwnedResourceReceipt::Agent(receipt) => {
-            format!("agent in pane {}", terminal_text(&receipt.pane_id))
-        }
-    }
-}
-
-pub(super) fn owned_resource_summary(attempt: &DispatchAttempt) -> String {
-    if attempt.owned_resources().is_empty() {
-        "no recorded resources".into()
-    } else {
-        attempt
-            .owned_resources()
-            .iter()
-            .map(owned_resource_label)
-            .collect::<Vec<_>>()
-            .join(" · ")
     }
 }
 

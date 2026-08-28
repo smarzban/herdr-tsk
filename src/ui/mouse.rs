@@ -29,10 +29,6 @@ pub enum BoardPopup {
     None,
     /// Session-only project scope selector.
     ProjectPicker,
-    /// Durable dispatch attempt recovery actions for old persisted attempts.
-    Recovery,
-    /// Explicit cleanup confirmation for recorded owned receipts.
-    CleanupConfirm,
     /// Board persistence failed; Retry or Cancel must resolve it before another mutation.
     SaveRecovery,
 }
@@ -483,10 +479,7 @@ pub fn map_board_mouse(
         // The step line editor is keyboard-only in this slice: the mouse has no hit
         // region on the section's line yet, so every click is inert rather than
         // reaching the page behind the editor.
-        BoardInputMode::EditStep
-        | BoardInputMode::Recovery
-        | BoardInputMode::CleanupConfirm
-        | BoardInputMode::SaveRecovery => None,
+        BoardInputMode::EditStep | BoardInputMode::SaveRecovery => None,
         BoardInputMode::Normal => match hit_at(hits, pos) {
             Some(QueueHitTarget::ProjectChip) => Some(BoardIntent::OpenProjectSelector),
             Some(QueueHitTarget::HomeTab(tab)) => Some(BoardIntent::SelectHomeTab(tab)),

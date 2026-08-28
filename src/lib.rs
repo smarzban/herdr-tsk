@@ -1,22 +1,17 @@
 //! tsk library root.
 
 pub mod app;
-pub mod attention;
 pub mod board_pane;
 pub mod capture;
 pub mod cli;
 pub mod config;
 pub mod context;
-pub mod dispatch;
 pub mod domain;
-pub mod host;
-pub mod resume;
 pub mod save_recovery;
 pub mod scope;
 pub mod store;
 pub(crate) mod text;
 pub mod ui;
-pub mod views;
 
 pub use board_pane::{find_board_pane_from_stdin, find_board_pane_id};
 

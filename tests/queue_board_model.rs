@@ -259,7 +259,6 @@ fn confirming_project_choice_changes_visible_queue_sections() {
         &mut model,
         BoardIntent::OpenProjectSelector,
         None,
-        None,
     )
     .unwrap();
     // Picker highlights the current deck scope (All at open); step to /repos/other.
@@ -277,7 +276,6 @@ fn confirming_project_choice_changes_visible_queue_sections() {
             &mut model,
             BoardIntent::ProjectPickerNext,
             None,
-            None,
         )
         .unwrap();
     }
@@ -286,7 +284,6 @@ fn confirming_project_choice_changes_visible_queue_sections() {
         &mut domain,
         &mut model,
         BoardIntent::ConfirmProjectChoice,
-        None,
         None,
     )
     .unwrap();
@@ -327,7 +324,6 @@ fn sync_from_domain_reanchors_by_id() {
         &mut model,
         BoardIntent::SelectHomeTab(BoardTab::Projects),
         None,
-        None,
     )
     .unwrap();
     let visible = model.visible_ids();
@@ -338,7 +334,6 @@ fn sync_from_domain_reanchors_by_id() {
         &mut domain,
         &mut model,
         BoardIntent::SelectIndex(todo_idx),
-        None,
         None,
     )
     .unwrap();
@@ -686,7 +681,6 @@ fn selection_stays_on_task_id_across_thread_block_reorder() {
         &mut model,
         BoardIntent::SelectIndex(beta_index),
         None,
-        None,
     )
     .unwrap();
 
@@ -764,14 +758,8 @@ fn arrow_navigation_crosses_painted_header_task_to_task() {
     model.set_selected_project(Some(PathBuf::from(THIS_REPO)));
     let ids = model.visible_ids();
     assert_eq!(ids.len(), 2, "two threaded tasks are visible");
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::SelectIndex(0),
-        None,
-        None,
-    )
-    .expect("select first task");
+    apply_intent(&mut domain, &mut model, BoardIntent::SelectIndex(0), None)
+        .expect("select first task");
 
     let rows = board_rows(&model, 80, 24);
     let first_title = domain.get(ids[0]).expect("first task").title.clone();
@@ -794,7 +782,7 @@ fn arrow_navigation_crosses_painted_header_task_to_task() {
         rows.join("\n")
     );
 
-    apply_intent(&mut domain, &mut model, BoardIntent::SelectNext, None, None)
+    apply_intent(&mut domain, &mut model, BoardIntent::SelectNext, None)
         .expect("arrow navigation moves to next task");
     assert_eq!(
         model.selected_id(),
@@ -835,13 +823,7 @@ fn two_fresh_models_from_same_store_share_no_ui_state_and_no_ui_writes_under_sta
 
     // Mutate session-only UI on A; a fresh B must not inherit it.
     a.set_message("only on A");
-    let _ = apply_intent(
-        &mut domain,
-        &mut a,
-        BoardIntent::ToggleDoneDrawer,
-        None,
-        None,
-    );
+    let _ = apply_intent(&mut domain, &mut a, BoardIntent::ToggleDoneDrawer, None);
 
     let b_fresh = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
     assert_eq!(

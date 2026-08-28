@@ -5,26 +5,20 @@ use std::error::Error;
 use std::fs;
 use std::io;
 use std::path::PathBuf;
-use std::sync::mpsc::{self, Receiver, TryRecvError};
-use std::thread;
 use std::time::{Duration, SystemTime};
 
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::layout::Rect;
 use ratatui::DefaultTerminal;
 
-use crate::attention::{self, RefreshResult};
 use crate::config::{default_config_dir, SettingsRecord, WalkthroughRecord};
 use crate::context::{build_snapshot, InvocationSnapshot, RawHostContext};
-use crate::dispatch::{cleanup_dispatch_attempt, resume_dispatch_attempt, DispatchRecoveryResult};
 use crate::domain::{DomainError, DomainState};
-use crate::host::{HerdrHost, HostPorts};
 use crate::save_recovery::SaveRecovery;
 use crate::store::{default_state_dir, StoreError, TaskStore};
 use crate::ui::board::{
-    apply_dispatch_recovery_result, apply_intent, board_intent_may_persist, draw_board,
-    resolve_board_command, BoardInputMode, BoardModel, IntentOutcome, SaveResolution,
-    WalkthroughOutcome,
+    apply_intent, board_intent_may_persist, draw_board, resolve_board_command, BoardInputMode,
+    BoardModel, IntentOutcome, SaveResolution, WalkthroughOutcome,
 };
 use crate::ui::capture::{
     apply_capture_intent, draw_capture, CaptureModel, CaptureOutcome, TITLE_REQUIRED_MESSAGE,
@@ -39,11 +33,6 @@ use crate::ui::mouse::{
 };
 use crate::ui::queue::BoardTab;
 use crate::ui::scheduler;
-
-/// In-flight off-thread host dispatch.
-struct PendingDispatch {
-    rx: Receiver<DispatchRecoveryResult>,
-}
 
 /// Env var set by open-capture launcher for Capture UI mode.
 pub const MODE_ENV: &str = "TSK_MODE";
@@ -91,10 +80,7 @@ fn load_snapshot() -> InvocationSnapshot {
     build_snapshot(&raw, cwd)
 }
 
-/// Load store + context into domain and board view-model (no TTY).
-///
-/// Does not poll the host: the board loop never calls [`run_attention_cycle`]
-/// after load; the function remains for the tests that drive it directly.
+/// Load store + snapshot into domain and board view-model (no TTY).
 pub fn load_board() -> Result<(TaskStore, DomainState, BoardModel), Box<dyn Error>> {
     let store = TaskStore::new(default_state_dir());
     let state = store.load()?;
@@ -102,68 +88,6 @@ pub fn load_board() -> Result<(TaskStore, DomainState, BoardModel), Box<dyn Erro
     let mut model = BoardModel::from_domain(&state, snapshot.this_repo.clone());
     model.verb_modifier = SettingsRecord::new(default_config_dir()).verb_modifier();
     Ok((store, state, model))
-}
-
-/// One attention poll: merge disk → host pane list → reactor → optional persist + model sync.
-///
-/// Reloads the disk snapshot before applying so attention never acts on an older local copy.
-/// Persists only when human status actually changed (no-op observation must not rewrite disk).
-/// Host list failure skips apply (returns empty result). Used on board open and while the
-/// board is focused.
-pub fn run_attention_cycle(
-    store: &TaskStore,
-    domain: &mut DomainState,
-    model: &mut BoardModel,
-    host: &dyn HostPorts,
-) -> RefreshResult {
-    // Freshest disk first: poll must not apply against stale tasks then stomp newer edits.
-    if let Ok(disk) = store.load() {
-        domain.merge_tasks_from_disk(&disk);
-    }
-    match attention::poll_host(domain, host) {
-        Ok(result) if result.status_changed() => {
-            model.apply_attention_result(&result);
-            if let Err(e) = store.reload_merge_save(domain) {
-                // Attention polls have no interactive Retry/Cancel surface. Keep the working
-                // state visible rather than rendering the prior persisted status as current.
-                model.sync_from_domain(domain);
-                model.set_message(format!("attention save failed: {e}"));
-            } else {
-                model.sync_from_domain(domain);
-                let n = result.status_changed.len();
-                model.set_message(format!(
-                    "attention · {n} task{} updated from agent",
-                    if n == 1 { "" } else { "s" }
-                ));
-            }
-            result
-        }
-        Ok(result) => {
-            // Disk merge (and any pure no-ops) still need model sync for concurrent edits.
-            model.apply_attention_result(&result);
-            model.sync_from_domain(domain);
-            result
-        }
-        Err(_) => {
-            // An unavailable snapshot must not turn links stale.
-            let result = RefreshResult::unavailable(domain);
-            model.apply_attention_result(&result);
-            model.sync_from_domain(domain);
-            result
-        }
-    }
-}
-
-/// Retained test seam for a one-off attention refresh.
-///
-/// the board loop never calls this on the frame path.
-pub fn run_board_open_refresh(
-    store: &TaskStore,
-    domain: &mut DomainState,
-    model: &mut BoardModel,
-    host: &dyn HostPorts,
-) -> RefreshResult {
-    run_attention_cycle(store, domain, model, host)
 }
 
 /// The one walkthrough read on the open path: no record means the card opens.
@@ -188,7 +112,7 @@ pub fn open_walkthrough_for_launch(
     }
     // The reducer's `OpenWalkthrough` arm has no failure mode, and a board that could not
     // raise its onboarding card is still a usable board: nothing here fails the launch.
-    let _ = apply_intent(domain, model, BoardIntent::OpenWalkthrough, None, None);
+    let _ = apply_intent(domain, model, BoardIntent::OpenWalkthrough, None);
 }
 
 /// Record the dismissal an open walkthrough just reported, at most once per close.
@@ -350,55 +274,29 @@ fn run_board() -> Result<(), Box<dyn Error>> {
     let mut store_watch = StoreWatch::seeded(&store);
     // the board frame path does no host polling and does not
     // auto-open the walkthrough on launch. `load_board` is the whole open path; the first
-    // paint below is of that model, unrefreshed. `run_attention_cycle`,
+    // paint below is of that model, unrefreshed. attention polling (removed),
     // `run_board_open_refresh`, and `open_walkthrough_for_launch` remain for the tests that
     // drive them directly -- this loop simply stops calling them.
     //
-    // the Idle branch below is not pure silence, though. Every idle tick revalidates the
-    // store -- a `stat` on tsk.json, and only when its mtime/size changed does it pay for
-    // `store.load()` + `merge_tasks_from_disk` + `sync_from_domain` (see
-    // [`revalidate_board_from_store`]) -- so a quick-capture popup (a separate process writing
-    // the same file) becomes visible on an open, idle board without this board ever running a
-    // persisting intent. That is disk-merge, not host polling: NC-1's no-attention-polling
-    // constraint is about the host, not the store, so it stays satisfied. Save recovery still
-    // gates it off via `board_background_work_allowed`, same as it gates the dispatch-recovery
-    // reload above.
+    // Every idle tick revalidates the store -- a `stat` on tsk.json, and only when its
+    // mtime/size changed does it pay for `store.load()` + `merge_tasks_from_disk` +
+    // `sync_from_domain` (see [`revalidate_board_from_store`]) -- so a quick-capture popup
+    // (a separate process writing the same file) becomes visible on an open, idle board
+    // without this board ever running a persisting intent. Save recovery still gates that
+    // off via `board_background_work_allowed`.
 
     // Query before the alternate screen is entered: it can block on a terminal round-trip,
     // and a blank alternate screen is what the user would be staring at meanwhile.
     let keyboard_enhancement = keyboard_enhancement_supported();
     ratatui::run(|terminal| -> io::Result<()> {
         let _input = enable_terminal_input(keyboard_enhancement)?;
-        let mut pending_dispatch: Option<PendingDispatch> = None;
         let mut save_recovery = SaveRecovery::new();
         loop {
-            // A completed worker must remain queued while the failed save owns the displayed
-            // working state. Applying it would reload disk and replace SaveRecovery.
-            match process_pending_dispatch(&mut pending_dispatch, &save_recovery) {
-                PendingDispatchPoll::Finished(result) => match store.load() {
-                    Ok(reloaded) => {
-                        // The worker persists every recovery transition. Replace the local
-                        // snapshot before rendering so completed/cleaned attempts disappear.
-                        domain = reloaded;
-                        apply_dispatch_recovery_result(&domain, &mut model, result);
-                    }
-                    Err(error) => {
-                        model.set_message(format!("dispatch recovery reload failed: {error}"));
-                    }
-                },
-                PendingDispatchPoll::Disconnected => {
-                    model.set_message("dispatch recovery worker disconnected");
-                }
-                PendingDispatchPoll::Pending => {}
-            }
-
-            // Settle, paint, then wait -- the the board frame path does no host polling
-            //, so the wait is only the Frame Scheduler's idle floor
-            //, never an attention tick. All three are one call because the order is
-            // the correctness property: the walkthrough's report -- from the previous
-            // iteration's event or from the dispatch recovery just applied above -- is
-            // written before this frame is painted and before the wait can time out into the
-            // `continue` below.
+            // Settle, paint, then wait. The board frame path does no host polling, so the
+            // wait is only the Frame Scheduler's idle floor. All three are one call because
+            // the order is the correctness property: the walkthrough's report from the
+            // previous iteration is written before this frame is painted and before the wait
+            // can time out into the `continue` below.
             let poll = board_idle_tick(
                 &mut model,
                 || walkthrough.record_dismissed(),
@@ -435,7 +333,6 @@ fn run_board() -> Result<(), Box<dyn Error>> {
                         &mut domain,
                         &mut model,
                         intent,
-                        &mut pending_dispatch,
                         &mut save_recovery,
                     )? {
                         break;
@@ -451,7 +348,6 @@ fn run_board() -> Result<(), Box<dyn Error>> {
                         &mut domain,
                         &mut model,
                         intent,
-                        &mut pending_dispatch,
                         &mut save_recovery,
                     )? {
                         break;
@@ -467,7 +363,6 @@ fn run_board() -> Result<(), Box<dyn Error>> {
                         &mut domain,
                         &mut model,
                         intent,
-                        &mut pending_dispatch,
                         &mut save_recovery,
                     )? {
                         break;
@@ -587,33 +482,6 @@ pub fn revalidate_board_from_store(
     true
 }
 
-/// Result of polling a pending dispatch without replacing save-recovery state.
-enum PendingDispatchPoll {
-    Pending,
-    Finished(DispatchRecoveryResult),
-    Disconnected,
-}
-
-/// Deliver a finished dispatch only when it cannot replace SaveRecovery's retained model.
-fn process_pending_dispatch(
-    pending_dispatch: &mut Option<PendingDispatch>,
-    recovery: &SaveRecovery<DomainState>,
-) -> PendingDispatchPoll {
-    if !board_background_work_allowed(recovery) {
-        return PendingDispatchPoll::Pending;
-    }
-    let Some(pending) = pending_dispatch.take() else {
-        return PendingDispatchPoll::Pending;
-    };
-    match pending.rx.try_recv() {
-        Ok(result) => PendingDispatchPoll::Finished(result),
-        Err(TryRecvError::Empty) => {
-            *pending_dispatch = Some(pending);
-            PendingDispatchPoll::Pending
-        }
-        Err(TryRecvError::Disconnected) => PendingDispatchPoll::Disconnected,
-    }
-}
 fn terminal_area(terminal: &DefaultTerminal) -> io::Result<Rect> {
     let size = terminal.size()?;
     Ok(Rect::new(0, 0, size.width, size.height))
@@ -624,7 +492,6 @@ pub struct BoardSaveContext<'a> {
     pub baseline: DomainState,
     pub intent: BoardIntent,
     pub snapshot: Option<&'a InvocationSnapshot>,
-    pub host: Option<&'a dyn HostPorts>,
 }
 
 /// Apply one board intent through the save-recovery boundary.
@@ -696,7 +563,6 @@ pub fn apply_board_intent_with_save_recovery(
         baseline,
         intent,
         snapshot,
-        host,
     } = context;
     // Resolve a command-surface confirmation before the recovery gate, so the surface
     // dispatches the same intent the direct route would and gains no exemption.
@@ -755,9 +621,7 @@ pub fn apply_board_intent_with_save_recovery(
             | BoardIntent::PageScrollDown
             | BoardIntent::PageWheelScrollUp
             | BoardIntent::PageWheelScrollDown
-            | BoardIntent::ToggleDoneDrawer => {
-                return apply_intent(domain, model, intent, None, None)
-            }
+            | BoardIntent::ToggleDoneDrawer => return apply_intent(domain, model, intent, None),
             _ => {
                 model.begin_save_recovery(recovery.error().unwrap_or("save failed"));
                 return Ok(IntentOutcome::None);
@@ -789,7 +653,7 @@ pub fn apply_board_intent_with_save_recovery(
     if holds_task_edit {
         model.hold_task_edit_save();
     }
-    let outcome = match apply_intent(domain, model, intent, snapshot, host) {
+    let outcome = match apply_intent(domain, model, intent, snapshot) {
         Ok(outcome) => outcome,
         Err(error) => {
             if holds_task_edit {
@@ -1063,12 +927,8 @@ fn handle_board_intent(
     domain: &mut DomainState,
     model: &mut BoardModel,
     intent: BoardIntent,
-    pending_dispatch: &mut Option<PendingDispatch>,
     save_recovery: &mut SaveRecovery<DomainState>,
 ) -> io::Result<bool> {
-    let herdr = HerdrHost::from_env();
-    let host: &dyn HostPorts = &herdr;
-
     let baseline = if save_recovery.is_pending() || !board_intent_may_persist(&intent) {
         DomainState::new()
     } else {
@@ -1103,7 +963,6 @@ fn handle_board_intent(
             baseline,
             intent,
             snapshot: snapshot_for_intent,
-            host: Some(host),
         },
         |state| {
             store
@@ -1113,36 +972,6 @@ fn handle_board_intent(
     ) {
         IntentOutcome::Quit => Ok(true),
         IntentOutcome::Persist | IntentOutcome::Persisted => Ok(false),
-        IntentOutcome::ResumeDispatch { attempt_id } => {
-            if pending_dispatch.is_some() {
-                model.set_message("dispatch recovery already in progress…");
-                return Ok(false);
-            }
-            let (tx, rx) = mpsc::channel();
-            let worker_store = store.clone();
-            let worker_host = HerdrHost::from_env();
-            thread::spawn(move || {
-                let result = resume_dispatch_attempt(worker_store, attempt_id, &worker_host);
-                let _ = tx.send(result);
-            });
-            *pending_dispatch = Some(PendingDispatch { rx });
-            Ok(false)
-        }
-        IntentOutcome::CleanupDispatch { attempt_id } => {
-            if pending_dispatch.is_some() {
-                model.set_message("dispatch recovery already in progress…");
-                return Ok(false);
-            }
-            let (tx, rx) = mpsc::channel();
-            let worker_store = store.clone();
-            let worker_host = HerdrHost::from_env();
-            thread::spawn(move || {
-                let result = cleanup_dispatch_attempt(worker_store, attempt_id, &worker_host);
-                let _ = tx.send(result);
-            });
-            *pending_dispatch = Some(PendingDispatch { rx });
-            Ok(false)
-        }
         IntentOutcome::None => Ok(false),
     }
 }
@@ -1214,78 +1043,18 @@ fn capture_form_loop(
 }
 #[cfg(test)]
 mod save_recovery_tests {
-    use std::sync::mpsc;
-
-    use super::{
-        board_background_work_allowed, process_pending_dispatch, PendingDispatch,
-        PendingDispatchPoll,
-    };
-    use crate::dispatch::DispatchRecoveryResult;
+    use super::board_background_work_allowed;
     use crate::domain::DomainState;
     use crate::save_recovery::SaveRecovery;
 
     #[test]
-    fn board_background_work_defers_finished_dispatch_during_save_recovery() {
-        let (tx, rx) = mpsc::channel();
-        tx.send(DispatchRecoveryResult::Error {
-            message: "finished while saving".into(),
-        })
-        .expect("queue dispatch result");
-        let mut pending = Some(PendingDispatch { rx });
+    fn board_background_work_defers_during_save_recovery() {
         let mut recovery = SaveRecovery::new();
-        recovery.fail(DomainState::new(), DomainState::new(), "save failed");
-
-        assert!(matches!(
-            process_pending_dispatch(&mut pending, &recovery),
-            PendingDispatchPoll::Pending
-        ));
-
-        assert!(
-            pending.is_some(),
-            "finished dispatch stays queued until recovery resolves"
-        );
-        assert!(
-            !board_background_work_allowed(&recovery),
-            "background work must not run during save recovery"
-        );
-
-        let _ = recovery.cancel();
-        assert!(matches!(
-            process_pending_dispatch(&mut pending, &recovery),
-            PendingDispatchPoll::Finished(DispatchRecoveryResult::Error { .. })
-        ));
-
-        assert!(pending.is_none());
         assert!(board_background_work_allowed(&recovery));
-    }
-
-    /// A worker that dies without sending must surface as `Disconnected` exactly once,
-    /// so the board can clear its pending state instead of polling a dead channel.
-    #[test]
-    fn dropped_dispatch_worker_reports_disconnected_and_does_not_requeue() {
-        let (tx, rx) = mpsc::channel::<DispatchRecoveryResult>();
-        drop(tx);
-        let mut pending = Some(PendingDispatch { rx });
-        let recovery = SaveRecovery::<DomainState>::new();
-
-        assert!(
-            matches!(
-                process_pending_dispatch(&mut pending, &recovery),
-                PendingDispatchPoll::Disconnected
-            ),
-            "a sender dropped without a result must report Disconnected"
-        );
-        assert!(
-            pending.is_none(),
-            "a disconnected worker must not be re-queued for another poll"
-        );
-        assert!(
-            matches!(
-                process_pending_dispatch(&mut pending, &recovery),
-                PendingDispatchPoll::Pending
-            ),
-            "with the slot cleared the next poll is idle, not Disconnected again"
-        );
+        recovery.fail(DomainState::new(), DomainState::new(), "save failed");
+        assert!(!board_background_work_allowed(&recovery));
+        let _ = recovery.cancel();
+        assert!(board_background_work_allowed(&recovery));
     }
 }
 
@@ -1536,7 +1305,7 @@ mod idle_store_revalidation_tests {
     /// M-3(i) /: an open **title** edit must not be redirected by the idle merge this
     /// call site drives -- the doc above claims it (`sync_from_domain` reanchors selection by
     /// id and never touches the edit binding), and `tests/edit_target_binding.rs` already
-    /// pins the identical merge+reanchor pair through `run_attention_cycle`, but nothing drove
+    /// pins the identical merge+reanchor pair through attention polling (removed), but nothing drove
     /// it through `revalidate_board_from_store` itself. Pin it here so this call site's own
     /// risk is bound to a test, not only to the property it borrows.
     #[test]
@@ -1561,14 +1330,8 @@ mod idle_store_revalidation_tests {
         let mut watch = StoreWatch::seeded(&store);
         let save_recovery = SaveRecovery::<DomainState>::new();
 
-        apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::BeginEditTitle,
-            None,
-            None,
-        )
-        .expect("begin title edit");
+        apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+            .expect("begin title edit");
         assert_eq!(model.input_mode(), BoardInputMode::EditTitle);
         assert_eq!(model.edit_target(), Some(alpha));
 
@@ -1639,21 +1402,14 @@ mod idle_store_revalidation_tests {
         let mut watch = StoreWatch::seeded(&store);
         let save_recovery = SaveRecovery::<DomainState>::new();
 
-        apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::OpenCapture,
-            None,
-            None,
-        )
-        .expect("open quick add");
+        apply_intent(&mut domain, &mut model, BoardIntent::OpenCapture, None)
+            .expect("open quick add");
         assert_eq!(model.input_mode(), BoardInputMode::QuickAdd);
         for character in "Draft in progress".chars() {
             apply_intent(
                 &mut domain,
                 &mut model,
                 BoardIntent::QuickAddInsert(character),
-                None,
                 None,
             )
             .expect("type into the capture draft");
@@ -1778,8 +1534,7 @@ mod tests {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     use crate::context::InvocationSnapshot;
-    use crate::domain::{AgentMeta, HumanStatus, ObservedStatus, ProvenanceOrigin, TaskScope};
-    use crate::host::PaneInfo;
+    use crate::domain::{HumanStatus, ProvenanceOrigin, TaskScope};
     use crate::ui::board::CommandSurface;
     use crate::ui::capture::CaptureField;
     use crate::ui::input::map_key;
@@ -1850,7 +1605,7 @@ mod tests {
             let intent = resolve_board_command(model, intent).unwrap_or_else(|| {
                 panic!("{area:?}: {key:?}'s intent must resolve through the command route")
             });
-            apply_intent(domain, model, intent, None, None)
+            apply_intent(domain, model, intent, None)
                 .unwrap_or_else(|e| panic!("{area:?}: {key:?} must apply cleanly: {e:?}"))
         }
         let alt = |code| KeyEvent::new(code, KeyModifiers::ALT);
@@ -1982,7 +1737,6 @@ mod tests {
             &mut model,
             BoardIntent::OpenCommandPalette,
             None,
-            None,
         )
         .expect("open palette");
         // Narrow to "delete" (the catalog; reopen needs a done selection and Complete is
@@ -1992,7 +1746,6 @@ mod tests {
                 &mut domain,
                 &mut model,
                 BoardIntent::CommandQueryInsert(character),
-                None,
                 None,
             )
             .expect("type query");
@@ -2106,7 +1859,6 @@ mod tests {
             &mut model,
             BoardIntent::SelectHomeTab(BoardTab::Projects),
             None,
-            None,
         )
         .expect("projects tab");
         let area = Rect::new(0, 0, 80, 24);
@@ -2145,7 +1897,7 @@ mod tests {
                            model: &mut BoardModel,
                            mouse: crossterm::event::MouseEvent| {
             let intent = board_mouse_intent(area, model, mouse).expect("click maps to intent");
-            apply_intent(domain, model, intent, None, None).expect("click applies");
+            apply_intent(domain, model, intent, None).expect("click applies");
         };
 
         let mouse = {
@@ -2342,40 +2094,17 @@ mod tests {
             .expect("seed task");
         temp.store.save(&domain).expect("seed store");
         let mut model = BoardModel::from_domain(&domain, None);
-        let mut pending_dispatch = None;
         let mut recovery = SaveRecovery::new();
-        apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::OpenTaskPage,
-            None,
-            None,
-        )
-        .expect("open");
-        apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::BeginAddStep,
-            None,
-            None,
-        )
-        .expect("edit");
+        apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open");
+        apply_intent(&mut domain, &mut model, BoardIntent::BeginAddStep, None).expect("edit");
         for ch in "next step".chars() {
-            apply_intent(
-                &mut domain,
-                &mut model,
-                BoardIntent::EditInsert(ch),
-                None,
-                None,
-            )
-            .expect("type");
+            apply_intent(&mut domain, &mut model, BoardIntent::EditInsert(ch), None).expect("type");
         }
         handle_board_intent(
             &temp.store,
             &mut domain,
             &mut model,
             BoardIntent::ConfirmEditNext,
-            &mut pending_dispatch,
             &mut recovery,
         )
         .expect("real ctrl-enter save");
@@ -2408,7 +2137,6 @@ mod tests {
         let mut domain = DomainState::new();
         temp.store.save(&domain).expect("seed empty store");
         let mut model = BoardModel::from_domain(&domain, None);
-        let mut pending_dispatch = None;
         let mut save_recovery = SaveRecovery::new();
 
         assert_eq!(model.input_mode(), BoardInputMode::Normal);
@@ -2419,7 +2147,6 @@ mod tests {
             &mut domain,
             &mut model,
             BoardIntent::OpenCapture,
-            &mut pending_dispatch,
             &mut save_recovery,
         )
         .expect("open capture");
@@ -2433,7 +2160,6 @@ mod tests {
                 &mut domain,
                 &mut model,
                 BoardIntent::QuickAddInsert(ch),
-                &mut pending_dispatch,
                 &mut save_recovery,
             )
             .expect("type title");
@@ -2445,7 +2171,6 @@ mod tests {
             &mut domain,
             &mut model,
             BoardIntent::QuickAddSave,
-            &mut pending_dispatch,
             &mut save_recovery,
         )
         .expect("save quick add");
@@ -2495,7 +2220,6 @@ mod tests {
             &mut model,
             BoardIntent::OpenCapture,
             Some(&snapshot),
-            None,
         )
         .expect("open quick add");
         apply_intent(
@@ -2503,7 +2227,6 @@ mod tests {
             &mut model,
             BoardIntent::QuickAddInsertText("Case insensitive scope !p TSK-Board".into()),
             Some(&snapshot),
-            None,
         )
         .expect("type title and scope token");
         apply_intent(
@@ -2511,7 +2234,6 @@ mod tests {
             &mut model,
             BoardIntent::QuickAddSave,
             Some(&snapshot),
-            None,
         )
         .expect("save quick add");
 
@@ -2543,7 +2265,6 @@ mod tests {
             &mut model,
             BoardIntent::OpenCapture,
             Some(&snapshot),
-            None,
         )
         .expect("open quick add");
         apply_intent(
@@ -2551,7 +2272,6 @@ mod tests {
             &mut model,
             BoardIntent::QuickAddSave,
             Some(&snapshot),
-            None,
         )
         .expect("reject empty title");
         assert_eq!(model.input_mode(), BoardInputMode::QuickAdd);
@@ -2562,28 +2282,15 @@ mod tests {
             &mut model,
             BoardIntent::CancelQuickAdd,
             Some(&snapshot),
-            None,
         )
         .expect("close refused quick add");
         assert_eq!(model.input_mode(), BoardInputMode::Normal);
         assert_eq!(model.message(), None, "no refusal leaks onto the board");
 
-        apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::OpenCapture,
-            None,
-            None,
-        )
-        .expect("open snapshot-less quick add");
-        apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::QuickAddSave,
-            None,
-            None,
-        )
-        .expect("refuse unavailable capture context");
+        apply_intent(&mut domain, &mut model, BoardIntent::OpenCapture, None)
+            .expect("open snapshot-less quick add");
+        apply_intent(&mut domain, &mut model, BoardIntent::QuickAddSave, None)
+            .expect("refuse unavailable capture context");
         assert_eq!(model.input_mode(), BoardInputMode::QuickAdd);
         assert_eq!(
             model.message(),
@@ -2616,7 +2323,6 @@ mod tests {
             &mut model,
             BoardIntent::OpenCapture,
             Some(&snapshot),
-            None,
         )
         .expect("open quick add");
         apply_intent(
@@ -2624,7 +2330,6 @@ mod tests {
             &mut model,
             BoardIntent::ExpandQuickAdd,
             Some(&snapshot),
-            None,
         )
         .expect("expand quick add");
         apply_intent(
@@ -2632,7 +2337,6 @@ mod tests {
             &mut model,
             BoardIntent::EditInsertText("retained notes".into()),
             Some(&snapshot),
-            None,
         )
         .expect("write notes");
         apply_intent(
@@ -2640,7 +2344,6 @@ mod tests {
             &mut model,
             BoardIntent::FocusFormField(CaptureField::Scope),
             Some(&snapshot),
-            None,
         )
         .expect("focus scope");
         apply_intent(
@@ -2648,7 +2351,6 @@ mod tests {
             &mut model,
             BoardIntent::FormCycleScope,
             Some(&snapshot),
-            None,
         )
         .expect("choose project scope");
         assert_eq!(
@@ -2666,7 +2368,6 @@ mod tests {
                 baseline: DomainState::new(),
                 intent: BoardIntent::ConfirmEdit,
                 snapshot: Some(&snapshot),
-                host: None,
             },
             |working| store.save(working).map_err(|error| error.to_string()),
         )
@@ -2686,7 +2387,6 @@ mod tests {
                 baseline: DomainState::new(),
                 intent: BoardIntent::CancelSave,
                 snapshot: None,
-                host: None,
             },
             |_| panic!("CancelSave must not persist"),
         )
@@ -2709,7 +2409,6 @@ mod tests {
             &mut model,
             BoardIntent::ExpandQuickAdd,
             Some(&snapshot),
-            None,
         )
         .expect("reopen retained draft");
         assert_eq!(model.input_mode(), BoardInputMode::EditNotes);
@@ -2738,7 +2437,6 @@ mod tests {
             &mut model,
             BoardIntent::OpenCapture,
             Some(&snapshot),
-            None,
         )
         .expect("open quick add");
         apply_intent(
@@ -2746,7 +2444,6 @@ mod tests {
             &mut model,
             BoardIntent::ExpandQuickAdd,
             Some(&snapshot),
-            None,
         )
         .expect("expand quick add");
         let outcome = apply_board_intent_with_save_recovery(
@@ -2757,7 +2454,6 @@ mod tests {
                 baseline: DomainState::new(),
                 intent: BoardIntent::ConfirmEdit,
                 snapshot: Some(&snapshot),
-                host: None,
             },
             |working| temp.store.save(working).map_err(|error| error.to_string()),
         )
@@ -2777,14 +2473,8 @@ mod tests {
     fn quick_add_save_without_a_capture_snapshot_neither_saves_nor_reports_persist() {
         let mut domain = DomainState::new();
         let mut model = BoardModel::from_domain(&domain, None);
-        apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::OpenCapture,
-            None,
-            None,
-        )
-        .expect("open quick add with no snapshot");
+        apply_intent(&mut domain, &mut model, BoardIntent::OpenCapture, None)
+            .expect("open quick add with no snapshot");
         assert_eq!(model.input_mode(), BoardInputMode::QuickAdd);
 
         apply_intent(
@@ -2792,18 +2482,11 @@ mod tests {
             &mut model,
             BoardIntent::QuickAddInsert('x'),
             None,
-            None,
         )
         .expect("type into title");
 
-        let outcome = apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::QuickAddSave,
-            None,
-            None,
-        )
-        .expect("confirm without a snapshot");
+        let outcome = apply_intent(&mut domain, &mut model, BoardIntent::QuickAddSave, None)
+            .expect("confirm without a snapshot");
 
         assert_eq!(
             outcome,
@@ -2861,14 +2544,7 @@ mod tests {
     #[test]
     fn task_page_view_mode_routes_keys_through_the_page_keymap_not_the_form_field_map() {
         let (mut domain, mut model) = board_with_one_task();
-        apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::OpenTaskPage,
-            None,
-            None,
-        )
-        .expect("open page");
+        apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
         assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
         assert!(model.board_form_open(), "the page keeps its form open");
 
@@ -2898,14 +2574,8 @@ mod tests {
         }
 
         // A focused field hands back to the form field map: bare characters insert.
-        apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::BeginEditTitle,
-            None,
-            None,
-        )
-        .expect("enter title edit");
+        apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+            .expect("enter title edit");
         assert_eq!(model.input_mode(), BoardInputMode::EditTitle);
         assert_eq!(
             board_keyboard_intent(
@@ -2923,14 +2593,8 @@ mod tests {
     #[test]
     fn board_keyboard_uses_the_form_mapper_only_for_form_field_and_dropdown_modes() {
         let (mut domain, mut model) = board_with_one_task();
-        apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::BeginEditTitle,
-            None,
-            None,
-        )
-        .expect("open task form");
+        apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+            .expect("open task form");
         assert!(model.board_form_open());
 
         for mode in [BoardInputMode::EditTitle, BoardInputMode::EditNotes] {
@@ -2948,7 +2612,6 @@ mod tests {
             &mut domain,
             &mut model,
             BoardIntent::FocusFormField(CaptureField::Scope),
-            None,
             None,
         )
         .expect("focus scope field");
@@ -2987,16 +2650,6 @@ mod tests {
                 Some(BoardIntent::CancelProjectPicker),
             ),
             (
-                BoardInputMode::Recovery,
-                KeyCode::Char('r'),
-                Some(BoardIntent::RecoveryResume),
-            ),
-            (
-                BoardInputMode::CleanupConfirm,
-                KeyCode::Char('y'),
-                Some(BoardIntent::ConfirmCleanup),
-            ),
-            (
                 BoardInputMode::SaveRecovery,
                 KeyCode::Char('r'),
                 Some(BoardIntent::RetrySave),
@@ -3030,14 +2683,8 @@ mod tests {
     #[test]
     fn save_recovery_with_an_open_form_routes_r_c_and_esc_to_its_own_mapper() {
         let (mut domain, mut model) = board_with_one_task();
-        apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::BeginEditTitle,
-            None,
-            None,
-        )
-        .expect("open task form");
+        apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+            .expect("open task form");
         model.begin_save_recovery("injected save failure");
         assert!(
             model.board_form_open(),
@@ -3073,367 +2720,6 @@ mod tests {
     /// `resize_guidance_blocks_task_mutation_from_every_open_surface`): every open surface was
     /// force-closed and forced to `Normal`, and every intent but quit/close-layer was
     /// swallowed below 50x18.
-    /// Fake host returning fixed panes for attention poll tests.
-    struct AttentionFakeHost {
-        panes: Vec<PaneInfo>,
-        list_calls: std::sync::atomic::AtomicUsize,
-    }
-
-    impl HostPorts for AttentionFakeHost {
-        fn list_pane_ids(&self) -> Result<Vec<String>, String> {
-            Ok(self.list_panes()?.into_iter().map(|p| p.pane_id).collect())
-        }
-
-        fn list_panes(&self) -> Result<Vec<PaneInfo>, String> {
-            self.list_calls
-                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            Ok(self.panes.clone())
-        }
-
-        fn focus_pane(&self, _pane_id: &str) -> Result<(), String> {
-            Ok(())
-        }
-
-        fn open_path(&self, _path: &str) -> Result<(), String> {
-            Ok(())
-        }
-    }
-
-    struct FailingAttentionHost;
-
-    impl HostPorts for FailingAttentionHost {
-        fn list_pane_ids(&self) -> Result<Vec<String>, String> {
-            Err("host unavailable".into())
-        }
-
-        fn list_panes(&self) -> Result<Vec<PaneInfo>, String> {
-            Err("host unavailable".into())
-        }
-
-        fn focus_pane(&self, _pane_id: &str) -> Result<(), String> {
-            Ok(())
-        }
-
-        fn open_path(&self, _path: &str) -> Result<(), String> {
-            Ok(())
-        }
-    }
-
-    #[test]
-    fn attention_cycle_with_fake_host_sets_review_and_syncs_model() {
-        use std::fs;
-        use std::time::{SystemTime, UNIX_EPOCH};
-
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let seq = TEMP_DIR_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let dir = env::temp_dir().join(format!("tsk-attn-cycle-{nanos}-{seq}"));
-        fs::create_dir_all(&dir).unwrap();
-
-        let store = TaskStore::new(&dir);
-        let mut domain = DomainState::new();
-        let id = domain
-            .create(
-                "Linked agent work",
-                None,
-                TaskScope::Global,
-                None,
-                Some(AgentMeta {
-                    agent_id: Some("grok".into()),
-                    pane_id: Some("w0:p1".into()),
-                    agent_session: None,
-                }),
-                ProvenanceOrigin::Capture,
-            )
-            .unwrap();
-        store.save(&domain).unwrap();
-
-        let mut model = BoardModel::from_domain(&domain, None);
-        assert_eq!(domain.get(id).unwrap().status, HumanStatus::Ready);
-
-        let host = AttentionFakeHost {
-            panes: vec![PaneInfo {
-                pane_id: "w0:p1".into(),
-                agent: Some("grok".into()),
-                observed: Some(ObservedStatus::Done),
-                ..PaneInfo::default()
-            }],
-            list_calls: std::sync::atomic::AtomicUsize::new(0),
-        };
-
-        let result = run_attention_cycle(&store, &mut domain, &mut model, &host);
-        assert!(result.status_changed.contains(&id));
-        assert_eq!(domain.get(id).unwrap().status, HumanStatus::Review);
-        assert_eq!(host.list_calls.load(std::sync::atomic::Ordering::SeqCst), 1);
-        assert!(
-            model
-                .message()
-                .is_some_and(|m| m.contains("updated from agent")),
-            "signal change should set status message"
-        );
-
-        // Model reflects attention set after sync; preserve open message like run_board.
-        let open_msg = model.message().map(str::to_string);
-        let this_repo = model.this_repo().map(|p| p.to_path_buf());
-        model = BoardModel::from_domain(&domain, this_repo);
-        if let Some(msg) = open_msg {
-            model.set_message(msg);
-        }
-        assert!(model
-            .message()
-            .is_some_and(|m| m.contains("updated from agent")));
-
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn attention_cycle_save_failure_keeps_changed_status_visible_in_model() {
-        use std::fs;
-        use std::time::{SystemTime, UNIX_EPOCH};
-
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let seq = TEMP_DIR_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let dir = env::temp_dir().join(format!("tsk-attn-save-failure-{nanos}-{seq}"));
-        fs::create_dir_all(&dir).unwrap();
-        let store = TaskStore::new(&dir);
-        let mut domain = DomainState::new();
-        let id = domain
-            .create(
-                "Linked agent work",
-                None,
-                TaskScope::Global,
-                None,
-                Some(AgentMeta {
-                    agent_id: Some("grok".into()),
-                    pane_id: Some("w0:p1".into()),
-                    agent_session: None,
-                }),
-                ProvenanceOrigin::Capture,
-            )
-            .unwrap();
-        store.save(&domain).unwrap();
-        let mut model = BoardModel::from_domain(&domain, None);
-        fs::remove_file(store.state_file()).unwrap();
-        fs::create_dir(store.state_file()).unwrap();
-
-        let result = run_attention_cycle(
-            &store,
-            &mut domain,
-            &mut model,
-            &AttentionFakeHost {
-                panes: vec![PaneInfo {
-                    pane_id: "w0:p1".into(),
-                    agent: Some("grok".into()),
-                    observed: Some(ObservedStatus::Done),
-                    ..PaneInfo::default()
-                }],
-                list_calls: std::sync::atomic::AtomicUsize::new(0),
-            },
-        );
-
-        assert!(result.status_changed.contains(&id));
-        assert_eq!(domain.get(id).unwrap().status, HumanStatus::Review);
-        assert!(
-            model.visible_ids().contains(&id),
-            "the board model must not lose the changed task after save failure"
-        );
-        assert!(model
-            .message()
-            .is_some_and(|message| message.contains("attention save failed")));
-    }
-
-    #[test]
-    fn attention_cycle_host_failure_preserves_existing_stale_presentation() {
-        use std::fs;
-        use std::time::{SystemTime, UNIX_EPOCH};
-
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let seq = TEMP_DIR_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let dir = env::temp_dir().join(format!("tsk-attn-unavailable-{nanos}-{seq}"));
-        fs::create_dir_all(&dir).unwrap();
-        let store = TaskStore::new(&dir);
-        let mut domain = DomainState::new();
-        let id = domain
-            .create(
-                "Missing linked agent",
-                None,
-                TaskScope::Global,
-                None,
-                Some(AgentMeta {
-                    agent_id: Some("grok".into()),
-                    pane_id: Some("w0:missing".into()),
-                    agent_session: None,
-                }),
-                ProvenanceOrigin::Capture,
-            )
-            .unwrap();
-        store.save(&domain).unwrap();
-        let mut model = BoardModel::from_domain(&domain, None);
-        let first = run_attention_cycle(
-            &store,
-            &mut domain,
-            &mut model,
-            &AttentionFakeHost {
-                panes: Vec::new(),
-                list_calls: std::sync::atomic::AtomicUsize::new(0),
-            },
-        );
-        assert!(first.stale_ids().contains(&id));
-        assert!(model.is_stale(id));
-
-        let unavailable =
-            run_attention_cycle(&store, &mut domain, &mut model, &FailingAttentionHost);
-        assert!(unavailable
-            .classifications
-            .iter()
-            .all(|(_, c)| *c != crate::attention::AttentionClassification::Stale));
-        assert!(model.is_stale(id));
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn attention_cycle_merges_disk_before_apply_keeps_newer_edit() {
-        use std::fs;
-        use std::thread;
-        use std::time::{Duration, SystemTime, UNIX_EPOCH};
-
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let seq = TEMP_DIR_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let dir = env::temp_dir().join(format!("tsk-attn-merge-{nanos}-{seq}"));
-        fs::create_dir_all(&dir).unwrap();
-
-        let store = TaskStore::new(&dir);
-        let mut domain = DomainState::new();
-        let id = domain
-            .create(
-                "Stale title",
-                None,
-                TaskScope::Global,
-                None,
-                Some(AgentMeta {
-                    agent_id: Some("grok".into()),
-                    pane_id: Some("w0:p1".into()),
-                    agent_session: None,
-                }),
-                ProvenanceOrigin::Capture,
-            )
-            .unwrap();
-        store.save(&domain).unwrap();
-
-        // Concurrent writer: newer title edit on disk while this board holds stale domain.
-        thread::sleep(Duration::from_millis(5));
-        let mut other = store.load().unwrap();
-        other
-            .edit(
-                id,
-                "Newer title from other board",
-                None,
-                TaskScope::Global,
-                None,
-            )
-            .unwrap();
-        store.save(&other).unwrap();
-
-        // Local domain is still stale (old title) when poll runs.
-        assert_eq!(domain.get(id).unwrap().title, "Stale title");
-
-        let mut model = BoardModel::from_domain(&domain, None);
-        let host = AttentionFakeHost {
-            panes: vec![PaneInfo {
-                pane_id: "w0:p1".into(),
-                agent: Some("grok".into()),
-                observed: Some(ObservedStatus::Done),
-                ..PaneInfo::default()
-            }],
-            list_calls: std::sync::atomic::AtomicUsize::new(0),
-        };
-
-        let result = run_attention_cycle(&store, &mut domain, &mut model, &host);
-        assert!(result.status_changed.contains(&id));
-        let task = domain.get(id).unwrap();
-        assert_eq!(task.status, HumanStatus::Review);
-        assert_eq!(
-            task.title, "Newer title from other board",
-            "poll must merge disk before apply so newer edits are not overwritten"
-        );
-
-        let reloaded = store.load().unwrap();
-        assert_eq!(
-            reloaded.get(id).unwrap().title,
-            "Newer title from other board"
-        );
-        assert_eq!(reloaded.get(id).unwrap().status, HumanStatus::Review);
-
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn attention_cycle_noop_observation_does_not_rewrite_disk_updated_at() {
-        use std::fs;
-        use std::time::{SystemTime, UNIX_EPOCH};
-
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let seq = TEMP_DIR_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let dir = env::temp_dir().join(format!("tsk-attn-noop-{nanos}-{seq}"));
-        fs::create_dir_all(&dir).unwrap();
-
-        let store = TaskStore::new(&dir);
-        let mut domain = DomainState::new();
-        let id = domain
-            .create(
-                "Already review",
-                None,
-                TaskScope::Global,
-                None,
-                Some(AgentMeta {
-                    agent_id: Some("grok".into()),
-                    pane_id: Some("w0:p1".into()),
-                    agent_session: None,
-                }),
-                ProvenanceOrigin::Capture,
-            )
-            .unwrap();
-        domain.set_status(id, HumanStatus::Review).unwrap();
-        store.save(&domain).unwrap();
-        let disk_before = store.load().unwrap();
-        let updated_before = disk_before.get(id).unwrap().updated_at;
-
-        let mut model = BoardModel::from_domain(&domain, None);
-        let host = AttentionFakeHost {
-            panes: vec![PaneInfo {
-                pane_id: "w0:p1".into(),
-                agent: Some("grok".into()),
-                observed: Some(ObservedStatus::Done),
-                ..PaneInfo::default()
-            }],
-            list_calls: std::sync::atomic::AtomicUsize::new(0),
-        };
-
-        let result = run_attention_cycle(&store, &mut domain, &mut model, &host);
-        assert!(!result.status_changed());
-        assert!(!result.any_change());
-
-        let disk_after = store.load().unwrap();
-        assert_eq!(disk_after.get(id).unwrap().updated_at, updated_before);
-        assert_eq!(disk_after.get(id).unwrap().status, HumanStatus::Review);
-
-        let _ = fs::remove_dir_all(&dir);
-    }
-
     /// a bracketed paste reaches the board's edit route, and only that route.
     ///
     /// The board loop's paste arm is exactly this resolution followed by the same
@@ -3463,18 +2749,12 @@ mod tests {
         assert_eq!(model.edit_buffer(), "");
         assert_eq!(domain.get(id).expect("task").title, "Original");
 
-        apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::BeginEditTitle,
-            None,
-            None,
-        )
-        .expect("begin title edit");
+        apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+            .expect("begin title edit");
         let intent =
             board_paste_intent(area, &mut model, "one\ntwo").expect("a paste in an edit mode");
         assert_eq!(intent, BoardIntent::EditInsertText("one\ntwo".to_string()));
-        apply_intent(&mut domain, &mut model, intent, None, None).expect("insert the paste");
+        apply_intent(&mut domain, &mut model, intent, None).expect("insert the paste");
         assert!(
             model.edit_buffer().contains("one"),
             "the paste must land in the draft: {:?}",
@@ -3509,7 +2789,7 @@ mod tests {
             .expect("create task");
 
         let open_palette = |model: &mut BoardModel, domain: &mut DomainState| {
-            apply_intent(domain, model, BoardIntent::OpenCommandPalette, None, None)
+            apply_intent(domain, model, BoardIntent::OpenCommandPalette, None)
                 .expect("open the palette");
         };
 
@@ -3522,7 +2802,6 @@ mod tests {
                 &mut typed,
                 BoardIntent::CommandQueryInsert(character),
                 None,
-                None,
             )
             .expect("type into the query");
         }
@@ -3530,7 +2809,7 @@ mod tests {
         let mut pasted = BoardModel::from_domain(&domain, None);
         open_palette(&mut pasted, &mut domain);
         let intent = board_paste_intent(area, &mut pasted, "park").expect("a paste in the palette");
-        apply_intent(&mut domain, &mut pasted, intent, None, None).expect("insert the paste");
+        apply_intent(&mut domain, &mut pasted, intent, None).expect("insert the paste");
 
         assert_eq!(pasted.command_query(), typed.command_query());
         assert_eq!(
@@ -3552,7 +2831,7 @@ mod tests {
         open_palette(&mut broken, &mut domain);
         let intent =
             board_paste_intent(area, &mut broken, "a\r\nb").expect("a paste in the palette");
-        apply_intent(&mut domain, &mut broken, intent, None, None).expect("insert the paste");
+        apply_intent(&mut domain, &mut broken, intent, None).expect("insert the paste");
         assert_eq!(broken.command_query(), "a b");
     }
 
@@ -3732,23 +3011,11 @@ mod tests {
             let id = domain.tasks()[0].id;
             let before = domain.get(id).expect("task").clone();
 
-            apply_intent(
-                &mut domain,
-                &mut model,
-                BoardIntent::BeginEditTitle,
-                None,
-                None,
-            )
-            .expect("open the title edit");
+            apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+                .expect("open the title edit");
             for _ in 0..before.title.chars().count() {
-                apply_intent(
-                    &mut domain,
-                    &mut model,
-                    BoardIntent::EditBackspace,
-                    None,
-                    None,
-                )
-                .expect("clear the seeded title");
+                apply_intent(&mut domain, &mut model, BoardIntent::EditBackspace, None)
+                    .expect("clear the seeded title");
             }
             for character in draft.chars() {
                 apply_intent(
@@ -3756,19 +3023,12 @@ mod tests {
                     &mut model,
                     BoardIntent::EditInsert(character),
                     None,
-                    None,
                 )
                 .expect("type the draft");
             }
             // Leave the cursor somewhere other than the end, so "unchanged" is a real claim.
-            apply_intent(
-                &mut domain,
-                &mut model,
-                BoardIntent::EditMoveLeft,
-                None,
-                None,
-            )
-            .expect("move the cursor");
+            apply_intent(&mut domain, &mut model, BoardIntent::EditMoveLeft, None)
+                .expect("move the cursor");
             let cursor = model.edit_cursor();
 
             let mut recovery = SaveRecovery::new();
@@ -3780,7 +3040,6 @@ mod tests {
                     baseline: DomainState::new(),
                     intent: BoardIntent::ConfirmEdit,
                     snapshot: None,
-                    host: None,
                 },
                 |_| panic!("a refused edit must never persist"),
             );
@@ -3893,7 +3152,6 @@ mod thread_project_double_click_tests {
             &mut model,
             BoardIntent::SelectHomeTab(BoardTab::Threads),
             None,
-            None,
         )
         .expect("open threads tab");
 
@@ -3923,8 +3181,7 @@ mod thread_project_double_click_tests {
 
         let first = sub_header(&model);
         let intent = board_mouse_intent(area, &mut model, first).expect("first click maps");
-        apply_intent(&mut domain, &mut model, intent.clone(), None, None)
-            .expect("apply first click");
+        apply_intent(&mut domain, &mut model, intent.clone(), None).expect("apply first click");
         assert_eq!(
             model.selected_project(),
             None,
@@ -3933,7 +3190,7 @@ mod thread_project_double_click_tests {
 
         let second = sub_header(&model);
         let intent = board_mouse_intent(area, &mut model, second).expect("second click maps");
-        apply_intent(&mut domain, &mut model, intent, None, None).expect("apply second click");
+        apply_intent(&mut domain, &mut model, intent, None).expect("apply second click");
         assert_eq!(
             model.selected_project().map(Path::to_path_buf),
             Some(PathBuf::from(&targeted_path)),

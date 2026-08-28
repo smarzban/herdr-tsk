@@ -112,9 +112,7 @@ impl BoardModel {
             command("help", BoardIntent::OpenHelp),
             command("quit", BoardIntent::Quit),
         ]);
-        // Dispatch recovery (`RecoveryResume`/`BeginCleanup`) stays constructible for the
-        // save-recovery boundary and host callbacks, but excludes it from the the
-        // palette outright, active attempt or not: no entry is pushed here.
+        // Park / resume / link / dispatch stay out of the palette.
         commands
     }
 

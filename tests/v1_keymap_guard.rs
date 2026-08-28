@@ -119,23 +119,9 @@ fn bare_page_keys_never_mutate_steps() {
     domain.add_step(id, "alpha step").expect("step 1");
     domain.add_step(id, "bravo step").expect("step 2");
     let mut model = BoardModel::from_domain(&domain, None);
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::OpenTaskPage,
-        None,
-        None,
-    )
-    .expect("open page");
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
     // Activate the step cursor (the first bare Down on a task with steps).
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::PageScrollDown,
-        None,
-        None,
-    )
-    .expect("cursor press");
+    apply_intent(&mut domain, &mut model, BoardIntent::PageScrollDown, None).expect("cursor press");
 
     let before = domain.get(id).expect("task").clone();
     for key in [
