@@ -16,7 +16,7 @@ use ratatui::Terminal;
 use tsk_tui::domain::{DomainState, HumanStatus, ProvenanceOrigin, TaskScope};
 use tsk_tui::ui::board::{
     apply_intent, board_hit_map, board_verb_items, draw_board, resolve_board_command,
-    BoardInputMode, BoardModel,
+    BoardInputMode, BoardModel, ProjectScopeOption,
 };
 use tsk_tui::ui::capture::CaptureField;
 use tsk_tui::ui::input::{
@@ -1761,6 +1761,10 @@ fn drag_selection_copies_painted_task_title_not_undeclared_chrome() {
         text.contains("copyable title text"),
         "selection should include the task title, got {text:?}"
     );
+    assert!(
+        !text.contains('○') && !text.contains('▸'),
+        "status glyph is chrome and must stay out of the copy, got {text:?}"
+    );
 
     // A bare click (no drag) leaves no copyable text.
     model.begin_mouse_press(Position::new(area.x + 2, area.y));
@@ -1771,6 +1775,117 @@ fn drag_selection_copies_painted_task_title_not_undeclared_chrome() {
         Position::new(area.x + 2, area.y),
     );
     assert_eq!(selection_text(&rows, &hits.copyable, &bare), None);
+}
+
+/// Peek accordion body paints a `│` gutter; that pipe is chrome. A drag across the
+/// open peek on a project-scoped board must copy the notes text without it — the
+/// same surface that felt broken when copyable rects spanned the full row.
+#[test]
+fn peek_on_project_board_copy_excludes_pipe_gutter() {
+    use ratatui::layout::Position;
+    use tsk_tui::ui::text_select::{selection_text, TextSelection};
+
+    let mut domain = DomainState::new();
+    let notes = "Fixed. It wasn't a bug in the terminal-selection sense.";
+    let id = domain
+        .create(
+            "hi",
+            Some(notes.to_string()),
+            project(THIS_REPO),
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("create");
+    domain.set_status(id, HumanStatus::Started).expect("start");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
+    // Focus the project board (the "project page" surface), then open peek.
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenProjectSelector,
+        None,
+        None,
+    )
+    .expect("open project picker");
+    let project_idx = model
+        .project_options()
+        .iter()
+        .position(|opt| matches!(opt, ProjectScopeOption::Project(p) if p == Path::new(THIS_REPO)))
+        .expect("this repo is offered");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::SelectProjectOption(project_idx),
+        None,
+        None,
+    )
+    .expect("select project");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ConfirmProjectChoice,
+        None,
+        None,
+    )
+    .expect("confirm project focus");
+    assert_eq!(
+        model.selected_project(),
+        Some(Path::new(THIS_REPO)),
+        "board must be project-focused"
+    );
+    apply_intent(&mut domain, &mut model, BoardIntent::PeekDetail, None, None).expect("peek");
+    assert_eq!(model.detail_open(), Some(id));
+
+    let hits = board_hit_map(STANDARD, &model);
+    let mut terminal =
+        Terminal::new(TestBackend::new(STANDARD.width, STANDARD.height)).expect("test terminal");
+    terminal
+        .draw(|frame| {
+            let _ = draw_board(frame, &model);
+        })
+        .expect("draw");
+    let buffer = terminal.backend().buffer();
+    let rows: Vec<String> = (0..STANDARD.height)
+        .map(|y| {
+            (0..STANDARD.width)
+                .map(|x| buffer[(x, y)].symbol().to_string())
+                .collect::<String>()
+        })
+        .collect();
+
+    let note_y = rows
+        .iter()
+        .position(|row| row.contains("Fixed. It wasn't"))
+        .expect("peek paints the notes preview") as u16;
+    assert!(
+        rows[note_y as usize].contains('│'),
+        "sanity: the peek gutter is on the painted row"
+    );
+    let note_copyable = hits
+        .copyable
+        .iter()
+        .find(|rect| rect.y == note_y)
+        .expect("peek notes row must declare a copyable rect");
+    assert!(
+        note_copyable.x >= 6,
+        "copyable must start past `    │ ` (6 cells), got x={}",
+        note_copyable.x
+    );
+
+    let selection = TextSelection::new(
+        Position::new(0, note_y),
+        Position::new(STANDARD.width - 1, note_y),
+    );
+    let text = selection_text(&rows, &hits.copyable, &selection).expect("peek notes copy");
+    assert!(
+        text.contains("Fixed. It wasn't a bug"),
+        "notes text must copy, got {text:?}"
+    );
+    assert!(
+        !text.contains('│'),
+        "peek pipe gutter must stay out of the clipboard, got {text:?}"
+    );
 }
 
 /// The shared modal card only declares its own body rows copyable -- never the

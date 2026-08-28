@@ -19,7 +19,11 @@ surface: board rows, task page, overlays) and release copies the painted text
 to the system clipboard via OSC 52: the terminal or host multiplexer performs
 the copy, so terminals without OSC 52 support ignore it. Clicks are deferred
 until mouse-up so a drag on a board row does not also peek; a bare click still
-behaves as before. A brief `copied` status clears itself after two seconds.
+behaves as before. Painters declare content-only copyable rects (task titles
+past the glyph, peek notes past the `│` gutter, page notes past their indent),
+so chrome never reaches the clipboard. A Down→Up move without intermediate
+Drag events still counts as a selection. A brief `copied` status clears itself
+after two seconds.
 
 The live document is **`tsk.json`** (lock `tsk.json.lock`, previous `tsk.json.1`).
 A first run creates an empty `~/.tsk`; leftover `tasks.json` is not read.

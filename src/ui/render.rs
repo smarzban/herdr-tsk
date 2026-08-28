@@ -104,6 +104,16 @@ pub struct TaskRowPaint<'a> {
     pub title_bold: bool,
 }
 
+/// One painted task-row line plus the title-content cells a text selection may copy.
+///
+/// `content_x` / `content_width` skip the leading indent, status glyph, and (on the
+/// first line) the right-aligned meta column — chrome the clipboard must not see.
+pub struct TaskRowLine {
+    pub line: Line<'static>,
+    pub content_x: u16,
+    pub content_width: u16,
+}
+
 /// Paint one task as ONE OR MORE list lines: the first is the classic glyph + title +
 /// right-aligned meta row; a title too wide for its budget wraps at word boundaries onto
 /// continuation lines indented into its own column, with no meta. Nothing is cut.
@@ -111,7 +121,7 @@ pub fn paint_task_row_lines(
     row: &TaskRowPaint<'_>,
     geo: &TierGeometry,
     leading_indent: usize,
-) -> Vec<Line<'static>> {
+) -> Vec<TaskRowLine> {
     // The title room `paint_task_row_with_indent` derives must match here, so both
     // share one computation of the prefix cells.
     let row_w = geo.row_width as usize;
@@ -124,6 +134,8 @@ pub fn paint_task_row_lines(
     let glyph_cells = display_width(&super::terminal_text(row.glyph));
     let prefix_cells = leading_indent + 2 + glyph_cells + 1;
     let room = title_budget.saturating_sub(prefix_cells).max(1);
+    let content_x = u16::try_from(prefix_cells).unwrap_or(u16::MAX);
+    let content_width = u16::try_from(room).unwrap_or(1).max(1);
     let segments: Vec<String> = crate::ui::edit::wrap_text(row.title, room)
         .into_iter()
         .map(|wrapped| wrapped.text)
@@ -135,7 +147,11 @@ pub fn paint_task_row_lines(
         title: &segments[0],
         ..*row
     };
-    lines.push(paint_task_row_with_indent(&head, geo, leading_indent));
+    lines.push(TaskRowLine {
+        line: paint_task_row_with_indent(&head, geo, leading_indent),
+        content_x,
+        content_width,
+    });
     // Continuations indent into the title column (past glyph and space).
     let indent = " ".repeat(prefix_cells);
     let continuation_style = if row.selected {
@@ -144,13 +160,17 @@ pub fn paint_task_row_lines(
         style_plain()
     };
     for segment in segments.iter().skip(1) {
-        lines.push(bound_line(
-            Line::from(Span::styled(
-                format!("{indent}{segment}"),
-                continuation_style,
-            )),
-            row_w,
-        ));
+        lines.push(TaskRowLine {
+            line: bound_line(
+                Line::from(Span::styled(
+                    format!("{indent}{segment}"),
+                    continuation_style,
+                )),
+                row_w,
+            ),
+            content_x,
+            content_width,
+        });
     }
     lines
 }
@@ -713,17 +733,27 @@ pub fn draw_queue_frame(
                 ListRow::Hint(line) | ListRow::ThreadHeader(line) => {
                     put_line(frame, y, width, line)
                 }
-                ListRow::Task { id, line } => {
+                ListRow::Task {
+                    id,
+                    line,
+                    content_x,
+                    content_width,
+                } => {
                     put_line(frame, y, width, line);
                     if base_list_interactive {
                         hits.push(QueueHitTarget::Task(id), Rect::new(0, y, width, 1));
                     }
-                    // Task title text is a hit target, but exactly what a text selection is for.
-                    hits.push_copyable(Rect::new(0, y, width, 1));
+                    // Title text only: indent, glyph, and right-side meta stay out of the copy.
+                    hits.push_copyable(Rect::new(content_x, y, content_width, 1));
                 }
-                ListRow::Detail(line) => {
+                ListRow::Detail {
+                    line,
+                    content_x,
+                    content_width,
+                } => {
                     put_line(frame, y, width, line);
-                    hits.push_copyable(Rect::new(0, y, width, 1));
+                    // Peek body past the `│` gutter — the pipe is chrome, not notes.
+                    hits.push_copyable(Rect::new(content_x, y, content_width, 1));
                 }
             }
         }
@@ -1843,7 +1873,14 @@ fn paint_task_page(
         QueueHitTarget::FormTitle,
         Rect::new(0, lay.title_y, width, title_row_count),
     );
-    hits.push_copyable(Rect::new(0, lay.title_y, header_width, title_row_count));
+    // Title words only: two-cell gutter on the left; status word on the first row is
+    // outside this rect because it sits past the title columns in the paint.
+    hits.push_copyable(Rect::new(
+        2,
+        lay.title_y,
+        header_width.saturating_sub(2),
+        title_row_count,
+    ));
     if let Some((cursor_row, cursor_col)) = title_cursor {
         // Every title row shares the four-cell gutter (two leading blanks plus
         // glyph and space), so the wrapped field starts at column 4 on all of them.
@@ -1926,7 +1963,8 @@ fn paint_task_page(
                 QueueHitTarget::FormNotes(absolute),
                 Rect::new(0, y, content_width, 1),
             );
-            hits.push_copyable(Rect::new(0, y, content_width, 1));
+            // Notes body past the two-cell gutter (and the trailing pad space).
+            hits.push_copyable(Rect::new(2, y, content_width.saturating_sub(3), 1));
         } else if !step_views.is_empty() && absolute == content.steps_start {
             put_line(
                 frame,
@@ -1967,7 +2005,14 @@ fn paint_task_page(
                     QueueHitTarget::Step(index),
                     Rect::new(0, y, content_width, 1),
                 );
-                hits.push_copyable(Rect::new(0, y, content_width, 1));
+                // Step text past `▸ `/`  ` + glyph + space; trailing pad stays out.
+                let step_prefix = 2u16 + display_width(glyph) as u16 + 1;
+                hits.push_copyable(Rect::new(
+                    step_prefix,
+                    y,
+                    content_width.saturating_sub(step_prefix).saturating_sub(1),
+                    1,
+                ));
             }
         }
     }
@@ -2209,9 +2254,18 @@ enum ListRow {
     Task {
         id: Uuid,
         line: Line<'static>,
+        /// First column of the title text (past indent + glyph).
+        content_x: u16,
+        /// Title-zone width (excludes right-aligned meta).
+        content_width: u16,
     },
     /// Read-only accordion content under a task, full-width and un-hit-tested.
-    Detail(Line<'static>),
+    Detail {
+        line: Line<'static>,
+        /// First column past the peek `│` gutter.
+        content_x: u16,
+        content_width: u16,
+    },
 }
 
 /// Read-only accordion body under an expanded task: notes preview,
@@ -2222,16 +2276,27 @@ enum ListRow {
 /// on the task page.
 const PEEK_NOTES_LINE_LIMIT: usize = 5;
 
-fn detail_lines_for_task(task: &Task, now: SystemTime, width: u16) -> Vec<Line<'static>> {
-    let indent = "    │ ";
-    let mut lines: Vec<Line<'static>> = Vec::new();
+/// Peek accordion gutter (`    │ `). Copyable content starts after these cells.
+const PEEK_DETAIL_INDENT: &str = "    │ ";
+
+fn detail_lines_for_task(
+    task: &Task,
+    now: SystemTime,
+    width: u16,
+) -> Vec<(Line<'static>, u16, u16)> {
+    let indent = PEEK_DETAIL_INDENT;
+    let content_x = u16::try_from(display_width(indent)).unwrap_or(0);
+    let content_width = width.saturating_sub(content_x);
+    let mut lines: Vec<(Line<'static>, u16, u16)> = Vec::new();
+    let push = |lines: &mut Vec<(Line<'static>, u16, u16)>, line: Line<'static>| {
+        lines.push((line, content_x, content_width));
+    };
     let notes_text = task.notes.as_deref().map(str::trim).unwrap_or_default();
     if notes_text.is_empty() {
-        lines.push(paint_bounded_line(
-            &format!("{indent}no notes yet"),
-            width,
-            style_dim(),
-        ));
+        push(
+            &mut lines,
+            paint_bounded_line(&format!("{indent}no notes yet"), width, style_dim()),
+        );
     } else {
         // Preview rows wrap at word boundaries like every other note surface, so
         // a long line continues under itself instead of being cut at the edge.
@@ -2240,30 +2305,31 @@ fn detail_lines_for_task(task: &Task, now: SystemTime, width: u16) -> Vec<Line<'
         let mut remaining = 0usize;
         for note_row in crate::ui::edit::wrap_text(notes_text, room) {
             if shown < PEEK_NOTES_LINE_LIMIT {
-                lines.push(paint_bounded_line(
-                    &format!("{indent}{}", note_row.text),
-                    width,
-                    style_dim(),
-                ));
+                push(
+                    &mut lines,
+                    paint_bounded_line(&format!("{indent}{}", note_row.text), width, style_dim()),
+                );
                 shown += 1;
             } else {
                 remaining += 1;
             }
         }
         if remaining > 0 {
-            lines.push(paint_bounded_line(
-                &format!("{indent}… {remaining} more lines"),
-                width,
-                style_dim(),
-            ));
+            push(
+                &mut lines,
+                paint_bounded_line(
+                    &format!("{indent}… {remaining} more lines"),
+                    width,
+                    style_dim(),
+                ),
+            );
         }
     }
     if let Some(thread) = task.thread.as_deref() {
-        lines.push(paint_bounded_line(
-            &format!("{indent}thread #{thread}"),
-            width,
-            style_dim(),
-        ));
+        push(
+            &mut lines,
+            paint_bounded_line(&format!("{indent}thread #{thread}"), width, style_dim()),
+        );
     }
     let scope_text = match &task.scope {
         TaskScope::Project { path } => short_project(path).to_string(),
@@ -2274,16 +2340,14 @@ fn detail_lines_for_task(task: &Task, now: SystemTime, width: u16) -> Vec<Line<'
         format_age(now, task.created_at),
         format_age(now, task.updated_at)
     );
-    lines.push(paint_bounded_line(
-        &format!("{indent}scope {scope_text}"),
-        width,
-        style_dim(),
-    ));
-    lines.push(paint_bounded_line(
-        &format!("{indent}{age_text}"),
-        width,
-        style_dim(),
-    ));
+    push(
+        &mut lines,
+        paint_bounded_line(&format!("{indent}scope {scope_text}"), width, style_dim()),
+    );
+    push(
+        &mut lines,
+        paint_bounded_line(&format!("{indent}{age_text}"), width, style_dim()),
+    );
     lines
 }
 
@@ -2337,8 +2401,13 @@ fn build_list_rows(
         if selected {
             *selected_idx = Some(out.len());
         }
-        for line in lines {
-            out.push(ListRow::Task { id: task.id, line });
+        for painted in lines {
+            out.push(ListRow::Task {
+                id: task.id,
+                line: painted.line,
+                content_x: painted.content_x,
+                content_width: painted.content_width,
+            });
         }
         if selected {
             // Selection follow anchors the whole block, so a two-line selection
@@ -2346,8 +2415,14 @@ fn build_list_rows(
             *selected_idx = Some(out.len() - 1);
         }
         if detail_target == Some(task.id) {
-            for line in detail_lines_for_task(task, model.now, geo.row_width) {
-                out.push(ListRow::Detail(line));
+            for (line, content_x, content_width) in
+                detail_lines_for_task(task, model.now, geo.row_width)
+            {
+                out.push(ListRow::Detail {
+                    line,
+                    content_x,
+                    content_width,
+                });
             }
             *anchor_last_idx = Some(out.len() - 1);
         }

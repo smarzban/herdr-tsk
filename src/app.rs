@@ -377,6 +377,13 @@ fn run_board() -> Result<(), Box<dyn Error>> {
                             continue;
                         }
                         MouseEventKind::Up(MouseButton::Left) => {
+                            let up = Position::new(mouse.column, mouse.row);
+                            // Some hosts omit Drag and only move between Down and Up.
+                            // Grow the selection from the press cell before clearing it
+                            // so copy still works there (and peek is not fired instead).
+                            if model.text_selection().is_none() {
+                                model.drag_text_selection(up);
+                            }
                             model.end_mouse_press();
                             if model.text_selection().is_some_and(|sel| sel.has_area()) {
                                 copy_drag_selection(&mut model, &frame_rows, &frame_copyable);
