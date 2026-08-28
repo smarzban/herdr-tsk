@@ -218,14 +218,6 @@ pub enum BoardIntent {
     /// index (mouse click on an step row; AC-21). A click selects — it never toggles the
     /// step, opens the editor, or arms the delete mark; no key produces it.
     SelectStep(usize),
-    /// Continue the selected durable dispatch attempt.
-    RecoveryResume,
-    /// Ask for explicit confirmation before removing recorded owned receipts.
-    BeginCleanup,
-    /// Run confirmed cleanup for the selected durable dispatch attempt.
-    ConfirmCleanup,
-    /// Close recovery or return from cleanup confirmation without side effects.
-    CancelRecovery,
     /// Retry the exact failed board persistence state.
     RetrySave,
     /// Restore the last persisted board state and abandon the failed mutation.
@@ -559,8 +551,6 @@ pub fn map_key_with(
         BoardInputMode::Normal => map_normal(key, verbs),
         BoardInputMode::TaskPage => map_task_page(key, verbs),
         BoardInputMode::ProjectPicker => map_project_picker(key),
-        BoardInputMode::Recovery => map_recovery(key),
-        BoardInputMode::CleanupConfirm => map_cleanup_confirmation(key),
         BoardInputMode::SaveRecovery => map_save_recovery(key),
         BoardInputMode::Palette => map_palette(key),
         BoardInputMode::Help => map_help(key),
@@ -764,8 +754,6 @@ pub fn map_edit_paste(mode: BoardInputMode, text: &str) -> Option<BoardIntent> {
         BoardInputMode::Palette => Some(BoardIntent::CommandQueryInsertText(text.to_string())),
         BoardInputMode::Normal
         | BoardInputMode::ProjectPicker
-        | BoardInputMode::Recovery
-        | BoardInputMode::CleanupConfirm
         | BoardInputMode::SaveRecovery
         | BoardInputMode::Help => None,
     }
@@ -840,10 +828,6 @@ pub fn intent_primary_action(intent: &BoardIntent) -> Option<PrimaryBoardAction>
         | BoardIntent::SelectSectionThread(_)
         | BoardIntent::SelectSectionThreadProject { .. }
         | BoardIntent::SelectStep(_)
-        | BoardIntent::RecoveryResume
-        | BoardIntent::BeginCleanup
-        | BoardIntent::ConfirmCleanup
-        | BoardIntent::CancelRecovery
         | BoardIntent::RetrySave
         | BoardIntent::CancelSave
         | BoardIntent::OpenCommandPalette
@@ -989,21 +973,6 @@ fn map_project_picker(key: KeyEvent) -> Option<BoardIntent> {
     }
 }
 
-fn map_recovery(key: KeyEvent) -> Option<BoardIntent> {
-    if key
-        .modifiers
-        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER)
-    {
-        return None;
-    }
-    match key.code {
-        KeyCode::Char('r') | KeyCode::Enter => Some(BoardIntent::RecoveryResume),
-        KeyCode::Char('c') => Some(BoardIntent::BeginCleanup),
-        KeyCode::Esc | KeyCode::Char('q') => Some(BoardIntent::CancelRecovery),
-        _ => None,
-    }
-}
-
 fn map_save_recovery(key: KeyEvent) -> Option<BoardIntent> {
     if key
         .modifiers
@@ -1037,20 +1006,6 @@ fn map_palette(key: KeyEvent) -> Option<BoardIntent> {
         KeyCode::Char(character) if !character.is_control() => {
             Some(BoardIntent::CommandQueryInsert(character))
         }
-        _ => None,
-    }
-}
-
-fn map_cleanup_confirmation(key: KeyEvent) -> Option<BoardIntent> {
-    if key
-        .modifiers
-        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER)
-    {
-        return None;
-    }
-    match key.code {
-        KeyCode::Enter | KeyCode::Char('y') => Some(BoardIntent::ConfirmCleanup),
-        KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('q') => Some(BoardIntent::CancelRecovery),
         _ => None,
     }
 }

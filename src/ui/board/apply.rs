@@ -1,4 +1,4 @@
-//! Board intent reducer and dispatch-recovery result application.
+//! Board intent reducer.
 
 use std::path::PathBuf;
 use std::time::Instant;
@@ -7,9 +7,7 @@ use uuid::Uuid;
 
 use crate::config::{default_config_dir, SettingsRecord};
 use crate::context::InvocationSnapshot;
-use crate::dispatch::DispatchRecoveryResult;
 use crate::domain::{normalize_thread, DomainError, DomainState, HumanStatus, TaskScope};
-use crate::host::HostPorts;
 use crate::ui::capture::{CaptureField, TITLE_REQUIRED_MESSAGE};
 use crate::ui::edit::{flatten_line_breaks, EditBuffer};
 use crate::ui::input::BoardIntent;
@@ -18,8 +16,8 @@ use crate::ui::queue::ThreadProjectCollapseKey;
 
 use super::commands::{resolve_board_command, CommandSurface};
 use super::model::{
-    owned_resource_summary, BoardForm, BoardInputMode, BoardLocation, BoardModel, IntentOutcome,
-    ProjectPickerState, ProjectScopeOption, StepEditor, StepEditorSave, TaskEditSave,
+    BoardForm, BoardInputMode, BoardLocation, BoardModel, IntentOutcome, ProjectPickerState,
+    ProjectScopeOption, StepEditor, StepEditorSave, TaskEditSave,
 };
 
 /// What the row says when an action that aims at the selection is asked for on a board that
@@ -116,14 +114,12 @@ fn apply_chrome_row_lifetime(model: &mut BoardModel, intent: &BoardIntent) {
 /// Apply a board intent to domain + model.
 ///
 /// Mutating intents call Task Domain only. Caller persists with Task Store when outcome is
-/// [`IntentOutcome::Persist`]. The capture snapshot is retained by the form; the host argument
-/// stays as a compatibility seam for existing callers and dispatch recovery wiring.
+/// [`IntentOutcome::Persist`]. The capture snapshot is retained by the form.
 pub fn apply_intent(
     domain: &mut DomainState,
     model: &mut BoardModel,
     intent: BoardIntent,
     snapshot: Option<&InvocationSnapshot>,
-    host: Option<&dyn HostPorts>,
 ) -> Result<IntentOutcome, DomainError> {
     // A successful quick add remains emphasized only until the next input intent.
     model.clear_saved_task();
@@ -150,7 +146,7 @@ pub fn apply_intent(
     }
     let notice_before = model.delete_notice().map(str::to_string);
     let mutating = board_intent_may_persist(&intent);
-    let result = apply_board_intent(domain, model, intent, snapshot, host);
+    let result = apply_board_intent(domain, model, intent, snapshot);
     // A command confirmation carries no lifetime of its own: it recurses with the command it
     // resolved to, and that intent is classified on the way through, so it is the recursion
     // that restores.
@@ -165,7 +161,6 @@ fn apply_board_intent(
     model: &mut BoardModel,
     intent: BoardIntent,
     snapshot: Option<&InvocationSnapshot>,
-    host: Option<&dyn HostPorts>,
 ) -> Result<IntentOutcome, DomainError> {
     // While the task page owns input, its verbs act on the page's own task: keep the
     // selection pinned to the bound id, whatever deck visibility did to it meanwhile
@@ -270,7 +265,7 @@ fn apply_board_intent(
             let Some(resolved) = resolve_board_command(model, intent) else {
                 return Ok(IntentOutcome::None);
             };
-            return apply_intent(domain, model, resolved, snapshot, host);
+            return apply_intent(domain, model, resolved, snapshot);
         }
         BoardIntent::Quit => {
             // Esc closes an open menu first; second Esc quits.
@@ -405,13 +400,7 @@ fn apply_board_intent(
         }
         BoardIntent::QuickAddSelectIndex(index) => {
             model.discard_quick_add();
-            return apply_board_intent(
-                domain,
-                model,
-                BoardIntent::SelectIndex(index),
-                snapshot,
-                host,
-            );
+            return apply_board_intent(domain, model, BoardIntent::SelectIndex(index), snapshot);
         }
         BoardIntent::QuickAddSave | BoardIntent::QuickAddSaveNext => {
             return quick_add_save(
@@ -724,7 +713,7 @@ fn apply_board_intent(
             if model.input_mode == BoardInputMode::EditStep {
                 return confirm_step_editor(domain, model, true);
             }
-            return apply_intent(domain, model, BoardIntent::ConfirmEdit, snapshot, host);
+            return apply_intent(domain, model, BoardIntent::ConfirmEdit, snapshot);
         }
         BoardIntent::ConfirmEdit => {
             // The step line editor applies its own domain command (add or rename) and
@@ -794,10 +783,7 @@ fn apply_board_intent(
             // the project-scope chip opens this dropdown from any board surface.
             // Modals that own their own decision (save failure or dispatch recovery) keep
             // that decision rather than being dismissed by the chip.
-            if matches!(
-                model.popup,
-                BoardPopup::SaveRecovery | BoardPopup::Recovery | BoardPopup::CleanupConfirm
-            ) {
+            if matches!(model.popup, BoardPopup::SaveRecovery) {
                 return Ok(IntentOutcome::None);
             }
             let options = model.project_options();
@@ -957,48 +943,6 @@ fn apply_board_intent(
             model.clear_message();
             return Ok(IntentOutcome::None);
         }
-        BoardIntent::RecoveryResume => {
-            let Some(attempt) = model.selected_attempt().cloned() else {
-                model.close_popup();
-                model.set_message("dispatch recovery is no longer available");
-                return Ok(IntentOutcome::None);
-            };
-            model.close_popup();
-            model.set_message("resuming dispatch recovery…");
-            return Ok(IntentOutcome::ResumeDispatch {
-                attempt_id: attempt.id(),
-            });
-        }
-        BoardIntent::BeginCleanup => {
-            if let Some(summary) = model.selected_attempt().map(owned_resource_summary) {
-                model.popup = BoardPopup::CleanupConfirm;
-                model.set_message(format!("confirm cleanup · {summary}"));
-            } else {
-                model.close_popup();
-                model.set_message("dispatch recovery is no longer available");
-            }
-            return Ok(IntentOutcome::None);
-        }
-        BoardIntent::ConfirmCleanup => {
-            let Some(attempt) = model.selected_attempt().cloned() else {
-                model.close_popup();
-                model.set_message("dispatch recovery is no longer available");
-                return Ok(IntentOutcome::None);
-            };
-            model.close_popup();
-            model.set_message("cleaning recorded dispatch resources…");
-            return Ok(IntentOutcome::CleanupDispatch {
-                attempt_id: attempt.id(),
-            });
-        }
-        BoardIntent::CancelRecovery => {
-            model.popup = if model.popup == BoardPopup::CleanupConfirm {
-                BoardPopup::Recovery
-            } else {
-                BoardPopup::None
-            };
-            return Ok(IntentOutcome::None);
-        }
         // The app-level save-recovery boundary handles these while unresolved.
         BoardIntent::RetrySave | BoardIntent::CancelSave => return Ok(IntentOutcome::None),
         BoardIntent::PrimaryVerb => {
@@ -1025,7 +969,6 @@ fn apply_board_intent(
                         domain.reopen(id)?;
                     }
                     HumanStatus::Started | HumanStatus::Blocked | HumanStatus::Review => {
-                        model.set_message("resume not available yet");
                         return Ok(IntentOutcome::None);
                     }
                 }
@@ -1317,60 +1260,6 @@ fn apply_board_intent(
 
     model.sync_from_domain(domain);
     Ok(IntentOutcome::Persist)
-}
-
-/// Present a completed durable dispatch worker result after the caller reloads the store.
-///
-/// The loaded domain is the source of truth for owned receipts and whether recovery remains.
-pub fn apply_dispatch_recovery_result(
-    domain: &DomainState,
-    model: &mut BoardModel,
-    result: DispatchRecoveryResult,
-) {
-    model.sync_from_domain(domain);
-    match result {
-        DispatchRecoveryResult::Dispatched {
-            pane_id,
-            agent,
-            prompt_warning,
-        } => {
-            model.close_popup();
-            let mut message = match agent {
-                Some(agent) => format!("dispatched · agent {agent} · pane {pane_id}"),
-                None => format!("dispatched · pane {pane_id}"),
-            };
-            if let Some(warning) = prompt_warning {
-                message.push_str(&format!(" (prompt failed: {warning})"));
-            }
-            model.set_message(message);
-        }
-        DispatchRecoveryResult::RecoveryRequired { attempt_id, .. }
-        | DispatchRecoveryResult::Failed { attempt_id, .. }
-        | DispatchRecoveryResult::PersistenceUncertain { attempt_id, .. } => {
-            if let Some(attempt) = domain.active_attempt(attempt_id) {
-                model.popup = BoardPopup::Recovery;
-                model.set_message(format!(
-                    "dispatch recovery · {} · {}",
-                    attempt.last_error().unwrap_or("interrupted dispatch"),
-                    owned_resource_summary(attempt)
-                ));
-            } else {
-                model.close_popup();
-                model.set_message("dispatch recovery state changed, reload before retrying");
-            }
-        }
-        DispatchRecoveryResult::Cleaned { .. } => {
-            model.close_popup();
-            model.set_message("recorded dispatch resources cleaned");
-        }
-        DispatchRecoveryResult::Error { message } => {
-            // The failed recovery attempt remains durable. Keep it presented because V1 has no
-            // dispatch-start route that can reopen the recovery surface in this session.
-            model.close_popup();
-            model.present_existing_dispatch_recovery();
-            model.set_message(format!("dispatch recovery failed: {message}"));
-        }
-    }
 }
 
 /// Apply one draft operation, but only while a field edit is actually open.

@@ -1,11 +1,10 @@
-//! the real attention cycle must not redirect a field edit that is still open.
+//! A concurrent store writer must not redirect a field edit that is still open.
 //!
-//! proved the binding, the refusal, and the selection clamp at the unit level, by
+//! Proved the binding, the refusal, and the selection clamp at the unit level by
 //! mutating `BoardModel` directly (a swap, a direct `sync_from_domain` call). This is the
-//! end-to-end proof the plan calls for: it drives the actual `run_attention_cycle` (`src/app.rs`)
-//! against a `TaskStore` whose on-disk snapshot a second writer changes while the edit sits open,
-//! the same shape as the idle loop's real poll, then confirms and checks the write landed on the
-//! bound task and nowhere else.
+//! end-to-end proof: it merges a `TaskStore` whose on-disk snapshot a second writer changes
+//! while the edit sits open, the same shape as the idle loop's store revalidation, then
+//! confirms and checks the write landed on the bound task and nowhere else.
 //!
 //! The two cases below are not interchangeable and do not carry equal weight against a
 //! binding-vs-selection regression.'s `clamp_selection` glues `selected_id()` to
@@ -26,10 +25,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use tsk_tui::app::{
     apply_board_intent_with_save_recovery, confirm_edit_refusal_against_the_record,
-    refresh_before_mutation, run_attention_cycle, BoardSaveContext,
+    refresh_before_mutation, BoardSaveContext,
 };
 use tsk_tui::domain::{DomainError, DomainState, ProvenanceOrigin, TaskScope};
-use tsk_tui::host::HostPorts;
 use tsk_tui::save_recovery::SaveRecovery;
 use tsk_tui::store::TaskStore;
 use tsk_tui::ui::board::{apply_intent, BoardInputMode, BoardModel, IntentOutcome};
@@ -65,23 +63,11 @@ impl Drop for TempDirGuard {
     }
 }
 
-/// No panes, no linked tasks in either scenario below, so `poll_host` (`refresh` in
-/// `attention.rs`) has nothing to observe and never mutates status. What is under test here is
-/// the disk merge and the selection reclamp, not attention matching.
-struct NoPanesHost;
-
-impl HostPorts for NoPanesHost {
-    fn list_pane_ids(&self) -> Result<Vec<String>, String> {
-        Ok(Vec::new())
-    }
-
-    fn focus_pane(&self, _pane_id: &str) -> Result<(), String> {
-        Ok(())
-    }
-
-    fn open_path(&self, _path: &str) -> Result<(), String> {
-        Ok(())
-    }
+/// Merge the durable store into the open board the way idle revalidation does.
+fn merge_disk_into_board(store: &TaskStore, domain: &mut DomainState, model: &mut BoardModel) {
+    let baseline = store.load().expect("load concurrent store");
+    domain.merge_tasks_from_disk(&baseline);
+    model.sync_from_domain(domain);
 }
 
 /// case 1: a task **added** to the visible order ahead of the bound task.
@@ -93,10 +79,10 @@ impl HostPorts for NoPanesHost {
 /// view: created before the bound task, so it resumes that earlier position the moment it is
 /// visible again. Here Zebra is created (and completed, so Open hides it) before Alpha, the bound
 /// task; a second writer reopens Zebra while the edit sits open, and the real
-/// `run_attention_cycle` must merge that in and put Zebra ahead of Alpha in the visible list.
+/// `merge_disk_into_board` must merge that in and put Zebra ahead of Alpha in the visible list.
 ///
 /// What this proves: the merge (`DomainState::merge_tasks_from_disk`) and the `clamp_selection`
-/// "glue to the bound task" rule both hold up end to end through the real attention cycle, and
+/// "glue to the bound task" rule both hold up end to end through the disk merge, and
 /// no other task's data is disturbed by the reorder.
 ///
 /// What this does **not** prove: a binding-vs-selection regression in `confirm_edit`. Alpha
@@ -142,31 +128,18 @@ fn attention_cycle_adds_a_task_ahead_of_the_bound_task_and_confirm_still_lands_o
         "Zebra is done, so Alpha is the only visible task at open"
     );
 
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::BeginEditTitle,
-        None,
-        None,
-    )
-    .expect("begin title edit");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+        .expect("begin title edit");
     assert_eq!(model.edit_buffer(), "Alpha");
     for _ in 0.."Alpha".len() {
-        apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::EditBackspace,
-            None,
-            None,
-        )
-        .expect("backspace draft");
+        apply_intent(&mut domain, &mut model, BoardIntent::EditBackspace, None)
+            .expect("backspace draft");
     }
     for character in "Alpha renamed".chars() {
         apply_intent(
             &mut domain,
             &mut model,
             BoardIntent::EditInsert(character),
-            None,
             None,
         )
         .expect("insert draft");
@@ -178,7 +151,7 @@ fn attention_cycle_adds_a_task_ahead_of_the_bound_task_and_confirm_still_lands_o
     other.reopen(zebra).expect("reopen zebra concurrently");
     store.save(&other).expect("save concurrent reopen");
 
-    run_attention_cycle(&store, &mut domain, &mut model, &NoPanesHost);
+    merge_disk_into_board(&store, &mut domain, &mut model);
 
     assert_eq!(
         model.visible_ids(),
@@ -191,14 +164,8 @@ fn attention_cycle_adds_a_task_ahead_of_the_bound_task_and_confirm_still_lands_o
         "the reclamp keeps the highlight on the bound task even though it moved"
     );
 
-    let outcome = apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::ConfirmEdit,
-        None,
-        None,
-    )
-    .expect("confirm edit");
+    let outcome = apply_intent(&mut domain, &mut model, BoardIntent::ConfirmEdit, None)
+        .expect("confirm edit");
     assert_eq!(outcome, IntentOutcome::Persist);
 
     assert_eq!(domain.get(alpha).unwrap().title, "Alpha renamed");
@@ -265,36 +232,22 @@ fn attention_cycle_removes_the_bound_task_and_confirm_still_lands_on_it_not_the_
         &mut model,
         BoardIntent::SelectIndex(alpha_idx),
         None,
-        None,
     )
     .expect("select alpha");
     assert_eq!(model.selected_id(), Some(alpha));
 
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::BeginEditNotes,
-        None,
-        None,
-    )
-    .expect("begin notes edit");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditNotes, None)
+        .expect("begin notes edit");
     assert_eq!(model.edit_buffer(), "a notes");
     for _ in 0.."a notes".len() {
-        apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::EditBackspace,
-            None,
-            None,
-        )
-        .expect("backspace draft");
+        apply_intent(&mut domain, &mut model, BoardIntent::EditBackspace, None)
+            .expect("backspace draft");
     }
     for character in "a notes updated".chars() {
         apply_intent(
             &mut domain,
             &mut model,
             BoardIntent::EditInsert(character),
-            None,
             None,
         )
         .expect("insert draft");
@@ -306,7 +259,7 @@ fn attention_cycle_removes_the_bound_task_and_confirm_still_lands_on_it_not_the_
     other.complete(alpha).expect("complete alpha concurrently");
     store.save(&other).expect("save concurrent completion");
 
-    run_attention_cycle(&store, &mut domain, &mut model, &NoPanesHost);
+    merge_disk_into_board(&store, &mut domain, &mut model);
 
     assert_eq!(
         model.visible_ids(),
@@ -320,14 +273,8 @@ fn attention_cycle_removes_the_bound_task_and_confirm_still_lands_on_it_not_the_
          divergence this test needs is real, not that confirm already agrees with the clamp"
     );
 
-    let outcome = apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::ConfirmEdit,
-        None,
-        None,
-    )
-    .expect("confirm edit");
+    let outcome = apply_intent(&mut domain, &mut model, BoardIntent::ConfirmEdit, None)
+        .expect("confirm edit");
     assert_eq!(outcome, IntentOutcome::Persist);
 
     let alpha_task = domain.get(alpha).unwrap();
@@ -415,44 +362,30 @@ fn board_with_an_open_edit_and_a_bystander(
         &mut model,
         BoardIntent::SelectIndex(alpha_idx),
         None,
-        None,
     )
     .expect("select alpha");
     assert_eq!(model.selected_id(), Some(alpha), "Alpha must be selected");
 
     // Open a Title edit on Alpha and type a draft, through the real intent path.
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::BeginEditTitle,
-        None,
-        None,
-    )
-    .expect("open the title edit");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+        .expect("open the title edit");
     for character in " RENAMED".chars() {
         apply_intent(
             &mut domain,
             &mut model,
             BoardIntent::EditInsert(character),
             None,
-            None,
         )
         .expect("type into the draft");
     }
     // Leave the cursor off the end so "unchanged" is a real claim after the refusal.
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::EditMoveLeft,
-        None,
-        None,
-    )
-    .expect("move the cursor");
+    apply_intent(&mut domain, &mut model, BoardIntent::EditMoveLeft, None)
+        .expect("move the cursor");
     let draft_before = model.edit_buffer().to_string();
     let cursor_before = model.edit_cursor();
     assert_eq!(draft_before, "Alpha RENAMED");
 
-    // A second actor soft-deletes Alpha and persists it. No attention cycle runs: this board's
+    // A second actor soft-deletes Alpha and persists it. No disk merge runs: this board's
     // in-memory copy of Alpha is still alive and still says `soft_deleted == false`.
     let mut other_actor = store.load().expect("second actor loads the store");
     other_actor
@@ -480,7 +413,7 @@ fn board_with_an_open_edit_and_a_bystander(
 }
 
 /// the availability of the bound task is judged against the **fresh durable state**, not
-/// against whatever the last attention poll happened to leave in memory.
+/// against whatever the last store revalidation happened to leave in memory.
 ///
 /// Resolved decision 8 (2026-07-27): a soft-deleted task is not editable, and staleness is not an
 /// excuse for editing one. The hazard here is narrower than the poll-driven one above and the poll
@@ -604,7 +537,7 @@ fn a_restored_task_accepts_the_draft_the_deletion_refused() {
     // this board's copy is older than the delete-and-restore round trip left on disk, and the
     // confirm collides at `merge_for_save` exactly as it did before — pre-existing behavior
     // this feature neither introduces nor removes.
-    run_attention_cycle(&store, &mut domain, &mut model, &NoPanesHost);
+    merge_disk_into_board(&store, &mut domain, &mut model);
     assert_eq!(
         model.edit_buffer(),
         draft_before,
@@ -687,7 +620,6 @@ fn confirm_through_the_board_loop(
             baseline,
             intent: BoardIntent::ConfirmEdit,
             snapshot: None,
-            host: None,
         },
         |state| {
             store
@@ -777,7 +709,7 @@ fn a_concurrent_edit_to_the_bound_task_still_reaches_the_save_conflict() {
 /// performs in `src/app.rs` -- so's bound-task guarantee is proven from the real key
 /// entry point through to the durable write, not just from an intent constructed mid-air.
 ///
-/// A real `run_attention_cycle` now runs between the persisted soft delete and the refusal, so
+/// A real `merge_disk_into_board` now runs between the persisted soft delete and the refusal, so
 /// `selected_id` genuinely clamps onto Bravo while `edit_target` still names Alpha at the moment
 /// this test asserts the refusal names Alpha, not whatever the clamp resolves to -- a real
 /// falsifier for that half. It is not one for the eventual *success* half: `reanchor_selection`
@@ -847,7 +779,6 @@ fn a_soft_deleted_bind_opened_through_the_real_key_map_refuses_then_confirms_aft
         &mut model,
         BoardIntent::SelectIndex(alpha_idx),
         None,
-        None,
     )
     .expect("select alpha");
     assert_eq!(model.selected_id(), Some(alpha));
@@ -860,7 +791,7 @@ fn a_soft_deleted_bind_opened_through_the_real_key_map_refuses_then_confirms_aft
     )
     .expect("e opens a title edit");
     assert_eq!(open_title, BoardIntent::BeginEditTitle);
-    apply_intent(&mut domain, &mut model, open_title, None, None).expect("open the title edit");
+    apply_intent(&mut domain, &mut model, open_title, None).expect("open the title edit");
     assert_eq!(model.edit_buffer(), "Alpha");
 
     for character in " RENAMED".chars() {
@@ -869,7 +800,7 @@ fn a_soft_deleted_bind_opened_through_the_real_key_map_refuses_then_confirms_aft
             KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE),
         )
         .expect("typing maps to an edit intent");
-        apply_intent(&mut domain, &mut model, typed, None, None).expect("type into the draft");
+        apply_intent(&mut domain, &mut model, typed, None).expect("type into the draft");
     }
     let draft_before = model.edit_buffer().to_string();
     assert_eq!(draft_before, "Alpha RENAMED");
@@ -887,7 +818,7 @@ fn a_soft_deleted_bind_opened_through_the_real_key_map_refuses_then_confirms_aft
     // This must move `selected_id()` off Alpha (the numeric clamp lands on Bravo, the only task
     // left) while `edit_target` -- the bind -- still names Alpha, so the assertions below are a
     // real oracle on which one confirm actually reads.
-    run_attention_cycle(&store, &mut domain, &mut model, &NoPanesHost);
+    merge_disk_into_board(&store, &mut domain, &mut model);
     assert_eq!(
         model.visible_ids(),
         vec![bravo],
@@ -936,7 +867,7 @@ fn a_soft_deleted_bind_opened_through_the_real_key_map_refuses_then_confirms_aft
     //
     // A poll must run here: `confirm_edit`'s own soft-deleted guard reads the *local* `domain`,
     // not the freshly loaded baseline, and nothing except `merge_tasks_from_disk` (always paired
-    // with `model.sync_from_domain`, in both `run_attention_cycle` and `refresh_before_mutation`
+    // with `model.sync_from_domain`, in both `merge_disk_into_board` and `refresh_before_mutation`
     // -- there is no production path that calls one without the other) clears that flag. That
     // pairing is also why `selected_id()` cannot stay diverged from `edit_target` through this
     // second confirm: `reanchor_selection` re-pins the selection onto `edit_target` the instant
@@ -953,7 +884,7 @@ fn a_soft_deleted_bind_opened_through_the_real_key_map_refuses_then_confirms_aft
     store
         .reload_merge_save(&mut restorer)
         .expect("second actor persists the restore");
-    run_attention_cycle(&store, &mut domain, &mut model, &NoPanesHost);
+    merge_disk_into_board(&store, &mut domain, &mut model);
     assert_eq!(
         model.edit_buffer(),
         draft_before,
@@ -1052,26 +983,13 @@ fn board_edit_preserves_existing_thread() {
         &mut model,
         BoardIntent::SelectIndex(index),
         None,
-        None,
     )
     .expect("select threaded task");
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::BeginEditTitle,
-        None,
-        None,
-    )
-    .expect("open board title edit");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+        .expect("open board title edit");
     for _ in 0.."Threaded task".len() {
-        apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::EditBackspace,
-            None,
-            None,
-        )
-        .expect("clear title draft");
+        apply_intent(&mut domain, &mut model, BoardIntent::EditBackspace, None)
+            .expect("clear title draft");
     }
     for character in "Renamed threaded task".chars() {
         apply_intent(
@@ -1079,20 +997,13 @@ fn board_edit_preserves_existing_thread() {
             &mut model,
             BoardIntent::EditInsert(character),
             None,
-            None,
         )
         .expect("type title draft");
     }
 
     assert_eq!(
-        apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::ConfirmEdit,
-            None,
-            None,
-        )
-        .expect("confirm board title edit"),
+        apply_intent(&mut domain, &mut model, BoardIntent::ConfirmEdit, None,)
+            .expect("confirm board title edit"),
         IntentOutcome::Persist
     );
     let task = domain.get(id).expect("threaded task after board edit");
@@ -1135,22 +1046,14 @@ fn background_sync_cannot_redirect_a_bound_task_form_while_its_scope_dropdown_is
         &mut model,
         BoardIntent::SelectIndex(alpha_index),
         None,
-        None,
     )
     .expect("select Alpha");
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::BeginEditScope,
-        None,
-        None,
-    )
-    .expect("open Alpha form at Scope");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditScope, None)
+        .expect("open Alpha form at Scope");
     apply_intent(
         &mut domain,
         &mut model,
         BoardIntent::OpenFormScopeDropdown,
-        None,
         None,
     )
     .expect("open scope dropdown");
@@ -1169,31 +1072,18 @@ fn background_sync_cannot_redirect_a_bound_task_form_while_its_scope_dropdown_is
         if model.form_scope_dropdown_choice() == Some(&TaskScope::Global) {
             break;
         }
-        apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::FormScopeNext,
-            None,
-            None,
-        )
-        .expect("move scope selection");
+        apply_intent(&mut domain, &mut model, BoardIntent::FormScopeNext, None)
+            .expect("move scope selection");
     }
     apply_intent(
         &mut domain,
         &mut model,
         BoardIntent::ConfirmFormScopeDropdown,
         None,
-        None,
     )
     .expect("apply scope selection");
-    let saved = apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::ConfirmEdit,
-        None,
-        None,
-    )
-    .expect("save bound task form");
+    let saved = apply_intent(&mut domain, &mut model, BoardIntent::ConfirmEdit, None)
+        .expect("save bound task form");
     assert_eq!(saved, IntentOutcome::Persist);
     assert_eq!(domain.get(alpha).expect("Alpha").scope, TaskScope::Global);
     assert_eq!(

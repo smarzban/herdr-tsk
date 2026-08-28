@@ -40,53 +40,24 @@ fn title_edit_e_obeys_editbuffer_char_index_word_chords_paste_and_bound_task_ref
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
 
     // Open via BeginEditTitle (the 'e' path).
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::BeginEditTitle,
-        None,
-        None,
-    )
-    .expect("begin title");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None).expect("begin title");
     assert_eq!(model.input_mode(), BoardInputMode::EditTitle);
     assert_eq!(model.edit_target(), Some(id));
     assert_eq!(model.edit_buffer(), "Alpha Task");
 
     // Char-index cursor movement and insert.
     for _ in 0..5 {
-        apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::EditMoveLeft,
-            None,
-            None,
-        )
-        .expect("left");
+        apply_intent(&mut domain, &mut model, BoardIntent::EditMoveLeft, None).expect("left");
     }
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::EditInsert('X'),
-        None,
-        None,
-    )
-    .expect("insert");
+    apply_intent(&mut domain, &mut model, BoardIntent::EditInsert('X'), None).expect("insert");
     assert_eq!(model.edit_buffer(), "AlphaX Task");
 
     // Word chord: move word left then right; cursor must be char-granular.
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::EditMoveWordLeft,
-        None,
-        None,
-    )
-    .expect("word left");
+    apply_intent(&mut domain, &mut model, BoardIntent::EditMoveWordLeft, None).expect("word left");
     apply_intent(
         &mut domain,
         &mut model,
         BoardIntent::EditMoveWordRight,
-        None,
         None,
     )
     .expect("word right");
@@ -97,7 +68,6 @@ fn title_edit_e_obeys_editbuffer_char_index_word_chords_paste_and_bound_task_ref
         &mut model,
         BoardIntent::EditInsertText(" pasted".to_string()),
         None,
-        None,
     )
     .expect("paste");
     assert!(model.edit_buffer().contains("pasted"));
@@ -106,14 +76,8 @@ fn title_edit_e_obeys_editbuffer_char_index_word_chords_paste_and_bound_task_ref
     // (The heavy cross-actor reorder cases live in edit_target_binding.rs; here we assert
     // the open path binds and confirm uses the binding.)
     let expected = model.edit_buffer().to_string();
-    let outcome = apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::ConfirmEdit,
-        None,
-        None,
-    )
-    .expect("confirm title");
+    let outcome = apply_intent(&mut domain, &mut model, BoardIntent::ConfirmEdit, None)
+        .expect("confirm title");
     assert_eq!(outcome, IntentOutcome::Persist);
     assert_eq!(domain.get(id).expect("task").title, expected);
     assert_eq!(model.input_mode(), BoardInputMode::Normal);
@@ -137,39 +101,19 @@ fn palette_notes_edit_obeys_notes_save_chord_pair_and_bound_task_refusal() {
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
 
     // Notes is palette-routed: BeginEditNotes (the 'n' or palette "edit notes" path).
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::BeginEditNotes,
-        None,
-        None,
-    )
-    .expect("begin notes");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditNotes, None).expect("begin notes");
     assert_eq!(model.input_mode(), BoardInputMode::EditNotes);
     assert_eq!(model.edit_target(), Some(id));
 
     // Type a multi-line draft (notes accept breaks).
     for ch in "line1\nline2".chars() {
-        apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::EditInsert(ch),
-            None,
-            None,
-        )
-        .expect("insert");
+        apply_intent(&mut domain, &mut model, BoardIntent::EditInsert(ch), None).expect("insert");
     }
     // Confirm via the notes save chord intent (bare Enter in Notes inserts a line break;
     // Ctrl/Alt+Enter is ConfirmEdit here, since both are mapped to the same intent at the
     // reducer boundary this test drives).
-    let outcome = apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::ConfirmEdit,
-        None,
-        None,
-    )
-    .expect("confirm notes");
+    let outcome = apply_intent(&mut domain, &mut model, BoardIntent::ConfirmEdit, None)
+        .expect("confirm notes");
     assert_eq!(outcome, IntentOutcome::Persist);
     let saved = domain.get(id).expect("task");
     assert!(saved.notes.as_deref().unwrap_or("").contains("line1"));
@@ -211,17 +155,10 @@ fn open_edit_session_not_redirected_by_sync_from_domain_reorder() {
         &mut model,
         BoardIntent::SelectIndex(a_idx),
         None,
-        None,
     )
     .expect("select a");
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::BeginEditTitle,
-        None,
-        None,
-    )
-    .expect("begin title on a");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+        .expect("begin title on a");
     assert_eq!(model.edit_target(), Some(a));
 
     // Simulate a domain reorder that would put B first (e.g., B updated later).
@@ -236,23 +173,9 @@ fn open_edit_session_not_redirected_by_sync_from_domain_reorder() {
     // Confirm must still land on A, not whatever now sits at the old index.
     // Type a distinguishing suffix.
     for ch in " edited".chars() {
-        apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::EditInsert(ch),
-            None,
-            None,
-        )
-        .expect("type");
+        apply_intent(&mut domain, &mut model, BoardIntent::EditInsert(ch), None).expect("type");
     }
-    let _ = apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::ConfirmEdit,
-        None,
-        None,
-    )
-    .expect("confirm");
+    let _ = apply_intent(&mut domain, &mut model, BoardIntent::ConfirmEdit, None).expect("confirm");
     assert_eq!(domain.get(a).expect("a").title, "A edited");
     assert_eq!(domain.get(b).expect("b").title, "B", "bystander untouched");
 }
@@ -282,14 +205,7 @@ fn title_edit_cursor_and_window_track_the_actual_paint_width_not_a_hardcoded_one
         )
         .expect("create");
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::BeginEditTitle,
-        None,
-        None,
-    )
-    .expect("begin title");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None).expect("begin title");
     assert_eq!(
         model.edit_cursor(),
         62,
@@ -387,25 +303,17 @@ fn task_form_unifies_palette_field_routes_scope_dropdown_and_atomic_save() {
         &mut model,
         BoardIntent::SelectIndex(target_index),
         None,
-        None,
     )
     .expect("select target");
 
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::BeginEditTitle,
-        None,
-        None,
-    )
-    .expect("e opens task form");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+        .expect("e opens task form");
     assert_eq!(model.edit_target(), Some(id));
     assert_eq!(model.form_focus(), Some(CaptureField::Title));
     apply_intent(
         &mut domain,
         &mut model,
         BoardIntent::FocusFormField(CaptureField::Notes),
-        None,
         None,
     )
     .expect("a direct field focus keeps the same bound form");
@@ -415,7 +323,6 @@ fn task_form_unifies_palette_field_routes_scope_dropdown_and_atomic_save() {
         &mut domain,
         &mut model,
         BoardIntent::FocusFormField(CaptureField::Title),
-        None,
         None,
     )
     .expect("Title focus returns to the same draft");
@@ -435,7 +342,6 @@ fn task_form_unifies_palette_field_routes_scope_dropdown_and_atomic_save() {
             &mut model,
             BoardIntent::EditInsert(character),
             None,
-            None,
         )
         .expect("type title");
     }
@@ -447,13 +353,12 @@ fn task_form_unifies_palette_field_routes_scope_dropdown_and_atomic_save() {
     )
     .expect("Tab moves a task form field");
     assert_eq!(tab, BoardIntent::FormFocusNext);
-    apply_intent(&mut domain, &mut model, tab, None, None).expect("focus Notes");
+    apply_intent(&mut domain, &mut model, tab, None).expect("focus Notes");
     assert_eq!(model.form_focus(), Some(CaptureField::Notes));
     apply_intent(
         &mut domain,
         &mut model,
         BoardIntent::EditInsertLineBreak,
-        None,
         None,
     )
     .expect("Notes newline");
@@ -462,7 +367,6 @@ fn task_form_unifies_palette_field_routes_scope_dropdown_and_atomic_save() {
             &mut domain,
             &mut model,
             BoardIntent::EditInsert(character),
-            None,
             None,
         )
         .expect("type Notes");
@@ -474,7 +378,7 @@ fn task_form_unifies_palette_field_routes_scope_dropdown_and_atomic_save() {
         KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE),
     )
     .expect("Tab moves to thread");
-    apply_intent(&mut domain, &mut model, tab, None, None).expect("focus thread");
+    apply_intent(&mut domain, &mut model, tab, None).expect("focus thread");
     assert_eq!(model.form_focus(), Some(CaptureField::Thread));
     let tab = map_board_form_key(
         model.form_focus().expect("Thread focus"),
@@ -482,7 +386,7 @@ fn task_form_unifies_palette_field_routes_scope_dropdown_and_atomic_save() {
         KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE),
     )
     .expect("Tab moves to scope");
-    apply_intent(&mut domain, &mut model, tab, None, None).expect("focus scope");
+    apply_intent(&mut domain, &mut model, tab, None).expect("focus scope");
     assert_eq!(model.form_focus(), Some(CaptureField::Scope));
     let before_cycle = model.form_scope().cloned().expect("scope draft");
     assert_eq!(
@@ -493,14 +397,8 @@ fn task_form_unifies_palette_field_routes_scope_dropdown_and_atomic_save() {
         ),
         Some(BoardIntent::FormCycleScope)
     );
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::FormCycleScope,
-        None,
-        None,
-    )
-    .expect("Space cycles direct scope");
+    apply_intent(&mut domain, &mut model, BoardIntent::FormCycleScope, None)
+        .expect("Space cycles direct scope");
     assert_ne!(model.form_scope(), Some(&before_cycle));
 
     let open_dropdown = map_board_form_key(
@@ -510,17 +408,11 @@ fn task_form_unifies_palette_field_routes_scope_dropdown_and_atomic_save() {
     )
     .expect("Scope Enter opens its dropdown");
     assert_eq!(open_dropdown, BoardIntent::OpenFormScopeDropdown);
-    apply_intent(&mut domain, &mut model, open_dropdown, None, None).expect("open dropdown");
+    apply_intent(&mut domain, &mut model, open_dropdown, None).expect("open dropdown");
     assert_eq!(model.input_mode(), BoardInputMode::FormScopeDropdown);
     let draft_before_dropdown = model.form_scope().cloned();
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::FormScopeNext,
-        None,
-        None,
-    )
-    .expect("move dropdown selection");
+    apply_intent(&mut domain, &mut model, BoardIntent::FormScopeNext, None)
+        .expect("move dropdown selection");
     assert_eq!(
         model.form_scope(),
         draft_before_dropdown.as_ref(),
@@ -530,7 +422,6 @@ fn task_form_unifies_palette_field_routes_scope_dropdown_and_atomic_save() {
         &mut domain,
         &mut model,
         BoardIntent::CancelFormScopeDropdown,
-        None,
         None,
     )
     .expect("Esc returns to parent form");
@@ -542,21 +433,14 @@ fn task_form_unifies_palette_field_routes_scope_dropdown_and_atomic_save() {
         &mut model,
         BoardIntent::OpenFormScopeDropdown,
         None,
-        None,
     )
     .expect("open dropdown again");
     for _ in 0..model.form_scope_options().len() {
         if model.form_scope_dropdown_choice() == Some(&TaskScope::Global) {
             break;
         }
-        apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::FormScopeNext,
-            None,
-            None,
-        )
-        .expect("move toward Global");
+        apply_intent(&mut domain, &mut model, BoardIntent::FormScopeNext, None)
+            .expect("move toward Global");
     }
     assert_eq!(model.form_scope_dropdown_choice(), Some(&TaskScope::Global));
     apply_intent(
@@ -564,27 +448,14 @@ fn task_form_unifies_palette_field_routes_scope_dropdown_and_atomic_save() {
         &mut model,
         BoardIntent::ConfirmFormScopeDropdown,
         None,
-        None,
     )
     .expect("apply dropdown scope");
     assert_eq!(model.form_scope(), Some(&TaskScope::Global));
 
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::FormFocusNext,
-        None,
-        None,
-    )
-    .expect("scope wraps to title");
-    let outcome = apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::ConfirmEdit,
-        None,
-        None,
-    )
-    .expect("one atomic form save");
+    apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
+        .expect("scope wraps to title");
+    let outcome = apply_intent(&mut domain, &mut model, BoardIntent::ConfirmEdit, None)
+        .expect("one atomic form save");
     assert_eq!(outcome, IntentOutcome::Persist);
     let saved = domain.get(id).expect("saved task");
     assert_eq!(saved.title, "Task updated");
@@ -598,12 +469,11 @@ fn task_form_unifies_palette_field_routes_scope_dropdown_and_atomic_save() {
         .expect("palette Edit notes command")
         .intent;
     assert_eq!(palette_notes_route, BoardIntent::BeginEditNotes);
-    apply_intent(&mut domain, &mut model, palette_notes_route, None, None)
+    apply_intent(&mut domain, &mut model, palette_notes_route, None)
         .expect("palette Notes route opens the shared form");
     assert_eq!(model.edit_target(), Some(id));
     assert_eq!(model.form_focus(), Some(CaptureField::Notes));
-    apply_intent(&mut domain, &mut model, BoardIntent::CancelEdit, None, None)
-        .expect("close Notes form");
+    apply_intent(&mut domain, &mut model, BoardIntent::CancelEdit, None).expect("close Notes form");
     let palette_scope_route = model
         .available_commands()
         .into_iter()
@@ -611,7 +481,7 @@ fn task_form_unifies_palette_field_routes_scope_dropdown_and_atomic_save() {
         .expect("palette Change scope command")
         .intent;
     assert_eq!(palette_scope_route, BoardIntent::BeginEditScope);
-    apply_intent(&mut domain, &mut model, palette_scope_route, None, None)
+    apply_intent(&mut domain, &mut model, palette_scope_route, None)
         .expect("palette Change scope route opens the shared form");
     assert_eq!(model.edit_target(), Some(id));
     assert_eq!(model.form_focus(), Some(CaptureField::Scope));
@@ -656,19 +526,11 @@ fn task_page_scope_dropdown_sits_above_the_footer_with_short_names() {
         )
         .expect("create second project");
     let mut model = BoardModel::from_domain(&domain, Some(std::path::PathBuf::from("/repos/tsk")));
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::OpenTaskPage,
-        None,
-        None,
-    )
-    .expect("open page");
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
     apply_intent(
         &mut domain,
         &mut model,
         BoardIntent::OpenFormScopeDropdown,
-        None,
         None,
     )
     .expect("open scope dropdown");
@@ -728,14 +590,7 @@ fn page_view_shows_thread_beside_scope() {
         )
         .expect("create");
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::OpenTaskPage,
-        None,
-        None,
-    )
-    .expect("open page");
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
 
     let backend = TestBackend::new(80, 24);
     let mut terminal = Terminal::new(backend).expect("terminal");
@@ -769,14 +624,7 @@ fn task_page_form_tab_cycle_reaches_thread_and_shift_tab_reverses_it() {
         )
         .expect("create");
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::BeginEditTitle,
-        None,
-        None,
-    )
-    .expect("open form");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None).expect("open form");
 
     let mut focus = CaptureField::Title;
     for expected in [
@@ -791,7 +639,7 @@ fn task_page_form_tab_cycle_reaches_thread_and_shift_tab_reverses_it() {
         )
         .expect("Tab maps on every editable form field");
         assert_eq!(tab, BoardIntent::FormFocusNext);
-        apply_intent(&mut domain, &mut model, tab, None, None).expect("Tab focuses the next field");
+        apply_intent(&mut domain, &mut model, tab, None).expect("Tab focuses the next field");
         assert_eq!(model.form_focus(), Some(expected));
         focus = expected;
     }
@@ -807,7 +655,7 @@ fn task_page_form_tab_cycle_reaches_thread_and_shift_tab_reverses_it() {
         )
         .expect("Shift+Tab maps on every editable form field");
         assert_eq!(shift_tab, BoardIntent::FormFocusPrev);
-        apply_intent(&mut domain, &mut model, shift_tab, None, None)
+        apply_intent(&mut domain, &mut model, shift_tab, None)
             .expect("Shift+Tab reverses the prior focus move");
         assert_eq!(model.form_focus(), Some(expected));
         focus = expected;
@@ -828,23 +676,10 @@ fn page_edit_sets_thread_and_clearing_unthreads() {
         )
         .expect("create");
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::BeginEditTitle,
-        None,
-        None,
-    )
-    .expect("open form");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None).expect("open form");
     for _ in 0..2 {
-        apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::FormFocusNext,
-            None,
-            None,
-        )
-        .expect("focus next");
+        apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
+            .expect("focus next");
     }
     assert_eq!(model.form_focus(), Some(CaptureField::Thread));
     for character in "Release-2026".chars() {
@@ -853,19 +688,11 @@ fn page_edit_sets_thread_and_clearing_unthreads() {
             &mut model,
             BoardIntent::EditInsert(character),
             None,
-            None,
         )
         .expect("type thread");
     }
     assert_eq!(
-        apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::ConfirmEdit,
-            None,
-            None
-        )
-        .expect("save thread"),
+        apply_intent(&mut domain, &mut model, BoardIntent::ConfirmEdit, None).expect("save thread"),
         IntentOutcome::Persist
     );
     assert_eq!(
@@ -873,42 +700,16 @@ fn page_edit_sets_thread_and_clearing_unthreads() {
         Some("release-2026")
     );
 
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::BeginEditTitle,
-        None,
-        None,
-    )
-    .expect("reopen form");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None).expect("reopen form");
     for _ in 0..2 {
-        apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::FormFocusNext,
-            None,
-            None,
-        )
-        .expect("focus thread");
+        apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
+            .expect("focus thread");
     }
     for _ in 0.."release-2026".len() {
-        apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::EditBackspace,
-            None,
-            None,
-        )
-        .expect("clear thread");
+        apply_intent(&mut domain, &mut model, BoardIntent::EditBackspace, None)
+            .expect("clear thread");
     }
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::ConfirmEdit,
-        None,
-        None,
-    )
-    .expect("unthread");
+    apply_intent(&mut domain, &mut model, BoardIntent::ConfirmEdit, None).expect("unthread");
     assert_eq!(domain.get(id).expect("task").thread, None);
 }
 
@@ -926,23 +727,9 @@ fn page_thread_field_refuses_invalid_name_without_persisting() {
         )
         .expect("create");
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::BeginEditTitle,
-        None,
-        None,
-    )
-    .expect("open");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None).expect("open");
     for _ in 0..2 {
-        apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::FormFocusNext,
-            None,
-            None,
-        )
-        .expect("focus");
+        apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None).expect("focus");
     }
     for character in "bad_name".chars() {
         apply_intent(
@@ -950,19 +737,11 @@ fn page_thread_field_refuses_invalid_name_without_persisting() {
             &mut model,
             BoardIntent::EditInsert(character),
             None,
-            None,
         )
         .expect("type");
     }
     assert_eq!(
-        apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::ConfirmEdit,
-            None,
-            None
-        )
-        .expect("refusal"),
+        apply_intent(&mut domain, &mut model, BoardIntent::ConfirmEdit, None).expect("refusal"),
         IntentOutcome::None
     );
     assert_eq!(model.input_mode(), BoardInputMode::EditThread);
@@ -983,19 +762,12 @@ fn canceling_thread_edit_keeps_the_task_page_and_resets_the_thread_draft() {
         )
         .expect("create");
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::BeginEditTitle,
-        None,
-        None,
-    )
-    .expect("open task form");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+        .expect("open task form");
     apply_intent(
         &mut domain,
         &mut model,
         BoardIntent::FocusFormField(CaptureField::Thread),
-        None,
         None,
     )
     .expect("focus thread");
@@ -1004,11 +776,10 @@ fn canceling_thread_edit_keeps_the_task_page_and_resets_the_thread_draft() {
         &mut model,
         BoardIntent::EditInsertText("release".into()),
         None,
-        None,
     )
     .expect("type thread");
 
-    apply_intent(&mut domain, &mut model, BoardIntent::CancelEdit, None, None)
+    apply_intent(&mut domain, &mut model, BoardIntent::CancelEdit, None)
         .expect("cancel thread field");
     assert!(
         model.board_form_open(),
@@ -1019,7 +790,6 @@ fn canceling_thread_edit_keeps_the_task_page_and_resets_the_thread_draft() {
         &mut domain,
         &mut model,
         BoardIntent::FocusFormField(CaptureField::Thread),
-        None,
         None,
     )
     .expect("reopen thread field");
@@ -1044,19 +814,12 @@ fn editing_an_unthreaded_task_paints_a_labeled_thread_footer_slot() {
         )
         .expect("create");
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::BeginEditTitle,
-        None,
-        None,
-    )
-    .expect("open task form");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+        .expect("open task form");
     apply_intent(
         &mut domain,
         &mut model,
         BoardIntent::FocusFormField(CaptureField::Thread),
-        None,
         None,
     )
     .expect("focus thread");
@@ -1098,14 +861,7 @@ fn thread_field_is_inert_while_step_editor_owns_the_footer() {
         )
         .expect("create");
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::OpenTaskPage,
-        None,
-        None,
-    )
-    .expect("page");
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("page");
     assert!(
         board_hit_map(Rect::new(0, 0, 80, 24), &model)
             .regions
@@ -1113,19 +869,11 @@ fn thread_field_is_inert_while_step_editor_owns_the_footer() {
             .any(|hit| hit.target == QueueHitTarget::FormThread),
         "the threaded page exposes its footer hit before a step editor opens"
     );
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::BeginAddStep,
-        None,
-        None,
-    )
-    .expect("item editor");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginAddStep, None).expect("item editor");
     apply_intent(
         &mut domain,
         &mut model,
         BoardIntent::FocusFormField(CaptureField::Thread),
-        None,
         None,
     )
     .expect("inert focus");
@@ -1154,40 +902,12 @@ fn thread_refusal_paints_inline_and_clears_without_status_leak() {
         )
         .expect("create");
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::BeginEditTitle,
-        None,
-        None,
-    )
-    .expect("open");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None).expect("open");
     for _ in 0..2 {
-        apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::FormFocusNext,
-            None,
-            None,
-        )
-        .expect("focus");
+        apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None).expect("focus");
     }
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::EditInsert('_'),
-        None,
-        None,
-    )
-    .expect("type");
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::ConfirmEdit,
-        None,
-        None,
-    )
-    .expect("refuse");
+    apply_intent(&mut domain, &mut model, BoardIntent::EditInsert('_'), None).expect("type");
+    apply_intent(&mut domain, &mut model, BoardIntent::ConfirmEdit, None).expect("refuse");
     let backend = TestBackend::new(80, 24);
     let mut terminal = Terminal::new(backend).expect("terminal");
     terminal
@@ -1209,7 +929,7 @@ fn thread_refusal_paints_inline_and_clears_without_status_leak() {
         None,
         "thread refusal must not use status message"
     );
-    apply_intent(&mut domain, &mut model, BoardIntent::CancelEdit, None, None).expect("close");
+    apply_intent(&mut domain, &mut model, BoardIntent::CancelEdit, None).expect("close");
     assert_eq!(model.message(), None);
 }
 
@@ -1228,14 +948,7 @@ fn task_page_footer_hits_use_display_columns_and_stay_within_the_painted_row() {
         )
         .expect("create");
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::OpenTaskPage,
-        None,
-        None,
-    )
-    .expect("open page");
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
 
     let width = 40;
     let hits = board_hit_map(Rect::new(0, 0, width, 10), &model);
@@ -1271,19 +984,11 @@ fn long_invalid_thread_refusal_remains_visible_at_40x10() {
         )
         .expect("create");
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::BeginEditTitle,
-        None,
-        None,
-    )
-    .expect("open");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None).expect("open");
     apply_intent(
         &mut domain,
         &mut model,
         BoardIntent::FocusFormField(CaptureField::Thread),
-        None,
         None,
     )
     .expect("focus thread");
@@ -1292,17 +997,9 @@ fn long_invalid_thread_refusal_remains_visible_at_40x10() {
         &mut model,
         BoardIntent::EditInsertText("invalid_thread_name_here".into()),
         None,
-        None,
     )
     .expect("type invalid thread");
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::ConfirmEdit,
-        None,
-        None,
-    )
-    .expect("refuse");
+    apply_intent(&mut domain, &mut model, BoardIntent::ConfirmEdit, None).expect("refuse");
 
     let backend = TestBackend::new(40, 10);
     let mut terminal = Terminal::new(backend).expect("terminal");
@@ -1336,29 +1033,14 @@ fn page_footer_thread_edit_operable_at_40x10() {
         )
         .expect("create");
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::BeginEditTitle,
-        None,
-        None,
-    )
-    .expect("open");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None).expect("open");
     for _ in 0..2 {
-        apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::FormFocusNext,
-            None,
-            None,
-        )
-        .expect("focus");
+        apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None).expect("focus");
     }
     apply_intent(
         &mut domain,
         &mut model,
         BoardIntent::EditInsertText("tiny".into()),
-        None,
         None,
     )
     .expect("type");

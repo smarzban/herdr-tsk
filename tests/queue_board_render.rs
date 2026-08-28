@@ -175,7 +175,6 @@ fn todo_verbs() -> Vec<VerbEntry<'static>> {
         &mut model,
         BoardIntent::SelectHomeTab(BoardTab::Projects),
         None,
-        None,
     )
     .expect("projects tab for fixture todo task");
     let target = Uuid::from_u128(10);
@@ -184,8 +183,7 @@ fn todo_verbs() -> Vec<VerbEntry<'static>> {
         if model.selected_id() == Some(target) {
             break;
         }
-        apply_intent(&mut domain, &mut model, BoardIntent::SelectNext, None, None)
-            .expect("select next");
+        apply_intent(&mut domain, &mut model, BoardIntent::SelectNext, None).expect("select next");
     }
     assert_eq!(
         model.selected_id(),
@@ -200,7 +198,7 @@ fn todo_verbs() -> Vec<VerbEntry<'static>> {
 fn accordion_verbs() -> Vec<VerbEntry<'static>> {
     let mut model = base_board_model();
     let mut domain = DomainState::new();
-    apply_intent(&mut domain, &mut model, BoardIntent::PeekDetail, None, None)
+    apply_intent(&mut domain, &mut model, BoardIntent::PeekDetail, None)
         .expect("peek the fixture's selected task");
     assert_eq!(
         model.detail_open(),
@@ -228,7 +226,6 @@ fn palette_commands() -> Vec<PaletteCommandRow<'static>> {
         &mut model,
         BoardIntent::OpenCommandPalette,
         None,
-        None,
     )
     .expect("open the palette");
     for character in "stat".chars() {
@@ -236,7 +233,6 @@ fn palette_commands() -> Vec<PaletteCommandRow<'static>> {
             &mut domain,
             &mut model,
             BoardIntent::CommandQueryInsert(character),
-            None,
             None,
         )
         .expect("type palette query character");
@@ -263,22 +259,8 @@ fn palette_commands() -> Vec<PaletteCommandRow<'static>> {
          status commands (no dispatch, no other tail entry) -- if the product catalog \
          changed, this fixture must follow it, not be hand-patched"
     );
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::CommandNext,
-        None,
-        None,
-    )
-    .expect("command next");
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::CommandNext,
-        None,
-        None,
-    )
-    .expect("command next");
+    apply_intent(&mut domain, &mut model, BoardIntent::CommandNext, None).expect("command next");
+    apply_intent(&mut domain, &mut model, BoardIntent::CommandNext, None).expect("command next");
     assert_eq!(
         model.command_selected(),
         Some(2),
@@ -500,9 +482,8 @@ fn standard_78x24_fixture_has_selector_list_rule_status_verb_and_no_other_chrome
 
     let verbs = trimmed(&rows[23]);
     // Imp-3 (round 2): `space` is context-dependent -- this fixture's selection is a Doing
-    // task, and `PrimaryVerb` does not act on it yet ("resume not available yet"), so a
-    // correct legend omits the entry rather than advertise a no-op. `enter`/`?` are always
-    // present regardless of selection.
+    // task, and `PrimaryVerb` is a silent no-op there, so a correct legend omits the entry
+    // rather than advertise a no-op. `enter`/`?` are always present regardless of selection.
     assert!(
         verbs.contains("enter") && verbs.contains('?') && verbs.contains("+ capture"),
         "standard verb bar must retain open, help, and capture: {verbs:?}"
@@ -1024,14 +1005,7 @@ fn task_page_paints_steps_section_between_notes_and_footer() {
     domain.toggle_step(id, second).expect("toggle step 2");
 
     let mut model = BoardModel::from_domain(&domain, None);
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::OpenTaskPage,
-        None,
-        None,
-    )
-    .expect("open task page");
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open task page");
 
     let rows = board_rows(&model, 78, 24);
     let shown: Vec<String> = rows.iter().map(|row| trimmed(row)).collect();
@@ -1100,14 +1074,7 @@ fn task_page_without_steps_paints_no_steps_section() {
         )
         .expect("create task");
     let mut model = BoardModel::from_domain(&domain, None);
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::OpenTaskPage,
-        None,
-        None,
-    )
-    .expect("open task page");
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open task page");
 
     for &(width, height) in &[(78u16, 24u16), (40u16, 10u16)] {
         let rows = board_rows(&model, width, height);
@@ -1154,22 +1121,9 @@ fn task_page_notes_edit_keeps_a_visible_row_at_the_compact_floor_alongside_steps
     domain.toggle_step(id, first).expect("toggle step 1");
 
     let mut model = BoardModel::from_domain(&domain, None);
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::OpenTaskPage,
-        None,
-        None,
-    )
-    .expect("open task page");
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::BeginEditNotes,
-        None,
-        None,
-    )
-    .expect("begin notes edit");
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open task page");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditNotes, None)
+        .expect("begin notes edit");
 
     let rows = board_rows(&model, 40, 10);
     let shown: Vec<String> = rows.iter().map(|row| trimmed(row)).collect();
@@ -1208,31 +1162,16 @@ fn notes_edit_caret_accounts_for_shared_stream_scroll() {
             .expect("add step");
     }
     let mut model = BoardModel::from_domain(&domain, None);
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::OpenTaskPage,
-        None,
-        None,
-    )
-    .expect("open page");
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
     board_rows(&model, 80, 24);
     apply_intent(
         &mut domain,
         &mut model,
         BoardIntent::PageWheelScrollDown,
         None,
-        None,
     )
     .expect("scroll shared stream");
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::BeginEditNotes,
-        None,
-        None,
-    )
-    .expect("edit notes");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditNotes, None).expect("edit notes");
 
     let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("test terminal");
     terminal
@@ -1270,14 +1209,7 @@ fn notes_edit_after_deep_stream_scroll_keeps_draft_and_caret_aligned() {
             .expect("add step");
     }
     let mut model = BoardModel::from_domain(&domain, None);
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::OpenTaskPage,
-        None,
-        None,
-    )
-    .expect("open");
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open");
     board_rows(&model, 80, 24);
     for _ in 0..20 {
         apply_intent(
@@ -1285,18 +1217,10 @@ fn notes_edit_after_deep_stream_scroll_keeps_draft_and_caret_aligned() {
             &mut model,
             BoardIntent::PageWheelScrollDown,
             None,
-            None,
         )
         .expect("deep wheel");
     }
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::BeginEditNotes,
-        None,
-        None,
-    )
-    .expect("edit notes");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditNotes, None).expect("edit notes");
     let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("terminal");
     terminal
         .draw(|frame| draw_board(frame, &model))
@@ -1338,14 +1262,7 @@ fn shift_tab_from_scope_resets_notes_stream_origin_and_aligns_caret() {
             .expect("add step");
     }
     let mut model = BoardModel::from_domain(&domain, None);
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::OpenTaskPage,
-        None,
-        None,
-    )
-    .expect("open");
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open");
     board_rows(&model, 80, 24);
     for _ in 0..20 {
         apply_intent(
@@ -1353,18 +1270,10 @@ fn shift_tab_from_scope_resets_notes_stream_origin_and_aligns_caret() {
             &mut model,
             BoardIntent::PageWheelScrollDown,
             None,
-            None,
         )
         .expect("deep wheel");
     }
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::BeginEditScope,
-        None,
-        None,
-    )
-    .expect("edit scope");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditScope, None).expect("edit scope");
     let shift_tab = map_key(
         BoardInputMode::EditScope,
         KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT),
@@ -1375,7 +1284,6 @@ fn shift_tab_from_scope_resets_notes_stream_origin_and_aligns_caret() {
         &mut model,
         shift_tab.clone().expect("Shift+Tab intent"),
         None,
-        None,
     )
     .expect("Shift+Tab into Thread");
     assert_eq!(model.input_mode(), BoardInputMode::EditThread);
@@ -1383,7 +1291,6 @@ fn shift_tab_from_scope_resets_notes_stream_origin_and_aligns_caret() {
         &mut domain,
         &mut model,
         shift_tab.expect("second Shift+Tab intent"),
-        None,
         None,
     )
     .expect("Shift+Tab into Notes");
@@ -1423,23 +1330,9 @@ fn notes_edit_wraps_a_long_line_instead_of_scrolling_horizontally() {
         )
         .expect("create task");
     let mut model = BoardModel::from_domain(&domain, None);
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::OpenTaskPage,
-        None,
-        None,
-    )
-    .expect("open page");
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
     board_rows(&model, 80, 24);
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::BeginEditNotes,
-        None,
-        None,
-    )
-    .expect("edit notes");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditNotes, None).expect("edit notes");
 
     let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("terminal");
     terminal
@@ -1481,14 +1374,7 @@ fn task_page_view_wraps_long_notes_instead_of_truncating() {
         )
         .expect("create task");
     let mut model = BoardModel::from_domain(&domain, None);
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::OpenTaskPage,
-        None,
-        None,
-    )
-    .expect("open page");
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
 
     let rows = board_rows(&model, 80, 24);
     assert!(
@@ -1526,14 +1412,7 @@ fn task_page_scrolls_notes_and_steps_as_one_content_region() {
         .expect("create task");
     domain.add_step(id, "only step").expect("add step");
     let mut model = BoardModel::from_domain(&domain, None);
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::OpenTaskPage,
-        None,
-        None,
-    )
-    .expect("open task page");
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open task page");
 
     let initial = board_rows(&model, 78, 24);
     let shown: Vec<String> = initial.iter().map(|row| trimmed(row)).collect();
@@ -1558,7 +1437,6 @@ fn task_page_scrolls_notes_and_steps_as_one_content_region() {
             &mut domain,
             &mut model,
             BoardIntent::PageWheelScrollDown,
-            None,
             None,
         )
         .expect("wheel scroll down");
@@ -1617,14 +1495,7 @@ fn steps_stack_from_the_top_below_the_divider() {
         domain.add_step(id, text).expect("add step");
     }
     let mut model = BoardModel::from_domain(&domain, None);
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::OpenTaskPage,
-        None,
-        None,
-    )
-    .expect("open task page");
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open task page");
 
     // 78x24: label opens the bottom half on row 12; steps 1..3 stack downward
     // from it while the footer-side rows of the half stay empty.
@@ -2323,14 +2194,8 @@ fn footer_lists_the_step_add_verb() {
             domain.add_step(id, text).expect("add step");
         }
         let mut model = BoardModel::from_domain(&domain, None);
-        apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::OpenTaskPage,
-            None,
-            None,
-        )
-        .expect("open task page");
+        apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None)
+            .expect("open task page");
         let rows = board_rows(&model, width, 24);
         let verb_row = tier::resolve(width, 24).verb_row.expect("verb row");
         trimmed(&rows[verb_row as usize])
@@ -2522,7 +2387,6 @@ fn header_shows_name_and_open_count() {
         &mut model,
         BoardIntent::SelectIndex(deck_index),
         None,
-        None,
     )
     .expect("select threaded task");
 
@@ -2587,7 +2451,7 @@ fn board_with_headers_paints_within_40x10_and_all_tasks_reachable() {
 
     for (index, id) in ids.into_iter().enumerate() {
         if index > 0 {
-            apply_intent(&mut domain, &mut model, BoardIntent::SelectNext, None, None)
+            apply_intent(&mut domain, &mut model, BoardIntent::SelectNext, None)
                 .expect("arrow to next task");
         }
         assert_eq!(
@@ -2636,7 +2500,6 @@ fn peek_shows_thread_line_only_for_threaded_task() {
         &mut threaded_model,
         BoardIntent::PeekDetail,
         None,
-        None,
     )
     .expect("open threaded peek");
     assert!(
@@ -2660,7 +2523,6 @@ fn peek_shows_thread_line_only_for_threaded_task() {
         &mut domain,
         &mut unthreaded_model,
         BoardIntent::PeekDetail,
-        None,
         None,
     )
     .expect("open unthreaded peek");
@@ -2744,20 +2606,12 @@ fn board_list_wraps_a_long_title_onto_a_continuation_row() {
 fn quick_add_wraps_a_long_title_into_the_reserved_rows() {
     let mut domain = DomainState::new();
     let mut model = BoardModel::from_domain(&domain, None);
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::OpenCapture,
-        None,
-        None,
-    )
-    .expect("open quick add");
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenCapture, None).expect("open quick add");
     let title: String = (0..40).map(|index| format!("w{index} ")).collect();
     apply_intent(
         &mut domain,
         &mut model,
         BoardIntent::QuickAddInsertText(title),
-        None,
         None,
     )
     .expect("type long title");
@@ -2812,23 +2666,9 @@ fn notes_edit_arrows_move_across_logical_and_wrapped_rows() {
         )
         .expect("create task");
     let mut model = BoardModel::from_domain(&domain, None);
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::OpenTaskPage,
-        None,
-        None,
-    )
-    .expect("open page");
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
     board_rows(&model, 80, 24);
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::BeginEditNotes,
-        None,
-        None,
-    )
-    .expect("edit notes");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditNotes, None).expect("edit notes");
 
     let caret_at = |model: &BoardModel, width: u16, height: u16| {
         let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("terminal");
@@ -2841,20 +2681,11 @@ fn notes_edit_arrows_move_across_logical_and_wrapped_rows() {
 
     // Seeded at the end of "two" (row 2). Up twice walks back over the blank row.
     assert_eq!(caret_y(&model), 5);
-    apply_intent(&mut domain, &mut model, BoardIntent::EditMoveUp, None, None)
-        .expect("up to blank row");
+    apply_intent(&mut domain, &mut model, BoardIntent::EditMoveUp, None).expect("up to blank row");
     assert_eq!(caret_y(&model), 4, "up lands on the blank middle row");
-    apply_intent(&mut domain, &mut model, BoardIntent::EditMoveUp, None, None)
-        .expect("up to first row");
+    apply_intent(&mut domain, &mut model, BoardIntent::EditMoveUp, None).expect("up to first row");
     assert_eq!(caret_y(&model), 3, "up reaches the first note row");
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::EditMoveDown,
-        None,
-        None,
-    )
-    .expect("down again");
+    apply_intent(&mut domain, &mut model, BoardIntent::EditMoveDown, None).expect("down again");
     assert_eq!(caret_y(&model), 4);
 
     // Wrapped rows: at the compact floor the same draft wraps at word boundaries,
@@ -2871,25 +2702,11 @@ fn notes_edit_arrows_move_across_logical_and_wrapped_rows() {
         )
         .expect("create task");
     let mut model = BoardModel::from_domain(&domain, None);
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::OpenTaskPage,
-        None,
-        None,
-    )
-    .expect("open page");
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
     board_rows(&model, 40, 10);
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::BeginEditNotes,
-        None,
-        None,
-    )
-    .expect("edit notes");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditNotes, None).expect("edit notes");
     let before = caret_at(&model, 40, 10);
-    apply_intent(&mut domain, &mut model, BoardIntent::EditMoveUp, None, None)
+    apply_intent(&mut domain, &mut model, BoardIntent::EditMoveUp, None)
         .expect("up across the wrap");
     let after = caret_at(&model, 40, 10);
     assert!(
@@ -2916,14 +2733,7 @@ fn task_page_caps_a_wrapped_header_inside_the_page_body() {
         )
         .expect("create task");
     let mut model = BoardModel::from_domain(&domain, None);
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::OpenTaskPage,
-        None,
-        None,
-    )
-    .expect("open page");
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
 
     let rows = board_rows(&model, 40, 10);
     // Chrome rows keep their own content: rule dashes at 7, status at 8, verbs at 9.
@@ -2972,25 +2782,12 @@ fn step_cursor_moves_do_not_rescroll_the_page_when_steps_fit() {
             .expect("add step");
     }
     let mut model = BoardModel::from_domain(&domain, None);
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::OpenTaskPage,
-        None,
-        None,
-    )
-    .expect("open page");
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
     // One painted frame records the viewport; then walk the step cursor down.
     board_rows(&model, 80, 24);
     for _ in 0..4 {
-        apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::PageScrollDown,
-            None,
-            None,
-        )
-        .expect("advance step cursor");
+        apply_intent(&mut domain, &mut model, BoardIntent::PageScrollDown, None)
+            .expect("advance step cursor");
     }
     let rows = board_rows(&model, 80, 24);
     let text = rows.join("\n");
@@ -3021,23 +2818,9 @@ fn edit_title_caret_parks_at_the_capped_headers_end() {
         )
         .expect("create task");
     let mut model = BoardModel::from_domain(&domain, None);
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::OpenTaskPage,
-        None,
-        None,
-    )
-    .expect("open page");
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
     board_rows(&model, 40, 10);
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::BeginEditTitle,
-        None,
-        None,
-    )
-    .expect("edit title");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None).expect("edit title");
 
     let mut terminal = Terminal::new(TestBackend::new(40, 10)).expect("terminal");
     terminal

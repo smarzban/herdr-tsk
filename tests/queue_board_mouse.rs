@@ -207,14 +207,8 @@ fn hit_map_covers_selection_rows_verbs_drawer_selector_chip_dropdown_palette_row
 
     // Drawer: only painted while the done drawer is open.
     let (mut domain, mut model, _id) = board_with_task("archived", HumanStatus::Done);
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::ToggleDoneDrawer,
-        None,
-        None,
-    )
-    .expect("open drawer");
+    apply_intent(&mut domain, &mut model, BoardIntent::ToggleDoneDrawer, None)
+        .expect("open drawer");
     let hits = board_hit_map(STANDARD, &model);
     assert!(
         hits.regions
@@ -229,7 +223,6 @@ fn hit_map_covers_selection_rows_verbs_drawer_selector_chip_dropdown_palette_row
         &mut domain,
         &mut model,
         BoardIntent::OpenProjectSelector,
-        None,
         None,
     )
     .expect("open selector");
@@ -248,7 +241,6 @@ fn hit_map_covers_selection_rows_verbs_drawer_selector_chip_dropdown_palette_row
         &mut model,
         BoardIntent::OpenCommandPalette,
         None,
-        None,
     )
     .expect("open palette");
     let hits = board_hit_map(STANDARD, &model);
@@ -261,7 +253,7 @@ fn hit_map_covers_selection_rows_verbs_drawer_selector_chip_dropdown_palette_row
 
     // Help card.
     let (mut domain, mut model, _id) = board_with_task("help", HumanStatus::Ready);
-    apply_intent(&mut domain, &mut model, BoardIntent::OpenHelp, None, None).expect("open help");
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenHelp, None).expect("open help");
     let hits = board_hit_map(STANDARD, &model);
     assert!(
         hits.regions
@@ -279,7 +271,6 @@ fn projects_tab_group_header_double_click_scopes_the_board_to_that_project() {
         &mut domain,
         &mut model,
         BoardIntent::SelectHomeTab(tsk_tui::ui::board::BoardTab::Projects),
-        None,
         None,
     )
     .expect("open projects tab");
@@ -299,14 +290,13 @@ fn projects_tab_group_header_double_click_scopes_the_board_to_that_project() {
         })
         .unwrap_or_else(|| panic!("no group header hit region for {OTHER_REPO}: {hits:?}"));
     let intent = click(header, &model, &hits).expect("header click maps to an intent");
-    apply_intent(&mut domain, &mut model, intent.clone(), None, None)
-        .expect("apply first header click");
+    apply_intent(&mut domain, &mut model, intent.clone(), None).expect("apply first header click");
     assert_eq!(
         model.selected_project(),
         None,
         "one header click collapses the group but stays at home"
     );
-    apply_intent(&mut domain, &mut model, intent, None, None).expect("apply second header click");
+    apply_intent(&mut domain, &mut model, intent, None).expect("apply second header click");
     assert_eq!(
         model.selected_project(),
         Some(Path::new(OTHER_REPO)),
@@ -401,17 +391,10 @@ fn task_form_mouse_fields_dropdown_and_verbs_match_keyboard_while_scrolled() {
         &mut model,
         BoardIntent::SelectIndex(target_index),
         None,
-        None,
     )
     .expect("select target");
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::BeginEditTitle,
-        None,
-        None,
-    )
-    .expect("open task form");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+        .expect("open task form");
 
     let mut hits = board_hit_map(STANDARD, &model);
     let intent_for = |target| {
@@ -472,7 +455,7 @@ fn task_form_mouse_fields_dropdown_and_verbs_match_keyboard_while_scrolled() {
         .expect("task-form scope hit");
     let open = click(scope_hit, &model, &hits).expect("scope click intent");
     assert_eq!(open, BoardIntent::OpenFormScopeDropdown);
-    apply_intent(&mut domain, &mut model, open, None, None).expect("open form dropdown");
+    apply_intent(&mut domain, &mut model, open, None).expect("open form dropdown");
     assert_eq!(model.input_mode(), BoardInputMode::FormScopeDropdown);
     assert_eq!(
         map_board_mouse(&model, &board_hit_map(STANDARD, &model), left_click(0, 0)),
@@ -489,7 +472,7 @@ fn task_form_mouse_fields_dropdown_and_verbs_match_keyboard_while_scrolled() {
             KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),
         )
         .expect("Down selects the next scope option");
-        apply_intent(&mut keyboard_domain, &mut keyboard_model, next, None, None)
+        apply_intent(&mut keyboard_domain, &mut keyboard_model, next, None)
             .expect("move keyboard choice");
     }
     let confirm = map_board_form_key(
@@ -498,14 +481,8 @@ fn task_form_mouse_fields_dropdown_and_verbs_match_keyboard_while_scrolled() {
         KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
     )
     .expect("Enter confirms the highlighted scope");
-    apply_intent(
-        &mut keyboard_domain,
-        &mut keyboard_model,
-        confirm,
-        None,
-        None,
-    )
-    .expect("confirm keyboard scope");
+    apply_intent(&mut keyboard_domain, &mut keyboard_model, confirm, None)
+        .expect("confirm keyboard scope");
 
     let global_index = model
         .form_scope_options()
@@ -520,7 +497,7 @@ fn task_form_mouse_fields_dropdown_and_verbs_match_keyboard_while_scrolled() {
         .expect("Global dropdown option is painted above the scrolled task list");
     let choose = click(option, &model, &hits).expect("dropdown option click");
     assert_eq!(choose, BoardIntent::SelectFormScopeOption(global_index));
-    apply_intent(&mut domain, &mut model, choose, None, None).expect("choose form scope");
+    apply_intent(&mut domain, &mut model, choose, None).expect("choose form scope");
     assert_eq!(model.form_scope(), keyboard_model.form_scope());
     assert_eq!(model.input_mode(), BoardInputMode::EditScope);
     assert_eq!(
@@ -534,7 +511,6 @@ fn task_form_mouse_fields_dropdown_and_verbs_match_keyboard_while_scrolled() {
         &mut model,
         BoardIntent::OpenFormScopeDropdown,
         None,
-        None,
     )
     .expect("reopen dropdown");
     let esc = map_board_form_key(
@@ -543,7 +519,7 @@ fn task_form_mouse_fields_dropdown_and_verbs_match_keyboard_while_scrolled() {
         KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
     )
     .expect("Esc cancels only the dropdown");
-    apply_intent(&mut domain, &mut model, esc, None, None).expect("cancel dropdown");
+    apply_intent(&mut domain, &mut model, esc, None).expect("cancel dropdown");
     assert_eq!(model.input_mode(), BoardInputMode::EditScope);
     assert_eq!(model.form_scope(), Some(&TaskScope::Global));
 }
@@ -563,15 +539,14 @@ fn assert_verb_parity(title: &str, status: HumanStatus, chord: &str, key: KeyCod
             (&mut domain_key, &mut model_key, id_key),
             (&mut domain_mouse, &mut model_mouse, id_mouse),
         ] {
-            apply_intent(domain, model, BoardIntent::ToggleDoneDrawer, None, None)
-                .expect("open drawer");
+            apply_intent(domain, model, BoardIntent::ToggleDoneDrawer, None).expect("open drawer");
             if model.selected_id() != Some(id) {
                 let idx = model
                     .visible_ids()
                     .iter()
                     .position(|&row| row == id)
                     .expect("done row visible with drawer open");
-                apply_intent(domain, model, BoardIntent::SelectIndex(idx), None, None)
+                apply_intent(domain, model, BoardIntent::SelectIndex(idx), None)
                     .expect("select done");
             }
         }
@@ -584,7 +559,6 @@ fn assert_verb_parity(title: &str, status: HumanStatus, chord: &str, key: KeyCod
         &mut model_key,
         keyboard_intent.clone(),
         None,
-        None,
     )
     .expect("keyboard apply");
 
@@ -596,14 +570,7 @@ fn assert_verb_parity(title: &str, status: HumanStatus, chord: &str, key: KeyCod
         mouse_intent, keyboard_intent,
         "chord {chord:?}: mouse and key must agree"
     );
-    apply_intent(
-        &mut domain_mouse,
-        &mut model_mouse,
-        mouse_intent,
-        None,
-        None,
-    )
-    .expect("mouse apply");
+    apply_intent(&mut domain_mouse, &mut model_mouse, mouse_intent, None).expect("mouse apply");
 
     assert_eq!(
         domain_key.get(id_key).unwrap().status,
@@ -648,8 +615,7 @@ fn click_and_wheel_match_keyboard_effects_for_each_control() {
         (&mut domain_key, &mut model_key),
         (&mut domain_mouse, &mut model_mouse),
     ] {
-        apply_intent(domain, model, BoardIntent::ToggleDoneDrawer, None, None)
-            .expect("open drawer");
+        apply_intent(domain, model, BoardIntent::ToggleDoneDrawer, None).expect("open drawer");
         assert!(model.drawer_open());
     }
     let keyboard_intent =
@@ -658,7 +624,6 @@ fn click_and_wheel_match_keyboard_effects_for_each_control() {
         &mut domain_key,
         &mut model_key,
         keyboard_intent.clone(),
-        None,
         None,
     )
     .expect("keyboard close drawer");
@@ -672,14 +637,8 @@ fn click_and_wheel_match_keyboard_effects_for_each_control() {
         .expect("drawer hit region");
     let mouse_intent = click(drawer_hit, &model_mouse, &hits).expect("drawer click intent");
     assert_eq!(mouse_intent, keyboard_intent);
-    apply_intent(
-        &mut domain_mouse,
-        &mut model_mouse,
-        mouse_intent,
-        None,
-        None,
-    )
-    .expect("mouse close drawer");
+    apply_intent(&mut domain_mouse, &mut model_mouse, mouse_intent, None)
+        .expect("mouse close drawer");
     assert!(!model_mouse.drawer_open());
 
     // Wheel: a step is the keyboard's own relative selection step.
@@ -710,18 +669,12 @@ fn click_and_wheel_match_keyboard_effects_for_each_control() {
     assert_eq!(ids.len(), 2, "both tasks must be visible on the deck");
     assert_eq!(model_key.selected_id(), Some(ids[0]));
     let keyboard_next = map_key(BoardInputMode::Normal, press(KeyCode::Down)).expect("down key");
-    apply_intent(
-        &mut domain_key,
-        &mut model_key,
-        keyboard_next.clone(),
-        None,
-        None,
-    )
-    .expect("keyboard next");
+    apply_intent(&mut domain_key, &mut model_key, keyboard_next.clone(), None)
+        .expect("keyboard next");
     let hits = board_hit_map(STANDARD, &model_mouse);
     let mouse_next = map_board_mouse(&model_mouse, &hits, wheel_down(0, 0)).expect("wheel next");
     assert_eq!(mouse_next, keyboard_next);
-    apply_intent(&mut domain_mouse, &mut model_mouse, mouse_next, None, None).expect("mouse next");
+    apply_intent(&mut domain_mouse, &mut model_mouse, mouse_next, None).expect("mouse next");
     assert_eq!(model_key.selected_id(), Some(ids[1]));
     assert_eq!(model_mouse.selected_id(), Some(ids[1]));
     // the last row is a hard stop for the wheel, unlike the
@@ -748,7 +701,6 @@ fn click_and_wheel_match_keyboard_effects_for_each_control() {
         &mut model_direct,
         BoardIntent::OpenProjectSelector,
         None,
-        None,
     )
     .expect("direct open");
     let hits = board_hit_map(STANDARD, &model_mouse);
@@ -759,14 +711,7 @@ fn click_and_wheel_match_keyboard_effects_for_each_control() {
         .expect("selector chip hit region");
     let mouse_intent = click(chip_hit, &model_mouse, &hits).expect("chip click intent");
     assert_eq!(mouse_intent, BoardIntent::OpenProjectSelector);
-    apply_intent(
-        &mut domain_mouse,
-        &mut model_mouse,
-        mouse_intent,
-        None,
-        None,
-    )
-    .expect("mouse open");
+    apply_intent(&mut domain_mouse, &mut model_mouse, mouse_intent, None).expect("mouse open");
     assert_eq!(
         model_direct.project_picker_index(),
         model_mouse.project_picker_index()
@@ -781,8 +726,7 @@ fn click_and_wheel_match_keyboard_effects_for_each_control() {
         (&mut domain_key, &mut model_key),
         (&mut domain_mouse, &mut model_mouse),
     ] {
-        apply_intent(domain, model, BoardIntent::OpenProjectSelector, None, None)
-            .expect("open selector");
+        apply_intent(domain, model, BoardIntent::OpenProjectSelector, None).expect("open selector");
     }
     let target_index = model_key
         .project_options()
@@ -798,18 +742,12 @@ fn click_and_wheel_match_keyboard_effects_for_each_control() {
     let next_key = map_key(BoardInputMode::ProjectPicker, press(KeyCode::Down))
         .expect("project picker down key");
     for _ in 0..target_index {
-        apply_intent(
-            &mut domain_key,
-            &mut model_key,
-            next_key.clone(),
-            None,
-            None,
-        )
-        .expect("step to option");
+        apply_intent(&mut domain_key, &mut model_key, next_key.clone(), None)
+            .expect("step to option");
     }
     let confirm_key = map_key(BoardInputMode::ProjectPicker, press(KeyCode::Enter))
         .expect("project picker enter key");
-    apply_intent(&mut domain_key, &mut model_key, confirm_key, None, None).expect("confirm choice");
+    apply_intent(&mut domain_key, &mut model_key, confirm_key, None).expect("confirm choice");
 
     let hits = board_hit_map(STANDARD, &model_mouse);
     let option_hit = hits
@@ -819,14 +757,7 @@ fn click_and_wheel_match_keyboard_effects_for_each_control() {
         .expect("dropdown option hit region");
     let mouse_intent = click(option_hit, &model_mouse, &hits).expect("dropdown click intent");
     assert_eq!(mouse_intent, BoardIntent::SelectProjectOption(target_index));
-    apply_intent(
-        &mut domain_mouse,
-        &mut model_mouse,
-        mouse_intent,
-        None,
-        None,
-    )
-    .expect("mouse choice");
+    apply_intent(&mut domain_mouse, &mut model_mouse, mouse_intent, None).expect("mouse choice");
 
     assert!(
         model_key.project_picker_index().is_none(),
@@ -866,14 +797,8 @@ fn empty_thread_target_follows_a_scope_name_containing_the_thread_label() {
         )
         .expect("create");
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(scope_path)));
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::BeginEditTitle,
-        None,
-        None,
-    )
-    .expect("open task form");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+        .expect("open task form");
 
     let hits = board_hit_map(STANDARD, &model);
     let scope_hit = hits
@@ -958,7 +883,6 @@ fn a_palette_row_over_a_full_deck_still_runs_its_own_command_not_the_task_row_un
         &mut model,
         BoardIntent::OpenCommandPalette,
         None,
-        None,
     )
     .expect("open palette");
     let hits = board_hit_map(STANDARD, &model);
@@ -1015,7 +939,6 @@ fn a_dropdown_option_over_a_task_row_still_selects_that_option_not_the_task_unde
         &mut model,
         BoardIntent::OpenProjectSelector,
         None,
-        None,
     )
     .expect("open selector");
     let hits = board_hit_map(STANDARD, &model);
@@ -1053,10 +976,9 @@ fn click_a_task_row_selects_its_index_on_a_scrolled_list() {
         &mut model,
         BoardIntent::SelectIndex(last),
         None,
-        None,
     )
     .expect("select last task");
-    apply_intent(&mut domain, &mut model, BoardIntent::PeekDetail, None, None)
+    apply_intent(&mut domain, &mut model, BoardIntent::PeekDetail, None)
         .expect("open peek on the last task");
     assert_eq!(model.detail_open(), Some(visible[last]));
 
@@ -1097,8 +1019,7 @@ fn stepping_selection_past_the_fold_with_select_next_keeps_the_selected_row_pain
     let last = visible.len() - 1;
 
     for step in 0..last {
-        apply_intent(&mut domain, &mut model, BoardIntent::SelectNext, None, None)
-            .expect("select next");
+        apply_intent(&mut domain, &mut model, BoardIntent::SelectNext, None).expect("select next");
         let selected = model
             .selected_id()
             .expect("a task stays selected while stepping through the deck");
@@ -1130,7 +1051,6 @@ fn a_click_on_the_palettes_own_chrome_does_not_dismiss_it() {
         &mut domain,
         &mut model,
         BoardIntent::OpenCommandPalette,
-        None,
         None,
     )
     .expect("open palette");
@@ -1174,7 +1094,6 @@ fn wheel_scrolls_the_open_command_surface_so_every_command_becomes_reachable() {
         &mut model,
         BoardIntent::OpenCommandPalette,
         None,
-        None,
     )
     .expect("open palette");
 
@@ -1211,7 +1130,7 @@ fn wheel_scrolls_the_open_command_surface_so_every_command_becomes_reachable() {
                 model.command_selected()
             )
         });
-        apply_intent(&mut domain, &mut model, intent, None, None).expect("apply wheel step");
+        apply_intent(&mut domain, &mut model, intent, None).expect("apply wheel step");
         steps += 1;
         assert!(
             steps <= last,
@@ -1251,7 +1170,7 @@ fn wheel_scrolls_the_open_command_surface_so_every_command_becomes_reachable() {
         let hits = board_hit_map(STANDARD, &model);
         let intent = map_board_mouse(&model, &hits, wheel_up(0, 0))
             .expect("wheel must retreat the selection");
-        apply_intent(&mut domain, &mut model, intent, None, None).expect("apply wheel step");
+        apply_intent(&mut domain, &mut model, intent, None).expect("apply wheel step");
     }
     let hits = board_hit_map(STANDARD, &model);
     assert_eq!(
@@ -1269,8 +1188,7 @@ fn wheel_scrolls_the_open_command_surface_so_every_command_becomes_reachable() {
 #[test]
 fn delete_notice_undo_control_is_clickable_and_matches_the_keyboard() {
     let (mut domain, mut model, id) = board_with_task("doomed", HumanStatus::Ready);
-    apply_intent(&mut domain, &mut model, BoardIntent::SoftDelete, None, None)
-        .expect("soft delete");
+    apply_intent(&mut domain, &mut model, BoardIntent::SoftDelete, None).expect("soft delete");
     assert!(
         model.delete_notice().is_some(),
         "a fresh soft delete must arm the undo notice"
@@ -1286,7 +1204,7 @@ fn delete_notice_undo_control_is_clickable_and_matches_the_keyboard() {
     assert_eq!(click(undo_hit, &model, &hits), Some(BoardIntent::Undo));
 
     let undo_intent = click(undo_hit, &model, &hits).unwrap();
-    apply_intent(&mut domain, &mut model, undo_intent, None, None).expect("mouse undo");
+    apply_intent(&mut domain, &mut model, undo_intent, None).expect("mouse undo");
     assert!(
         !domain.get(id).unwrap().soft_deleted,
         "the click must restore the task"
@@ -1304,8 +1222,7 @@ fn delete_notice_undo_control_is_clickable_and_matches_the_keyboard() {
 #[test]
 fn delete_notice_undo_region_survives_a_title_containing_the_literal_u_undo() {
     let (mut domain, mut model, id) = board_with_task("u Undo now", HumanStatus::Ready);
-    apply_intent(&mut domain, &mut model, BoardIntent::SoftDelete, None, None)
-        .expect("soft delete");
+    apply_intent(&mut domain, &mut model, BoardIntent::SoftDelete, None).expect("soft delete");
     assert!(
         model.delete_notice().is_some(),
         "a fresh soft delete must arm the undo notice"
@@ -1345,7 +1262,7 @@ fn delete_notice_undo_region_survives_a_title_containing_the_literal_u_undo() {
     );
 
     let undo_intent = click(undo_hit, &model, &hits).unwrap();
-    apply_intent(&mut domain, &mut model, undo_intent, None, None).expect("mouse undo");
+    apply_intent(&mut domain, &mut model, undo_intent, None).expect("mouse undo");
     assert!(
         !domain.get(id).unwrap().soft_deleted,
         "the click on the real control must still restore the task"
@@ -1442,7 +1359,7 @@ fn a_row_click_selects_and_peeks_and_a_second_click_opens_the_task_page() {
         .area;
     let intent =
         map_board_mouse(&model, &hits, left_click(area.x + 1, area.y)).expect("first click");
-    apply_intent(&mut domain, &mut model, intent, None, None).expect("apply first click");
+    apply_intent(&mut domain, &mut model, intent, None).expect("apply first click");
     assert_eq!(model.selected_id(), Some(target));
     assert_eq!(
         model.detail_open(),
@@ -1461,7 +1378,7 @@ fn a_row_click_selects_and_peeks_and_a_second_click_opens_the_task_page() {
         .area;
     let intent =
         map_board_mouse(&model, &hits, left_click(area.x + 1, area.y)).expect("second click");
-    apply_intent(&mut domain, &mut model, intent, None, None).expect("apply second click");
+    apply_intent(&mut domain, &mut model, intent, None).expect("apply second click");
     assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
     assert_eq!(model.detail_open(), None, "the page replaces the peek");
 }
@@ -1469,14 +1386,7 @@ fn a_row_click_selects_and_peeks_and_a_second_click_opens_the_task_page() {
 #[test]
 fn page_field_clicks_stay_inert_including_the_scope_footer() {
     let (mut domain, mut model) = deck_of(1);
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::OpenTaskPage,
-        None,
-        None,
-    )
-    .expect("open the page");
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open the page");
     assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
 
     // Title and notes regions are inert: only `e`/`n`/Tab enter edit mode on the page.
@@ -1523,23 +1433,16 @@ fn page_field_clicks_stay_inert_including_the_scope_footer() {
 #[test]
 fn the_wheel_scrolls_the_page_notes_not_the_board_list() {
     let (mut domain, mut model) = deck_of(3);
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::OpenTaskPage,
-        None,
-        None,
-    )
-    .expect("open the page");
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open the page");
     let selection_before = model.selected_id();
 
     let hits = board_hit_map(STANDARD, &model);
     let down = map_board_mouse(&model, &hits, wheel_down(5, 5)).expect("wheel down");
     assert_eq!(down, BoardIntent::PageWheelScrollDown);
-    apply_intent(&mut domain, &mut model, down, None, None).expect("scroll down");
+    apply_intent(&mut domain, &mut model, down, None).expect("scroll down");
     let up = map_board_mouse(&model, &hits, wheel_up(5, 5)).expect("wheel up");
     assert_eq!(up, BoardIntent::PageWheelScrollUp);
-    apply_intent(&mut domain, &mut model, up, None, None).expect("scroll up");
+    apply_intent(&mut domain, &mut model, up, None).expect("scroll up");
 
     assert_eq!(
         model.selected_id(),
@@ -1552,14 +1455,7 @@ fn the_wheel_scrolls_the_page_notes_not_the_board_list() {
 #[test]
 fn page_verb_clicks_resolve_through_the_page_legend() {
     let (mut domain, mut model) = deck_of(1);
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::OpenTaskPage,
-        None,
-        None,
-    )
-    .expect("open the page");
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open the page");
     let id = model.selected_id().expect("one task");
 
     let hits = board_hit_map(STANDARD, &model);
@@ -1577,7 +1473,7 @@ fn page_verb_clicks_resolve_through_the_page_legend() {
         .area;
     let intent = map_board_mouse(&model, &hits, left_click(verb_area.x + 1, verb_area.y))
         .expect("verb click");
-    apply_intent(&mut domain, &mut model, intent, None, None).expect("complete via click");
+    apply_intent(&mut domain, &mut model, intent, None).expect("complete via click");
     assert_eq!(
         domain.get(id).expect("task").status,
         HumanStatus::Done,
@@ -1592,14 +1488,7 @@ fn page_step_add_footer_chip_routes_to_begin_add_step() {
     let id = model.selected_id().expect("task");
     domain.add_step(id, "existing step").expect("add step");
     model = BoardModel::from_domain(&domain, None);
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::OpenTaskPage,
-        None,
-        None,
-    )
-    .expect("open");
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open");
     let verbs = board_verb_items(&model);
     let step_index = verbs
         .iter()
@@ -1647,14 +1536,7 @@ fn clicking_a_step_row_selects_it() {
         domain.add_step(id, text).expect("add step");
     }
     model.sync_from_domain(&domain);
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::OpenTaskPage,
-        None,
-        None,
-    )
-    .expect("open the page");
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open the page");
     assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
 
     // The click lands on step 3's painted row, located from the same frame the
@@ -1668,7 +1550,7 @@ fn clicking_a_step_row_selects_it() {
     let intent = map_board_mouse(&model, &hits, left_click(3, step_y as u16))
         .expect("a step-row click must dispatch a select intent");
     let revision_before = domain.get(id).expect("task").revision;
-    apply_intent(&mut domain, &mut model, intent, None, None).expect("apply the click");
+    apply_intent(&mut domain, &mut model, intent, None).expect("apply the click");
 
     let selected = page_rows(&model);
     assert!(

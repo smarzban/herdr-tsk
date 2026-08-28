@@ -369,7 +369,6 @@ fn board_save_failure_retains_working_state_blocks_mutations_and_retries_exactly
             baseline,
             intent: BoardIntent::Complete,
             snapshot: None,
-            host: None,
         },
         |_| {
             saves += 1;
@@ -408,7 +407,6 @@ fn board_save_failure_retains_working_state_blocks_mutations_and_retries_exactly
             baseline: DomainState::new(),
             intent: BoardIntent::SetStatus(HumanStatus::Blocked),
             snapshot: None,
-            host: None,
         },
         |_| {
             saves += 1;
@@ -431,7 +429,6 @@ fn board_save_failure_retains_working_state_blocks_mutations_and_retries_exactly
             baseline: DomainState::new(),
             intent: BoardIntent::RetrySave,
             snapshot: None,
-            host: None,
         },
         |state| {
             saves += 1;
@@ -465,7 +462,6 @@ fn board_save_recovery_cancel_restores_baseline_and_keyboard_reaches_retry_cance
             baseline,
             intent: BoardIntent::Complete,
             snapshot: None,
-            host: None,
         },
         |_| Err("injected board save failure".into()),
     )
@@ -514,7 +510,6 @@ fn board_save_recovery_cancel_restores_baseline_and_keyboard_reaches_retry_cance
             baseline: DomainState::new(),
             intent: BoardIntent::CancelSave,
             snapshot: None,
-            host: None,
         },
         |_| panic!("cancel must not persist"),
     )
@@ -545,7 +540,6 @@ fn command_surface_reaches_save_failure_retry_and_cancel_through_the_same_bounda
             baseline,
             intent: BoardIntent::Complete,
             snapshot: None,
-            host: None,
         },
         |_| {
             saves += 1;
@@ -571,7 +565,6 @@ fn command_surface_reaches_save_failure_retry_and_cancel_through_the_same_bounda
                 baseline: DomainState::new(),
                 intent,
                 snapshot: None,
-                host: None,
             },
             |_| panic!("command surface state must not persist"),
         )
@@ -619,7 +612,6 @@ fn command_surface_reaches_save_failure_retry_and_cancel_through_the_same_bounda
             baseline: DomainState::new(),
             intent: BoardIntent::ConfirmCommand,
             snapshot: None,
-            host: None,
         },
         |state| {
             saves += 1;
@@ -648,7 +640,6 @@ fn command_surface_reaches_save_failure_retry_and_cancel_through_the_same_bounda
             baseline: DomainState::new(),
             intent: BoardIntent::CancelSave,
             snapshot: None,
-            host: None,
         },
         |_| panic!("cancel must not persist"),
     )
@@ -682,7 +673,6 @@ fn failed_board_save() -> (
             baseline,
             intent: BoardIntent::Complete,
             snapshot: None,
-            host: None,
         },
         |_| Err("injected board save failure".into()),
     )
@@ -773,7 +763,6 @@ fn a_palette_paste_during_save_recovery_narrows_the_query_like_typing() {
             baseline: DomainState::new(),
             intent: BoardIntent::ConfirmCommand,
             snapshot: None,
-            host: None,
         },
         |state| {
             saves += 1;
@@ -804,7 +793,6 @@ fn presentation_only(
             baseline: DomainState::new(),
             intent,
             snapshot: None,
-            host: None,
         },
         |_| panic!("presentation state must not persist"),
     )
@@ -961,14 +949,8 @@ fn board_with_two_tasks() -> (DomainState, BoardModel, uuid::Uuid) {
         .iter()
         .position(|&id| id == doomed)
         .expect("doomed visible");
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::SelectIndex(idx),
-        None,
-        None,
-    )
-    .expect("select doomed");
+    apply_intent(&mut domain, &mut model, BoardIntent::SelectIndex(idx), None)
+        .expect("select doomed");
     (domain, model, doomed)
 }
 
@@ -1006,7 +988,6 @@ fn a_failed_delete_save_reports_exactly_what_a_failed_complete_save_reports() {
             baseline: reference_baseline,
             intent: BoardIntent::Complete,
             snapshot: None,
-            host: None,
         },
         |_| Err(INJECTED.into()),
     )
@@ -1034,7 +1015,6 @@ fn a_failed_delete_save_reports_exactly_what_a_failed_complete_save_reports() {
                 baseline,
                 intent: BoardIntent::SoftDelete,
                 snapshot: None,
-                host: None,
             },
             |_| {
                 saves += 1;
@@ -1067,7 +1047,6 @@ fn a_failed_delete_save_reports_exactly_what_a_failed_complete_save_reports() {
                     baseline: DomainState::new(),
                     intent: BoardIntent::RetrySave,
                     snapshot: None,
-                    host: None,
                 },
                 |state| {
                     saves += 1;
@@ -1095,7 +1074,6 @@ fn a_failed_delete_save_reports_exactly_what_a_failed_complete_save_reports() {
                     baseline: DomainState::new(),
                     intent: BoardIntent::CancelSave,
                     snapshot: None,
-                    host: None,
                 },
                 |_| panic!("cancel must not persist"),
             )
@@ -1123,66 +1101,31 @@ fn task_form_save_failure_retries_the_exact_atomic_title_notes_and_scope_mutatio
     let baseline = snapshot_of(&domain);
     let mut recovery = SaveRecovery::new();
 
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::BeginEditTitle,
-        None,
-        None,
-    )
-    .expect("open task form");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+        .expect("open task form");
     for character in " retry".chars() {
         apply_intent(
             &mut domain,
             &mut model,
             BoardIntent::EditInsert(character),
             None,
-            None,
         )
         .expect("type title");
     }
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::FormFocusNext,
-        None,
-        None,
-    )
-    .expect("focus Notes");
+    apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None).expect("focus Notes");
     for character in "retry notes".chars() {
         apply_intent(
             &mut domain,
             &mut model,
             BoardIntent::EditInsert(character),
             None,
-            None,
         )
         .expect("type Notes");
     }
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::FormFocusNext,
-        None,
-        None,
-    )
-    .expect("focus Thread");
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::FormFocusNext,
-        None,
-        None,
-    )
-    .expect("focus Scope");
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::FormCycleScope,
-        None,
-        None,
-    )
-    .expect("cycle scope to Global");
+    apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None).expect("focus Thread");
+    apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None).expect("focus Scope");
+    apply_intent(&mut domain, &mut model, BoardIntent::FormCycleScope, None)
+        .expect("cycle scope to Global");
     assert_eq!(model.form_scope(), Some(&TaskScope::Global));
 
     let failed = apply_board_intent_with_save_recovery(
@@ -1193,7 +1136,6 @@ fn task_form_save_failure_retries_the_exact_atomic_title_notes_and_scope_mutatio
             baseline,
             intent: BoardIntent::ConfirmEdit,
             snapshot: None,
-            host: None,
         },
         |_| Err(INJECTED.into()),
     )
@@ -1210,7 +1152,6 @@ fn task_form_save_failure_retries_the_exact_atomic_title_notes_and_scope_mutatio
             baseline: DomainState::new(),
             intent: BoardIntent::RetrySave,
             snapshot: None,
-            host: None,
         },
         |working| {
             let task = working.get(id).expect("task in retained working state");
@@ -1275,28 +1216,14 @@ fn failed_step_editor_save() -> (
         .expect("create task");
     domain.add_step(id, "alpha step").expect("seed one step");
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/app")));
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::OpenTaskPage,
-        None,
-        None,
-    )
-    .expect("open task page");
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::BeginAddStep,
-        None,
-        None,
-    )
-    .expect("open step editor");
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open task page");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginAddStep, None)
+        .expect("open step editor");
     for character in "zed step".chars() {
         apply_intent(
             &mut domain,
             &mut model,
             BoardIntent::EditInsert(character),
-            None,
             None,
         )
         .expect("type draft");
@@ -1312,7 +1239,6 @@ fn failed_step_editor_save() -> (
             baseline,
             intent: BoardIntent::ConfirmEdit,
             snapshot: None,
-            host: None,
         },
         |_| Err(INJECTED.into()),
     )
@@ -1376,7 +1302,6 @@ fn cancelled_failed_step_editor_save_leaves_no_orphan_edit_mode() {
             baseline: DomainState::new(),
             intent: BoardIntent::CancelSave,
             snapshot: None,
-            host: None,
         },
         |_| panic!("cancel must not persist"),
     )
@@ -1417,7 +1342,7 @@ fn cancelled_failed_step_editor_save_leaves_no_orphan_edit_mode() {
     )
     .expect("esc maps");
     assert_eq!(esc, BoardIntent::CloseLayer);
-    apply_intent(&mut domain, &mut model, esc, None, None).expect("close the page");
+    apply_intent(&mut domain, &mut model, esc, None).expect("close the page");
     assert_eq!(
         model.input_mode(),
         BoardInputMode::Normal,
@@ -1425,28 +1350,15 @@ fn cancelled_failed_step_editor_save_leaves_no_orphan_edit_mode() {
     );
 
     // And a fresh editor session works: the cancelled pending save left no state.
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::OpenTaskPage,
-        None,
-        None,
-    )
-    .expect("reopen the page");
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::BeginAddStep,
-        None,
-        None,
-    )
-    .expect("open a fresh editor");
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None)
+        .expect("reopen the page");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginAddStep, None)
+        .expect("open a fresh editor");
     for character in "after cancel".chars() {
         apply_intent(
             &mut domain,
             &mut model,
             BoardIntent::EditInsert(character),
-            None,
             None,
         )
         .expect("type");
@@ -1460,7 +1372,6 @@ fn cancelled_failed_step_editor_save_leaves_no_orphan_edit_mode() {
             baseline: fresh_baseline,
             intent: BoardIntent::ConfirmEdit,
             snapshot: None,
-            host: None,
         },
         |_| Ok(()),
     )
@@ -1497,7 +1408,6 @@ fn retried_step_editor_save_applies_and_closes() {
             baseline: DomainState::new(),
             intent: BoardIntent::RetrySave,
             snapshot: None,
-            host: None,
         },
         |working| {
             retries += 1;
@@ -1560,49 +1470,17 @@ fn retried_step_rename_save_applies_the_held_rename() {
         .expect("task");
     domain.add_step(id, "alpha step").expect("step");
     let mut model = BoardModel::from_domain(&domain, None);
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::OpenTaskPage,
-        None,
-        None,
-    )
-    .expect("open");
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::SelectStep(0),
-        None,
-        None,
-    )
-    .expect("select");
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::BeginEditTitle,
-        None,
-        None,
-    )
-    .expect("contextual rename");
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open");
+    apply_intent(&mut domain, &mut model, BoardIntent::SelectStep(0), None).expect("select");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+        .expect("contextual rename");
     for _ in 0..10 {
-        apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::EditBackspace,
-            None,
-            None,
-        )
-        .expect("clear old text");
+        apply_intent(&mut domain, &mut model, BoardIntent::EditBackspace, None)
+            .expect("clear old text");
     }
     for ch in "renamed step".chars() {
-        apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::EditInsert(ch),
-            None,
-            None,
-        )
-        .expect("type rename");
+        apply_intent(&mut domain, &mut model, BoardIntent::EditInsert(ch), None)
+            .expect("type rename");
     }
     let baseline = snapshot_of(&domain);
     let mut recovery = SaveRecovery::new();
@@ -1614,7 +1492,6 @@ fn retried_step_rename_save_applies_the_held_rename() {
             baseline,
             intent: BoardIntent::ConfirmEdit,
             snapshot: None,
-            host: None,
         },
         |_| Err(INJECTED.into()),
     )
@@ -1628,7 +1505,6 @@ fn retried_step_rename_save_applies_the_held_rename() {
             baseline: DomainState::new(),
             intent: BoardIntent::RetrySave,
             snapshot: None,
-            host: None,
         },
         |working| {
             assert_eq!(working.get(id).expect("task").steps[0].text, "renamed step");
@@ -1662,28 +1538,14 @@ fn ctrl_enter_refuses_in_place_when_the_bound_task_was_concurrently_soft_deleted
         .expect("create task");
     domain.add_step(id, "alpha step").expect("seed one step");
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/app")));
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::OpenTaskPage,
-        None,
-        None,
-    )
-    .expect("open task page");
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::BeginAddStep,
-        None,
-        None,
-    )
-    .expect("open step editor");
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open task page");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginAddStep, None)
+        .expect("open step editor");
     for character in "zed step".chars() {
         apply_intent(
             &mut domain,
             &mut model,
             BoardIntent::EditInsert(character),
-            None,
             None,
         )
         .expect("type draft");
@@ -1709,7 +1571,6 @@ fn ctrl_enter_refuses_in_place_when_the_bound_task_was_concurrently_soft_deleted
             baseline,
             intent: BoardIntent::ConfirmEditNext,
             snapshot: None,
-            host: None,
         },
         |_| {
             saves += 1;
@@ -1754,22 +1615,9 @@ fn successful_title_save_with_boundary_whitespace_releases_the_task_form_once() 
     let baseline = snapshot_of(&domain);
     let history_before = domain.get(id).expect("task").history.len();
     let mut recovery = SaveRecovery::new();
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::BeginEditTitle,
-        None,
-        None,
-    )
-    .expect("open title");
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::EditInsert(' '),
-        None,
-        None,
-    )
-    .expect("append boundary whitespace");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None).expect("open title");
+    apply_intent(&mut domain, &mut model, BoardIntent::EditInsert(' '), None)
+        .expect("append boundary whitespace");
 
     assert_eq!(
         apply_board_intent_with_save_recovery(
@@ -1780,7 +1628,6 @@ fn successful_title_save_with_boundary_whitespace_releases_the_task_form_once() 
                 baseline,
                 intent: BoardIntent::ConfirmEdit,
                 snapshot: None,
-                host: None,
             },
             |_| Ok(()),
         )
@@ -1808,7 +1655,6 @@ fn successful_title_save_with_boundary_whitespace_releases_the_task_form_once() 
                 baseline: saved_baseline,
                 intent: BoardIntent::ConfirmEdit,
                 snapshot: None,
-                host: None,
             },
             |_| -> Result<(), String> { panic!("released form cannot save again") },
         )
@@ -1827,31 +1673,18 @@ fn failed_task_page_view_save_holds_a_dirty_form_for_recovery() {
     let (mut domain, mut model, _) = board_with_two_tasks();
     let baseline = snapshot_of(&domain);
     let mut recovery = SaveRecovery::new();
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::BeginEditTitle,
-        None,
-        None,
-    )
-    .expect("open task form");
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::EditInsert('!'),
-        None,
-        None,
-    )
-    .expect("dirty title draft");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+        .expect("open task form");
+    apply_intent(&mut domain, &mut model, BoardIntent::EditInsert('!'), None)
+        .expect("dirty title draft");
     apply_intent(
         &mut domain,
         &mut model,
         BoardIntent::FocusFormField(CaptureField::Notes),
         None,
-        None,
     )
     .expect("move to notes");
-    apply_intent(&mut domain, &mut model, BoardIntent::CancelEdit, None, None)
+    apply_intent(&mut domain, &mut model, BoardIntent::CancelEdit, None)
         .expect("return to page while retaining title draft");
     assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
 
@@ -1863,7 +1696,6 @@ fn failed_task_page_view_save_holds_a_dirty_form_for_recovery() {
             baseline,
             intent: BoardIntent::ConfirmEdit,
             snapshot: None,
-            host: None,
         },
         |_| Err(INJECTED.into()),
     )
@@ -1883,27 +1715,14 @@ fn failed_scope_dropdown_save_holds_the_task_form_for_recovery() {
     let (mut domain, mut model, _) = board_with_two_tasks();
     let baseline = snapshot_of(&domain);
     let mut recovery = SaveRecovery::new();
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::BeginEditTitle,
-        None,
-        None,
-    )
-    .expect("open task form");
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::EditInsert('!'),
-        None,
-        None,
-    )
-    .expect("dirty title draft");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+        .expect("open task form");
+    apply_intent(&mut domain, &mut model, BoardIntent::EditInsert('!'), None)
+        .expect("dirty title draft");
     apply_intent(
         &mut domain,
         &mut model,
         BoardIntent::FocusFormField(CaptureField::Scope),
-        None,
         None,
     )
     .expect("focus scope");
@@ -1911,7 +1730,6 @@ fn failed_scope_dropdown_save_holds_the_task_form_for_recovery() {
         &mut domain,
         &mut model,
         BoardIntent::OpenFormScopeDropdown,
-        None,
         None,
     )
     .expect("open scope dropdown");
@@ -1925,7 +1743,6 @@ fn failed_scope_dropdown_save_holds_the_task_form_for_recovery() {
             baseline,
             intent: BoardIntent::ConfirmEdit,
             snapshot: None,
-            host: None,
         },
         |_| Err(INJECTED.into()),
     )
@@ -1944,19 +1761,11 @@ fn failed_task_thread_edit_cancel_returns_to_task_page_with_a_retained_form() {
     let (mut domain, mut model, id) = board_with_two_tasks();
     let baseline = snapshot_of(&domain);
     let mut recovery = SaveRecovery::new();
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::BeginEditTitle,
-        None,
-        None,
-    )
-    .expect("open form");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None).expect("open form");
     apply_intent(
         &mut domain,
         &mut model,
         BoardIntent::EditInsertText(" staged title".into()),
-        None,
         None,
     )
     .expect("stage title");
@@ -1965,14 +1774,12 @@ fn failed_task_thread_edit_cancel_returns_to_task_page_with_a_retained_form() {
         &mut model,
         BoardIntent::FocusFormField(CaptureField::Thread),
         None,
-        None,
     )
     .expect("focus thread");
     apply_intent(
         &mut domain,
         &mut model,
         BoardIntent::EditInsertText("release-2026".into()),
-        None,
         None,
     )
     .expect("type thread");
@@ -1981,14 +1788,12 @@ fn failed_task_thread_edit_cancel_returns_to_task_page_with_a_retained_form() {
         &mut model,
         BoardIntent::FocusFormField(CaptureField::Notes),
         None,
-        None,
     )
     .expect("focus notes");
     apply_intent(
         &mut domain,
         &mut model,
         BoardIntent::EditInsertText("staged notes".into()),
-        None,
         None,
     )
     .expect("type notes");
@@ -1997,17 +1802,10 @@ fn failed_task_thread_edit_cancel_returns_to_task_page_with_a_retained_form() {
         &mut model,
         BoardIntent::FocusFormField(CaptureField::Scope),
         None,
-        None,
     )
     .expect("focus scope");
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::FormCycleScope,
-        None,
-        None,
-    )
-    .expect("stage changed scope");
+    apply_intent(&mut domain, &mut model, BoardIntent::FormCycleScope, None)
+        .expect("stage changed scope");
     apply_board_intent_with_save_recovery(
         &mut domain,
         &mut model,
@@ -2016,7 +1814,6 @@ fn failed_task_thread_edit_cancel_returns_to_task_page_with_a_retained_form() {
             baseline,
             intent: BoardIntent::ConfirmEdit,
             snapshot: None,
-            host: None,
         },
         |_| Err(INJECTED.into()),
     )
@@ -2031,7 +1828,6 @@ fn failed_task_thread_edit_cancel_returns_to_task_page_with_a_retained_form() {
                 baseline: DomainState::new(),
                 intent: BoardIntent::CancelSave,
                 snapshot: None,
-                host: None,
             },
             |_| -> Result<(), String> { panic!("Cancel does not persist") },
         )
@@ -2046,7 +1842,6 @@ fn failed_task_thread_edit_cancel_returns_to_task_page_with_a_retained_form() {
         &mut model,
         BoardIntent::FocusFormField(CaptureField::Title),
         None,
-        None,
     )
     .expect("focus restored title");
     assert_eq!(model.edit_buffer(), "Delete me");
@@ -2054,7 +1849,6 @@ fn failed_task_thread_edit_cancel_returns_to_task_page_with_a_retained_form() {
         &mut domain,
         &mut model,
         BoardIntent::FocusFormField(CaptureField::Notes),
-        None,
         None,
     )
     .expect("focus restored notes");
@@ -2068,7 +1862,6 @@ fn failed_task_thread_edit_cancel_returns_to_task_page_with_a_retained_form() {
         &mut model,
         BoardIntent::FocusFormField(CaptureField::Thread),
         None,
-        None,
     )
     .expect("focus restored thread");
     assert_eq!(
@@ -2080,7 +1873,6 @@ fn failed_task_thread_edit_cancel_returns_to_task_page_with_a_retained_form() {
         &mut domain,
         &mut model,
         BoardIntent::FocusFormField(CaptureField::Scope),
-        None,
         None,
     )
     .expect("focus restored scope");
@@ -2098,30 +1890,16 @@ fn failed_save_during_thread_edit_holds_form_until_retry_or_cancel() {
     let (mut domain, mut model, id) = board_with_two_tasks();
     let baseline = snapshot_of(&domain);
     let mut recovery = SaveRecovery::new();
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::BeginEditTitle,
-        None,
-        None,
-    )
-    .expect("open form");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None).expect("open form");
     for _ in 0..2 {
-        apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::FormFocusNext,
-            None,
-            None,
-        )
-        .expect("focus thread");
+        apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
+            .expect("focus thread");
     }
     for character in "release-2026".chars() {
         apply_intent(
             &mut domain,
             &mut model,
             BoardIntent::EditInsert(character),
-            None,
             None,
         )
         .expect("type thread");
@@ -2135,7 +1913,6 @@ fn failed_save_during_thread_edit_holds_form_until_retry_or_cancel() {
             baseline,
             intent: BoardIntent::ConfirmEdit,
             snapshot: None,
-            host: None,
         },
         |_| Err(INJECTED.into()),
     )
@@ -2153,7 +1930,6 @@ fn failed_save_during_thread_edit_holds_form_until_retry_or_cancel() {
             baseline: DomainState::new(),
             intent: BoardIntent::RetrySave,
             snapshot: None,
-            host: None,
         },
         |working| {
             assert_eq!(

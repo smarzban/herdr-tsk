@@ -6,8 +6,8 @@ tsk captures work and moves it through human status: ready, started, blocked,
 review, done. It ships today as a [herdr](https://herdr.dev) plugin, and the
 `tsk` binary also runs standalone against its own state directory.
 
-Park, resume, attention, linking, and dispatch-start are not board actions.
-Dispatch recovery can still open if a persisted attempt is already in the store.
+Park, resume, attention, linking, and dispatch are not part of this tree.
+Older engines live only on the local archive branch `archive/dark-engine-pre-v1`.
 
 ## Requirements
 

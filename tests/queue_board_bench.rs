@@ -206,8 +206,7 @@ fn keypress_to_repaint_p99_under_16ms_during_navigation_at_80x24_with_100_tasks(
     // would never be selected and any position-dependent cost in selected_index()'s linear
     // scan would never be timed.
     let mut step = |domain: &mut DomainState, model: &mut BoardModel| {
-        apply_intent(domain, model, BoardIntent::SelectNext, None, None)
-            .expect("navigation intent");
+        apply_intent(domain, model, BoardIntent::SelectNext, None).expect("navigation intent");
         let completed = terminal
             .draw(|frame| draw_board(frame, model))
             .expect("navigation frame draw");
