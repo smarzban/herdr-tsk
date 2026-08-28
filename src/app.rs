@@ -278,15 +278,12 @@ fn run_board() -> Result<(), Box<dyn Error>> {
     // `run_board_open_refresh`, and `open_walkthrough_for_launch` remain for the tests that
     // drive them directly -- this loop simply stops calling them.
     //
-    // the Idle branch below is not pure silence, though. Every idle tick revalidates the
-    // store -- a `stat` on tsk.json, and only when its mtime/size changed does it pay for
-    // `store.load()` + `merge_tasks_from_disk` + `sync_from_domain` (see
-    // [`revalidate_board_from_store`]) -- so a quick-capture popup (a separate process writing
-    // the same file) becomes visible on an open, idle board without this board ever running a
-    // persisting intent. That is disk-merge, not host polling: NC-1's no-attention-polling
-    // constraint is about the host, not the store, so it stays satisfied. Save recovery still
-    // gates it off via `board_background_work_allowed`, same as it gates the dispatch-recovery
-    // reload above.
+    // Every idle tick revalidates the store -- a `stat` on tsk.json, and only when its
+    // mtime/size changed does it pay for `store.load()` + `merge_tasks_from_disk` +
+    // `sync_from_domain` (see [`revalidate_board_from_store`]) -- so a quick-capture popup
+    // (a separate process writing the same file) becomes visible on an open, idle board
+    // without this board ever running a persisting intent. Save recovery still gates that
+    // off via `board_background_work_allowed`.
 
     // Query before the alternate screen is entered: it can block on a terminal round-trip,
     // and a blank alternate screen is what the user would be staring at meanwhile.
@@ -295,15 +292,11 @@ fn run_board() -> Result<(), Box<dyn Error>> {
         let _input = enable_terminal_input(keyboard_enhancement)?;
         let mut save_recovery = SaveRecovery::new();
         loop {
-            // A completed worker must remain queued while the failed save owns the displayed
-
-            // Settle, paint, then wait -- the the board frame path does no host polling
-            //, so the wait is only the Frame Scheduler's idle floor
-            //, never an attention tick. All three are one call because the order is
-            // the correctness property: the walkthrough's report -- from the previous
-            // iteration's event or from the dispatch recovery just applied above -- is
-            // written before this frame is painted and before the wait can time out into the
-            // `continue` below.
+            // Settle, paint, then wait. The board frame path does no host polling, so the
+            // wait is only the Frame Scheduler's idle floor. All three are one call because
+            // the order is the correctness property: the walkthrough's report from the
+            // previous iteration is written before this frame is painted and before the wait
+            // can time out into the `continue` below.
             let poll = board_idle_tick(
                 &mut model,
                 || walkthrough.record_dismissed(),

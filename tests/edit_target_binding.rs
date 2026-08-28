@@ -25,7 +25,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use tsk_tui::app::{
     apply_board_intent_with_save_recovery, confirm_edit_refusal_against_the_record,
-    refresh_before_mutation, BoardSaveContext,
+    refresh_before_mutation, revalidate_board_from_store, BoardSaveContext, StoreWatch,
 };
 use tsk_tui::domain::{DomainError, DomainState, ProvenanceOrigin, TaskScope};
 use tsk_tui::save_recovery::SaveRecovery;
@@ -63,11 +63,14 @@ impl Drop for TempDirGuard {
     }
 }
 
-/// Merge the durable store into the open board the way idle revalidation does.
+/// Drive the production idle-merge path against a concurrent store write.
 fn merge_disk_into_board(store: &TaskStore, domain: &mut DomainState, model: &mut BoardModel) {
-    let baseline = store.load().expect("load concurrent store");
-    domain.merge_tasks_from_disk(&baseline);
-    model.sync_from_domain(domain);
+    let mut watch = StoreWatch::new();
+    let recovery = SaveRecovery::new();
+    assert!(
+        revalidate_board_from_store(store, domain, model, &mut watch, &recovery),
+        "concurrent store write must merge through revalidate_board_from_store"
+    );
 }
 
 /// case 1: a task **added** to the visible order ahead of the bound task.

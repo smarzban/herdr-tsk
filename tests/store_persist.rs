@@ -13,6 +13,8 @@ use tsk_tui::domain::{
     WorktreeReceipt,
 };
 use tsk_tui::store::TaskStore;
+use tsk_tui::ui::board::{BoardInputMode, BoardModel};
+use tsk_tui::ui::mouse::BoardPopup;
 use uuid::Uuid;
 
 fn temp_state_dir() -> PathBuf {
@@ -1168,4 +1170,149 @@ fn create_with_capsule_and_agent_meta_round_trips() {
     assert_eq!(task.status, HumanStatus::Started);
     assert_eq!(task.capsule.as_ref(), Some(&capsule));
     assert_eq!(task.agent_meta.as_ref(), Some(&meta));
+}
+
+#[test]
+fn legacy_dark_event_kinds_decode_and_round_trip() {
+    // The dark engines are gone, but old stores carry `parked`, `agent_linked`,
+    // `agent_unlinked`, and `dispatched` history entries. They must keep decoding.
+    let dir = temp_state_dir();
+    let _guard = TempDirGuard(dir.clone());
+    let store = TaskStore::new(&dir);
+
+    let mut state = DomainState::new();
+    state
+        .create(
+            "Dark history",
+            None,
+            TaskScope::Global,
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("create task");
+    let mut legacy = serde_json::to_value(&state).expect("serialize state");
+    let at = legacy["tasks"][0]["history"][0]["at"].clone();
+    legacy["tasks"][0]["history"] = serde_json::json!([
+        { "kind": "created", "at": at },
+        { "kind": "parked", "at": at },
+        { "kind": "agent_linked", "at": at },
+        { "kind": "agent_unlinked", "at": at },
+        { "kind": "dispatched", "at": at },
+    ]);
+    fs::write(
+        dir.join("tsk.json"),
+        serde_json::to_string_pretty(&legacy).expect("encode legacy state"),
+    )
+    .expect("write legacy state");
+
+    let loaded = store.load().expect("legacy state decodes");
+    let task = loaded.tasks().first().expect("task present");
+    assert_eq!(
+        task.history
+            .iter()
+            .map(|event| event.kind)
+            .collect::<Vec<_>>(),
+        vec![
+            TaskEventKind::Created,
+            TaskEventKind::Parked,
+            TaskEventKind::AgentLinked,
+            TaskEventKind::AgentUnlinked,
+            TaskEventKind::Dispatched,
+        ],
+    );
+    let round = serde_json::to_value(&loaded).expect("reserialize loaded state");
+    assert_eq!(
+        round["tasks"][0]["history"]
+            .as_array()
+            .expect("history array")
+            .iter()
+            .map(|event| event["kind"].as_str().expect("kind string"))
+            .collect::<Vec<_>>(),
+        vec![
+            "created",
+            "parked",
+            "agent_linked",
+            "agent_unlinked",
+            "dispatched"
+        ],
+        "dark event kinds must round-trip, not be silently dropped"
+    );
+}
+
+#[test]
+fn legacy_agent_meta_without_session_and_last_observed_decode() {
+    // `agent_meta` without `agent_session` and a `last_observed` value are legacy
+    // store shapes; both keep decoding after the dark engines left the tree.
+    let dir = temp_state_dir();
+    let _guard = TempDirGuard(dir.clone());
+    let store = TaskStore::new(&dir);
+
+    let mut state = DomainState::new();
+    state
+        .create(
+            "Legacy link",
+            None,
+            TaskScope::Global,
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("create task");
+    let mut legacy = serde_json::to_value(&state).expect("serialize state");
+    legacy["tasks"][0]["agent_meta"] =
+        serde_json::json!({ "agent_id": "grok", "pane_id": "w0:p3" });
+    legacy["tasks"][0]["last_observed"] = serde_json::json!("working");
+    fs::write(
+        dir.join("tsk.json"),
+        serde_json::to_string_pretty(&legacy).expect("encode legacy state"),
+    )
+    .expect("write legacy state");
+
+    let loaded = store.load().expect("legacy state decodes");
+    let task = loaded.tasks().first().expect("task present");
+    assert_eq!(
+        task.agent_meta,
+        Some(AgentMeta {
+            agent_id: Some("grok".into()),
+            pane_id: Some("w0:p3".into()),
+            agent_session: None,
+        }),
+        "agent_meta decodes with every subfield absent"
+    );
+    assert_eq!(task.last_observed, Some(ObservedStatus::Working));
+}
+
+#[test]
+fn persisted_active_attempts_load_to_a_quiet_board() {
+    // Old stores can still carry durable dispatch attempts. The recovery UI is gone:
+    // a board opened over such a store must render normally, not surface a dead popup.
+    let dir = temp_state_dir();
+    let _guard = TempDirGuard(dir.clone());
+
+    let mut state = DomainState::new();
+    let id = state
+        .create(
+            "Carries an attempt",
+            None,
+            TaskScope::Global,
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("create task");
+    let attempt_id = state
+        .start_dispatch_attempt(id, DispatchAttemptMode::Here, "grok")
+        .expect("start attempt");
+    let store = TaskStore::new(&dir);
+    store.save(&state).expect("save with attempt");
+
+    let loaded = store.load().expect("load with attempt");
+    assert!(
+        loaded.active_attempt(attempt_id).is_some(),
+        "the attempt survives the store round-trip"
+    );
+    let model = BoardModel::from_domain(&loaded, None);
+    assert_eq!(model.input_mode(), BoardInputMode::Normal);
+    assert_eq!(model.popup(), BoardPopup::None);
 }

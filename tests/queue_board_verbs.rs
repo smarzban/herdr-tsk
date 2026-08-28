@@ -567,12 +567,11 @@ fn palette_lists_exactly_m1_commands_for_selection_filters_by_subsequence_and_di
     );
 }
 
-/// park / resume / link / dispatch never appear in the the palette.
+/// park / resume / link / dispatch never appear in the palette.
 ///
-/// The dispatch-recovery entries (`RecoveryResume`/`BeginCleanup`) only ever reach the
-/// catalog when the selected task carries an active attempt, so a fixture with no attempt
-/// would pass this test whether or not the catalog is fixed: the second block below builds
-/// that state so the assertion is load-bearing.
+/// The second block builds the strongest old-store state (a selected task carrying a
+/// durable dispatch attempt) so the exclusion stays load-bearing even though the
+/// recovery surface is gone from this tree.
 #[test]
 fn palette_excludes_park_resume_link_dispatch() {
     let (mut domain, mut model, _id) = board_with_task("no classic tail", HumanStatus::Ready);
