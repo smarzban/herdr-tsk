@@ -7,9 +7,7 @@ use std::io;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
-use crossterm::event::{
-    self, Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind,
-};
+use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::layout::{Position, Rect};
 use ratatui::DefaultTerminal;
 
@@ -373,20 +371,14 @@ fn run_board() -> Result<(), Box<dyn Error>> {
                     match mouse.kind {
                         MouseEventKind::Drag(MouseButton::Left) => {
                             model.drag_text_selection(Position::new(mouse.column, mouse.row));
-                            if model
-                                .text_selection()
-                                .is_some_and(crate::ui::text_select::TextSelection::has_area)
-                            {
+                            if model.text_selection().is_some_and(|sel| sel.has_area()) {
                                 pending_click = None;
                             }
                             continue;
                         }
                         MouseEventKind::Up(MouseButton::Left) => {
                             model.end_mouse_press();
-                            if model
-                                .text_selection()
-                                .is_some_and(crate::ui::text_select::TextSelection::has_area)
-                            {
+                            if model.text_selection().is_some_and(|sel| sel.has_area()) {
                                 copy_drag_selection(&mut model, &frame_rows, &frame_copyable);
                                 pending_click = None;
                                 continue;
