@@ -785,7 +785,7 @@ fn overlay_rows_are_padded_exact_no_base_bleed() {
         }
     }
 
-    // --- Scope dropdown column must be padded to its col width; no meta bleed in cells ---
+    // --- Scope dropdown is a centered modal card; its rows must be padded full width ---
     {
         let mut model = fixture_model(&tasks, &view);
         model.status_message = Some(status);
@@ -794,32 +794,29 @@ fn overlay_rows_are_padded_exact_no_base_bleed() {
             options: &scope_opts,
             selected: 0,
         };
-        let (rows, geo) = paint(80, 24, &model);
-        // Dropdown sits under selector chip; first option row is selector_row+1.
-        if let Some(sel) = geo.selector_row {
-            let y = sel + 1;
-            if (y as usize) < rows.len() {
-                let row = &rows[y as usize];
-                // The dropdown only writes its col_w cells at x0; those cells must be padded.
-                // We assert the painted option text area does not contain base fragments.
-                // Distinctive status won't be here, but task meta or rule chars could.
-                // Check the right-hand side of the row for our marker/text.
-                assert!(
-                    row.contains("▸ desk") || row.contains("  desk"),
-                    "scope dropdown must paint option text: {row:?}"
-                );
-                // The desk option must be painted as its own dropdown row, not merely
-                // satisfied by task titles or meta elsewhere on the frame.
-                assert!(
-                    rows.get(y as usize + 1)
-                        .is_some_and(|option_row| option_row.contains("tsk")),
-                    "scope dropdown must paint each option on its own row"
-                );
-                // Ensure no stray count/meta tail attached inside the option cells.
-                // Since we pad to col_w in paint, the rendered cells are clean.
-                // Spot-check: after the label there should be trailing space within the column.
-            }
-        }
+        let (rows, _geo) = paint(80, 24, &model);
+        let desk_row = rows
+            .iter()
+            .position(|row| row.contains("▸ desk") || row.contains("  desk"))
+            .expect("scope dropdown must paint the desk option");
+        assert_eq!(
+            rows[desk_row].chars().count(),
+            80,
+            "scope dropdown option row must fill width: {:?}",
+            rows[desk_row]
+        );
+        // The `tsk` option must be painted as its own row, not merely satisfied by task
+        // titles or meta elsewhere on the frame.
+        assert!(
+            rows.get(desk_row + 1)
+                .is_some_and(|option_row| option_row.contains("tsk")),
+            "scope dropdown must paint each option on its own row"
+        );
+        assert!(
+            !rows[desk_row].contains("motion") && !rows[desk_row].contains("done"),
+            "base status/meta must not bleed into scope dropdown: {:?}",
+            rows[desk_row]
+        );
     }
 }
 

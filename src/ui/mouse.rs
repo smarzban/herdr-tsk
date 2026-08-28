@@ -420,6 +420,10 @@ pub fn map_board_mouse(
                 .get(index)
                 .map(|_| BoardIntent::SelectCommand(index)),
             Some(QueueHitTarget::CommandChrome) => None,
+            // The card's own border/title/footer rule: inert, the same as the palette's
+            // pre-card `CommandChrome` furniture just above.
+            Some(QueueHitTarget::ModalChrome) => None,
+            Some(QueueHitTarget::ModalClose) => Some(BoardIntent::CloseCommandSurface),
             Some(QueueHitTarget::Verb(index)) => palette_verb_intent(index),
             _ => Some(BoardIntent::CloseCommandSurface),
         },
@@ -427,10 +431,18 @@ pub fn map_board_mouse(
             Some(QueueHitTarget::ProjectOption(index)) => {
                 Some(BoardIntent::SelectProjectOption(index))
             }
+            Some(QueueHitTarget::ModalChrome) => None,
+            Some(QueueHitTarget::ModalClose) => Some(BoardIntent::CancelProjectPicker),
             Some(QueueHitTarget::Verb(index)) => scope_dropdown_verb_intent(index),
             _ => Some(BoardIntent::CancelProjectPicker),
         },
-        BoardInputMode::Help => Some(BoardIntent::CloseLayer),
+        // The card's border/title/footer are inert; every other hit -- the `[x]` close
+        // control, the card's own body text, `HelpDismiss`'s full-frame fallback, or no
+        // hit at all -- closes, matching the keyboard's "any key closes".
+        BoardInputMode::Help => match hit_at(hits, pos) {
+            Some(QueueHitTarget::ModalChrome) => None,
+            _ => Some(BoardIntent::CloseLayer),
+        },
         BoardInputMode::QuickAdd => match hit_at(hits, pos) {
             // The line already owns keyboard focus, so its click is intentionally inert.
             Some(QueueHitTarget::QuickAddInput) => None,

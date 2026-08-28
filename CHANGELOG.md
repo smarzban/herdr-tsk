@@ -8,6 +8,12 @@ old documents may still carry (`capsule`, `agent_meta`, `last_observed`,
 `active_attempts`, related event kinds) keep loading. Local reference only:
 `archive/dark-engine-pre-v1`.
 
+Modal overlays: `?` help, `:` command palette, and `P` project scope now open
+as a shared, centered mono card (dim box-drawing border, bold title with an
+`[x]` close control, and a footer key legend) instead of their own bespoke
+layouts. The board stays visible around the card, and the verb bar goes
+blank while one is open since the card's footer already names its own keys.
+
 Mouse text selection: a left-button drag highlights the cells it covers (any
 surface: board rows, task page, overlays) and release copies the painted text
 to the system clipboard via OSC 52: the terminal or host multiplexer performs

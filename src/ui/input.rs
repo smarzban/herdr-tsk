@@ -508,8 +508,11 @@ fn help_chord_shown(chord: &str, verbs: VerbModifier) -> String {
 }
 
 /// Help-card body lines painted by the renderer (derived from [`normal_help_bindings`]).
+///
+/// No heading or trailing close instruction: the shared modal card's own title (`help`)
+/// and footer legend (`any key close`) already say both.
 pub fn help_card_lines(verbs: VerbModifier) -> Vec<String> {
-    let mut lines = vec!["keys".to_string(), String::new()];
+    let mut lines = Vec::new();
     let bindings = normal_help_bindings();
     let mut i = 0;
     while i < bindings.len() {
@@ -526,8 +529,6 @@ pub fn help_card_lines(verbs: VerbModifier) -> Vec<String> {
             i += 1;
         }
     }
-    lines.push(String::new());
-    lines.push(" any key to close".to_string());
     lines
 }
 

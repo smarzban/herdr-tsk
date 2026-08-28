@@ -698,18 +698,24 @@ fn help_card_lists_every_active_tier_binding_and_closes_on_any_key() {
         );
     }
 
-    // Compact is a takeover, not a truncated card: every binding fits at the minimum.
+    // At the 40x10 operability floor the shared modal card's own border+footer chrome
+    // leaves too few rows for every binding to fit at once (unlike the full-screen takeover
+    // this used to be): the card shows as many as it can starting from the top and marks
+    // the title `▼` so the cut-off is visible rather than silently dropped.
     let compact = rendered_board(&model, 40, 10);
-    for (chord, label) in normal_help_bindings() {
-        assert!(
-            compact.contains(chord),
-            "compact help missing {chord:?}\n{compact}"
-        );
-        assert!(
-            compact.contains(label),
-            "compact help missing {label:?}\n{compact}"
-        );
-    }
+    assert!(
+        compact.contains("help ▼"),
+        "compact help card must mark its title truncated: {compact:?}"
+    );
+    assert!(
+        compact.contains("any key close"),
+        "compact help card must keep its close legend: {compact:?}"
+    );
+    let (first_chord, first_label) = normal_help_bindings()[0];
+    assert!(
+        compact.contains(first_chord) && compact.contains(first_label),
+        "compact help card must show its first binding {first_chord:?}/{first_label:?}: {compact:?}"
+    );
 
     // Any key closes (including a letter that would quit in normal mode).
     let close = map_key(BoardInputMode::Help, press(KeyCode::Char('q'))).expect("any key");

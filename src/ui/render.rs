@@ -518,8 +518,10 @@ pub enum QueueHitTarget {
         section_idx: usize,
         subgroup_idx: usize,
     },
-    /// The open help card: painted full-frame so any click inside it closes it, matching
-    /// the keyboard's "any key closes".
+    /// The open help card's full-frame dismiss hit -- a click anywhere the card's own
+    /// `ModalClose`/`ModalChrome`/body hits do not shadow closes it, matching the
+    /// keyboard's "any key closes". The board behind the card stays visible and painted;
+    /// only [`paint_modal_card`]'s own rect is cleared and repainted.
     HelpDismiss,
     /// Shared-form title row. A click focuses Title without recreating the form.
     FormTitle,
@@ -553,6 +555,15 @@ pub enum QueueHitTarget {
     /// dismisses the surface), matching the pre-rewrite behavior a click on the palette's
     /// own furniture had; only a click genuinely outside the whole surface closes it.
     CommandChrome,
+    /// The shared modal card's `[x]` close control (Help / Palette / project-scope
+    /// picker; [`paint_modal_card`]). Dismisses whatever overlay painted it -- the same
+    /// effect the surface's own Esc/close route already has.
+    ModalClose,
+    /// The shared modal card's own chrome -- its border, title row, and footer rule +
+    /// legend -- that is neither `ModalClose` nor the caller's own body hit. A click here
+    /// is deliberately inert, the same rule `CommandChrome` already applies to the
+    /// palette's pre-card furniture.
+    ModalChrome,
 }
 
 /// One hit-testable region produced beside the paint.
@@ -755,9 +766,11 @@ pub fn draw_queue_frame(
     if let Some(row) = geo.verb_row {
         let budget = geo.verb_bar_entry_budget as usize;
         let verb_items = match &model.overlay {
-            QueueOverlay::Palette { .. } => PALETTE_VERBS,
-            QueueOverlay::Help { .. } => HELP_VERBS,
-            QueueOverlay::ScopeDropdown { .. } => SCOPE_VERBS,
+            // The modal card painted for each of these owns its own footer legend now;
+            // the board's verb bar stays blank underneath it.
+            QueueOverlay::Palette { .. }
+            | QueueOverlay::Help { .. }
+            | QueueOverlay::ScopeDropdown { .. } => &[],
             QueueOverlay::QuickAdd { recovery, .. } if *recovery => &[],
             QueueOverlay::QuickAdd { .. } => QUICK_ADD_VERBS,
             // The page's field edits keep the form legends; its view mode reads the
@@ -1001,11 +1014,6 @@ const EDIT_NOTES_VERBS: &[VerbEntry<'static>] = &[
     },
 ];
 
-const HELP_VERBS: &[VerbEntry<'static>] = &[VerbEntry {
-    key: "any",
-    label: "close",
-}];
-
 pub(crate) const SCOPE_VERBS: &[VerbEntry<'static>] = &[
     VerbEntry {
         key: "j/k",
@@ -1039,14 +1047,7 @@ fn paint_overlay(
             paint_help_overlay(frame, geo, lines, hits);
         }
         QueueOverlay::ScopeDropdown { options, selected } => {
-            paint_scope_dropdown(
-                frame,
-                geo,
-                options,
-                *selected,
-                QueueHitTarget::ProjectOption,
-                hits,
-            );
+            paint_scope_dropdown(frame, geo, options, *selected, hits);
         }
         QueueOverlay::EditTitle {
             ref draft,
@@ -1208,6 +1209,254 @@ fn paint_edit_notes_overlay(
     }
 }
 
+/// Shared centered mono modal card for `P` / `?` / `:` (help / command palette / project
+/// scope): a bordered box with the title and `[x]` close control integrated into the top
+/// border, an optional footer rule + dim key legend, and the board still visible behind
+/// it (only the card's own rect is cleared and repainted).
+///
+/// `bounds` is the region the card may center within -- a caller with nothing worth
+/// preserving underneath (Help, project-scope) passes the full frame; the palette passes
+/// a shorter band so its own query row (painted separately, on the status row) stays
+/// clear. Compact tier drops the blank padding row/column around the content but always
+/// keeps the border and footer; the card otherwise sizes itself to `content_rows`,
+/// clamped to what `bounds` can hold.
+///
+/// Hits are pushed in this order -- later pushes win under `hit_at`'s reverse search --
+/// so a caller's own body hits (and `push_copyable` calls) painted after this returns
+/// correctly shadow the blanket chrome below for their own rects:
+/// 1. A full-frame `dismiss` hit (when given), so a click anywhere on the board behind
+///    the card resolves to it unless something more specific shadows it.
+/// 2. A blanket `ModalChrome` hit over the whole card, so every cell defaults to inert.
+/// 3. `ModalClose` on the `[x]` control.
+///
+/// Per-call content for [`paint_modal_card`]: everything that varies between Help /
+/// Palette / project-scope beyond the shared `frame` / `geo` / `bounds` / `hits` plumbing.
+struct ModalCardSpec<'a> {
+    title: &'a str,
+    content_rows: u16,
+    legend: &'a [VerbEntry<'a>],
+    /// A full-frame dismiss hit to push first, before the card's own chrome (see below).
+    dismiss: Option<QueueHitTarget>,
+}
+
+/// Fixed row overhead a [`paint_modal_card`] with a footer legend (or not) spends on its
+/// own chrome -- border top+bottom, the footer's rule+legend rows when it has one, and
+/// blank vertical padding outside `Tier::Compact`. Callers that need to know how many
+/// body rows will actually be visible *before* the card paints (e.g. to decide whether a
+/// title needs a `▼` scroll marker) go through this, so that decision can never drift
+/// from what the card itself later carves out of `bounds`.
+fn modal_chrome_rows(tier: Tier, has_footer: bool) -> u16 {
+    let pad: u16 = if tier == Tier::Compact { 0 } else { 1 };
+    let footer_rows: u16 = if has_footer { 2 } else { 0 };
+    2 + footer_rows + 2 * pad
+}
+
+/// Returns the content `Rect` the caller paints its body into (zero-area when nothing
+/// fits, e.g. a zero-sized frame).
+fn paint_modal_card(
+    frame: &mut Frame<'_>,
+    geo: &TierGeometry,
+    bounds: Rect,
+    spec: ModalCardSpec<'_>,
+    hits: &mut QueueHitMap,
+) -> Rect {
+    let ModalCardSpec {
+        title,
+        content_rows,
+        legend,
+        dismiss,
+    } = spec;
+    if geo.row_width == 0 || geo.height == 0 || bounds.width == 0 || bounds.height == 0 {
+        return Rect::default();
+    }
+    if let Some(target) = dismiss {
+        hits.push(target, Rect::new(0, 0, geo.row_width, geo.height));
+    }
+
+    let card_w = bounds.width.saturating_sub(4).clamp(1, 62);
+    // Blank inset around the content, shed on both axes in compact so its scarce cells
+    // go to actual body text instead of decorative breathing room.
+    let pad: u16 = if geo.tier == Tier::Compact { 0 } else { 1 };
+    let chrome_rows = modal_chrome_rows(geo.tier, !legend.is_empty());
+    let shown_content = content_rows.min(bounds.height.saturating_sub(chrome_rows));
+    let card_h = (chrome_rows + shown_content).min(bounds.height).max(1);
+    let x0 = bounds.x + bounds.width.saturating_sub(card_w) / 2;
+    let y0 = bounds.y + bounds.height.saturating_sub(card_h) / 2;
+    let area = Rect::new(x0, y0, card_w, card_h);
+
+    frame.render_widget(Clear, area);
+    hits.push(QueueHitTarget::ModalChrome, area);
+
+    let (top_line, close_x) = modal_title_border_row(title, card_w);
+    paint_row_in(frame, area, 0, top_line);
+    if close_x < card_w {
+        let close_w = 3.min(card_w.saturating_sub(close_x));
+        hits.push(
+            QueueHitTarget::ModalClose,
+            Rect::new(x0 + close_x, y0, close_w, 1),
+        );
+    }
+
+    let bottom_offset = card_h.saturating_sub(1);
+    if bottom_offset > 0 {
+        paint_row_in(
+            frame,
+            area,
+            bottom_offset,
+            modal_plain_border_row('└', '─', '┘', card_w),
+        );
+    }
+    if !legend.is_empty() {
+        let rule_offset = bottom_offset.saturating_sub(2);
+        let legend_offset = bottom_offset.saturating_sub(1);
+        paint_row_in(
+            frame,
+            area,
+            rule_offset,
+            modal_plain_border_row('├', '─', '┤', card_w),
+        );
+        paint_row_in(
+            frame,
+            area,
+            legend_offset,
+            modal_legend_line(legend, card_w as usize),
+        );
+    }
+
+    Rect::new(
+        x0.saturating_add(1 + pad),
+        y0.saturating_add(1 + pad),
+        card_w.saturating_sub(2 + 2 * pad),
+        shown_content,
+    )
+}
+
+/// One row of a modal card's border/legend, painted at `area`'s `row_offset`-th row
+/// (never past `area`'s own height).
+fn paint_row_in(frame: &mut Frame<'_>, area: Rect, row_offset: u16, line: Line<'static>) {
+    if row_offset >= area.height {
+        return;
+    }
+    let rect = Rect::new(area.x, area.y.saturating_add(row_offset), area.width, 1);
+    put_line_at(frame, rect, line);
+}
+
+/// A plain dim border row: one corner glyph, a fill of `card_w - 2` cells, the other
+/// corner glyph (`┌─…─┐` / `├─…─┤` / `└─…─┘`).
+fn modal_plain_border_row(left: char, fill: char, right: char, card_w: u16) -> Line<'static> {
+    let width = card_w as usize;
+    let inner = width.saturating_sub(2);
+    let mut text = String::with_capacity(width.max(1));
+    text.push(left);
+    text.extend(std::iter::repeat_n(fill, inner));
+    text.push(right);
+    bound_line(Line::from(Span::styled(text, style_dim())), width)
+}
+
+/// The card's top border, with its title and `[x]` close control integrated
+/// (`┌─ Title ──…── [x]─┐`). Returns the painted line plus the close control's column
+/// offset from the card's own left edge, so the caller can push a hit region that can
+/// never drift from what was actually painted.
+fn modal_title_border_row(title: &str, card_w: u16) -> (Line<'static>, u16) {
+    let width = card_w as usize;
+    let inner = width.saturating_sub(2);
+    // Fixed furniture around the title and close control: "─ " + " " + " " + "[x]" + "─".
+    const FIXED: usize = 8;
+    let title_budget = inner.saturating_sub(FIXED + 1);
+    let shown_title = present_line(title, title_budget);
+    let title_w = display_width(&shown_title);
+    let fill = inner.saturating_sub(FIXED + title_w).max(1);
+    let close_x = (1 + 2 + title_w + 1 + fill + 1) as u16;
+
+    let spans = vec![
+        Span::styled("┌".to_string(), style_dim()),
+        Span::styled("─ ".to_string(), style_dim()),
+        Span::styled(shown_title, style_bold()),
+        Span::styled(" ".to_string(), style_dim()),
+        Span::styled("─".repeat(fill), style_dim()),
+        Span::styled(" ".to_string(), style_dim()),
+        Span::styled("[x]".to_string(), style_bold()),
+        Span::styled("─".to_string(), style_dim()),
+        Span::styled("┐".to_string(), style_dim()),
+    ];
+    (bound_line(Line::from(spans), width), close_x)
+}
+
+/// A modal card's footer legend line: dim separators and labels, bold keys, e.g.
+/// `  esc close · enter run`.
+fn modal_legend_line(entries: &[VerbEntry<'_>], width: usize) -> Line<'static> {
+    let mut spans: Vec<Span<'static>> = vec![Span::styled("  ".to_string(), style_plain())];
+    for (i, entry) in entries.iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::styled(" · ".to_string(), style_dim()));
+        }
+        spans.push(Span::styled(entry.key.to_string(), style_bold()));
+        spans.push(Span::styled(format!(" {}", entry.label), style_dim()));
+    }
+    bound_line(Line::from(spans), width)
+}
+
+/// The vertical band a modal card ( [`paint_modal_card`] ) may center within: the whole
+/// row width, but never the rule/status/verb rows underneath -- the palette keeps its
+/// query on the status row exactly as before, and the (now-blank) verb row stays intact
+/// for every card so the board's own bottom chrome never gets painted over.
+fn modal_bounds(geo: &TierGeometry) -> Rect {
+    Rect::new(0, 0, geo.row_width, geo.rule_row.unwrap_or(geo.height))
+}
+
+/// Legend footer for the Help card: any key (Esc included) closes it.
+const HELP_FOOTER: &[VerbEntry<'static>] = &[VerbEntry {
+    key: "any key",
+    label: "close",
+}];
+
+/// Legend footer for the command palette card.
+const PALETTE_FOOTER: &[VerbEntry<'static>] = &[
+    VerbEntry {
+        key: "↑/↓",
+        label: "move",
+    },
+    VerbEntry {
+        key: "enter",
+        label: "run",
+    },
+    VerbEntry {
+        key: "esc",
+        label: "close",
+    },
+];
+
+/// Legend footer for the project-scope card.
+const SCOPE_FOOTER: &[VerbEntry<'static>] = &[
+    VerbEntry {
+        key: "↑/↓",
+        label: "move",
+    },
+    VerbEntry {
+        key: "enter",
+        label: "choose",
+    },
+    VerbEntry {
+        key: "esc",
+        label: "close",
+    },
+];
+
+/// Append a scroll marker to a card title when its body is windowed (`▲`/`▼`/both).
+fn titled_with_scroll_marker(title: &str, above: bool, below: bool) -> String {
+    if !above && !below {
+        return title.to_string();
+    }
+    let mut owned = format!("{title} ");
+    if above {
+        owned.push('▲');
+    }
+    if below {
+        owned.push('▼');
+    }
+    owned
+}
+
 fn paint_palette_overlay(
     frame: &mut Frame<'_>,
     geo: &TierGeometry,
@@ -1220,83 +1469,70 @@ fn paint_palette_overlay(
     if width == 0 || height < 3 {
         return;
     }
+    let bounds = modal_bounds(geo);
+    // Derived from the same chrome math `paint_modal_card` itself uses, rather than a
+    // separate guess (`viewport_height` belongs to the board list, not this card) -- a
+    // mismatch here would either scroll past what the card can paint (leaving the
+    // "selected" row visually missing) or paint into the card's own footer.
+    let capacity = bounds
+        .height
+        .saturating_sub(modal_chrome_rows(geo.tier, true));
     let max_rows = if geo.tier == Tier::Compact {
-        // Compact: fill the list viewport when present, else as many rows as fit above chrome.
-        geo.viewport_height.max(1) as usize
+        capacity.max(1) as usize
     } else {
-        6usize
+        6usize.min(capacity.max(1) as usize)
     };
-    // Query sits on the status row when present; otherwise the last content row.
-    let query_row = geo.status_row.unwrap_or(height.saturating_sub(2));
-    // The dim rule row is base chrome every other the scene keeps: stop the command
-    // list one row above it instead of one row above the query, which reached into the
-    // rule row and overwrote it with command text.
-    let list_bottom = geo
-        .rule_row
-        .map(|r| r.saturating_sub(1))
-        .unwrap_or_else(|| query_row.saturating_sub(1));
-    // Reserve one row for the `command` header directly above the list, and never paint
-    // above `viewport_top`: `list_bottom` is a row *index*, not a row
-    // *count*, so windowing straight off it let the header climb onto (or above) the
-    // selector row on short/compact terminals once the command count passed the
-    // available space. The rows actually available for header + list is the span between
-    // `viewport_top` and `list_bottom` inclusive; the header eats one of them.
-    let available = list_bottom.saturating_sub(geo.viewport_top) as usize;
-    let rows = available.min(max_rows).min(commands.len());
-    if rows > 0 {
-        let selected = commands
-            .iter()
-            .position(|command| command.selected)
-            .unwrap_or(0);
-        let scroll = if selected < rows {
-            0
-        } else {
-            (selected + 1 - rows).min(commands.len() - rows)
-        };
-        let first_cmd = list_bottom + 1 - rows as u16;
-        let above = scroll > 0;
-        let below = scroll + rows < commands.len();
-        let marker = match (above, below) {
-            (true, true) => " ▲▼",
-            (true, false) => " ▲",
-            (false, true) => " ▼",
-            (false, false) => "",
-        };
-        let header_row = first_cmd.saturating_sub(1);
-        put_line(
-            frame,
-            header_row,
-            width,
-            paint_bounded_line(&format!(" command{marker}"), width, style_underline()),
-        );
-        // the header row is the palette's own chrome, not a command
-        // row and not outside the surface either -- a click here must neither run a
-        // command (there is none to run) nor dismiss the surface, matching the
-        // pre-rewrite behavior of a click on the palette's own furniture.
-        hits.push(
-            QueueHitTarget::CommandChrome,
-            Rect::new(0, header_row, width, 1),
-        );
-        for (j, cmd) in commands.iter().skip(scroll).take(rows).enumerate() {
-            let y = first_cmd.saturating_add(j as u16);
-            let pre = if cmd.selected { " ▸ " } else { "   " };
+    let rows = max_rows.min(commands.len());
+    let selected = commands
+        .iter()
+        .position(|command| command.selected)
+        .unwrap_or(0);
+    let scroll = if rows == 0 || selected < rows {
+        0
+    } else {
+        (selected + 1 - rows).min(commands.len() - rows)
+    };
+    let above = scroll > 0;
+    let below = rows > 0 && scroll + rows < commands.len();
+    let title = titled_with_scroll_marker("command", above, below);
+
+    let content = paint_modal_card(
+        frame,
+        geo,
+        bounds,
+        ModalCardSpec {
+            title: &title,
+            content_rows: rows as u16,
+            legend: PALETTE_FOOTER,
+            dismiss: None,
+        },
+        hits,
+    );
+    if content.width > 0 && content.height > 0 {
+        let paintable = rows.min(content.height as usize);
+        for (j, cmd) in commands.iter().skip(scroll).take(paintable).enumerate() {
+            let y = content.y.saturating_add(j as u16);
+            let pre = if cmd.selected { "▸ " } else { "  " };
             let text = format!("{pre}{}", cmd.label);
             let style = if cmd.selected {
                 style_reverse()
             } else {
                 style_plain()
             };
-            put_line(frame, y, width, paint_bounded_line(&text, width, style));
+            let rect = Rect::new(content.x, y, content.width, 1);
+            put_line_at(frame, rect, paint_bounded_line(&text, content.width, style));
             // Index into the full (unscrolled) command list, so a click resolves to the
             // same command `BoardModel::visible_commands()` would name at that position
             // regardless of which window is currently painted.
-            hits.push(
-                QueueHitTarget::Command(scroll + j),
-                Rect::new(0, y, width, 1),
-            );
-            hits.push_copyable(Rect::new(0, y, width, 1));
+            hits.push(QueueHitTarget::Command(scroll + j), rect);
+            hits.push_copyable(rect);
         }
     }
+
+    // Query sits on the status row when present; otherwise the last content row -- the
+    // card's own bounds stop above this row, so caret placement here stays exactly as
+    // simple as before the card existed.
+    let query_row = geo.status_row.unwrap_or(height.saturating_sub(2));
     let q = format!(" :{query}");
     put_line(
         frame,
@@ -1318,62 +1554,63 @@ fn paint_help_overlay(
     lines: &[String],
     hits: &mut QueueHitMap,
 ) {
-    let width = geo.row_width;
-    let height = geo.height;
-    if width == 0 || height == 0 || lines.is_empty() {
+    if geo.row_width == 0 || geo.height == 0 || lines.is_empty() {
         return;
     }
-    // Any click anywhere in the frame closes the card, matching the keyboard's "any key":
-    // one full-frame region rather than one per painted line, so a click in the
-    // padding around a short card still closes it.
-    hits.push(QueueHitTarget::HelpDismiss, Rect::new(0, 0, width, height));
-    frame.render_widget(Clear, Rect::new(0, 0, width, height));
-    let body_w = (width.saturating_sub(2)).min(62) as usize;
-    // Compact is a takeover: omit decorative blank rows so the title, every binding,
-    // and the close instruction fit at the 40x10 minimum.
-    let shown: Vec<&String> = if geo.tier == Tier::Compact {
-        lines.iter().filter(|line| !line.is_empty()).collect()
+    // Compact: omit decorative blank rows, and drop each line's leading indent column --
+    // the card's own border already insets the body, so the width that bought is worth
+    // more here than the indent. Neither line up needs an inset from the other; the
+    // card's `pad` already covers it.
+    let shown: Vec<String> = if geo.tier == Tier::Compact {
+        lines
+            .iter()
+            .filter(|line| !line.is_empty())
+            .map(|line| line.trim_start().to_string())
+            .collect()
     } else {
-        // Keep standard card spacing, while sharing the loop below.
-        lines.iter().collect()
+        lines.to_vec()
     };
-    let show = shown.len().min(height as usize);
-    let y0 = if geo.tier == Tier::Compact {
-        0
-    } else {
-        ((height as usize).saturating_sub(show) / 2).max(1) as u16
-    };
-    let x_pad = width.saturating_sub(body_w as u16) / 2;
-    for (j, ln) in shown.iter().take(show).enumerate() {
-        let y = y0.saturating_add(j as u16);
-        if y >= height {
-            break;
-        }
-        let body = present_line(ln, body_w);
-        let pad = " ".repeat(x_pad as usize);
-        if ln.contains("any key") {
-            // Reverse only the words. Padding stays plain so the bar does not run to the left.
-            let trail = (width as usize).saturating_sub(x_pad as usize + display_width(&body));
-            put_line(
-                frame,
-                y,
-                width,
-                bound_line(
-                    Line::from(vec![
-                        Span::styled(pad, style_plain()),
-                        Span::styled(body, style_reverse()),
-                        Span::styled(" ".repeat(trail), style_plain()),
-                    ]),
-                    width as usize,
-                ),
-            );
-        } else {
-            let padded = format!("{pad}{body}");
-            let style = if j == 0 { style_bold() } else { style_plain() };
-            put_line(frame, y, width, paint_bounded_line(&padded, width, style));
-        }
-        // Body lines only — not the full-frame dismiss chrome.
-        hits.push_copyable(Rect::new(x_pad, y, body_w as u16, 1));
+
+    // Help has nothing worth preserving underneath it (no query row like the palette),
+    // so it takes the whole frame as its ceiling -- the one place that actually matters:
+    // a narrow compact terminal, where every row the border+footer would otherwise leave
+    // idle buys another binding into view.
+    let bounds = Rect::new(0, 0, geo.row_width, geo.height);
+    let capacity = bounds
+        .height
+        .saturating_sub(modal_chrome_rows(geo.tier, true));
+    // Never scrolls -- there is no selection to seek with, and closing on any key rules
+    // out a dedicated scroll chord -- so `▼` here means "more exists" (resize to see it),
+    // not "more is reachable".
+    let title = titled_with_scroll_marker("help", false, (shown.len() as u16) > capacity);
+    let content = paint_modal_card(
+        frame,
+        geo,
+        bounds,
+        ModalCardSpec {
+            title: &title,
+            content_rows: shown.len() as u16,
+            legend: HELP_FOOTER,
+            dismiss: Some(QueueHitTarget::HelpDismiss),
+        },
+        hits,
+    );
+    // The card's blanket `ModalChrome` (pushed for the whole card, border included) would
+    // otherwise make the body text itself inert too. Help's body is not an interactive
+    // surface like the palette's command rows or the picker's options -- there is nothing
+    // to select inside it -- so it keeps mouse parity with the keyboard's "any key" by
+    // reclaiming its own content rect as a `HelpDismiss` hit, the same close its own `[x]`
+    // and the frame outside the card already resolve to.
+    hits.push(QueueHitTarget::HelpDismiss, content);
+    for (j, ln) in shown.iter().take(content.height as usize).enumerate() {
+        let y = content.y.saturating_add(j as u16);
+        let rect = Rect::new(content.x, y, content.width, 1);
+        put_line_at(
+            frame,
+            rect,
+            paint_bounded_line(ln, content.width, style_plain()),
+        );
+        hits.push_copyable(rect);
     }
 }
 
@@ -1874,32 +2111,32 @@ fn paint_page_scope_dropdown(
     }
 }
 
+/// The board's `P` project-scope picker: a centered modal card, not the chip-anchored
+/// dropdown this used to paint. [`paint_page_scope_dropdown`] (the task-page form's own
+/// scope control) is a separate, unrelated painter and keeps its chip-anchored panel.
 fn paint_scope_dropdown(
     frame: &mut Frame<'_>,
     geo: &TierGeometry,
     options: &[String],
     selected: usize,
-    option_target: impl Fn(usize) -> QueueHitTarget,
     hits: &mut QueueHitMap,
 ) {
-    let width = geo.row_width;
-    if width == 0 || options.is_empty() {
+    if geo.row_width == 0 || options.is_empty() {
         return;
     }
-    // Align under the project chip on the right of the selector row.
-    let max_label = options
-        .iter()
-        .map(|o| display_width(o))
-        .max()
-        .unwrap_or(0)
-        .max(display_width("projects"));
-    let col_w = (max_label + 4).min(geo.selector_chip_max as usize).max(8);
-    let x0 = width.saturating_sub(col_w as u16);
-    let top = geo.selector_row.map(|r| r.saturating_add(1)).unwrap_or(0);
+    // Help/project-scope have nothing worth preserving underneath (no query row like the
+    // palette), so the full frame is the ceiling: a narrow compact terminal gets every row
+    // the border+footer would otherwise leave idle.
+    let bounds = Rect::new(0, 0, geo.row_width, geo.height);
+    // Derived from the same chrome math `paint_modal_card` itself uses (see the palette's
+    // identical comment) so the window this picks always matches what actually paints.
+    let capacity = bounds
+        .height
+        .saturating_sub(modal_chrome_rows(geo.tier, true));
     let max_n = if geo.tier == Tier::Compact {
-        geo.viewport_height.max(1) as usize
+        capacity.max(1) as usize
     } else {
-        options.len().min(12)
+        options.len().min(12).min(capacity.max(1) as usize)
     };
     let rows = max_n.min(options.len());
     let selected = selected.min(options.len().saturating_sub(1));
@@ -1908,36 +2145,41 @@ fn paint_scope_dropdown(
     } else {
         (selected + 1 - rows).min(options.len() - rows)
     };
-    let panel_h = rows.min((geo.height.saturating_sub(top).saturating_sub(2)) as usize) as u16;
-    if panel_h > 0 {
-        frame.render_widget(Clear, Rect::new(x0, top, col_w as u16, panel_h));
+    let above = scroll > 0;
+    let below = scroll + rows < options.len();
+    let title = titled_with_scroll_marker("project", above, below);
+
+    let content = paint_modal_card(
+        frame,
+        geo,
+        bounds,
+        ModalCardSpec {
+            title: &title,
+            content_rows: rows as u16,
+            legend: SCOPE_FOOTER,
+            dismiss: None,
+        },
+        hits,
+    );
+    if content.width == 0 || content.height == 0 {
+        return;
     }
-    for (j, opt) in options.iter().enumerate().skip(scroll).take(rows) {
-        let y = top.saturating_add((j - scroll) as u16);
-        if y >= geo.height.saturating_sub(2) {
-            break;
-        }
+    let paintable = rows.min(content.height as usize);
+    for (j, opt) in options.iter().enumerate().skip(scroll).take(paintable) {
+        let y = content.y.saturating_add((j - scroll) as u16);
         let marker = if j == selected { "▸ " } else { "  " };
-        let body = present_line(&format!("{marker}{opt}"), col_w);
-        // Pad to col_w so the dropdown cell fully overwrites base row content under it.
-        let w = col_w;
-        let text = if display_width(&body) >= w {
-            body
-        } else {
-            format!("{}{}", body, " ".repeat(w - display_width(&body)))
-        };
+        let text = format!("{marker}{opt}");
         let style = if j == selected {
             style_reverse()
         } else {
             style_plain()
         };
-        // Paint only the right-hand chip column.
-        let area = Rect::new(x0, y, col_w as u16, 1);
-        frame.render_widget(Paragraph::new(Line::from(Span::styled(text, style))), area);
+        let rect = Rect::new(content.x, y, content.width, 1);
+        put_line_at(frame, rect, paint_bounded_line(&text, content.width, style));
         // `j` remains the source index after windowing, so a click selects the same option
         // Up/Down plus Enter would confirm rather than its position within this paint slice.
-        hits.push(option_target(j), area);
-        hits.push_copyable(area);
+        hits.push(QueueHitTarget::ProjectOption(j), rect);
+        hits.push_copyable(rect);
     }
 }
 
@@ -2731,22 +2973,25 @@ pub(crate) fn short_project(path: &str) -> &str {
 }
 
 fn put_line(frame: &mut Frame<'_>, row: u16, width: u16, line: Line<'static>) {
-    if width == 0 {
+    put_line_at(frame, Rect::new(0, row, width, 1), line);
+}
+
+/// Paint `line` at an arbitrary single-row `rect`, padding with plain spaces to `rect.width`
+/// so whatever the base frame painted underneath cannot bleed through a short line.
+fn put_line_at(frame: &mut Frame<'_>, rect: Rect, line: Line<'static>) {
+    if rect.width == 0 {
         return;
     }
-    let w = width as usize;
-    let area = Rect::new(0, row, width, 1);
+    let w = rect.width as usize;
     if line.width() >= w {
-        frame.render_widget(Paragraph::new(line), area);
+        frame.render_widget(Paragraph::new(line), rect);
         return;
     }
-    // Pad to full row width with plain spaces so base frame content cannot bleed through
-    // (overlays paint short content; trailing cells must be overwritten).
     let pad = w - line.width();
     let mut spans: Vec<Span<'static>> = line.spans.into_iter().collect();
     spans.push(Span::styled(" ".repeat(pad), style_plain()));
     let padded = Line::from(spans);
-    frame.render_widget(Paragraph::new(padded), area);
+    frame.render_widget(Paragraph::new(padded), rect);
 }
 
 pub(crate) fn display_width(s: &str) -> usize {
