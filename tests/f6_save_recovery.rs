@@ -1187,7 +1187,12 @@ fn save_recovery_unbinds_retired_lens_keys() {
 
 /// Painted board text at the standard size, exactly as the board loop draws it.
 fn board_painted(model: &BoardModel) -> String {
-    painted(|frame| draw_board(frame, model), (80, 24))
+    painted(
+        |frame| {
+            let _ = draw_board(frame, model);
+        },
+        (80, 24),
+    )
 }
 
 /// A task page opened on a task carrying one step, with the step line editor open

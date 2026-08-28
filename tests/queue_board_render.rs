@@ -377,7 +377,9 @@ fn board_rows(model: &BoardModel, width: u16, height: u16) -> Vec<String> {
     let backend = TestBackend::new(width, height);
     let mut terminal = Terminal::new(backend).expect("test terminal");
     terminal
-        .draw(|frame: &mut Frame| draw_board(frame, model))
+        .draw(|frame| {
+            let _ = draw_board(frame, model);
+        })
         .expect("draw board");
     let buffer = terminal.backend().buffer();
     assert_buffer_mono(buffer);
@@ -1175,7 +1177,9 @@ fn notes_edit_caret_accounts_for_shared_stream_scroll() {
 
     let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("test terminal");
     terminal
-        .draw(|frame| draw_board(frame, &model))
+        .draw(|frame| {
+            let _ = draw_board(frame, &model);
+        })
         .expect("draw edit page");
     let cursor = terminal.backend().cursor_position();
     assert_eq!(
@@ -1223,7 +1227,9 @@ fn notes_edit_after_deep_stream_scroll_keeps_draft_and_caret_aligned() {
     apply_intent(&mut domain, &mut model, BoardIntent::BeginEditNotes, None).expect("edit notes");
     let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("terminal");
     terminal
-        .draw(|frame| draw_board(frame, &model))
+        .draw(|frame| {
+            let _ = draw_board(frame, &model);
+        })
         .expect("draw");
     let text = board_rows(&model, 80, 24).join("\n");
     assert!(
@@ -1298,7 +1304,9 @@ fn shift_tab_from_scope_resets_notes_stream_origin_and_aligns_caret() {
 
     let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("terminal");
     terminal
-        .draw(|frame| draw_board(frame, &model))
+        .draw(|frame| {
+            let _ = draw_board(frame, &model);
+        })
         .expect("draw");
     let text = board_rows(&model, 80, 24).join("\n");
     assert!(
@@ -1336,7 +1344,9 @@ fn notes_edit_wraps_a_long_line_instead_of_scrolling_horizontally() {
 
     let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("terminal");
     terminal
-        .draw(|frame| draw_board(frame, &model))
+        .draw(|frame| {
+            let _ = draw_board(frame, &model);
+        })
         .expect("draw edit page");
     let rows = board_rows(&model, 80, 24);
     assert!(
@@ -2618,7 +2628,9 @@ fn quick_add_wraps_a_long_title_into_the_reserved_rows() {
 
     let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("terminal");
     terminal
-        .draw(|frame| draw_board(frame, &model))
+        .draw(|frame| {
+            let _ = draw_board(frame, &model);
+        })
         .expect("draw quick add");
     let rows = board_rows(&model, 80, 24);
     let prompt_rows: Vec<&String> = rows.iter().filter(|row| row.contains("▎")).collect();
@@ -2673,7 +2685,9 @@ fn notes_edit_arrows_move_across_logical_and_wrapped_rows() {
     let caret_at = |model: &BoardModel, width: u16, height: u16| {
         let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("terminal");
         terminal
-            .draw(|frame| draw_board(frame, model))
+            .draw(|frame| {
+                let _ = draw_board(frame, model);
+            })
             .expect("draw");
         terminal.backend().cursor_position().y
     };
@@ -2824,7 +2838,9 @@ fn edit_title_caret_parks_at_the_capped_headers_end() {
 
     let mut terminal = Terminal::new(TestBackend::new(40, 10)).expect("terminal");
     terminal
-        .draw(|frame| draw_board(frame, &model))
+        .draw(|frame| {
+            let _ = draw_board(frame, &model);
+        })
         .expect("draw edit page");
     let rows = board_rows(&model, 40, 10);
     // The capped header's last row carries the marker; the caret must sit at

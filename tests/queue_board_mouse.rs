@@ -1513,7 +1513,9 @@ fn page_rows(model: &BoardModel) -> Vec<String> {
     let mut terminal =
         Terminal::new(TestBackend::new(STANDARD.width, STANDARD.height)).expect("test terminal");
     terminal
-        .draw(|frame| draw_board(frame, model))
+        .draw(|frame| {
+            let _ = draw_board(frame, model);
+        })
         .expect("draw page");
     let buffer = terminal.backend().buffer();
     (0..STANDARD.height)
@@ -1594,4 +1596,61 @@ fn clicking_a_step_row_selects_it() {
         "the cursor stays on the clicked step after a notes-half click:\n{}",
         after.join("\n")
     );
+}
+
+/// Painters declare copyable content rects beside the paint; a drag selection
+/// over those cells yields the painted text (chrome columns outside `copyable`
+/// stay out of the clipboard string).
+#[test]
+fn drag_selection_copies_painted_task_title_not_undeclared_chrome() {
+    use ratatui::layout::Position;
+    use tsk_tui::ui::text_select::{selection_text, TextSelection};
+
+    let (_domain, mut model, _id) = board_with_task("copyable title text", HumanStatus::Ready);
+    let hits = board_hit_map(STANDARD, &model);
+    assert!(
+        !hits.copyable.is_empty(),
+        "task rows must push copyable content rects"
+    );
+
+    let mut terminal =
+        Terminal::new(TestBackend::new(STANDARD.width, STANDARD.height)).expect("test terminal");
+    terminal
+        .draw(|frame| {
+            let _ = draw_board(frame, &model);
+        })
+        .expect("draw");
+    let buffer = terminal.backend().buffer();
+    let rows: Vec<String> = (0..STANDARD.height)
+        .map(|y| {
+            (0..STANDARD.width)
+                .map(|x| buffer[(x, y)].symbol().to_string())
+                .collect::<String>()
+        })
+        .collect();
+
+    // Anchor on the title content, drag across it.
+    let area = hits.copyable[0];
+    model.begin_mouse_press(Position::new(area.x, area.y));
+    model.drag_text_selection(Position::new(
+        area.x.saturating_add(area.width.saturating_sub(1)),
+        area.y,
+    ));
+    model.end_mouse_press();
+    let selection = model.text_selection().expect("drag left a selection");
+    let text = selection_text(&rows, &hits.copyable, &selection).expect("copyable text");
+    assert!(
+        text.contains("copyable title text"),
+        "selection should include the task title, got {text:?}"
+    );
+
+    // A bare click (no drag) leaves no copyable text.
+    model.begin_mouse_press(Position::new(area.x + 2, area.y));
+    model.end_mouse_press();
+    assert!(model.text_selection().is_none());
+    let bare = TextSelection::new(
+        Position::new(area.x + 2, area.y),
+        Position::new(area.x + 2, area.y),
+    );
+    assert_eq!(selection_text(&rows, &hits.copyable, &bare), None);
 }

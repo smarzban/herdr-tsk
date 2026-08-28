@@ -7,8 +7,10 @@ use std::io;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
-use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
-use ratatui::layout::Rect;
+use crossterm::event::{
+    self, Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind,
+};
+use ratatui::layout::{Position, Rect};
 use ratatui::DefaultTerminal;
 
 use crate::config::{default_config_dir, SettingsRecord, WalkthroughRecord};
@@ -33,6 +35,7 @@ use crate::ui::mouse::{
 };
 use crate::ui::queue::BoardTab;
 use crate::ui::scheduler;
+use crate::ui::text_select::{copy_to_clipboard, frame_text_rows, selection_text};
 
 /// Env var set by open-capture launcher for Capture UI mode.
 pub const MODE_ENV: &str = "TSK_MODE";
@@ -291,6 +294,12 @@ fn run_board() -> Result<(), Box<dyn Error>> {
     ratatui::run(|terminal| -> io::Result<()> {
         let _input = enable_terminal_input(keyboard_enhancement)?;
         let mut save_recovery = SaveRecovery::new();
+        // The painted frame's text and its declared copyable rects, refreshed by
+        // every board paint: the snapshot a finished drag selection slices its
+        // copied text from ("copy what you see", inside what the painters declared
+        // as content).
+        let mut frame_rows: Vec<String> = Vec::new();
+        let mut frame_copyable: Vec<Rect> = Vec::new();
         loop {
             // Settle, paint, then wait. The board frame path does no host polling, so the
             // wait is only the Frame Scheduler's idle floor. All three are one call because
@@ -300,7 +309,15 @@ fn run_board() -> Result<(), Box<dyn Error>> {
             let poll = board_idle_tick(
                 &mut model,
                 || walkthrough.record_dismissed(),
-                |model: &BoardModel| terminal.draw(|frame| draw_board(frame, model)).map(|_| ()),
+                |model: &BoardModel| {
+                    terminal
+                        .draw(|frame| {
+                            let hits = draw_board(frame, model);
+                            frame_rows = frame_text_rows(frame.buffer_mut());
+                            frame_copyable = hits.copyable;
+                        })
+                        .map(|_| ())
+                },
                 event::poll,
                 &store,
                 &mut domain,
@@ -339,6 +356,27 @@ fn run_board() -> Result<(), Box<dyn Error>> {
                     }
                 }
                 Event::Mouse(mouse) => {
+                    // A left-button drag grows a text selection over the painted frame
+                    // (highlight and copy text come from the last painted snapshot), and
+                    // release hands that text to the clipboard. Clicks (Down) still
+                    // keep their exact Down-time behavior, drags were dead weight before.
+                    match mouse.kind {
+                        MouseEventKind::Drag(MouseButton::Left) => {
+                            model.drag_text_selection(Position::new(mouse.column, mouse.row));
+                            continue;
+                        }
+                        MouseEventKind::Up(MouseButton::Left) => {
+                            model.end_mouse_press();
+                            copy_drag_selection(&mut model, &frame_rows, &frame_copyable);
+                            continue;
+                        }
+                        _ => {}
+                    }
+                    if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+                        // The press anchors a would-be selection and clears the previous
+                        // highlight before the click mapper runs.
+                        model.begin_mouse_press(Position::new(mouse.column, mouse.row));
+                    }
                     let area = terminal_area(terminal)?;
                     let Some(intent) = board_mouse_intent(area, &mut model, mouse) else {
                         continue;
@@ -375,6 +413,27 @@ fn run_board() -> Result<(), Box<dyn Error>> {
         Ok(())
     })?;
     Ok(())
+}
+
+/// Copy a finished drag selection from the last painted frame to the clipboard.
+///
+/// Only cells the painters declared copyable are taken, so scrollbars, borders,
+/// and other chrome never reach the clipboard. A selection with no text (a bare
+/// click, or a drag over blank cells) copies nothing; a real one reports on the
+/// status row, since the only other feedback (the terminal's own clipboard
+/// toast, if any) is outside this process.
+fn copy_drag_selection(model: &mut BoardModel, frame_rows: &[String], copyable: &[Rect]) {
+    let Some(selection) = model.text_selection() else {
+        return;
+    };
+    let Some(text) = selection_text(frame_rows, copyable, &selection) else {
+        return;
+    };
+    if copy_to_clipboard(&text) {
+        model.set_message(format!("copied {} chars", text.chars().count()));
+    } else {
+        model.set_message("copy failed");
+    }
 }
 
 /// Whether save recovery permits the board to apply background state changes.

@@ -566,12 +566,24 @@ pub struct QueueHit {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct QueueHitMap {
     pub regions: Vec<QueueHit>,
+    /// Rects the painters declared as copyable content (task rows, page title,
+    /// notes, steps, drawer body, options). Text selection copies only cells
+    /// inside these, so chrome — scrollbars, borders, verb bars, dividers — is
+    /// excluded by construction.
+    pub copyable: Vec<Rect>,
 }
 
 impl QueueHitMap {
     fn push(&mut self, target: QueueHitTarget, area: Rect) {
         if area.width > 0 && area.height > 0 {
             self.regions.push(QueueHit { target, area });
+        }
+    }
+
+    /// Declare a rect as copyable content, beside the paint that drew it.
+    pub fn push_copyable(&mut self, area: Rect) {
+        if area.width > 0 && area.height > 0 {
+            self.copyable.push(area);
         }
     }
 }
@@ -695,8 +707,13 @@ pub fn draw_queue_frame(
                     if base_list_interactive {
                         hits.push(QueueHitTarget::Task(id), Rect::new(0, y, width, 1));
                     }
+                    // Task title text is a hit target, but exactly what a text selection is for.
+                    hits.push_copyable(Rect::new(0, y, width, 1));
                 }
-                ListRow::Detail(line) => put_line(frame, y, width, line),
+                ListRow::Detail(line) => {
+                    put_line(frame, y, width, line);
+                    hits.push_copyable(Rect::new(0, y, width, 1));
+                }
             }
         }
     }
@@ -1277,6 +1294,7 @@ fn paint_palette_overlay(
                 QueueHitTarget::Command(scroll + j),
                 Rect::new(0, y, width, 1),
             );
+            hits.push_copyable(Rect::new(0, y, width, 1));
         }
     }
     let q = format!(" :{query}");
@@ -1354,6 +1372,8 @@ fn paint_help_overlay(
             let style = if j == 0 { style_bold() } else { style_plain() };
             put_line(frame, y, width, paint_bounded_line(&padded, width, style));
         }
+        // Body lines only — not the full-frame dismiss chrome.
+        hits.push_copyable(Rect::new(x_pad, y, body_w as u16, 1));
     }
 }
 
@@ -1586,6 +1606,7 @@ fn paint_task_page(
         QueueHitTarget::FormTitle,
         Rect::new(0, lay.title_y, width, title_row_count),
     );
+    hits.push_copyable(Rect::new(0, lay.title_y, header_width, title_row_count));
     if let Some((cursor_row, cursor_col)) = title_cursor {
         // Every title row shares the four-cell gutter (two leading blanks plus
         // glyph and space), so the wrapped field starts at column 4 on all of them.
@@ -1668,6 +1689,7 @@ fn paint_task_page(
                 QueueHitTarget::FormNotes(absolute),
                 Rect::new(0, y, content_width, 1),
             );
+            hits.push_copyable(Rect::new(0, y, content_width, 1));
         } else if !step_views.is_empty() && absolute == content.steps_start {
             put_line(
                 frame,
@@ -1708,6 +1730,7 @@ fn paint_task_page(
                     QueueHitTarget::Step(index),
                     Rect::new(0, y, content_width, 1),
                 );
+                hits.push_copyable(Rect::new(0, y, content_width, 1));
             }
         }
     }
@@ -1847,6 +1870,7 @@ fn paint_page_scope_dropdown(
             QueueHitTarget::FormScopeOption(j),
             Rect::new(0, y, width, 1),
         );
+        hits.push_copyable(Rect::new(0, y, width, 1));
     }
 }
 
@@ -1913,6 +1937,7 @@ fn paint_scope_dropdown(
         // `j` remains the source index after windowing, so a click selects the same option
         // Up/Down plus Enter would confirm rather than its position within this paint slice.
         hits.push(option_target(j), area);
+        hits.push_copyable(area);
     }
 }
 

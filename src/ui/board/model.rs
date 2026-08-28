@@ -4,6 +4,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+use ratatui::layout::Position;
 use uuid::Uuid;
 
 use crate::config::VerbModifier;
@@ -22,6 +23,7 @@ use crate::ui::queue::{
 use crate::ui::render::StepView;
 use crate::ui::selection;
 use crate::ui::terminal_text;
+use crate::ui::text_select::TextSelection;
 
 use super::commands::CommandSurface;
 
@@ -567,6 +569,11 @@ pub struct BoardModel {
     pub(super) project_picker: Option<ProjectPickerState>,
     /// Open palette (presentation only).
     pub(super) surface: CommandSurface,
+    /// The last left-button press cell, held until release so a drag can grow a text
+    /// selection out of it. Presentation-only; a plain click never reads it.
+    pub(super) mouse_press: Option<Position>,
+    /// The live drag-selected screen region, cleared on the next press.
+    pub(super) text_selection: Option<TextSelection>,
     /// Palette query.
     pub(super) command_query: String,
     /// Selection into the currently visible command set.
@@ -621,6 +628,8 @@ impl BoardModel {
             surface: CommandSurface::None,
             command_query: String::new(),
             command_selected: 0,
+            mouse_press: None,
+            text_selection: None,
             verb_modifier: VerbModifier::Alt,
         };
         model.seed_selection();
@@ -915,6 +924,36 @@ impl BoardModel {
     /// intervenes. Mouse-boundary state only, never persisted.
     pub(crate) fn cancel_project_header_double_click(&mut self) {
         self.last_project_header_click = None;
+    }
+
+    /// Record a left-button press cell and drop any finished selection's highlight.
+    ///
+    /// The press cell is what a following drag grows the selection from; a plain
+    /// click never reads it. Called for every left press, whatever the input mode.
+    pub fn begin_mouse_press(&mut self, position: Position) {
+        self.mouse_press = Some(position);
+        self.text_selection = None;
+    }
+
+    /// Extend the drag selection to `position`, anchored at the press cell.
+    ///
+    /// Inert without a live press (a drag that starts mid-gesture, e.g. before tsk
+    /// saw the press), so it can never invent an anchor.
+    pub fn drag_text_selection(&mut self, position: Position) {
+        if let Some(anchor) = self.mouse_press {
+            self.text_selection = Some(TextSelection::new(anchor, position));
+        }
+    }
+
+    /// Clear the press on release; the selection itself stays painted (its copied
+    /// cells remain visible) until the next press replaces it.
+    pub fn end_mouse_press(&mut self) {
+        self.mouse_press = None;
+    }
+
+    /// The live drag selection, if a drag is (or was) in progress.
+    pub fn text_selection(&self) -> Option<TextSelection> {
+        self.text_selection
     }
 
     /// Options the session project selector offers, in presentation order.

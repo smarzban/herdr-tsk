@@ -952,7 +952,9 @@ fn failed_save_keeps_the_draft_for_retry_or_cancel() {
 fn render_rows(model: &BoardModel, width: u16, height: u16) -> Vec<String> {
     let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("test terminal");
     terminal
-        .draw(|frame| draw_board(frame, model))
+        .draw(|frame| {
+            let _ = draw_board(frame, model);
+        })
         .expect("draw board");
     let buffer = terminal.backend().buffer();
     tsk_tui::ui::render::assert_buffer_mono(buffer);
@@ -1037,7 +1039,9 @@ fn capture_bar_renders_spaced_three_row_block_and_stays_bounded_without_color_sg
     )
     .expect("ANSI terminal");
     terminal
-        .draw(|frame| draw_board(frame, &model))
+        .draw(|frame| {
+            let _ = draw_board(frame, &model);
+        })
         .expect("ANSI draw");
     drop(terminal);
     let output = String::from_utf8(bytes.borrow().clone()).expect("ANSI output");

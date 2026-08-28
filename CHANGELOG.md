@@ -8,6 +8,13 @@ old documents may still carry (`capsule`, `agent_meta`, `last_observed`,
 `active_attempts`, related event kinds) keep loading. Local reference only:
 `archive/dark-engine-pre-v1`.
 
+Mouse text selection: a left-button drag highlights the cells it covers (any
+surface: board rows, task page, overlays) and release copies the painted text
+to the system clipboard via OSC 52: the terminal or host multiplexer performs
+the copy, so terminals without OSC 52 support ignore it. A bare click copies
+nothing and behaves exactly as before; the status row reports the copied
+count.
+
 The live document is **`tsk.json`** (lock `tsk.json.lock`, previous `tsk.json.1`).
 A first run creates an empty `~/.tsk`; leftover `tasks.json` is not read.
 

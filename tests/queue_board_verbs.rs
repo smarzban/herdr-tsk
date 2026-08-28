@@ -394,7 +394,9 @@ fn esc_closes_transient_then_detail_then_quit_and_q_quits_only_in_normal() {
 fn rendered_board(model: &BoardModel, width: u16, height: u16) -> String {
     let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("test terminal");
     terminal
-        .draw(|frame| draw_board(frame, model))
+        .draw(|frame| {
+            let _ = draw_board(frame, model);
+        })
         .expect("draw");
     let buffer = terminal.backend().buffer();
     (0..height)
@@ -415,7 +417,9 @@ fn board_chrome_row(model: &BoardModel, mode: (u16, u16)) -> String {
         .expect("status row present at supported sizes");
     let mut terminal = Terminal::new(TestBackend::new(mode.0, mode.1)).expect("test terminal");
     terminal
-        .draw(|frame| draw_board(frame, model))
+        .draw(|frame| {
+            let _ = draw_board(frame, model);
+        })
         .expect("draw board");
     let buffer = terminal.backend().buffer().clone();
     (0..mode.0)
@@ -1352,7 +1356,9 @@ fn page_scroll_reaches_the_bottom_of_a_wrapping_note() {
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).expect("test terminal");
         terminal
-            .draw(|frame| draw_board(frame, model))
+            .draw(|frame| {
+                let _ = draw_board(frame, model);
+            })
             .expect("draw");
         let buffer = terminal.backend().buffer().clone();
         (0..24)
