@@ -436,7 +436,7 @@ fn build_task_page_overlay<'a>(
 pub fn draw_board(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap {
     let hits = draw_board_impl(frame, model);
     if let Some(selection) = model.text_selection() {
-        crate::ui::text_select::paint_selection(frame, &selection);
+        crate::ui::text_select::paint_selection(frame, &selection, &hits.copyable);
     }
     hits
 }

@@ -177,8 +177,13 @@ fn slice_cells(row: &str, start: u16, end: u16) -> String {
     out
 }
 
-/// Reverse-highlight every cell the selection covers (line-oriented, matching copy).
-pub fn paint_selection(frame: &mut Frame<'_>, selection: &TextSelection) {
+/// Reverse-highlight the cells a selection covers, clipped to `copyable`.
+///
+/// Geometry matches [`selection_text`]: first/last rows use the drag edges, interior
+/// rows span their copyable columns. Chrome outside those rects (peek `│` gutter,
+/// glyphs, meta) stays unhighlighted — the same content bounds grok-build-style
+/// app selection uses, rather than painting full terminal rows.
+pub fn paint_selection(frame: &mut Frame<'_>, selection: &TextSelection, copyable: &[Rect]) {
     if !selection.has_area() {
         return;
     }
@@ -190,18 +195,18 @@ pub fn paint_selection(frame: &mut Frame<'_>, selection: &TextSelection) {
             break;
         }
         let start = if y == y0 { x0 } else { 0 };
-        let end = if y == y1 {
-            x1
-        } else {
-            area.width.saturating_sub(1)
-        };
-        for x in start..=end {
-            if x >= area.width {
-                break;
+        let end = if y == y1 { x1 } else { u16::MAX };
+        for (span_start, span_end) in copyable_spans(copyable, y) {
+            let from = span_start.max(start);
+            let to = span_end.min(end).min(area.width.saturating_sub(1));
+            if from > to {
+                continue;
             }
-            let cell = &mut buffer[(x, y)];
-            let style = cell.style().add_modifier(Modifier::REVERSED);
-            cell.set_style(style);
+            for x in from..=to {
+                let cell = &mut buffer[(x, y)];
+                let style = cell.style().add_modifier(Modifier::REVERSED);
+                cell.set_style(style);
+            }
         }
     }
 }
@@ -395,6 +400,45 @@ mod tests {
         // A drag that only covers the blank middle yields nothing.
         let sel = TextSelection::new(pos(0, 1), pos(5, 1));
         assert_eq!(selection_text(&rows, &copyable, &sel).as_deref(), None);
+    }
+
+    #[test]
+    fn paint_selection_stays_inside_copyable_not_gutter() {
+        use ratatui::backend::TestBackend;
+        use ratatui::style::Modifier;
+        use ratatui::Terminal;
+
+        // Peek-shaped layout: columns 0..5 are `    │ ` chrome; content starts at 6.
+        let copyable = [Rect::new(6, 0, 14, 3)];
+        let sel = TextSelection::new(pos(8, 0), pos(12, 2));
+        let mut terminal = Terminal::new(TestBackend::new(20, 4)).expect("terminal");
+        terminal
+            .draw(|frame| {
+                paint_selection(frame, &sel, &copyable);
+            })
+            .expect("draw");
+        let buffer = terminal.backend().buffer();
+        for y in 0..=2 {
+            for x in 0..6 {
+                assert!(
+                    !buffer[(x, y)].modifier.contains(Modifier::REVERSED),
+                    "gutter cell ({x},{y}) must not reverse-highlight"
+                );
+            }
+        }
+        // Interior row: full copyable span is highlighted (line-oriented within content).
+        for x in 6..=19 {
+            assert!(
+                buffer[(x, 1)].modifier.contains(Modifier::REVERSED),
+                "content cell ({x},1) should reverse-highlight"
+            );
+        }
+        // First row: only from drag start (8) through copyable end.
+        assert!(!buffer[(6, 0)].modifier.contains(Modifier::REVERSED));
+        assert!(buffer[(8, 0)].modifier.contains(Modifier::REVERSED));
+        // Last row: only through drag end (12).
+        assert!(buffer[(12, 2)].modifier.contains(Modifier::REVERSED));
+        assert!(!buffer[(13, 2)].modifier.contains(Modifier::REVERSED));
     }
 
     #[test]

@@ -21,9 +21,10 @@ the copy, so terminals without OSC 52 support ignore it. Clicks are deferred
 until mouse-up so a drag on a board row does not also peek; a bare click still
 behaves as before. Painters declare content-only copyable rects (task titles
 past the glyph, peek notes past the `│` gutter, page notes past their indent),
-so chrome never reaches the clipboard. A Down→Up move without intermediate
-Drag events still counts as a selection. A brief `copied` status clears itself
-after two seconds.
+so chrome never reaches the clipboard. The reverse highlight uses those same
+rects, so a multi-line drag does not paint through the peek `│` gutter. A
+Down→Up move without intermediate Drag events still counts as a selection. A
+brief `copied` status clears itself after two seconds.
 
 The live document is **`tsk.json`** (lock `tsk.json.lock`, previous `tsk.json.1`).
 A first run creates an empty `~/.tsk`; leftover `tasks.json` is not read.
