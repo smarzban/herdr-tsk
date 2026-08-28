@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>tsk — a task board for your terminal</title>
+    <meta
+      name="description"
+      content="tsk captures work and moves it through human status: ready, started, blocked, review, done. A queue board for your terminal."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Syne:wght@600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="grain" aria-hidden="true"></div>
+
+    <header class="top">
+      <a class="mark" href="#top">tsk</a>
+      <nav class="top-nav" aria-label="Primary">
+        <a href="#board">Board</a>
+        <a href="#status">Status</a>
+        <a href="#install">Install</a>
+        <a
+          class="top-github"
+          href="https://github.com/smarzban/herdr-tsk"
+          rel="noopener noreferrer"
+          >GitHub</a
+        >
+      </nav>
+    </header>
+
+    <main id="top">
+      <section class="hero" aria-labelledby="brand">
+        <div class="hero-copy">
+          <p class="brand" id="brand">tsk</p>
+          <h1 class="headline">A task board for your terminal.</h1>
+          <p class="lede">
+            Capture work. Move it through ready, started, blocked, review, and
+            done. Runs standalone or as a herdr plugin.
+          </p>
+          <div class="cta">
+            <a class="btn btn-primary" href="#install">Install</a>
+            <a
+              class="btn btn-ghost"
+              href="https://github.com/smarzban/herdr-tsk"
+              rel="noopener noreferrer"
+              >View source</a
+            >
+          </div>
+        </div>
+
+        <div class="hero-stage" id="board" aria-label="tsk board preview" data-parallax>
+          <div class="terminal-motion">
+          <div class="terminal">
+            <div class="terminal-chrome">
+              <span class="terminal-dots" aria-hidden="true"></span>
+              <span class="terminal-title">tsk · ~/.tsk</span>
+            </div>
+            <pre class="board" tabindex="0"><span class="dim">desk  ·  projects  ·  threads</span>
+
+<span class="sec">IN MOTION</span> <span class="rule">──────────────────────────────</span><span class="count">2</span>
+
+  <span class="sel">▸</span> <span class="sel-text">Smoke-test worktree dispatch</span>          <span class="meta">tsk · 3m</span>
+  <span class="glyph">▸</span> Edit target binding pin               <span class="meta">herdr · 12m</span>
+
+<span class="sec">desk</span> <span class="rule">──────────────────────────────────</span><span class="count">1</span>
+
+  <span class="glyph">○</span> Global backlog note                           <span class="meta">2d</span>
+
+<span class="foot-rule">────────────────────────────────────────────────</span>
+<span class="foot">2 done</span>
+<span class="foot dim">enter open · alt+d done · alt+b block · + capture</span><span class="cursor" aria-hidden="true">█</span></pre>
+          </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="band status-band" id="status" aria-labelledby="status-heading">
+        <div class="band-inner">
+          <h2 id="status-heading">Human status is the source of truth.</h2>
+          <p class="band-lede">
+            Agents do not auto-complete your work. You move tasks with verbs.
+            Mutating keys need Alt, so typing into a focused board cannot finish
+            or delete anything by accident.
+          </p>
+          <ol class="status-rail" aria-label="Task statuses">
+            <li><span class="status-name">ready</span><span class="status-hint">on deck</span></li>
+            <li><span class="status-name">started</span><span class="status-hint">in motion</span></li>
+            <li><span class="status-name">blocked</span><span class="status-hint">waiting</span></li>
+            <li><span class="status-name">review</span><span class="status-hint">check it</span></li>
+            <li><span class="status-name">done</span><span class="status-hint">drawer</span></li>
+          </ol>
+        </div>
+      </section>
+
+      <section class="band capture-band" aria-labelledby="capture-heading">
+        <div class="band-inner capture-grid">
+          <div>
+            <h2 id="capture-heading">Capture stays on the board.</h2>
+            <p class="band-lede">
+              Press <kbd>+</kbd> for a one-line title. Enter saves. Tab expands
+              onto the task page for notes and scope. Tokens in the title set
+              project and thread without leaving the line.
+            </p>
+          </div>
+          <ul class="token-list">
+            <li>
+              <code>!p</code>
+              <span>desk</span>
+            </li>
+            <li>
+              <code>!p name</code>
+              <span>project by basename</span>
+            </li>
+            <li>
+              <code>!t name</code>
+              <span>thread, normalized</span>
+            </li>
+            <li>
+              <code>!t</code>
+              <span>unthread</span>
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="band install-band" id="install" aria-labelledby="install-heading">
+        <div class="band-inner">
+          <h2 id="install-heading">Build it, then open the board.</h2>
+          <div class="install-block">
+            <pre class="shell"><span class="shell-prompt">$</span> git clone git@github.com:smarzban/herdr-tsk.git
+<span class="shell-prompt">$</span> cd herdr-tsk
+<span class="shell-prompt">$</span> cargo build --release
+<span class="shell-prompt">$</span> ./target/release/tsk</pre>
+            <p class="install-note">
+              Plugin mode: <code>herdr plugin link "$PWD"</code>, then Open tsk
+              board. State lives in <code>~/.tsk</code> either way.
+            </p>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-foot">
+      <p>
+        <span class="mark">tsk</span>
+        <span class="foot-sep">·</span>
+        a task board for your terminal
+      </p>
+      <p>
+        <a href="https://github.com/smarzban/herdr-tsk" rel="noopener noreferrer"
+          >github.com/smarzban/herdr-tsk</a
+        >
+      </p>
+    </footer>
+
+    <script src="main.js"></script>
+  </body>
+</html>
