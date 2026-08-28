@@ -574,6 +574,9 @@ pub struct BoardModel {
     pub(super) mouse_press: Option<Position>,
     /// The live drag-selected screen region, cleared on the next press.
     pub(super) text_selection: Option<TextSelection>,
+    /// When set, [`Self::message`] clears itself on the next idle tick after this instant.
+    /// Sticky messages (errors, delete notices) leave this `None`.
+    pub(super) message_expires_at: Option<Instant>,
     /// Palette query.
     pub(super) command_query: String,
     /// Selection into the currently visible command set.
@@ -630,6 +633,7 @@ impl BoardModel {
             command_selected: 0,
             mouse_press: None,
             text_selection: None,
+            message_expires_at: None,
             verb_modifier: VerbModifier::Alt,
         };
         model.seed_selection();
@@ -945,10 +949,15 @@ impl BoardModel {
         }
     }
 
-    /// Clear the press on release; the selection itself stays painted (its copied
-    /// cells remain visible) until the next press replaces it.
+    /// Clear the press on release; the selection itself stays until copy clears it
+    /// or the next press replaces it.
     pub fn end_mouse_press(&mut self) {
         self.mouse_press = None;
+    }
+
+    /// Drop a finished text selection highlight (after copy, Esc, or cancel).
+    pub fn clear_text_selection(&mut self) {
+        self.text_selection = None;
     }
 
     /// The live drag selection, if a drag is (or was) in progress.
@@ -1429,10 +1438,28 @@ impl BoardModel {
 
     pub fn set_message(&mut self, msg: impl Into<String>) {
         self.message = Some(terminal_text(&msg.into()));
+        self.message_expires_at = None;
+    }
+
+    /// Status feedback that clears itself after `ttl` (copy confirmation, brief notices).
+    pub fn set_ephemeral_message(&mut self, msg: impl Into<String>, ttl: std::time::Duration) {
+        self.message = Some(terminal_text(&msg.into()));
+        self.message_expires_at = Some(Instant::now() + ttl);
     }
 
     pub fn clear_message(&mut self) {
         self.message = None;
+        self.message_expires_at = None;
+    }
+
+    /// Drop an ephemeral status line whose TTL has elapsed. Sticky messages are untouched.
+    pub fn expire_ephemeral_message(&mut self) {
+        if self
+            .message_expires_at
+            .is_some_and(|deadline| Instant::now() >= deadline)
+        {
+            self.clear_message();
+        }
     }
 
     /// Title carried by the visible delete recovery notice, if one is armed.
@@ -1672,6 +1699,25 @@ mod tests {
         domain
             .create(title, None, scope, None, None, ProvenanceOrigin::Manual)
             .expect("create")
+    }
+
+    #[test]
+    fn ephemeral_status_clears_after_deadline() {
+        let mut model = BoardModel::from_tasks(Vec::new(), None);
+        model.set_ephemeral_message("copied", std::time::Duration::from_millis(1));
+        assert_eq!(model.message(), Some("copied"));
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        model.expire_ephemeral_message();
+        assert!(model.message().is_none());
+        assert!(model.message_expires_at.is_none());
+    }
+
+    #[test]
+    fn sticky_status_survives_expire_tick() {
+        let mut model = BoardModel::from_tasks(Vec::new(), None);
+        model.set_message("save failed");
+        model.expire_ephemeral_message();
+        assert_eq!(model.message(), Some("save failed"));
     }
 
     #[test]

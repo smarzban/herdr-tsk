@@ -229,6 +229,7 @@ pub fn board_idle_tick(
     watch: &mut StoreWatch,
     save_recovery: &SaveRecovery<DomainState>,
 ) -> io::Result<FramePoll> {
+    model.expire_ephemeral_message();
     let poll = board_frame(model, write, paint, wait)?;
     if poll == FramePoll::Idle {
         revalidate_board_from_store(store, domain, model, watch, save_recovery);
@@ -300,6 +301,10 @@ fn run_board() -> Result<(), Box<dyn Error>> {
         // as content).
         let mut frame_rows: Vec<String> = Vec::new();
         let mut frame_copyable: Vec<Rect> = Vec::new();
+        // Left Down is deferred until Up (or abandoned when a text drag grows): firing
+        // the click on Down made every board-row drag also peek/toggle, so copy only
+        // felt reliable on the task page where Down is inert over notes.
+        let mut pending_click: Option<crossterm::event::MouseEvent> = None;
         loop {
             // Settle, paint, then wait. The board frame path does no host polling, so the
             // wait is only the Frame Scheduler's idle floor. All three are one call because
@@ -329,6 +334,9 @@ fn run_board() -> Result<(), Box<dyn Error>> {
             }
             match event::read()? {
                 Event::Key(key) if key.kind == KeyEventKind::Press => {
+                    // A key while the mouse button is held abandons the deferred click so
+                    // Up does not fire a stale peek/select after the keyboard moved on.
+                    pending_click = None;
                     let area = terminal_area(terminal)?;
                     // The painted mode owns the keyboard: `resolve_board_surface` resolves the
                     // same input mode at every terminal size (`board_input_mode_for_area` no
@@ -358,27 +366,47 @@ fn run_board() -> Result<(), Box<dyn Error>> {
                 Event::Mouse(mouse) => {
                     // A left-button drag grows a text selection over the painted frame
                     // (highlight and copy text come from the last painted snapshot), and
-                    // release hands that text to the clipboard. Clicks (Down) still
-                    // keep their exact Down-time behavior, drags were dead weight before.
+                    // release hands that text to the clipboard. Clicks are deferred to Up
+                    // so a drag does not also fire the Down-time peek/select path.
+                    use crossterm::event::{MouseButton, MouseEventKind};
+                    let mut click = mouse;
                     match mouse.kind {
                         MouseEventKind::Drag(MouseButton::Left) => {
                             model.drag_text_selection(Position::new(mouse.column, mouse.row));
+                            if model
+                                .text_selection()
+                                .is_some_and(crate::ui::text_select::TextSelection::has_area)
+                            {
+                                pending_click = None;
+                            }
                             continue;
                         }
                         MouseEventKind::Up(MouseButton::Left) => {
                             model.end_mouse_press();
-                            copy_drag_selection(&mut model, &frame_rows, &frame_copyable);
+                            if model
+                                .text_selection()
+                                .is_some_and(crate::ui::text_select::TextSelection::has_area)
+                            {
+                                copy_drag_selection(&mut model, &frame_rows, &frame_copyable);
+                                pending_click = None;
+                                continue;
+                            }
+                            let Some(down) = pending_click.take() else {
+                                continue;
+                            };
+                            click = down;
+                        }
+                        MouseEventKind::Down(MouseButton::Left) => {
+                            // Anchor a would-be selection and stash the Down for Up;
+                            // do not map the click yet.
+                            model.begin_mouse_press(Position::new(mouse.column, mouse.row));
+                            pending_click = Some(mouse);
                             continue;
                         }
                         _ => {}
                     }
-                    if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
-                        // The press anchors a would-be selection and clears the previous
-                        // highlight before the click mapper runs.
-                        model.begin_mouse_press(Position::new(mouse.column, mouse.row));
-                    }
                     let area = terminal_area(terminal)?;
-                    let Some(intent) = board_mouse_intent(area, &mut model, mouse) else {
+                    let Some(intent) = board_mouse_intent(area, &mut model, click) else {
                         continue;
                     };
                     if handle_board_intent(
@@ -419,21 +447,22 @@ fn run_board() -> Result<(), Box<dyn Error>> {
 ///
 /// Only cells the painters declared copyable are taken, so scrollbars, borders,
 /// and other chrome never reach the clipboard. A selection with no text (a bare
-/// click, or a drag over blank cells) copies nothing; a real one reports on the
-/// status row, since the only other feedback (the terminal's own clipboard
-/// toast, if any) is outside this process.
+/// click, or a drag over blank cells) copies nothing. Success flashes a short
+/// ephemeral status that clears itself; the highlight drops so it does not stick.
 fn copy_drag_selection(model: &mut BoardModel, frame_rows: &[String], copyable: &[Rect]) {
     let Some(selection) = model.text_selection() else {
         return;
     };
     let Some(text) = selection_text(frame_rows, copyable, &selection) else {
+        model.clear_text_selection();
         return;
     };
     if copy_to_clipboard(&text) {
-        model.set_message(format!("copied {} chars", text.chars().count()));
+        model.set_ephemeral_message("copied", Duration::from_secs(2));
     } else {
-        model.set_message("copy failed");
+        model.set_ephemeral_message("copy failed", Duration::from_secs(2));
     }
+    model.clear_text_selection();
 }
 
 /// Whether save recovery permits the board to apply background state changes.
