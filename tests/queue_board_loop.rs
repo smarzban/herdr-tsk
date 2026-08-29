@@ -8,9 +8,12 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
-use tsk_tui::app::{board_frame, board_poll_duration, load_board_model, FramePoll};
+use tsk_tui::app::{
+    board_frame, board_poll_duration, load_board_model, take_pending_after_paint, FramePoll,
+};
 use tsk_tui::domain::DomainState;
 use tsk_tui::ui::scheduler::{next_wait, DEFAULT_BASE_TICK};
 use tsk_tui::ui::{draw_board, BoardModel};
@@ -213,4 +216,48 @@ fn load_board_and_draw_path_smoke_at_80x24() {
             let _ = draw_board(frame, &model);
         })
         .expect("draw the loaded board without panicking");
+}
+
+#[test]
+fn pending_resize_event_paints_before_it_is_returned() {
+    let key = Event::Key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+    let mut pending = Some(key.clone());
+    let mut painted = 0usize;
+    let out = take_pending_after_paint(&mut pending, || {
+        painted += 1;
+        Ok::<_, ()>(())
+    })
+    .expect("paint");
+    assert_eq!(
+        painted, 1,
+        "settled size must paint before the deferred event"
+    );
+    assert_eq!(out, Some(key));
+    assert!(pending.is_none());
+}
+
+#[test]
+fn no_pending_event_skips_the_settled_paint() {
+    let mut pending: Option<Event> = None;
+    let mut painted = 0usize;
+    let out = take_pending_after_paint(&mut pending, || {
+        painted += 1;
+        Ok::<_, ()>(())
+    })
+    .expect("paint");
+    assert_eq!(painted, 0);
+    assert!(out.is_none());
+}
+
+#[test]
+fn run_board_resize_arm_drains_through_coalesce_then_paints() {
+    let src = include_str!("../src/app.rs");
+    assert!(
+        src.contains("pending_event = scheduler::coalesce_resizes(event::poll, event::read)?"),
+        "run_board Resize arm must call coalesce_resizes"
+    );
+    assert!(
+        src.contains("take_pending_after_paint(&mut pending_event"),
+        "run_board must paint the settled size before a deferred event"
+    );
 }
