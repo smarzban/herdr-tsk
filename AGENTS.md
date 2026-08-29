@@ -76,6 +76,12 @@ For scriptable board work, use `tsk add` and `tsk list`; read
   capped task-page header and the verb bar's tier-budget ellipsis are chrome limits,
   not task text. `escaped_draft_rows` remains only for the single-line Title/Thread
   editors.
+- Notes markdown (view and peek only; edit is raw source). No color. Peek paints the
+  same markers then dims every span; markdown runs on the note text, then the `│`
+  gutter is prefixed. Subset: `**bold**`; `*em*` / `_em_` underline; `` `code` `` dim
+  with ticks kept; `#`…`######` headings (bold+underline, dim hashes); `-` / `*` lists
+  (dim bullet); fenced ` ``` ` (dim fence and body, no inline inside); `- [ ]` stays
+  text (steps own checklists). Unmatched `*` and word-internal `_` stay literal.
 
 ## Build / test / verify
 
@@ -83,9 +89,8 @@ For scriptable board work, use `tsk add` and `tsk list`; read
 - `herdr-plugin.toml` launches `./target/release/tsk`. Rebuild in-repo
   before live smoke. A running board keeps the old binary until you quit it.
 - Test: `cargo test` (plain, parallel)
-- `clippy::if_same_then_else` does not fire on the pinned 1.96.0 toolchain, even when
-  explicitly enabled: byte-identical if/else branches pass `-D warnings`. Do not count on
-  clippy to catch them.
+- `clippy::if_same_then_else` is on via `-D warnings` on the pinned 1.96.0 toolchain.
+  Identical if/else bodies fail the green bar; merge the conditions.
 - A regression test must fail without its fix. Write it, revert the fix, watch it
   fail, restore the fix. Use content that actually crosses the boundary under test.
 - Temp state dirs need a per-binary atomic counter, not just `SystemTime::now()`.
