@@ -9,6 +9,9 @@ review, done. It ships today as a [herdr](https://herdr.dev) plugin, and the
 Park, resume, attention, linking, and dispatch are not part of this tree.
 Older engines live only on the local archive branch `archive/dark-engine-pre-v1`.
 
+The marketing page and docs live in [`site/`](site/) and deploy to
+https://tsk-gules.vercel.app. They are not packaged into the `tsk` binary.
+
 ## Requirements
 
 - Rust 1.96.0 (pinned in `rust-toolchain.toml`)
@@ -162,8 +165,20 @@ Deleted "Draft the quickstart" · u Undo
 `alt+u` restores it. Undo also reverses the last done. It is refused if the task
 changed in between.
 
+## Site
+
+```bash
+cd site
+npm install
+npm run dev
+```
+
+`npm run build` writes `site/dist/`. Vercel Root Directory is `site`.
+
 ## Verify
 
 ```bash
 cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && cargo build --release
 ```
+
+Site-only: `cd site && npm ci && npm run build`.

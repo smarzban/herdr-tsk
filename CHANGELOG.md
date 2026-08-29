@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+The landing page and docs live in `site/` again (Astro + Starlight, moved back
+from `smarzban/tsk-site`). They are not part of the `tsk` binary. Site CI is
+`npm ci && npm run build`; Vercel Root Directory is `site`.
+
 Resize debounce: a burst of terminal `Resize` events (pane-edge drag) waits a
 short quiet window and paints layout once at the settled size. A key or mouse
 event that arrives during that window is deferred until after that paint.

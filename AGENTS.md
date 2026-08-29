@@ -91,7 +91,16 @@ For scriptable board work, use `tsk add` and `tsk list`; read
 - Temp state dirs need a per-binary atomic counter, not just `SystemTime::now()`.
 - Green bar: `cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && cargo build --release`
 - CI installs Rust **1.96.0** with `rustfmt` + `clippy` on ubuntu and macos. The
-  frame-time bench is Linux-only.
+  frame-time bench is Linux-only. Site-only pushes skip that matrix
+  (`paths-ignore: site/**`). Site CI is `.github/workflows/site.yml`:
+  `npm ci && npm run build` in `site/`.
+- Landing page and Starlight docs live in `site/` (Astro). They are not part of
+  the `tsk` binary. Production: https://tsk-gules.vercel.app. Point Vercel at
+  this repo with Root Directory `site`.
+- Changes to the keymap, status verbs, or tab/section semantics need a matching
+  `site/` update (`src/content/docs/docs/{keys,board,capture,cli}.md` and
+  `public/board-demo.js`). The web demo uses bare verb keys on purpose (browsers
+  steal Alt-chords); do not "fix" that to match the TUI.
 
 ### Live herdr smoke
 
