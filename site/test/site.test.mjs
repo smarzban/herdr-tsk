@@ -6,9 +6,9 @@ import { parseCapture } from "../public/capture.js";
 
 const read = (path) => readFile(new URL(path, import.meta.url), "utf8");
 
-test("Vercel ignores unchanged files relative to the site root", async () => {
+test("site Vercel config does not skip the first production deploy", async () => {
   const config = JSON.parse(await read("../vercel.json"));
-  assert.equal(config.ignoreCommand, "git diff --quiet HEAD^ HEAD -- .");
+  assert.equal(config.ignoreCommand, undefined);
 });
 
 test("repo-root Vercel config builds site/ without a Root Directory setting", async () => {

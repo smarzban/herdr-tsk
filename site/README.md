@@ -34,3 +34,5 @@ Root Directory to `site` fails if Vercel is still reading `tsk-site` (that
 repo has no `site/` folder).
 
 `site/vercel.json` is only used if you later set Root Directory to `site`.
+It has no `ignoreCommand`: a docs-only `main` tip would cancel a new
+project's first deploy.
