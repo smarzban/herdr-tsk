@@ -29,7 +29,7 @@ use crate::ui::input::{
 };
 use crate::ui::mouse::{
     capture_layout_for_model, enable_terminal_input, keyboard_enhancement_supported,
-    map_capture_mouse,
+    map_capture_mouse, scrollbar_hit_at, scrollbar_intent_at,
 };
 use crate::ui::queue::BoardTab;
 use crate::ui::scheduler;
@@ -299,10 +299,12 @@ fn run_board() -> Result<(), Box<dyn Error>> {
         // as content).
         let mut frame_rows: Vec<String> = Vec::new();
         let mut frame_copyable: Vec<Rect> = Vec::new();
+        let mut frame_hits = crate::ui::render::QueueHitMap::default();
         // Left Down is deferred until Up (or abandoned when a text drag grows): firing
         // the click on Down made every board-row drag also peek/toggle, so copy only
         // felt reliable on the task page where Down is inert over notes.
         let mut drag_gesture = crate::ui::text_select::DragSelectGesture::new();
+        let mut scrollbar_drag = false;
         loop {
             // Settle, paint, then wait. The board frame path does no host polling, so the
             // wait is only the Frame Scheduler's idle floor. All three are one call because
@@ -317,7 +319,8 @@ fn run_board() -> Result<(), Box<dyn Error>> {
                         .draw(|frame| {
                             let hits = draw_board(frame, model);
                             frame_rows = frame_text_rows(frame.buffer_mut());
-                            frame_copyable = hits.copyable;
+                            frame_copyable = hits.copyable.clone();
+                            frame_hits = hits;
                         })
                         .map(|_| ())
                 },
@@ -335,6 +338,7 @@ fn run_board() -> Result<(), Box<dyn Error>> {
                     // A key while the mouse button is held abandons the deferred click so
                     // Up does not fire a stale peek/select after the keyboard moved on.
                     drag_gesture.clear();
+                    scrollbar_drag = false;
                     let area = terminal_area(terminal)?;
                     // The painted mode owns the keyboard: `resolve_board_surface` resolves the
                     // same input mode at every terminal size (`board_input_mode_for_area` no
@@ -368,6 +372,47 @@ fn run_board() -> Result<(), Box<dyn Error>> {
                     // so a drag does not also fire the Down-time peek/select path.
                     use crate::ui::text_select::{DragSelectOutcome, DragSelectPhase};
                     use crossterm::event::{MouseButton, MouseEventKind};
+                    let page = model.input_mode() == BoardInputMode::TaskPage;
+                    match mouse.kind {
+                        MouseEventKind::Down(MouseButton::Left) => {
+                            let pos = Position::new(mouse.column, mouse.row);
+                            if let Some(intent) = scrollbar_hit_at(&frame_hits, pos) {
+                                scrollbar_drag = true;
+                                drag_gesture.clear();
+                                if handle_board_intent(
+                                    &store,
+                                    &mut domain,
+                                    &mut model,
+                                    intent,
+                                    &mut save_recovery,
+                                )? {
+                                    break;
+                                }
+                                continue;
+                            }
+                            scrollbar_drag = false;
+                        }
+                        MouseEventKind::Drag(MouseButton::Left) if scrollbar_drag => {
+                            if let Some(intent) = scrollbar_intent_at(&frame_hits, mouse.row, page)
+                            {
+                                if handle_board_intent(
+                                    &store,
+                                    &mut domain,
+                                    &mut model,
+                                    intent,
+                                    &mut save_recovery,
+                                )? {
+                                    break;
+                                }
+                            }
+                            continue;
+                        }
+                        MouseEventKind::Up(MouseButton::Left) if scrollbar_drag => {
+                            scrollbar_drag = false;
+                            continue;
+                        }
+                        _ => {}
+                    }
                     let mut click = mouse;
                     match mouse.kind {
                         MouseEventKind::Drag(MouseButton::Left) => {
@@ -708,7 +753,8 @@ pub fn apply_board_intent_with_save_recovery(
             BoardIntent::SelectNext
             | BoardIntent::SelectPrev
             | BoardIntent::SelectIndex(_)
-            | BoardIntent::SelectListIndex(_)
+            | BoardIntent::ListScrollTo(_)
+            | BoardIntent::PageScrollTo(_)
             | BoardIntent::OpenCommandPalette
             | BoardIntent::CommandNext
             | BoardIntent::CommandPrev

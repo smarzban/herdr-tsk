@@ -2,12 +2,14 @@
 
 ## Unreleased
 
-Board list scrollbar: when the deck is taller than the viewport, a dim track (`│`)
-and solid thumb (`█`) paint on the right edge with a one-column gap so titles stay
-clear of the thumb. Selection-follow still keeps the selected row (and an open
-peek) on screen; a click on the track jumps selection to that fraction of the
-deck without peeking or opening the task page. The task page body scrollbar uses
-the same paint helper.
+Board list scrollbar: when the deck is taller than the viewport, a thinner thumb (`▌`)
+paints on the right edge with a one-column gap so titles stay clear of it. The gutter
+is blank and clickable (no `│` track). Titles and age wrap/fit instead of clipping to
+`…`. Clicking the gutter or dragging the thumb moves the viewport without changing
+selection or peeking. The current section header (desk, project, thread, DONE) pins
+under the tabs with a one-row gap once it would scroll off, and the next header
+replaces it. The task page body scrollbar uses the same paint helper, including
+gutter click and thumb drag.
 
 Removed dark engines from the live tree: attention / NEEDS YOU poll, park/resume,
 dispatch/worktree recovery UI, and agent-link board plumbing. Store fields that

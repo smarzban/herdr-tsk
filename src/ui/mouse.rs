@@ -368,6 +368,53 @@ fn hit_at(hits: &QueueHitMap, pos: Position) -> Option<QueueHitTarget> {
         .map(|hit| hit.target)
 }
 
+fn scrollbar_target_intent(target: QueueHitTarget) -> Option<BoardIntent> {
+    match target {
+        QueueHitTarget::ListScroll(offset) => Some(BoardIntent::ListScrollTo(offset)),
+        QueueHitTarget::PageScroll(offset) => Some(BoardIntent::PageScrollTo(offset)),
+        _ => None,
+    }
+}
+
+/// Scrollbar intent for a press that actually lands on the grab zone.
+pub fn scrollbar_hit_at(hits: &QueueHitMap, pos: Position) -> Option<BoardIntent> {
+    hit_at(hits, pos).and_then(scrollbar_target_intent)
+}
+
+/// Scrollbar intent for a drag: clamp `row` to the track even if the pointer left it.
+pub fn scrollbar_intent_at(hits: &QueueHitMap, row: u16, page: bool) -> Option<BoardIntent> {
+    let mut cells: Vec<&crate::ui::render::QueueHit> = hits
+        .regions
+        .iter()
+        .filter(|hit| match hit.target {
+            QueueHitTarget::PageScroll(_) if page => true,
+            QueueHitTarget::ListScroll(_) if !page => true,
+            _ => false,
+        })
+        .collect();
+    if cells.is_empty() {
+        return None;
+    }
+    cells.sort_by_key(|hit| hit.area.y);
+    let first = cells[0];
+    let last = cells[cells.len() - 1];
+    let chosen = if row <= first.area.y {
+        first
+    } else if row >= last.area.y {
+        last
+    } else {
+        cells
+            .iter()
+            .copied()
+            .find(|hit| {
+                let end = hit.area.y.saturating_add(hit.area.height.max(1));
+                (hit.area.y..end).contains(&row)
+            })
+            .unwrap_or(first)
+    };
+    scrollbar_target_intent(chosen.target)
+}
+
 fn wheel_board_intent(model: &BoardModel, kind: MouseEventKind) -> Option<BoardIntent> {
     match model.input_mode() {
         BoardInputMode::TaskPage => match kind {
@@ -375,17 +422,15 @@ fn wheel_board_intent(model: &BoardModel, kind: MouseEventKind) -> Option<BoardI
             MouseEventKind::ScrollDown => Some(BoardIntent::PageWheelScrollDown),
             _ => None,
         },
-        BoardInputMode::Normal => {
-            let visible = model.visible_ids().len();
-            let selected = model.selected_index()?;
-            match kind {
-                MouseEventKind::ScrollUp if selected > 0 => Some(BoardIntent::SelectPrev),
-                MouseEventKind::ScrollDown if selected + 1 < visible => {
-                    Some(BoardIntent::SelectNext)
-                }
-                _ => None,
-            }
-        }
+        BoardInputMode::Normal => match kind {
+            MouseEventKind::ScrollUp => Some(BoardIntent::ListScrollTo(
+                model.list_scroll().saturating_sub(1),
+            )),
+            MouseEventKind::ScrollDown => Some(BoardIntent::ListScrollTo(
+                model.list_scroll().saturating_add(1),
+            )),
+            _ => None,
+        },
         BoardInputMode::Palette => {
             let len = model.visible_commands().len();
             let selected = model.command_selected()?;
@@ -478,6 +523,7 @@ pub fn map_board_mouse(
             // A click on an step row selects it (AC-21) — the board's click
             // convention: a click selects, never mutates.
             Some(QueueHitTarget::Step(index)) => Some(BoardIntent::SelectStep(index)),
+            Some(QueueHitTarget::PageScroll(offset)) => Some(BoardIntent::PageScrollTo(offset)),
             Some(QueueHitTarget::Verb(index)) => verb_intent(model, index),
             _ => None,
         },
@@ -514,11 +560,7 @@ pub fn map_board_mouse(
                 .iter()
                 .position(|&visible| visible == id)
                 .map(BoardIntent::SelectIndex),
-            Some(QueueHitTarget::ListScrollSelect(id)) => model
-                .visible_ids()
-                .iter()
-                .position(|&visible| visible == id)
-                .map(BoardIntent::SelectListIndex),
+            Some(QueueHitTarget::ListScroll(offset)) => Some(BoardIntent::ListScrollTo(offset)),
             Some(QueueHitTarget::Verb(index)) => verb_intent(model, index),
             Some(QueueHitTarget::DeleteNoticeUndo) => Some(BoardIntent::Undo),
             _ => None,

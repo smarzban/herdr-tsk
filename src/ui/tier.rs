@@ -41,6 +41,26 @@ pub struct TierGeometry {
     pub verb_bar_entry_budget: u16,
 }
 
+impl TierGeometry {
+    /// Rebuild title/meta budgets for a narrower content width (scrollbar gap + track).
+    ///
+    /// Only shrinking `row_width` left title+meta summing past the row and clipped
+    /// every task into `…`.
+    pub fn with_row_width(self, row_width: u16) -> Self {
+        let meta_column_width = match self.tier {
+            Tier::Standard => STANDARD_META_COLUMN_WIDTH.min(row_width),
+            Tier::Compact => 0,
+        };
+        let title_width = row_width.saturating_sub(meta_column_width);
+        Self {
+            row_width,
+            title_width,
+            meta_column_width,
+            ..self
+        }
+    }
+}
+
 /// Project chip truncation ceiling shared by both tiers.
 pub const SELECTOR_CHIP_MAX_CELLS: u16 = 24;
 
@@ -165,6 +185,15 @@ mod tests {
                 assert_eq!(g.meta_column_width, STANDARD_META_COLUMN_WIDTH);
                 assert_eq!(g.title_width, 50, "78 columns retain 50 title cells");
             }
+            let narrowed = g.with_row_width(w.saturating_sub(2));
+            assert_eq!(narrowed.row_width, w.saturating_sub(2), "{w}x{h}");
+            assert_eq!(
+                narrowed
+                    .title_width
+                    .saturating_add(narrowed.meta_column_width),
+                narrowed.row_width,
+                "{w}x{h} scrollbar shrink must rebalance title+meta"
+            );
             // Width ≥ 120 still reports standard in the (wide deferred).
             if w >= 120 {
                 assert_eq!(g.tier, Tier::Standard, "wide not returned in M1 at {w}x{h}");

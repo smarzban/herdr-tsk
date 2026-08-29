@@ -641,52 +641,20 @@ fn click_and_wheel_match_keyboard_effects_for_each_control() {
         .expect("mouse close drawer");
     assert!(!model_mouse.drawer_open());
 
-    // Wheel: a step is the keyboard's own relative selection step.
-    let mut seed = DomainState::new();
-    seed.create(
-        "first",
-        None,
-        project(THIS_REPO),
-        None,
-        None,
-        ProvenanceOrigin::Manual,
-    )
-    .expect("first");
-    seed.create(
-        "second",
-        None,
-        project(THIS_REPO),
-        None,
-        None,
-        ProvenanceOrigin::Manual,
-    )
-    .expect("second");
-    let mut domain_key = seed.clone();
-    let mut domain_mouse = seed.clone();
-    let mut model_key = BoardModel::from_domain(&domain_key, Some(PathBuf::from(THIS_REPO)));
-    let mut model_mouse = BoardModel::from_domain(&domain_mouse, Some(PathBuf::from(THIS_REPO)));
-    let ids = model_key.visible_ids();
-    assert_eq!(ids.len(), 2, "both tasks must be visible on the deck");
-    assert_eq!(model_key.selected_id(), Some(ids[0]));
-    let keyboard_next = map_key(BoardInputMode::Normal, press(KeyCode::Down)).expect("down key");
-    apply_intent(&mut domain_key, &mut model_key, keyboard_next.clone(), None)
-        .expect("keyboard next");
+    // Wheel scrolls the list viewport; it does not move selection (j/k still do).
+    let (mut domain_mouse, mut model_mouse) = deck_of(40);
+    let selected = model_mouse.selected_id();
+    let _ = page_rows(&model_mouse);
     let hits = board_hit_map(STANDARD, &model_mouse);
-    let mouse_next = map_board_mouse(&model_mouse, &hits, wheel_down(0, 0)).expect("wheel next");
-    assert_eq!(mouse_next, keyboard_next);
-    apply_intent(&mut domain_mouse, &mut model_mouse, mouse_next, None).expect("mouse next");
-    assert_eq!(model_key.selected_id(), Some(ids[1]));
-    assert_eq!(model_mouse.selected_id(), Some(ids[1]));
-    // the last row is a hard stop for the wheel, unlike the
-    // keyboard's own wrap: no further step down, but a step back up still moves the
-    // selection. This is a deliberate, signed-off divergence from's literal wording,
-    // not an inherited accident -- see the comment on `wheel_step_matches_the_keyboard_
-    // selection_step` in `src/ui/mouse.rs` for why a wheel step does not wrap.
+    let mouse_next = map_board_mouse(&model_mouse, &hits, wheel_down(0, 0)).expect("wheel down");
+    assert_eq!(mouse_next, BoardIntent::ListScrollTo(1));
+    apply_intent(&mut domain_mouse, &mut model_mouse, mouse_next, None).expect("wheel scroll");
+    assert_eq!(model_mouse.selected_id(), selected);
+    assert_eq!(model_mouse.list_scroll(), 1);
     let hits = board_hit_map(STANDARD, &model_mouse);
-    assert_eq!(map_board_mouse(&model_mouse, &hits, wheel_down(0, 0)), None);
     assert_eq!(
         map_board_mouse(&model_mouse, &hits, wheel_up(0, 0)),
-        Some(BoardIntent::SelectPrev)
+        Some(BoardIntent::ListScrollTo(0))
     );
 
     // Project selector chip: no the key binds it (mouse-only, like `SelectIndex`), so its
@@ -2018,36 +1986,111 @@ fn the_modal_cards_copyable_rects_exclude_its_own_border_and_footer() {
 }
 
 #[test]
-fn list_scrollbar_click_jumps_selection_without_peeking() {
+fn list_scrollbar_click_jumps_viewport_without_changing_selection() {
     let (mut domain, mut model) = deck_of(40);
     let first = model.visible_ids()[0];
     assert_eq!(model.selected_id(), Some(first));
     assert_eq!(model.detail_open(), None);
 
     let hits = board_hit_map(STANDARD, &model);
-    let track = hits
-        .regions
-        .iter()
-        .rev()
-        .find(|hit| matches!(hit.target, QueueHitTarget::ListScrollSelect(_)))
-        .expect("overflowing deck paints scrollbar hits");
-    // Bottom of the track jumps toward the end of the deck.
     let bottom = hits
         .regions
         .iter()
-        .filter(|hit| matches!(hit.target, QueueHitTarget::ListScrollSelect(_)))
+        .filter(|hit| matches!(hit.target, QueueHitTarget::ListScroll(_)))
         .max_by_key(|hit| hit.area.y)
         .expect("scrollbar track cells");
     let intent = map_board_mouse(&model, &hits, left_click(bottom.area.x, bottom.area.y))
         .expect("scrollbar click");
     assert!(
-        matches!(intent, BoardIntent::SelectListIndex(_)),
-        "scrollbar must quiet-select, got {intent:?}"
+        matches!(intent, BoardIntent::ListScrollTo(offset) if offset > 0),
+        "scrollbar must jump the viewport, got {intent:?}"
     );
     apply_intent(&mut domain, &mut model, intent, None).expect("apply jump");
-    let selected = model.selected_id().expect("selection");
-    assert_ne!(selected, first, "jump must leave the top of the deck");
+    assert_eq!(
+        model.selected_id(),
+        Some(first),
+        "track click must leave selection alone"
+    );
     assert_eq!(model.detail_open(), None, "scrollbar click must not peek");
     assert_eq!(model.input_mode(), BoardInputMode::Normal);
-    let _ = track; // silence unused when filter finds cells
+}
+
+#[test]
+fn row_click_selects_without_jumping_the_viewport() {
+    let (mut domain, mut model) = deck_of(40);
+    let _ = page_rows(&model);
+    let before = page_rows(&model);
+    assert!(
+        before.iter().any(|row| row.contains("task 39")),
+        "top of the deck should be on screen:\n{}",
+        before.join("\n")
+    );
+    let ids = model.visible_ids();
+    let mid = 8;
+    apply_intent(&mut domain, &mut model, BoardIntent::SelectIndex(mid), None)
+        .expect("select middle row");
+    assert_eq!(model.selected_id(), Some(ids[mid]));
+    assert_eq!(model.detail_open(), Some(ids[mid]));
+    let after = page_rows(&model);
+    assert!(
+        after.iter().any(|row| row.contains("task 39")),
+        "clicking a visible row must not park the peek at the bottom:\n{}",
+        after.join("\n")
+    );
+}
+
+#[test]
+fn list_scrollbar_still_moves_the_viewport_while_peek_is_open() {
+    let (mut domain, mut model) = deck_of(40);
+    let _ = page_rows(&model);
+    apply_intent(&mut domain, &mut model, BoardIntent::SelectIndex(0), None)
+        .expect("peek first row");
+    assert!(model.detail_open().is_some());
+    let before = page_rows(&model);
+    let hits = board_hit_map(STANDARD, &model);
+    let bottom = hits
+        .regions
+        .iter()
+        .filter(|hit| matches!(hit.target, QueueHitTarget::ListScroll(_)))
+        .max_by_key(|hit| hit.area.y)
+        .expect("peek must not remove the list scrollbar");
+    let intent = map_board_mouse(&model, &hits, left_click(bottom.area.x, bottom.area.y))
+        .expect("scrollbar click with peek open");
+    apply_intent(&mut domain, &mut model, intent, None).expect("scroll with peek open");
+    let after = page_rows(&model);
+    assert_ne!(
+        after,
+        before,
+        "scrollbar must move the list while peek is open:\n{}",
+        after.join("\n")
+    );
+}
+
+#[test]
+fn mouse_wheel_scrolls_the_list_while_peek_is_open() {
+    let (mut domain, mut model) = deck_of(40);
+    let _ = page_rows(&model);
+    apply_intent(&mut domain, &mut model, BoardIntent::SelectIndex(0), None)
+        .expect("peek first row");
+    let selected = model.selected_id();
+    let before = page_rows(&model);
+    let hits = board_hit_map(STANDARD, &model);
+    for _ in 0..8 {
+        let intent = map_board_mouse(&model, &hits, wheel_down(0, 0)).expect("wheel down");
+        apply_intent(&mut domain, &mut model, intent, None).expect("apply wheel");
+    }
+    assert_eq!(
+        model.selected_id(),
+        selected,
+        "wheel must not move selection"
+    );
+    assert_eq!(model.detail_open(), selected, "wheel must leave peek open");
+    assert!(model.list_scroll() > 0, "wheel must advance list_scroll");
+    let after = page_rows(&model);
+    assert_ne!(
+        after,
+        before,
+        "wheel must move the list while peek is open:\n{}",
+        after.join("\n")
+    );
 }

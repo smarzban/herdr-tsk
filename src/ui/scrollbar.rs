@@ -1,7 +1,7 @@
-//! Vertical mono scrollbar: dim track (`│`) and solid thumb (`█`).
+//! Vertical mono scrollbar: a thinner thumb (`▌`) in the last column.
 //!
-//! Space is reserved only when content overflows the viewport. Callers paint the
-//! track in the last column and leave a one-column gap beside it.
+//! Space is reserved only when content overflows the viewport. Callers leave a
+//! one-column gap beside the thumb column; the gutter itself is blank (clickable).
 
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
@@ -15,6 +15,9 @@ fn style_dim() -> Style {
 
 /// Columns reserved beside content when a scrollbar is shown: gap + track.
 pub const SCROLLBAR_RESERVE_COLS: u16 = 2;
+
+/// Thumb glyph: left-half block, one cell, thinner than a full `█`.
+pub const THUMB_GLYPH: &str = "▌";
 
 /// Whether content overflows the viewport enough to need a scrollbar.
 pub fn needs_scrollbar(total_rows: usize, viewport_rows: usize) -> bool {
@@ -43,6 +46,21 @@ pub fn split_for_scrollbar(
         height,
     };
     (content_width, Some(track))
+}
+
+/// Mouse grab zone: the track plus the one-column gap to its left.
+///
+/// Grok Build uses gap + track + one slop column past the border so a press on
+/// the adjacent chrome still grabs. Our track is already the frame edge, so the
+/// gap column is the slop.
+pub fn grab_zone(track: Rect) -> Rect {
+    let x = track.x.saturating_sub(1);
+    Rect {
+        x,
+        y: track.y,
+        width: (track.x - x).saturating_add(track.width),
+        height: track.height,
+    }
 }
 
 /// Map a click on the track to a content scroll offset.
@@ -106,14 +124,9 @@ pub fn paint(frame: &mut Frame<'_>, track: Rect, scroll: usize, total_rows: usiz
         return;
     }
     let (thumb_start, thumb_rows) = thumb_range(scroll, total_rows, viewport);
-    for row in 0..viewport {
-        let glyph = if (thumb_start..thumb_start + thumb_rows).contains(&row) {
-            "█"
-        } else {
-            "│"
-        };
+    for row in thumb_start..thumb_start.saturating_add(thumb_rows).min(viewport) {
         frame.render_widget(
-            Paragraph::new(Line::from(Span::styled(glyph, style_dim()))),
+            Paragraph::new(Line::from(Span::styled(THUMB_GLYPH, style_dim()))),
             Rect::new(track.x, track.y.saturating_add(row as u16), 1, 1),
         );
     }
@@ -163,5 +176,15 @@ mod tests {
         let (bottom, rows2) = thumb_range(90, 100, 10);
         assert_eq!(rows, rows2);
         assert!(top < bottom);
+    }
+
+    #[test]
+    fn grab_zone_includes_the_gap_column() {
+        let zone = grab_zone(Rect::new(39, 2, 1, 10));
+        assert_eq!(zone, Rect::new(38, 2, 2, 10));
+        assert!(zone.contains((38, 2).into()), "gap column grabs");
+        assert!(zone.contains((39, 11).into()), "track grabs");
+        assert!(!zone.contains((37, 5).into()), "two columns left is out");
+        assert!(!zone.contains((40, 5).into()), "past the frame is out");
     }
 }

@@ -337,6 +337,8 @@ fn fixture_model_on_tab<'a>(
         now: now(),
         overlay: QueueOverlay::None,
         detail_open: None,
+        list_scroll: 0,
+        follow_list: true,
     }
 }
 
@@ -346,7 +348,7 @@ fn paint(width: u16, height: u16, model: &QueueFrameModel<'_>) -> (Vec<String>, 
     let mut terminal = Terminal::new(backend).expect("test terminal");
     terminal
         .draw(|frame: &mut Frame| {
-            let _hits = draw_queue_frame(frame, model, &geo);
+            let _ = draw_queue_frame(frame, model, &geo);
         })
         .expect("draw");
     let backend = terminal.backend();
@@ -399,7 +401,7 @@ fn trimmed(row: &str) -> String {
 /// List content without the overflow scrollbar's track/thumb cell on the right edge.
 fn list_body(row: &str) -> String {
     let mut body = trimmed(row);
-    if body.ends_with('█') || body.ends_with('│') {
+    if body.ends_with('█') || body.ends_with('▌') || body.ends_with('│') {
         body.pop();
         body = body.trim_end().to_string();
     }
@@ -1439,7 +1441,7 @@ fn task_page_scrolls_notes_and_steps_as_one_content_region() {
     );
     assert!(shown[20].contains("created"), "footer must stay fixed");
     assert!(
-        shown.iter().any(|row| row.contains('█')),
+        shown.iter().any(|row| row.contains('▌')),
         "overflow needs a scrollbar"
     );
     assert!(shown.iter().any(|row| row.contains("N16 filler line")));
@@ -1473,7 +1475,7 @@ fn task_page_scrolls_notes_and_steps_as_one_content_region() {
     assert!(
         shown[step_row + 1]
             .chars()
-            .all(|cell| matches!(cell, ' ' | '█' | '│')),
+            .all(|cell| matches!(cell, ' ' | '▌')),
         "the steps section needs its trailing blank row:\n{}",
         shown.join("\n")
     );
@@ -1886,10 +1888,17 @@ fn compact_peek_is_inline_and_editors_stay_full_screen_takeovers() {
             viewport.contains("Smoke-test worktree dispatch"),
             "{w}x{h}: the peeked task's row must stay visible:\n{viewport}"
         );
-        assert!(
-            viewport.contains("scope tsk"),
-            "{w}x{h}: the peek body must weave inline under the row:\n{viewport}"
-        );
+        if h > 10 {
+            assert!(
+                viewport.contains("scope tsk"),
+                "{w}x{h}: the peek body must weave inline under the row:\n{viewport}"
+            );
+        } else {
+            assert!(
+                viewport.contains("no notes yet"),
+                "{w}x{h}: compact floor still shows the peek under the row:\n{viewport}"
+            );
+        }
 
         // A field editor (title) is still a full takeover that erases the base list.
         model.detail_open = None;
@@ -2895,13 +2904,15 @@ fn overflowing_board_list_paints_a_scrollbar() {
     let bottom = (geo.viewport_top + geo.viewport_height) as usize;
     let viewport = &rows[top..bottom];
     assert!(
-        viewport.iter().any(|row| row.contains('█')),
+        viewport.iter().any(|row| row.contains('▌')),
         "overflowing list needs a thumb:\n{}",
         viewport.join("\n")
     );
     assert!(
-        viewport.iter().any(|row| row.contains('│')),
-        "overflowing list needs a track:\n{}",
+        viewport
+            .iter()
+            .all(|row| { !matches!(row.chars().last(), Some('│')) }),
+        "scrollbar gutter is blank, not a │ track:\n{}",
         viewport.join("\n")
     );
     assert!(
@@ -2910,5 +2921,108 @@ fn overflowing_board_list_paints_a_scrollbar() {
             .any(|row| trimmed(row).contains("Scrollbar padding task 39")),
         "selection-follow still keeps the selected task visible:\n{}",
         viewport.join("\n")
+    );
+}
+
+#[test]
+fn overflowing_board_list_does_not_clip_task_rows_to_ellipsis() {
+    let tasks: Vec<Task> = (0..40u128)
+        .map(|i| {
+            task(
+                7100 + i,
+                &format!("Scrollbar padding task {i}"),
+                HumanStatus::Ready,
+                project("/repos/tsk"),
+                3600,
+            )
+        })
+        .collect();
+    let view = fixture_view_projects(&tasks, false);
+    let model = fixture_model_on_tab(&tasks, &view, BoardTab::Projects);
+    let (rows, geo) = paint(80, 24, &model);
+    let top = geo.viewport_top as usize;
+    let bottom = (geo.viewport_top + geo.viewport_height) as usize;
+    for row in &rows[top..bottom] {
+        if trimmed(row).contains("Scrollbar padding task") {
+            assert!(
+                !row.contains('…'),
+                "scrollbar must not clip task rows into ellipsis:\n{row}"
+            );
+        }
+    }
+}
+
+#[test]
+fn scrolled_list_pins_the_section_header_under_the_tabs() {
+    let tasks: Vec<Task> = (0..40u128)
+        .map(|i| {
+            task(
+                7200 + i,
+                &format!("Sticky header task {i}"),
+                HumanStatus::Ready,
+                TaskScope::Global,
+                3600,
+            )
+        })
+        .collect();
+    let view = fixture_view(&tasks, false);
+    let mut model = fixture_model(&tasks, &view);
+    model.selection_id = Some(Uuid::from_u128(7200));
+    model.list_scroll = 6;
+    model.follow_list = false;
+    let (rows, geo) = paint(80, 24, &model);
+    let top = geo.viewport_top as usize;
+    assert!(
+        trimmed(&rows[top]).is_empty(),
+        "pinned header needs a blank row under the tabs:\n{}",
+        rows.join("\n")
+    );
+    let header = trimmed(&rows[top + 1]);
+    assert!(
+        header.contains("desk"),
+        "desk header must pin under the tabs after scrolling past it:\n{header}\n{}",
+        rows.join("\n")
+    );
+}
+
+#[test]
+fn scrolled_done_section_pins_done_under_the_tabs() {
+    let mut tasks: Vec<Task> = (0..8u128)
+        .map(|i| {
+            task(
+                7300 + i,
+                &format!("Open sticky {i}"),
+                HumanStatus::Ready,
+                TaskScope::Global,
+                3600,
+            )
+        })
+        .collect();
+    tasks.extend((0..40u128).map(|i| {
+        task(
+            7400 + i,
+            &format!("Done sticky {i}"),
+            HumanStatus::Done,
+            TaskScope::Global,
+            3600,
+        )
+    }));
+    let view = fixture_view(&tasks, true);
+    let mut model = fixture_model(&tasks, &view);
+    model.selection_id = Some(Uuid::from_u128(7300));
+    model.list_scroll = 20;
+    model.follow_list = false;
+    let (rows, geo) = paint(80, 24, &model);
+    let top = geo.viewport_top as usize;
+    assert!(
+        trimmed(&rows[top]).is_empty(),
+        "pinned header needs a blank row under the tabs:\n{}",
+        rows.join("\n")
+    );
+    let header = trimmed(&rows[top + 1]);
+    assert!(
+        header.contains("DONE"),
+        "DONE header must pin under the tabs once that section reaches the top:\n{header}\n{}",
+        rows.join("\n")
     );
 }

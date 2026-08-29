@@ -102,7 +102,8 @@ letters do nothing, so typing in a focused board cannot complete or delete work.
 
 | Key | Does |
 | --- | --- |
-| `j` `k` or `↑` `↓` | move (the wheel does too) |
+| `j` `k` or `↑` `↓` | move selection |
+| wheel | scroll the list |
 | `alt+space` | start the selected task, or reopen it if it is done |
 | `alt+d` | done |
 | `alt+o` | reopen |

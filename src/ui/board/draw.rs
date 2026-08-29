@@ -636,8 +636,13 @@ fn draw_board_impl(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap
         now: SystemTime::now(),
         overlay,
         detail_open: model.detail_open,
+        list_scroll: model.list_scroll.get(),
+        follow_list: model.follow_list.get(),
     };
-    let hits = render::draw_queue_frame(frame, &frame_model, &geo);
+    let (hits, painted_list_scroll) = render::draw_queue_frame(frame, &frame_model, &geo);
+    if let Some(scroll) = painted_list_scroll {
+        model.list_scroll.set(scroll);
+    }
 
     // Board-form edits use the task page's status and verb rows rather than an inline rule row.
     if model.open_field_edit().is_some() && model.form.is_none() {
