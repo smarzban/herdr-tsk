@@ -248,3 +248,16 @@ fn no_pending_event_skips_the_settled_paint() {
     assert_eq!(painted, 0);
     assert!(out.is_none());
 }
+
+#[test]
+fn run_board_resize_arm_drains_through_coalesce_then_paints() {
+    let src = include_str!("../src/app.rs");
+    assert!(
+        src.contains("pending_event = scheduler::coalesce_resizes(event::poll, event::read)?"),
+        "run_board Resize arm must call coalesce_resizes"
+    );
+    assert!(
+        src.contains("take_pending_after_paint(&mut pending_event"),
+        "run_board must paint the settled size before a deferred event"
+    );
+}
