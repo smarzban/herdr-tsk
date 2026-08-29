@@ -25,6 +25,71 @@ use ratatui::style::Modifier;
 use ratatui::Frame;
 use unicode_width::UnicodeWidthChar;
 
+// ---------------------------------------------------------------------------
+// Drag edge auto-scroll
+// ---------------------------------------------------------------------------
+
+/// Direction for drag auto-scroll.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AutoScrollDirection {
+    Up,
+    Down,
+}
+
+/// Timer-driven auto-scroll while a text drag sits near a content edge.
+///
+/// Each idle tick scrolls by `speed` rows in `direction`. Pointer motion
+/// recomputes the state; leaving the edge zone or ending the drag clears it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DragAutoScrollState {
+    pub direction: AutoScrollDirection,
+    /// Rows to scroll per tick.
+    pub speed: u16,
+}
+
+/// Rows of near-edge interior that still arm auto-scroll.
+const EDGE_THRESHOLD: u16 = 2;
+
+/// Compute auto-scroll from the pointer row relative to a content area.
+///
+/// Returns `Some` when the pointer is above, below, or within [`EDGE_THRESHOLD`]
+/// rows of the content boundary; `None` when it sits comfortably inside.
+pub fn compute_autoscroll(mouse_row: u16, content_area: Rect) -> Option<DragAutoScrollState> {
+    let top = content_area.y;
+    let bottom = content_area.y.saturating_add(content_area.height);
+
+    if content_area.height == 0 {
+        return None;
+    }
+
+    if mouse_row < top.saturating_add(EDGE_THRESHOLD) {
+        let distance = top.saturating_add(EDGE_THRESHOLD).saturating_sub(mouse_row);
+        Some(DragAutoScrollState {
+            direction: AutoScrollDirection::Up,
+            speed: speed_for_distance(distance),
+        })
+    } else if mouse_row >= bottom.saturating_sub(EDGE_THRESHOLD) {
+        let distance = mouse_row
+            .saturating_sub(bottom.saturating_sub(EDGE_THRESHOLD))
+            .saturating_add(1);
+        Some(DragAutoScrollState {
+            direction: AutoScrollDirection::Down,
+            speed: speed_for_distance(distance),
+        })
+    } else {
+        None
+    }
+}
+
+fn speed_for_distance(distance: u16) -> u16 {
+    match distance {
+        0..=2 => 1,
+        3..=5 => 2,
+        6..=10 => 3,
+        _ => 5,
+    }
+}
+
 /// Left-button press → drag → release for board text selection.
 ///
 /// Clicks are deferred until release so a real drag can copy without also firing
@@ -34,6 +99,16 @@ use unicode_width::UnicodeWidthChar;
 pub struct DragSelectGesture {
     /// Down cell while a deferred click is still armed (`None` once a drag has area).
     pending_down: Option<Position>,
+    /// Edge auto-scroll armed while a drag with area sits near the content edge.
+    autoscroll: Option<DragAutoScrollState>,
+    /// Last pointer row seen during an active drag (feeds idle ticks).
+    last_drag_row: Option<u16>,
+    /// Copyable lines that scrolled out of the top of the selection.
+    captured_before: Vec<String>,
+    /// Copyable lines that scrolled out of the bottom of the selection.
+    captured_after: Vec<String>,
+    /// Copyable text on the press row; copy never includes lines before this.
+    copy_origin: Option<String>,
 }
 
 /// One phase of [`DragSelectGesture::handle`].
@@ -63,6 +138,104 @@ impl DragSelectGesture {
     /// Abandon a deferred click (e.g. a key pressed while the button is held).
     pub fn clear(&mut self) {
         self.pending_down = None;
+        self.autoscroll = None;
+        self.last_drag_row = None;
+        self.captured_before.clear();
+        self.captured_after.clear();
+        self.copy_origin = None;
+    }
+
+    /// Whether edge auto-scroll is armed and needs short idle ticks.
+    pub fn has_autoscroll(&self) -> bool {
+        self.autoscroll.is_some()
+    }
+
+    /// Current auto-scroll state, if any.
+    pub fn autoscroll(&self) -> Option<DragAutoScrollState> {
+        self.autoscroll
+    }
+
+    pub fn last_drag_row(&self) -> Option<u16> {
+        self.last_drag_row
+    }
+
+    /// Lines that left the selection through the top of the viewport.
+    pub fn captured_before(&self) -> &[String] {
+        &self.captured_before
+    }
+
+    /// Lines that left the selection through the bottom of the viewport.
+    pub fn captured_after(&self) -> &[String] {
+        &self.captured_after
+    }
+
+    pub fn copy_origin(&self) -> Option<&str> {
+        self.copy_origin.as_deref()
+    }
+
+    /// Remember the press-row title once, before autoscroll moves it.
+    pub fn ensure_copy_origin(&mut self, line: String) {
+        if self.copy_origin.is_none() && !line.is_empty() {
+            self.copy_origin = Some(line);
+        }
+    }
+
+    /// Keep copyable lines that just scrolled out of the live highlight.
+    pub fn capture_leaving_rows(
+        &mut self,
+        rows: &[String],
+        copyable: &[Rect],
+        selection: TextSelection,
+        content: Rect,
+        direction: AutoScrollDirection,
+        delta: usize,
+    ) {
+        if delta == 0 || content.height == 0 {
+            return;
+        }
+        let delta = u16::try_from(delta).unwrap_or(u16::MAX);
+        // Sticky headers pin at content.y, so titles leave below them. Use the
+        // first copyable row in the viewport as the top of scrolling content.
+        let origin = first_copyable_row(copyable, content).unwrap_or(content.y);
+        let (from, to, prefix) = match direction {
+            AutoScrollDirection::Down => {
+                let from = origin;
+                let to = origin.saturating_add(delta.saturating_sub(1));
+                (from, to, true)
+            }
+            AutoScrollDirection::Up => {
+                let end = last_copyable_row(copyable, content)
+                    .unwrap_or_else(|| content.y.saturating_add(content.height.saturating_sub(1)));
+                let from = end.saturating_sub(delta.saturating_sub(1));
+                (from, end, false)
+            }
+        };
+        let lines = selection_lines(rows, copyable, &selection, from, to);
+        if lines.is_empty() {
+            return;
+        }
+        if prefix {
+            self.captured_before.extend(lines);
+        } else {
+            self.captured_after.splice(0..0, lines);
+        }
+    }
+
+    /// Recompute auto-scroll from the pointer row and content area.
+    ///
+    /// Only arms when a drag already has area; otherwise clears.
+    pub fn update_autoscroll(
+        &mut self,
+        mouse_row: u16,
+        content_area: Rect,
+        selection_has_area: bool,
+    ) {
+        self.last_drag_row = Some(mouse_row);
+        if selection_has_area {
+            self.autoscroll = compute_autoscroll(mouse_row, content_area);
+        } else {
+            self.autoscroll = None;
+        }
     }
 
     /// Feed one left-button phase.
@@ -80,15 +253,25 @@ impl DragSelectGesture {
         match phase {
             DragSelectPhase::Press => {
                 self.pending_down = Some(position);
+                self.autoscroll = None;
+                self.last_drag_row = Some(position.y);
+                self.captured_before.clear();
+                self.captured_after.clear();
+                self.copy_origin = None;
                 DragSelectOutcome::Continue
             }
             DragSelectPhase::Move => {
+                self.last_drag_row = Some(position.y);
                 if selection.is_some_and(|sel| sel.has_area()) {
                     self.pending_down = None;
+                } else {
+                    self.autoscroll = None;
                 }
                 DragSelectOutcome::Continue
             }
             DragSelectPhase::Release => {
+                self.autoscroll = None;
+                self.last_drag_row = None;
                 if selection.is_some_and(|sel| sel.has_area()) {
                     self.pending_down = None;
                     DragSelectOutcome::Copy
@@ -178,9 +361,61 @@ pub fn selection_text(
     if !selection.has_area() {
         return None;
     }
+    let (_, y0, _, y1) = selection.normalized();
+    let lines = selection_lines(rows, copyable, selection, y0, y1);
+    if lines.is_empty() {
+        None
+    } else {
+        Some(lines.join("\n"))
+    }
+}
+
+fn first_copyable_row(copyable: &[Rect], content: Rect) -> Option<u16> {
+    copyable
+        .iter()
+        .filter(|area| {
+            area.width > 0
+                && area.height > 0
+                && area.y >= content.y
+                && area.y < content.y.saturating_add(content.height)
+        })
+        .map(|area| area.y)
+        .min()
+}
+
+fn last_copyable_row(copyable: &[Rect], content: Rect) -> Option<u16> {
+    copyable
+        .iter()
+        .filter(|area| {
+            area.width > 0
+                && area.height > 0
+                && area.y >= content.y
+                && area.y < content.y.saturating_add(content.height)
+        })
+        .map(|area| area.y.saturating_add(area.height.saturating_sub(1)))
+        .max()
+}
+
+/// Copyable lines of `selection` whose screen row sits in `y_from..=y_to`.
+/// One-row slices are kept; this is how autoscroll records lines that left the window.
+fn selection_lines(
+    rows: &[String],
+    copyable: &[Rect],
+    selection: &TextSelection,
+    y_from: u16,
+    y_to: u16,
+) -> Vec<String> {
+    if y_from > y_to {
+        return Vec::new();
+    }
     let (x0, y0, x1, y1) = selection.normalized();
+    let top = y0.max(y_from);
+    let bottom = y1.min(y_to);
+    if top > bottom {
+        return Vec::new();
+    }
     let mut lines = Vec::new();
-    for y in y0..=y1 {
+    for y in top..=bottom {
         let Some(row) = rows.get(y as usize) else {
             continue;
         };
@@ -201,6 +436,53 @@ pub fn selection_text(
         }
         if !pieces.is_empty() {
             lines.push(pieces.join(" "));
+        }
+    }
+    lines
+}
+
+/// Copyable text on one screen row, same trim as a drag copy.
+pub fn copyable_line_at(rows: &[String], copyable: &[Rect], y: u16) -> Option<String> {
+    let dummy = TextSelection::new(Position::new(0, y), Position::new(u16::MAX, y));
+    selection_lines(rows, copyable, &dummy, y, y)
+        .into_iter()
+        .next()
+}
+
+/// Prefix (scrolled off the top) + live frame + suffix (scrolled off the bottom).
+/// `origin` is the press-row title. `from_origin` is a downward drag: drop lines
+/// before origin. Upward: drop lines after origin. Seam de-dupe is exact equality
+/// only, so `fix` and `fix bug` stay two titles.
+pub fn compose_selection_copy(
+    before: &[String],
+    live: Option<String>,
+    after: &[String],
+    origin: Option<&str>,
+    from_origin: bool,
+) -> Option<String> {
+    let mut lines: Vec<String> = Vec::new();
+    lines.extend(before.iter().cloned());
+    if let Some(live) = live {
+        let live_lines: Vec<String> = live.split('\n').map(str::to_string).collect();
+        if let (Some(last), Some(first)) = (lines.last(), live_lines.first()) {
+            if last == first {
+                lines.extend(live_lines.into_iter().skip(1));
+            } else {
+                lines.extend(live_lines);
+            }
+        } else {
+            lines.extend(live_lines);
+        }
+    }
+    lines.extend(after.iter().cloned());
+    lines.retain(|line| !line.is_empty());
+    if let Some(origin) = origin {
+        if let Some(i) = lines.iter().position(|line| line == origin) {
+            if from_origin {
+                lines.drain(..i);
+            } else {
+                lines.truncate(i.saturating_add(1));
+            }
         }
     }
     if lines.is_empty() {
@@ -264,8 +546,8 @@ fn slice_cells(row: &str, start: u16, end: u16) -> String {
 ///
 /// Geometry matches [`selection_text`]: first/last rows use the drag edges, interior
 /// rows span their copyable columns. Chrome outside those rects (peek `│` gutter,
-/// glyphs, meta) stays unhighlighted — the same content bounds grok-build-style
-/// app selection uses, rather than painting full terminal rows.
+/// glyphs, meta) stays unhighlighted — the same content bounds the copy path
+/// uses, rather than painting full terminal rows.
 pub fn paint_selection(frame: &mut Frame<'_>, selection: &TextSelection, copyable: &[Rect]) {
     if !selection.has_area() {
         return;
@@ -622,6 +904,171 @@ mod tests {
         assert_eq!(
             selection_text(&rows, &copyable, &sel).as_deref(),
             Some("abc")
+        );
+    }
+
+    #[test]
+    fn autoscroll_arms_near_edges_and_clears_inside() {
+        let area = Rect::new(0, 10, 40, 20);
+        assert!(compute_autoscroll(20, area).is_none());
+        let up = compute_autoscroll(11, area).expect("near top");
+        assert_eq!(up.direction, AutoScrollDirection::Up);
+        assert_eq!(up.speed, 1);
+        let down = compute_autoscroll(28, area).expect("near bottom");
+        assert_eq!(down.direction, AutoScrollDirection::Down);
+        let far = compute_autoscroll(5, area).expect("above");
+        assert!(far.speed >= 2);
+    }
+
+    #[test]
+    fn gesture_autoscroll_only_while_selection_has_area() {
+        let mut g = DragSelectGesture::new();
+        let area = Rect::new(0, 0, 40, 20);
+        g.update_autoscroll(0, area, false);
+        assert!(!g.has_autoscroll());
+        g.update_autoscroll(0, area, true);
+        assert!(g.has_autoscroll());
+        let _ = g.handle(DragSelectPhase::Release, pos(0, 0), None);
+        assert!(!g.has_autoscroll());
+    }
+
+    #[test]
+    fn autoscroll_keeps_scrolled_out_copyable_lines() {
+        let rows = vec![
+            "....title-one..........".to_string(),
+            "....title-two..........".to_string(),
+            "....title-three........".to_string(),
+        ];
+        let copyable = vec![Rect::new(4, 0, 12, 3)];
+        let sel = TextSelection::new(pos(4, 0), pos(10, 2));
+        let mut g = DragSelectGesture::new();
+        // One viewport row leaving, tall selection: must still keep that line
+        // (the old clip required has_area and dropped single rows).
+        g.capture_leaving_rows(
+            &rows,
+            &copyable,
+            sel,
+            Rect::new(0, 0, 40, 3),
+            AutoScrollDirection::Down,
+            1,
+        );
+        assert!(
+            g.captured_before()
+                .first()
+                .is_some_and(|line| line.starts_with("title-one")),
+            "start title must be kept, got {:?}",
+            g.captured_before()
+        );
+        let live = Some("title-two\ntitle-three".to_string());
+        let text =
+            compose_selection_copy(g.captured_before(), live, g.captured_after(), None, true)
+                .expect("stitched copy");
+        assert!(
+            text.starts_with("title-one"),
+            "copy must keep the start title: {text:?}"
+        );
+        assert!(text.contains("title-three"), "{text:?}");
+    }
+
+    #[test]
+    fn downward_autoscroll_captures_titles_below_a_sticky_header() {
+        let rows = vec![
+            "....HEADER..............".to_string(),
+            "....HEADER..............".to_string(),
+            "....start-title.........".to_string(),
+            "....next-title..........".to_string(),
+        ];
+        let copyable = vec![Rect::new(4, 2, 12, 2)];
+        let sel = TextSelection::new(pos(4, 2), pos(10, 3));
+        let mut g = DragSelectGesture::new();
+        g.capture_leaving_rows(
+            &rows,
+            &copyable,
+            sel,
+            Rect::new(0, 0, 40, 4),
+            AutoScrollDirection::Down,
+            1,
+        );
+        assert!(
+            g.captured_before()
+                .first()
+                .is_some_and(|line| line.contains("start-title")),
+            "top-to-bottom crawl must keep the start title under a sticky header, got {:?}",
+            g.captured_before()
+        );
+    }
+
+    #[test]
+    fn compose_drops_unselected_titles_above_the_origin() {
+        let text = compose_selection_copy(
+            &["above".into(), "start".into(), "next".into()],
+            Some("next\nbelow".into()),
+            &[],
+            Some("start"),
+            true,
+        )
+        .expect("copy");
+        assert_eq!(text, "start\nnext\nbelow");
+    }
+
+    #[test]
+    fn compose_keeps_adjacent_titles_that_share_a_prefix() {
+        let text = compose_selection_copy(
+            &["fix".into()],
+            Some("fix bug".into()),
+            &[],
+            Some("fix"),
+            true,
+        )
+        .expect("copy");
+        assert_eq!(text, "fix\nfix bug");
+    }
+
+    #[test]
+    fn compose_upward_keeps_through_origin_and_drops_titles_below() {
+        let text = compose_selection_copy(
+            &[],
+            Some("top\nstart\nbelow".into()),
+            &["below".into(), "further".into()],
+            Some("start"),
+            false,
+        )
+        .expect("copy");
+        assert_eq!(text, "top\nstart");
+    }
+
+    #[test]
+    fn upward_autoscroll_captures_the_last_copyable_row() {
+        let rows = vec![
+            "....top-title...........".to_string(),
+            "....mid-title...........".to_string(),
+            "....end-title...........".to_string(),
+            "....STATUS..............".to_string(),
+        ];
+        let copyable = vec![Rect::new(4, 0, 12, 3)];
+        let sel = TextSelection::new(pos(16, 2), pos(4, 0));
+        let mut g = DragSelectGesture::new();
+        g.capture_leaving_rows(
+            &rows,
+            &copyable,
+            sel,
+            Rect::new(0, 0, 40, 4),
+            AutoScrollDirection::Up,
+            1,
+        );
+        assert!(
+            g.captured_after()
+                .last()
+                .is_some_and(|line| line.contains("end-title")),
+            "bottom-to-top crawl must keep the press row, got {:?}",
+            g.captured_after()
+        );
+        assert!(
+            !g.captured_after()
+                .iter()
+                .any(|line| line.contains("STATUS")),
+            "status chrome must not be captured, got {:?}",
+            g.captured_after()
         );
     }
 }

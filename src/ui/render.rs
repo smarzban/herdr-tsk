@@ -648,7 +648,7 @@ pub fn draw_queue_frame(
     frame: &mut Frame<'_>,
     model: &QueueFrameModel<'_>,
     geo: &TierGeometry,
-) -> (QueueHitMap, Option<usize>) {
+) -> (QueueHitMap, Option<(usize, usize)>) {
     let input_slot_geo = bottom_input_slot_geometry(*geo, &model.overlay);
     let geo = &input_slot_geo;
     let mut hits = QueueHitMap::default();
@@ -778,7 +778,7 @@ pub fn draw_queue_frame(
                 }
             }
         }
-        painted_list_scroll = Some(scroll);
+        painted_list_scroll = Some((scroll, max_scroll));
     }
 
     if let Some(row) = geo.rule_row {

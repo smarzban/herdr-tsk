@@ -573,6 +573,9 @@ pub struct BoardModel {
     /// The last left-button press cell, held until release so a drag can grow a text
     /// selection out of it. Presentation-only; a plain click never reads it.
     pub(super) mouse_press: Option<Position>,
+    /// `list_scroll` / notes scroll at the press, so the anchor stays on that content
+    /// row while edge auto-scroll moves the viewport.
+    pub(super) mouse_press_scroll: Option<usize>,
     /// List viewport offset. Scrollbar click/drag writes it; row click leaves it.
     pub(super) list_scroll: Cell<usize>,
     /// When true, the next paint nudges `list_scroll` so the selection is on screen
@@ -580,6 +583,8 @@ pub struct BoardModel {
     pub(super) follow_list: Cell<bool>,
     /// The live drag-selected screen region, cleared on the next press.
     pub(super) text_selection: Option<TextSelection>,
+    /// Furthest list scroll the last painted frame could show (renderer-recorded).
+    pub(super) list_max_scroll: Cell<usize>,
     /// When set, [`Self::message`] clears itself on the next idle tick after this instant.
     /// Sticky messages (errors, delete notices) leave this `None`.
     pub(super) message_expires_at: Option<Instant>,
@@ -641,9 +646,11 @@ impl BoardModel {
             command_query: String::new(),
             command_selected: 0,
             mouse_press: None,
+            mouse_press_scroll: None,
             list_scroll: Cell::new(0),
             follow_list: Cell::new(true),
             text_selection: None,
+            list_max_scroll: Cell::new(0),
             message_expires_at: None,
             message_restore: None,
             verb_modifier: VerbModifier::Alt,
@@ -949,7 +956,32 @@ impl BoardModel {
     /// click never reads it. Called for every left press, whatever the input mode.
     pub fn begin_mouse_press(&mut self, position: Position) {
         self.mouse_press = Some(position);
+        self.mouse_press_scroll = Some(self.content_scroll());
         self.text_selection = None;
+    }
+
+    fn content_scroll(&self) -> usize {
+        match self.input_mode() {
+            BoardInputMode::TaskPage => self
+                .form
+                .as_ref()
+                .map(|form| form.notes_scroll)
+                .unwrap_or(0),
+            _ => self.list_scroll.get(),
+        }
+    }
+
+    fn content_relative_anchor(&self, press: Position) -> Position {
+        let Some(press_scroll) = self.mouse_press_scroll else {
+            return press;
+        };
+        let dy = self.content_scroll() as i32 - press_scroll as i32;
+        let y = if dy >= 0 {
+            press.y.saturating_sub(dy as u16)
+        } else {
+            press.y.saturating_add(dy.unsigned_abs() as u16)
+        };
+        Position::new(press.x, y)
     }
 
     /// Extend the drag selection to `position`, anchored at the press cell.
@@ -957,15 +989,22 @@ impl BoardModel {
     /// Inert without a live press (a drag that starts mid-gesture, e.g. before tsk
     /// saw the press), so it can never invent an anchor.
     pub fn drag_text_selection(&mut self, position: Position) {
-        if let Some(anchor) = self.mouse_press {
+        if let Some(press) = self.mouse_press {
+            let anchor = self.content_relative_anchor(press);
             self.text_selection = Some(TextSelection::new(anchor, position));
         }
+    }
+
+    /// Recompute the live highlight after the viewport scrolled under a held drag.
+    pub fn recompute_text_selection_head(&mut self, head: Position) {
+        self.drag_text_selection(head);
     }
 
     /// Clear the press on release; the selection itself stays until copy clears it
     /// or the next press replaces it.
     pub fn end_mouse_press(&mut self) {
         self.mouse_press = None;
+        self.mouse_press_scroll = None;
     }
 
     /// Drop a finished text selection highlight (after copy, Esc, or cancel).
@@ -976,6 +1015,48 @@ impl BoardModel {
     /// The live drag selection, if a drag is (or was) in progress.
     pub fn text_selection(&self) -> Option<TextSelection> {
         self.text_selection
+    }
+
+    /// Scroll the board list by `rows` without moving the pinned selection.
+    ///
+    /// Used by drag edge auto-scroll so a text drag near the viewport edge can
+    /// reveal more of the deck. Clamped to the last painted max scroll.
+    pub fn nudge_list_scroll(
+        &self,
+        direction: crate::ui::text_select::AutoScrollDirection,
+        rows: u16,
+    ) -> usize {
+        use crate::ui::text_select::AutoScrollDirection;
+        self.follow_list.set(false);
+        let max = self.list_max_scroll.get();
+        let cur = self.list_scroll.get();
+        let next = match direction {
+            AutoScrollDirection::Up => cur.saturating_sub(rows as usize),
+            AutoScrollDirection::Down => cur.saturating_add(rows as usize).min(max),
+        };
+        self.list_scroll.set(next);
+        cur.abs_diff(next)
+    }
+
+    /// Scroll the open task page's shared notes body by `rows` (view mode only).
+    pub fn nudge_notes_scroll(
+        &mut self,
+        direction: crate::ui::text_select::AutoScrollDirection,
+        rows: u16,
+    ) -> usize {
+        use crate::ui::text_select::AutoScrollDirection;
+        let Some(form) = self.form.as_mut() else {
+            return 0;
+        };
+        let horizon = form.notes_max_scroll.get();
+        let cur = form.notes_scroll;
+        form.notes_scroll = match direction {
+            AutoScrollDirection::Up => form.notes_scroll.saturating_sub(rows as usize),
+            AutoScrollDirection::Down => {
+                form.notes_scroll.saturating_add(rows as usize).min(horizon)
+            }
+        };
+        cur.abs_diff(form.notes_scroll)
     }
 
     /// Options the session project selector offers, in presentation order.

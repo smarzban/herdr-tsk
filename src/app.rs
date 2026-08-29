@@ -33,7 +33,9 @@ use crate::ui::mouse::{
 };
 use crate::ui::queue::BoardTab;
 use crate::ui::scheduler;
-use crate::ui::text_select::{copy_to_clipboard, frame_text_rows, selection_text};
+use crate::ui::text_select::{
+    copy_to_clipboard, copyable_line_at, frame_text_rows, selection_text,
+};
 
 /// Env var set by open-capture launcher for Capture UI mode.
 pub const MODE_ENV: &str = "TSK_MODE";
@@ -167,8 +169,8 @@ pub enum FramePoll {
 
 /// The board loop's input-wait duration for one frame.
 ///
-/// the paints no animation yet, so every real call site passes `false` here; the parameter
-/// stays so a future animation source can shorten the wait without moving this call site.
+/// `active_animations` is true while a text-drag autoscroll is armed, so the wait
+/// shortens to the scheduler's animation tick.
 /// Wired straight through [`scheduler::next_wait`] rather than a fixed constant -- the base
 /// tick and the short-tick floor stay the Frame Scheduler's, not a second copy in the loop.
 pub fn board_poll_duration(active_animations: bool) -> Duration {
@@ -197,10 +199,11 @@ pub fn board_frame(
     write: impl FnOnce() -> Result<(), StoreError>,
     paint: impl FnOnce(&BoardModel) -> io::Result<()>,
     wait: impl FnOnce(Duration) -> io::Result<bool>,
+    active_animations: bool,
 ) -> io::Result<FramePoll> {
     record_walkthrough_dismissal(model, write);
     paint(model)?;
-    if wait(board_poll_duration(false))? {
+    if wait(board_poll_duration(active_animations))? {
         Ok(FramePoll::Event)
     } else {
         Ok(FramePoll::Idle)
@@ -226,9 +229,10 @@ pub fn board_idle_tick(
     domain: &mut DomainState,
     watch: &mut StoreWatch,
     save_recovery: &SaveRecovery<DomainState>,
+    active_animations: bool,
 ) -> io::Result<FramePoll> {
     model.expire_ephemeral_message();
-    let poll = board_frame(model, write, paint, wait)?;
+    let poll = board_frame(model, write, paint, wait, active_animations)?;
     if poll == FramePoll::Idle {
         revalidate_board_from_store(store, domain, model, watch, save_recovery);
     }
@@ -329,8 +333,21 @@ fn run_board() -> Result<(), Box<dyn Error>> {
                 &mut domain,
                 &mut store_watch,
                 &save_recovery,
+                drag_gesture.has_autoscroll(),
             )?;
             if poll == FramePoll::Idle {
+                if let Some(auto) = drag_gesture.autoscroll() {
+                    let area = terminal_area(terminal)?;
+                    let content = drag_content_area(&model, area);
+                    tick_drag_autoscroll(
+                        &mut model,
+                        &mut drag_gesture,
+                        auto,
+                        &frame_rows,
+                        &frame_copyable,
+                        content,
+                    );
+                }
                 continue;
             }
             match event::read()? {
@@ -402,10 +419,25 @@ fn run_board() -> Result<(), Box<dyn Error>> {
                         MouseEventKind::Drag(MouseButton::Left) => {
                             let pos = Position::new(mouse.column, mouse.row);
                             model.drag_text_selection(pos);
+                            if let Some(sel) = model.text_selection() {
+                                if let Some(text) =
+                                    selection_text(&frame_rows, &frame_copyable, &sel)
+                                {
+                                    if let Some(first) = text.lines().next() {
+                                        drag_gesture.ensure_copy_origin(first.to_string());
+                                    }
+                                }
+                            }
                             let _ = drag_gesture.handle(
                                 DragSelectPhase::Move,
                                 pos,
                                 model.text_selection(),
+                            );
+                            let area = terminal_area(terminal)?;
+                            drag_gesture.update_autoscroll(
+                                pos.y,
+                                drag_content_area(&model, area),
+                                model.text_selection().is_some_and(|s| s.has_area()),
                             );
                             continue;
                         }
@@ -424,7 +456,14 @@ fn run_board() -> Result<(), Box<dyn Error>> {
                                 model.text_selection(),
                             ) {
                                 DragSelectOutcome::Copy => {
-                                    copy_drag_selection(&mut model, &frame_rows, &frame_copyable);
+                                    copy_drag_selection(
+                                        &mut model,
+                                        &frame_rows,
+                                        &frame_copyable,
+                                        drag_gesture.captured_before(),
+                                        drag_gesture.captured_after(),
+                                        drag_gesture.copy_origin(),
+                                    );
                                     continue;
                                 }
                                 DragSelectOutcome::Click(down) => {
@@ -445,6 +484,11 @@ fn run_board() -> Result<(), Box<dyn Error>> {
                             let pos = Position::new(mouse.column, mouse.row);
                             model.begin_mouse_press(pos);
                             let _ = drag_gesture.handle(DragSelectPhase::Press, pos, None);
+                            if let Some(line) =
+                                copyable_line_at(&frame_rows, &frame_copyable, pos.y)
+                            {
+                                drag_gesture.ensure_copy_origin(line);
+                            }
                             continue;
                         }
                         _ => {}
@@ -493,11 +537,26 @@ fn run_board() -> Result<(), Box<dyn Error>> {
 /// and other chrome never reach the clipboard. A selection with no text (a bare
 /// click, or a drag over blank cells) copies nothing. Success flashes a short
 /// ephemeral status that clears itself; the highlight drops so it does not stick.
-fn copy_drag_selection(model: &mut BoardModel, frame_rows: &[String], copyable: &[Rect]) {
+fn copy_drag_selection(
+    model: &mut BoardModel,
+    frame_rows: &[String],
+    copyable: &[Rect],
+    captured_before: &[String],
+    captured_after: &[String],
+    origin: Option<&str>,
+) {
     let Some(selection) = model.text_selection() else {
         return;
     };
-    let Some(text) = selection_text(frame_rows, copyable, &selection) else {
+    let live = selection_text(frame_rows, copyable, &selection);
+    let from_origin = selection.anchor.y <= selection.head.y;
+    let Some(text) = crate::ui::text_select::compose_selection_copy(
+        captured_before,
+        live,
+        captured_after,
+        origin,
+        from_origin,
+    ) else {
         model.clear_text_selection();
         return;
     };
@@ -507,6 +566,55 @@ fn copy_drag_selection(model: &mut BoardModel, frame_rows: &[String], copyable: 
         model.set_ephemeral_message("copy failed", Duration::from_secs(2));
     }
     model.clear_text_selection();
+}
+
+/// Content rect that edge auto-scroll watches during a text drag.
+pub fn drag_content_area(model: &BoardModel, area: Rect) -> Rect {
+    let geo = crate::ui::tier::resolve(area.width, area.height);
+    match model.input_mode() {
+        BoardInputMode::TaskPage => {
+            // Approximate the shared notes/steps viewport: below a one-row header,
+            // above the rule. Exact step halving is unnecessary for edge detection.
+            let top = geo.viewport_top.saturating_add(1);
+            let bottom = geo.rule_row.unwrap_or(geo.height.saturating_sub(2));
+            let height = bottom.saturating_sub(top);
+            Rect::new(0, top, area.width, height)
+        }
+        _ => Rect::new(0, geo.viewport_top, area.width, geo.viewport_height),
+    }
+}
+
+/// One idle tick of edge auto-scroll while a text drag sits near the content edge.
+pub fn tick_drag_autoscroll(
+    model: &mut BoardModel,
+    gesture: &mut crate::ui::text_select::DragSelectGesture,
+    auto: crate::ui::text_select::DragAutoScrollState,
+    frame_rows: &[String],
+    copyable: &[Rect],
+    content: Rect,
+) {
+    let delta = match model.input_mode() {
+        BoardInputMode::TaskPage => model.nudge_notes_scroll(auto.direction, auto.speed),
+        BoardInputMode::Normal => model.nudge_list_scroll(auto.direction, auto.speed),
+        _ => 0,
+    };
+    if delta == 0 {
+        return;
+    }
+    if let Some(selection) = model.text_selection() {
+        gesture.capture_leaving_rows(
+            frame_rows,
+            copyable,
+            selection,
+            content,
+            auto.direction,
+            delta,
+        );
+    }
+    if let Some(y) = gesture.last_drag_row() {
+        let x = model.text_selection().map(|s| s.head.x).unwrap_or(0);
+        model.recompute_text_selection_head(ratatui::layout::Position::new(x, y));
+    }
 }
 
 /// Whether save recovery permits the board to apply background state changes.
@@ -1645,6 +1753,7 @@ mod idle_store_revalidation_tests {
             &mut domain,
             &mut watch,
             &save_recovery,
+            false,
         )
         .unwrap();
         assert_eq!(poll, FramePoll::Idle);
