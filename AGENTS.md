@@ -18,8 +18,8 @@ The committed `.gitignore` already covers it.
 **tsk** is a terminal task board ("a task board for your terminal"): a queue
 board for capture and human-status verbs. It ships as the herdr plugin
 `herdr-tsk`, and the built binary (`tsk`) also runs standalone. Attention,
-park/resume, linking, and dispatch are not in this tree; local reference only
-on `archive/dark-engine-pre-v1`. Crate (`tsk-tui`) and plugin are `0.3.0`.
+park/resume, linking, and dispatch are not in this tree; reference lives on
+`archive/dark-engine-pre-v1`. Crate (`tsk-tui`) and plugin are `0.3.0`.
 
 A gitignored `HANDOFF.md` may hold this clone’s live working state.
 
