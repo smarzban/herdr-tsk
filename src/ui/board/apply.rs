@@ -504,6 +504,10 @@ fn apply_board_intent(
             }
             return Ok(IntentOutcome::None);
         }
+        BoardIntent::SelectListIndex(idx) => {
+            model.select_index(idx);
+            return Ok(IntentOutcome::None);
+        }
         BoardIntent::BeginAddStep => {
             model.close_popup();
             // The step input lives on the task page's footer row; from any other

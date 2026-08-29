@@ -708,6 +708,7 @@ pub fn apply_board_intent_with_save_recovery(
             BoardIntent::SelectNext
             | BoardIntent::SelectPrev
             | BoardIntent::SelectIndex(_)
+            | BoardIntent::SelectListIndex(_)
             | BoardIntent::OpenCommandPalette
             | BoardIntent::CommandNext
             | BoardIntent::CommandPrev

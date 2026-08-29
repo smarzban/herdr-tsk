@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+Board list scrollbar: when the deck is taller than the viewport, a dim track (`│`)
+and solid thumb (`█`) paint on the right edge with a one-column gap so titles stay
+clear of the thumb. Selection-follow still keeps the selected row (and an open
+peek) on screen; a click on the track jumps selection to that fraction of the
+deck without peeking or opening the task page. The task page body scrollbar uses
+the same paint helper.
+
 Removed dark engines from the live tree: attention / NEEDS YOU poll, park/resume,
 dispatch/worktree recovery UI, and agent-link board plumbing. Store fields that
 old documents may still carry (`capsule`, `agent_meta`, `last_observed`,

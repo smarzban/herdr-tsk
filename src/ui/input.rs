@@ -118,6 +118,9 @@ pub enum BoardIntent {
     SelectPrev,
     /// Select visible list row by index (mouse row click).
     SelectIndex(usize),
+    /// Jump selection to a visible list row without peek or double-click side effects
+    /// (list scrollbar track click).
+    SelectListIndex(usize),
     SetStatus(HumanStatus),
     Complete,
     Reopen,
@@ -763,9 +766,10 @@ pub fn map_edit_paste(mode: BoardInputMode, text: &str) -> Option<BoardIntent> {
 /// Which primary board action an intent advances, if any.
 pub fn intent_primary_action(intent: &BoardIntent) -> Option<PrimaryBoardAction> {
     match intent {
-        BoardIntent::SelectNext | BoardIntent::SelectPrev | BoardIntent::SelectIndex(_) => {
-            Some(PrimaryBoardAction::SelectTask)
-        }
+        BoardIntent::SelectNext
+        | BoardIntent::SelectPrev
+        | BoardIntent::SelectIndex(_)
+        | BoardIntent::SelectListIndex(_) => Some(PrimaryBoardAction::SelectTask),
         BoardIntent::Complete => Some(PrimaryBoardAction::Complete),
         BoardIntent::Reopen => Some(PrimaryBoardAction::Reopen),
         BoardIntent::SoftDelete => Some(PrimaryBoardAction::SoftDelete),

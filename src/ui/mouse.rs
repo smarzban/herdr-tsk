@@ -514,6 +514,11 @@ pub fn map_board_mouse(
                 .iter()
                 .position(|&visible| visible == id)
                 .map(BoardIntent::SelectIndex),
+            Some(QueueHitTarget::ListScrollSelect(id)) => model
+                .visible_ids()
+                .iter()
+                .position(|&visible| visible == id)
+                .map(BoardIntent::SelectListIndex),
             Some(QueueHitTarget::Verb(index)) => verb_intent(model, index),
             Some(QueueHitTarget::DeleteNoticeUndo) => Some(BoardIntent::Undo),
             _ => None,

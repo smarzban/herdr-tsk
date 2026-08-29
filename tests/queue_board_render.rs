@@ -396,6 +396,48 @@ fn trimmed(row: &str) -> String {
     row.trim_end().to_string()
 }
 
+/// List content without the overflow scrollbar's track/thumb cell on the right edge.
+fn list_body(row: &str) -> String {
+    let mut body = trimmed(row);
+    if body.ends_with('█') || body.ends_with('│') {
+        body.pop();
+        body = body.trim_end().to_string();
+    }
+    body
+}
+
+fn assert_exact_header_spacing(
+    rows: &[String],
+    geo: TierGeometry,
+    header: &str,
+    first_content: &str,
+    dimensions: &str,
+) {
+    let marker = format!("{header} ─");
+    let header_row = rows
+        .iter()
+        .position(|line| list_body(line).contains(&marker))
+        .unwrap_or_else(|| panic!("{dimensions}: missing {header:?}:\n{:#?}", rows));
+    let viewport_top = geo.viewport_top as usize;
+    let viewport_bottom = viewport_top + geo.viewport_height as usize;
+    assert!(
+        header_row > viewport_top && header_row + 2 < viewport_bottom,
+        "{dimensions}: {header:?} and its surrounding rows must be visible after selection scrolling:\n{:#?}",
+        rows
+    );
+    assert!(
+        list_body(&rows[header_row - 1]).is_empty() && list_body(&rows[header_row + 1]).is_empty(),
+        "{dimensions}: {header:?} needs one blank row immediately above and below:\n{:#?}",
+        rows
+    );
+    assert!(
+        !list_body(&rows[header_row - 2]).is_empty()
+            && list_body(&rows[header_row + 2]).contains(first_content),
+        "{dimensions}: {header:?} must have exactly one surrounding blank row before {first_content:?}:\n{:#?}",
+        rows
+    );
+}
+
 #[test]
 fn standard_78x24_fixture_has_selector_list_rule_status_verb_and_no_other_chrome_rows() {
     let tasks = fixture_tasks();
@@ -537,38 +579,6 @@ fn assert_visible_chrome(rows: &[String], geo: TierGeometry, dimensions: &str) {
             "{dimensions}: row exceeds the frame width"
         );
     }
-}
-
-fn assert_exact_header_spacing(
-    rows: &[String],
-    geo: TierGeometry,
-    header: &str,
-    first_content: &str,
-    dimensions: &str,
-) {
-    let marker = format!("{header} ─");
-    let header_row = rows
-        .iter()
-        .position(|line| trimmed(line).contains(&marker))
-        .unwrap_or_else(|| panic!("{dimensions}: missing {header:?}:\n{:#?}", rows));
-    let viewport_top = geo.viewport_top as usize;
-    let viewport_bottom = viewport_top + geo.viewport_height as usize;
-    assert!(
-        header_row > viewport_top && header_row + 2 < viewport_bottom,
-        "{dimensions}: {header:?} and its surrounding rows must be visible after selection scrolling:\n{:#?}",
-        rows
-    );
-    assert!(
-        trimmed(&rows[header_row - 1]).is_empty() && trimmed(&rows[header_row + 1]).is_empty(),
-        "{dimensions}: {header:?} needs one blank row immediately above and below:\n{:#?}",
-        rows
-    );
-    assert!(
-        !trimmed(&rows[header_row - 2]).is_empty()
-            && trimmed(&rows[header_row + 2]).contains(first_content),
-        "{dimensions}: {header:?} must have exactly one surrounding blank row before {first_content:?}:\n{:#?}",
-        rows
-    );
 }
 
 /// every section heading has one, and only one, blank row above and below it in both
@@ -2857,5 +2867,48 @@ fn edit_title_caret_parks_at_the_capped_headers_end() {
         painted.chars().count(),
         "caret must sit immediately after the marker, not at a hidden column:\n{}",
         rows.join("\n")
+    );
+}
+
+/// A deck longer than the viewport paints a dim track+thumb on the right edge and
+/// reserves a gap so wrapped titles never sit under the thumb.
+#[test]
+fn overflowing_board_list_paints_a_scrollbar() {
+    let tasks: Vec<Task> = (0..40u128)
+        .map(|i| {
+            task(
+                7000 + i,
+                &format!("Scrollbar padding task {i}"),
+                HumanStatus::Ready,
+                project("/repos/tsk"),
+                3600,
+            )
+        })
+        .collect();
+    let last_id = Uuid::from_u128(7000 + 39);
+    let view = fixture_view_projects(&tasks, false);
+    let mut model = fixture_model_on_tab(&tasks, &view, BoardTab::Projects);
+    model.selection_id = Some(last_id);
+
+    let (rows, geo) = paint(80, 24, &model);
+    let top = geo.viewport_top as usize;
+    let bottom = (geo.viewport_top + geo.viewport_height) as usize;
+    let viewport = &rows[top..bottom];
+    assert!(
+        viewport.iter().any(|row| row.contains('█')),
+        "overflowing list needs a thumb:\n{}",
+        viewport.join("\n")
+    );
+    assert!(
+        viewport.iter().any(|row| row.contains('│')),
+        "overflowing list needs a track:\n{}",
+        viewport.join("\n")
+    );
+    assert!(
+        viewport
+            .iter()
+            .any(|row| trimmed(row).contains("Scrollbar padding task 39")),
+        "selection-follow still keeps the selected task visible:\n{}",
+        viewport.join("\n")
     );
 }

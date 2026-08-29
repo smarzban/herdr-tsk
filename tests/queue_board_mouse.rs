@@ -2016,3 +2016,38 @@ fn the_modal_cards_copyable_rects_exclude_its_own_border_and_footer() {
         "the card's first body row should yield its painted binding text, got {text:?}"
     );
 }
+
+#[test]
+fn list_scrollbar_click_jumps_selection_without_peeking() {
+    let (mut domain, mut model) = deck_of(40);
+    let first = model.visible_ids()[0];
+    assert_eq!(model.selected_id(), Some(first));
+    assert_eq!(model.detail_open(), None);
+
+    let hits = board_hit_map(STANDARD, &model);
+    let track = hits
+        .regions
+        .iter()
+        .rev()
+        .find(|hit| matches!(hit.target, QueueHitTarget::ListScrollSelect(_)))
+        .expect("overflowing deck paints scrollbar hits");
+    // Bottom of the track jumps toward the end of the deck.
+    let bottom = hits
+        .regions
+        .iter()
+        .filter(|hit| matches!(hit.target, QueueHitTarget::ListScrollSelect(_)))
+        .max_by_key(|hit| hit.area.y)
+        .expect("scrollbar track cells");
+    let intent = map_board_mouse(&model, &hits, left_click(bottom.area.x, bottom.area.y))
+        .expect("scrollbar click");
+    assert!(
+        matches!(intent, BoardIntent::SelectListIndex(_)),
+        "scrollbar must quiet-select, got {intent:?}"
+    );
+    apply_intent(&mut domain, &mut model, intent, None).expect("apply jump");
+    let selected = model.selected_id().expect("selection");
+    assert_ne!(selected, first, "jump must leave the top of the deck");
+    assert_eq!(model.detail_open(), None, "scrollbar click must not peek");
+    assert_eq!(model.input_mode(), BoardInputMode::Normal);
+    let _ = track; // silence unused when filter finds cells
+}
