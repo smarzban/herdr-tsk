@@ -417,10 +417,14 @@ fn run_board() -> Result<(), Box<dyn Error>> {
                         MouseEventKind::Drag(MouseButton::Left) => {
                             let pos = Position::new(mouse.column, mouse.row);
                             model.drag_text_selection(pos);
-                            if let Some(line) =
-                                model.copyable_press_line(&frame_rows, &frame_copyable)
-                            {
-                                drag_gesture.ensure_copy_origin(line);
+                            if let Some(sel) = model.text_selection() {
+                                if let Some(text) =
+                                    selection_text(&frame_rows, &frame_copyable, &sel)
+                                {
+                                    if let Some(first) = text.lines().next() {
+                                        drag_gesture.ensure_copy_origin(first.to_string());
+                                    }
+                                }
                             }
                             let _ = drag_gesture.handle(
                                 DragSelectPhase::Move,

@@ -464,7 +464,7 @@ pub fn compose_selection_copy(
     if let Some(live) = live {
         let live_lines: Vec<String> = live.split('\n').map(str::to_string).collect();
         if let (Some(last), Some(first)) = (lines.last(), live_lines.first()) {
-            if last == first {
+            if same_copy_line(last, first) {
                 lines.extend(live_lines.into_iter().skip(1));
             } else {
                 lines.extend(live_lines);
@@ -476,7 +476,7 @@ pub fn compose_selection_copy(
     lines.extend(after.iter().cloned());
     lines.retain(|line| !line.is_empty());
     if let Some(origin) = origin {
-        if let Some(i) = lines.iter().position(|line| line == origin) {
+        if let Some(i) = lines.iter().position(|line| same_copy_line(line, origin)) {
             lines.drain(..i);
         }
     }
@@ -485,6 +485,10 @@ pub fn compose_selection_copy(
     } else {
         Some(lines.join("\n"))
     }
+}
+
+fn same_copy_line(a: &str, b: &str) -> bool {
+    a == b || a.ends_with(b) || b.ends_with(a)
 }
 
 /// The copyable column spans covering one row, merged and in paint order.
@@ -1013,5 +1017,17 @@ mod tests {
         )
         .expect("copy");
         assert_eq!(text, "start\nnext\nbelow");
+        let partial = compose_selection_copy(
+            &["PR18 overflow 41".into(), "overflow 40".into()],
+            Some("PR18 overflow 40\nPR18 overflow 39".into()),
+            &[],
+            Some("overflow 40"),
+        )
+        .expect("partial origin");
+        assert!(
+            partial.starts_with("overflow 40") || partial.starts_with("PR18 overflow 40"),
+            "{partial:?}"
+        );
+        assert!(!partial.contains("overflow 41"), "{partial:?}");
     }
 }
