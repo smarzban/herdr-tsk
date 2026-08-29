@@ -98,7 +98,7 @@ For scriptable board work, use `tsk add` and `tsk list`; read
 - CI installs Rust **1.96.0** with `rustfmt` + `clippy` on ubuntu and macos. The
   frame-time bench is Linux-only. Site-only pushes skip that matrix
   (`paths-ignore: site/**`). Site CI is `.github/workflows/site.yml`:
-  `npm ci && npm run build` in `site/`.
+  `npm ci && npm test && npm run build` in `site/`.
 - Landing page and Starlight docs live in `site/` (Astro). They are not part of
   the `tsk` binary. Production: https://tsk-gules.vercel.app. Point Vercel at
   this repo with Root Directory `site`.
