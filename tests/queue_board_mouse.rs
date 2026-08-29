@@ -1091,7 +1091,6 @@ fn the_modal_cards_close_control_and_chrome_behave_the_same_on_palette_help_and_
         &mut model,
         BoardIntent::OpenCommandPalette,
         None,
-        None,
     )
     .expect("open palette");
     let hits = board_hit_map(STANDARD, &model);
@@ -1122,7 +1121,6 @@ fn the_modal_cards_close_control_and_chrome_behave_the_same_on_palette_help_and_
         &mut model,
         BoardIntent::OpenProjectSelector,
         None,
-        None,
     )
     .expect("open project selector");
     let hits = board_hit_map(STANDARD, &model);
@@ -1150,7 +1148,7 @@ fn the_modal_cards_close_control_and_chrome_behave_the_same_on_palette_help_and_
     // but (unlike the other two) its own body text still closes -- there is nothing to
     // select inside it, so it keeps mouse parity with the keyboard's "any key closes".
     let (mut domain, mut model, _id) = board_with_task("modal card help", HumanStatus::Ready);
-    apply_intent(&mut domain, &mut model, BoardIntent::OpenHelp, None, None).expect("open help");
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenHelp, None).expect("open help");
     let hits = board_hit_map(STANDARD, &model);
     let close_hit = hits
         .regions
@@ -1805,7 +1803,6 @@ fn peek_on_project_board_copy_excludes_pipe_gutter() {
         &mut model,
         BoardIntent::OpenProjectSelector,
         None,
-        None,
     )
     .expect("open project picker");
     let project_idx = model
@@ -1818,14 +1815,12 @@ fn peek_on_project_board_copy_excludes_pipe_gutter() {
         &mut model,
         BoardIntent::SelectProjectOption(project_idx),
         None,
-        None,
     )
     .expect("select project");
     apply_intent(
         &mut domain,
         &mut model,
         BoardIntent::ConfirmProjectChoice,
-        None,
         None,
     )
     .expect("confirm project focus");
@@ -1834,7 +1829,7 @@ fn peek_on_project_board_copy_excludes_pipe_gutter() {
         Some(Path::new(THIS_REPO)),
         "board must be project-focused"
     );
-    apply_intent(&mut domain, &mut model, BoardIntent::PeekDetail, None, None).expect("peek");
+    apply_intent(&mut domain, &mut model, BoardIntent::PeekDetail, None).expect("peek");
     assert_eq!(model.detail_open(), Some(id));
 
     let hits = board_hit_map(STANDARD, &model);
@@ -1896,14 +1891,7 @@ fn task_page_title_copy_excludes_glyph_and_status_word() {
     use tsk_tui::ui::text_select::{selection_text, TextSelection};
 
     let (mut domain, mut model, _id) = board_with_task("title only please", HumanStatus::Started);
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::OpenTaskPage,
-        None,
-        None,
-    )
-    .expect("open page");
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
 
     let hits = board_hit_map(STANDARD, &model);
     let mut terminal =
@@ -1955,7 +1943,7 @@ fn the_modal_cards_copyable_rects_exclude_its_own_border_and_footer() {
     use tsk_tui::ui::text_select::{selection_text, TextSelection};
 
     let (mut domain, mut model, _id) = board_with_task("modal card copyable", HumanStatus::Ready);
-    apply_intent(&mut domain, &mut model, BoardIntent::OpenHelp, None, None).expect("open help");
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenHelp, None).expect("open help");
     let hits = board_hit_map(STANDARD, &model);
 
     let mut terminal =
