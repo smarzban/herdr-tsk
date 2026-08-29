@@ -857,6 +857,7 @@ impl BoardModel {
             self.reveal_task_on_home(id);
             if self.visible_ids().contains(&id) {
                 self.selection_id = Some(id);
+                self.follow_list.set(true);
             } else {
                 // Anchor on the saved id's old position when it had one (an edit that
                 // left this lens); otherwise fall back to the pre-sync selection so an

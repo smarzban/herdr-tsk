@@ -29,7 +29,7 @@ use crate::ui::input::{
 };
 use crate::ui::mouse::{
     capture_layout_for_model, enable_terminal_input, keyboard_enhancement_supported,
-    map_capture_mouse, scrollbar_hit_at, scrollbar_intent_at,
+    map_capture_mouse, map_scrollbar_mouse, ScrollbarMouse,
 };
 use crate::ui::queue::BoardTab;
 use crate::ui::scheduler;
@@ -372,46 +372,30 @@ fn run_board() -> Result<(), Box<dyn Error>> {
                     // so a drag does not also fire the Down-time peek/select path.
                     use crate::ui::text_select::{DragSelectOutcome, DragSelectPhase};
                     use crossterm::event::{MouseButton, MouseEventKind};
-                    let page = model.input_mode() == BoardInputMode::TaskPage;
-                    match mouse.kind {
-                        MouseEventKind::Down(MouseButton::Left) => {
-                            let pos = Position::new(mouse.column, mouse.row);
-                            if let Some(intent) = scrollbar_hit_at(&frame_hits, pos) {
-                                scrollbar_drag = true;
-                                drag_gesture.clear();
-                                if handle_board_intent(
-                                    &store,
-                                    &mut domain,
-                                    &mut model,
-                                    intent,
-                                    &mut save_recovery,
-                                )? {
-                                    break;
-                                }
-                                continue;
-                            }
-                            scrollbar_drag = false;
-                        }
-                        MouseEventKind::Drag(MouseButton::Left) if scrollbar_drag => {
-                            if let Some(intent) = scrollbar_intent_at(&frame_hits, mouse.row, page)
-                            {
-                                if handle_board_intent(
-                                    &store,
-                                    &mut domain,
-                                    &mut model,
-                                    intent,
-                                    &mut save_recovery,
-                                )? {
-                                    break;
-                                }
+                    match map_scrollbar_mouse(
+                        model.input_mode(),
+                        &frame_hits,
+                        mouse,
+                        &mut scrollbar_drag,
+                    ) {
+                        ScrollbarMouse::Miss => {}
+                        ScrollbarMouse::Intent(intent) => {
+                            drag_gesture.clear();
+                            if handle_board_intent(
+                                &store,
+                                &mut domain,
+                                &mut model,
+                                intent,
+                                &mut save_recovery,
+                            )? {
+                                break;
                             }
                             continue;
                         }
-                        MouseEventKind::Up(MouseButton::Left) if scrollbar_drag => {
-                            scrollbar_drag = false;
+                        ScrollbarMouse::Consumed => {
+                            drag_gesture.clear();
                             continue;
                         }
-                        _ => {}
                     }
                     let mut click = mouse;
                     match mouse.kind {

@@ -2930,7 +2930,7 @@ fn overflowing_board_list_does_not_clip_task_rows_to_ellipsis() {
         .map(|i| {
             task(
                 7100 + i,
-                &format!("Scrollbar padding task {i}"),
+                &format!("ScrollbarNoBreakTitleThatMustWrapNotEllipsize{i:02}XXXXXXXXXXXXXXXX"),
                 HumanStatus::Ready,
                 project("/repos/tsk"),
                 3600,
@@ -2942,14 +2942,21 @@ fn overflowing_board_list_does_not_clip_task_rows_to_ellipsis() {
     let (rows, geo) = paint(80, 24, &model);
     let top = geo.viewport_top as usize;
     let bottom = (geo.viewport_top + geo.viewport_height) as usize;
+    let mut saw_title = false;
     for row in &rows[top..bottom] {
-        if trimmed(row).contains("Scrollbar padding task") {
+        if trimmed(row).contains("ScrollbarNoBreakTitle") {
+            saw_title = true;
             assert!(
                 !row.contains('…'),
                 "scrollbar must not clip task rows into ellipsis:\n{row}"
             );
         }
     }
+    assert!(
+        saw_title,
+        "fixture title must actually paint:\n{}",
+        rows.join("\n")
+    );
 }
 
 #[test]

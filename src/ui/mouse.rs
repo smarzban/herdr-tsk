@@ -415,6 +415,54 @@ pub fn scrollbar_intent_at(hits: &QueueHitMap, row: u16, page: bool) -> Option<B
     scrollbar_target_intent(chosen.target)
 }
 
+/// Result of routing a pointer event through the scrollbar grab zone.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ScrollbarMouse {
+    /// Not a scrollbar event; the rest of the mouse path should run.
+    Miss,
+    /// Dispatch this intent and skip the rest of the mouse path.
+    Intent(BoardIntent),
+    /// Drag ended; swallow the Up so it does not become a click.
+    Consumed,
+}
+
+/// List/page scrollbar pointer state machine. Overlays (palette, picker, help)
+/// miss so a gutter click still dismisses them.
+pub fn map_scrollbar_mouse(
+    mode: BoardInputMode,
+    hits: &QueueHitMap,
+    mouse: MouseEvent,
+    dragging: &mut bool,
+) -> ScrollbarMouse {
+    if !matches!(mode, BoardInputMode::Normal | BoardInputMode::TaskPage) {
+        *dragging = false;
+        return ScrollbarMouse::Miss;
+    }
+    let page = mode == BoardInputMode::TaskPage;
+    match mouse.kind {
+        MouseEventKind::Down(MouseButton::Left) => {
+            let pos = Position::new(mouse.column, mouse.row);
+            if let Some(intent) = scrollbar_hit_at(hits, pos) {
+                *dragging = true;
+                ScrollbarMouse::Intent(intent)
+            } else {
+                *dragging = false;
+                ScrollbarMouse::Miss
+            }
+        }
+        MouseEventKind::Drag(MouseButton::Left) if *dragging => {
+            scrollbar_intent_at(hits, mouse.row, page)
+                .map(ScrollbarMouse::Intent)
+                .unwrap_or(ScrollbarMouse::Consumed)
+        }
+        MouseEventKind::Up(MouseButton::Left) if *dragging => {
+            *dragging = false;
+            ScrollbarMouse::Consumed
+        }
+        _ => ScrollbarMouse::Miss,
+    }
+}
+
 fn wheel_board_intent(model: &BoardModel, kind: MouseEventKind) -> Option<BoardIntent> {
     match model.input_mode() {
         BoardInputMode::TaskPage => match kind {

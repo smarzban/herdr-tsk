@@ -65,26 +65,29 @@ pub fn grab_zone(track: Rect) -> Rect {
 
 /// Map a click on the track to a content scroll offset.
 ///
+/// `content_viewport` is the number of list rows shown under sticky chrome, so
+/// the last track cell can reach the renderer's `max_scroll`. Thumb size still
+/// follows the painted track (`track_cells`).
+///
 /// First / last track rows jump to the extremes; interior rows place the thumb
 /// centered on the click (inverse of [`thumb_range`]).
 pub fn click_to_offset(
     cell_index: u16,
     track_cells: u16,
     total_rows: usize,
-    viewport_rows: usize,
+    content_viewport: usize,
 ) -> usize {
-    if track_cells == 0 || !needs_scrollbar(total_rows, viewport_rows) {
+    if track_cells == 0 || !needs_scrollbar(total_rows, content_viewport) {
         return 0;
     }
-    let max_scroll = total_rows.saturating_sub(viewport_rows);
+    let max_scroll = total_rows.saturating_sub(content_viewport);
     if cell_index == 0 {
         return 0;
     }
     if cell_index >= track_cells.saturating_sub(1) {
         return max_scroll;
     }
-    let (thumb_start, thumb_rows) = thumb_range(0, total_rows, viewport_rows);
-    let _ = thumb_start;
+    let thumb_rows = thumb_range(0, total_rows, track_cells as usize).1;
     let travel = (track_cells as usize).saturating_sub(thumb_rows);
     if travel == 0 || max_scroll == 0 {
         return 0;
@@ -168,6 +171,9 @@ mod tests {
         assert_eq!(click_to_offset(9, 10, 100, 10), 90);
         let mid = click_to_offset(5, 10, 100, 10);
         assert!(mid > 0 && mid < 90, "mid={mid}");
+        // Sticky chrome shrinks the content viewport; the last cell must still
+        // reach the renderer's max_scroll, not total - track_cells.
+        assert_eq!(click_to_offset(9, 10, 100, 8), 92);
     }
 
     #[test]

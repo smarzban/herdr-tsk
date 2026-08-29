@@ -770,7 +770,7 @@ pub fn draw_queue_frame(
             if base_list_interactive {
                 let zone = scrollbar::grab_zone(track);
                 for row in 0..track.height {
-                    let jump = scrollbar::click_to_offset(row, track.height, total, viewport_h);
+                    let jump = scrollbar::click_to_offset(row, track.height, total, min_content);
                     hits.push(
                         QueueHitTarget::ListScroll(jump),
                         Rect::new(zone.x, track.y.saturating_add(row), zone.width, 1),

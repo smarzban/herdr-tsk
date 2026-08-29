@@ -25,7 +25,7 @@ use tsk_tui::ui::input::{
 };
 use tsk_tui::ui::mouse::{
     capture_layout, capture_mouse_paths_complete, left_click, map_board_mouse, map_capture_mouse,
-    primary_capture_action_sample_mouse,
+    map_scrollbar_mouse, primary_capture_action_sample_mouse, ScrollbarMouse,
 };
 use tsk_tui::ui::render::{QueueHit, QueueHitMap, QueueHitTarget};
 
@@ -73,6 +73,24 @@ fn wheel_up(column: u16, row: u16) -> MouseEvent {
 fn wheel_down(column: u16, row: u16) -> MouseEvent {
     MouseEvent {
         kind: MouseEventKind::ScrollDown,
+        column,
+        row,
+        modifiers: KeyModifiers::NONE,
+    }
+}
+
+fn left_drag(column: u16, row: u16) -> MouseEvent {
+    MouseEvent {
+        kind: MouseEventKind::Drag(MouseButton::Left),
+        column,
+        row,
+        modifiers: KeyModifiers::NONE,
+    }
+}
+
+fn left_up(column: u16, row: u16) -> MouseEvent {
+    MouseEvent {
+        kind: MouseEventKind::Up(MouseButton::Left),
         column,
         row,
         modifiers: KeyModifiers::NONE,
@@ -2001,11 +2019,20 @@ fn list_scrollbar_click_jumps_viewport_without_changing_selection() {
         .expect("scrollbar track cells");
     let intent = map_board_mouse(&model, &hits, left_click(bottom.area.x, bottom.area.y))
         .expect("scrollbar click");
+    let QueueHitTarget::ListScroll(bottom_offset) = bottom.target else {
+        panic!("bottom cell must be ListScroll, got {:?}", bottom.target);
+    };
     assert!(
-        matches!(intent, BoardIntent::ListScrollTo(offset) if offset > 0),
-        "scrollbar must jump the viewport, got {intent:?}"
+        matches!(intent, BoardIntent::ListScrollTo(offset) if offset == bottom_offset && offset > 0),
+        "bottom track cell must jump to its mapped offset {bottom_offset}, got {intent:?}"
     );
     apply_intent(&mut domain, &mut model, intent, None).expect("apply jump");
+    let _ = page_rows(&model);
+    assert_eq!(
+        model.list_scroll(),
+        bottom_offset,
+        "bottom click must land on the mapped offset, not a sticky-clipped one"
+    );
     assert_eq!(
         model.selected_id(),
         Some(first),
@@ -2092,5 +2119,129 @@ fn mouse_wheel_scrolls_the_list_while_peek_is_open() {
         before,
         "wheel must move the list while peek is open:\n{}",
         after.join("\n")
+    );
+}
+
+#[test]
+fn scrollbar_pointer_state_machine_drags_and_ignores_overlays() {
+    let (mut domain, mut model) = deck_of(40);
+    let _ = page_rows(&model);
+    let hits = board_hit_map(STANDARD, &model);
+    let cell = hits
+        .regions
+        .iter()
+        .find(|hit| matches!(hit.target, QueueHitTarget::ListScroll(_)))
+        .expect("list scrollbar");
+    let mut dragging = false;
+    let down = map_scrollbar_mouse(
+        BoardInputMode::Normal,
+        &hits,
+        left_click(cell.area.x, cell.area.y),
+        &mut dragging,
+    );
+    assert!(matches!(
+        down,
+        ScrollbarMouse::Intent(BoardIntent::ListScrollTo(_))
+    ));
+    assert!(dragging);
+
+    let below = cell.area.y.saturating_add(20);
+    let drag = map_scrollbar_mouse(
+        BoardInputMode::Normal,
+        &hits,
+        left_drag(cell.area.x, below),
+        &mut dragging,
+    );
+    assert!(matches!(
+        drag,
+        ScrollbarMouse::Intent(BoardIntent::ListScrollTo(_))
+    ));
+    assert!(dragging);
+
+    let up = map_scrollbar_mouse(
+        BoardInputMode::Normal,
+        &hits,
+        left_up(cell.area.x, below),
+        &mut dragging,
+    );
+    assert_eq!(up, ScrollbarMouse::Consumed);
+    assert!(!dragging);
+
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenCommandPalette,
+        None,
+    )
+    .expect("open palette");
+    let overlay_hits = board_hit_map(STANDARD, &model);
+    let mut overlay_drag = false;
+    let miss = map_scrollbar_mouse(
+        model.input_mode(),
+        &overlay_hits,
+        left_click(cell.area.x, cell.area.y),
+        &mut overlay_drag,
+    );
+    assert_eq!(miss, ScrollbarMouse::Miss);
+    assert!(!overlay_drag);
+}
+
+#[test]
+fn task_page_scrollbar_click_jumps_notes_without_changing_selection() {
+    let notes = (0..30)
+        .map(|i| format!("page-scroll line {i}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut domain = DomainState::new();
+    let id = domain
+        .create(
+            "Page scrollbar",
+            Some(notes),
+            project(THIS_REPO),
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("create");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
+    let before = page_rows(&model);
+    let hits = board_hit_map(STANDARD, &model);
+    let bottom = hits
+        .regions
+        .iter()
+        .filter(|hit| matches!(hit.target, QueueHitTarget::PageScroll(_)))
+        .max_by_key(|hit| hit.area.y)
+        .expect("page scrollbar hits");
+    let intent = map_board_mouse(&model, &hits, left_click(bottom.area.x, bottom.area.y))
+        .expect("page scrollbar click");
+    assert!(matches!(intent, BoardIntent::PageScrollTo(offset) if offset > 0));
+    apply_intent(&mut domain, &mut model, intent, None).expect("jump notes");
+    assert_eq!(model.selected_id(), Some(id));
+    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+    let after = page_rows(&model);
+    assert_ne!(
+        after,
+        before,
+        "page scrollbar must move notes:\n{}",
+        after.join("\n")
+    );
+}
+
+#[test]
+fn painting_clamps_an_oversize_list_scroll_back_into_the_model() {
+    let (mut domain, mut model) = deck_of(40);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ListScrollTo(10_000),
+        None,
+    )
+    .expect("oversize scroll");
+    let _ = page_rows(&model);
+    assert!(
+        model.list_scroll() < 10_000,
+        "paint must write the clamped offset back, got {}",
+        model.list_scroll()
     );
 }
