@@ -152,6 +152,10 @@ impl DragSelectGesture {
         self.autoscroll
     }
 
+    pub fn last_drag_row(&self) -> Option<u16> {
+        self.last_drag_row
+    }
+
     /// Lines that left the selection through the top of the viewport.
     pub fn captured_before(&self) -> &[String] {
         &self.captured_before

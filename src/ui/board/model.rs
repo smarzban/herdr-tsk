@@ -573,6 +573,9 @@ pub struct BoardModel {
     /// The last left-button press cell, held until release so a drag can grow a text
     /// selection out of it. Presentation-only; a plain click never reads it.
     pub(super) mouse_press: Option<Position>,
+    /// `list_scroll` / notes scroll at the press, so the anchor stays on that content
+    /// row while edge auto-scroll moves the viewport.
+    pub(super) mouse_press_scroll: Option<usize>,
     /// List viewport offset. Scrollbar click/drag writes it; row click leaves it.
     pub(super) list_scroll: Cell<usize>,
     /// When true, the next paint nudges `list_scroll` so the selection is on screen
@@ -643,6 +646,7 @@ impl BoardModel {
             command_query: String::new(),
             command_selected: 0,
             mouse_press: None,
+            mouse_press_scroll: None,
             list_scroll: Cell::new(0),
             follow_list: Cell::new(true),
             text_selection: None,
@@ -952,7 +956,32 @@ impl BoardModel {
     /// click never reads it. Called for every left press, whatever the input mode.
     pub fn begin_mouse_press(&mut self, position: Position) {
         self.mouse_press = Some(position);
+        self.mouse_press_scroll = Some(self.content_scroll());
         self.text_selection = None;
+    }
+
+    fn content_scroll(&self) -> usize {
+        match self.input_mode() {
+            BoardInputMode::TaskPage => self
+                .form
+                .as_ref()
+                .map(|form| form.notes_scroll)
+                .unwrap_or(0),
+            _ => self.list_scroll.get(),
+        }
+    }
+
+    fn content_relative_anchor(&self, press: Position) -> Position {
+        let Some(press_scroll) = self.mouse_press_scroll else {
+            return press;
+        };
+        let dy = self.content_scroll() as i32 - press_scroll as i32;
+        let y = if dy >= 0 {
+            press.y.saturating_sub(dy as u16)
+        } else {
+            press.y.saturating_add(dy.unsigned_abs() as u16)
+        };
+        Position::new(press.x, y)
     }
 
     /// Extend the drag selection to `position`, anchored at the press cell.
@@ -960,29 +989,22 @@ impl BoardModel {
     /// Inert without a live press (a drag that starts mid-gesture, e.g. before tsk
     /// saw the press), so it can never invent an anchor.
     pub fn drag_text_selection(&mut self, position: Position) {
-        if let Some(anchor) = self.mouse_press {
+        if let Some(press) = self.mouse_press {
+            let anchor = self.content_relative_anchor(press);
             self.text_selection = Some(TextSelection::new(anchor, position));
         }
     }
 
-    /// Keep the drag anchor on the same content row after the list/notes scrolled.
-    pub fn shift_text_selection_anchor_y(&mut self, delta: i16) {
-        if let Some(press) = self.mouse_press.as_mut() {
-            press.y = if delta >= 0 {
-                press.y.saturating_add(delta as u16)
-            } else {
-                press.y.saturating_sub(delta.unsigned_abs())
-            };
-        }
-        if let Some(selection) = self.text_selection.as_mut() {
-            selection.shift_anchor_y(delta);
-        }
+    /// Recompute the live highlight after the viewport scrolled under a held drag.
+    pub fn recompute_text_selection_head(&mut self, head: Position) {
+        self.drag_text_selection(head);
     }
 
     /// Clear the press on release; the selection itself stays until copy clears it
     /// or the next press replaces it.
     pub fn end_mouse_press(&mut self) {
         self.mouse_press = None;
+        self.mouse_press_scroll = None;
     }
 
     /// Drop a finished text selection highlight (after copy, Esc, or cancel).

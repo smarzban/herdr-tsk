@@ -588,13 +588,10 @@ fn tick_drag_autoscroll(
             delta,
         );
     }
-    let shift = match auto.direction {
-        crate::ui::text_select::AutoScrollDirection::Down => {
-            -i16::try_from(delta).unwrap_or(i16::MAX)
-        }
-        crate::ui::text_select::AutoScrollDirection::Up => i16::try_from(delta).unwrap_or(i16::MAX),
-    };
-    model.shift_text_selection_anchor_y(shift);
+    if let Some(y) = gesture.last_drag_row() {
+        let x = model.text_selection().map(|s| s.head.x).unwrap_or(0);
+        model.recompute_text_selection_head(ratatui::layout::Position::new(x, y));
+    }
 }
 
 /// Whether save recovery permits the board to apply background state changes.
