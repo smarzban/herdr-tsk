@@ -73,6 +73,11 @@ pub fn style_bold() -> Style {
     mono_style(Modifier::BOLD)
 }
 
+/// Heading body: bold and underlined, so it does not collapse into `**strong**`.
+pub fn style_heading() -> Style {
+    mono_style(Modifier::BOLD.union(Modifier::UNDERLINED))
+}
+
 pub fn style_dim() -> Style {
     mono_style(Modifier::DIM)
 }
@@ -2017,12 +2022,24 @@ fn paint_task_page(
             } else {
                 notes_style
             };
-            put_line(
-                frame,
-                y,
-                content_width,
-                paint_bounded_line(&format!("  {text} "), content_width, style),
-            );
+            let painted = if notes_rows.is_empty() || focus == Some(CaptureField::Notes) {
+                paint_bounded_line(&format!("  {text} "), content_width, style)
+            } else {
+                let mut in_fence = notes_rows
+                    .iter()
+                    .take(absolute)
+                    .filter(|row| crate::ui::markdown::is_fence_line(row))
+                    .count()
+                    % 2
+                    == 1;
+                crate::ui::markdown::paint_notes_line(
+                    &format!("  {text} "),
+                    content_width as usize,
+                    style,
+                    &mut in_fence,
+                )
+            };
+            put_line(frame, y, content_width, painted);
             hits.push(
                 QueueHitTarget::FormNotes(absolute),
                 Rect::new(0, y, content_width, 1),
@@ -2475,12 +2492,18 @@ fn detail_lines_for_task(
         let room = (width as usize).saturating_sub(display_width(indent) + 1);
         let mut shown = 0usize;
         let mut remaining = 0usize;
+        let mut in_fence = false;
         for note_row in crate::ui::edit::wrap_text(notes_text, room) {
             if shown < PEEK_NOTES_LINE_LIMIT {
-                push(
-                    &mut lines,
-                    paint_bounded_line(&format!("{indent}{}", note_row.text), width, style_dim()),
+                let md = crate::ui::markdown::paint_notes_line(
+                    &note_row.text,
+                    room,
+                    style_plain(),
+                    &mut in_fence,
                 );
+                let mut spans = vec![Span::styled(indent.to_string(), style_dim())];
+                spans.extend(md.spans);
+                push(&mut lines, crate::ui::markdown::dim_line(Line::from(spans)));
                 shown += 1;
             } else {
                 remaining += 1;

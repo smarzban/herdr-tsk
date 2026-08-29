@@ -6,6 +6,14 @@ The landing page and docs live in `site/` again (Astro + Starlight, moved back
 from `smarzban/tsk-site`). They are not part of the `tsk` binary. Site CI is
 `npm ci && npm run build`; Vercel Root Directory is `site`.
 
+Mono markdown notes: view-mode task page notes and peek paint a small markdown
+subset with bold / dim / underline / reverse only: `**strong**`, `*em*` /
+`_em_`, `` `code` `` (dim, ticks kept), fenced code blocks (dim fence ticks,
+plain body), `#` headings (bold+underline, distinct from `**strong**`), and
+`-` / `*` list markers. Peek uses the same markers, all dim. Edit mode stays raw
+source. Checkbox-looking lines stay literal text (structured steps own
+checklists).
+
 Resize debounce: a burst of terminal `Resize` events (pane-edge drag) waits a
 short quiet window and paints layout once at the settled size. A key or mouse
 event that arrives during that window is deferred until after that paint.

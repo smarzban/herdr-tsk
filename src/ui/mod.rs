@@ -4,6 +4,7 @@ pub mod board;
 pub mod capture;
 pub mod edit;
 pub mod input;
+pub mod markdown;
 pub mod mouse;
 pub mod queue;
 pub mod render;
