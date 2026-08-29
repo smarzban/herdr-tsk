@@ -16,3 +16,8 @@ Cargo.lock.bak
 ._*
 .empanel/
 .review-panel/
+
+# site/ (Astro) — also listed in site/.gitignore
+site/node_modules/
+site/dist/
+site/.astro/

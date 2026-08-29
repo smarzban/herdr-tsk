@@ -1,8 +1,11 @@
 name: CI
 
 on:
-  push:
   pull_request:
+  push:
+    paths-ignore:
+      - "site/**"
+      - ".github/workflows/site.yml"
 
 jobs:
   verify:

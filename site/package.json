@@ -1,0 +1,21 @@
+{
+  "name": "tsk-site",
+  "type": "module",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "node scripts/generate-apple-touch.mjs && astro dev",
+    "start": "astro dev",
+    "build": "node scripts/generate-apple-touch.mjs && astro build",
+    "preview": "astro preview",
+    "astro": "astro",
+    "generate-apple-touch": "node scripts/generate-apple-touch.mjs",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@astrojs/sitemap": "^3.7.2",
+    "@astrojs/starlight": "^0.41.10",
+    "astro": "^7.1.6",
+    "sharp": "^0.35.3"
+  }
+}
