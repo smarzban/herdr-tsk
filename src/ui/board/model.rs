@@ -1,5 +1,6 @@
 //! Session-only board state, forms, selection, and recovery presentation.
 
+use std::cell::Cell;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -572,6 +573,11 @@ pub struct BoardModel {
     /// The last left-button press cell, held until release so a drag can grow a text
     /// selection out of it. Presentation-only; a plain click never reads it.
     pub(super) mouse_press: Option<Position>,
+    /// List viewport offset. Scrollbar click/drag writes it; row click leaves it.
+    pub(super) list_scroll: Cell<usize>,
+    /// When true, the next paint nudges `list_scroll` so the selection is on screen
+    /// (keyboard / reanchor). Row click and scrollbar leave it false.
+    pub(super) follow_list: Cell<bool>,
     /// The live drag-selected screen region, cleared on the next press.
     pub(super) text_selection: Option<TextSelection>,
     /// When set, [`Self::message`] clears itself on the next idle tick after this instant.
@@ -635,6 +641,8 @@ impl BoardModel {
             command_query: String::new(),
             command_selected: 0,
             mouse_press: None,
+            list_scroll: Cell::new(0),
+            follow_list: Cell::new(true),
             text_selection: None,
             message_expires_at: None,
             message_restore: None,
@@ -849,6 +857,7 @@ impl BoardModel {
             self.reveal_task_on_home(id);
             if self.visible_ids().contains(&id) {
                 self.selection_id = Some(id);
+                self.follow_list.set(true);
             } else {
                 // Anchor on the saved id's old position when it had one (an edit that
                 // left this lens); otherwise fall back to the pre-sync selection so an
@@ -1086,6 +1095,11 @@ impl BoardModel {
     /// Selected task id, if any.
     pub fn selected_id(&self) -> Option<Uuid> {
         self.selection_id
+    }
+
+    /// Current list viewport offset.
+    pub fn list_scroll(&self) -> usize {
+        self.list_scroll.get()
     }
 }
 
@@ -1566,10 +1580,12 @@ impl BoardModel {
                 .find(|id| visible.contains(id))
             {
                 self.selection_id = Some(id);
+                self.follow_list.set(true);
                 return;
             }
         }
         self.selection_id = None;
+        self.follow_list.set(true);
     }
 
     /// Re-pin selection after the visible set changes (edit bind wins while still visible).
@@ -1587,6 +1603,7 @@ impl BoardModel {
                 return;
             }
         }
+        self.follow_list.set(true);
         self.selection_id = selection::reanchor(previous, previous_visible, &new_visible);
         // `reanchor` defers when `previous` was `None`; if rows exist again (e.g. CancelSave
         // restored a completed task into the deck), seed rather than leave the pin empty.
@@ -1625,6 +1642,7 @@ impl BoardModel {
             None => ids[0],
         };
         self.selection_id = Some(next);
+        self.follow_list.set(true);
     }
 
     pub(super) fn select_prev(&mut self) {
@@ -1642,6 +1660,7 @@ impl BoardModel {
             Some(i) => ids[i - 1],
         };
         self.selection_id = Some(prev);
+        self.follow_list.set(true);
     }
 
     pub(super) fn select_index(&mut self, idx: usize) {
@@ -1653,7 +1672,14 @@ impl BoardModel {
         }
         if let Some(&id) = ids.get(idx) {
             self.selection_id = Some(id);
+            // Nudge only if this row is off-screen; a click on a visible row stays put.
+            self.follow_list.set(true);
         }
+    }
+
+    pub(super) fn set_list_scroll(&mut self, offset: usize) {
+        self.list_scroll.set(offset);
+        self.follow_list.set(false);
     }
 
     /// Set the session-only project focus. `None` returns home on the Desk tab.

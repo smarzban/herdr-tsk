@@ -504,6 +504,10 @@ fn apply_board_intent(
             }
             return Ok(IntentOutcome::None);
         }
+        BoardIntent::ListScrollTo(offset) => {
+            model.set_list_scroll(offset);
+            return Ok(IntentOutcome::None);
+        }
         BoardIntent::BeginAddStep => {
             model.close_popup();
             // The step input lives on the task page's footer row; from any other
@@ -1030,6 +1034,15 @@ fn apply_board_intent(
                         form.steps.cursor = Some(index);
                         steps_scroll_to_cursor(form, index);
                     }
+                }
+            }
+            return Ok(IntentOutcome::None);
+        }
+        BoardIntent::PageScrollTo(offset) => {
+            if let Some(form) = model.form.as_mut().filter(|form| form.is_task()) {
+                if model.input_mode == BoardInputMode::TaskPage {
+                    let horizon = form.notes_max_scroll.get();
+                    form.notes_scroll = offset.min(horizon);
                 }
             }
             return Ok(IntentOutcome::None);

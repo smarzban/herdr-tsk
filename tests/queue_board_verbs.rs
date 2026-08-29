@@ -1515,7 +1515,7 @@ fn arrow_keys_move_the_cursor_through_shared_steps() {
 
     let frame = rendered_board(&model, 80, 24);
     assert!(
-        frame.contains('█'),
+        frame.contains('▌'),
         "overflow must show the page scrollbar:\n{frame}"
     );
     assert!(

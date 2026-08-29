@@ -8,6 +8,7 @@ pub mod mouse;
 pub mod queue;
 pub mod render;
 pub mod scheduler;
+pub mod scrollbar;
 pub mod selection;
 pub mod text_select;
 pub mod tier;

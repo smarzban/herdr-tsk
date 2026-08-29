@@ -118,6 +118,11 @@ pub enum BoardIntent {
     SelectPrev,
     /// Select visible list row by index (mouse row click).
     SelectIndex(usize),
+    /// Jump the list viewport to a content offset without changing selection or peek
+    /// (list scrollbar track click / thumb drag).
+    ListScrollTo(usize),
+    /// Jump the task-page body to a content offset (page scrollbar track click / drag).
+    PageScrollTo(usize),
     SetStatus(HumanStatus),
     Complete,
     Reopen,
@@ -850,6 +855,8 @@ pub fn intent_primary_action(intent: &BoardIntent) -> Option<PrimaryBoardAction>
         | BoardIntent::PageScrollDown
         | BoardIntent::PageWheelScrollUp
         | BoardIntent::PageWheelScrollDown
+        | BoardIntent::PageScrollTo(_)
+        | BoardIntent::ListScrollTo(_)
         | BoardIntent::ToggleDoneDrawer
         | BoardIntent::OpenHelp
         | BoardIntent::CloseLayer

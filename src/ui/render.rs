@@ -22,6 +22,7 @@ use super::present_line;
 use super::queue::{
     BoardTab, QueueSection, QueueView, SectionKind, StatusCounts, ThreadProjectCollapseKey,
 };
+use super::scrollbar;
 use super::tier::{Tier, TierGeometry};
 use crate::domain::{HumanStatus, Task, TaskScope};
 
@@ -502,6 +503,10 @@ pub struct QueueFrameModel<'a> {
     /// Standard: expands inline under the selected row. Compact: full-viewport takeover.
     /// Only painted while `overlay` is `QueueOverlay::None`.
     pub detail_open: Option<Uuid>,
+    /// List viewport offset. Scrollbar and the last paint persist this; row click leaves it.
+    pub list_scroll: usize,
+    /// Nudge `list_scroll` so the selection (or its peek) stays on screen.
+    pub follow_list: bool,
 }
 
 /// Logical control under a painted rectangle (rebuilt every frame).
@@ -560,6 +565,11 @@ pub enum QueueHitTarget {
     /// One painted option in a shared form's scope dropdown, indexed into that form's own
     /// `TaskScope` choices. It cannot name the board selector's all-projects choice.
     FormScopeOption(usize),
+    /// One cell of the board list's overflow scrollbar (track or thumb). The usize is the
+    /// content offset that cell jumps the viewport to. Does not change selection or peek.
+    ListScroll(usize),
+    /// One cell of the task-page body scrollbar. The usize is the notes/steps offset.
+    PageScroll(usize),
     /// The `u Undo` control inside the delete-recovery notice on the status line (I2,
     /// round 2), positioned wherever [`paint_status_line`] actually put it -- which shifts
     /// with the deleted title's length and with whether a later message is composed after
@@ -632,20 +642,21 @@ pub fn status_glyph(status: HumanStatus) -> &'static str {
 
 /// Paint the the queue frame: selector, list, rule, status, verb bar.
 ///
-/// Returns the hit-map recorded beside the paint. Never panics on tiny
-/// geometries; every painted line is width-bounded to `geo.row_width`.
+/// Returns the hit-map recorded beside the paint, plus the list viewport offset
+/// used this frame (`None` when the list was not painted).
 pub fn draw_queue_frame(
     frame: &mut Frame<'_>,
     model: &QueueFrameModel<'_>,
     geo: &TierGeometry,
-) -> QueueHitMap {
+) -> (QueueHitMap, Option<usize>) {
     let input_slot_geo = bottom_input_slot_geometry(*geo, &model.overlay);
     let geo = &input_slot_geo;
     let mut hits = QueueHitMap::default();
+    let mut painted_list_scroll = None;
     let width = geo.row_width;
     let height = geo.height;
     if width == 0 || height == 0 {
-        return hits;
+        return (hits, None);
     }
 
     // Clear the frame so leftover cells never leak chrome between sizes.
@@ -670,93 +681,104 @@ pub fn draw_queue_frame(
     let base_list_interactive = true;
 
     if geo.viewport_height > 0 && !page_active {
-        let (list_rows, anchor_last_idx, selected_idx) = build_list_rows(model, geo);
+        // First pass measures overflow at the full row width; when a scrollbar is
+        // needed, rebuild at the narrowed content width so wrapped titles and the
+        // thumb share one consistent row count.
+        let (mut list_rows, mut anchor_last_idx, mut selected_idx) = build_list_rows(model, geo);
         let top = geo.viewport_top;
         let viewport_h = geo.viewport_height as usize;
-        // An expanded accordion can land past the viewport on a long deck. Keep its complete
-        // block visible, and otherwise follow the plain selection so mutating verbs never act
-        // on an invisible row.
-        let follow_idx = anchor_last_idx.or(selected_idx);
-        let scroll = match follow_idx {
-            Some(idx) if idx >= viewport_h => idx + 1 - viewport_h,
-            _ => 0,
+        let (_, provisional_track) =
+            scrollbar::split_for_scrollbar(0, top, width, geo.viewport_height, list_rows.len());
+        let list_geo = if provisional_track.is_some() {
+            let narrowed =
+                geo.with_row_width(width.saturating_sub(scrollbar::SCROLLBAR_RESERVE_COLS));
+            let rebuilt = build_list_rows(model, &narrowed);
+            list_rows = rebuilt.0;
+            anchor_last_idx = rebuilt.1;
+            selected_idx = rebuilt.2;
+            narrowed
+        } else {
+            *geo
         };
-        for (offset, list_row) in list_rows
-            .into_iter()
-            .skip(scroll)
-            .take(viewport_h)
-            .enumerate()
-        {
-            let y = top + offset as u16;
-            match list_row {
-                ListRow::Blank => put_line(frame, y, width, Line::from("")),
-                ListRow::Header(kind, _section_idx, line) => {
-                    put_line(frame, y, width, line);
-                    if kind == SectionKind::Done && base_list_interactive {
-                        hits.push(QueueHitTarget::Drawer, Rect::new(0, y, width, 1));
-                    }
-                }
-                ListRow::ProjectGroupHeader { section_idx, line } => {
-                    put_line(frame, y, width, line);
-                    if base_list_interactive {
-                        hits.push(
-                            QueueHitTarget::SectionProject(section_idx),
-                            Rect::new(0, y, width, 1),
-                        );
-                    }
-                }
-                ListRow::ThreadGroupHeader { section_idx, line } => {
-                    put_line(frame, y, width, line);
-                    if base_list_interactive {
-                        hits.push(
-                            QueueHitTarget::SectionThread(section_idx),
-                            Rect::new(0, y, width, 1),
-                        );
-                    }
-                }
-                ListRow::ThreadProjectHeader {
-                    section_idx,
-                    subgroup_idx,
-                    line,
-                } => {
-                    put_line(frame, y, width, line);
-                    if base_list_interactive {
-                        hits.push(
-                            QueueHitTarget::SectionThreadProject {
-                                section_idx,
-                                subgroup_idx,
-                            },
-                            Rect::new(0, y, width, 1),
-                        );
-                    }
-                }
-                ListRow::Hint(line) | ListRow::ThreadHeader(line) => {
-                    put_line(frame, y, width, line)
-                }
-                ListRow::Task {
-                    id,
-                    line,
-                    content_x,
-                    content_width,
-                } => {
-                    put_line(frame, y, width, line);
-                    if base_list_interactive {
-                        hits.push(QueueHitTarget::Task(id), Rect::new(0, y, width, 1));
-                    }
-                    // Title text only: indent, glyph, and right-side meta stay out of the copy.
-                    hits.push_copyable(Rect::new(content_x, y, content_width, 1));
-                }
-                ListRow::Detail {
-                    line,
-                    content_x,
-                    content_width,
-                } => {
-                    put_line(frame, y, width, line);
-                    // Peek body past the `│` gutter — the pipe is chrome, not notes.
-                    hits.push_copyable(Rect::new(content_x, y, content_width, 1));
+        let content_width = list_geo.row_width;
+        let (_, track) =
+            scrollbar::split_for_scrollbar(0, top, width, geo.viewport_height, list_rows.len());
+        // Row click and scrollbar drag persist list_scroll and leave the viewport
+        // where it is. Keyboard selection sets follow_list so a row that walked
+        // off-screen is nudged back, without parking the peek at the bottom.
+        let follow_idx = anchor_last_idx.or(selected_idx);
+        let has_headers = list_rows.iter().any(ListRow::is_sticky_header);
+        let min_content = if has_headers {
+            viewport_h.saturating_sub(2).max(1)
+        } else {
+            viewport_h
+        };
+        let max_scroll = list_rows.len().saturating_sub(min_content);
+        let mut scroll = model.list_scroll.min(max_scroll);
+        if model.follow_list {
+            let pin = if model.detail_open.is_some() && model.detail_open == model.selection_id {
+                selected_idx
+            } else {
+                follow_idx
+            };
+            if let Some(idx) = pin {
+                let visible_h = viewport_h
+                    .saturating_sub(header_chrome_rows(&list_rows, scroll))
+                    .max(1);
+                if idx < scroll {
+                    scroll = idx;
+                } else if idx >= scroll.saturating_add(visible_h) {
+                    scroll = idx
+                        .saturating_add(1)
+                        .saturating_sub(min_content)
+                        .min(max_scroll);
                 }
             }
         }
+        let sticky = sticky_header_at(&list_rows, scroll);
+        let first_is_header = list_rows.get(scroll).is_some_and(ListRow::is_sticky_header);
+        let mut y = top;
+        if sticky.is_some() || first_is_header {
+            put_line(frame, y, content_width, Line::from(""));
+            y = y.saturating_add(1);
+        }
+        if let Some(header_idx) = sticky {
+            paint_list_row(
+                frame,
+                &mut hits,
+                &list_rows[header_idx],
+                y,
+                content_width,
+                base_list_interactive,
+            );
+            y = y.saturating_add(1);
+        }
+        let content_h = viewport_h.saturating_sub((y - top) as usize);
+        for (offset, list_row) in list_rows.iter().skip(scroll).take(content_h).enumerate() {
+            paint_list_row(
+                frame,
+                &mut hits,
+                list_row,
+                y.saturating_add(offset as u16),
+                content_width,
+                base_list_interactive,
+            );
+        }
+        if let Some(track) = track {
+            let total = list_rows.len();
+            scrollbar::paint(frame, track, scroll, total);
+            if base_list_interactive {
+                let zone = scrollbar::grab_zone(track);
+                for row in 0..track.height {
+                    let jump = scrollbar::click_to_offset(row, track.height, total, min_content);
+                    hits.push(
+                        QueueHitTarget::ListScroll(jump),
+                        Rect::new(zone.x, track.y.saturating_add(row), zone.width, 1),
+                    );
+                }
+            }
+        }
+        painted_list_scroll = Some(scroll);
     }
 
     if let Some(row) = geo.rule_row {
@@ -848,7 +870,7 @@ pub fn draw_queue_frame(
 
     paint_overlay(frame, model, geo, &mut hits);
 
-    hits
+    (hits, painted_list_scroll)
 }
 
 /// Reserve breathing room around a shared bottom input by taking two rows from the list.
@@ -2073,7 +2095,7 @@ fn paint_task_page(
         );
     }
     if content.max_scroll > 0 {
-        paint_page_scrollbar(frame, &lay, width, scroll, content.total_rows);
+        paint_page_scrollbar(frame, hits, &lay, width, scroll, content.total_rows);
     }
 
     // Meta footer: scope · thread · created · updated. It remains available while a step
@@ -2106,31 +2128,24 @@ fn paint_task_page(
 /// render notes and steps.
 fn paint_page_scrollbar(
     frame: &mut Frame<'_>,
+    hits: &mut QueueHitMap,
     lay: &TaskPageLayout,
     width: u16,
     scroll: usize,
     total_rows: usize,
 ) {
-    let viewport = lay.notes_rows as usize;
-    if width == 0 || viewport == 0 || total_rows <= viewport {
+    let viewport = lay.notes_rows;
+    if width == 0 || viewport == 0 || !scrollbar::needs_scrollbar(total_rows, viewport as usize) {
         return;
     }
-    let thumb_rows = (viewport * viewport).div_ceil(total_rows).max(1);
-    let travel = viewport.saturating_sub(thumb_rows);
-    let max_scroll = total_rows.saturating_sub(viewport);
-    let thumb_start = scroll
-        .saturating_mul(travel)
-        .checked_div(max_scroll)
-        .unwrap_or(0);
-    for row in 0..viewport {
-        let glyph = if (thumb_start..thumb_start + thumb_rows).contains(&row) {
-            "█"
-        } else {
-            "│"
-        };
-        frame.render_widget(
-            Paragraph::new(Span::styled(glyph, style_dim())),
-            Rect::new(width - 1, lay.notes_y.saturating_add(row as u16), 1, 1),
+    let track = Rect::new(width - 1, lay.notes_y, 1, viewport);
+    scrollbar::paint(frame, track, scroll, total_rows);
+    let zone = scrollbar::grab_zone(track);
+    for row in 0..track.height {
+        let jump = scrollbar::click_to_offset(row, track.height, total_rows, viewport as usize);
+        hits.push(
+            QueueHitTarget::PageScroll(jump),
+            Rect::new(zone.x, track.y.saturating_add(row), zone.width, 1),
         );
     }
 }
@@ -2308,6 +2323,121 @@ enum ListRow {
         content_x: u16,
         content_width: u16,
     },
+}
+
+impl ListRow {
+    fn is_sticky_header(&self) -> bool {
+        matches!(
+            self,
+            ListRow::Header(..)
+                | ListRow::ProjectGroupHeader { .. }
+                | ListRow::ThreadGroupHeader { .. }
+                | ListRow::ThreadProjectHeader { .. }
+                | ListRow::ThreadHeader(_)
+        )
+    }
+}
+
+/// Last section header strictly above `scroll`. None when `scroll` is already on a header
+/// (that header is naturally at the top) or nothing has been scrolled past.
+fn sticky_header_at(rows: &[ListRow], scroll: usize) -> Option<usize> {
+    if scroll == 0 || rows.is_empty() {
+        return None;
+    }
+    let scroll = scroll.min(rows.len());
+    if scroll < rows.len() && rows[scroll].is_sticky_header() {
+        return None;
+    }
+    rows[..scroll]
+        .iter()
+        .rposition(|row| row.is_sticky_header())
+}
+
+/// Rows the viewport spends on a blank-under-tabs gap and a pinned header.
+fn header_chrome_rows(rows: &[ListRow], scroll: usize) -> usize {
+    if sticky_header_at(rows, scroll).is_some() {
+        2
+    } else if rows.get(scroll).is_some_and(ListRow::is_sticky_header) {
+        1
+    } else {
+        0
+    }
+}
+
+fn paint_list_row(
+    frame: &mut Frame<'_>,
+    hits: &mut QueueHitMap,
+    list_row: &ListRow,
+    y: u16,
+    content_width: u16,
+    base_list_interactive: bool,
+) {
+    match list_row {
+        ListRow::Blank => put_line(frame, y, content_width, Line::from("")),
+        ListRow::Header(kind, _section_idx, line) => {
+            put_line(frame, y, content_width, line.clone());
+            if *kind == SectionKind::Done && base_list_interactive {
+                hits.push(QueueHitTarget::Drawer, Rect::new(0, y, content_width, 1));
+            }
+        }
+        ListRow::ProjectGroupHeader { section_idx, line } => {
+            put_line(frame, y, content_width, line.clone());
+            if base_list_interactive {
+                hits.push(
+                    QueueHitTarget::SectionProject(*section_idx),
+                    Rect::new(0, y, content_width, 1),
+                );
+            }
+        }
+        ListRow::ThreadGroupHeader { section_idx, line } => {
+            put_line(frame, y, content_width, line.clone());
+            if base_list_interactive {
+                hits.push(
+                    QueueHitTarget::SectionThread(*section_idx),
+                    Rect::new(0, y, content_width, 1),
+                );
+            }
+        }
+        ListRow::ThreadProjectHeader {
+            section_idx,
+            subgroup_idx,
+            line,
+        } => {
+            put_line(frame, y, content_width, line.clone());
+            if base_list_interactive {
+                hits.push(
+                    QueueHitTarget::SectionThreadProject {
+                        section_idx: *section_idx,
+                        subgroup_idx: *subgroup_idx,
+                    },
+                    Rect::new(0, y, content_width, 1),
+                );
+            }
+        }
+        ListRow::Hint(line) | ListRow::ThreadHeader(line) => {
+            put_line(frame, y, content_width, line.clone())
+        }
+        ListRow::Task {
+            id,
+            line,
+            content_x,
+            content_width: copy_w,
+        } => {
+            put_line(frame, y, content_width, line.clone());
+            if base_list_interactive {
+                hits.push(QueueHitTarget::Task(*id), Rect::new(0, y, content_width, 1));
+            }
+            hits.push_copyable(Rect::new(*content_x, y, *copy_w, 1));
+        }
+        ListRow::Detail {
+            line,
+            content_x,
+            content_width: copy_w,
+        } => {
+            put_line(frame, y, content_width, line.clone());
+            hits.push_copyable(Rect::new(*content_x, y, *copy_w, 1));
+        }
+    }
 }
 
 /// Read-only accordion body under an expanded task: notes preview,
