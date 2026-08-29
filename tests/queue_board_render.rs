@@ -1153,6 +1153,42 @@ fn task_page_notes_edit_keeps_a_visible_row_at_the_compact_floor_alongside_steps
     );
 }
 
+#[test]
+fn notes_edit_shows_raw_markdown_markers_that_view_mode_strips() {
+    let mut domain = DomainState::new();
+    domain
+        .create(
+            "Markdown notes",
+            Some("see *em* and **strong** here".into()),
+            TaskScope::Global,
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("create task");
+    let mut model = BoardModel::from_domain(&domain, None);
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open");
+    let view = board_rows(&model, 80, 24).join("\n");
+    assert!(
+        !view.contains("*em*"),
+        "view must strip em markers:\n{view}"
+    );
+    assert!(
+        view.contains("em"),
+        "view must still show the em text:\n{view}"
+    );
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditNotes, None).expect("edit");
+    let edit = board_rows(&model, 80, 24).join("\n");
+    assert!(
+        edit.contains("*em*"),
+        "notes edit must show raw *em* markers:\n{edit}"
+    );
+    assert!(
+        edit.contains("**strong**"),
+        "notes edit must show raw **strong** markers:\n{edit}"
+    );
+}
+
 /// T-10 (AC-27): a Notes caret uses the same shared-stream offset as its rows.
 #[test]
 fn notes_edit_caret_accounts_for_shared_stream_scroll() {

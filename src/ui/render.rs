@@ -2017,7 +2017,7 @@ fn paint_task_page(
             } else {
                 notes_style
             };
-            let painted = if notes_rows.is_empty() {
+            let painted = if notes_rows.is_empty() || focus == Some(CaptureField::Notes) {
                 paint_bounded_line(&format!("  {text} "), content_width, style)
             } else {
                 crate::ui::markdown::paint_md_line(
