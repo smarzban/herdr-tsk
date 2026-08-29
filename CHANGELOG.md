@@ -4,7 +4,7 @@
 
 Mono markdown notes: view-mode task page notes and peek paint a small markdown
 subset with bold / dim / underline / reverse only — `**strong**`, `*em*` /
-`_em_`, `` `code` ``, `#` headings, and `-` / `*` list markers. Edit mode stays
+`_em_`, `` `code` ``, `#` headings (bold+underline, distinct from `**strong**`), and `-` / `*` list markers. Edit mode stays
 raw source. Checkbox-looking lines stay literal text (structured steps own
 checklists).
 

@@ -73,6 +73,11 @@ pub fn style_bold() -> Style {
     mono_style(Modifier::BOLD)
 }
 
+/// Heading body: bold and underlined, so it does not collapse into `**strong**`.
+pub fn style_heading() -> Style {
+    mono_style(Modifier::BOLD.union(Modifier::UNDERLINED))
+}
+
 pub fn style_dim() -> Style {
     mono_style(Modifier::DIM)
 }

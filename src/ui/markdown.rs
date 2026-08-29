@@ -4,7 +4,7 @@
 //! keeps the raw source; this module paints the reading surface.
 //!
 //! Supported inline: `**strong**`, `*em*` / `_em_`, `` `code` ``.
-//! Supported line starts: `#`…`######` headings (bold body), `-` / `*` lists
+//! Supported line starts: `#`…`######` headings (bold+underline body), `-` / `*` lists
 //! (dim marker). Task-list markers like `- [ ]` stay literal text (structured
 //! steps own checklists).
 
@@ -12,7 +12,9 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 
 use super::present_line;
-use super::render::{style_bold, style_dim, style_plain, style_reverse, style_underline};
+use super::render::{
+    style_bold, style_dim, style_heading, style_plain, style_reverse, style_underline,
+};
 
 /// Paint one already-wrapped notes row with mono markdown styling.
 pub fn paint_md_line(text: &str, width: usize, base: Style) -> Line<'static> {
@@ -26,7 +28,7 @@ pub fn paint_md_line(text: &str, width: usize, base: Style) -> Line<'static> {
 
     let (prefix_spans, body, heading) = line_prefix(trimmed);
     let mut spans = prefix_spans;
-    let body_base = if heading { style_bold() } else { base };
+    let body_base = if heading { style_heading() } else { base };
     spans.extend(inline_spans(body, body_base));
     bound_styled_line(spans, width)
 }
@@ -168,6 +170,13 @@ mod tests {
         assert!(has_mod(&line, Modifier::REVERSED));
         let flat: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
         assert_eq!(flat, "a b c d");
+        let strong = line
+            .spans
+            .iter()
+            .find(|s| s.content.as_ref() == "b")
+            .expect("strong span");
+        assert!(strong.style.add_modifier.contains(Modifier::BOLD));
+        assert!(!strong.style.add_modifier.contains(Modifier::UNDERLINED));
     }
 
     #[test]
@@ -175,7 +184,13 @@ mod tests {
         let h = paint_md_line("# Title", 40, style_plain());
         assert_eq!(h.spans[0].content.as_ref(), "# ");
         assert!(h.spans[0].style.add_modifier.contains(Modifier::DIM));
-        assert!(has_mod(&h, Modifier::BOLD));
+        let title = h
+            .spans
+            .iter()
+            .find(|s| s.content.as_ref() == "Title")
+            .expect("heading body");
+        assert!(title.style.add_modifier.contains(Modifier::BOLD));
+        assert!(title.style.add_modifier.contains(Modifier::UNDERLINED));
         let indented = paint_md_line("  # Title", 40, style_plain());
         assert!(indented.spans.iter().any(|s| s.content.as_ref() == "# "));
         let list = paint_md_line("- item", 40, style_plain());
