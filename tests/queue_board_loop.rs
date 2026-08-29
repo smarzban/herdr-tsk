@@ -156,6 +156,44 @@ fn instrumented_loop_idle_wait_never_sustained_below_25ms_without_animation() {
     );
 }
 
+#[test]
+fn autoscroll_shortens_the_board_frame_wait() {
+    let domain = DomainState::new();
+    let mut model = BoardModel::from_domain(&domain, None);
+    let backend = TestBackend::new(80, 24);
+    let mut terminal = Terminal::new(backend).expect("test terminal");
+    let mut recorded = None;
+    let poll = board_frame(
+        &mut model,
+        || panic!("no walkthrough"),
+        |model| {
+            terminal
+                .draw(|frame| {
+                    let _ = draw_board(frame, model);
+                })
+                .expect("draw");
+            Ok(())
+        },
+        |duration| {
+            recorded = Some(duration);
+            Ok(false)
+        },
+        true,
+    )
+    .expect("board frame");
+    assert_eq!(poll, FramePoll::Idle);
+    let wait = recorded.expect("wait recorded");
+    assert_eq!(wait, next_wait(true, DEFAULT_BASE_TICK));
+    assert!(
+        wait < Duration::from_millis(250),
+        "armed autoscroll must shorten the wait, got {wait:?}"
+    );
+    assert!(
+        wait >= Duration::from_millis(25),
+        "short tick must stay at the 25ms floor, got {wait:?}"
+    );
+}
+
 /// [`load_board_model`] (the whole the open path: store load + context snapshot + BoardModel
 /// construction, no host refresh) feeds straight into [`draw_board`] without panicking at the
 /// standard tier's floor size ( smoke;/'s "board loop stops calling attention"

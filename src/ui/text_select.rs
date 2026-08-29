@@ -204,10 +204,10 @@ impl DragSelectGesture {
                 (from, to, true)
             }
             AutoScrollDirection::Up => {
-                let bottom = content.y.saturating_add(content.height);
-                let to = bottom.saturating_sub(1);
-                let from = bottom.saturating_sub(delta);
-                (from, to, false)
+                let end = last_copyable_row(copyable, content)
+                    .unwrap_or_else(|| content.y.saturating_add(content.height.saturating_sub(1)));
+                let from = end.saturating_sub(delta.saturating_sub(1));
+                (from, end, false)
             }
         };
         let lines = selection_lines(rows, copyable, &selection, from, to);
@@ -321,20 +321,6 @@ impl TextSelection {
         let dy = self.anchor.y.abs_diff(self.head.y);
         dx.max(dy) >= 2
     }
-
-    /// Keep the anchor on the same content row after the viewport scrolled.
-    /// Head stays on the pointer.
-    pub fn shift_anchor_y(&mut self, delta: i16) {
-        self.anchor.y = add_y(self.anchor.y, delta);
-    }
-}
-
-fn add_y(y: u16, delta: i16) -> u16 {
-    if delta >= 0 {
-        y.saturating_add(delta as u16)
-    } else {
-        y.saturating_sub(delta.unsigned_abs())
-    }
 }
 
 /// The painted frame's text, one `String` per row, cells concatenated in order.
@@ -397,6 +383,19 @@ fn first_copyable_row(copyable: &[Rect], content: Rect) -> Option<u16> {
         .min()
 }
 
+fn last_copyable_row(copyable: &[Rect], content: Rect) -> Option<u16> {
+    copyable
+        .iter()
+        .filter(|area| {
+            area.width > 0
+                && area.height > 0
+                && area.y >= content.y
+                && area.y < content.y.saturating_add(content.height)
+        })
+        .map(|area| area.y.saturating_add(area.height.saturating_sub(1)))
+        .max()
+}
+
 /// Copyable lines of `selection` whose screen row sits in `y_from..=y_to`.
 /// One-row slices are kept; this is how autoscroll records lines that left the window.
 fn selection_lines(
@@ -451,20 +450,22 @@ pub fn copyable_line_at(rows: &[String], copyable: &[Rect], y: u16) -> Option<St
 }
 
 /// Prefix (scrolled off the top) + live frame + suffix (scrolled off the bottom).
-/// `origin` is the press-row title: lines before it are dropped, and a duplicate
-/// of it at the live/prefix join is dropped.
+/// `origin` is the press-row title. `from_origin` is a downward drag: drop lines
+/// before origin. Upward: drop lines after origin. Seam de-dupe is exact equality
+/// only, so `fix` and `fix bug` stay two titles.
 pub fn compose_selection_copy(
     before: &[String],
     live: Option<String>,
     after: &[String],
     origin: Option<&str>,
+    from_origin: bool,
 ) -> Option<String> {
     let mut lines: Vec<String> = Vec::new();
     lines.extend(before.iter().cloned());
     if let Some(live) = live {
         let live_lines: Vec<String> = live.split('\n').map(str::to_string).collect();
         if let (Some(last), Some(first)) = (lines.last(), live_lines.first()) {
-            if same_copy_line(last, first) {
+            if last == first {
                 lines.extend(live_lines.into_iter().skip(1));
             } else {
                 lines.extend(live_lines);
@@ -476,8 +477,12 @@ pub fn compose_selection_copy(
     lines.extend(after.iter().cloned());
     lines.retain(|line| !line.is_empty());
     if let Some(origin) = origin {
-        if let Some(i) = lines.iter().position(|line| same_copy_line(line, origin)) {
-            lines.drain(..i);
+        if let Some(i) = lines.iter().position(|line| line == origin) {
+            if from_origin {
+                lines.drain(..i);
+            } else {
+                lines.truncate(i.saturating_add(1));
+            }
         }
     }
     if lines.is_empty() {
@@ -485,10 +490,6 @@ pub fn compose_selection_copy(
     } else {
         Some(lines.join("\n"))
     }
-}
-
-fn same_copy_line(a: &str, b: &str) -> bool {
-    a == b || a.ends_with(b) || b.ends_with(a)
 }
 
 /// The copyable column spans covering one row, merged and in paint order.
@@ -932,17 +933,6 @@ mod tests {
     }
 
     #[test]
-    fn shift_anchor_keeps_the_head_on_the_pointer() {
-        let mut sel = TextSelection::new(pos(4, 10), pos(8, 20));
-        sel.shift_anchor_y(-3);
-        assert_eq!(sel.anchor, pos(4, 7));
-        assert_eq!(sel.head, pos(8, 20));
-        sel.shift_anchor_y(2);
-        assert_eq!(sel.anchor, pos(4, 9));
-        assert_eq!(sel.head, pos(8, 20));
-    }
-
-    #[test]
     fn autoscroll_keeps_scrolled_out_copyable_lines() {
         let rows = vec![
             "....title-one..........".to_string(),
@@ -970,8 +960,9 @@ mod tests {
             g.captured_before()
         );
         let live = Some("title-two\ntitle-three".to_string());
-        let text = compose_selection_copy(g.captured_before(), live, g.captured_after(), None)
-            .expect("stitched copy");
+        let text =
+            compose_selection_copy(g.captured_before(), live, g.captured_after(), None, true)
+                .expect("stitched copy");
         assert!(
             text.starts_with("title-one"),
             "copy must keep the start title: {text:?}"
@@ -1014,20 +1005,70 @@ mod tests {
             Some("next\nbelow".into()),
             &[],
             Some("start"),
+            true,
         )
         .expect("copy");
         assert_eq!(text, "start\nnext\nbelow");
-        let partial = compose_selection_copy(
-            &["PR18 overflow 41".into(), "overflow 40".into()],
-            Some("PR18 overflow 40\nPR18 overflow 39".into()),
+    }
+
+    #[test]
+    fn compose_keeps_adjacent_titles_that_share_a_prefix() {
+        let text = compose_selection_copy(
+            &["fix".into()],
+            Some("fix bug".into()),
             &[],
-            Some("overflow 40"),
+            Some("fix"),
+            true,
         )
-        .expect("partial origin");
-        assert!(
-            partial.starts_with("overflow 40") || partial.starts_with("PR18 overflow 40"),
-            "{partial:?}"
+        .expect("copy");
+        assert_eq!(text, "fix\nfix bug");
+    }
+
+    #[test]
+    fn compose_upward_keeps_through_origin_and_drops_titles_below() {
+        let text = compose_selection_copy(
+            &[],
+            Some("top\nstart\nbelow".into()),
+            &["below".into(), "further".into()],
+            Some("start"),
+            false,
+        )
+        .expect("copy");
+        assert_eq!(text, "top\nstart");
+    }
+
+    #[test]
+    fn upward_autoscroll_captures_the_last_copyable_row() {
+        let rows = vec![
+            "....top-title...........".to_string(),
+            "....mid-title...........".to_string(),
+            "....end-title...........".to_string(),
+            "....STATUS..............".to_string(),
+        ];
+        let copyable = vec![Rect::new(4, 0, 12, 3)];
+        let sel = TextSelection::new(pos(16, 2), pos(4, 0));
+        let mut g = DragSelectGesture::new();
+        g.capture_leaving_rows(
+            &rows,
+            &copyable,
+            sel,
+            Rect::new(0, 0, 40, 4),
+            AutoScrollDirection::Up,
+            1,
         );
-        assert!(!partial.contains("overflow 41"), "{partial:?}");
+        assert!(
+            g.captured_after()
+                .last()
+                .is_some_and(|line| line.contains("end-title")),
+            "bottom-to-top crawl must keep the press row, got {:?}",
+            g.captured_after()
+        );
+        assert!(
+            !g.captured_after()
+                .iter()
+                .any(|line| line.contains("STATUS")),
+            "status chrome must not be captured, got {:?}",
+            g.captured_after()
+        );
     }
 }

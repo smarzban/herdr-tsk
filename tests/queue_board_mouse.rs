@@ -13,6 +13,7 @@ use ratatui::backend::TestBackend;
 use ratatui::layout::{Position, Rect};
 use ratatui::Terminal;
 
+use tsk_tui::app::{drag_content_area, tick_drag_autoscroll};
 use tsk_tui::domain::{DomainState, HumanStatus, ProvenanceOrigin, TaskScope};
 use tsk_tui::ui::board::{
     apply_intent, board_hit_map, board_verb_items, draw_board, resolve_board_command,
@@ -28,7 +29,9 @@ use tsk_tui::ui::mouse::{
     map_scrollbar_mouse, primary_capture_action_sample_mouse, scrollbar_intent_at, ScrollbarMouse,
 };
 use tsk_tui::ui::render::{QueueHit, QueueHitMap, QueueHitTarget};
-use tsk_tui::ui::text_select::{self, AutoScrollDirection, DragSelectGesture};
+use tsk_tui::ui::text_select::{
+    self, AutoScrollDirection, DragAutoScrollState, DragSelectGesture, DragSelectPhase,
+};
 
 const THIS_REPO: &str = "/repos/app";
 const OTHER_REPO: &str = "/repos/other";
@@ -2309,28 +2312,33 @@ fn downward_autoscroll_copy_excludes_titles_above_the_press_row() {
     model.begin_mouse_press(Position::new(10, start_y));
     model.drag_text_selection(Position::new(10, 20));
     let mut gesture = DragSelectGesture::new();
+    let _ = gesture.handle(
+        DragSelectPhase::Move,
+        Position::new(10, 20),
+        model.text_selection(),
+    );
     gesture.ensure_copy_origin(origin.clone());
 
-    let content = Rect::new(0, 2, 80, 19);
+    let content = drag_content_area(&model, STANDARD);
+    let auto = DragAutoScrollState {
+        direction: AutoScrollDirection::Down,
+        speed: 1,
+    };
     for _ in 0..12 {
         let rows = page_rows(&model);
         let hits = board_hit_map(STANDARD, &model);
-        let Some(sel) = model.text_selection() else {
-            break;
-        };
-        let delta = model.nudge_list_scroll(AutoScrollDirection::Down, 1);
-        if delta == 0 {
-            break;
-        }
-        gesture.capture_leaving_rows(
+        let before = model.list_scroll();
+        tick_drag_autoscroll(
+            &mut model,
+            &mut gesture,
+            auto,
             &rows,
             &hits.copyable,
-            sel,
             content,
-            AutoScrollDirection::Down,
-            delta,
         );
-        model.recompute_text_selection_head(Position::new(10, 20));
+        if model.list_scroll() == before {
+            break;
+        }
     }
 
     let rows = page_rows(&model);
@@ -2338,11 +2346,15 @@ fn downward_autoscroll_copy_excludes_titles_above_the_press_row() {
     let live = model
         .text_selection()
         .and_then(|sel| text_select::selection_text(&rows, &hits.copyable, &sel));
+    let from_origin = model
+        .text_selection()
+        .is_some_and(|sel| sel.anchor.y <= sel.head.y);
     let text = text_select::compose_selection_copy(
         gesture.captured_before(),
         live,
         gesture.captured_after(),
         gesture.copy_origin(),
+        from_origin,
     )
     .expect("copy");
     assert!(
@@ -2352,5 +2364,61 @@ fn downward_autoscroll_copy_excludes_titles_above_the_press_row() {
     assert!(
         text.contains("task 30"),
         "copy must include the press row:\n{text}"
+    );
+}
+
+#[test]
+fn task_page_autoscroll_tick_moves_notes() {
+    let notes = (0..30)
+        .map(|i| format!("page-scroll line {i}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut domain = DomainState::new();
+    domain
+        .create(
+            "Page autoscroll",
+            Some(notes),
+            project(THIS_REPO),
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("create");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
+    let _ = page_rows(&model);
+    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+    let content = drag_content_area(&model, STANDARD);
+    assert!(
+        content.y > 0 && content.height > 0,
+        "task-page content must sit below the header, got {content:?}"
+    );
+    model.begin_mouse_press(Position::new(10, content.y.saturating_add(2)));
+    model.drag_text_selection(Position::new(10, content.y.saturating_add(content.height)));
+    let mut gesture = DragSelectGesture::new();
+    let head = Position::new(
+        10,
+        content.y.saturating_add(content.height.saturating_sub(1)),
+    );
+    let _ = gesture.handle(DragSelectPhase::Move, head, model.text_selection());
+    let before = page_rows(&model);
+    let hits = board_hit_map(STANDARD, &model);
+    tick_drag_autoscroll(
+        &mut model,
+        &mut gesture,
+        DragAutoScrollState {
+            direction: AutoScrollDirection::Down,
+            speed: 2,
+        },
+        &before,
+        &hits.copyable,
+        content,
+    );
+    let after = page_rows(&model);
+    assert_ne!(
+        after,
+        before,
+        "task-page autoscroll tick must move notes:\n{}",
+        after.join("\n")
     );
 }

@@ -169,8 +169,8 @@ pub enum FramePoll {
 
 /// The board loop's input-wait duration for one frame.
 ///
-/// the paints no animation yet, so every real call site passes `false` here; the parameter
-/// stays so a future animation source can shorten the wait without moving this call site.
+/// `active_animations` is true while a text-drag autoscroll is armed, so the wait
+/// shortens to the scheduler's animation tick.
 /// Wired straight through [`scheduler::next_wait`] rather than a fixed constant -- the base
 /// tick and the short-tick floor stay the Frame Scheduler's, not a second copy in the loop.
 pub fn board_poll_duration(active_animations: bool) -> Duration {
@@ -549,11 +549,13 @@ fn copy_drag_selection(
         return;
     };
     let live = selection_text(frame_rows, copyable, &selection);
+    let from_origin = selection.anchor.y <= selection.head.y;
     let Some(text) = crate::ui::text_select::compose_selection_copy(
         captured_before,
         live,
         captured_after,
         origin,
+        from_origin,
     ) else {
         model.clear_text_selection();
         return;
@@ -567,7 +569,7 @@ fn copy_drag_selection(
 }
 
 /// Content rect that edge auto-scroll watches during a text drag.
-fn drag_content_area(model: &BoardModel, area: Rect) -> Rect {
+pub fn drag_content_area(model: &BoardModel, area: Rect) -> Rect {
     let geo = crate::ui::tier::resolve(area.width, area.height);
     match model.input_mode() {
         BoardInputMode::TaskPage => {
@@ -583,7 +585,7 @@ fn drag_content_area(model: &BoardModel, area: Rect) -> Rect {
 }
 
 /// One idle tick of edge auto-scroll while a text drag sits near the content edge.
-fn tick_drag_autoscroll(
+pub fn tick_drag_autoscroll(
     model: &mut BoardModel,
     gesture: &mut crate::ui::text_select::DragSelectGesture,
     auto: crate::ui::text_select::DragAutoScrollState,
