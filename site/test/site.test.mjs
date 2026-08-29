@@ -11,6 +11,13 @@ test("Vercel ignores unchanged files relative to the site root", async () => {
   assert.equal(config.ignoreCommand, "git diff --quiet HEAD^ HEAD -- .");
 });
 
+test("repo-root Vercel config builds site/ without a Root Directory setting", async () => {
+  const config = JSON.parse(await read("../../vercel.json"));
+  assert.equal(config.installCommand, "npm ci --prefix site");
+  assert.equal(config.buildCommand, "npm run build --prefix site");
+  assert.equal(config.outputDirectory, "site/dist");
+});
+
 test("demo capture keeps an absolute project path verbatim", () => {
   assert.deepEqual(parseCapture("Ship it !p /Users/saeed/Workspace/herdr-tasks !t Site-Docs", null), {
     title: "Ship it",

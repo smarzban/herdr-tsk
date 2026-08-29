@@ -25,9 +25,12 @@ Output is `site/dist/`.
 
 ## Deploy
 
-Vercel should use this repository with **Root Directory** `site`.
-`vercel.json` pins install / build / output. Production is
-https://tsk-gules.vercel.app.
+Production is https://tsk-gules.vercel.app.
 
-Ignore builds that do not touch `site/**` so a Rust-only commit does not
-rebuild the landing page.
+The Vercel project must be connected to **`smarzban/herdr-tsk`**, production
+branch **`main`**. Leave **Root Directory empty**. A repo-root `vercel.json`
+runs `npm ci` / `npm run build` in `site/` and publishes `site/dist`. Setting
+Root Directory to `site` fails if Vercel is still reading `tsk-site` (that
+repo has no `site/` folder).
+
+`site/vercel.json` is only used if you later set Root Directory to `site`.

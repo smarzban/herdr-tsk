@@ -100,8 +100,9 @@ For scriptable board work, use `tsk add` and `tsk list`; read
   (`paths-ignore: site/**`). Site CI is `.github/workflows/site.yml`:
   `npm ci && npm test && npm run build` in `site/`.
 - Landing page and Starlight docs live in `site/` (Astro). They are not part of
-  the `tsk` binary. Production: https://tsk-gules.vercel.app. Point Vercel at
-  this repo with Root Directory `site`.
+  the `tsk` binary. Production: https://tsk-gules.vercel.app. Vercel connects
+  this repo with an **empty** Root Directory; the repo-root `vercel.json`
+  builds `site/` and publishes `site/dist`.
 - Changes to the keymap, status verbs, or tab/section semantics need a matching
   `site/` update (`src/content/docs/docs/{keys,board,capture,cli}.md` and
   `public/board-demo.js`). The web demo uses bare verb keys on purpose (browsers
