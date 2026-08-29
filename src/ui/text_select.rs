@@ -176,27 +176,23 @@ impl DragSelectGesture {
             return;
         }
         let delta = u16::try_from(delta).unwrap_or(u16::MAX);
-        let (leaving, prefix) = match direction {
+        let (from, to, prefix) = match direction {
             AutoScrollDirection::Down => {
                 let from = content.y;
                 let to = content.y.saturating_add(delta.saturating_sub(1));
-                (from..=to, true)
+                (from, to, true)
             }
             AutoScrollDirection::Up => {
                 let bottom = content.y.saturating_add(content.height);
                 let to = bottom.saturating_sub(1);
                 let from = bottom.saturating_sub(delta);
-                (from..=to, false)
+                (from, to, false)
             }
         };
-        let Some(clipped) = clip_selection_to_rows(selection, *leaving.start(), *leaving.end())
-        else {
+        let lines = selection_lines(rows, copyable, &selection, from, to);
+        if lines.is_empty() {
             return;
-        };
-        let Some(text) = selection_text(rows, copyable, &clipped) else {
-            return;
-        };
-        let lines = text.split('\n').map(str::to_string);
+        }
         if prefix {
             self.captured_before.extend(lines);
         } else {
@@ -357,9 +353,35 @@ pub fn selection_text(
     if !selection.has_area() {
         return None;
     }
+    let (_, y0, _, y1) = selection.normalized();
+    let lines = selection_lines(rows, copyable, selection, y0, y1);
+    if lines.is_empty() {
+        None
+    } else {
+        Some(lines.join("\n"))
+    }
+}
+
+/// Copyable lines of `selection` whose screen row sits in `y_from..=y_to`.
+/// One-row slices are kept; this is how autoscroll records lines that left the window.
+fn selection_lines(
+    rows: &[String],
+    copyable: &[Rect],
+    selection: &TextSelection,
+    y_from: u16,
+    y_to: u16,
+) -> Vec<String> {
+    if y_from > y_to {
+        return Vec::new();
+    }
     let (x0, y0, x1, y1) = selection.normalized();
+    let top = y0.max(y_from);
+    let bottom = y1.min(y_to);
+    if top > bottom {
+        return Vec::new();
+    }
     let mut lines = Vec::new();
-    for y in y0..=y1 {
+    for y in top..=bottom {
         let Some(row) = rows.get(y as usize) else {
             continue;
         };
@@ -382,33 +404,7 @@ pub fn selection_text(
             lines.push(pieces.join(" "));
         }
     }
-    if lines.is_empty() {
-        None
-    } else {
-        Some(lines.join("\n"))
-    }
-}
-
-/// Clip a selection to a closed screen-row range. `None` when they do not overlap
-/// enough to still count as a selection.
-fn clip_selection_to_rows(
-    selection: TextSelection,
-    y_from: u16,
-    y_to: u16,
-) -> Option<TextSelection> {
-    if y_from > y_to {
-        return None;
-    }
-    let (x0, y0, x1, y1) = selection.normalized();
-    let top = y0.max(y_from);
-    let bottom = y1.min(y_to);
-    if top > bottom {
-        return None;
-    }
-    let start_x = if top == y0 { x0 } else { 0 };
-    let end_x = if bottom == y1 { x1 } else { u16::MAX };
-    let clipped = TextSelection::new(Position::new(start_x, top), Position::new(end_x, bottom));
-    clipped.has_area().then_some(clipped)
+    lines
 }
 
 /// Prefix (scrolled off the top) + live frame + suffix (scrolled off the bottom).
@@ -892,6 +888,8 @@ mod tests {
         let copyable = vec![Rect::new(4, 0, 12, 3)];
         let sel = TextSelection::new(pos(4, 0), pos(10, 2));
         let mut g = DragSelectGesture::new();
+        // One viewport row leaving, tall selection: must still keep that line
+        // (the old clip required has_area and dropped single rows).
         g.capture_leaving_rows(
             &rows,
             &copyable,
