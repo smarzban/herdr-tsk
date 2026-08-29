@@ -2495,16 +2495,15 @@ fn detail_lines_for_task(
         let mut in_fence = false;
         for note_row in crate::ui::edit::wrap_text(notes_text, room) {
             if shown < PEEK_NOTES_LINE_LIMIT {
-                let body = format!("{indent}{}", note_row.text);
-                push(
-                    &mut lines,
-                    crate::ui::markdown::dim_line(crate::ui::markdown::paint_notes_line(
-                        &body,
-                        width as usize,
-                        style_plain(),
-                        &mut in_fence,
-                    )),
+                let md = crate::ui::markdown::paint_notes_line(
+                    &note_row.text,
+                    room,
+                    style_plain(),
+                    &mut in_fence,
                 );
+                let mut spans = vec![Span::styled(indent.to_string(), style_dim())];
+                spans.extend(md.spans);
+                push(&mut lines, crate::ui::markdown::dim_line(Line::from(spans)));
                 shown += 1;
             } else {
                 remaining += 1;

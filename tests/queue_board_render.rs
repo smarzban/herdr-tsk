@@ -1189,6 +1189,64 @@ fn notes_edit_shows_raw_markdown_markers_that_view_mode_strips() {
     );
 }
 
+#[test]
+fn task_page_view_leaves_fence_body_unparsed() {
+    let mut domain = DomainState::new();
+    domain
+        .create(
+            "Fenced",
+            Some("```\n**not bold**\n```".into()),
+            TaskScope::Global,
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("create");
+    let mut model = BoardModel::from_domain(&domain, None);
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open");
+    let view = board_rows(&model, 80, 24).join("\n");
+    assert!(view.contains("```"), "page must show fence ticks:\n{view}");
+    assert!(
+        view.contains("**not bold**"),
+        "fence body must not run inline markdown:\n{view}"
+    );
+}
+
+#[test]
+fn task_page_fence_stays_closed_after_the_opener_scrolls_off() {
+    let mut notes = String::from("```\n");
+    for i in 0..40 {
+        notes.push_str(&format!("pad-line-{i}\n"));
+    }
+    notes.push_str("**still stars**\n```\n");
+    let mut domain = DomainState::new();
+    domain
+        .create(
+            "Long fence",
+            Some(notes),
+            TaskScope::Global,
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("create");
+    let mut model = BoardModel::from_domain(&domain, None);
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open");
+    let _ = board_rows(&model, 80, 24);
+    for _ in 0..30 {
+        apply_intent(&mut domain, &mut model, BoardIntent::PageScrollDown, None).expect("scroll");
+    }
+    let view = board_rows(&model, 80, 24).join("\n");
+    assert!(
+        !view.contains("pad-line-0"),
+        "fence opener should have left the viewport:\n{view}"
+    );
+    assert!(
+        view.contains("**still stars**"),
+        "scrolled fence body must still skip inline markdown:\n{view}"
+    );
+}
+
 /// T-10 (AC-27): a Notes caret uses the same shared-stream offset as its rows.
 #[test]
 fn notes_edit_caret_accounts_for_shared_stream_scroll() {
@@ -2612,6 +2670,32 @@ fn peek_shows_inline_backticks_and_fence_ticks() {
     assert!(
         body.contains("fn x() {}"),
         "peek must show the fence body:\n{body}"
+    );
+}
+
+#[test]
+fn peek_runs_markdown_not_plain_dim_text() {
+    let mut coded = task(203, "peek-md", HumanStatus::Ready, TaskScope::Global, 1);
+    coded.notes = Some("# Title\n**strong** here\n```\n**still stars**\n```".into());
+    let mut model = BoardModel::from_tasks(vec![coded], None);
+    let mut domain = DomainState::new();
+    apply_intent(&mut domain, &mut model, BoardIntent::PeekDetail, None).expect("peek");
+    let body = board_rows(&model, 80, 24).join("\n");
+    assert!(
+        !body.contains("**strong**"),
+        "peek must strip strong markers like the page:\n{body}"
+    );
+    assert!(
+        body.contains("strong"),
+        "peek must keep strong text:\n{body}"
+    );
+    assert!(
+        body.contains("# ") || body.contains("# Title"),
+        "peek must keep heading hashes:\n{body}"
+    );
+    assert!(
+        body.contains("**still stars**"),
+        "peek fence must leave body markers:\n{body}"
     );
 }
 

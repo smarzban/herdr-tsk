@@ -12,7 +12,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
 use super::present_line;
-use super::render::{style_bold, style_dim, style_heading, style_plain, style_underline};
+use super::render::{style_dim, style_heading, style_plain};
 
 /// A line that opens or closes a fenced code block (` ``` ` after indent).
 pub fn is_fence_line(text: &str) -> bool {
@@ -120,8 +120,8 @@ fn inline_spans(text: &str, base: Style) -> Vec<Span<'static>> {
         }
         let style = match kind {
             InlineKind::Plain => base,
-            InlineKind::Strong => style_bold(),
-            InlineKind::Em => style_underline(),
+            InlineKind::Strong => base.add_modifier(Modifier::BOLD),
+            InlineKind::Em => base.add_modifier(Modifier::UNDERLINED),
             InlineKind::Code => style_dim(),
         };
         spans.push(Span::styled(std::mem::take(buf), style));
@@ -136,10 +136,17 @@ fn inline_spans(text: &str, base: Style) -> Vec<Span<'static>> {
                     buf.push('`');
                     i += 1;
                 } else if chars[i] == '*' && i + 1 < chars.len() && chars[i + 1] == '*' {
-                    flush(&mut buf, kind, &mut spans);
-                    kind = InlineKind::Strong;
-                    i += 2;
-                } else if chars[i] == '*' || chars[i] == '_' {
+                    if rest_has_starstar(&chars, i + 2) {
+                        flush(&mut buf, kind, &mut spans);
+                        kind = InlineKind::Strong;
+                        i += 2;
+                    } else {
+                        buf.push('*');
+                        i += 1;
+                    }
+                } else if (chars[i] == '*' && rest_has_char(&chars, i + 1, '*'))
+                    || (chars[i] == '_' && can_open_underscore(&chars, i))
+                {
                     flush(&mut buf, kind, &mut spans);
                     kind = InlineKind::Em;
                     i += 1;
@@ -186,6 +193,19 @@ fn inline_spans(text: &str, base: Style) -> Vec<Span<'static>> {
         spans.push(Span::styled(String::new(), base));
     }
     spans
+}
+
+fn rest_has_starstar(chars: &[char], from: usize) -> bool {
+    chars[from..].windows(2).any(|w| w[0] == '*' && w[1] == '*')
+}
+
+fn rest_has_char(chars: &[char], from: usize, needle: char) -> bool {
+    chars[from..].contains(&needle)
+}
+
+fn can_open_underscore(chars: &[char], i: usize) -> bool {
+    let left_ok = i == 0 || !chars[i - 1].is_alphanumeric();
+    left_ok && rest_has_char(chars, i + 1, '_')
 }
 
 fn bound_styled_line(spans: Vec<Span<'static>>, width: usize) -> Line<'static> {
@@ -298,5 +318,27 @@ mod tests {
             .expect("code");
         assert!(!span.style.add_modifier.contains(Modifier::REVERSED));
         assert!(span.style.add_modifier.contains(Modifier::DIM));
+    }
+
+    #[test]
+    fn unmatched_stars_and_word_underscores_stay_literal() {
+        let glob = paint_md_line("*.rs", 40, style_plain());
+        let flat: String = glob.spans.iter().map(|s| s.content.as_ref()).collect();
+        assert_eq!(flat, "*.rs");
+        let ident = paint_md_line("test_foo", 40, style_plain());
+        let flat: String = ident.spans.iter().map(|s| s.content.as_ref()).collect();
+        assert_eq!(flat, "test_foo");
+    }
+
+    #[test]
+    fn heading_keeps_bold_when_the_body_is_emphasized() {
+        let h = paint_md_line("# *Release*", 40, style_plain());
+        let body = h
+            .spans
+            .iter()
+            .find(|s| s.content.as_ref() == "Release")
+            .expect("heading em");
+        assert!(body.style.add_modifier.contains(Modifier::BOLD));
+        assert!(body.style.add_modifier.contains(Modifier::UNDERLINED));
     }
 }
