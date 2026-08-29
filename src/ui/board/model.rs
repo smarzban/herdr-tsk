@@ -526,6 +526,8 @@ pub struct BoardModel {
     pub(super) detail_open: Option<Uuid>,
     /// Id-pinned selection into the queue-visible row set.
     pub(super) selection_id: Option<Uuid>,
+    /// Task under the pointer on the board list (underline hover). Session-only.
+    pub(super) hover_id: Option<Uuid>,
     /// The last task-row click (time + id), kept only to detect a double-click that opens
     /// the task page. Presentation-only, never persisted.
     pub(super) last_row_click: Option<(Instant, Uuid)>,
@@ -628,6 +630,7 @@ impl BoardModel {
             drawer_open: false,
             detail_open: None,
             selection_id: None,
+            hover_id: None,
             last_row_click: None,
             last_project_header_click: None,
             input_mode: BoardInputMode::Normal,
@@ -1181,6 +1184,16 @@ impl BoardModel {
     /// Current list viewport offset.
     pub fn list_scroll(&self) -> usize {
         self.list_scroll.get()
+    }
+
+    /// Task under the pointer, if the board list is tracking hover.
+    pub fn hover_id(&self) -> Option<Uuid> {
+        self.hover_id
+    }
+
+    /// Update list-row hover from a pointer move (or clear it).
+    pub fn set_hover_id(&mut self, id: Option<Uuid>) {
+        self.hover_id = id;
     }
 }
 

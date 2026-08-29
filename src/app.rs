@@ -491,6 +491,11 @@ fn run_board() -> Result<(), Box<dyn Error>> {
                             }
                             continue;
                         }
+                        MouseEventKind::Moved => {
+                            let area = terminal_area(terminal)?;
+                            update_board_hover(&mut model, area, mouse.column, mouse.row);
+                            continue;
+                        }
                         _ => {}
                     }
                     let area = terminal_area(terminal)?;
@@ -615,6 +620,26 @@ pub fn tick_drag_autoscroll(
         let x = model.text_selection().map(|s| s.head.x).unwrap_or(0);
         model.recompute_text_selection_head(ratatui::layout::Position::new(x, y));
     }
+}
+
+/// Track which board-list task sits under the pointer (underline hover).
+fn update_board_hover(model: &mut BoardModel, area: Rect, column: u16, row: u16) {
+    if model.input_mode() != BoardInputMode::Normal {
+        model.set_hover_id(None);
+        return;
+    }
+    let hits = crate::ui::board::board_hit_map(area, model);
+    let pos = Position::new(column, row);
+    let id = hits
+        .regions
+        .iter()
+        .rev()
+        .find(|hit| hit.area.contains(pos))
+        .and_then(|hit| match hit.target {
+            crate::ui::render::QueueHitTarget::Task(id) => Some(id),
+            _ => None,
+        });
+    model.set_hover_id(id);
 }
 
 /// Whether save recovery permits the board to apply background state changes.

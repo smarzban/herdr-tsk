@@ -339,6 +339,7 @@ fn fixture_model_on_tab<'a>(
         detail_open: None,
         list_scroll: 0,
         follow_list: true,
+        hover_id: None,
     }
 }
 

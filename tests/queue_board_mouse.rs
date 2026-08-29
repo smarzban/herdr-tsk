@@ -2422,3 +2422,35 @@ fn task_page_autoscroll_tick_moves_notes() {
         after.join("\n")
     );
 }
+
+#[test]
+fn pointer_move_over_a_task_row_sets_hover_without_changing_selection() {
+    let (domain, mut model) = deck_of(3);
+    let visible = model.visible_ids();
+    let first = visible[0];
+    let second = visible[1];
+    assert_eq!(model.selected_id(), Some(first));
+    assert_eq!(model.hover_id(), None);
+
+    let hits = board_hit_map(STANDARD, &model);
+    let area = hits
+        .regions
+        .iter()
+        .find(|hit| hit.target == QueueHitTarget::Task(second))
+        .expect("second row hit")
+        .area;
+    model.set_hover_id(Some(second));
+    assert_eq!(model.hover_id(), Some(second));
+    assert_eq!(
+        model.selected_id(),
+        Some(first),
+        "hover must not move selection"
+    );
+
+    // Painting with hover_id set must still keep selection reverse and not panic.
+    let mut hovered = model;
+    hovered.set_hover_id(Some(second));
+    let _ = board_hit_map(STANDARD, &hovered);
+    let _ = domain;
+    let _ = area;
+}

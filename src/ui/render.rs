@@ -103,6 +103,8 @@ pub struct TaskRowPaint<'a> {
     pub selected: bool,
     /// Bold the title when unselected (e.g. attention emphasis).
     pub title_bold: bool,
+    /// Pointer rests on this row (and it is not selected): underline, not reverse.
+    pub hovered: bool,
 }
 
 /// One painted task-row line plus the title-content cells a text selection may copy.
@@ -157,6 +159,8 @@ pub fn paint_task_row_lines(
     let indent = " ".repeat(prefix_cells);
     let continuation_style = if row.selected {
         style_reverse()
+    } else if row.hovered {
+        style_underline()
     } else {
         style_plain()
     };
@@ -233,6 +237,8 @@ fn paint_task_row_with_indent(
 
     let (left_style, leader_style, meta_style) = if row.selected {
         (style_reverse(), style_reverse_dim(), style_reverse_dim())
+    } else if row.hovered {
+        (style_underline(), style_dim(), style_dim())
     } else {
         let title_style = if row.title_bold {
             style_bold()
@@ -507,6 +513,8 @@ pub struct QueueFrameModel<'a> {
     pub list_scroll: usize,
     /// Nudge `list_scroll` so the selection (or its peek) stays on screen.
     pub follow_list: bool,
+    /// Task id under the pointer (board list hover), if any.
+    pub hover_id: Option<Uuid>,
 }
 
 /// Logical control under a painted rectangle (rebuilt every frame).
@@ -2557,6 +2565,7 @@ fn build_list_rows(
         let meta = row_meta(task, model.now, in_project_section);
         let selected = model.selection_id == Some(task.id)
             && !matches!(model.overlay, QueueOverlay::ScopeDropdown { .. });
+        let hovered = !selected && model.hover_id == Some(task.id);
         // A long title wraps onto continuation lines indented under its own first
         // row; every painted line carries the task's hit target and selection.
         let lines = paint_task_row_lines(
@@ -2566,6 +2575,7 @@ fn build_list_rows(
                 meta: &meta,
                 selected,
                 title_bold: false,
+                hovered,
             },
             geo,
             usize::from(indented_under_thread) * 2,
@@ -3359,6 +3369,7 @@ mod tests {
                 meta: long_meta,
                 selected: false,
                 title_bold: false,
+                hovered: false,
             },
             &geo,
         );
@@ -3404,6 +3415,7 @@ mod tests {
                 meta: "1h",
                 selected: false,
                 title_bold: false,
+                hovered: false,
             },
             &geo,
         );
@@ -3419,6 +3431,7 @@ mod tests {
                 meta: long_meta,
                 selected: false,
                 title_bold: false,
+                hovered: false,
             },
             &geo,
         );
@@ -3465,6 +3478,7 @@ mod tests {
                                 meta,
                                 selected,
                                 title_bold: selected,
+                                hovered: false,
                             },
                             &geo,
                         );
@@ -3537,6 +3551,7 @@ mod tests {
                 meta: "1h",
                 selected: false,
                 title_bold: false,
+                hovered: false,
             },
             TaskRowPaint {
                 glyph: "▲",
@@ -3544,6 +3559,7 @@ mod tests {
                 meta: "tsk · 2m",
                 selected: false,
                 title_bold: true,
+                hovered: false,
             },
             TaskRowPaint {
                 glyph: "◓",
@@ -3551,6 +3567,7 @@ mod tests {
                 meta: "3d",
                 selected: true,
                 title_bold: false,
+                hovered: false,
             },
         ];
 

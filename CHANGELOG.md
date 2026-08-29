@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+Board list hover: moving the pointer over a task row underlines it (mono only).
+Selection stays reverse; hover clears when the pointer leaves task rows or the
+board leaves normal list mode.
+
 Edge auto-scroll during text drag-select: holding a selection near the top or
 bottom of the board list or task-page notes viewport scrolls that surface while
 the drag stays armed, with a faster idle tick so the motion keeps up with the

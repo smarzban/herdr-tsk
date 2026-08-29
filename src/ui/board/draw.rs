@@ -638,6 +638,7 @@ fn draw_board_impl(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap
         detail_open: model.detail_open,
         list_scroll: model.list_scroll.get(),
         follow_list: model.follow_list.get(),
+        hover_id: model.hover_id,
     };
     let (hits, painted_list_scroll) = render::draw_queue_frame(frame, &frame_model, &geo);
     if let Some((scroll, max_scroll)) = painted_list_scroll {
