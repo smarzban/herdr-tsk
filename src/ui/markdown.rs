@@ -21,7 +21,7 @@ pub fn is_fence_line(text: &str) -> bool {
 
 /// Paint one already-wrapped notes row, tracking fenced-code state.
 ///
-/// Fence lines are dim. Body lines inside a fence stay plain (no inline md).
+/// Fence lines and body are dim. Body does not run inline md.
 /// Other lines use [`paint_md_line`].
 pub fn paint_notes_line(
     text: &str,
@@ -40,7 +40,10 @@ pub fn paint_notes_line(
         );
     }
     if *in_fence {
-        return bound_styled_line(vec![Span::styled(text.trim_end().to_string(), base)], width);
+        return bound_styled_line(
+            vec![Span::styled(text.trim_end().to_string(), style_dim())],
+            width,
+        );
     }
     paint_md_line(text, width, base)
 }
@@ -262,6 +265,7 @@ mod tests {
         let flat: String = body.spans.iter().map(|s| s.content.as_ref()).collect();
         assert_eq!(flat, "**not bold**");
         assert!(!has_mod(&body, Modifier::BOLD));
+        assert!(has_mod(&body, Modifier::DIM));
         let close = paint_notes_line("```", 40, style_plain(), &mut in_fence);
         assert!(!in_fence);
         assert!(has_mod(&close, Modifier::DIM));
