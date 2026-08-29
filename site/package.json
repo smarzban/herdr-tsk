@@ -9,7 +9,8 @@
     "build": "node scripts/generate-apple-touch.mjs && astro build",
     "preview": "astro preview",
     "astro": "astro",
-    "generate-apple-touch": "node scripts/generate-apple-touch.mjs"
+    "generate-apple-touch": "node scripts/generate-apple-touch.mjs",
+    "test": "node --test"
   },
   "dependencies": {
     "@astrojs/sitemap": "^3.7.2",

@@ -3,5 +3,5 @@
   "outputDirectory": "dist",
   "framework": "astro",
   "installCommand": "npm ci",
-  "ignoreCommand": "git diff --quiet HEAD^ HEAD -- site/"
+  "ignoreCommand": "git diff --quiet HEAD^ HEAD -- ."
 }

@@ -1,3 +1,5 @@
+import { parseCapture } from "./capture.js";
+
 (() => {
   const root = document.getElementById("tsk-demo");
   const frame = document.getElementById("board-demo");
@@ -147,48 +149,6 @@
   const projectName = (task) => task.project || "desk";
   const byUpdated = (a, b) => b.updatedAt - a.updatedAt;
   const taskById = (id) => state.tasks.find((t) => t.id === id);
-
-  function normalizeThread(raw) {
-    const s = String(raw)
-      .toLowerCase()
-      .replace(/[^a-z0-9-]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .slice(0, 32);
-    if (!s || !/^[a-z0-9]/.test(s)) return null;
-    return s;
-  }
-
-  function parseCapture(raw, fallbackProject) {
-    const parts = raw.trim().split(/\s+/).filter(Boolean);
-    let project = fallbackProject;
-    let thread = undefined;
-    const title = [];
-    for (let i = 0; i < parts.length; i += 1) {
-      const p = parts[i];
-      if (p === "!p") {
-        const arg = parts[i + 1];
-        if (!arg || arg.startsWith("!")) {
-          project = null;
-        } else {
-          i += 1;
-          project = arg.startsWith("/") ? arg.replace(/^.*\//, "") : arg;
-        }
-        continue;
-      }
-      if (p === "!t") {
-        const arg = parts[i + 1];
-        if (!arg || arg.startsWith("!")) {
-          thread = null;
-        } else {
-          i += 1;
-          thread = normalizeThread(arg);
-        }
-        continue;
-      }
-      title.push(p);
-    }
-    return { title: title.join(" "), project, thread };
-  }
 
   function knownProjects() {
     const set = new Set();

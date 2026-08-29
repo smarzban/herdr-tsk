@@ -47,6 +47,10 @@ export default defineConfig({
       ],
       head: [
         {
+          tag: 'script',
+          attrs: { src: '/theme.js' },
+        },
+        {
           // Dark by default; respects saved tsk-theme / starlight-theme.
           tag: 'script',
           content: `(function(){var k='tsk-theme';var t=null;try{t=localStorage.getItem(k)||localStorage.getItem('starlight-theme');}catch(e){}if(t!=='light'&&t!=='dark')t='dark';document.documentElement.dataset.theme=t;document.documentElement.style.colorScheme=t;try{localStorage.setItem(k,t);localStorage.setItem('starlight-theme',t);}catch(e){}})();`,
