@@ -1336,8 +1336,12 @@ fn paint_modal_card(
             modal_plain_border_row('└', '─', '┘', card_w),
         );
     }
-    if !legend.is_empty() {
-        let rule_offset = bottom_offset.saturating_sub(2);
+    let rule_offset = if !legend.is_empty() {
+        Some(bottom_offset.saturating_sub(2))
+    } else {
+        None
+    };
+    if let Some(rule_offset) = rule_offset {
         let legend_offset = bottom_offset.saturating_sub(1);
         paint_row_in(
             frame,
@@ -1353,12 +1357,37 @@ fn paint_modal_card(
         );
     }
 
+    // Side borders for every middle row that is not already a full `├─┤` / top / bottom
+    // rule. Content, padding, and the legend line only had corners before — the box
+    // looked open on the left and right.
+    for row_offset in 1..bottom_offset {
+        if rule_offset == Some(row_offset) {
+            continue;
+        }
+        paint_modal_side_borders(frame, area, row_offset);
+    }
+
     Rect::new(
         x0.saturating_add(1 + pad),
         y0.saturating_add(1 + pad),
         card_w.saturating_sub(2 + 2 * pad),
         shown_content,
     )
+}
+
+/// Dim `│` on the left and right edges of one card row (content / padding / legend).
+fn paint_modal_side_borders(frame: &mut Frame<'_>, area: Rect, row_offset: u16) {
+    if row_offset >= area.height || area.width == 0 {
+        return;
+    }
+    let y = area.y.saturating_add(row_offset);
+    let style = style_dim();
+    let buffer = frame.buffer_mut();
+    buffer[(area.x, y)].set_symbol("│").set_style(style);
+    if area.width > 1 {
+        let right = area.x.saturating_add(area.width.saturating_sub(1));
+        buffer[(right, y)].set_symbol("│").set_style(style);
+    }
 }
 
 /// One row of a modal card's border/legend, painted at `area`'s `row_offset`-th row
@@ -1863,9 +1892,30 @@ fn paint_task_page(
                 line.spans
                     .push(Span::styled(status_word.to_string(), style_dim()));
             }
+            // `  {glyph} {title}` — title words start at column 4; the glyph and the
+            // right-aligned status word are chrome and stay out of the copy.
+            let title_cells = used.saturating_sub(4);
+            if title_cells > 0 {
+                hits.push_copyable(Rect::new(
+                    4,
+                    y,
+                    u16::try_from(title_cells).unwrap_or(u16::MAX),
+                    1,
+                ));
+            }
             line
         } else {
-            Line::from(Span::styled(format!("    {row_text}"), style_bold()))
+            let painted = format!("    {row_text}");
+            let title_cells = display_width(&painted).saturating_sub(4);
+            if title_cells > 0 {
+                hits.push_copyable(Rect::new(
+                    4,
+                    y,
+                    u16::try_from(title_cells).unwrap_or(u16::MAX),
+                    1,
+                ));
+            }
+            Line::from(Span::styled(painted, style_bold()))
         };
         put_line(frame, y, header_width, line);
     }
@@ -1873,14 +1923,6 @@ fn paint_task_page(
         QueueHitTarget::FormTitle,
         Rect::new(0, lay.title_y, width, title_row_count),
     );
-    // Title words only: two-cell gutter on the left; status word on the first row is
-    // outside this rect because it sits past the title columns in the paint.
-    hits.push_copyable(Rect::new(
-        2,
-        lay.title_y,
-        header_width.saturating_sub(2),
-        title_row_count,
-    ));
     if let Some((cursor_row, cursor_col)) = title_cursor {
         // Every title row shares the four-cell gutter (two leading blanks plus
         // glyph and space), so the wrapped field starts at column 4 on all of them.

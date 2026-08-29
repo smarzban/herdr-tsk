@@ -25,6 +25,83 @@ use ratatui::style::Modifier;
 use ratatui::Frame;
 use unicode_width::UnicodeWidthChar;
 
+/// Left-button press → drag → release for board text selection.
+///
+/// Clicks are deferred until release so a real drag can copy without also firing
+/// the Down-time peek/select path. Extracted from `run_board` so the transition
+/// table is unit-testable without a live event loop.
+#[derive(Debug, Default, Clone)]
+pub struct DragSelectGesture {
+    /// Down cell while a deferred click is still armed (`None` once a drag has area).
+    pending_down: Option<Position>,
+}
+
+/// One phase of [`DragSelectGesture::handle`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DragSelectPhase {
+    Press,
+    Move,
+    Release,
+}
+
+/// What `run_board` should do after feeding a left-button phase.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DragSelectOutcome {
+    /// Event consumed; do not dispatch a board click.
+    Continue,
+    /// Selection has area — copy from the painted frame snapshot.
+    Copy,
+    /// Bare click — dispatch at the original Down cell.
+    Click(Position),
+}
+
+impl DragSelectGesture {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Abandon a deferred click (e.g. a key pressed while the button is held).
+    pub fn clear(&mut self) {
+        self.pending_down = None;
+    }
+
+    /// Feed one left-button phase.
+    ///
+    /// For `Press` / `Move`, `selection` is the model selection *after* the caller
+    /// applied `begin_mouse_press` / `drag_text_selection`. For `Release`, it is the
+    /// selection after synthesizing a final drag from the release cell when the host
+    /// omitted intermediate Drag events.
+    pub fn handle(
+        &mut self,
+        phase: DragSelectPhase,
+        position: Position,
+        selection: Option<TextSelection>,
+    ) -> DragSelectOutcome {
+        match phase {
+            DragSelectPhase::Press => {
+                self.pending_down = Some(position);
+                DragSelectOutcome::Continue
+            }
+            DragSelectPhase::Move => {
+                if selection.is_some_and(|sel| sel.has_area()) {
+                    self.pending_down = None;
+                }
+                DragSelectOutcome::Continue
+            }
+            DragSelectPhase::Release => {
+                if selection.is_some_and(|sel| sel.has_area()) {
+                    self.pending_down = None;
+                    DragSelectOutcome::Copy
+                } else if let Some(down) = self.pending_down.take() {
+                    DragSelectOutcome::Click(down)
+                } else {
+                    DragSelectOutcome::Continue
+                }
+            }
+        }
+    }
+}
+
 /// A drag-selected screen region: where the press landed and where the drag sits.
 ///
 /// `anchor` is the press cell, `head` the latest drag cell; either may end up
@@ -51,9 +128,15 @@ impl TextSelection {
         }
     }
 
-    /// Whether the drag has actually covered cells (a bare click is no selection).
+    /// Whether the drag has covered enough cells to count as a selection.
+    ///
+    /// A single-cell wobble (`anchor` adjacent to `head`) stays a click: hosts often
+    /// deliver one pixel of motion between Down and Up. Chebyshev distance ≥ 2
+    /// (two steps in any direction, including diagonal) is the copy threshold.
     pub fn has_area(&self) -> bool {
-        self.anchor != self.head
+        let dx = self.anchor.x.abs_diff(self.head.x);
+        let dy = self.anchor.y.abs_diff(self.head.y);
+        dx.max(dy) >= 2
     }
 }
 
@@ -403,6 +486,63 @@ mod tests {
     }
 
     #[test]
+    fn one_cell_wobble_is_not_a_selection() {
+        assert!(!TextSelection::new(pos(5, 5), pos(5, 5)).has_area());
+        assert!(!TextSelection::new(pos(5, 5), pos(6, 5)).has_area());
+        assert!(!TextSelection::new(pos(5, 5), pos(5, 6)).has_area());
+        assert!(!TextSelection::new(pos(5, 5), pos(6, 6)).has_area());
+        assert!(TextSelection::new(pos(5, 5), pos(7, 5)).has_area());
+        assert!(TextSelection::new(pos(5, 5), pos(5, 7)).has_area());
+    }
+
+    #[test]
+    fn drag_select_gesture_defers_click_until_real_drag_or_release() {
+        let mut g = DragSelectGesture::new();
+        let down = pos(3, 4);
+        assert_eq!(
+            g.handle(DragSelectPhase::Press, down, None),
+            DragSelectOutcome::Continue
+        );
+        // One-cell wobble: still a click.
+        let wobble = TextSelection::new(down, pos(4, 4));
+        assert_eq!(
+            g.handle(DragSelectPhase::Move, pos(4, 4), Some(wobble)),
+            DragSelectOutcome::Continue
+        );
+        assert_eq!(
+            g.handle(DragSelectPhase::Release, pos(4, 4), Some(wobble)),
+            DragSelectOutcome::Click(down)
+        );
+
+        let mut g = DragSelectGesture::new();
+        assert_eq!(
+            g.handle(DragSelectPhase::Press, down, None),
+            DragSelectOutcome::Continue
+        );
+        let drag = TextSelection::new(down, pos(8, 4));
+        assert_eq!(
+            g.handle(DragSelectPhase::Move, pos(8, 4), Some(drag)),
+            DragSelectOutcome::Continue
+        );
+        assert_eq!(
+            g.handle(DragSelectPhase::Release, pos(8, 4), Some(drag)),
+            DragSelectOutcome::Copy
+        );
+
+        let mut g = DragSelectGesture::new();
+        let _ = g.handle(DragSelectPhase::Press, down, None);
+        g.clear();
+        assert_eq!(
+            g.handle(
+                DragSelectPhase::Release,
+                down,
+                Some(TextSelection::new(down, down))
+            ),
+            DragSelectOutcome::Continue
+        );
+    }
+
+    #[test]
     fn paint_selection_stays_inside_copyable_not_gutter() {
         use ratatui::backend::TestBackend;
         use ratatui::style::Modifier;
@@ -477,11 +617,11 @@ mod tests {
             selection_text(&rows, &copyable, &sel).as_deref(),
             Some("abcd")
         );
-        // Partial inclusive end.
-        let sel = TextSelection::new(pos(1, 0), pos(2, 0));
+        // Partial inclusive end (two cells apart so it clears the wobble threshold).
+        let sel = TextSelection::new(pos(0, 0), pos(2, 0));
         assert_eq!(
             selection_text(&rows, &copyable, &sel).as_deref(),
-            Some("bc")
+            Some("abc")
         );
     }
 }

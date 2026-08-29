@@ -4,19 +4,19 @@
 │                                                                                │
 │ IN MOTION ───────────────────────────────────────────────────────────────────2 │
 │         ┌─ help ──────────────────────────────────────────────── [x]─┐         │
-│  ▸ Smoke                                                              tsk · 3m │
-│  ▸ Edit    alt+q quit | Esc close                                     dr · 12m │
-│            j/k · ↑/↓ move | alt+space primary                                  │
-│ desk ───   alt+d done | alt+o reopen                                  ───────1 │
-│            alt+b block | enter open                                            │
-│  ○ Globa   →/← peek | + capture                                             2d │
-│            alt+e title | alt+x/Delete delete                                   │
-│            alt+u undo | z drawer                                               │
-│            : palette | ? help                                                  │
-│            P project                                                           │
-│                                                                                │
+│  ▸ Smoke│                                                            │tsk · 3m │
+│  ▸ Edit │  alt+q quit | Esc close                                    │dr · 12m │
+│         │  j/k · ↑/↓ move | alt+space primary                        │         │
+│ desk ───│  alt+d done | alt+o reopen                                 │───────1 │
+│         │  alt+b block | enter open                                  │         │
+│  ○ Globa│  →/← peek | + capture                                      │      2d │
+│         │  alt+e title | alt+x/Delete delete                         │         │
+│         │  alt+u undo | z drawer                                     │         │
+│         │  : palette | ? help                                        │         │
+│         │  P project                                                 │         │
+│         │                                                            │         │
 │         ├────────────────────────────────────────────────────────────┤         │
-│           any key close                                                        │
+│         │ any key close                                              │         │
 │         └────────────────────────────────────────────────────────────┘         │
 │                                                                                │
 │                                                                                │

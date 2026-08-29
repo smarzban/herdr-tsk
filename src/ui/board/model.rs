@@ -577,6 +577,9 @@ pub struct BoardModel {
     /// When set, [`Self::message`] clears itself on the next idle tick after this instant.
     /// Sticky messages (errors, delete notices) leave this `None`.
     pub(super) message_expires_at: Option<Instant>,
+    /// Sticky status restored when an ephemeral toast expires (e.g. save-recovery banner
+    /// under a brief `copied` notice). Cleared by [`Self::set_message`] / [`Self::clear_message`].
+    pub(super) message_restore: Option<String>,
     /// Palette query.
     pub(super) command_query: String,
     /// Selection into the currently visible command set.
@@ -634,6 +637,7 @@ impl BoardModel {
             mouse_press: None,
             text_selection: None,
             message_expires_at: None,
+            message_restore: None,
             verb_modifier: VerbModifier::Alt,
         };
         model.seed_selection();
@@ -1439,10 +1443,17 @@ impl BoardModel {
     pub fn set_message(&mut self, msg: impl Into<String>) {
         self.message = Some(terminal_text(&msg.into()));
         self.message_expires_at = None;
+        self.message_restore = None;
     }
 
     /// Status feedback that clears itself after `ttl` (copy confirmation, brief notices).
+    ///
+    /// A sticky status already on the line (save-recovery banner, etc.) is stashed and
+    /// restored when the toast expires, so a `copied` flash cannot erase it.
     pub fn set_ephemeral_message(&mut self, msg: impl Into<String>, ttl: std::time::Duration) {
+        if self.message_expires_at.is_none() {
+            self.message_restore = self.message.clone();
+        }
         self.message = Some(terminal_text(&msg.into()));
         self.message_expires_at = Some(Instant::now() + ttl);
     }
@@ -1450,15 +1461,18 @@ impl BoardModel {
     pub fn clear_message(&mut self) {
         self.message = None;
         self.message_expires_at = None;
+        self.message_restore = None;
     }
 
-    /// Drop an ephemeral status line whose TTL has elapsed. Sticky messages are untouched.
+    /// Drop an ephemeral status line whose TTL has elapsed. Sticky messages are untouched;
+    /// a stashed sticky under a toast is restored.
     pub fn expire_ephemeral_message(&mut self) {
         if self
             .message_expires_at
             .is_some_and(|deadline| Instant::now() >= deadline)
         {
-            self.clear_message();
+            self.message = self.message_restore.take();
+            self.message_expires_at = None;
         }
     }
 
@@ -1709,6 +1723,22 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(5));
         model.expire_ephemeral_message();
         assert!(model.message().is_none());
+        assert!(model.message_expires_at.is_none());
+    }
+
+    #[test]
+    fn ephemeral_toast_restores_sticky_save_recovery_banner() {
+        let mut model = BoardModel::from_tasks(Vec::new(), None);
+        model.set_message("save failed: disk full · Retry or Cancel");
+        model.set_ephemeral_message("copied", std::time::Duration::from_millis(1));
+        assert_eq!(model.message(), Some("copied"));
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        model.expire_ephemeral_message();
+        assert_eq!(
+            model.message(),
+            Some("save failed: disk full · Retry or Cancel"),
+            "sticky banner must return after the toast, not vanish"
+        );
         assert!(model.message_expires_at.is_none());
     }
 

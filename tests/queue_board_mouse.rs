@@ -1888,6 +1888,64 @@ fn peek_on_project_board_copy_excludes_pipe_gutter() {
     );
 }
 
+/// Task-page header copyable rects cover title words only — not the status glyph or
+/// the right-aligned status word.
+#[test]
+fn task_page_title_copy_excludes_glyph_and_status_word() {
+    use ratatui::layout::Position;
+    use tsk_tui::ui::text_select::{selection_text, TextSelection};
+
+    let (mut domain, mut model, _id) = board_with_task("title only please", HumanStatus::Started);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenTaskPage,
+        None,
+        None,
+    )
+    .expect("open page");
+
+    let hits = board_hit_map(STANDARD, &model);
+    let mut terminal =
+        Terminal::new(TestBackend::new(STANDARD.width, STANDARD.height)).expect("test terminal");
+    terminal
+        .draw(|frame| {
+            let _ = draw_board(frame, &model);
+        })
+        .expect("draw");
+    let buffer = terminal.backend().buffer();
+    let rows: Vec<String> = (0..STANDARD.height)
+        .map(|y| {
+            (0..STANDARD.width)
+                .map(|x| buffer[(x, y)].symbol().to_string())
+                .collect::<String>()
+        })
+        .collect();
+
+    let title_y = rows
+        .iter()
+        .position(|row| row.contains("title only please"))
+        .expect("page paints the title") as u16;
+    assert!(
+        rows[title_y as usize].contains('▸'),
+        "sanity: status glyph is on the title row"
+    );
+    assert!(
+        rows[title_y as usize].contains("started"),
+        "sanity: status word is on the title row"
+    );
+
+    let selection = TextSelection::new(
+        Position::new(0, title_y),
+        Position::new(STANDARD.width - 1, title_y),
+    );
+    let text = selection_text(&rows, &hits.copyable, &selection).expect("title copy");
+    assert_eq!(
+        text, "title only please",
+        "copy must be the title alone, got {text:?}"
+    );
+}
+
 /// The shared modal card only declares its own body rows copyable -- never the
 /// border, title, or footer rows around them -- so a selection dragged across the
 /// card's border/footer paints no clipboard text, only its actual binding lines do.

@@ -302,7 +302,7 @@ fn run_board() -> Result<(), Box<dyn Error>> {
         // Left Down is deferred until Up (or abandoned when a text drag grows): firing
         // the click on Down made every board-row drag also peek/toggle, so copy only
         // felt reliable on the task page where Down is inert over notes.
-        let mut pending_click: Option<crossterm::event::MouseEvent> = None;
+        let mut drag_gesture = crate::ui::text_select::DragSelectGesture::new();
         loop {
             // Settle, paint, then wait. The board frame path does no host polling, so the
             // wait is only the Frame Scheduler's idle floor. All three are one call because
@@ -334,7 +334,7 @@ fn run_board() -> Result<(), Box<dyn Error>> {
                 Event::Key(key) if key.kind == KeyEventKind::Press => {
                     // A key while the mouse button is held abandons the deferred click so
                     // Up does not fire a stale peek/select after the keyboard moved on.
-                    pending_click = None;
+                    drag_gesture.clear();
                     let area = terminal_area(terminal)?;
                     // The painted mode owns the keyboard: `resolve_board_surface` resolves the
                     // same input mode at every terminal size (`board_input_mode_for_area` no
@@ -366,40 +366,56 @@ fn run_board() -> Result<(), Box<dyn Error>> {
                     // (highlight and copy text come from the last painted snapshot), and
                     // release hands that text to the clipboard. Clicks are deferred to Up
                     // so a drag does not also fire the Down-time peek/select path.
+                    use crate::ui::text_select::{DragSelectOutcome, DragSelectPhase};
                     use crossterm::event::{MouseButton, MouseEventKind};
                     let mut click = mouse;
                     match mouse.kind {
                         MouseEventKind::Drag(MouseButton::Left) => {
-                            model.drag_text_selection(Position::new(mouse.column, mouse.row));
-                            if model.text_selection().is_some_and(|sel| sel.has_area()) {
-                                pending_click = None;
-                            }
+                            let pos = Position::new(mouse.column, mouse.row);
+                            model.drag_text_selection(pos);
+                            let _ = drag_gesture.handle(
+                                DragSelectPhase::Move,
+                                pos,
+                                model.text_selection(),
+                            );
                             continue;
                         }
                         MouseEventKind::Up(MouseButton::Left) => {
-                            let up = Position::new(mouse.column, mouse.row);
+                            let pos = Position::new(mouse.column, mouse.row);
                             // Some hosts omit Drag and only move between Down and Up.
                             // Grow the selection from the press cell before clearing it
                             // so copy still works there (and peek is not fired instead).
                             if model.text_selection().is_none() {
-                                model.drag_text_selection(up);
+                                model.drag_text_selection(pos);
                             }
                             model.end_mouse_press();
-                            if model.text_selection().is_some_and(|sel| sel.has_area()) {
-                                copy_drag_selection(&mut model, &frame_rows, &frame_copyable);
-                                pending_click = None;
-                                continue;
+                            match drag_gesture.handle(
+                                DragSelectPhase::Release,
+                                pos,
+                                model.text_selection(),
+                            ) {
+                                DragSelectOutcome::Copy => {
+                                    copy_drag_selection(&mut model, &frame_rows, &frame_copyable);
+                                    continue;
+                                }
+                                DragSelectOutcome::Click(down) => {
+                                    model.clear_text_selection();
+                                    click = crossterm::event::MouseEvent {
+                                        kind: MouseEventKind::Down(MouseButton::Left),
+                                        column: down.x,
+                                        row: down.y,
+                                        modifiers: mouse.modifiers,
+                                    };
+                                }
+                                DragSelectOutcome::Continue => continue,
                             }
-                            let Some(down) = pending_click.take() else {
-                                continue;
-                            };
-                            click = down;
                         }
                         MouseEventKind::Down(MouseButton::Left) => {
                             // Anchor a would-be selection and stash the Down for Up;
                             // do not map the click yet.
-                            model.begin_mouse_press(Position::new(mouse.column, mouse.row));
-                            pending_click = Some(mouse);
+                            let pos = Position::new(mouse.column, mouse.row);
+                            model.begin_mouse_press(pos);
+                            let _ = drag_gesture.handle(DragSelectPhase::Press, pos, None);
                             continue;
                         }
                         _ => {}
