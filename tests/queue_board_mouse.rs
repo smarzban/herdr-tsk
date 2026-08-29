@@ -25,7 +25,7 @@ use tsk_tui::ui::input::{
 };
 use tsk_tui::ui::mouse::{
     capture_layout, capture_mouse_paths_complete, left_click, map_board_mouse, map_capture_mouse,
-    map_scrollbar_mouse, primary_capture_action_sample_mouse, ScrollbarMouse,
+    map_scrollbar_mouse, primary_capture_action_sample_mouse, scrollbar_intent_at, ScrollbarMouse,
 };
 use tsk_tui::ui::render::{QueueHit, QueueHitMap, QueueHitTarget};
 
@@ -2184,6 +2184,48 @@ fn scrollbar_pointer_state_machine_drags_and_ignores_overlays() {
     );
     assert_eq!(miss, ScrollbarMouse::Miss);
     assert!(!overlay_drag);
+}
+
+#[test]
+fn scrollbar_intent_at_clamps_off_track_and_ignores_the_other_surface() {
+    let (_, model) = deck_of(40);
+    let _ = page_rows(&model);
+    let hits = board_hit_map(STANDARD, &model);
+    let mut cells: Vec<_> = hits
+        .regions
+        .iter()
+        .filter(|hit| matches!(hit.target, QueueHitTarget::ListScroll(_)))
+        .collect();
+    cells.sort_by_key(|hit| hit.area.y);
+    let first = cells.first().expect("track");
+    let last = cells.last().expect("track");
+    let QueueHitTarget::ListScroll(first_off) = first.target else {
+        panic!("first cell");
+    };
+    let QueueHitTarget::ListScroll(last_off) = last.target else {
+        panic!("last cell");
+    };
+    assert_eq!(
+        scrollbar_intent_at(&hits, first.area.y.saturating_sub(5), false),
+        Some(BoardIntent::ListScrollTo(first_off))
+    );
+    assert_eq!(
+        scrollbar_intent_at(&hits, last.area.y.saturating_add(20), false),
+        Some(BoardIntent::ListScrollTo(last_off))
+    );
+    let mid = cells[cells.len() / 2];
+    let QueueHitTarget::ListScroll(mid_off) = mid.target else {
+        panic!("mid cell");
+    };
+    assert_eq!(
+        scrollbar_intent_at(&hits, mid.area.y, false),
+        Some(BoardIntent::ListScrollTo(mid_off))
+    );
+    assert_eq!(
+        scrollbar_intent_at(&hits, mid.area.y, true),
+        None,
+        "list hits must not drive the page scrollbar"
+    );
 }
 
 #[test]
