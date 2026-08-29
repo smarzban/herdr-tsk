@@ -3,7 +3,7 @@
 //! Markers are styled with bold / dim / underline only — never color. Edit mode
 //! keeps the raw source; this module paints the reading surface.
 //!
-//! Supported inline: `**strong**`, `*em*` / `_em_`, `` `code` `` (reverse).
+//! Supported inline: `**strong**`, `*em*` / `_em_`, `` `code` `` (dim, ticks kept).
 //! Supported line starts: `#`…`######` headings (bold+underline body), `-` / `*` lists
 //! (dim marker), fenced ` ``` ` blocks (dim fence, plain body). Task-list markers
 //! like `- [ ]` stay literal text (structured steps own checklists).
@@ -12,9 +12,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
 use super::present_line;
-use super::render::{
-    style_bold, style_dim, style_heading, style_plain, style_reverse, style_underline,
-};
+use super::render::{style_bold, style_dim, style_heading, style_plain, style_underline};
 
 /// A line that opens or closes a fenced code block (` ``` ` after indent).
 pub fn is_fence_line(text: &str) -> bool {
@@ -121,7 +119,7 @@ fn inline_spans(text: &str, base: Style) -> Vec<Span<'static>> {
             InlineKind::Plain => base,
             InlineKind::Strong => style_bold(),
             InlineKind::Em => style_underline(),
-            InlineKind::Code => style_reverse(),
+            InlineKind::Code => style_dim(),
         };
         spans.push(Span::styled(std::mem::take(buf), style));
     };
@@ -132,6 +130,7 @@ fn inline_spans(text: &str, base: Style) -> Vec<Span<'static>> {
                 if chars[i] == '`' {
                     flush(&mut buf, kind, &mut spans);
                     kind = InlineKind::Code;
+                    buf.push('`');
                     i += 1;
                 } else if chars[i] == '*' && i + 1 < chars.len() && chars[i + 1] == '*' {
                     flush(&mut buf, kind, &mut spans);
@@ -168,6 +167,7 @@ fn inline_spans(text: &str, base: Style) -> Vec<Span<'static>> {
             }
             InlineKind::Code => {
                 if chars[i] == '`' {
+                    buf.push('`');
                     flush(&mut buf, kind, &mut spans);
                     kind = InlineKind::Plain;
                     i += 1;
@@ -211,12 +211,12 @@ mod tests {
         let code = line
             .spans
             .iter()
-            .find(|s| s.content.as_ref() == "d")
+            .find(|s| s.content.as_ref() == "`d`")
             .expect("code span");
-        assert!(code.style.add_modifier.contains(Modifier::REVERSED));
-        assert!(!code.style.add_modifier.contains(Modifier::DIM));
+        assert!(code.style.add_modifier.contains(Modifier::DIM));
+        assert!(!code.style.add_modifier.contains(Modifier::REVERSED));
         let flat: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
-        assert_eq!(flat, "a b c d");
+        assert_eq!(flat, "a b c `d`");
         let strong = line
             .spans
             .iter()
@@ -290,9 +290,9 @@ mod tests {
         let span = code
             .spans
             .iter()
-            .find(|s| s.content.as_ref() == "x")
+            .find(|s| s.content.as_ref() == "`x`")
             .expect("code");
-        assert!(span.style.add_modifier.contains(Modifier::REVERSED));
+        assert!(!span.style.add_modifier.contains(Modifier::REVERSED));
         assert!(span.style.add_modifier.contains(Modifier::DIM));
     }
 }

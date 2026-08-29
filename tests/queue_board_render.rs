@@ -2597,6 +2597,25 @@ fn peek_shows_thread_line_only_for_threaded_task() {
 }
 
 #[test]
+fn peek_shows_inline_backticks_and_fence_ticks() {
+    let mut coded = task(202, "coded", HumanStatus::Ready, TaskScope::Global, 1);
+    coded.notes = Some("`code`\n```\nfn x() {}\n```".into());
+    let mut model = BoardModel::from_tasks(vec![coded], None);
+    let mut domain = DomainState::new();
+    apply_intent(&mut domain, &mut model, BoardIntent::PeekDetail, None).expect("peek");
+    let body = board_rows(&model, 80, 24).join("\n");
+    assert!(
+        body.contains("`code`"),
+        "peek must keep inline backticks:\n{body}"
+    );
+    assert!(body.contains("```"), "peek must keep fenced ticks:\n{body}");
+    assert!(
+        body.contains("fn x() {}"),
+        "peek must show the fence body:\n{body}"
+    );
+}
+
+#[test]
 fn all_golden_frames_pass_no_color_sgr_scan() {
     let dir = golden_fixtures_dir();
     let mut scanned = 0usize;
