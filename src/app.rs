@@ -33,7 +33,9 @@ use crate::ui::mouse::{
 };
 use crate::ui::queue::BoardTab;
 use crate::ui::scheduler;
-use crate::ui::text_select::{copy_to_clipboard, frame_text_rows, selection_text};
+use crate::ui::text_select::{
+    copy_to_clipboard, copyable_line_at, frame_text_rows, selection_text,
+};
 
 /// Env var set by open-capture launcher for Capture UI mode.
 pub const MODE_ENV: &str = "TSK_MODE";
@@ -482,6 +484,11 @@ fn run_board() -> Result<(), Box<dyn Error>> {
                             let pos = Position::new(mouse.column, mouse.row);
                             model.begin_mouse_press(pos);
                             let _ = drag_gesture.handle(DragSelectPhase::Press, pos, None);
+                            if let Some(line) =
+                                copyable_line_at(&frame_rows, &frame_copyable, pos.y)
+                            {
+                                drag_gesture.ensure_copy_origin(line);
+                            }
                             continue;
                         }
                         _ => {}

@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::backend::TestBackend;
-use ratatui::layout::Rect;
+use ratatui::layout::{Position, Rect};
 use ratatui::Terminal;
 
 use tsk_tui::domain::{DomainState, HumanStatus, ProvenanceOrigin, TaskScope};
@@ -28,6 +28,7 @@ use tsk_tui::ui::mouse::{
     map_scrollbar_mouse, primary_capture_action_sample_mouse, scrollbar_intent_at, ScrollbarMouse,
 };
 use tsk_tui::ui::render::{QueueHit, QueueHitMap, QueueHitTarget};
+use tsk_tui::ui::text_select::{self, AutoScrollDirection, DragSelectGesture};
 
 const THIS_REPO: &str = "/repos/app";
 const OTHER_REPO: &str = "/repos/other";
@@ -2285,5 +2286,71 @@ fn painting_clamps_an_oversize_list_scroll_back_into_the_model() {
         model.list_scroll() < 10_000,
         "paint must write the clamped offset back, got {}",
         model.list_scroll()
+    );
+}
+
+#[test]
+fn downward_autoscroll_copy_excludes_titles_above_the_press_row() {
+    let (_, mut model) = deck_of(40);
+    let _ = page_rows(&model);
+    let hits = board_hit_map(STANDARD, &model);
+    let rows = page_rows(&model);
+    let start_y = rows
+        .iter()
+        .position(|row| row.contains("task 30"))
+        .expect("task 30 visible") as u16;
+    let origin = text_select::copyable_line_at(&rows, &hits.copyable, start_y)
+        .expect("press row is copyable");
+    assert!(
+        origin.contains("task 30"),
+        "origin must be the pressed title, got {origin:?}"
+    );
+
+    model.begin_mouse_press(Position::new(10, start_y));
+    model.drag_text_selection(Position::new(10, 20));
+    let mut gesture = DragSelectGesture::new();
+    gesture.ensure_copy_origin(origin.clone());
+
+    let content = Rect::new(0, 2, 80, 19);
+    for _ in 0..12 {
+        let rows = page_rows(&model);
+        let hits = board_hit_map(STANDARD, &model);
+        let Some(sel) = model.text_selection() else {
+            break;
+        };
+        let delta = model.nudge_list_scroll(AutoScrollDirection::Down, 1);
+        if delta == 0 {
+            break;
+        }
+        gesture.capture_leaving_rows(
+            &rows,
+            &hits.copyable,
+            sel,
+            content,
+            AutoScrollDirection::Down,
+            delta,
+        );
+        model.recompute_text_selection_head(Position::new(10, 20));
+    }
+
+    let rows = page_rows(&model);
+    let hits = board_hit_map(STANDARD, &model);
+    let live = model
+        .text_selection()
+        .and_then(|sel| text_select::selection_text(&rows, &hits.copyable, &sel));
+    let text = text_select::compose_selection_copy(
+        gesture.captured_before(),
+        live,
+        gesture.captured_after(),
+        gesture.copy_origin(),
+    )
+    .expect("copy");
+    assert!(
+        !text.contains("task 39"),
+        "copy must not include titles above the press row:\n{text}"
+    );
+    assert!(
+        text.contains("task 30"),
+        "copy must include the press row:\n{text}"
     );
 }
