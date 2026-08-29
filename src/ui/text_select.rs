@@ -176,10 +176,13 @@ impl DragSelectGesture {
             return;
         }
         let delta = u16::try_from(delta).unwrap_or(u16::MAX);
+        // Sticky headers pin at content.y, so titles leave below them. Use the
+        // first copyable row in the viewport as the top of scrolling content.
+        let origin = first_copyable_row(copyable, content).unwrap_or(content.y);
         let (from, to, prefix) = match direction {
             AutoScrollDirection::Down => {
-                let from = content.y;
-                let to = content.y.saturating_add(delta.saturating_sub(1));
+                let from = origin;
+                let to = origin.saturating_add(delta.saturating_sub(1));
                 (from, to, true)
             }
             AutoScrollDirection::Up => {
@@ -360,6 +363,19 @@ pub fn selection_text(
     } else {
         Some(lines.join("\n"))
     }
+}
+
+fn first_copyable_row(copyable: &[Rect], content: Rect) -> Option<u16> {
+    copyable
+        .iter()
+        .filter(|area| {
+            area.width > 0
+                && area.height > 0
+                && area.y >= content.y
+                && area.y < content.y.saturating_add(content.height)
+        })
+        .map(|area| area.y)
+        .min()
 }
 
 /// Copyable lines of `selection` whose screen row sits in `y_from..=y_to`.
@@ -913,5 +929,33 @@ mod tests {
             "copy must keep the start title: {text:?}"
         );
         assert!(text.contains("title-three"), "{text:?}");
+    }
+
+    #[test]
+    fn downward_autoscroll_captures_titles_below_a_sticky_header() {
+        let rows = vec![
+            "....HEADER..............".to_string(),
+            "....HEADER..............".to_string(),
+            "....start-title.........".to_string(),
+            "....next-title..........".to_string(),
+        ];
+        let copyable = vec![Rect::new(4, 2, 12, 2)];
+        let sel = TextSelection::new(pos(4, 2), pos(10, 3));
+        let mut g = DragSelectGesture::new();
+        g.capture_leaving_rows(
+            &rows,
+            &copyable,
+            sel,
+            Rect::new(0, 0, 40, 4),
+            AutoScrollDirection::Down,
+            1,
+        );
+        assert!(
+            g.captured_before()
+                .first()
+                .is_some_and(|line| line.contains("start-title")),
+            "top-to-bottom crawl must keep the start title under a sticky header, got {:?}",
+            g.captured_before()
+        );
     }
 }
