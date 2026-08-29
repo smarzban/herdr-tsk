@@ -13,6 +13,12 @@ const SHORT_TICK_FLOOR: Duration = Duration::from_millis(25);
 /// Prototype-like animation frame interval (~30 Hz, within 16–33 ms).
 const SHORT_TICK: Duration = Duration::from_millis(33);
 
+/// Quiet window after a terminal resize before the next forced layout paint.
+///
+/// Dragging a pane edge fires many `Event::Resize` reports; waiting this long
+/// after the latest one lets the size settle so the board rebuilds once.
+pub const RESIZE_DEBOUNCE: Duration = Duration::from_millis(50);
+
 /// Next input-wait duration for one frame-loop cycle.
 ///
 /// - Idle (`active_animations == false`): at least `base` and
@@ -26,9 +32,39 @@ pub fn next_wait(active_animations: bool, base: Duration) -> Duration {
     }
 }
 
+/// Drain a burst of resize events, returning the first non-resize (if any).
+///
+/// `poll` / `read` are injected so the policy is unit-testable without a tty.
+/// Each resize resets the quiet window; when the window elapses with no further
+/// event, returns `None` so the caller can paint once at the settled size.
+pub fn coalesce_resizes<E>(
+    mut poll: impl FnMut(Duration) -> Result<bool, E>,
+    mut read: impl FnMut() -> Result<crossterm::event::Event, E>,
+    is_resize: impl Fn(&crossterm::event::Event) -> bool,
+) -> Result<Option<crossterm::event::Event>, E> {
+    let mut deadline = std::time::Instant::now() + RESIZE_DEBOUNCE;
+    loop {
+        let now = std::time::Instant::now();
+        if now >= deadline {
+            return Ok(None);
+        }
+        let wait = deadline.saturating_duration_since(now);
+        if !poll(wait)? {
+            return Ok(None);
+        }
+        let event = read()?;
+        if is_resize(&event) {
+            deadline = std::time::Instant::now() + RESIZE_DEBOUNCE;
+            continue;
+        }
+        return Ok(Some(event));
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{next_wait, DEFAULT_BASE_TICK};
+    use super::{coalesce_resizes, next_wait, DEFAULT_BASE_TICK, RESIZE_DEBOUNCE};
+    use crossterm::event::Event;
     use std::time::Duration;
 
     #[test]
@@ -95,5 +131,48 @@ mod tests {
                 "idle wait must preserve base {base:?}, got {wait:?}"
             );
         }
+    }
+
+    #[test]
+    fn coalesce_resizes_returns_none_when_only_resizes_arrive() {
+        use std::cell::Cell;
+        let sizes = [(80u16, 24u16), (90, 30), (100, 40)];
+        let idx = Cell::new(0usize);
+        let out = coalesce_resizes(
+            |_| Ok::<_, ()>(idx.get() < sizes.len()),
+            || {
+                let i = idx.get();
+                let (w, h) = sizes[i];
+                idx.set(i + 1);
+                Ok(Event::Resize(w, h))
+            },
+            |e| matches!(e, Event::Resize(_, _)),
+        )
+        .expect("coalesce");
+        assert!(out.is_none());
+        assert!(RESIZE_DEBOUNCE >= Duration::from_millis(16));
+    }
+
+    #[test]
+    fn coalesce_resizes_surfaces_the_first_non_resize() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        use std::cell::Cell;
+        let events = [
+            Event::Resize(80, 24),
+            Event::Key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE)),
+        ];
+        let idx = Cell::new(0usize);
+        let out = coalesce_resizes(
+            |_| Ok::<_, ()>(idx.get() < events.len()),
+            || {
+                let i = idx.get();
+                let event = events[i].clone();
+                idx.set(i + 1);
+                Ok(event)
+            },
+            |e| matches!(e, Event::Resize(_, _)),
+        )
+        .expect("coalesce");
+        assert!(matches!(out, Some(Event::Key(_))));
     }
 }

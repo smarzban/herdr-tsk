@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+Resize debounce: a burst of terminal `Resize` events (pane-edge drag) waits a
+short quiet window and paints layout once at the settled size. A key or mouse
+event that arrives during that window is deferred until after that paint.
+
 Edge auto-scroll during text drag-select: holding a selection near the top or
 bottom of the board list or task-page notes viewport scrolls that surface while
 the drag stays armed, with a faster idle tick so the motion keeps up with the

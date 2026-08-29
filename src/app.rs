@@ -309,48 +309,64 @@ fn run_board() -> Result<(), Box<dyn Error>> {
         // felt reliable on the task page where Down is inert over notes.
         let mut drag_gesture = crate::ui::text_select::DragSelectGesture::new();
         let mut scrollbar_drag = false;
+        // Non-resize event that arrived during a resize debounce window; handled
+        // after one settled-size paint so a key typed mid-drag is not dropped.
+        let mut pending_event: Option<Event> = None;
         loop {
             // Settle, paint, then wait. The board frame path does no host polling, so the
             // wait is only the Frame Scheduler's idle floor. All three are one call because
             // the order is the correctness property: the walkthrough's report from the
             // previous iteration is written before this frame is painted and before the wait
             // can time out into the `continue` below.
-            let poll = board_idle_tick(
-                &mut model,
-                || walkthrough.record_dismissed(),
-                |model: &BoardModel| {
-                    terminal
-                        .draw(|frame| {
-                            let hits = draw_board(frame, model);
-                            frame_rows = frame_text_rows(frame.buffer_mut());
-                            frame_copyable = hits.copyable.clone();
-                            frame_hits = hits;
-                        })
-                        .map(|_| ())
-                },
-                event::poll,
-                &store,
-                &mut domain,
-                &mut store_watch,
-                &save_recovery,
-                drag_gesture.has_autoscroll(),
-            )?;
-            if poll == FramePoll::Idle {
-                if let Some(auto) = drag_gesture.autoscroll() {
-                    let area = terminal_area(terminal)?;
-                    let content = drag_content_area(&model, area);
-                    tick_drag_autoscroll(
-                        &mut model,
-                        &mut drag_gesture,
-                        auto,
-                        &frame_rows,
-                        &frame_copyable,
-                        content,
-                    );
+            let next = if let Some(event) = pending_event.take() {
+                // Paint once at the settled size before applying a key/mouse that
+                // arrived during the resize quiet window.
+                terminal.draw(|frame| {
+                    let hits = draw_board(frame, &model);
+                    frame_rows = frame_text_rows(frame.buffer_mut());
+                    frame_copyable = hits.copyable.clone();
+                    frame_hits = hits;
+                })?;
+                event
+            } else {
+                let poll = board_idle_tick(
+                    &mut model,
+                    || walkthrough.record_dismissed(),
+                    |model: &BoardModel| {
+                        terminal
+                            .draw(|frame| {
+                                let hits = draw_board(frame, model);
+                                frame_rows = frame_text_rows(frame.buffer_mut());
+                                frame_copyable = hits.copyable.clone();
+                                frame_hits = hits;
+                            })
+                            .map(|_| ())
+                    },
+                    event::poll,
+                    &store,
+                    &mut domain,
+                    &mut store_watch,
+                    &save_recovery,
+                    drag_gesture.has_autoscroll(),
+                )?;
+                if poll == FramePoll::Idle {
+                    if let Some(auto) = drag_gesture.autoscroll() {
+                        let area = terminal_area(terminal)?;
+                        let content = drag_content_area(&model, area);
+                        tick_drag_autoscroll(
+                            &mut model,
+                            &mut drag_gesture,
+                            auto,
+                            &frame_rows,
+                            &frame_copyable,
+                            content,
+                        );
+                    }
+                    continue;
                 }
-                continue;
-            }
-            match event::read()? {
+                event::read()?
+            };
+            match next {
                 Event::Key(key) if key.kind == KeyEventKind::Press => {
                     // A key while the mouse button is held abandons the deferred click so
                     // Up does not fire a stale peek/select after the keyboard moved on.
@@ -522,7 +538,15 @@ fn run_board() -> Result<(), Box<dyn Error>> {
                         break;
                     }
                 }
-                Event::Resize(_, _) => {}
+                Event::Resize(_, _) => {
+                    // Dragging a pane edge fires a burst of resizes; wait them out
+                    // so the next paint rebuilds layout once at the settled size.
+                    pending_event =
+                        scheduler::coalesce_resizes(event::poll, event::read, |event| {
+                            matches!(event, Event::Resize(_, _))
+                        })?;
+                    continue;
+                }
                 _ => {}
             }
         }
