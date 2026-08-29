@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use ratatui::layout::Position;
+use ratatui::layout::{Position, Rect};
 use uuid::Uuid;
 
 use crate::config::VerbModifier;
@@ -998,6 +998,12 @@ impl BoardModel {
     /// Recompute the live highlight after the viewport scrolled under a held drag.
     pub fn recompute_text_selection_head(&mut self, head: Position) {
         self.drag_text_selection(head);
+    }
+
+    /// Copyable text on the original press row (used once, before autoscroll).
+    pub fn copyable_press_line(&self, rows: &[String], copyable: &[Rect]) -> Option<String> {
+        let press = self.mouse_press?;
+        crate::ui::text_select::copyable_line_at(rows, copyable, press.y)
     }
 
     /// Clear the press on release; the selection itself stays until copy clears it

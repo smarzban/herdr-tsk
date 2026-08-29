@@ -417,6 +417,11 @@ fn run_board() -> Result<(), Box<dyn Error>> {
                         MouseEventKind::Drag(MouseButton::Left) => {
                             let pos = Position::new(mouse.column, mouse.row);
                             model.drag_text_selection(pos);
+                            if let Some(line) =
+                                model.copyable_press_line(&frame_rows, &frame_copyable)
+                            {
+                                drag_gesture.ensure_copy_origin(line);
+                            }
                             let _ = drag_gesture.handle(
                                 DragSelectPhase::Move,
                                 pos,
@@ -451,6 +456,7 @@ fn run_board() -> Result<(), Box<dyn Error>> {
                                         &frame_copyable,
                                         drag_gesture.captured_before(),
                                         drag_gesture.captured_after(),
+                                        drag_gesture.copy_origin(),
                                     );
                                     continue;
                                 }
@@ -526,14 +532,18 @@ fn copy_drag_selection(
     copyable: &[Rect],
     captured_before: &[String],
     captured_after: &[String],
+    origin: Option<&str>,
 ) {
     let Some(selection) = model.text_selection() else {
         return;
     };
     let live = selection_text(frame_rows, copyable, &selection);
-    let Some(text) =
-        crate::ui::text_select::compose_selection_copy(captured_before, live, captured_after)
-    else {
+    let Some(text) = crate::ui::text_select::compose_selection_copy(
+        captured_before,
+        live,
+        captured_after,
+        origin,
+    ) else {
         model.clear_text_selection();
         return;
     };

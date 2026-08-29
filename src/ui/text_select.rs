@@ -107,6 +107,8 @@ pub struct DragSelectGesture {
     captured_before: Vec<String>,
     /// Copyable lines that scrolled out of the bottom of the selection.
     captured_after: Vec<String>,
+    /// Copyable text on the press row; copy never includes lines before this.
+    copy_origin: Option<String>,
 }
 
 /// One phase of [`DragSelectGesture::handle`].
@@ -140,6 +142,7 @@ impl DragSelectGesture {
         self.last_drag_row = None;
         self.captured_before.clear();
         self.captured_after.clear();
+        self.copy_origin = None;
     }
 
     /// Whether edge auto-scroll is armed and needs short idle ticks.
@@ -164,6 +167,17 @@ impl DragSelectGesture {
     /// Lines that left the selection through the bottom of the viewport.
     pub fn captured_after(&self) -> &[String] {
         &self.captured_after
+    }
+
+    pub fn copy_origin(&self) -> Option<&str> {
+        self.copy_origin.as_deref()
+    }
+
+    /// Remember the press-row title once, before autoscroll moves it.
+    pub fn ensure_copy_origin(&mut self, line: String) {
+        if self.copy_origin.is_none() && !line.is_empty() {
+            self.copy_origin = Some(line);
+        }
     }
 
     /// Keep copyable lines that just scrolled out of the live highlight.
@@ -243,6 +257,7 @@ impl DragSelectGesture {
                 self.last_drag_row = Some(position.y);
                 self.captured_before.clear();
                 self.captured_after.clear();
+                self.copy_origin = None;
                 DragSelectOutcome::Continue
             }
             DragSelectPhase::Move => {
@@ -427,19 +442,44 @@ fn selection_lines(
     lines
 }
 
+/// Copyable text on one screen row, same trim as a drag copy.
+pub fn copyable_line_at(rows: &[String], copyable: &[Rect], y: u16) -> Option<String> {
+    let dummy = TextSelection::new(Position::new(0, y), Position::new(u16::MAX, y));
+    selection_lines(rows, copyable, &dummy, y, y)
+        .into_iter()
+        .next()
+}
+
 /// Prefix (scrolled off the top) + live frame + suffix (scrolled off the bottom).
+/// `origin` is the press-row title: lines before it are dropped, and a duplicate
+/// of it at the live/prefix join is dropped.
 pub fn compose_selection_copy(
     before: &[String],
     live: Option<String>,
     after: &[String],
+    origin: Option<&str>,
 ) -> Option<String> {
     let mut lines: Vec<String> = Vec::new();
     lines.extend(before.iter().cloned());
     if let Some(live) = live {
-        lines.extend(live.split('\n').map(str::to_string));
+        let live_lines: Vec<String> = live.split('\n').map(str::to_string).collect();
+        if let (Some(last), Some(first)) = (lines.last(), live_lines.first()) {
+            if last == first {
+                lines.extend(live_lines.into_iter().skip(1));
+            } else {
+                lines.extend(live_lines);
+            }
+        } else {
+            lines.extend(live_lines);
+        }
     }
     lines.extend(after.iter().cloned());
     lines.retain(|line| !line.is_empty());
+    if let Some(origin) = origin {
+        if let Some(i) = lines.iter().position(|line| line == origin) {
+            lines.drain(..i);
+        }
+    }
     if lines.is_empty() {
         None
     } else {
@@ -926,7 +966,7 @@ mod tests {
             g.captured_before()
         );
         let live = Some("title-two\ntitle-three".to_string());
-        let text = compose_selection_copy(g.captured_before(), live, g.captured_after())
+        let text = compose_selection_copy(g.captured_before(), live, g.captured_after(), None)
             .expect("stitched copy");
         assert!(
             text.starts_with("title-one"),
@@ -961,5 +1001,17 @@ mod tests {
             "top-to-bottom crawl must keep the start title under a sticky header, got {:?}",
             g.captured_before()
         );
+    }
+
+    #[test]
+    fn compose_drops_unselected_titles_above_the_origin() {
+        let text = compose_selection_copy(
+            &["above".into(), "start".into(), "next".into()],
+            Some("next\nbelow".into()),
+            &[],
+            Some("start"),
+        )
+        .expect("copy");
+        assert_eq!(text, "start\nnext\nbelow");
     }
 }
