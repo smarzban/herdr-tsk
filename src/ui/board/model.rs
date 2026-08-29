@@ -965,6 +965,20 @@ impl BoardModel {
         }
     }
 
+    /// Keep the drag anchor on the same content row after the list/notes scrolled.
+    pub fn shift_text_selection_anchor_y(&mut self, delta: i16) {
+        if let Some(press) = self.mouse_press.as_mut() {
+            press.y = if delta >= 0 {
+                press.y.saturating_add(delta as u16)
+            } else {
+                press.y.saturating_sub(delta.unsigned_abs())
+            };
+        }
+        if let Some(selection) = self.text_selection.as_mut() {
+            selection.shift_anchor_y(delta);
+        }
+    }
+
     /// Clear the press on release; the selection itself stays until copy clears it
     /// or the next press replaces it.
     pub fn end_mouse_press(&mut self) {
@@ -989,8 +1003,9 @@ impl BoardModel {
         &self,
         direction: crate::ui::text_select::AutoScrollDirection,
         rows: u16,
-    ) {
+    ) -> usize {
         use crate::ui::text_select::AutoScrollDirection;
+        self.follow_list.set(false);
         let max = self.list_max_scroll.get();
         let cur = self.list_scroll.get();
         let next = match direction {
@@ -998,6 +1013,7 @@ impl BoardModel {
             AutoScrollDirection::Down => cur.saturating_add(rows as usize).min(max),
         };
         self.list_scroll.set(next);
+        cur.abs_diff(next)
     }
 
     /// Scroll the open task page's shared notes body by `rows` (view mode only).
@@ -1005,18 +1021,20 @@ impl BoardModel {
         &mut self,
         direction: crate::ui::text_select::AutoScrollDirection,
         rows: u16,
-    ) {
+    ) -> usize {
         use crate::ui::text_select::AutoScrollDirection;
         let Some(form) = self.form.as_mut() else {
-            return;
+            return 0;
         };
         let horizon = form.notes_max_scroll.get();
+        let cur = form.notes_scroll;
         form.notes_scroll = match direction {
             AutoScrollDirection::Up => form.notes_scroll.saturating_sub(rows as usize),
             AutoScrollDirection::Down => {
                 form.notes_scroll.saturating_add(rows as usize).min(horizon)
             }
         };
+        cur.abs_diff(form.notes_scroll)
     }
 
     /// Options the session project selector offers, in presentation order.

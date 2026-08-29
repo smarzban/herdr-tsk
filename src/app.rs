@@ -335,7 +335,16 @@ fn run_board() -> Result<(), Box<dyn Error>> {
             )?;
             if poll == FramePoll::Idle {
                 if let Some(auto) = drag_gesture.autoscroll() {
-                    tick_drag_autoscroll(&mut model, auto);
+                    let area = terminal_area(terminal)?;
+                    let content = drag_content_area(&model, area);
+                    tick_drag_autoscroll(
+                        &mut model,
+                        &mut drag_gesture,
+                        auto,
+                        &frame_rows,
+                        &frame_copyable,
+                        content,
+                    );
                 }
                 continue;
             }
@@ -436,7 +445,13 @@ fn run_board() -> Result<(), Box<dyn Error>> {
                                 model.text_selection(),
                             ) {
                                 DragSelectOutcome::Copy => {
-                                    copy_drag_selection(&mut model, &frame_rows, &frame_copyable);
+                                    copy_drag_selection(
+                                        &mut model,
+                                        &frame_rows,
+                                        &frame_copyable,
+                                        drag_gesture.captured_before(),
+                                        drag_gesture.captured_after(),
+                                    );
                                     continue;
                                 }
                                 DragSelectOutcome::Click(down) => {
@@ -505,11 +520,20 @@ fn run_board() -> Result<(), Box<dyn Error>> {
 /// and other chrome never reach the clipboard. A selection with no text (a bare
 /// click, or a drag over blank cells) copies nothing. Success flashes a short
 /// ephemeral status that clears itself; the highlight drops so it does not stick.
-fn copy_drag_selection(model: &mut BoardModel, frame_rows: &[String], copyable: &[Rect]) {
+fn copy_drag_selection(
+    model: &mut BoardModel,
+    frame_rows: &[String],
+    copyable: &[Rect],
+    captured_before: &[String],
+    captured_after: &[String],
+) {
     let Some(selection) = model.text_selection() else {
         return;
     };
-    let Some(text) = selection_text(frame_rows, copyable, &selection) else {
+    let live = selection_text(frame_rows, copyable, &selection);
+    let Some(text) =
+        crate::ui::text_select::compose_selection_copy(captured_before, live, captured_after)
+    else {
         model.clear_text_selection();
         return;
     };
@@ -538,16 +562,39 @@ fn drag_content_area(model: &BoardModel, area: Rect) -> Rect {
 }
 
 /// One idle tick of edge auto-scroll while a text drag sits near the content edge.
-fn tick_drag_autoscroll(model: &mut BoardModel, auto: crate::ui::text_select::DragAutoScrollState) {
-    match model.input_mode() {
-        BoardInputMode::TaskPage => {
-            model.nudge_notes_scroll(auto.direction, auto.speed);
-        }
-        BoardInputMode::Normal => {
-            model.nudge_list_scroll(auto.direction, auto.speed);
-        }
-        _ => {}
+fn tick_drag_autoscroll(
+    model: &mut BoardModel,
+    gesture: &mut crate::ui::text_select::DragSelectGesture,
+    auto: crate::ui::text_select::DragAutoScrollState,
+    frame_rows: &[String],
+    copyable: &[Rect],
+    content: Rect,
+) {
+    let delta = match model.input_mode() {
+        BoardInputMode::TaskPage => model.nudge_notes_scroll(auto.direction, auto.speed),
+        BoardInputMode::Normal => model.nudge_list_scroll(auto.direction, auto.speed),
+        _ => 0,
+    };
+    if delta == 0 {
+        return;
     }
+    if let Some(selection) = model.text_selection() {
+        gesture.capture_leaving_rows(
+            frame_rows,
+            copyable,
+            selection,
+            content,
+            auto.direction,
+            delta,
+        );
+    }
+    let shift = match auto.direction {
+        crate::ui::text_select::AutoScrollDirection::Down => {
+            -i16::try_from(delta).unwrap_or(i16::MAX)
+        }
+        crate::ui::text_select::AutoScrollDirection::Up => i16::try_from(delta).unwrap_or(i16::MAX),
+    };
+    model.shift_text_selection_anchor_y(shift);
 }
 
 /// Whether save recovery permits the board to apply background state changes.
