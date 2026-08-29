@@ -197,10 +197,11 @@ pub fn board_frame(
     write: impl FnOnce() -> Result<(), StoreError>,
     paint: impl FnOnce(&BoardModel) -> io::Result<()>,
     wait: impl FnOnce(Duration) -> io::Result<bool>,
+    active_animations: bool,
 ) -> io::Result<FramePoll> {
     record_walkthrough_dismissal(model, write);
     paint(model)?;
-    if wait(board_poll_duration(false))? {
+    if wait(board_poll_duration(active_animations))? {
         Ok(FramePoll::Event)
     } else {
         Ok(FramePoll::Idle)
@@ -226,9 +227,10 @@ pub fn board_idle_tick(
     domain: &mut DomainState,
     watch: &mut StoreWatch,
     save_recovery: &SaveRecovery<DomainState>,
+    active_animations: bool,
 ) -> io::Result<FramePoll> {
     model.expire_ephemeral_message();
-    let poll = board_frame(model, write, paint, wait)?;
+    let poll = board_frame(model, write, paint, wait, active_animations)?;
     if poll == FramePoll::Idle {
         revalidate_board_from_store(store, domain, model, watch, save_recovery);
     }
@@ -329,8 +331,12 @@ fn run_board() -> Result<(), Box<dyn Error>> {
                 &mut domain,
                 &mut store_watch,
                 &save_recovery,
+                drag_gesture.has_autoscroll(),
             )?;
             if poll == FramePoll::Idle {
+                if let Some(auto) = drag_gesture.autoscroll() {
+                    tick_drag_autoscroll(&mut model, auto);
+                }
                 continue;
             }
             match event::read()? {
@@ -406,6 +412,12 @@ fn run_board() -> Result<(), Box<dyn Error>> {
                                 DragSelectPhase::Move,
                                 pos,
                                 model.text_selection(),
+                            );
+                            let area = terminal_area(terminal)?;
+                            drag_gesture.update_autoscroll(
+                                pos.y,
+                                drag_content_area(&model, area),
+                                model.text_selection().is_some_and(|s| s.has_area()),
                             );
                             continue;
                         }
@@ -507,6 +519,35 @@ fn copy_drag_selection(model: &mut BoardModel, frame_rows: &[String], copyable: 
         model.set_ephemeral_message("copy failed", Duration::from_secs(2));
     }
     model.clear_text_selection();
+}
+
+/// Content rect that edge auto-scroll watches during a text drag.
+fn drag_content_area(model: &BoardModel, area: Rect) -> Rect {
+    let geo = crate::ui::tier::resolve(area.width, area.height);
+    match model.input_mode() {
+        BoardInputMode::TaskPage => {
+            // Approximate the shared notes/steps viewport: below a one-row header,
+            // above the rule. Exact step halving is unnecessary for edge detection.
+            let top = geo.viewport_top.saturating_add(1);
+            let bottom = geo.rule_row.unwrap_or(geo.height.saturating_sub(2));
+            let height = bottom.saturating_sub(top);
+            Rect::new(0, top, area.width, height)
+        }
+        _ => Rect::new(0, geo.viewport_top, area.width, geo.viewport_height),
+    }
+}
+
+/// One idle tick of edge auto-scroll while a text drag sits near the content edge.
+fn tick_drag_autoscroll(model: &mut BoardModel, auto: crate::ui::text_select::DragAutoScrollState) {
+    match model.input_mode() {
+        BoardInputMode::TaskPage => {
+            model.nudge_notes_scroll(auto.direction, auto.speed);
+        }
+        BoardInputMode::Normal => {
+            model.nudge_list_scroll(auto.direction, auto.speed);
+        }
+        _ => {}
+    }
 }
 
 /// Whether save recovery permits the board to apply background state changes.
@@ -1645,6 +1686,7 @@ mod idle_store_revalidation_tests {
             &mut domain,
             &mut watch,
             &save_recovery,
+            false,
         )
         .unwrap();
         assert_eq!(poll, FramePoll::Idle);

@@ -640,8 +640,9 @@ fn draw_board_impl(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap
         follow_list: model.follow_list.get(),
     };
     let (hits, painted_list_scroll) = render::draw_queue_frame(frame, &frame_model, &geo);
-    if let Some(scroll) = painted_list_scroll {
+    if let Some((scroll, max_scroll)) = painted_list_scroll {
         model.list_scroll.set(scroll);
+        model.list_max_scroll.set(max_scroll);
     }
 
     // Board-form edits use the task page's status and verb rows rather than an inline rule row.

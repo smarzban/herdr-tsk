@@ -127,6 +127,7 @@ fn instrumented_loop_idle_wait_never_sustained_below_25ms_without_animation() {
                 recorded_waits.push(duration);
                 Ok(false)
             },
+            false,
         )
         .expect("board frame");
         assert_eq!(

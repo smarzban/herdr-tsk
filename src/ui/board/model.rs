@@ -580,6 +580,8 @@ pub struct BoardModel {
     pub(super) follow_list: Cell<bool>,
     /// The live drag-selected screen region, cleared on the next press.
     pub(super) text_selection: Option<TextSelection>,
+    /// Furthest list scroll the last painted frame could show (renderer-recorded).
+    pub(super) list_max_scroll: Cell<usize>,
     /// When set, [`Self::message`] clears itself on the next idle tick after this instant.
     /// Sticky messages (errors, delete notices) leave this `None`.
     pub(super) message_expires_at: Option<Instant>,
@@ -644,6 +646,7 @@ impl BoardModel {
             list_scroll: Cell::new(0),
             follow_list: Cell::new(true),
             text_selection: None,
+            list_max_scroll: Cell::new(0),
             message_expires_at: None,
             message_restore: None,
             verb_modifier: VerbModifier::Alt,
@@ -976,6 +979,44 @@ impl BoardModel {
     /// The live drag selection, if a drag is (or was) in progress.
     pub fn text_selection(&self) -> Option<TextSelection> {
         self.text_selection
+    }
+
+    /// Scroll the board list by `rows` without moving the pinned selection.
+    ///
+    /// Used by drag edge auto-scroll so a text drag near the viewport edge can
+    /// reveal more of the deck. Clamped to the last painted max scroll.
+    pub fn nudge_list_scroll(
+        &self,
+        direction: crate::ui::text_select::AutoScrollDirection,
+        rows: u16,
+    ) {
+        use crate::ui::text_select::AutoScrollDirection;
+        let max = self.list_max_scroll.get();
+        let cur = self.list_scroll.get();
+        let next = match direction {
+            AutoScrollDirection::Up => cur.saturating_sub(rows as usize),
+            AutoScrollDirection::Down => cur.saturating_add(rows as usize).min(max),
+        };
+        self.list_scroll.set(next);
+    }
+
+    /// Scroll the open task page's shared notes body by `rows` (view mode only).
+    pub fn nudge_notes_scroll(
+        &mut self,
+        direction: crate::ui::text_select::AutoScrollDirection,
+        rows: u16,
+    ) {
+        use crate::ui::text_select::AutoScrollDirection;
+        let Some(form) = self.form.as_mut() else {
+            return;
+        };
+        let horizon = form.notes_max_scroll.get();
+        form.notes_scroll = match direction {
+            AutoScrollDirection::Up => form.notes_scroll.saturating_sub(rows as usize),
+            AutoScrollDirection::Down => {
+                form.notes_scroll.saturating_add(rows as usize).min(horizon)
+            }
+        };
     }
 
     /// Options the session project selector offers, in presentation order.

@@ -25,6 +25,71 @@ use ratatui::style::Modifier;
 use ratatui::Frame;
 use unicode_width::UnicodeWidthChar;
 
+// ---------------------------------------------------------------------------
+// Drag edge auto-scroll
+// ---------------------------------------------------------------------------
+
+/// Direction for drag auto-scroll.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AutoScrollDirection {
+    Up,
+    Down,
+}
+
+/// Timer-driven auto-scroll while a text drag sits near a content edge.
+///
+/// Each idle tick scrolls by `speed` rows in `direction`. Pointer motion
+/// recomputes the state; leaving the edge zone or ending the drag clears it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DragAutoScrollState {
+    pub direction: AutoScrollDirection,
+    /// Rows to scroll per tick.
+    pub speed: u16,
+}
+
+/// Rows of near-edge interior that still arm auto-scroll.
+const EDGE_THRESHOLD: u16 = 2;
+
+/// Compute auto-scroll from the pointer row relative to a content area.
+///
+/// Returns `Some` when the pointer is above, below, or within [`EDGE_THRESHOLD`]
+/// rows of the content boundary; `None` when it sits comfortably inside.
+pub fn compute_autoscroll(mouse_row: u16, content_area: Rect) -> Option<DragAutoScrollState> {
+    let top = content_area.y;
+    let bottom = content_area.y.saturating_add(content_area.height);
+
+    if content_area.height == 0 {
+        return None;
+    }
+
+    if mouse_row < top.saturating_add(EDGE_THRESHOLD) {
+        let distance = top.saturating_add(EDGE_THRESHOLD).saturating_sub(mouse_row);
+        Some(DragAutoScrollState {
+            direction: AutoScrollDirection::Up,
+            speed: speed_for_distance(distance),
+        })
+    } else if mouse_row >= bottom.saturating_sub(EDGE_THRESHOLD) {
+        let distance = mouse_row
+            .saturating_sub(bottom.saturating_sub(EDGE_THRESHOLD))
+            .saturating_add(1);
+        Some(DragAutoScrollState {
+            direction: AutoScrollDirection::Down,
+            speed: speed_for_distance(distance),
+        })
+    } else {
+        None
+    }
+}
+
+fn speed_for_distance(distance: u16) -> u16 {
+    match distance {
+        0..=2 => 1,
+        3..=5 => 2,
+        6..=10 => 3,
+        _ => 5,
+    }
+}
+
 /// Left-button press → drag → release for board text selection.
 ///
 /// Clicks are deferred until release so a real drag can copy without also firing
@@ -34,6 +99,10 @@ use unicode_width::UnicodeWidthChar;
 pub struct DragSelectGesture {
     /// Down cell while a deferred click is still armed (`None` once a drag has area).
     pending_down: Option<Position>,
+    /// Edge auto-scroll armed while a drag with area sits near the content edge.
+    autoscroll: Option<DragAutoScrollState>,
+    /// Last pointer row seen during an active drag (feeds idle ticks).
+    last_drag_row: Option<u16>,
 }
 
 /// One phase of [`DragSelectGesture::handle`].
@@ -63,6 +132,35 @@ impl DragSelectGesture {
     /// Abandon a deferred click (e.g. a key pressed while the button is held).
     pub fn clear(&mut self) {
         self.pending_down = None;
+        self.autoscroll = None;
+        self.last_drag_row = None;
+    }
+
+    /// Whether edge auto-scroll is armed and needs short idle ticks.
+    pub fn has_autoscroll(&self) -> bool {
+        self.autoscroll.is_some()
+    }
+
+    /// Current auto-scroll state, if any.
+    pub fn autoscroll(&self) -> Option<DragAutoScrollState> {
+        self.autoscroll
+    }
+
+    /// Recompute auto-scroll from the pointer row and content area.
+    ///
+    /// Only arms when a drag already has area; otherwise clears.
+    pub fn update_autoscroll(
+        &mut self,
+        mouse_row: u16,
+        content_area: Rect,
+        selection_has_area: bool,
+    ) {
+        self.last_drag_row = Some(mouse_row);
+        if selection_has_area {
+            self.autoscroll = compute_autoscroll(mouse_row, content_area);
+        } else {
+            self.autoscroll = None;
+        }
     }
 
     /// Feed one left-button phase.
@@ -80,15 +178,22 @@ impl DragSelectGesture {
         match phase {
             DragSelectPhase::Press => {
                 self.pending_down = Some(position);
+                self.autoscroll = None;
+                self.last_drag_row = Some(position.y);
                 DragSelectOutcome::Continue
             }
             DragSelectPhase::Move => {
+                self.last_drag_row = Some(position.y);
                 if selection.is_some_and(|sel| sel.has_area()) {
                     self.pending_down = None;
+                } else {
+                    self.autoscroll = None;
                 }
                 DragSelectOutcome::Continue
             }
             DragSelectPhase::Release => {
+                self.autoscroll = None;
+                self.last_drag_row = None;
                 if selection.is_some_and(|sel| sel.has_area()) {
                     self.pending_down = None;
                     DragSelectOutcome::Copy
@@ -264,8 +369,8 @@ fn slice_cells(row: &str, start: u16, end: u16) -> String {
 ///
 /// Geometry matches [`selection_text`]: first/last rows use the drag edges, interior
 /// rows span their copyable columns. Chrome outside those rects (peek `│` gutter,
-/// glyphs, meta) stays unhighlighted — the same content bounds grok-build-style
-/// app selection uses, rather than painting full terminal rows.
+/// glyphs, meta) stays unhighlighted — the same content bounds the copy path
+/// uses, rather than painting full terminal rows.
 pub fn paint_selection(frame: &mut Frame<'_>, selection: &TextSelection, copyable: &[Rect]) {
     if !selection.has_area() {
         return;
@@ -623,5 +728,30 @@ mod tests {
             selection_text(&rows, &copyable, &sel).as_deref(),
             Some("abc")
         );
+    }
+
+    #[test]
+    fn autoscroll_arms_near_edges_and_clears_inside() {
+        let area = Rect::new(0, 10, 40, 20);
+        assert!(compute_autoscroll(20, area).is_none());
+        let up = compute_autoscroll(11, area).expect("near top");
+        assert_eq!(up.direction, AutoScrollDirection::Up);
+        assert_eq!(up.speed, 1);
+        let down = compute_autoscroll(28, area).expect("near bottom");
+        assert_eq!(down.direction, AutoScrollDirection::Down);
+        let far = compute_autoscroll(5, area).expect("above");
+        assert!(far.speed >= 2);
+    }
+
+    #[test]
+    fn gesture_autoscroll_only_while_selection_has_area() {
+        let mut g = DragSelectGesture::new();
+        let area = Rect::new(0, 0, 40, 20);
+        g.update_autoscroll(0, area, false);
+        assert!(!g.has_autoscroll());
+        g.update_autoscroll(0, area, true);
+        assert!(g.has_autoscroll());
+        let _ = g.handle(DragSelectPhase::Release, pos(0, 0), None);
+        assert!(!g.has_autoscroll());
     }
 }

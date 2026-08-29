@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+Edge auto-scroll during text drag-select: holding a selection near the top or
+bottom of the board list or task-page notes viewport scrolls that surface while
+the drag stays armed, with a faster idle tick so the motion keeps up with the
+pointer. Leaving the edge zone or releasing the button clears it.
+
 Board list scrollbar: when the deck is taller than the viewport, a thinner thumb (`▌`)
 paints on the right edge with a one-column gap so titles stay clear of it. The gutter
 is blank and clickable (no `│` track). Titles and age wrap/fit instead of clipping to
