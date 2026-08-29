@@ -2498,12 +2498,12 @@ fn detail_lines_for_task(
                 let body = format!("{indent}{}", note_row.text);
                 push(
                     &mut lines,
-                    crate::ui::markdown::paint_notes_line(
+                    crate::ui::markdown::dim_line(crate::ui::markdown::paint_notes_line(
                         &body,
                         width as usize,
-                        style_dim(),
+                        style_plain(),
                         &mut in_fence,
-                    ),
+                    )),
                 );
                 shown += 1;
             } else {

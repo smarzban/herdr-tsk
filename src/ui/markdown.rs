@@ -8,7 +8,7 @@
 //! (dim marker), fenced ` ``` ` blocks (dim fence, plain body). Task-list markers
 //! like `- [ ]` stay literal text (structured steps own checklists).
 
-use ratatui::style::Style;
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
 use super::present_line;
@@ -45,6 +45,16 @@ pub fn paint_notes_line(
         return bound_styled_line(vec![Span::styled(text.trim_end().to_string(), base)], width);
     }
     paint_md_line(text, width, base)
+}
+
+/// Same styles as view, with dim on every span (peek).
+pub fn dim_line(line: Line<'static>) -> Line<'static> {
+    Line::from(
+        line.spans
+            .into_iter()
+            .map(|span| Span::styled(span.content, span.style.add_modifier(Modifier::DIM)))
+            .collect::<Vec<_>>(),
+    )
 }
 
 /// Paint one already-wrapped notes row with mono markdown styling.
@@ -257,5 +267,32 @@ mod tests {
         assert!(has_mod(&close, Modifier::DIM));
         let after = paint_notes_line("**bold**", 40, style_plain(), &mut in_fence);
         assert!(has_mod(&after, Modifier::BOLD));
+    }
+
+    #[test]
+    fn dim_line_keeps_heading_and_code_and_adds_dim() {
+        let mut in_fence = false;
+        let heading = dim_line(paint_notes_line(
+            "# Title",
+            40,
+            style_plain(),
+            &mut in_fence,
+        ));
+        let title = heading
+            .spans
+            .iter()
+            .find(|s| s.content.as_ref() == "Title")
+            .expect("heading");
+        assert!(title.style.add_modifier.contains(Modifier::BOLD));
+        assert!(title.style.add_modifier.contains(Modifier::UNDERLINED));
+        assert!(title.style.add_modifier.contains(Modifier::DIM));
+        let code = dim_line(paint_md_line("`x`", 40, style_plain()));
+        let span = code
+            .spans
+            .iter()
+            .find(|s| s.content.as_ref() == "x")
+            .expect("code");
+        assert!(span.style.add_modifier.contains(Modifier::REVERSED));
+        assert!(span.style.add_modifier.contains(Modifier::DIM));
     }
 }
