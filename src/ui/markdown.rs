@@ -13,7 +13,7 @@ use ratatui::text::{Line, Span};
 
 use super::present_line;
 use super::render::{
-    style_bold, style_dim, style_heading, style_plain, style_reverse, style_underline,
+    style_bold, style_dim, style_heading, style_plain, style_reverse_dim, style_underline,
 };
 
 /// Paint one already-wrapped notes row with mono markdown styling.
@@ -80,7 +80,7 @@ fn inline_spans(text: &str, base: Style) -> Vec<Span<'static>> {
             InlineKind::Plain => base,
             InlineKind::Strong => style_bold(),
             InlineKind::Em => style_underline(),
-            InlineKind::Code => style_reverse(),
+            InlineKind::Code => style_reverse_dim(),
         };
         spans.push(Span::styled(std::mem::take(buf), style));
     };
@@ -168,6 +168,12 @@ mod tests {
         assert!(has_mod(&line, Modifier::BOLD));
         assert!(has_mod(&line, Modifier::UNDERLINED));
         assert!(has_mod(&line, Modifier::REVERSED));
+        let code = line
+            .spans
+            .iter()
+            .find(|s| s.content.as_ref() == "d")
+            .expect("code span");
+        assert!(code.style.add_modifier.contains(Modifier::DIM));
         let flat: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
         assert_eq!(flat, "a b c d");
         let strong = line
