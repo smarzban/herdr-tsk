@@ -2017,12 +2017,16 @@ fn paint_task_page(
             } else {
                 notes_style
             };
-            put_line(
-                frame,
-                y,
-                content_width,
-                paint_bounded_line(&format!("  {text} "), content_width, style),
-            );
+            let painted = if notes_rows.is_empty() {
+                paint_bounded_line(&format!("  {text} "), content_width, style)
+            } else {
+                crate::ui::markdown::paint_md_line(
+                    &format!("  {text} "),
+                    content_width as usize,
+                    style,
+                )
+            };
+            put_line(frame, y, content_width, painted);
             hits.push(
                 QueueHitTarget::FormNotes(absolute),
                 Rect::new(0, y, content_width, 1),
@@ -2477,9 +2481,10 @@ fn detail_lines_for_task(
         let mut remaining = 0usize;
         for note_row in crate::ui::edit::wrap_text(notes_text, room) {
             if shown < PEEK_NOTES_LINE_LIMIT {
+                let body = format!("{indent}{}", note_row.text);
                 push(
                     &mut lines,
-                    paint_bounded_line(&format!("{indent}{}", note_row.text), width, style_dim()),
+                    crate::ui::markdown::paint_md_line(&body, width as usize, style_dim()),
                 );
                 shown += 1;
             } else {
