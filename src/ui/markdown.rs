@@ -3,16 +3,49 @@
 //! Markers are styled with bold / dim / underline only — never color. Edit mode
 //! keeps the raw source; this module paints the reading surface.
 //!
-//! Supported inline: `**strong**`, `*em*` / `_em_`, `` `code` ``.
+//! Supported inline: `**strong**`, `*em*` / `_em_`, `` `code` `` (reverse).
 //! Supported line starts: `#`…`######` headings (bold+underline body), `-` / `*` lists
-//! (dim marker). Task-list markers like `- [ ]` stay literal text (structured
-//! steps own checklists).
+//! (dim marker), fenced ` ``` ` blocks (dim fence, plain body). Task-list markers
+//! like `- [ ]` stay literal text (structured steps own checklists).
 
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 
 use super::present_line;
-use super::render::{style_bold, style_dim, style_heading, style_plain, style_underline};
+use super::render::{
+    style_bold, style_dim, style_heading, style_plain, style_reverse, style_underline,
+};
+
+/// A line that opens or closes a fenced code block (` ``` ` after indent).
+pub fn is_fence_line(text: &str) -> bool {
+    text.trim_start().starts_with("```")
+}
+
+/// Paint one already-wrapped notes row, tracking fenced-code state.
+///
+/// Fence lines are dim. Body lines inside a fence stay plain (no inline md).
+/// Other lines use [`paint_md_line`].
+pub fn paint_notes_line(
+    text: &str,
+    width: usize,
+    base: Style,
+    in_fence: &mut bool,
+) -> Line<'static> {
+    if width == 0 {
+        return Line::from("");
+    }
+    if is_fence_line(text) {
+        *in_fence = !*in_fence;
+        return bound_styled_line(
+            vec![Span::styled(text.trim_end().to_string(), style_dim())],
+            width,
+        );
+    }
+    if *in_fence {
+        return bound_styled_line(vec![Span::styled(text.trim_end().to_string(), base)], width);
+    }
+    paint_md_line(text, width, base)
+}
 
 /// Paint one already-wrapped notes row with mono markdown styling.
 pub fn paint_md_line(text: &str, width: usize, base: Style) -> Line<'static> {
@@ -78,7 +111,7 @@ fn inline_spans(text: &str, base: Style) -> Vec<Span<'static>> {
             InlineKind::Plain => base,
             InlineKind::Strong => style_bold(),
             InlineKind::Em => style_underline(),
-            InlineKind::Code => style_dim(),
+            InlineKind::Code => style_reverse(),
         };
         spans.push(Span::styled(std::mem::take(buf), style));
     };
@@ -170,8 +203,8 @@ mod tests {
             .iter()
             .find(|s| s.content.as_ref() == "d")
             .expect("code span");
-        assert!(code.style.add_modifier.contains(Modifier::DIM));
-        assert!(!code.style.add_modifier.contains(Modifier::REVERSED));
+        assert!(code.style.add_modifier.contains(Modifier::REVERSED));
+        assert!(!code.style.add_modifier.contains(Modifier::DIM));
         let flat: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
         assert_eq!(flat, "a b c d");
         let strong = line
@@ -207,5 +240,22 @@ mod tests {
         let line = paint_md_line("- [ ] not a step", 40, style_plain());
         let flat: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(flat.contains("[ ] not a step"));
+    }
+
+    #[test]
+    fn fenced_block_dims_the_fence_and_leaves_body_unparsed() {
+        let mut in_fence = false;
+        let open = paint_notes_line("```rust", 40, style_plain(), &mut in_fence);
+        assert!(in_fence);
+        assert!(has_mod(&open, Modifier::DIM));
+        let body = paint_notes_line("**not bold**", 40, style_plain(), &mut in_fence);
+        let flat: String = body.spans.iter().map(|s| s.content.as_ref()).collect();
+        assert_eq!(flat, "**not bold**");
+        assert!(!has_mod(&body, Modifier::BOLD));
+        let close = paint_notes_line("```", 40, style_plain(), &mut in_fence);
+        assert!(!in_fence);
+        assert!(has_mod(&close, Modifier::DIM));
+        let after = paint_notes_line("**bold**", 40, style_plain(), &mut in_fence);
+        assert!(has_mod(&after, Modifier::BOLD));
     }
 }

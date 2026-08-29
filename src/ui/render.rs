@@ -2025,10 +2025,18 @@ fn paint_task_page(
             let painted = if notes_rows.is_empty() || focus == Some(CaptureField::Notes) {
                 paint_bounded_line(&format!("  {text} "), content_width, style)
             } else {
-                crate::ui::markdown::paint_md_line(
+                let mut in_fence = notes_rows
+                    .iter()
+                    .take(absolute)
+                    .filter(|row| crate::ui::markdown::is_fence_line(row))
+                    .count()
+                    % 2
+                    == 1;
+                crate::ui::markdown::paint_notes_line(
                     &format!("  {text} "),
                     content_width as usize,
                     style,
+                    &mut in_fence,
                 )
             };
             put_line(frame, y, content_width, painted);
@@ -2484,12 +2492,18 @@ fn detail_lines_for_task(
         let room = (width as usize).saturating_sub(display_width(indent) + 1);
         let mut shown = 0usize;
         let mut remaining = 0usize;
+        let mut in_fence = false;
         for note_row in crate::ui::edit::wrap_text(notes_text, room) {
             if shown < PEEK_NOTES_LINE_LIMIT {
                 let body = format!("{indent}{}", note_row.text);
                 push(
                     &mut lines,
-                    crate::ui::markdown::paint_md_line(&body, width as usize, style_dim()),
+                    crate::ui::markdown::paint_notes_line(
+                        &body,
+                        width as usize,
+                        style_dim(),
+                        &mut in_fence,
+                    ),
                 );
                 shown += 1;
             } else {
