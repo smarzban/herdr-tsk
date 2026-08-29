@@ -117,7 +117,9 @@ fn instrumented_loop_idle_wait_never_sustained_below_25ms_without_animation() {
                 // `TestBackend`'s draw error is `Infallible`; `expect` collapses it to the
                 // `io::Result<()>` `board_frame` requires without inventing a fake error path.
                 terminal
-                    .draw(|frame| draw_board(frame, model))
+                    .draw(|frame| {
+                        let _ = draw_board(frame, model);
+                    })
                     .expect("test backend draw");
                 Ok(())
             },
@@ -168,6 +170,8 @@ fn load_board_and_draw_path_smoke_at_80x24() {
     let backend = TestBackend::new(80, 24);
     let mut terminal = Terminal::new(backend).expect("test terminal");
     terminal
-        .draw(|frame| draw_board(frame, &model))
+        .draw(|frame| {
+            let _ = draw_board(frame, &model);
+        })
         .expect("draw the loaded board without panicking");
 }

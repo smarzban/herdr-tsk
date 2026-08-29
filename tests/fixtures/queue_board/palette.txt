@@ -4,23 +4,23 @@
 │                                                                                │
 │ IN MOTION ───────────────────────────────────────────────────────────────────2 │
 │                                                                                │
-│  ▸ Smoke-test worktree dispatch                                       tsk · 3m │
-│  ▸ Edit target binding pin                                         herdr · 12m │
+│  ▸ Smoke┌─ command ───────────────────────────────────────────── [x]─┐tsk · 3m │
+│  ▸ Edit │                                                            │dr · 12m │
+│         │   set status: ready                                        │         │
+│ desk ───│   set status: started                                      │───────1 │
+│         │ ▸ set status: blocked                                      │         │
+│  ○ Globa│   set status: review                                       │      2d │
+│         │                                                            │         │
+│         ├────────────────────────────────────────────────────────────┤         │
+│         │ ↑/↓ move · enter run · esc close                           │         │
+│         └────────────────────────────────────────────────────────────┘         │
 │                                                                                │
-│ desk ────────────────────────────────────────────────────────────────────────1 │
-│                                                                                │
-│  ○ Global backlog note                                                      2d │
 │                                                                                │
 │                                                                                │
 │                                                                                │
 │                                                                                │
 │                                                                                │
-│ command                                                                        │
-│   set status: ready                                                            │
-│   set status: started                                                          │
-│ ▸ set status: blocked                                                          │
-│   set status: review                                                           │
 │────────────────────────────────────────────────────────────────────────────────│
 │ :stat                                                                          │
-│ enter run · esc close · type to filter                                         │
+│                                                                                │
 └────────────────────────────────────────────────────────────────────────────────┘

@@ -433,8 +433,12 @@ fn build_task_page_overlay<'a>(
 /// the paints the queue frame via [`render::draw_queue_frame`]. Classic master-detail
 /// chrome is retired; overlays that still need the classic layout (edit band, save
 /// recovery banner via message) are layered lightly on top where session mode requires it.
-pub fn draw_board(frame: &mut Frame, model: &BoardModel) {
-    let _hits = draw_board_impl(frame, model);
+pub fn draw_board(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap {
+    let hits = draw_board_impl(frame, model);
+    if let Some(selection) = model.text_selection() {
+        crate::ui::text_select::paint_selection(frame, &selection, &hits.copyable);
+    }
+    hits
 }
 
 /// The mouse hit-map for one board frame, without a live terminal.

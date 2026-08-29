@@ -4,6 +4,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+use ratatui::layout::Position;
 use uuid::Uuid;
 
 use crate::config::VerbModifier;
@@ -22,6 +23,7 @@ use crate::ui::queue::{
 use crate::ui::render::StepView;
 use crate::ui::selection;
 use crate::ui::terminal_text;
+use crate::ui::text_select::TextSelection;
 
 use super::commands::CommandSurface;
 
@@ -567,6 +569,17 @@ pub struct BoardModel {
     pub(super) project_picker: Option<ProjectPickerState>,
     /// Open palette (presentation only).
     pub(super) surface: CommandSurface,
+    /// The last left-button press cell, held until release so a drag can grow a text
+    /// selection out of it. Presentation-only; a plain click never reads it.
+    pub(super) mouse_press: Option<Position>,
+    /// The live drag-selected screen region, cleared on the next press.
+    pub(super) text_selection: Option<TextSelection>,
+    /// When set, [`Self::message`] clears itself on the next idle tick after this instant.
+    /// Sticky messages (errors, delete notices) leave this `None`.
+    pub(super) message_expires_at: Option<Instant>,
+    /// Sticky status restored when an ephemeral toast expires (e.g. save-recovery banner
+    /// under a brief `copied` notice). Cleared by [`Self::set_message`] / [`Self::clear_message`].
+    pub(super) message_restore: Option<String>,
     /// Palette query.
     pub(super) command_query: String,
     /// Selection into the currently visible command set.
@@ -621,6 +634,10 @@ impl BoardModel {
             surface: CommandSurface::None,
             command_query: String::new(),
             command_selected: 0,
+            mouse_press: None,
+            text_selection: None,
+            message_expires_at: None,
+            message_restore: None,
             verb_modifier: VerbModifier::Alt,
         };
         model.seed_selection();
@@ -915,6 +932,41 @@ impl BoardModel {
     /// intervenes. Mouse-boundary state only, never persisted.
     pub(crate) fn cancel_project_header_double_click(&mut self) {
         self.last_project_header_click = None;
+    }
+
+    /// Record a left-button press cell and drop any finished selection's highlight.
+    ///
+    /// The press cell is what a following drag grows the selection from; a plain
+    /// click never reads it. Called for every left press, whatever the input mode.
+    pub fn begin_mouse_press(&mut self, position: Position) {
+        self.mouse_press = Some(position);
+        self.text_selection = None;
+    }
+
+    /// Extend the drag selection to `position`, anchored at the press cell.
+    ///
+    /// Inert without a live press (a drag that starts mid-gesture, e.g. before tsk
+    /// saw the press), so it can never invent an anchor.
+    pub fn drag_text_selection(&mut self, position: Position) {
+        if let Some(anchor) = self.mouse_press {
+            self.text_selection = Some(TextSelection::new(anchor, position));
+        }
+    }
+
+    /// Clear the press on release; the selection itself stays until copy clears it
+    /// or the next press replaces it.
+    pub fn end_mouse_press(&mut self) {
+        self.mouse_press = None;
+    }
+
+    /// Drop a finished text selection highlight (after copy, Esc, or cancel).
+    pub fn clear_text_selection(&mut self) {
+        self.text_selection = None;
+    }
+
+    /// The live drag selection, if a drag is (or was) in progress.
+    pub fn text_selection(&self) -> Option<TextSelection> {
+        self.text_selection
     }
 
     /// Options the session project selector offers, in presentation order.
@@ -1390,10 +1442,38 @@ impl BoardModel {
 
     pub fn set_message(&mut self, msg: impl Into<String>) {
         self.message = Some(terminal_text(&msg.into()));
+        self.message_expires_at = None;
+        self.message_restore = None;
+    }
+
+    /// Status feedback that clears itself after `ttl` (copy confirmation, brief notices).
+    ///
+    /// A sticky status already on the line (save-recovery banner, etc.) is stashed and
+    /// restored when the toast expires, so a `copied` flash cannot erase it.
+    pub fn set_ephemeral_message(&mut self, msg: impl Into<String>, ttl: std::time::Duration) {
+        if self.message_expires_at.is_none() {
+            self.message_restore = self.message.clone();
+        }
+        self.message = Some(terminal_text(&msg.into()));
+        self.message_expires_at = Some(Instant::now() + ttl);
     }
 
     pub fn clear_message(&mut self) {
         self.message = None;
+        self.message_expires_at = None;
+        self.message_restore = None;
+    }
+
+    /// Drop an ephemeral status line whose TTL has elapsed. Sticky messages are untouched;
+    /// a stashed sticky under a toast is restored.
+    pub fn expire_ephemeral_message(&mut self) {
+        if self
+            .message_expires_at
+            .is_some_and(|deadline| Instant::now() >= deadline)
+        {
+            self.message = self.message_restore.take();
+            self.message_expires_at = None;
+        }
     }
 
     /// Title carried by the visible delete recovery notice, if one is armed.
@@ -1633,6 +1713,41 @@ mod tests {
         domain
             .create(title, None, scope, None, None, ProvenanceOrigin::Manual)
             .expect("create")
+    }
+
+    #[test]
+    fn ephemeral_status_clears_after_deadline() {
+        let mut model = BoardModel::from_tasks(Vec::new(), None);
+        model.set_ephemeral_message("copied", std::time::Duration::from_millis(1));
+        assert_eq!(model.message(), Some("copied"));
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        model.expire_ephemeral_message();
+        assert!(model.message().is_none());
+        assert!(model.message_expires_at.is_none());
+    }
+
+    #[test]
+    fn ephemeral_toast_restores_sticky_save_recovery_banner() {
+        let mut model = BoardModel::from_tasks(Vec::new(), None);
+        model.set_message("save failed: disk full · Retry or Cancel");
+        model.set_ephemeral_message("copied", std::time::Duration::from_millis(1));
+        assert_eq!(model.message(), Some("copied"));
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        model.expire_ephemeral_message();
+        assert_eq!(
+            model.message(),
+            Some("save failed: disk full · Retry or Cancel"),
+            "sticky banner must return after the toast, not vanish"
+        );
+        assert!(model.message_expires_at.is_none());
+    }
+
+    #[test]
+    fn sticky_status_survives_expire_tick() {
+        let mut model = BoardModel::from_tasks(Vec::new(), None);
+        model.set_message("save failed");
+        model.expire_ephemeral_message();
+        assert_eq!(model.message(), Some("save failed"));
     }
 
     #[test]

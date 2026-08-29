@@ -143,7 +143,9 @@ fn cold_start_to_first_frame_under_200ms_at_80x24_with_100_tasks() {
         let mut terminal =
             Terminal::new(TestBackend::new(WIDTH, HEIGHT)).expect("scratch terminal");
         let completed = terminal
-            .draw(|frame| draw_board(frame, &model))
+            .draw(|frame| {
+                let _ = draw_board(frame, &model);
+            })
             .expect("first frame draw");
         std::hint::black_box(&completed);
         elapsed_by_trial.push(start.elapsed());
@@ -208,7 +210,9 @@ fn keypress_to_repaint_p99_under_16ms_during_navigation_at_80x24_with_100_tasks(
     let mut step = |domain: &mut DomainState, model: &mut BoardModel| {
         apply_intent(domain, model, BoardIntent::SelectNext, None).expect("navigation intent");
         let completed = terminal
-            .draw(|frame| draw_board(frame, model))
+            .draw(|frame| {
+                let _ = draw_board(frame, model);
+            })
             .expect("navigation frame draw");
         std::hint::black_box(&completed);
     };

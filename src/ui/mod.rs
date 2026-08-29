@@ -9,6 +9,7 @@ pub mod queue;
 pub mod render;
 pub mod scheduler;
 pub mod selection;
+pub mod text_select;
 pub mod tier;
 
 /// Render untrusted values without allowing C0/C1 terminal control sequences through.

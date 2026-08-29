@@ -717,7 +717,9 @@ fn selection_stays_on_task_id_across_thread_block_reorder() {
 fn board_rows(model: &BoardModel, width: u16, height: u16) -> Vec<String> {
     let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("test terminal");
     terminal
-        .draw(|frame| draw_board(frame, model))
+        .draw(|frame| {
+            let _ = draw_board(frame, model);
+        })
         .expect("draw board");
     let buffer = terminal.backend().buffer();
     (0..height)

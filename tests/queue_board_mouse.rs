@@ -16,7 +16,7 @@ use ratatui::Terminal;
 use tsk_tui::domain::{DomainState, HumanStatus, ProvenanceOrigin, TaskScope};
 use tsk_tui::ui::board::{
     apply_intent, board_hit_map, board_verb_items, draw_board, resolve_board_command,
-    BoardInputMode, BoardModel,
+    BoardInputMode, BoardModel, ProjectScopeOption,
 };
 use tsk_tui::ui::capture::CaptureField;
 use tsk_tui::ui::input::{
@@ -1077,6 +1077,122 @@ fn a_click_on_the_palettes_own_chrome_does_not_dismiss_it() {
     );
 }
 
+/// The shared modal card's own `[x]` closes/cancels whichever surface painted it, its
+/// border+footer chrome is inert (not a second, redundant dismiss route on top of the
+/// palette's `CommandChrome`/project picker's outside-click fallthrough already proved
+/// above), and a click on the board behind the card still dismisses -- for all three
+/// surfaces the card now shares (Palette, `?` help, `P` project picker).
+#[test]
+fn the_modal_cards_close_control_and_chrome_behave_the_same_on_palette_help_and_project_picker() {
+    // Palette: `[x]` closes the command surface; the card's own border is inert.
+    let (mut domain, mut model, _id) = board_with_task("modal card palette", HumanStatus::Ready);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenCommandPalette,
+        None,
+    )
+    .expect("open palette");
+    let hits = board_hit_map(STANDARD, &model);
+    let close_hit = hits
+        .regions
+        .iter()
+        .find(|hit| matches!(hit.target, QueueHitTarget::ModalClose))
+        .expect("the palette card must paint an `[x]` close control");
+    assert_eq!(
+        click(close_hit, &model, &hits),
+        Some(BoardIntent::CloseCommandSurface)
+    );
+    let chrome_hit = hits
+        .regions
+        .iter()
+        .find(|hit| matches!(hit.target, QueueHitTarget::ModalChrome))
+        .expect("the palette card must paint its own border/footer chrome");
+    assert_eq!(
+        click(chrome_hit, &model, &hits),
+        None,
+        "a click on the card's border/footer must be inert"
+    );
+
+    // Project picker: `[x]` cancels the picker; the card's own border is inert.
+    let (mut domain, mut model, _id) = board_with_task("modal card scope", HumanStatus::Ready);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenProjectSelector,
+        None,
+    )
+    .expect("open project selector");
+    let hits = board_hit_map(STANDARD, &model);
+    let close_hit = hits
+        .regions
+        .iter()
+        .find(|hit| matches!(hit.target, QueueHitTarget::ModalClose))
+        .expect("the project picker card must paint an `[x]` close control");
+    assert_eq!(
+        click(close_hit, &model, &hits),
+        Some(BoardIntent::CancelProjectPicker)
+    );
+    let chrome_hit = hits
+        .regions
+        .iter()
+        .find(|hit| matches!(hit.target, QueueHitTarget::ModalChrome))
+        .expect("the project picker card must paint its own border/footer chrome");
+    assert_eq!(
+        click(chrome_hit, &model, &hits),
+        None,
+        "a click on the card's border/footer must be inert"
+    );
+
+    // Help: `[x]` closes the layer the same as any other key; the card's border is inert,
+    // but (unlike the other two) its own body text still closes -- there is nothing to
+    // select inside it, so it keeps mouse parity with the keyboard's "any key closes".
+    let (mut domain, mut model, _id) = board_with_task("modal card help", HumanStatus::Ready);
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenHelp, None).expect("open help");
+    let hits = board_hit_map(STANDARD, &model);
+    let close_hit = hits
+        .regions
+        .iter()
+        .find(|hit| matches!(hit.target, QueueHitTarget::ModalClose))
+        .expect("the help card must paint an `[x]` close control");
+    assert_eq!(
+        click(close_hit, &model, &hits),
+        Some(BoardIntent::CloseLayer)
+    );
+    let chrome_hit = hits
+        .regions
+        .iter()
+        .find(|hit| matches!(hit.target, QueueHitTarget::ModalChrome))
+        .expect("the help card must paint its own border/footer chrome");
+    assert_eq!(
+        click(chrome_hit, &model, &hits),
+        None,
+        "a click on the card's border/footer must be inert"
+    );
+    // The card repaints `HelpDismiss` over its own content rect *after* the full-frame
+    // one `paint_modal_card` pushes first, so the later (content-sized) region is the
+    // last `HelpDismiss` hit in the map.
+    let body_hit = hits
+        .regions
+        .iter()
+        .rev()
+        .find(|hit| matches!(hit.target, QueueHitTarget::HelpDismiss))
+        .expect("the help card's body must repaint HelpDismiss over its own content rect");
+    assert_eq!(
+        click(body_hit, &model, &hits),
+        Some(BoardIntent::CloseLayer)
+    );
+
+    // A click on the board behind the help card still dismisses it -- the far corner of
+    // the frame paints no card chrome at all. (Palette's own far-corner dismissal is
+    // already proved by `a_click_on_the_palettes_own_chrome_does_not_dismiss_it` above.)
+    let outside = left_click(STANDARD.width - 1, STANDARD.height - 1);
+    assert_eq!(
+        map_board_mouse(&model, &hits, outside),
+        Some(BoardIntent::CloseLayer)
+    );
+}
+
 /// R-2: the standard-tier command surface windows to 6
 /// rows at 80x24 while 13 commands exist, and the painted `▲▼` marker is inert
 /// `CommandChrome`, so a mouse-only user could not reach the 7 commands outside the
@@ -1513,7 +1629,9 @@ fn page_rows(model: &BoardModel) -> Vec<String> {
     let mut terminal =
         Terminal::new(TestBackend::new(STANDARD.width, STANDARD.height)).expect("test terminal");
     terminal
-        .draw(|frame| draw_board(frame, model))
+        .draw(|frame| {
+            let _ = draw_board(frame, model);
+        })
         .expect("draw page");
     let buffer = terminal.backend().buffer();
     (0..STANDARD.height)
@@ -1593,5 +1711,308 @@ fn clicking_a_step_row_selects_it() {
         after.iter().any(|row| row.contains("▸ ▪ charlie step")),
         "the cursor stays on the clicked step after a notes-half click:\n{}",
         after.join("\n")
+    );
+}
+
+/// Painters declare copyable content rects beside the paint; a drag selection
+/// over those cells yields the painted text (chrome columns outside `copyable`
+/// stay out of the clipboard string).
+#[test]
+fn drag_selection_copies_painted_task_title_not_undeclared_chrome() {
+    use ratatui::layout::Position;
+    use tsk_tui::ui::text_select::{selection_text, TextSelection};
+
+    let (_domain, mut model, _id) = board_with_task("copyable title text", HumanStatus::Ready);
+    let hits = board_hit_map(STANDARD, &model);
+    assert!(
+        !hits.copyable.is_empty(),
+        "task rows must push copyable content rects"
+    );
+
+    let mut terminal =
+        Terminal::new(TestBackend::new(STANDARD.width, STANDARD.height)).expect("test terminal");
+    terminal
+        .draw(|frame| {
+            let _ = draw_board(frame, &model);
+        })
+        .expect("draw");
+    let buffer = terminal.backend().buffer();
+    let rows: Vec<String> = (0..STANDARD.height)
+        .map(|y| {
+            (0..STANDARD.width)
+                .map(|x| buffer[(x, y)].symbol().to_string())
+                .collect::<String>()
+        })
+        .collect();
+
+    // Anchor on the title content, drag across it.
+    let area = hits.copyable[0];
+    model.begin_mouse_press(Position::new(area.x, area.y));
+    model.drag_text_selection(Position::new(
+        area.x.saturating_add(area.width.saturating_sub(1)),
+        area.y,
+    ));
+    model.end_mouse_press();
+    let selection = model.text_selection().expect("drag left a selection");
+    let text = selection_text(&rows, &hits.copyable, &selection).expect("copyable text");
+    assert!(
+        text.contains("copyable title text"),
+        "selection should include the task title, got {text:?}"
+    );
+    assert!(
+        !text.contains('○') && !text.contains('▸'),
+        "status glyph is chrome and must stay out of the copy, got {text:?}"
+    );
+
+    // A bare click (no drag) leaves no copyable text.
+    model.begin_mouse_press(Position::new(area.x + 2, area.y));
+    model.end_mouse_press();
+    assert!(model.text_selection().is_none());
+    let bare = TextSelection::new(
+        Position::new(area.x + 2, area.y),
+        Position::new(area.x + 2, area.y),
+    );
+    assert_eq!(selection_text(&rows, &hits.copyable, &bare), None);
+}
+
+/// Peek accordion body paints a `│` gutter; that pipe is chrome. A drag across the
+/// open peek on a project-scoped board must copy the notes text without it — the
+/// same surface that felt broken when copyable rects spanned the full row.
+#[test]
+fn peek_on_project_board_copy_excludes_pipe_gutter() {
+    use ratatui::layout::Position;
+    use tsk_tui::ui::text_select::{selection_text, TextSelection};
+
+    let mut domain = DomainState::new();
+    let notes = "Fixed. It wasn't a bug in the terminal-selection sense.";
+    let id = domain
+        .create(
+            "hi",
+            Some(notes.to_string()),
+            project(THIS_REPO),
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("create");
+    domain.set_status(id, HumanStatus::Started).expect("start");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
+    // Focus the project board (the "project page" surface), then open peek.
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenProjectSelector,
+        None,
+    )
+    .expect("open project picker");
+    let project_idx = model
+        .project_options()
+        .iter()
+        .position(|opt| matches!(opt, ProjectScopeOption::Project(p) if p == Path::new(THIS_REPO)))
+        .expect("this repo is offered");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::SelectProjectOption(project_idx),
+        None,
+    )
+    .expect("select project");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ConfirmProjectChoice,
+        None,
+    )
+    .expect("confirm project focus");
+    assert_eq!(
+        model.selected_project(),
+        Some(Path::new(THIS_REPO)),
+        "board must be project-focused"
+    );
+    apply_intent(&mut domain, &mut model, BoardIntent::PeekDetail, None).expect("peek");
+    assert_eq!(model.detail_open(), Some(id));
+
+    let hits = board_hit_map(STANDARD, &model);
+    let mut terminal =
+        Terminal::new(TestBackend::new(STANDARD.width, STANDARD.height)).expect("test terminal");
+    terminal
+        .draw(|frame| {
+            let _ = draw_board(frame, &model);
+        })
+        .expect("draw");
+    let buffer = terminal.backend().buffer();
+    let rows: Vec<String> = (0..STANDARD.height)
+        .map(|y| {
+            (0..STANDARD.width)
+                .map(|x| buffer[(x, y)].symbol().to_string())
+                .collect::<String>()
+        })
+        .collect();
+
+    let note_y = rows
+        .iter()
+        .position(|row| row.contains("Fixed. It wasn't"))
+        .expect("peek paints the notes preview") as u16;
+    assert!(
+        rows[note_y as usize].contains('│'),
+        "sanity: the peek gutter is on the painted row"
+    );
+    let note_copyable = hits
+        .copyable
+        .iter()
+        .find(|rect| rect.y == note_y)
+        .expect("peek notes row must declare a copyable rect");
+    assert!(
+        note_copyable.x >= 6,
+        "copyable must start past `    │ ` (6 cells), got x={}",
+        note_copyable.x
+    );
+
+    let selection = TextSelection::new(
+        Position::new(0, note_y),
+        Position::new(STANDARD.width - 1, note_y),
+    );
+    let text = selection_text(&rows, &hits.copyable, &selection).expect("peek notes copy");
+    assert!(
+        text.contains("Fixed. It wasn't a bug"),
+        "notes text must copy, got {text:?}"
+    );
+    assert!(
+        !text.contains('│'),
+        "peek pipe gutter must stay out of the clipboard, got {text:?}"
+    );
+}
+
+/// Task-page header copyable rects cover title words only — not the status glyph or
+/// the right-aligned status word.
+#[test]
+fn task_page_title_copy_excludes_glyph_and_status_word() {
+    use ratatui::layout::Position;
+    use tsk_tui::ui::text_select::{selection_text, TextSelection};
+
+    let (mut domain, mut model, _id) = board_with_task("title only please", HumanStatus::Started);
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
+
+    let hits = board_hit_map(STANDARD, &model);
+    let mut terminal =
+        Terminal::new(TestBackend::new(STANDARD.width, STANDARD.height)).expect("test terminal");
+    terminal
+        .draw(|frame| {
+            let _ = draw_board(frame, &model);
+        })
+        .expect("draw");
+    let buffer = terminal.backend().buffer();
+    let rows: Vec<String> = (0..STANDARD.height)
+        .map(|y| {
+            (0..STANDARD.width)
+                .map(|x| buffer[(x, y)].symbol().to_string())
+                .collect::<String>()
+        })
+        .collect();
+
+    let title_y = rows
+        .iter()
+        .position(|row| row.contains("title only please"))
+        .expect("page paints the title") as u16;
+    assert!(
+        rows[title_y as usize].contains('▸'),
+        "sanity: status glyph is on the title row"
+    );
+    assert!(
+        rows[title_y as usize].contains("started"),
+        "sanity: status word is on the title row"
+    );
+
+    let selection = TextSelection::new(
+        Position::new(0, title_y),
+        Position::new(STANDARD.width - 1, title_y),
+    );
+    let text = selection_text(&rows, &hits.copyable, &selection).expect("title copy");
+    assert_eq!(
+        text, "title only please",
+        "copy must be the title alone, got {text:?}"
+    );
+}
+
+/// The shared modal card only declares its own body rows copyable -- never the
+/// border, title, or footer rows around them -- so a selection dragged across the
+/// card's border/footer paints no clipboard text, only its actual binding lines do.
+#[test]
+fn the_modal_cards_copyable_rects_exclude_its_own_border_and_footer() {
+    use ratatui::layout::Position;
+    use tsk_tui::ui::text_select::{selection_text, TextSelection};
+
+    let (mut domain, mut model, _id) = board_with_task("modal card copyable", HumanStatus::Ready);
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenHelp, None).expect("open help");
+    let hits = board_hit_map(STANDARD, &model);
+
+    let mut terminal =
+        Terminal::new(TestBackend::new(STANDARD.width, STANDARD.height)).expect("test terminal");
+    terminal
+        .draw(|frame| {
+            let _ = draw_board(frame, &model);
+        })
+        .expect("draw");
+    let buffer = terminal.backend().buffer();
+    let rows: Vec<String> = (0..STANDARD.height)
+        .map(|y| {
+            (0..STANDARD.width)
+                .map(|x| buffer[(x, y)].symbol().to_string())
+                .collect::<String>()
+        })
+        .collect();
+
+    // The top border row (painted with the card's title) declares no copyable rect.
+    let top_border_y = hits
+        .regions
+        .iter()
+        .find(|hit| matches!(hit.target, QueueHitTarget::ModalClose))
+        .expect("the help card paints an `[x]` close control")
+        .area
+        .y;
+    assert!(
+        !hits
+            .copyable
+            .iter()
+            .any(|rect| rect.y == top_border_y && rect.height == 1),
+        "the card's own title/border row must not be copyable: {:?}",
+        rows[top_border_y as usize]
+    );
+    let border = TextSelection::new(
+        Position::new(0, top_border_y),
+        Position::new(STANDARD.width - 1, top_border_y),
+    );
+    assert_eq!(
+        selection_text(&rows, &hits.copyable, &border),
+        None,
+        "a drag across the card's border must yield no copyable text"
+    );
+
+    // A real body row -- one of Help's own binding lines -- is copyable and yields text.
+    let body_hit = hits
+        .regions
+        .iter()
+        .rev()
+        .find(|hit| matches!(hit.target, QueueHitTarget::HelpDismiss))
+        .expect("the help card's body repaints HelpDismiss over its content rect")
+        .area;
+    let body_y = body_hit.y;
+    assert!(
+        hits.copyable
+            .iter()
+            .any(|rect| rect.y == body_y && rect.height == 1),
+        "the card's first body row must be copyable"
+    );
+    let body = TextSelection::new(
+        Position::new(body_hit.x, body_y),
+        Position::new(
+            body_hit.x.saturating_add(body_hit.width.saturating_sub(1)),
+            body_y,
+        ),
+    );
+    let text = selection_text(&rows, &hits.copyable, &body).expect("copyable body text");
+    assert!(
+        !text.trim().is_empty(),
+        "the card's first body row should yield its painted binding text, got {text:?}"
     );
 }

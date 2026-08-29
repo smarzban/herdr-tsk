@@ -219,7 +219,9 @@ fn title_edit_cursor_and_window_track_the_actual_paint_width_not_a_hardcoded_one
         let backend = TestBackend::new(100, 30);
         let mut terminal = Terminal::new(backend).expect("terminal");
         terminal
-            .draw(|frame| draw_board(frame, &model))
+            .draw(|frame| {
+                let _ = draw_board(frame, &model);
+            })
             .expect("draw 100x30");
         let (title_y, _row) = (0..30)
             .map(|y| (y, row_text(&terminal, 100, y)))
@@ -241,7 +243,9 @@ fn title_edit_cursor_and_window_track_the_actual_paint_width_not_a_hardcoded_one
         let backend = TestBackend::new(40, 10);
         let mut terminal = Terminal::new(backend).expect("terminal");
         terminal
-            .draw(|frame| draw_board(frame, &model))
+            .draw(|frame| {
+                let _ = draw_board(frame, &model);
+            })
             .expect("draw 40x10");
         // 62 whitespace-free characters at a 30-cell field wrap as 30 / 30 / 2.
         let head_row = row_text(&terminal, 40, 1);
@@ -540,7 +544,9 @@ fn task_page_scope_dropdown_sits_above_the_footer_with_short_names() {
     let backend = TestBackend::new(width, height);
     let mut terminal = Terminal::new(backend).expect("terminal");
     terminal
-        .draw(|frame| draw_board(frame, &model))
+        .draw(|frame| {
+            let _ = draw_board(frame, &model);
+        })
         .expect("draw");
 
     let rows: Vec<String> = (0..height).map(|y| row_text(&terminal, width, y)).collect();
@@ -595,7 +601,9 @@ fn page_view_shows_thread_beside_scope() {
     let backend = TestBackend::new(80, 24);
     let mut terminal = Terminal::new(backend).expect("terminal");
     terminal
-        .draw(|frame| draw_board(frame, &model))
+        .draw(|frame| {
+            let _ = draw_board(frame, &model);
+        })
         .expect("draw");
     let painted: String = terminal
         .backend()
@@ -827,7 +835,9 @@ fn editing_an_unthreaded_task_paints_a_labeled_thread_footer_slot() {
     let backend = TestBackend::new(80, 24);
     let mut terminal = Terminal::new(backend).expect("terminal");
     terminal
-        .draw(|frame| draw_board(frame, &model))
+        .draw(|frame| {
+            let _ = draw_board(frame, &model);
+        })
         .expect("draw thread field");
     let painted: String = terminal
         .backend()
@@ -911,7 +921,9 @@ fn thread_refusal_paints_inline_and_clears_without_status_leak() {
     let backend = TestBackend::new(80, 24);
     let mut terminal = Terminal::new(backend).expect("terminal");
     terminal
-        .draw(|frame| draw_board(frame, &model))
+        .draw(|frame| {
+            let _ = draw_board(frame, &model);
+        })
         .expect("draw refusal");
     let painted: String = terminal
         .backend()
@@ -1004,7 +1016,9 @@ fn long_invalid_thread_refusal_remains_visible_at_40x10() {
     let backend = TestBackend::new(40, 10);
     let mut terminal = Terminal::new(backend).expect("terminal");
     terminal
-        .draw(|frame| draw_board(frame, &model))
+        .draw(|frame| {
+            let _ = draw_board(frame, &model);
+        })
         .expect("draw compact refusal");
     let painted: String = terminal
         .backend()
@@ -1047,7 +1061,9 @@ fn page_footer_thread_edit_operable_at_40x10() {
     let backend = TestBackend::new(40, 10);
     let mut terminal = Terminal::new(backend).expect("terminal");
     terminal
-        .draw(|frame| draw_board(frame, &model))
+        .draw(|frame| {
+            let _ = draw_board(frame, &model);
+        })
         .expect("draw compact");
     let painted: String = terminal
         .backend()

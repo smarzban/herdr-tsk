@@ -377,7 +377,9 @@ fn board_rows(model: &BoardModel, width: u16, height: u16) -> Vec<String> {
     let backend = TestBackend::new(width, height);
     let mut terminal = Terminal::new(backend).expect("test terminal");
     terminal
-        .draw(|frame: &mut Frame| draw_board(frame, model))
+        .draw(|frame| {
+            let _ = draw_board(frame, model);
+        })
         .expect("draw board");
     let buffer = terminal.backend().buffer();
     assert_buffer_mono(buffer);
@@ -783,7 +785,7 @@ fn overlay_rows_are_padded_exact_no_base_bleed() {
         }
     }
 
-    // --- Scope dropdown column must be padded to its col width; no meta bleed in cells ---
+    // --- Scope dropdown is a centered modal card; its rows must be padded full width ---
     {
         let mut model = fixture_model(&tasks, &view);
         model.status_message = Some(status);
@@ -792,32 +794,29 @@ fn overlay_rows_are_padded_exact_no_base_bleed() {
             options: &scope_opts,
             selected: 0,
         };
-        let (rows, geo) = paint(80, 24, &model);
-        // Dropdown sits under selector chip; first option row is selector_row+1.
-        if let Some(sel) = geo.selector_row {
-            let y = sel + 1;
-            if (y as usize) < rows.len() {
-                let row = &rows[y as usize];
-                // The dropdown only writes its col_w cells at x0; those cells must be padded.
-                // We assert the painted option text area does not contain base fragments.
-                // Distinctive status won't be here, but task meta or rule chars could.
-                // Check the right-hand side of the row for our marker/text.
-                assert!(
-                    row.contains("▸ desk") || row.contains("  desk"),
-                    "scope dropdown must paint option text: {row:?}"
-                );
-                // The desk option must be painted as its own dropdown row, not merely
-                // satisfied by task titles or meta elsewhere on the frame.
-                assert!(
-                    rows.get(y as usize + 1)
-                        .is_some_and(|option_row| option_row.contains("tsk")),
-                    "scope dropdown must paint each option on its own row"
-                );
-                // Ensure no stray count/meta tail attached inside the option cells.
-                // Since we pad to col_w in paint, the rendered cells are clean.
-                // Spot-check: after the label there should be trailing space within the column.
-            }
-        }
+        let (rows, _geo) = paint(80, 24, &model);
+        let desk_row = rows
+            .iter()
+            .position(|row| row.contains("▸ desk") || row.contains("  desk"))
+            .expect("scope dropdown must paint the desk option");
+        assert_eq!(
+            rows[desk_row].chars().count(),
+            80,
+            "scope dropdown option row must fill width: {:?}",
+            rows[desk_row]
+        );
+        // The `tsk` option must be painted as its own row, not merely satisfied by task
+        // titles or meta elsewhere on the frame.
+        assert!(
+            rows.get(desk_row + 1)
+                .is_some_and(|option_row| option_row.contains("tsk")),
+            "scope dropdown must paint each option on its own row"
+        );
+        assert!(
+            !rows[desk_row].contains("motion") && !rows[desk_row].contains("done"),
+            "base status/meta must not bleed into scope dropdown: {:?}",
+            rows[desk_row]
+        );
     }
 }
 
@@ -1175,7 +1174,9 @@ fn notes_edit_caret_accounts_for_shared_stream_scroll() {
 
     let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("test terminal");
     terminal
-        .draw(|frame| draw_board(frame, &model))
+        .draw(|frame| {
+            let _ = draw_board(frame, &model);
+        })
         .expect("draw edit page");
     let cursor = terminal.backend().cursor_position();
     assert_eq!(
@@ -1223,7 +1224,9 @@ fn notes_edit_after_deep_stream_scroll_keeps_draft_and_caret_aligned() {
     apply_intent(&mut domain, &mut model, BoardIntent::BeginEditNotes, None).expect("edit notes");
     let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("terminal");
     terminal
-        .draw(|frame| draw_board(frame, &model))
+        .draw(|frame| {
+            let _ = draw_board(frame, &model);
+        })
         .expect("draw");
     let text = board_rows(&model, 80, 24).join("\n");
     assert!(
@@ -1298,7 +1301,9 @@ fn shift_tab_from_scope_resets_notes_stream_origin_and_aligns_caret() {
 
     let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("terminal");
     terminal
-        .draw(|frame| draw_board(frame, &model))
+        .draw(|frame| {
+            let _ = draw_board(frame, &model);
+        })
         .expect("draw");
     let text = board_rows(&model, 80, 24).join("\n");
     assert!(
@@ -1336,7 +1341,9 @@ fn notes_edit_wraps_a_long_line_instead_of_scrolling_horizontally() {
 
     let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("terminal");
     terminal
-        .draw(|frame| draw_board(frame, &model))
+        .draw(|frame| {
+            let _ = draw_board(frame, &model);
+        })
         .expect("draw edit page");
     let rows = board_rows(&model, 80, 24);
     assert!(
@@ -2618,7 +2625,9 @@ fn quick_add_wraps_a_long_title_into_the_reserved_rows() {
 
     let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("terminal");
     terminal
-        .draw(|frame| draw_board(frame, &model))
+        .draw(|frame| {
+            let _ = draw_board(frame, &model);
+        })
         .expect("draw quick add");
     let rows = board_rows(&model, 80, 24);
     let prompt_rows: Vec<&String> = rows.iter().filter(|row| row.contains("▎")).collect();
@@ -2673,7 +2682,9 @@ fn notes_edit_arrows_move_across_logical_and_wrapped_rows() {
     let caret_at = |model: &BoardModel, width: u16, height: u16| {
         let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("terminal");
         terminal
-            .draw(|frame| draw_board(frame, model))
+            .draw(|frame| {
+                let _ = draw_board(frame, model);
+            })
             .expect("draw");
         terminal.backend().cursor_position().y
     };
@@ -2824,7 +2835,9 @@ fn edit_title_caret_parks_at_the_capped_headers_end() {
 
     let mut terminal = Terminal::new(TestBackend::new(40, 10)).expect("terminal");
     terminal
-        .draw(|frame| draw_board(frame, &model))
+        .draw(|frame| {
+            let _ = draw_board(frame, &model);
+        })
         .expect("draw edit page");
     let rows = board_rows(&model, 40, 10);
     // The capped header's last row carries the marker; the caret must sit at
