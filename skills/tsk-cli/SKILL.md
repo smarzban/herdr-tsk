@@ -25,7 +25,7 @@ Use `--title=<value>`, `--notes=<value>`, `--project=<value>`,
 plus `--file` are usage (exit 2, nothing persists). Piped stdin with item flags
 is ignored and not read. Use `--json` with a flag add when another
 tool needs one result object. It contains `outcome` (`created` or `existing`),
-`id`, trimmed `title`, and resolved `project` (or `null` for the desk).
+`id`, numeric `number`, trimmed `title`, and resolved `project` (or `null` for the desk).
 
 Plan JSON accepts a per-item `thread` string or `null`, for example
 `[{"title":"Release notes","thread":"release-2026"}]`. Invalid plan thread
@@ -62,22 +62,28 @@ exclusive, as are `--done` and `--deleted`.
 A typo in a project name silently files the task under a new scope. Use
 `tsk list --all --json` to recover the resulting scope.
 
-## Steps
+## Direct task lookup and steps
+
+A task number is the human handle: resolve “task 12” with `tsk list 12`.
+Bare digits and UUIDs are both valid task operands. Direct lookup ignores cwd,
+invocation default, and task scope: `tsk list 12` finds its one task even in
+another project, including done and soft-deleted tasks. JSON list rows include
+numeric `number` beside `id`. Do not combine a direct task operand with scope,
+thread, or status filters.
 
 ```sh
-tsk steps <task-id> add "Draft outline"
-tsk steps <task-id> toggle <step-short-id>
-tsk list <task-id>
+tsk steps 12 add "Draft outline"
+tsk steps 12 toggle <step-short-id>
+tsk list 12
 ```
 
-`<task-id>` is a task UUID from `tsk list --json`. A step short id is
-the shortest unambiguous prefix of the step id. `tsk list <task-id>`
+A step short id is the shortest unambiguous prefix of the step id. `tsk list 12`
 prints one line per step with its `[x]`/`[ ]` state and short id; with `--json`
 the row's `steps` array carries each step's `id`, `text`, `done`, and
-`short_id`.
+`short_id`. UUID remains valid in each command where a task number is shown.
 
 `toggle` flips the step state: a retry after an unseen success flips it back.
-Never blind-retry a `steps` invocation — run `tsk list <task-id>`
+Never blind-retry a `steps` invocation, run `tsk list 12`
 first and retry only a real refusal. `steps` exits 0 when the step was created
 or toggled, 1 for a refusal (stable tokens `empty-step-text`,
 `invalid-step-text`, `unknown-task`, `soft-deleted-task`, `unknown-step`,

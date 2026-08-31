@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use serde::Serialize;
 use uuid::Uuid;
 
+use crate::cli::parser::{parse_task_address, TaskAddress};
 use crate::context::snapshot_from_env;
 use crate::domain::{normalize_thread, HumanStatus, TaskScope};
 use crate::scope::resolve_flag_scope;
@@ -21,8 +22,8 @@ pub struct ListInput {
     pub deleted: bool,
     /// Normalized at the argv boundary so filtering only compares valid names.
     pub thread: Option<String>,
-    /// One task addressed by id: single-task listing with step lines.
-    pub task: Option<Uuid>,
+    /// One task addressed by UUID or human number: single-task listing with step lines.
+    pub task: Option<TaskAddress>,
     pub state_dir: Option<PathBuf>,
     pub help: bool,
 }
@@ -39,8 +40,8 @@ pub(crate) enum ListView {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ListError {
     Store(String),
-    /// A well-formed task id that addresses no task in the store.
-    UnknownTask(Uuid),
+    /// A well-formed task address that addresses no task in the store.
+    UnknownTask,
 }
 
 /// One task visible to the list command.
@@ -147,8 +148,7 @@ pub fn parse(args: &[String]) -> Result<ListInput, String> {
                 if input.task.is_some() {
                     return Err(format!("unknown list argument {flag}"));
                 }
-                input.task =
-                    Some(Uuid::parse_str(flag).map_err(|_| format!("invalid task id {flag}"))?);
+                input.task = Some(parse_task_address(flag)?);
                 index += 1;
             }
             _ => return Err(format!("unknown list argument {flag}")),
@@ -158,10 +158,12 @@ pub fn parse(args: &[String]) -> Result<ListInput, String> {
     if input.task.is_some()
         && (input.all || input.global || input.project.is_some() || input.thread.is_some())
     {
-        return Err("task id cannot be used with --project, --desk, --all, or --thread".into());
+        return Err(
+            "task operand cannot be used with --project, --desk, --all, or --thread".into(),
+        );
     }
     if input.task.is_some() && (input.done || input.deleted) {
-        return Err("task id cannot be used with --done or --deleted".into());
+        return Err("task operand cannot be used with --done or --deleted".into());
     }
     if input.all && (input.global || input.project.is_some()) {
         return Err("--all cannot be used with --project or --desk".into());
@@ -181,13 +183,13 @@ pub fn run(input: ListInput) -> Result<ListResult, ListError> {
     let domain = store
         .load()
         .map_err(|error| ListError::Store(error.to_string()))?;
-    if let Some(task_id) = input.task {
-        // Single-task listing: id addressing, no scope or filter, step lines included.
+    if let Some(task_address) = input.task {
+        // Single-task listing ignores cwd and filters, and includes step lines.
         let task = domain
             .tasks()
             .iter()
-            .find(|task| task.id == task_id)
-            .ok_or(ListError::UnknownTask(task_id))?;
+            .find(|task| task_address.matches(task))
+            .ok_or(ListError::UnknownTask)?;
         let view = if task.soft_deleted {
             ListView::Deleted
         } else if task.status == HumanStatus::Done {

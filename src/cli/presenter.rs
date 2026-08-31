@@ -18,9 +18,9 @@ pub fn add_help() -> CliOutput {
 pub fn list_help() -> CliOutput {
     CliOutput {
         stdout: concat!(
-            "usage: tsk list [<task-id>] [-p <project> | --desk | --all] [--thread <name>] [--done | --deleted] [--json] [--state-dir <dir>]\n\n",
+            "usage: tsk list [<task>] [-p <project> | --desk | --all] [--thread <name>] [--done | --deleted] [--json] [--state-dir <dir>]\n\n",
             "Lists ready, started, blocked, and review tasks in the invocation project by default, or your desk outside a repository.\n",
-            "With a task id (a task UUID from add --json or list --json), lists that one task alone and prints its steps: one line per step with its [x]/[ ] state and step short id. A task id cannot be combined with scope, thread, or status filters.\n",
+            "With a task number (bare digits) or UUID from add --json or list --json, lists that one task alone and prints its steps: one line per step with its [x]/[ ] state and step short id. Direct lookup ignores cwd. A task operand cannot be combined with scope, thread, or status filters.\n",
             "--project uses the same basename-or-path scope resolution as add; --desk selects your desk, tasks not tied to a project; --all selects every scope. --thread normalizes a thread name and filters within the selected scope; an invalid name is a usage error (exit 2). For dash-leading project and state-directory values, use --project=<scope> and --state-dir=<dir>.\n",
             "--done lists done tasks only. --deleted lists soft-deleted tasks only, regardless of status.\n",
             "To recover a typo scope, use tsk list --all --json.\n",
@@ -383,11 +383,11 @@ fn path_segments(path: &str) -> Vec<String> {
 pub fn steps_help() -> CliOutput {
     CliOutput {
         stdout: concat!(
-            "usage: tsk steps <task-id> add <text> [--state-dir <dir>]\n",
-            "       tsk steps <task-id> toggle <step-short-id> [--state-dir <dir>]\n\n",
-            "steps adds one step to a task or toggles one step's done flag. The task id is a task UUID from tsk list --json.\n",
-            "A step short id is the shortest unambiguous prefix of the step id, as printed by tsk list <task-id>.\n",
-            "toggle flips the step state: a blind retry after an unseen success flips it back, so verify with tsk list <task-id> before retrying.\n\n",
+            "usage: tsk steps <task> add <text> [--state-dir <dir>]\n",
+            "       tsk steps <task> toggle <step-short-id> [--state-dir <dir>]\n\n",
+            "steps adds one step to a task or toggles one step's done flag. The task is a bare task number or UUID from tsk list --json; direct lookup ignores cwd.\n",
+            "A step short id is the shortest unambiguous prefix of the step id, as printed by tsk list <task>.\n",
+            "toggle flips the step state: a blind retry after an unseen success flips it back, so verify with tsk list <task> before retrying.\n\n",
             "Refusal tokens (exit 1): empty-step-text, invalid-step-text, unknown-task, soft-deleted-task, unknown-step, ambiguous-step.\n\n",
             "Exit contract:\n",
             "  exit 0: step created or toggled\n",
@@ -424,7 +424,7 @@ pub fn steps_usage(reason: &str) -> CliOutput {
     CliOutput {
         stdout: String::new(),
         stderr: format!(
-            "tsk steps: {reason}\nusage: tsk steps <task-id> add <text> | toggle <step-short-id> [--state-dir <dir>]\n"
+            "tsk steps: {reason}\nusage: tsk steps <task> add <text> | toggle <step-short-id> [--state-dir <dir>]\n"
         ),
         code: 2,
     }
@@ -446,7 +446,7 @@ pub fn list_usage(reason: &str) -> CliOutput {
     CliOutput {
         stdout: String::new(),
         stderr: format!(
-            "tsk list: {reason}\nusage: tsk list [<task-id>] [-p <project> | --desk | --all] [--thread <name>] [--done | --deleted] [--json] [--state-dir <dir>]\n"
+            "tsk list: {reason}\nusage: tsk list [<task>] [-p <project> | --desk | --all] [--thread <name>] [--done | --deleted] [--json] [--state-dir <dir>]\n"
         ),
         code: 2,
     }
@@ -459,8 +459,8 @@ pub fn list_rejected(error: ListError) -> CliOutput {
             stderr: format!("tsk list: {detail}\n"),
             code: 3,
         },
-        // A well-formed id that addresses no task: the invocation is wrong, not the store.
-        ListError::UnknownTask(id) => list_usage(&format!("unknown task id {id}")),
+        // A well-formed address that addresses no task: the invocation is wrong, not the store.
+        ListError::UnknownTask => list_usage("unknown task"),
     }
 }
 
