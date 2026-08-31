@@ -47,6 +47,7 @@ pub enum ListError {
 #[derive(Debug, Serialize)]
 pub(crate) struct ListRow {
     pub(crate) id: Uuid,
+    pub(crate) number: u64,
     pub(crate) title: String,
     pub(crate) status: HumanStatus,
     pub(crate) project: Option<String>,
@@ -245,6 +246,9 @@ pub fn run(input: ListInput) -> Result<ListResult, ListError> {
 fn row_for(task: &crate::domain::Task) -> ListRow {
     ListRow {
         id: task.id,
+        number: task
+            .number
+            .expect("loaded tasks receive a number before CLI presentation"),
         title: task.title.clone(),
         status: task.status,
         project: match &task.scope {

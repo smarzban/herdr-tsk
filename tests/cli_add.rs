@@ -1015,7 +1015,7 @@ fn plan_with_only_existing_tasks_is_a_successful_read_only_noop() {
     assert!(result["created"].as_array().expect("created").is_empty());
     assert_eq!(
         result["existing"],
-        serde_json::json!([{"i":0,"id":id,"title":"same task"}])
+        serde_json::json!([{"i":0,"id":id,"number":1,"title":"same task"}])
     );
     assert!(result["failed"].as_array().expect("failed").is_empty());
     assert_eq!(
@@ -1073,7 +1073,7 @@ fn mixed_plan_exit_1_preserves_created_and_existing_rows_for_failed_only_retry()
     assert_eq!(result["created"][0]["i"], 0);
     assert_eq!(
         result["existing"],
-        serde_json::json!([{"i":1,"id":existing_id,"title":"already exists"}])
+        serde_json::json!([{"i":1,"id":existing_id,"number":1,"title":"already exists"}])
     );
     assert_eq!(result["failed"].as_array().expect("failed").len(), 1);
     assert_eq!(result["failed"][0]["i"], 2);
@@ -1652,7 +1652,7 @@ fn flag_add_json_reports_created_and_existing_resolved_tasks() {
     assert_eq!(created["title"], "json task");
     assert_eq!(created["project"], "/projects/json");
     let id = created["id"].as_str().expect("created id").to_owned();
-    assert_eq!(created.as_object().expect("created object").len(), 4);
+    assert_eq!(created.as_object().expect("created object").len(), 5);
 
     let existing = add(&args, true);
     assert_eq!(existing.code, 0);
@@ -1663,7 +1663,7 @@ fn flag_add_json_reports_created_and_existing_resolved_tasks() {
     assert_eq!(existing["id"], id);
     assert_eq!(existing["title"], "json task");
     assert_eq!(existing["project"], "/projects/json");
-    assert_eq!(existing.as_object().expect("existing object").len(), 4);
+    assert_eq!(existing.as_object().expect("existing object").len(), 5);
 
     let global = add(
         &[
@@ -1682,6 +1682,118 @@ fn flag_add_json_reports_created_and_existing_resolved_tasks() {
     let global: serde_json::Value = serde_json::from_str(&global.stdout).expect("global JSON");
     assert_eq!(global["outcome"], "created");
     assert!(global["project"].is_null());
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn json_created_and_existing_include_number() {
+    let _env = env_lock();
+    let dir = temp_state_dir("json-number");
+    let args = [
+        "tsk".into(),
+        "add".into(),
+        "--json".into(),
+        "--desk".into(),
+        "--state-dir".into(),
+        state_dir_arg(&dir),
+        "--title".into(),
+        "numbered task".into(),
+    ];
+
+    let created = add(&args, true);
+    assert_eq!(created.code, 0, "{}", created.stderr);
+    let created: serde_json::Value = serde_json::from_str(&created.stdout).expect("created JSON");
+    assert_eq!(created["outcome"], "created");
+    assert_eq!(created["number"], 1);
+
+    let existing = add(&args, true);
+    assert_eq!(existing.code, 0, "{}", existing.stderr);
+    let existing: serde_json::Value =
+        serde_json::from_str(&existing.stdout).expect("existing JSON");
+    assert_eq!(existing["outcome"], "existing");
+    assert_eq!(existing["number"], 1);
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn plan_created_and_existing_include_number() {
+    let _env = env_lock();
+    let dir = temp_state_dir("plan-number");
+    let run_plan = || {
+        run_with(
+            [
+                "tsk",
+                "add",
+                "--state-dir",
+                &state_dir_arg(&dir),
+                "--file",
+                "-",
+            ],
+            Cursor::new(r#"[{"title":"numbered plan task","project":null}]"#),
+            true,
+        )
+    };
+
+    let created = run_plan();
+    assert_eq!(created.code, 0, "{}", created.stderr);
+    let created: serde_json::Value = serde_json::from_str(&created.stdout).expect("created plan");
+    assert_eq!(created["created"][0]["number"], 1);
+
+    let existing = run_plan();
+    assert_eq!(existing.code, 0, "{}", existing.stderr);
+    let existing: serde_json::Value =
+        serde_json::from_str(&existing.stdout).expect("existing plan");
+    assert_eq!(existing["existing"][0]["number"], 1);
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn existing_add_does_not_advance_the_counter() {
+    let _env = env_lock();
+    let dir = temp_state_dir("existing-number-counter");
+    let existing = || {
+        add(
+            &[
+                "tsk".into(),
+                "add".into(),
+                "--desk".into(),
+                "--state-dir".into(),
+                state_dir_arg(&dir),
+                "--title".into(),
+                "first task".into(),
+            ],
+            true,
+        )
+    };
+    assert_eq!(existing().code, 0);
+    assert_eq!(existing().code, 0);
+
+    let next = add(
+        &[
+            "tsk".into(),
+            "add".into(),
+            "--json".into(),
+            "--desk".into(),
+            "--state-dir".into(),
+            state_dir_arg(&dir),
+            "--title".into(),
+            "second task".into(),
+        ],
+        true,
+    );
+    assert_eq!(next.code, 0, "{}", next.stderr);
+    let next: serde_json::Value = serde_json::from_str(&next.stdout).expect("next JSON");
+    assert_eq!(next["number"], 2);
+    assert_eq!(
+        task_store(&dir)
+            .load()
+            .expect("load state")
+            .next_task_number,
+        3
+    );
 
     let _ = std::fs::remove_dir_all(dir);
 }
