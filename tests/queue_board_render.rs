@@ -951,6 +951,26 @@ fn board_row_meta_shows_bare_digits_not_hash_or_t_prefix() {
 }
 
 #[test]
+fn standard_row_meta_keeps_age_when_number_and_long_project_compete() {
+    let mut tasks = fixture_tasks();
+    tasks[0].number = Some(7);
+    tasks[0].scope = project("/src/customer-portal-api");
+    tasks[0].updated_at = at_secs_ago(12 * 60);
+    let view = fixture_view(&tasks, false);
+    let model = fixture_model(&tasks, &view);
+    let rows = paint(80, 24, &model).0;
+    let row = rows
+        .iter()
+        .find(|row| row.contains("Smoke-test worktree dispatch"))
+        .expect("started fixture row");
+    assert!(row.contains('7'), "number must remain visible:\n{row}");
+    assert!(
+        row.contains("12m"),
+        "age must remain visible when number plus a long project share the meta column:\n{row}"
+    );
+}
+
+#[test]
 fn peek_shows_bare_digits() {
     let mut tasks = fixture_tasks();
     tasks[0].number = Some(12);

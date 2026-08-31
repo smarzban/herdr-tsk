@@ -3244,18 +3244,43 @@ fn paint_verb_bar(
 
 fn row_meta(task: &Task, now: SystemTime, in_project_section: bool) -> String {
     let age = format_age(now, task.updated_at);
-    let mut parts = task
-        .number
-        .map(|number| number.to_string())
-        .into_iter()
-        .collect::<Vec<_>>();
-    if !in_project_section {
-        if let TaskScope::Project { path } = &task.scope {
-            parts.push(short_project(path).to_string());
+    let number = task.number.map(|number| number.to_string());
+    let project = if !in_project_section {
+        match &task.scope {
+            TaskScope::Project { path } => Some(short_project(path).to_string()),
+            TaskScope::Global => None,
         }
+    } else {
+        None
+    };
+    fit_row_meta(number, project, age)
+}
+
+/// Keep number and age intact; shrink the project basename so the standard
+/// meta column (28 cells including the trailing margin) does not clip age.
+fn fit_row_meta(number: Option<String>, project: Option<String>, age: String) -> String {
+    const CONTENT: usize = 27;
+    const SEP: &str = " · ";
+    let sep_w = display_width(SEP);
+    let mut reserved = display_width(&age);
+    if let Some(n) = number.as_deref() {
+        reserved = reserved
+            .saturating_add(display_width(n))
+            .saturating_add(sep_w);
+    }
+    let project = project.and_then(|name| {
+        let room = CONTENT.saturating_sub(reserved.saturating_add(sep_w));
+        (room > 0).then(|| present_line(&name, room))
+    });
+    let mut parts = Vec::new();
+    if let Some(n) = number {
+        parts.push(n);
+    }
+    if let Some(p) = project {
+        parts.push(p);
     }
     parts.push(age);
-    parts.join(" · ")
+    parts.join(SEP)
 }
 
 pub(crate) fn format_age(now: SystemTime, then: SystemTime) -> String {
