@@ -41,6 +41,7 @@ fn task(id: u128, title: &str, status: HumanStatus, scope: TaskScope, secs_ago: 
     let at = at_secs_ago(secs_ago);
     Task {
         id: Uuid::from_u128(id),
+        number: None,
         revision: Some(Uuid::from_u128(id)),
         merge_base_revision: None,
         title: title.to_string(),

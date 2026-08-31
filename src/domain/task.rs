@@ -125,6 +125,9 @@ pub struct Step {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Task {
     pub id: Uuid,
+    /// Store-global human task number. Absent until the locked persistence boundary assigns it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub number: Option<u64>,
     /// Opaque semantic revision used to guard concurrent operations. Legacy tasks
     /// decode without one and receive a revision on their next mutation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -228,7 +231,7 @@ fn record_mutation(task: &mut Task, kind: TaskEventKind) {
 
 /// Document version written by this binary.
 /// Bump when an older writer cannot round-trip a newly persisted field.
-pub const STORE_FORMAT_VERSION: u32 = 1;
+pub const STORE_FORMAT_VERSION: u32 = 2;
 
 /// Version of documents written before `format_version` existed.
 /// Stay on 1 when [`STORE_FORMAT_VERSION`] is bumped.
@@ -236,6 +239,10 @@ pub const LEGACY_STORE_FORMAT_VERSION: u32 = 1;
 
 fn default_store_format_version() -> u32 {
     LEGACY_STORE_FORMAT_VERSION
+}
+
+fn default_next_task_number() -> u64 {
+    1
 }
 
 /// In-memory task set. Persistence is Task Store.
@@ -246,6 +253,9 @@ pub struct DomainState {
     /// Store document version. Missing on older files loads as [`LEGACY_STORE_FORMAT_VERSION`].
     #[serde(default = "default_store_format_version")]
     format_version: u32,
+    /// The next store-global task number, allocated only while holding the store lock.
+    #[serde(default = "default_next_task_number")]
+    pub next_task_number: u64,
     tasks: Vec<Task>,
     /// Active recovery records sharing the task store's lock and atomic replacement boundary.
     #[serde(default)]
@@ -264,6 +274,7 @@ impl DomainState {
     pub fn new() -> Self {
         Self {
             format_version: STORE_FORMAT_VERSION,
+            next_task_number: 1,
             tasks: Vec::new(),
             active_attempts: Vec::new(),
             undo_stack: Vec::new(),
@@ -426,6 +437,7 @@ impl DomainState {
         let agent_meta = agent_meta.filter(|m| !m.is_empty());
         self.tasks.push(Task {
             id,
+            number: None,
             revision: Some(Uuid::new_v4()),
             merge_base_revision: None,
             title: title.to_string(),
@@ -653,9 +665,46 @@ impl DomainState {
                 return Err(format!("task {} changed during save", local.id));
             }
         }
+        self.next_task_number = self.next_task_number.max(disk.next_task_number);
         self.merge_undo_entries(disk);
         self.merge_attempts_for_save(disk);
         Ok(())
+    }
+
+    /// Assign missing task numbers in deterministic creation order. The store calls this only
+    /// under its exclusive lock, immediately before the durable replacement.
+    pub(crate) fn assign_numbers_for_persistence(&mut self) {
+        let next_after_existing = self
+            .tasks
+            .iter()
+            .filter_map(|task| task.number)
+            .max()
+            .and_then(|number| number.checked_add(1))
+            .unwrap_or(1);
+        self.next_task_number = self.next_task_number.max(next_after_existing);
+        let mut missing: Vec<usize> = self
+            .tasks
+            .iter()
+            .enumerate()
+            .filter_map(|(index, task)| task.number.is_none().then_some(index))
+            .collect();
+        missing.sort_by_key(|&index| (self.tasks[index].created_at, self.tasks[index].id));
+        for index in missing {
+            self.tasks[index].number = Some(self.next_task_number);
+            self.next_task_number = self
+                .next_task_number
+                .checked_add(1)
+                .expect("task number exhausted");
+        }
+    }
+
+    pub(crate) fn sync_numbers_from_persisted(&mut self, persisted: &DomainState) {
+        self.next_task_number = persisted.next_task_number;
+        for task in &mut self.tasks {
+            task.number = persisted
+                .get(task.id)
+                .and_then(|persisted_task| persisted_task.number);
+        }
     }
 
     pub(crate) fn clear_merge_bases(&mut self) {
@@ -1203,6 +1252,80 @@ mod tests {
             2,
             "no journal writes for refused commands"
         );
+    }
+
+    #[test]
+    fn locked_create_assigns_number_one_then_two() {
+        let dir = std::env::temp_dir().join(format!("tsk-number-domain-{}", Uuid::new_v4()));
+        let store = crate::store::TaskStore::new(&dir);
+        let first = store
+            .locked_transition(|state| {
+                state
+                    .create(
+                        "first",
+                        None,
+                        TaskScope::Global,
+                        None,
+                        None,
+                        ProvenanceOrigin::Manual,
+                    )
+                    .map_err(|error| error.to_string())
+            })
+            .expect("persist first");
+        let second = store
+            .locked_transition(|state| {
+                state
+                    .create(
+                        "second",
+                        None,
+                        TaskScope::Global,
+                        None,
+                        None,
+                        ProvenanceOrigin::Manual,
+                    )
+                    .map_err(|error| error.to_string())
+            })
+            .expect("persist second");
+        let state = store.load().expect("load");
+        assert_eq!(state.get(first).and_then(|task| task.number), Some(1));
+        assert_eq!(state.get(second).and_then(|task| task.number), Some(2));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn edit_status_scope_thread_complete_soft_delete_leave_number_unchanged() {
+        let mut state = DomainState::new();
+        let id = create_sample(&mut state);
+        state.assign_numbers_for_persistence();
+        let number = state.get(id).and_then(|task| task.number);
+        state
+            .edit(
+                id,
+                "edited",
+                None,
+                TaskScope::Project {
+                    path: "/project".into(),
+                },
+                Some("thread".into()),
+            )
+            .expect("edit");
+        state.set_status(id, HumanStatus::Started).expect("status");
+        state.complete(id).expect("complete");
+        state.soft_delete(id).expect("delete");
+        assert_eq!(state.get(id).and_then(|task| task.number), number);
+    }
+
+    #[test]
+    fn undo_of_complete_and_of_soft_delete_keeps_the_same_number() {
+        let mut state = DomainState::new();
+        let id = create_sample(&mut state);
+        state.assign_numbers_for_persistence();
+        let number = state.get(id).and_then(|task| task.number);
+        state.complete(id).expect("complete");
+        state.undo().expect("undo complete");
+        state.soft_delete(id).expect("delete");
+        state.undo().expect("undo delete");
+        assert_eq!(state.get(id).and_then(|task| task.number), number);
     }
 
     #[test]
