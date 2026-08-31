@@ -72,7 +72,7 @@ fn project(path: &str) -> TaskScope {
 
 /// Deterministic deck-only fixture: motion, multi-project deck, blocked/review glyphs, done.
 fn fixture_tasks() -> Vec<Task> {
-    vec![
+    let mut tasks = vec![
         task(
             1,
             "Smoke-test worktree dispatch",
@@ -136,7 +136,11 @@ fn fixture_tasks() -> Vec<Task> {
             TaskScope::Global,
             6 * 3600,
         ),
-    ]
+    ];
+    for (index, task) in tasks.iter_mut().enumerate() {
+        task.number = Some((index + 1) as u64);
+    }
+    tasks
 }
 
 /// Board model matching this file's fixture: same tasks, `seed_selection` lands on the same
@@ -929,6 +933,139 @@ fn compact_77x24_and_48x19_and_40x10_paint_glyph_title_only_rows_and_leq_5_verb_
 /// status word), notes body, and meta footer. The selector row stays hidden, the base list
 /// never bleeds through, and every row is width-bounded at the 40x10 floor.
 #[test]
+fn board_row_meta_shows_bare_digits_not_hash_or_t_prefix() {
+    let mut tasks = fixture_tasks();
+    tasks[0].number = Some(12);
+    let view = fixture_view(&tasks, false);
+    let model = fixture_model(&tasks, &view);
+    let body = paint(80, 24, &model).0.join("\n");
+
+    assert!(
+        body.contains("12 · tsk · 3m"),
+        "number must lead row meta:\n{body}"
+    );
+    assert!(
+        !body.contains("#12") && !body.contains("T12"),
+        "number must be bare:\n{body}"
+    );
+}
+
+#[test]
+fn peek_shows_bare_digits() {
+    let mut tasks = fixture_tasks();
+    tasks[0].number = Some(12);
+    let view = fixture_view(&tasks, false);
+    let mut model = fixture_model(&tasks, &view);
+    model.detail_open = Some(Uuid::from_u128(1));
+    let body = paint(80, 24, &model).0.join("\n");
+
+    assert!(
+        body.contains("12 · created 3m ago"),
+        "peek must show bare number:\n{body}"
+    );
+    assert!(
+        !body.contains("#12") && !body.contains("T12"),
+        "number must be bare:\n{body}"
+    );
+}
+
+#[test]
+fn task_page_footer_shows_bare_digits() {
+    let tasks = fixture_tasks();
+    let view = fixture_view(&tasks, false);
+    let mut model = fixture_model(&tasks, &view);
+    model.overlay = QueueOverlay::TaskPage {
+        header_rows: vec!["○ numbered page".to_string()],
+        title_cursor: None,
+        status_word: "ready",
+        notes_rows: Vec::new(),
+        notes_cursor: None,
+        more_lines: 0,
+        step_views: Vec::new(),
+        step_cursor: None,
+        step_scroll: 0,
+        step_marked: None,
+        step_editor: None,
+        meta: "12 · desk · created 1m ago · updated 1m ago".to_string(),
+        meta_scope_x: 5,
+        meta_scope_width: 4,
+        thread_slot_width: None,
+        focus: None,
+        scope_dropdown: None,
+    };
+    let body = paint(80, 24, &model).0.join("\n");
+
+    assert!(
+        body.contains("12 · desk"),
+        "footer must start with the bare number:\n{body}"
+    );
+    assert!(
+        !body.contains("#12") && !body.contains("T12"),
+        "number must be bare:\n{body}"
+    );
+}
+
+#[test]
+fn done_drawer_rows_show_bare_digits() {
+    let mut tasks = fixture_tasks();
+    tasks[7].number = Some(12);
+    let view = fixture_view(&tasks, true);
+    let model = fixture_model(&tasks, &view);
+    let body = paint(80, 24, &model).0.join("\n");
+
+    assert!(
+        body.contains("12 · tsk · 5h"),
+        "done row must show bare number:\n{body}"
+    );
+    assert!(
+        !body.contains("#12") && !body.contains("T12"),
+        "number must be bare:\n{body}"
+    );
+}
+
+#[test]
+fn numbered_board_at_40x10_paints_in_bounds_wraps_titles_and_keeps_tasks_reachable() {
+    let mut tasks = (0..4)
+        .map(|index| {
+            let mut task = task(
+                500 + index,
+                &format!("item {index} title wraps across the compact forty column boundary"),
+                HumanStatus::Ready,
+                TaskScope::Global,
+                index as u64,
+            );
+            task.number = Some(1000 + index as u64);
+            task
+        })
+        .collect::<Vec<_>>();
+    let mut model = BoardModel::from_tasks(std::mem::take(&mut tasks), None);
+    let ids = model.visible_ids();
+    let mut domain = DomainState::new();
+
+    for (index, id) in ids.iter().copied().enumerate() {
+        if index > 0 {
+            apply_intent(&mut domain, &mut model, BoardIntent::SelectNext, None)
+                .expect("select next numbered task");
+        }
+        assert_eq!(model.selected_id(), Some(id));
+        let rows = board_rows(&model, 40, 10);
+        let body = rows.join("\n");
+        assert!(
+            body.contains(&format!("100{index}")),
+            "number must paint at 40x10:\n{body}"
+        );
+        assert!(
+            body.contains(&format!("item {index}")) && body.contains("boundary"),
+            "title must wrap rather than truncate:\n{body}"
+        );
+        assert!(
+            rows.iter().all(|row| row_display_width(row) == 40),
+            "row exceeded 40 columns"
+        );
+    }
+}
+
+#[test]
 fn task_page_renders_header_notes_and_meta_as_a_full_takeover_in_both_tiers() {
     let tasks = fixture_tasks();
     let view = fixture_view(&tasks, false);
@@ -949,6 +1086,7 @@ fn task_page_renders_header_notes_and_meta_as_a_full_takeover_in_both_tiers() {
         step_marked: None,
         step_editor: None,
         meta: "tsk \u{b7} created 1h ago \u{b7} updated 1h ago".to_string(),
+        meta_scope_x: 0,
         meta_scope_width: 11,
         thread_slot_width: None,
         focus: None,

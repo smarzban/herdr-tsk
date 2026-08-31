@@ -103,7 +103,8 @@ pub fn style_reverse_bold() -> Style {
 pub struct TaskRowPaint<'a> {
     pub glyph: &'a str,
     pub title: &'a str,
-    /// Trailing meta (age / project). Ignored when geometry reserves no meta column.
+    /// Trailing meta (number / age / project). At compact widths a bare number still reserves
+    /// its own small trailing run so it remains visible while the title wraps.
     pub meta: &'a str,
     pub selected: bool,
     /// Bold the title when unselected (e.g. attention emphasis).
@@ -131,12 +132,8 @@ pub fn paint_task_row_lines(
     // The title room `paint_task_row_with_indent` derives must match here, so both
     // share one computation of the prefix cells.
     let row_w = geo.row_width as usize;
-    let meta_budget = geo.meta_column_width as usize;
-    let title_budget = if meta_budget == 0 {
-        row_w
-    } else {
-        geo.title_width as usize
-    };
+    let meta_budget = task_meta_budget(row, geo);
+    let title_budget = row_w.saturating_sub(meta_budget);
     let glyph_cells = display_width(&super::terminal_text(row.glyph));
     let prefix_cells = leading_indent + 2 + glyph_cells + 1;
     let room = title_budget.saturating_sub(prefix_cells).max(1);
@@ -197,12 +194,8 @@ fn paint_task_row_with_indent(
     leading_indent: usize,
 ) -> Line<'static> {
     let row_w = geo.row_width as usize;
-    let meta_budget = geo.meta_column_width as usize;
-    let title_budget = if meta_budget == 0 {
-        row_w
-    } else {
-        geo.title_width as usize
-    };
+    let meta_budget = task_meta_budget(row, geo);
+    let title_budget = row_w.saturating_sub(meta_budget);
 
     let glyph = super::terminal_text(row.glyph);
     let prefix = format!("{}  {glyph} ", " ".repeat(leading_indent));
@@ -261,6 +254,21 @@ fn paint_task_row_with_indent(
     }
 
     bound_line(Line::from(spans), row_w)
+}
+
+/// Compact rows normally omit their age/project run, but a persisted task's bare number is
+/// still board chrome at the 40×10 floor. Reserve only that number plus the usual margin.
+fn task_meta_budget(row: &TaskRowPaint<'_>, geo: &TierGeometry) -> usize {
+    let standard = geo.meta_column_width as usize;
+    if standard > 0 {
+        standard
+    } else if !row.meta.is_empty() && row.meta.bytes().all(|byte| byte.is_ascii_digit()) {
+        display_width(row.meta)
+            .saturating_add(1)
+            .min(geo.row_width as usize)
+    } else {
+        0
+    }
 }
 
 /// Present untrusted text into a single mono-styled line bounded to `width` cells.
@@ -446,8 +454,10 @@ pub enum QueueOverlay<'a> {
         /// The page's add/rename step draft. When present it uses the shared
         /// bottom input slot, leaving the meta footer visible in the page above.
         step_editor: Option<BottomInputSlot<'a>>,
-        /// Footer: scope · thread · created · updated.
+        /// Footer: task number · scope · thread · created · updated.
         meta: String,
+        /// Display width before the scope inside `meta`. The number is chrome, not a scope hit.
+        meta_scope_x: u16,
         /// Display width of scope inside `meta`, carried separately so mouse geometry never
         /// parses user-controlled project names from rendered text.
         meta_scope_width: u16,
@@ -1133,6 +1143,7 @@ fn paint_overlay(
             step_marked,
             ref step_editor,
             ref meta,
+            meta_scope_x,
             meta_scope_width,
             thread_slot_width,
             focus,
@@ -1152,6 +1163,7 @@ fn paint_overlay(
                 *step_scroll,
                 *step_marked,
                 meta,
+                *meta_scope_x,
                 *meta_scope_width,
                 *thread_slot_width,
                 *focus,
@@ -1871,6 +1883,7 @@ fn paint_task_page(
     step_scroll: usize,
     step_marked: Option<usize>,
     meta: &str,
+    meta_scope_x: u16,
     meta_scope_width: u16,
     thread_slot_width: Option<u16>,
     focus: Option<CaptureField>,
@@ -2125,11 +2138,20 @@ fn paint_task_page(
             paint_bounded_line(&format!("  {meta}"), width, style_dim()),
         );
 
-        let thread_x = 2u16.saturating_add(meta_scope_width).min(width);
+        let scope_x = 2u16.saturating_add(meta_scope_x).min(width);
+        let thread_x = scope_x.saturating_add(meta_scope_width).min(width);
         if footer_input_open {
             return;
         }
-        hits.push(QueueHitTarget::FormScope, Rect::new(0, y, thread_x, 1));
+        hits.push(
+            QueueHitTarget::FormScope,
+            Rect::new(
+                scope_x,
+                y,
+                meta_scope_width.min(width.saturating_sub(scope_x)),
+                1,
+            ),
+        );
         if let Some(thread_slot_width) = thread_slot_width.filter(|_| thread_x < width) {
             let thread_width = thread_slot_width.min(width.saturating_sub(thread_x));
             hits.push(
@@ -2535,6 +2557,10 @@ fn detail_lines_for_task(
         format_age(now, task.created_at),
         format_age(now, task.updated_at)
     );
+    let age_text = task
+        .number
+        .map(|number| format!("{number} · {age_text}"))
+        .unwrap_or(age_text);
     push(
         &mut lines,
         paint_bounded_line(&format!("{indent}scope {scope_text}"), width, style_dim()),
@@ -2577,7 +2603,13 @@ fn build_list_rows(
             // Stale ids may outlive a snapshot refresh. Skip them without inventing a row.
             return;
         };
-        let meta = row_meta(task, model.now, in_project_section);
+        let meta = if geo.meta_column_width == 0 {
+            task.number
+                .map(|number| number.to_string())
+                .unwrap_or_default()
+        } else {
+            row_meta(task, model.now, in_project_section)
+        };
         let selected = model.selection_id == Some(task.id)
             && !matches!(model.overlay, QueueOverlay::ScopeDropdown { .. });
         // A long title wraps onto continuation lines indented under its own first
@@ -3212,13 +3244,18 @@ fn paint_verb_bar(
 
 fn row_meta(task: &Task, now: SystemTime, in_project_section: bool) -> String {
     let age = format_age(now, task.updated_at);
-    if in_project_section {
-        return age;
+    let mut parts = task
+        .number
+        .map(|number| number.to_string())
+        .into_iter()
+        .collect::<Vec<_>>();
+    if !in_project_section {
+        if let TaskScope::Project { path } = &task.scope {
+            parts.push(short_project(path).to_string());
+        }
     }
-    match &task.scope {
-        TaskScope::Project { path } => format!("{} · {age}", short_project(path)),
-        TaskScope::Global => age,
-    }
+    parts.push(age);
+    parts.join(" · ")
 }
 
 pub(crate) fn format_age(now: SystemTime, then: SystemTime) -> String {

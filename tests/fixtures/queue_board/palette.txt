@@ -9,7 +9,7 @@
 │         │   set status: ready                                        │         │
 │ desk ───│   set status: started                                      │───────1 │
 │         │ ▸ set status: blocked                                      │         │
-│  ○ Globa│   set status: review                                       │      2d │
+│  ○ Globa│   set status: review                                       │  7 · 2d │
 │         │                                                            │         │
 │         ├────────────────────────────────────────────────────────────┤         │
 │         │ ↑/↓ move · enter run · esc close                           │         │
