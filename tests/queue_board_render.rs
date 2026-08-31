@@ -1051,8 +1051,8 @@ fn task_page_paints_steps_section_between_notes_and_footer() {
     );
 
     // The compact tier stays operable: the notes and their two-row separation remain
-    // visible, while the steps section can be reached by scrolling, and every row stays
-    // width-bounded.
+    // visible at the head, while the steps section can be reached by scrolling. Every
+    // scroll position must preserve the fixed chrome and the frame width.
     let compact = board_rows(&model, 40, 10);
     let compact_shown: Vec<String> = compact.iter().map(|row| trimmed(row)).collect();
     let compact_note = compact_shown
@@ -1065,10 +1065,53 @@ fn task_page_paints_steps_section_between_notes_and_footer() {
         "compact page must keep two blank rows before steps:\n{}",
         compact_shown.join("\n")
     );
+
+    let mut saw_label = false;
+    let mut saw_first = false;
+    let mut saw_second = false;
+    let mut saw_third = false;
+    for scroll in 0..=5 {
+        let rows = board_rows(&model, 40, 10);
+        let geo = tier::resolve(40, 10);
+        let body = rows
+            .iter()
+            .map(|row| trimmed(row))
+            .collect::<Vec<_>>()
+            .join("\n");
+        saw_label |= body.contains("steps 2/3");
+        saw_first |= body.contains("✓ first step");
+        saw_second |= body.contains("✓ second step");
+        saw_third |= body.contains("▪ third step");
+        let rule_row = geo.rule_row.expect("compact rule row");
+        let status_row = geo.status_row.expect("compact status row");
+        let verb_row = geo.verb_row.expect("compact verb row");
+        assert!(
+            rows[rule_row as usize].contains('─')
+                && !trimmed(&rows[status_row as usize]).is_empty()
+                && !trimmed(&rows[verb_row as usize]).is_empty(),
+            "compact fixed chrome must remain intact at scroll {scroll}:\n{body}"
+        );
+        assert!(
+            rows.iter().all(|row| row_display_width(row) == 40),
+            "compact steps rows exceeded the frame width at scroll {scroll}:\n{body}"
+        );
+        if scroll < 5 {
+            apply_intent(
+                &mut domain,
+                &mut model,
+                BoardIntent::PageWheelScrollDown,
+                None,
+            )
+            .expect("scroll compact task page");
+        }
+    }
+    assert!(saw_label, "compact scrolling never reached the steps label");
+    assert!(saw_first, "compact scrolling never reached the first step");
     assert!(
-        compact.iter().all(|row| row_display_width(row) == 40),
-        "compact steps rows exceeded the frame width"
+        saw_second,
+        "compact scrolling never reached the second step"
     );
+    assert!(saw_third, "compact scrolling never reached the third step");
 }
 
 /// T-2 (AC-6): a task with no steps steps paints no steps section at all --
@@ -1111,7 +1154,8 @@ fn task_page_without_steps_paints_no_steps_section() {
 }
 
 /// At the 40x10 compact floor, a notes edit keeps its draft row visible and preserves
-/// the two blank rows before the steps section, even though the section is below the fold.
+/// the two blank rows before the steps section. The notes editor owns the viewport, so
+/// below-fold steps become reachable after Esc returns to page view.
 #[test]
 fn task_page_notes_edit_keeps_a_visible_row_and_spacing_at_the_compact_floor() {
     let mut domain = DomainState::new();
@@ -1154,6 +1198,42 @@ fn task_page_notes_edit_keeps_a_visible_row_and_spacing_at_the_compact_floor() {
         rows.iter().all(|row| row_display_width(row) == 40),
         "compact edit page exceeded the frame width"
     );
+
+    apply_intent(&mut domain, &mut model, BoardIntent::CancelEdit, None)
+        .expect("return to page view");
+    let mut saw_label = false;
+    let mut saw_step = false;
+    for scroll in 0..=5 {
+        let rows = board_rows(&model, 40, 10);
+        let geo = tier::resolve(40, 10);
+        let body = rows
+            .iter()
+            .map(|row| trimmed(row))
+            .collect::<Vec<_>>()
+            .join("\n");
+        saw_label |= body.contains("steps 1/3");
+        saw_step |= body.contains("✓ first step");
+        let rule_row = geo.rule_row.expect("compact rule row");
+        let status_row = geo.status_row.expect("compact status row");
+        let verb_row = geo.verb_row.expect("compact verb row");
+        assert!(
+            rows[rule_row as usize].contains('─')
+                && !trimmed(&rows[status_row as usize]).is_empty()
+                && !trimmed(&rows[verb_row as usize]).is_empty(),
+            "compact fixed chrome must remain intact after notes edit at scroll {scroll}:\n{body}"
+        );
+        if scroll < 5 {
+            apply_intent(
+                &mut domain,
+                &mut model,
+                BoardIntent::PageWheelScrollDown,
+                None,
+            )
+            .expect("scroll compact page after notes edit");
+        }
+    }
+    assert!(saw_label, "steps label was not reachable after notes edit");
+    assert!(saw_step, "steps were not reachable after notes edit");
 }
 
 #[test]

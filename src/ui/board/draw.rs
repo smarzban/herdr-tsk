@@ -325,9 +325,9 @@ fn build_task_page_overlay<'a>(
     let editing_notes = model.input_mode() == BoardInputMode::EditNotes;
     let (notes_rows, notes_cursor, more_lines, notes_scroll) = if editing_notes {
         let (all_rows, cursor_row, cursor_column) = wrapped_edit_rows(&form.notes, notes_width);
-        // Wheel and arrow scrolling are inert while the editor owns the page, so the
-        // frame's scroll may follow the caret without fighting a reading position:
-        // keep the minimal window that still shows the caret's wrapped row.
+        // The notes editor owns the page viewport, so wheel and page scrolling stay inert
+        // while the caret is active. Keep the minimal window that shows the caret's wrapped
+        // row; Esc returns to page view, where below-fold steps can be scrolled into view.
         let follow = form.notes_scroll.clamp(
             cursor_row.saturating_sub(want.saturating_sub(1)),
             cursor_row,
