@@ -20,9 +20,10 @@ import { parseCapture } from "./capture.js";
   const DAY = 24 * HOUR;
 
   const seed = () => {
-    let n = 1;
+    let n = 12;
     const task = (partial) => ({
-      id: `t${n++}`,
+      id: `t${n}`,
+      number: n++,
       notes: "",
       thread: null,
       project: null,
@@ -131,6 +132,7 @@ import { parseCapture } from "./capture.js";
     undo: null,
     refuse: "",
     nextId: 20,
+    nextNumber: 22,
   };
 
   const esc = (s) =>
@@ -339,6 +341,7 @@ import { parseCapture } from "./capture.js";
 
   function metaFor(task) {
     const bits = [];
+    bits.push(String(task.number));
     if (state.tab === "desk" && task.project) bits.push(task.project);
     bits.push(age(task.updatedAt));
     return bits.join(" · ");
@@ -470,6 +473,7 @@ import { parseCapture } from "./capture.js";
     const now = Date.now();
     const task = {
       id,
+      number: state.nextNumber++,
       title: parsed.title,
       notes: "",
       status: "ready",
@@ -595,7 +599,7 @@ import { parseCapture } from "./capture.js";
         ${title}
         <div class="dim">${esc(task.status)} · ${esc(projectName(task))}${task.thread ? ` · #${esc(task.thread)}` : ""}</div>
         ${notes}
-        <div class="foot dim">esc close · alt+e title · alt+n notes · alt+d done · alt+b block</div>
+        <div class="foot dim">${task.number} · esc close · alt+e title · alt+n notes · alt+d done · alt+b block</div>
       </div>`;
   }
 

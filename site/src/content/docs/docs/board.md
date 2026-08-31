@@ -10,7 +10,7 @@ Home is a tabbed board: **desk** · **projects** · **threads** (`1` / `2` / `3`
 - **threads**: cross-project thread names with project sub-groups
 
 Project focus (`P` → project) hides the tabs and paints the project name chip.
-Collapse state is session-only.
+Collapse state is session-only. Each row's dim meta includes its store-global task number as bare digits, alongside its age and project when shown.
 
 ## Sections
 
@@ -25,7 +25,7 @@ One urgency-ordered list. Sections are computed, not navigated.
 | Pane | What you get |
 | --- | --- |
 | at least 78×24 | standard board |
-| smaller | compact: glyph and title only |
+| smaller | compact: glyph, bare task number, and title |
 | down to 40×10 | still operable |
 
 ## Human status

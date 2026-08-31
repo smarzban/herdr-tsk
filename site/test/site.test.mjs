@@ -25,3 +25,12 @@ test("the shared theme script is loaded once from the Starlight head", async () 
   assert.match(config, /attrs: \{ src: ['"]\/theme\.js['"] \}/);
   assert.doesNotMatch(themeSelect, /theme\.js/);
 });
+
+test("demo rows paint bare task numbers", async () => {
+  const demo = await read("../public/board-demo.js");
+  assert.match(demo, /let n = 12;/);
+  assert.match(demo, /number: n\+\+,/);
+  assert.match(demo, /bits\.push\(String\(task\.number\)\)/);
+  assert.doesNotMatch(demo, /#\$\{task\.number\}/);
+  assert.doesNotMatch(demo, /T\$\{task\.number\}/);
+});
