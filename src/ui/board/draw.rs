@@ -177,10 +177,8 @@ fn build_task_page_overlay<'a>(
     let bound_task = form
         .task_id()
         .and_then(|id| model.tasks.iter().find(|task| task.id == id));
-    // The section consumes the extracted step views, never the raw storage; with
-    // steps the layout halves the content region (AC-24), so the notes window —
-    // and with it the notes scroll bound recorded below — keys off the same halved
-    // budget the painter lays out.
+    // The section consumes the extracted step views, never the raw storage. Notes and
+    // steps share one scrollable stream, with two blank rows separating the sections.
     let step_views = bound_task.map(super::model::step_views).unwrap_or_default();
     // A step draft is windowed for the shared bottom input slot: the row less
     // the two-cell `▎ ` prompt that owns the terminal cursor.

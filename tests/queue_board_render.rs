@@ -1029,9 +1029,10 @@ fn task_page_paints_steps_section_between_notes_and_footer() {
     let notes_row = find("the notes body", &shown);
     let label_row = find("steps 2/3", &shown);
     let meta_row = find("created", &shown);
-    assert!(
-        notes_row < label_row,
-        "steps section must sit after the notes block:\n{}",
+    assert_eq!(
+        label_row,
+        notes_row + 3,
+        "steps label must follow the notes with two blank rows:\n{}",
         shown.join("\n")
     );
     assert!(
@@ -1049,18 +1050,19 @@ fn task_page_paints_steps_section_between_notes_and_footer() {
         shown.join("\n")
     );
 
-    // The compact tier stays operable: the section still paints and never reaches the
-    // bottom chrome rows, and every row stays width-bounded.
+    // The compact tier stays operable: the notes and their two-row separation remain
+    // visible, while the steps section can be reached by scrolling, and every row stays
+    // width-bounded.
     let compact = board_rows(&model, 40, 10);
     let compact_shown: Vec<String> = compact.iter().map(|row| trimmed(row)).collect();
-    let compact_label = compact_shown
+    let compact_note = compact_shown
         .iter()
-        .position(|row| row.contains("steps 2/3"))
-        .unwrap_or_else(|| panic!("compact page omitted the steps label:\n{compact:#?}"));
-    let geo = tier::resolve(40, 10);
+        .position(|row| row.contains("the notes body"))
+        .expect("compact page omitted the notes");
     assert!(
-        (compact_label as u16) < geo.rule_row.expect("compact rule row"),
-        "compact steps section must stay above the chrome rows:\n{}",
+        list_body(&compact[compact_note + 1]).is_empty()
+            && list_body(&compact[compact_note + 2]).is_empty(),
+        "compact page must keep two blank rows before steps:\n{}",
         compact_shown.join("\n")
     );
     assert!(
@@ -1108,13 +1110,10 @@ fn task_page_without_steps_paints_no_steps_section() {
     }
 }
 
-/// T-2 remediation 1 (review round 0, Important): at the 40x10 compact floor a >=3-step
-/// steps clamps to the whole content region, and the notes edit that shared those
-/// rows painted NOTHING -- keystrokes worked, nothing rendered. A notes edit must always
-/// keep at least one visible draft row; the steps section yields the row (it caps,
-/// it does not vanish).
+/// At the 40x10 compact floor, a notes edit keeps its draft row visible and preserves
+/// the two blank rows before the steps section, even though the section is below the fold.
 #[test]
-fn task_page_notes_edit_keeps_a_visible_row_at_the_compact_floor_alongside_steps() {
+fn task_page_notes_edit_keeps_a_visible_row_and_spacing_at_the_compact_floor() {
     let mut domain = DomainState::new();
     let id = domain
         .create(
@@ -1143,9 +1142,13 @@ fn task_page_notes_edit_keeps_a_visible_row_at_the_compact_floor_alongside_steps
         body.contains("draft line under edit"),
         "a notes edit must paint at least one draft row at 40x10:\n{body}"
     );
+    let note_row = shown
+        .iter()
+        .position(|row| row.contains("draft line under edit"))
+        .expect("notes edit row missing");
     assert!(
-        body.contains("steps 1/3"),
-        "the steps section must cap to make room, not vanish:\n{body}"
+        list_body(&rows[note_row + 1]).is_empty() && list_body(&rows[note_row + 2]).is_empty(),
+        "notes edit must preserve two blank rows before steps:\n{body}"
     );
     assert!(
         rows.iter().all(|row| row_display_width(row) == 40),
@@ -1502,10 +1505,9 @@ fn task_page_view_wraps_long_notes_instead_of_truncating() {
     );
 }
 
-/// Long notes and steps form one scrollable page body. Notes use at least the
-/// first half of the viewport, then push the steps below the viewport instead of
-/// clipping them. The header and meta footer remain fixed while PageScroll reveals
-/// the deferred steps and the side scrollbar reports the overflow.
+/// Long notes and steps form one scrollable page body. Steps follow the notes after
+/// two blank rows instead of being positioned at a viewport fraction. The header and
+/// meta footer remain fixed while PageScroll reveals the deferred steps and scrollbar.
 #[test]
 fn task_page_scrolls_notes_and_steps_as_one_content_region() {
     let notes = (0..20)
@@ -1545,7 +1547,7 @@ fn task_page_scrolls_notes_and_steps_as_one_content_region() {
         shown.join("\n")
     );
 
-    for _ in 0..7 {
+    for _ in 0..8 {
         apply_intent(
             &mut domain,
             &mut model,
@@ -1588,9 +1590,8 @@ fn task_page_scrolls_notes_and_steps_as_one_content_region() {
     );
 }
 
-/// T-6 (AC-24): steps stack from the TOP of the steps half — step 1 directly
-/// under the section label, each next step directly below the previous — so a
-/// fourth step lands below the third, never pinned to the row above the footer.
+/// Steps stack from the top of their section, with step 1 directly under the section
+/// label and each next step directly below the previous, never pinned to the footer.
 #[test]
 fn steps_stack_from_the_top_below_the_divider() {
     let mut domain = DomainState::new();
@@ -1610,19 +1611,22 @@ fn steps_stack_from_the_top_below_the_divider() {
     let mut model = BoardModel::from_domain(&domain, None);
     apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open task page");
 
-    // 78x24: label opens the bottom half on row 12; steps 1..3 stack downward
-    // from it while the footer-side rows of the half stay empty.
+    // 78x24: the note is on row 3, the two-row gap follows, and the label is on row 6;
+    // steps 1..3 stack downward from it while the footer-side rows stay empty.
     let rows = board_rows(&model, 78, 24);
     let shown: Vec<String> = rows.iter().map(|row| trimmed(row)).collect();
     let label = shown
         .iter()
         .position(|row| row.contains("steps 0/3"))
         .unwrap_or_else(|| panic!("steps label missing:\n{}", shown.join("\n")));
-    assert_eq!(label, 12, "the half opens on the halfway row");
+    assert_eq!(
+        label, 6,
+        "the steps label follows the notes and two-row gap"
+    );
     assert!(
-        shown[13].contains("▪ first step")
-            && shown[14].contains("▪ second step")
-            && shown[15].contains("▪ third step"),
+        shown[7].contains("▪ first step")
+            && shown[8].contains("▪ second step")
+            && shown[9].contains("▪ third step"),
         "steps must stack one directly under another from the top of the half:\n{}",
         shown.join("\n")
     );
@@ -1638,7 +1642,7 @@ fn steps_stack_from_the_top_below_the_divider() {
     let rows4 = board_rows(&model, 78, 24);
     let shown4: Vec<String> = rows4.iter().map(|row| trimmed(row)).collect();
     assert!(
-        shown4[16].contains("▪ fourth step"),
+        shown4[10].contains("▪ fourth step"),
         "the fourth step must land directly below the third:\n{}",
         shown4.join("\n")
     );
