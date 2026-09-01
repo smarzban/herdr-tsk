@@ -454,6 +454,11 @@ html[data-theme="light"] .theme-toggle .icon-moon {
   white-space: nowrap;
 }
 
+.tsk-task-id {
+  color: var(--terminal-dim);
+  cursor: copy;
+}
+
 .tsk-row.is-sel .sel-text {
   color: #ffffff;
   background: color-mix(in srgb, var(--terminal-sel) 14%, transparent);

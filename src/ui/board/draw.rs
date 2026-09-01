@@ -240,7 +240,20 @@ fn build_task_page_overlay<'a>(
     // glyph instead of truncating; edit mode wraps the draft with its cursor.
     // The uniform budget keeps every row's wrap identical.
     let word_cells = status_word.chars().count() + 1;
-    let title_avail = width.saturating_sub(4 + word_cells);
+    let editing_title = model.input_mode() == BoardInputMode::EditTitle;
+    let header_identifier = (!editing_title)
+        .then(|| {
+            bound_task
+                .and_then(|task| task.number)
+                .map(|number| format!("T{number}"))
+        })
+        .flatten();
+    let identifier_cells = header_identifier
+        .as_deref()
+        .map(render::display_width)
+        .unwrap_or(0);
+    let title_avail =
+        width.saturating_sub(4 + word_cells + identifier_cells + usize::from(identifier_cells > 0));
     // The header may grow only inside the page body: it must stop one row short
     // of the lowest chrome row with one note row still living under it, or a
     // pathological title would eat the page (and the painter's chrome).
@@ -250,7 +263,6 @@ fn build_task_page_overlay<'a>(
         .min()
         .unwrap_or(page_geo.height);
     let header_cap = page_bottom.saturating_sub(3).max(1) as usize;
-    let editing_title = model.input_mode() == BoardInputMode::EditTitle;
     let mut header_rows: Vec<String> = Vec::new();
     let mut title_cursor = None;
     if editing_title {
@@ -357,20 +369,14 @@ fn build_task_page_overlay<'a>(
     form.notes_width.set(notes_width);
 
     // Meta footer: scope · thread · created · updated (ages only while the bound task is
-    // present). Keep its clickable pieces separate from the painted string: a project basename
-    // is user-controlled and may contain the same separator or label text.
+    // present). The identifier belongs in the header, so it never competes with scope hits.
     let meta_scope = match &form.scope {
         TaskScope::Project { path } => render::short_project(path).to_string(),
         TaskScope::Global => "desk".to_string(),
     };
     let meta_scope_width = u16::try_from(render::display_width(&meta_scope)).unwrap_or(u16::MAX);
     let mut meta = String::new();
-    let mut meta_scope_x = 0;
-    if let Some(number) = bound_task.and_then(|task| task.number) {
-        meta.push_str(&number.to_string());
-        meta.push_str(" · ");
-        meta_scope_x = u16::try_from(render::display_width(&meta)).unwrap_or(u16::MAX);
-    }
+    let meta_scope_x = 0;
     meta.push_str(&meta_scope);
     let mut thread_slot = None;
     if let Some(task) = bound_task {
@@ -415,6 +421,8 @@ fn build_task_page_overlay<'a>(
 
     QueueOverlay::TaskPage {
         header_rows,
+        header_identifier,
+        header_identifier_task: (!editing_title).then(|| form.task_id()).flatten(),
         title_cursor,
         status_word,
         notes_rows,

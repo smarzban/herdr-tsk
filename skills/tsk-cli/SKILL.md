@@ -64,9 +64,9 @@ A typo in a project name silently files the task under a new scope. Use
 
 ## Direct task lookup and steps
 
-A task number is the human handle: resolve “task 12” with `tsk list 12`.
-Bare digits and UUIDs are both valid task operands. Direct lookup ignores cwd,
-invocation default, and task scope: `tsk list 12` finds its one task even in
+A task number is the human handle: resolve `T12` with `tsk list T12`.
+`T12`, `t12`, bare digits, and UUIDs are valid task operands. Direct lookup ignores cwd,
+invocation default, and task scope: `tsk list T12` finds its one task even in
 another project, including done and soft-deleted tasks. JSON list rows include
 numeric `number` beside `id`. Do not combine a direct task operand with scope,
 thread, or status filters.

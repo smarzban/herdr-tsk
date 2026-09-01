@@ -26,11 +26,12 @@ test("the shared theme script is loaded once from the Starlight head", async () 
   assert.doesNotMatch(themeSelect, /theme\.js/);
 });
 
-test("demo rows paint bare task numbers", async () => {
+test("demo rows lead with copyable T task identifiers", async () => {
   const demo = await read("../public/board-demo.js");
   assert.match(demo, /let n = 12;/);
   assert.match(demo, /number: n\+\+,/);
-  assert.match(demo, /bits\.push\(String\(task\.number\)\)/);
+  assert.doesNotMatch(demo, /bits\.push\(String\(task\.number\)\)/);
+  assert.match(demo, /data-copy-task=/);
+  assert.match(demo, /T\$\{task\.number\}/);
   assert.doesNotMatch(demo, /#\$\{task\.number\}/);
-  assert.doesNotMatch(demo, /T\$\{task\.number\}/);
 });

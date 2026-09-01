@@ -44,8 +44,8 @@ tsk steps <task> toggle <step-short-id>
 tsk list <task>
 ```
 
-The task is a store-global number (bare digits) or a UUID from `tsk add --json`
-or `tsk list --json`. Direct lookup ignores cwd.
+The task is a store-global number (`T12`, `t12`, or bare `12`) or a UUID from
+`tsk add --json` or `tsk list --json`. Direct lookup ignores cwd.
 
 A step short id is the shortest unambiguous prefix of that step's id, as printed
 by `tsk list <task>`.

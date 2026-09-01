@@ -4,12 +4,12 @@
 │                                                                                │
 │ IN MOTION ───────────────────────────────────────────────────────────────────2 │
 │                                                                                │
-│  ▸ Smoke-test worktree dispatch                                   1 · tsk · 3m │
-│  ▸ Edit target binding pin                                     2 · herdr · 12m │
+│  ▸ T1 Smoke-test worktree dispatch                                    tsk · 3m │
+│  ▸ T2 Edit target binding pin                                      herdr · 12m │
 │                                                                                │
 │ desk ────────────────────────────────────────────────────────────────────────1 │
 │                                                                                │
-│  ○ Global backlog note                                                  7 · 2d │
+│  ○ T7 Global backlog note                                                   2d │
 │                                                                                │
 │                                                                                │
 │                                                                                │

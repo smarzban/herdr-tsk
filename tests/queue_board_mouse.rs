@@ -1494,6 +1494,105 @@ fn a_row_click_selects_and_peeks_and_a_second_click_opens_the_task_page() {
 }
 
 #[test]
+fn task_identifier_click_copies_without_falling_through_to_row_or_page_actions() {
+    let (domain, _model, id) = board_with_task("Copy this identifier", HumanStatus::Ready);
+    let mut task = domain.get(id).expect("task").clone();
+    task.number = Some(30);
+    let model = BoardModel::from_tasks(vec![task], Some(PathBuf::from(THIS_REPO)));
+
+    let hits = board_hit_map(STANDARD, &model);
+    let identifier = hits
+        .regions
+        .iter()
+        .find(|hit| hit.target == QueueHitTarget::TaskNumber(id))
+        .expect("identifier hit")
+        .area;
+    assert_eq!(
+        identifier.width, 3,
+        "the T30 cells are the whole click target"
+    );
+    assert_eq!(
+        map_board_mouse(&model, &hits, left_click(identifier.x, identifier.y)),
+        Some(BoardIntent::CopyTaskNumber(id)),
+        "identifier click must not become a row selection"
+    );
+}
+
+#[test]
+fn quick_add_identifier_click_copies_without_discarding_the_draft() {
+    let (mut domain, _model, id) = board_with_task("Copy while drafting", HumanStatus::Ready);
+    let mut task = domain.get(id).expect("task").clone();
+    task.number = Some(30);
+    let mut model = BoardModel::from_tasks(vec![task], Some(PathBuf::from(THIS_REPO)));
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenCapture, None).expect("open draft");
+
+    let hits = board_hit_map(STANDARD, &model);
+    let identifier = hits
+        .regions
+        .iter()
+        .find(|hit| hit.target == QueueHitTarget::TaskNumber(id))
+        .expect("identifier hit")
+        .area;
+    assert_eq!(
+        map_board_mouse(&model, &hits, left_click(identifier.x, identifier.y)),
+        Some(BoardIntent::CopyTaskNumber(id))
+    );
+}
+
+#[test]
+fn unnumbered_rows_and_drafts_register_no_identifier_hit() {
+    let (mut domain, mut model, _id) = board_with_task("Unsaved task", HumanStatus::Ready);
+    assert!(
+        !board_hit_map(STANDARD, &model)
+            .regions
+            .iter()
+            .any(|hit| matches!(hit.target, QueueHitTarget::TaskNumber(_))),
+        "a task without a persisted number must not paint an identifier"
+    );
+
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenCapture, None).expect("open draft");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::QuickAddInsertText("Draft title".to_string()),
+        None,
+    )
+    .expect("type draft");
+    apply_intent(&mut domain, &mut model, BoardIntent::ExpandQuickAdd, None)
+        .expect("expand draft onto the task page");
+    assert!(
+        !board_hit_map(STANDARD, &model)
+            .regions
+            .iter()
+            .any(|hit| matches!(hit.target, QueueHitTarget::TaskNumber(_))),
+        "an unsaved quick-add task page must not synthesize an identifier"
+    );
+}
+
+#[test]
+fn task_page_identifier_click_copies_instead_of_hitting_the_title_region() {
+    let (mut domain, _model, id) = board_with_task("Copy this page identifier", HumanStatus::Ready);
+    let mut task = domain.get(id).expect("task").clone();
+    task.number = Some(31);
+    let mut model = BoardModel::from_tasks(vec![task], Some(PathBuf::from(THIS_REPO)));
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
+    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+
+    let hits = board_hit_map(STANDARD, &model);
+    let identifier = hits
+        .regions
+        .iter()
+        .find(|hit| hit.target == QueueHitTarget::TaskNumber(id))
+        .expect("page identifier hit")
+        .area;
+    assert_eq!(
+        map_board_mouse(&model, &hits, left_click(identifier.x, identifier.y)),
+        Some(BoardIntent::CopyTaskNumber(id)),
+        "the identifier must outrank the broad title hit"
+    );
+}
+
+#[test]
 fn page_field_clicks_stay_inert_including_the_scope_footer() {
     let (mut domain, mut model) = deck_of(1);
     apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open the page");

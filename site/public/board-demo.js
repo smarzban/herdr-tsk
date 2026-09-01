@@ -121,6 +121,7 @@ import { parseCapture } from "./capture.js";
     selectedId: "t1",
     peekId: null,
     flashId: null,
+    copyNotice: "",
     drawer: false,
     overlay: null,
     draft: "",
@@ -341,10 +342,32 @@ import { parseCapture } from "./capture.js";
 
   function metaFor(task) {
     const bits = [];
-    bits.push(String(task.number));
     if (state.tab === "desk" && task.project) bits.push(task.project);
     bits.push(age(task.updatedAt));
     return bits.join(" · ");
+  }
+
+  function showCopyNotice(message) {
+    state.copyNotice = message;
+    setTimeout(() => {
+      if (state.copyNotice === message) {
+        state.copyNotice = "";
+        render();
+      }
+    }, 2000);
+    render();
+  }
+
+  function copyTaskIdentifier(task) {
+    const identifier = `T${task.number}`;
+    if (!navigator.clipboard?.writeText) {
+      showCopyNotice("copy unavailable");
+      return;
+    }
+    navigator.clipboard
+      .writeText(identifier)
+      .then(() => showCopyNotice(`copied ${identifier}`))
+      .catch(() => showCopyNotice("copy failed"));
   }
 
   function verbItems(task) {
@@ -454,6 +477,7 @@ import { parseCapture } from "./capture.js";
     state.overlay = null;
     state.draft = "";
     state.refuse = "";
+    state.copyNotice = "";
     state.undo = null;
   }
 
@@ -589,7 +613,7 @@ import { parseCapture } from "./capture.js";
     const title =
       editing === "title"
         ? `<input class="tsk-field" id="tsk-edit" value="${esc(state.editDraft)}" />`
-        : `<div class="tsk-page-title">${esc(task.title)}</div>`;
+        : `<div class="tsk-page-title"><span class="tsk-task-id" data-copy-task="${esc(task.id)}" title="copy T${task.number}">T${task.number}</span> ${esc(task.title)}</div>`;
     const notes =
       editing === "notes"
         ? `<textarea class="tsk-field tsk-notes" id="tsk-edit">${esc(state.editDraft)}</textarea>`
@@ -599,7 +623,7 @@ import { parseCapture } from "./capture.js";
         ${title}
         <div class="dim">${esc(task.status)} · ${esc(projectName(task))}${task.thread ? ` · #${esc(task.thread)}` : ""}</div>
         ${notes}
-        <div class="foot dim">${task.number} · esc close · alt+e title · alt+n notes · alt+d done · alt+b block</div>
+        <div class="foot dim">esc close · alt+e title · alt+n notes · alt+d done · alt+b block</div>
       </div>`;
   }
 
@@ -636,7 +660,7 @@ import { parseCapture } from "./capture.js";
                 .join("")
             : "";
         return `<button type="button" class="tsk-row ${selected ? "is-sel" : ""} ${flash ? "is-flash" : ""}" data-task="${task.id}">
-          <span class="tsk-row-main">${indent}  <span class="${selected ? "sel" : "glyph"}">${glyph}</span> <span class="${selected ? "sel-text" : ""}">${esc(task.title)}</span></span>
+          <span class="tsk-row-main">${indent}  <span class="${selected ? "sel" : "glyph"}">${glyph}</span> <span class="tsk-task-id ${selected ? "sel-text" : ""}" data-copy-task="${esc(task.id)}" title="copy T${task.number}">T${task.number}</span> <span class="${selected ? "sel-text" : ""}">${esc(task.title)}</span></span>
           <span class="meta">${esc(metaFor(task))}</span>
         </button>${peek}`;
       })
@@ -651,7 +675,8 @@ import { parseCapture } from "./capture.js";
         : `<button type="button" class="tsk-done-count foot" data-drawer="1">${doneN} done</button>
            <div class="foot dim tsk-verbs">${verbItems(task)
              .map((v) => `<button type="button" class="tsk-verb" data-verb="${esc(v.id)}">${esc(v.label)}</button>`)
-             .join("<span> · </span>")}</div>`;
+             .join("<span> · </span>")}</div>
+           ${state.copyNotice ? `<div class="foot dim">${esc(state.copyNotice)}</div>` : ""}`;
 
     return `
       <div class="tsk-tabs">${state.focusProject ? chip : tabs}</div>
@@ -1004,6 +1029,13 @@ import { parseCapture } from "./capture.js";
   let lastClick = { id: null, at: 0 };
 
   root.addEventListener("click", (e) => {
+    const copy = e.target.closest("[data-copy-task]");
+    if (copy) {
+      const task = state.tasks.find((item) => item.id === copy.getAttribute("data-copy-task"));
+      if (task) copyTaskIdentifier(task);
+      render();
+      return;
+    }
     const tab = e.target.closest("[data-tab]");
     if (tab) {
       goTab(tab.getAttribute("data-tab"));

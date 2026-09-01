@@ -39,9 +39,9 @@ For scriptable board work, use `tsk add` and `tsk list`; read
   project-scoped · done drawer (`z`). Scoped ON DECK thread blocks paint dim `#name`
   headers with open counts; headers consume row budget but are not selectable or
   hit-testable.
-- Standard ≥78×24, compact below, operable to 40×10. Persisted task rows paint their
-  bare task number as dim meta chrome, including peek, task page, and done drawer; drafts
-  without a number paint none.
+- Standard ≥78×24, compact below, operable to 40×10. Persisted task rows paint an
+  dim `T<number>` prefix before the title, including task page and done drawer; clicking
+  that prefix copies it. Peek relies on its parent row's prefix. Drafts without a number paint none.
 - Human status: `ready` · `started` · `blocked` · `review` · `done`. The store
   still reads old `todo`/`doing` values.
 - Mutating verbs (`space` `d` `o` `b` `e` `n` `x` `u` `q`) need Alt, or Ctrl

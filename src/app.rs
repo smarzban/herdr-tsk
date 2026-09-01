@@ -1199,6 +1199,29 @@ pub fn refresh_before_mutation(
     true
 }
 
+/// Copy a visible task identifier without changing selection, page state, or persistence.
+fn copy_task_number(domain: &DomainState, model: &mut BoardModel, id: uuid::Uuid) {
+    copy_task_number_with(domain, model, id, copy_to_clipboard);
+}
+
+fn copy_task_number_with(
+    domain: &DomainState,
+    model: &mut BoardModel,
+    id: uuid::Uuid,
+    copy: impl FnOnce(&str) -> bool,
+) {
+    let Some(number) = domain.get(id).and_then(|task| task.number) else {
+        return;
+    };
+    let identifier = format!("T{number}");
+    let message = if copy(&identifier) {
+        format!("copy sent: {identifier}")
+    } else {
+        "copy failed".to_string()
+    };
+    model.set_ephemeral_message(message, Duration::from_secs(2));
+}
+
 /// Apply a board intent. Returns `true` when the board loop should quit.
 fn handle_board_intent(
     store: &TaskStore,
@@ -1207,6 +1230,11 @@ fn handle_board_intent(
     intent: BoardIntent,
     save_recovery: &mut SaveRecovery<DomainState>,
 ) -> io::Result<bool> {
+    if let BoardIntent::CopyTaskNumber(id) = intent {
+        copy_task_number(domain, model, id);
+        return Ok(false);
+    }
+
     let baseline = if save_recovery.is_pending() || !board_intent_may_persist(&intent) {
         DomainState::new()
     } else {
@@ -2355,6 +2383,75 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.dir);
         }
+    }
+
+    #[test]
+    fn copy_task_number_sends_the_exact_displayed_identifier() {
+        let temp = TempStore::new("copy-task-number-payload");
+        let mut domain = DomainState::new();
+        let id = domain
+            .create(
+                "Copy me",
+                None,
+                TaskScope::Global,
+                None,
+                None,
+                ProvenanceOrigin::Manual,
+            )
+            .expect("seed task");
+        temp.store.save(&domain).expect("persist numbered task");
+        let domain = temp.store.load().expect("reload numbered task");
+        let mut model = BoardModel::from_domain(&domain, None);
+        let mut copied = None;
+
+        copy_task_number_with(&domain, &mut model, id, |text| {
+            copied = Some(text.to_string());
+            true
+        });
+
+        assert_eq!(copied.as_deref(), Some("T1"));
+        assert_eq!(model.message(), Some("copy sent: T1"));
+    }
+
+    #[test]
+    fn copy_task_number_intent_uses_the_app_loop_handoff_without_mutating() {
+        let temp = TempStore::new("copy-task-number");
+        let mut domain = DomainState::new();
+        let id = domain
+            .create(
+                "Copy me",
+                None,
+                TaskScope::Global,
+                None,
+                None,
+                ProvenanceOrigin::Manual,
+            )
+            .expect("seed task");
+        temp.store.save(&domain).expect("persist numbered task");
+        let mut domain = temp.store.load().expect("reload numbered task");
+        let number = domain.get(id).expect("task").number.expect("task number");
+        let mut model = BoardModel::from_domain(&domain, None);
+        let selection = model.selected_id();
+        let mut recovery = SaveRecovery::new();
+
+        let quit = handle_board_intent(
+            &temp.store,
+            &mut domain,
+            &mut model,
+            BoardIntent::CopyTaskNumber(id),
+            &mut recovery,
+        )
+        .expect("copy intent");
+
+        assert!(!quit);
+        assert_eq!(
+            model.selected_id(),
+            selection,
+            "copy must not move selection"
+        );
+        assert_eq!(domain.get(id).expect("task").number, Some(number));
+        let message = format!("copy sent: T{number}");
+        assert_eq!(model.message(), Some(message.as_str()));
     }
 
     #[test]

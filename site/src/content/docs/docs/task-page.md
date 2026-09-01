@@ -3,7 +3,8 @@ title: Task page
 description: "View and edit one task: title, notes, thread, and scope."
 ---
 
-`Enter` opens the selected task full height.
+`Enter` opens the selected task full height. The dim `T30` prefix in the
+header copies that task identifier when clicked.
 
 It is view-first. Nothing is in edit mode until you ask. `alt+e` edits the title,
 `alt+n` edits notes, `Tab` moves between title, notes, thread, and scope. The

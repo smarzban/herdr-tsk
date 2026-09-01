@@ -933,7 +933,7 @@ fn compact_77x24_and_48x19_and_40x10_paint_glyph_title_only_rows_and_leq_5_verb_
 /// status word), notes body, and meta footer. The selector row stays hidden, the base list
 /// never bleeds through, and every row is width-bounded at the 40x10 floor.
 #[test]
-fn board_row_meta_shows_bare_digits_not_hash_or_t_prefix() {
+fn board_row_leads_title_with_uppercase_t_identifier() {
     let mut tasks = fixture_tasks();
     tasks[0].number = Some(12);
     let view = fixture_view(&tasks, false);
@@ -941,17 +941,17 @@ fn board_row_meta_shows_bare_digits_not_hash_or_t_prefix() {
     let body = paint(80, 24, &model).0.join("\n");
 
     assert!(
-        body.contains("12 · tsk · 3m"),
-        "number must lead row meta:\n{body}"
+        body.contains("T12 Smoke-test worktree dispatch"),
+        "identifier must lead the title:\n{body}"
     );
     assert!(
-        !body.contains("#12") && !body.contains("T12"),
-        "number must be bare:\n{body}"
+        !body.contains("12 · tsk · 3m"),
+        "trailing meta must not repeat the identifier:\n{body}"
     );
 }
 
 #[test]
-fn standard_row_meta_keeps_age_when_number_and_long_project_compete() {
+fn standard_row_meta_keeps_age_when_long_project_competes() {
     let mut tasks = fixture_tasks();
     tasks[0].number = Some(7);
     tasks[0].scope = project("/src/customer-portal-api");
@@ -966,12 +966,12 @@ fn standard_row_meta_keeps_age_when_number_and_long_project_compete() {
     assert!(row.contains('7'), "number must remain visible:\n{row}");
     assert!(
         row.contains("12m"),
-        "age must remain visible when number plus a long project share the meta column:\n{row}"
+        "age must remain visible when a long project shares the meta column:\n{row}"
     );
 }
 
 #[test]
-fn peek_shows_bare_digits() {
+fn peek_keeps_the_identifier_on_its_task_row_not_in_detail_meta() {
     let mut tasks = fixture_tasks();
     tasks[0].number = Some(12);
     let view = fixture_view(&tasks, false);
@@ -980,22 +980,24 @@ fn peek_shows_bare_digits() {
     let body = paint(80, 24, &model).0.join("\n");
 
     assert!(
-        body.contains("12 · created 3m ago"),
-        "peek must show bare number:\n{body}"
+        body.contains("T12 Smoke-test worktree dispatch"),
+        "row must lead with T12:\n{body}"
     );
     assert!(
-        !body.contains("#12") && !body.contains("T12"),
-        "number must be bare:\n{body}"
+        !body.contains("12 · created"),
+        "peek detail must not duplicate the identifier:\n{body}"
     );
 }
 
 #[test]
-fn task_page_footer_shows_bare_digits() {
+fn task_page_header_shows_identifier_not_footer() {
     let tasks = fixture_tasks();
     let view = fixture_view(&tasks, false);
     let mut model = fixture_model(&tasks, &view);
     model.overlay = QueueOverlay::TaskPage {
         header_rows: vec!["○ numbered page".to_string()],
+        header_identifier: Some("T12".to_string()),
+        header_identifier_task: Some(Uuid::from_u128(1)),
         title_cursor: None,
         status_word: "ready",
         notes_rows: Vec::new(),
@@ -1006,8 +1008,8 @@ fn task_page_footer_shows_bare_digits() {
         step_scroll: 0,
         step_marked: None,
         step_editor: None,
-        meta: "12 · desk · created 1m ago · updated 1m ago".to_string(),
-        meta_scope_x: 5,
+        meta: "desk · created 1m ago · updated 1m ago".to_string(),
+        meta_scope_x: 0,
         meta_scope_width: 4,
         thread_slot_width: None,
         focus: None,
@@ -1016,17 +1018,17 @@ fn task_page_footer_shows_bare_digits() {
     let body = paint(80, 24, &model).0.join("\n");
 
     assert!(
-        body.contains("12 · desk"),
-        "footer must start with the bare number:\n{body}"
+        body.contains("T12 numbered page"),
+        "header must lead with T12:\n{body}"
     );
     assert!(
-        !body.contains("#12") && !body.contains("T12"),
-        "number must be bare:\n{body}"
+        !body.contains("12 · desk"),
+        "footer must not repeat the identifier:\n{body}"
     );
 }
 
 #[test]
-fn done_drawer_rows_show_bare_digits() {
+fn done_drawer_rows_lead_with_identifiers() {
     let mut tasks = fixture_tasks();
     tasks[7].number = Some(12);
     let view = fixture_view(&tasks, true);
@@ -1034,12 +1036,12 @@ fn done_drawer_rows_show_bare_digits() {
     let body = paint(80, 24, &model).0.join("\n");
 
     assert!(
-        body.contains("12 · tsk · 5h"),
-        "done row must show bare number:\n{body}"
+        body.contains("T12"),
+        "done row must show a leading identifier:\n{body}"
     );
     assert!(
-        !body.contains("#12") && !body.contains("T12"),
-        "number must be bare:\n{body}"
+        !body.contains("12 · tsk · 5h"),
+        "done row must not retain trailing number chrome:\n{body}"
     );
 }
 
@@ -1092,6 +1094,8 @@ fn task_page_renders_header_notes_and_meta_as_a_full_takeover_in_both_tiers() {
     let mut model = fixture_model(&tasks, &view);
     model.overlay = QueueOverlay::TaskPage {
         header_rows: vec!["\u{25cb} Rename this task".to_string()],
+        header_identifier: None,
+        header_identifier_task: None,
         title_cursor: None,
         status_word: "ready",
         notes_rows: vec![
