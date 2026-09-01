@@ -1,8 +1,10 @@
 //! Task Store: load/save survives reload.
 //! Uses temp dirs only; never writes real plugin state.
 
+use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::{Arc, Barrier};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use tsk_tui::domain::{
@@ -1281,6 +1283,263 @@ fn legacy_agent_meta_without_session_and_last_observed_decode() {
         "agent_meta decodes with every subfield absent"
     );
     assert_eq!(task.last_observed, Some(ObservedStatus::Working));
+}
+
+#[test]
+fn pre_number_store_upgrades_assigning_distinct_numbers_including_done_and_deleted() {
+    let dir = temp_state_dir();
+    let _guard = TempDirGuard(dir.clone());
+    let mut legacy = DomainState::new();
+    let first = legacy
+        .create(
+            "first",
+            None,
+            TaskScope::Global,
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("first");
+    let second = legacy
+        .create(
+            "second",
+            None,
+            TaskScope::Global,
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("second");
+    let third = legacy
+        .create(
+            "third",
+            None,
+            TaskScope::Global,
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("third");
+    legacy.complete(first).expect("done");
+    legacy.soft_delete(second).expect("deleted");
+    let mut document = serde_json::to_value(&legacy).expect("serialize legacy");
+    // Deliberately put creation times out of array order: numbers must follow these times.
+    document["tasks"][0]["created_at"] = serde_json::json!([3, 0]);
+    document["tasks"][1]["created_at"] = serde_json::json!([1, 0]);
+    document["tasks"][2]["created_at"] = serde_json::json!([2, 0]);
+    document["format_version"] = serde_json::json!(1);
+    document
+        .as_object_mut()
+        .expect("document")
+        .remove("next_task_number");
+    for task in document["tasks"].as_array_mut().expect("tasks") {
+        task.as_object_mut().expect("task").remove("number");
+    }
+    fs::write(
+        dir.join("tsk.json"),
+        serde_json::to_vec_pretty(&document).expect("json"),
+    )
+    .expect("write legacy");
+
+    let upgraded = TaskStore::new(&dir).load().expect("upgrade");
+    let on_disk: serde_json::Value =
+        serde_json::from_slice(&fs::read(dir.join("tsk.json")).expect("read upgraded store"))
+            .expect("json");
+    assert_eq!(on_disk["format_version"], 2);
+    assert_eq!(on_disk["next_task_number"], 4);
+    assert_eq!(
+        on_disk["tasks"]
+            .as_array()
+            .expect("tasks")
+            .iter()
+            .map(|task| task["number"].as_u64())
+            .collect::<Vec<_>>(),
+        vec![Some(3), Some(1), Some(2)],
+        "numbers are durably assigned in created_at order"
+    );
+    assert_eq!(upgraded.get(first).and_then(|task| task.number), Some(3));
+    assert_eq!(upgraded.get(second).and_then(|task| task.number), Some(1));
+    assert_eq!(upgraded.get(third).and_then(|task| task.number), Some(2));
+    assert_eq!(upgraded.get(first).expect("done").status, HumanStatus::Done);
+    assert!(upgraded.get(second).expect("deleted").soft_deleted);
+}
+
+#[test]
+fn upgraded_store_preserves_numbers_on_second_load() {
+    let dir = temp_state_dir();
+    let _guard = TempDirGuard(dir.clone());
+    let mut legacy = DomainState::new();
+    legacy
+        .create(
+            "first",
+            None,
+            TaskScope::Global,
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("first");
+    let mut document = serde_json::to_value(&legacy).expect("serialize legacy");
+    document["format_version"] = serde_json::json!(1);
+    document
+        .as_object_mut()
+        .expect("document")
+        .remove("next_task_number");
+    document["tasks"][0]
+        .as_object_mut()
+        .expect("task")
+        .remove("number");
+    fs::write(
+        dir.join("tsk.json"),
+        serde_json::to_vec_pretty(&document).expect("json"),
+    )
+    .expect("write legacy");
+    let store = TaskStore::new(&dir);
+    let first = store.load().expect("first load");
+    let numbers: Vec<Option<u64>> = first.tasks().iter().map(|task| task.number).collect();
+    let second = store.load().expect("second load");
+    assert_eq!(
+        second
+            .tasks()
+            .iter()
+            .map(|task| task.number)
+            .collect::<Vec<_>>(),
+        numbers
+    );
+}
+
+#[test]
+fn reload_merge_save_keeps_numbers_and_counter_across_another_writer() {
+    let dir = temp_state_dir();
+    let _guard = TempDirGuard(dir.clone());
+    let store = TaskStore::new(&dir);
+    let mut local = DomainState::new();
+    let mine = local
+        .create(
+            "mine",
+            None,
+            TaskScope::Global,
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("create mine");
+    store.reload_merge_save(&mut local).expect("persist mine");
+    let mine_number = local
+        .get(mine)
+        .and_then(|task| task.number)
+        .expect("synced number");
+
+    store
+        .locked_transition(|state| {
+            state
+                .create(
+                    "theirs",
+                    None,
+                    TaskScope::Global,
+                    None,
+                    None,
+                    ProvenanceOrigin::Manual,
+                )
+                .map_err(|error| error.to_string())
+        })
+        .expect("another writer persists");
+    store
+        .locked_transition(|state| {
+            // Gaps are valid: a merge must retain a counter ahead of every assigned number.
+            state.next_task_number = 10;
+            Ok(())
+        })
+        .expect("advance counter");
+
+    local
+        .set_status(mine, HumanStatus::Started)
+        .expect("change mine");
+    store.reload_merge_save(&mut local).expect("persist status");
+    assert_eq!(
+        local.get(mine).and_then(|task| task.number),
+        Some(mine_number)
+    );
+    let after_status = store.load().expect("load");
+    assert_eq!(
+        after_status.get(mine).and_then(|task| task.number),
+        Some(mine_number)
+    );
+    assert_eq!(
+        after_status.next_task_number, 10,
+        "merge must retain the disk counter"
+    );
+
+    let later = local
+        .create(
+            "later",
+            None,
+            TaskScope::Global,
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("create later");
+    store.reload_merge_save(&mut local).expect("persist later");
+    assert_eq!(local.get(later).and_then(|task| task.number), Some(10));
+}
+
+#[test]
+fn overlapping_creates_under_lock_receive_distinct_numbers() {
+    const WRITERS: usize = 8;
+    let dir = temp_state_dir();
+    let _guard = TempDirGuard(dir.clone());
+    let store = TaskStore::new(&dir);
+    let barrier = Arc::new(Barrier::new(WRITERS));
+    let ids = std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..WRITERS)
+            .map(|writer| {
+                let store = store.clone();
+                let barrier = Arc::clone(&barrier);
+                scope.spawn(move || {
+                    barrier.wait();
+                    store.locked_transition(|state| {
+                        state
+                            .create(
+                                format!("writer {writer}"),
+                                None,
+                                TaskScope::Global,
+                                None,
+                                None,
+                                ProvenanceOrigin::Manual,
+                            )
+                            .map_err(|error| error.to_string())
+                    })
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .map(|handle| handle.join().expect("writer thread").expect("create"))
+            .collect::<Vec<_>>()
+    });
+    let state = store.load().expect("load");
+    let numbers: HashSet<u64> = ids
+        .iter()
+        .map(|&id| state.get(id).and_then(|task| task.number).expect("number"))
+        .collect();
+    assert_eq!(state.tasks().len(), WRITERS);
+    assert_eq!(numbers.len(), WRITERS);
+}
+
+#[test]
+fn v2_store_is_refused_when_writer_format_is_older_and_the_file_is_unwritten() {
+    let dir = temp_state_dir();
+    let _guard = TempDirGuard(dir.clone());
+    // A v2-only writer would refuse v2 just as this v2 writer refuses the next format.
+    let document = serde_json::json!({ "format_version": 3, "next_task_number": 2, "tasks": [], "undo_stack": [] });
+    let bytes = serde_json::to_vec_pretty(&document).expect("json");
+    fs::write(dir.join("tsk.json"), &bytes).expect("write newer store");
+    let error = TaskStore::new(&dir)
+        .save(&DomainState::new())
+        .expect_err("older writer refuses newer store");
+    assert!(error.to_string().contains("newer"));
+    assert_eq!(fs::read(dir.join("tsk.json")).expect("read"), bytes);
 }
 
 #[test]

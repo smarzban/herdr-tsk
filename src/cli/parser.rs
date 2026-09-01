@@ -7,6 +7,35 @@ use uuid::Uuid;
 use super::steps::StepsAction;
 use crate::domain::normalize_thread;
 
+/// A direct task operand, either the internal UUID or its human task number.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskAddress {
+    Id(Uuid),
+    Number(u64),
+}
+
+impl TaskAddress {
+    pub fn matches(self, task: &crate::domain::Task) -> bool {
+        match self {
+            Self::Id(id) => task.id == id,
+            Self::Number(number) => task.number == Some(number),
+        }
+    }
+}
+
+/// Parse a task UUID or its bare-decimal human number.
+pub fn parse_task_address(value: &str) -> Result<TaskAddress, String> {
+    if value.bytes().all(|byte| byte.is_ascii_digit()) {
+        return value
+            .parse::<u64>()
+            .map(TaskAddress::Number)
+            .map_err(|_| format!("invalid task id {value}"));
+    }
+    Uuid::parse_str(value)
+        .map(TaskAddress::Id)
+        .map_err(|_| format!("invalid task id {value}"))
+}
+
 /// Parsed add input. A plan source is selected by `file` or piped stdin.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FlagAdd {
@@ -144,7 +173,7 @@ pub fn parse_flag_add(args: &[String]) -> Result<FlagAdd, String> {
 /// and the action's operand.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FlagSteps {
-    pub task: Option<Uuid>,
+    pub task: Option<TaskAddress>,
     pub action: Option<StepsAction>,
     pub state_dir: Option<PathBuf>,
     pub help: bool,
@@ -204,9 +233,7 @@ pub fn parse_flag_steps(args: &[String]) -> Result<FlagSteps, String> {
                 "steps action is required".into()
             });
         }
-        let task = positionals[0]
-            .parse::<Uuid>()
-            .map_err(|_| format!("invalid task id {}", positionals[0]))?;
+        let task = parse_task_address(positionals[0])?;
         let operand = positionals
             .get(2)
             .copied()

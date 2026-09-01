@@ -595,6 +595,7 @@ mod tests {
         let at = SystemTime::UNIX_EPOCH + Duration::from_secs(updated_secs);
         Task {
             id: Uuid::from_u128(id),
+            number: None,
             revision: Some(Uuid::from_u128(id)),
             merge_base_revision: None,
             title: format!("task-{id}"),

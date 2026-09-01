@@ -974,11 +974,63 @@ fn task_page_footer_hits_use_display_columns_and_stay_within_the_painted_row() {
         .iter()
         .find(|hit| hit.target == QueueHitTarget::FormThread)
         .expect("thread hit");
-    assert_eq!(scope.area.width, 14, "two-space inset plus six wide glyphs");
-    assert_eq!(thread.area.x, 14, "thread starts after the painted scope");
+    assert_eq!(
+        scope.area.width, 12,
+        "six wide glyphs, with the number chrome outside the scope target"
+    );
+    assert_eq!(
+        thread.area.x, 14,
+        "thread starts after the inset and painted scope, with no number on this in-memory task"
+    );
     assert!(
         thread.area.right() <= width,
         "thread hit must not extend beyond the clipped footer: {thread:?}"
+    );
+}
+
+/// AC-25: a persisted task page paints its bare number before the footer scope, while the
+/// FormScope target starts after that non-interactive number chrome.
+#[test]
+fn ac_25_task_page_footer_number_precedes_the_form_scope_hit_target() {
+    let mut domain = DomainState::new();
+    let id = domain
+        .create(
+            "Numbered task",
+            None,
+            project(THIS_REPO),
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("create");
+    let mut persisted = domain.get(id).expect("task").clone();
+    persisted.number = Some(1);
+    let mut model = BoardModel::from_tasks(vec![persisted], Some(PathBuf::from(THIS_REPO)));
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
+
+    let (width, height) = (80, 24);
+    let backend = TestBackend::new(width, height);
+    let mut terminal = Terminal::new(backend).expect("terminal");
+    terminal
+        .draw(|frame| {
+            let _ = draw_board(frame, &model);
+        })
+        .expect("paint task page");
+
+    let scope = board_hit_map(Rect::new(0, 0, width, height), &model)
+        .regions
+        .into_iter()
+        .find(|hit| hit.target == QueueHitTarget::FormScope)
+        .expect("scope hit");
+    let footer = row_text(&terminal, width, scope.area.y);
+    assert!(
+        footer.trim_start().starts_with("1 · app"),
+        "the painted footer must start with the persisted bare number: {footer:?}"
+    );
+    assert_eq!(
+        scope.area.x,
+        2 + "1 · ".chars().count() as u16,
+        "FormScope starts after the inset and non-interactive number chrome"
     );
 }
 

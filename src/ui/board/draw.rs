@@ -366,7 +366,14 @@ fn build_task_page_overlay<'a>(
         TaskScope::Global => "desk".to_string(),
     };
     let meta_scope_width = u16::try_from(render::display_width(&meta_scope)).unwrap_or(u16::MAX);
-    let mut meta = meta_scope.clone();
+    let mut meta = String::new();
+    let mut meta_scope_x = 0;
+    if let Some(number) = bound_task.and_then(|task| task.number) {
+        meta.push_str(&number.to_string());
+        meta.push_str(" · ");
+        meta_scope_x = u16::try_from(render::display_width(&meta)).unwrap_or(u16::MAX);
+    }
+    meta.push_str(&meta_scope);
     let mut thread_slot = None;
     if let Some(task) = bound_task {
         thread_slot = if let Some(thread) = task.thread.as_deref() {
@@ -421,6 +428,7 @@ fn build_task_page_overlay<'a>(
         step_marked: form.steps.delete_mark,
         step_editor,
         meta,
+        meta_scope_x,
         meta_scope_width,
         thread_slot_width,
         focus,

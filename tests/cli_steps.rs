@@ -55,6 +55,16 @@ fn steps_args(dir: &std::path::Path, task: Uuid) -> Vec<String> {
     ]
 }
 
+fn task_number(dir: &std::path::Path, task: Uuid) -> u64 {
+    TaskStore::new(dir)
+        .load()
+        .expect("load state")
+        .get(task)
+        .expect("seed task")
+        .number
+        .expect("persisted task number")
+}
+
 /// One `[state] short-id text` line from single-task list output.
 struct StepLine {
     done: bool,
@@ -341,6 +351,78 @@ fn steps_on_soft_deleted_task_refuses_without_mutation() {
         "a deleted task's steps are not scriptable"
     );
 
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn steps_bare_digits_act_on_the_task() {
+    let dir = temp_state_dir("number-address");
+    let task = seed_task(&dir, "number target");
+    let number = task_number(&dir, task);
+
+    let output = steps(&[
+        "tsk".into(),
+        "steps".into(),
+        number.to_string(),
+        "add".into(),
+        "addressed by number".into(),
+        "--state-dir".into(),
+        state_dir_arg(&dir),
+    ]);
+
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    assert_eq!(
+        TaskStore::new(&dir)
+            .load()
+            .expect("reload state")
+            .get(task)
+            .expect("task")
+            .steps[0]
+            .text,
+        "addressed by number"
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn steps_uuid_still_acts_on_the_task() {
+    let dir = temp_state_dir("uuid-address");
+    let task = seed_task(&dir, "uuid target");
+
+    let mut args = steps_args(&dir, task);
+    args.extend(["add".into(), "addressed by uuid".into()]);
+    let output = steps(&args);
+
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    assert_eq!(
+        TaskStore::new(&dir)
+            .load()
+            .expect("reload state")
+            .get(task)
+            .expect("task")
+            .steps[0]
+            .text,
+        "addressed by uuid"
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn steps_unknown_number_is_unknown_task() {
+    let dir = temp_state_dir("unknown-number");
+    let output = steps(&[
+        "tsk".into(),
+        "steps".into(),
+        "999".into(),
+        "add".into(),
+        "missing target".into(),
+        "--state-dir".into(),
+        state_dir_arg(&dir),
+    ]);
+
+    assert_eq!(output.code, 1);
+    assert!(output.stdout.is_empty());
+    assert!(output.stderr.contains("unknown-task"));
     let _ = std::fs::remove_dir_all(dir);
 }
 

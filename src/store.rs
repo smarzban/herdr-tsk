@@ -113,7 +113,7 @@ impl TaskStore {
     /// Load domain state. Missing file yields an empty state (first run).
     pub fn load(&self) -> Result<DomainState, StoreError> {
         let _guard = self.lock_exclusive()?;
-        self.load_unlocked()
+        self.load_and_upgrade_unlocked()
     }
 
     /// Persist domain state with atomic write (unique temp in same dir + rename).
@@ -123,6 +123,7 @@ impl TaskStore {
     pub fn save(&self, state: &DomainState) -> Result<(), StoreError> {
         let _guard = self.lock_exclusive()?;
         let mut durable = state.clone();
+        durable.assign_numbers_for_persistence();
         durable.clear_merge_bases();
         durable.stamp_format_version();
         self.save_unlocked(&durable)
@@ -134,8 +135,11 @@ impl TaskStore {
         transition: impl FnOnce(&mut DomainState) -> Result<T, String>,
     ) -> Result<T, String> {
         let _guard = self.lock_exclusive().map_err(|error| error.to_string())?;
-        let mut state = self.load_unlocked().map_err(|error| error.to_string())?;
+        let mut state = self
+            .load_and_upgrade_unlocked()
+            .map_err(|error| error.to_string())?;
         let result = transition(&mut state)?;
+        state.assign_numbers_for_persistence();
         state.clear_merge_bases();
         state.stamp_format_version();
         self.save_unlocked(&state)
@@ -152,9 +156,12 @@ impl TaskStore {
         transition: impl FnOnce(&mut DomainState) -> Result<(T, bool), String>,
     ) -> Result<T, String> {
         let _guard = self.lock_exclusive().map_err(|error| error.to_string())?;
-        let mut state = self.load_unlocked().map_err(|error| error.to_string())?;
+        let mut state = self
+            .load_and_upgrade_unlocked()
+            .map_err(|error| error.to_string())?;
         let (result, changed) = transition(&mut state)?;
         if changed {
+            state.assign_numbers_for_persistence();
             state.clear_merge_bases();
             state.stamp_format_version();
             self.save_unlocked(&state)
@@ -180,17 +187,29 @@ impl TaskStore {
         filesystem: &F,
     ) -> Result<(), StoreError> {
         let _guard = self.lock_exclusive()?;
-        let disk = self.load_unlocked()?;
+        let disk = self.load_and_upgrade_unlocked()?;
         check_format_version(disk.format_version())?;
         local
             .merge_for_save(&disk)
             .map_err(|message| StoreError::Io(io::Error::other(message)))?;
         let mut durable = local.clone();
+        durable.assign_numbers_for_persistence();
         durable.clear_merge_bases();
         durable.stamp_format_version();
         self.save_unlocked_with(&durable, filesystem)?;
+        local.sync_numbers_from_persisted(&durable);
         local.clear_merge_bases();
         Ok(())
+    }
+
+    fn load_and_upgrade_unlocked(&self) -> Result<DomainState, StoreError> {
+        let mut state = self.load_unlocked()?;
+        if state.format_version() < STORE_FORMAT_VERSION {
+            state.assign_numbers_for_persistence();
+            state.stamp_format_version();
+            self.save_unlocked(&state)?;
+        }
+        Ok(state)
     }
 
     fn load_unlocked(&self) -> Result<DomainState, StoreError> {
@@ -882,7 +901,7 @@ mod tests {
     }
 
     #[test]
-    fn save_stamps_format_version_one() {
+    fn save_stamps_format_version_two() {
         let dir = temp_dir("format-stamp");
         let _guard = TempDirGuard(dir.clone());
         let store = TaskStore::new(&dir);
@@ -891,7 +910,7 @@ mod tests {
         let value: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(dir.join(STATE_FILE)).expect("read"))
                 .expect("json");
-        assert_eq!(value["format_version"], 1);
+        assert_eq!(value["format_version"], 2);
     }
 
     #[test]
@@ -907,7 +926,7 @@ mod tests {
         );
 
         let loaded = TaskStore::new(&dir).load().expect("legacy store must load");
-        assert_eq!(loaded.format_version(), 1);
+        assert_eq!(loaded.format_version(), 2);
         assert!(loaded.tasks().is_empty());
     }
 
@@ -916,7 +935,7 @@ mod tests {
         let dir = temp_dir("format-load-newer");
         let _guard = TempDirGuard(dir.clone());
         let newer = serde_json::json!({
-            "format_version": 2,
+            "format_version": 3,
             "tasks": [],
             "undo_stack": []
         });
@@ -929,8 +948,8 @@ mod tests {
             matches!(
                 error,
                 StoreError::UnsupportedFormat {
-                    found: 2,
-                    supported: 1
+                    found: 3,
+                    supported: 2
                 }
             ),
             "{error}"
@@ -946,7 +965,7 @@ mod tests {
         let dir = temp_dir("format-save-newer");
         let _guard = TempDirGuard(dir.clone());
         let newer = serde_json::json!({
-            "format_version": 2,
+            "format_version": 3,
             "tasks": [],
             "undo_stack": []
         });
@@ -959,8 +978,8 @@ mod tests {
             matches!(
                 error,
                 StoreError::UnsupportedFormat {
-                    found: 2,
-                    supported: 1
+                    found: 3,
+                    supported: 2
                 }
             ),
             "{error}"

@@ -18,13 +18,13 @@ pub fn add_help() -> CliOutput {
 pub fn list_help() -> CliOutput {
     CliOutput {
         stdout: concat!(
-            "usage: tsk list [<task-id>] [-p <project> | --desk | --all] [--thread <name>] [--done | --deleted] [--json] [--state-dir <dir>]\n\n",
+            "usage: tsk list [<task>] [-p <project> | --desk | --all] [--thread <name>] [--done | --deleted] [--json] [--state-dir <dir>]\n\n",
             "Lists ready, started, blocked, and review tasks in the invocation project by default, or your desk outside a repository.\n",
-            "With a task id (a task UUID from add --json or list --json), lists that one task alone and prints its steps: one line per step with its [x]/[ ] state and step short id. A task id cannot be combined with scope, thread, or status filters.\n",
+            "With a task number (bare digits) or UUID from add --json or list --json, lists that one task alone and prints its steps: one line per step with its [x]/[ ] state and step short id. Direct lookup ignores cwd. A task operand cannot be combined with scope, thread, or status filters.\n",
             "--project uses the same basename-or-path scope resolution as add; --desk selects your desk, tasks not tied to a project; --all selects every scope. --thread normalizes a thread name and filters within the selected scope; an invalid name is a usage error (exit 2). For dash-leading project and state-directory values, use --project=<scope> and --state-dir=<dir>.\n",
             "--done lists done tasks only. --deleted lists soft-deleted tasks only, regardless of status.\n",
             "To recover a typo scope, use tsk list --all --json.\n",
-            "--json emits a flat array of id, title, status, project, and thread (or null) in displayed group order. Human --all groups rows by status, then project scope, using a unique concise trailing path or desk.\n\n",
+            "--json emits a flat array of id, number, title, status, project, and thread (or null) in displayed group order. Human --all groups rows by status, then project scope, using a unique concise trailing path or desk.\n\n",
             "Exit contract:\n",
             "  exit 0: tasks were listed\n",
             "  exit 2: usage or parse error, nothing persisted\n",
@@ -39,7 +39,7 @@ pub fn list_help() -> CliOutput {
 fn help_output(usage: &str) -> CliOutput {
     CliOutput {
         stdout: format!(
-            "{usage}\n\nExamples:\n  tsk add -t \"Draft release notes\"\n  tsk add -t \"Buy milk\" --desk\n  tsk add -t \"Fix widget\" --project widget --thread release-2026\n  tsk add --title=\"-fix parser\" --notes=\"-5 degrees\" --project=\"-maintenance\"\n  tsk add --file plan.json\n  cat plan.json | tsk add\n\nValues beginning with - must use --title=<value>, --notes=<value>, --project=<value>, --state-dir=<dir>, or --file=<path>.\nItem flags plus --file are usage (exit 2, nothing persists). Piped stdin with item flags is ignored and not read. An add whose trimmed title, resolved project scope, and normalized thread already exist succeeds without changing the task. With --json, flag add emits one object with outcome, id, title, and project (or null).\nPlan JSON: [{{\"title\": \"...\", \"notes\": \"...\", \"project\": \"...\", \"thread\": \"...\"}}] (thread may also be null)\nPlan result: {{\"created\": [...], \"existing\": [...], \"failed\": [...]}}\n\nExit contract:\n  exit 0: every item was created or already existed\n  exit 1: one or more items were refused, retry failed only\n  exit 2: usage or parse error, nothing persisted\n  exit 3: store I/O, commit indeterminate, verify with list before retrying\n"
+            "{usage}\n\nExamples:\n  tsk add -t \"Draft release notes\"\n  tsk add -t \"Buy milk\" --desk\n  tsk add -t \"Fix widget\" --project widget --thread release-2026\n  tsk add --title=\"-fix parser\" --notes=\"-5 degrees\" --project=\"-maintenance\"\n  tsk add --file plan.json\n  cat plan.json | tsk add\n\nValues beginning with - must use --title=<value>, --notes=<value>, --project=<value>, --state-dir=<dir>, or --file=<path>.\nItem flags plus --file are usage (exit 2, nothing persists). Piped stdin with item flags is ignored and not read. An add whose trimmed title, resolved project scope, and normalized thread already exist succeeds without changing the task. With --json, flag add emits one object with outcome, id, number, title, and project (or null).\nPlan JSON: [{{\"title\": \"...\", \"notes\": \"...\", \"project\": \"...\", \"thread\": \"...\"}}] (thread may also be null)\nPlan result: {{\"created\": [...], \"existing\": [...], \"failed\": [...]}}\n\nExit contract:\n  exit 0: every item was created or already existed\n  exit 1: one or more items were refused, retry failed only\n  exit 2: usage or parse error, nothing persisted\n  exit 3: store I/O, commit indeterminate, verify with list before retrying\n"
         ),
         stderr: String::new(),
         code: 0,
@@ -48,20 +48,32 @@ fn help_output(usage: &str) -> CliOutput {
 
 pub fn added(result: FlagAddResult, json: bool) -> CliOutput {
     let stdout = match result {
-        FlagAddResult::Created { id, title, project } if json => format!(
+        FlagAddResult::Created {
+            id,
+            number,
+            title,
+            project,
+        } if json => format!(
             "{}\n",
             serde_json::json!({
                 "outcome": "created",
                 "id": id,
+                "number": number,
                 "title": title,
                 "project": project,
             })
         ),
-        FlagAddResult::Existing { id, title, project } if json => format!(
+        FlagAddResult::Existing {
+            id,
+            number,
+            title,
+            project,
+        } if json => format!(
             "{}\n",
             serde_json::json!({
                 "outcome": "existing",
                 "id": id,
+                "number": number,
                 "title": title,
                 "project": project,
             })
@@ -113,7 +125,7 @@ pub fn list(result: ListResult, json: bool) -> CliOutput {
 
 /// The flat row array. A single-task listing with steps attaches them to its
 /// one row (`steps`: id, done, short_id, text); every other listing keeps
-/// today's exact row shape.
+/// the standard task row shape.
 fn list_json(result: &ListResult) -> String {
     let mut value = serde_json::to_value(&result.rows).expect("list rows are serializable");
     if !result.steps.is_empty() {
@@ -204,6 +216,8 @@ fn append_rows(output: &mut String, rows: &[&ListRow], indent: &str) {
     for row in rows {
         output.push_str(indent);
         output.push_str("- ");
+        output.push_str(&row.number.to_string());
+        output.push(' ');
         output.push_str(&terminal_text(&row.title));
         if let Some(thread) = row.thread.as_deref() {
             output.push_str(" #");
@@ -369,11 +383,11 @@ fn path_segments(path: &str) -> Vec<String> {
 pub fn steps_help() -> CliOutput {
     CliOutput {
         stdout: concat!(
-            "usage: tsk steps <task-id> add <text> [--state-dir <dir>]\n",
-            "       tsk steps <task-id> toggle <step-short-id> [--state-dir <dir>]\n\n",
-            "steps adds one step to a task or toggles one step's done flag. The task id is a task UUID from tsk list --json.\n",
-            "A step short id is the shortest unambiguous prefix of the step id, as printed by tsk list <task-id>.\n",
-            "toggle flips the step state: a blind retry after an unseen success flips it back, so verify with tsk list <task-id> before retrying.\n\n",
+            "usage: tsk steps <task> add <text> [--state-dir <dir>]\n",
+            "       tsk steps <task> toggle <step-short-id> [--state-dir <dir>]\n\n",
+            "steps adds one step to a task or toggles one step's done flag. The task is a bare task number or UUID from tsk list --json; direct lookup ignores cwd.\n",
+            "A step short id is the shortest unambiguous prefix of the step id, as printed by tsk list <task>.\n",
+            "toggle flips the step state: a blind retry after an unseen success flips it back, so verify with tsk list <task> before retrying.\n\n",
             "Refusal tokens (exit 1): empty-step-text, invalid-step-text, unknown-task, soft-deleted-task, unknown-step, ambiguous-step.\n\n",
             "Exit contract:\n",
             "  exit 0: step created or toggled\n",
@@ -410,7 +424,7 @@ pub fn steps_usage(reason: &str) -> CliOutput {
     CliOutput {
         stdout: String::new(),
         stderr: format!(
-            "tsk steps: {reason}\nusage: tsk steps <task-id> add <text> | toggle <step-short-id> [--state-dir <dir>]\n"
+            "tsk steps: {reason}\nusage: tsk steps <task> add <text> | toggle <step-short-id> [--state-dir <dir>]\n"
         ),
         code: 2,
     }
@@ -432,7 +446,7 @@ pub fn list_usage(reason: &str) -> CliOutput {
     CliOutput {
         stdout: String::new(),
         stderr: format!(
-            "tsk list: {reason}\nusage: tsk list [<task-id>] [-p <project> | --desk | --all] [--thread <name>] [--done | --deleted] [--json] [--state-dir <dir>]\n"
+            "tsk list: {reason}\nusage: tsk list [<task>] [-p <project> | --desk | --all] [--thread <name>] [--done | --deleted] [--json] [--state-dir <dir>]\n"
         ),
         code: 2,
     }
@@ -445,8 +459,8 @@ pub fn list_rejected(error: ListError) -> CliOutput {
             stderr: format!("tsk list: {detail}\n"),
             code: 3,
         },
-        // A well-formed id that addresses no task: the invocation is wrong, not the store.
-        ListError::UnknownTask(id) => list_usage(&format!("unknown task id {id}")),
+        // A well-formed address that addresses no task: the invocation is wrong, not the store.
+        ListError::UnknownTask => list_usage("unknown task"),
     }
 }
 

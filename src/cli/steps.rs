@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use serde::Serialize;
 
 use crate::cli::add::has_c0_control;
+use crate::cli::parser::TaskAddress;
 use crate::domain::{DomainError, DomainState, Step};
 use crate::store::{default_state_dir, TaskStore};
 use uuid::Uuid;
@@ -19,7 +20,7 @@ pub enum StepsAction {
 /// A steps failure after parsing and before presenting output.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StepsError {
-    UnknownTask(Uuid),
+    UnknownTask,
     SoftDeletedTask(Uuid),
     EmptyStepText,
     InvalidStepText,
@@ -31,7 +32,7 @@ pub enum StepsError {
 impl StepsError {
     pub fn code(&self) -> &'static str {
         match self {
-            Self::UnknownTask(_) => "unknown-task",
+            Self::UnknownTask => "unknown-task",
             Self::SoftDeletedTask(_) => "soft-deleted-task",
             Self::EmptyStepText => "empty-step-text",
             Self::InvalidStepText => "invalid-step-text",
@@ -61,14 +62,21 @@ pub enum StepsResult {
 /// Refusals are resolved at the boundary under the store lock and never reach
 /// the durable write, so a refused steps command persists nothing.
 pub fn run(
-    task_id: Uuid,
+    task_address: TaskAddress,
     action: StepsAction,
     state_dir: Option<PathBuf>,
 ) -> Result<StepsResult, StepsError> {
     let store = TaskStore::new(state_dir.unwrap_or_else(default_state_dir));
     store
         .locked_transition_if_changed(|domain| {
-            let outcome = apply(domain, task_id, &action);
+            let task_id = domain
+                .tasks()
+                .iter()
+                .find(|task| task_address.matches(task))
+                .map(|task| task.id);
+            let outcome = task_id.map_or(Err(StepsError::UnknownTask), |task_id| {
+                apply(domain, task_id, &action)
+            });
             let changed = outcome.is_ok();
             Ok((outcome, changed))
         })
@@ -82,7 +90,7 @@ fn apply(
 ) -> Result<StepsResult, StepsError> {
     // A deleted task's steps are not scriptable (park/link discipline, not edit's).
     match domain.get(task_id) {
-        None => return Err(StepsError::UnknownTask(task_id)),
+        None => return Err(StepsError::UnknownTask),
         Some(task) if task.soft_deleted => return Err(StepsError::SoftDeletedTask(task_id)),
         _ => {}
     }
@@ -136,7 +144,7 @@ fn apply(
 /// Domain commands re-check what the boundary already validated; mirror the twins.
 fn map_domain_error(error: DomainError) -> StepsError {
     match error {
-        DomainError::UnknownId(id) => StepsError::UnknownTask(id),
+        DomainError::UnknownId(_) => StepsError::UnknownTask,
         DomainError::EmptyStepText => StepsError::EmptyStepText,
         DomainError::UnknownStep(_) => StepsError::UnknownStep,
         other => StepsError::Store(other.to_string()),

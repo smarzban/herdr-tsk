@@ -9,7 +9,7 @@
 │         │  j/k · ↑/↓ move | alt+space primary                        │         │
 │ desk ───│  alt+d done | alt+o reopen                                 │───────1 │
 │         │  alt+b block | enter open                                  │         │
-│  ○ Globa│  →/← peek | + capture                                      │      2d │
+│  ○ Globa│  →/← peek | + capture                                      │  7 · 2d │
 │         │  alt+e title | alt+x/Delete delete                         │         │
 │         │  alt+u undo | z drawer                                     │         │
 │         │  : palette | ? help                                        │         │

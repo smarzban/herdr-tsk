@@ -46,6 +46,7 @@ impl PlanResult {
 struct Created {
     i: usize,
     id: Uuid,
+    number: u64,
     title: String,
 }
 
@@ -54,6 +55,7 @@ struct Created {
 struct Existing {
     i: usize,
     id: Uuid,
+    number: u64,
     title: String,
 }
 
@@ -88,11 +90,13 @@ struct ResolvedPlanItem {
 pub enum FlagAddResult {
     Created {
         id: Uuid,
+        number: u64,
         title: String,
         project: Option<String>,
     },
     Existing {
         id: Uuid,
+        number: u64,
         title: String,
         project: Option<String>,
     },
@@ -123,6 +127,9 @@ pub fn run(input: FlagAdd) -> Result<FlagAddResult, AddError> {
                 return Ok((
                     FlagAddResult::Existing {
                         id: task.id,
+                        number: task
+                            .number
+                            .expect("loaded tasks receive a number before CLI presentation"),
                         title: task.title.clone(),
                         project: scope_project(&task.scope),
                     },
@@ -141,7 +148,20 @@ pub fn run(input: FlagAdd) -> Result<FlagAddResult, AddError> {
                     thread,
                 )
                 .map_err(|error| error.to_string())?;
-            Ok((FlagAddResult::Created { id, title, project }, true))
+            domain.assign_numbers_for_persistence();
+            let number = domain
+                .get(id)
+                .and_then(|task| task.number)
+                .expect("new tasks receive a number while the store lock is held");
+            Ok((
+                FlagAddResult::Created {
+                    id,
+                    number,
+                    title,
+                    project,
+                },
+                true,
+            ))
         })
         .map_err(AddError::Store)
 }
@@ -182,6 +202,9 @@ pub fn run_plan(
                     existing.push(Existing {
                         i: item.i,
                         id: task.id,
+                        number: task
+                            .number
+                            .expect("loaded tasks receive a number before CLI presentation"),
                         title: item.title,
                     });
                     continue;
@@ -197,9 +220,15 @@ pub fn run_plan(
                         item.thread,
                     )
                     .expect("plan item titles and threads are validated before domain creation");
+                domain.assign_numbers_for_persistence();
+                let number = domain
+                    .get(id)
+                    .and_then(|task| task.number)
+                    .expect("new tasks receive a number while the store lock is held");
                 created.push(Created {
                     i: item.i,
                     id,
+                    number,
                     title: item.title,
                 });
             }

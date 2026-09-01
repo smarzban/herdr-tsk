@@ -801,12 +801,16 @@ fn empty_thread_target_follows_a_scope_name_containing_the_thread_label() {
         .iter()
         .find(|hit| hit.target == QueueHitTarget::FormThread)
         .expect("empty thread target");
-    let expected_scope_width = 2 + "foo · thread".chars().count() as u16;
+    let expected_scope_width = "foo · thread".chars().count() as u16;
     assert_eq!(
         scope_hit.area.width, expected_scope_width,
-        "the entire project basename remains the scope target"
+        "the entire project basename remains the scope target, excluding number chrome"
     );
-    assert_eq!(thread_hit.area.x, expected_scope_width);
+    assert_eq!(
+        thread_hit.area.x,
+        2 + expected_scope_width,
+        "thread follows the footer inset and scope target, with no number on this in-memory task"
+    );
 }
 
 #[test]

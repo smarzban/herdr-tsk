@@ -21,7 +21,8 @@ Canonical terms for this repo. No implementation detail.
 - **step done**: a step's checked state. Progress information only; it never implies, drives, or auto-applies a task status change.
 - **toggle**: flip one step's done flag. The only step state change that is not a text change.
 - **step cursor**: the task page's step-row focus. Inactive on page open; a bare ↓ activates it (again after any deactivation), ↑ from the first step deactivates it. While active, bare arrows move it and modifier-protected verbs act on it; a single click on a step row moves it.
-- **step short id**: an unambiguous prefix of a step's stable identity, the way tasks are addressed from the CLI.
+- **task number**: the store-global sequential integer assigned when a task is durably created. Spoken and typed as `12`. Unique across desk, every project, and every thread, including done and soft-deleted tasks. An address, not identity and not an ordering promise. Never reused.
+- **step short id**: an unambiguous prefix of a step's stable identity, used to address a step within one task from the CLI.
 - **thread**: an optional single name a task carries, grouping it with same-named tasks in the same scope. Not an entity: no identity beyond the name, no status, no lifecycle. It presents on the board exactly while at least one open task in its scope carries it; the field itself persists on the task regardless of status.
 - **thread token**: the `!t name` capture directive, sibling of `!p`; bare `!t` means unthreaded. Stripped from the saved title.
 - **thread header**: a derived, non-selectable board row above a thread's open tasks in a scoped deck group, showing the thread name and open count. Chrome, not a task.

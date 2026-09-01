@@ -187,7 +187,7 @@ fn list_defaults_to_invocation_project_open_tasks_in_human_and_json_group_order(
     assert!(human.stderr.is_empty());
     assert_eq!(
         human.stdout,
-        "STARTED\n - started target\n\nREADY\n - ready target\n\nBLOCKED\n - blocked target\n\nREVIEW\n - review target\n"
+        "STARTED\n - 3 started target\n\nREADY\n - 2 ready target\n\nBLOCKED\n - 4 blocked target\n\nREVIEW\n - 1 review target\n"
     );
 
     let json = list(&[
@@ -333,7 +333,7 @@ fn list_done_and_deleted_filters_are_status_and_soft_delete_specific() {
         state_dir_arg(&dir),
     ]);
     assert_eq!(done.code, 0);
-    assert_eq!(done.stdout, "DONE\n - done visible\n");
+    assert_eq!(done.stdout, "DONE\n - 1 done visible\n");
 
     let deleted = list(&[
         "tsk".into(),
@@ -366,7 +366,7 @@ fn list_done_and_deleted_filters_are_status_and_soft_delete_specific() {
     assert_eq!(deleted_human.code, 0);
     assert_eq!(
         deleted_human.stdout,
-        "DELETED\n - deleted ready\n - deleted done\n"
+        "DELETED\n - 2 deleted ready\n - 3 deleted done\n"
     );
 
     let _ = std::fs::remove_dir_all(repo);
@@ -475,7 +475,7 @@ fn list_all_groups_each_status_by_concise_scope_for_every_filter() {
     assert_eq!(
         open.stdout,
         format!(
-            "STARTED\n  desk\n    - global started\n  {project_name}\n    - project started\n  other\n    - other started\n\nREADY\n  {project_name}\n    - project ready\n\nBLOCKED\n  other\n    - other blocked\n\nREVIEW\n  desk\n    - global review\n"
+            "STARTED\n  desk\n    - 1 global started\n  {project_name}\n    - 2 project started\n  other\n    - 3 other started\n\nREADY\n  {project_name}\n    - 4 project ready\n\nBLOCKED\n  other\n    - 5 other blocked\n\nREVIEW\n  desk\n    - 6 global review\n"
         )
     );
 
@@ -529,7 +529,7 @@ fn list_all_groups_each_status_by_concise_scope_for_every_filter() {
                 .keys()
                 .map(String::as_str)
                 .collect::<Vec<_>>(),
-            vec!["id", "project", "status", "thread", "title"]
+            vec!["id", "number", "project", "status", "thread", "title"]
         );
     }
     let done_human = list(&[
@@ -542,7 +542,7 @@ fn list_all_groups_each_status_by_concise_scope_for_every_filter() {
     ]);
     assert_eq!(
         done_human.stdout,
-        format!("DONE\n  {project_name}\n    - project done\n  desk\n    - global done\n")
+        format!("DONE\n  {project_name}\n    - 7 project done\n  desk\n    - 8 global done\n")
     );
 
     let deleted = list(&[
@@ -574,7 +574,7 @@ fn list_all_groups_each_status_by_concise_scope_for_every_filter() {
     ]);
     assert_eq!(
         deleted_human.stdout,
-        "DELETED\n  desk\n    - global deleted\n  other\n    - other deleted\n"
+        "DELETED\n  desk\n    - 9 global deleted\n  other\n    - 10 other deleted\n"
     );
 
     let _ = std::fs::remove_dir_all(repo);
@@ -645,7 +645,7 @@ fn list_all_distinguishes_global_from_project_global_and_uses_visible_scope_labe
     assert_eq!(output.code, 0);
     assert_eq!(
         output.stdout,
-        "READY\n  desk\n    - global task\n  project: global\n    - project global token\n  work/global\n    - project global path\n  work/api\n    - work api\n  personal/api\n    - personal api\n  project: <empty project 1>\n    - whitespace scope\n"
+        "READY\n  desk\n    - 1 global task\n  project: global\n    - 2 project global token\n  work/global\n    - 3 project global path\n  work/api\n    - 4 work api\n  personal/api\n    - 5 personal api\n  project: <empty project 1>\n    - 6 whitespace scope\n"
     );
 
     let _ = std::fs::remove_dir_all(dir);
@@ -706,7 +706,7 @@ fn list_all_uses_shortest_unique_trailing_scope_labels_across_statuses() {
     assert_eq!(output.code, 0);
     assert_eq!(
         output.stdout,
-        "STARTED\n  global\n    - project global\n  work/api\n    - work api\n\nREADY\n  desk\n    - global\n  project: <empty project 1>\n    - blank one\n\nBLOCKED\n  personal/api\n    - personal api\n\nREVIEW\n  project: <empty project 2>\n    - blank two\n"
+        "STARTED\n  global\n    - 1 project global\n  work/api\n    - 2 work api\n\nREADY\n  desk\n    - 3 global\n  project: <empty project 1>\n    - 4 blank one\n\nBLOCKED\n  personal/api\n    - 5 personal api\n\nREVIEW\n  project: <empty project 2>\n    - 6 blank two\n"
     );
 
     let _ = std::fs::remove_dir_all(dir);
@@ -743,7 +743,7 @@ fn list_all_preserves_raw_scope_syntax_after_trailing_segments_are_exhausted() {
     assert_eq!(output.code, 0);
     assert_eq!(
         output.stdout,
-        "READY\n  project: \"/work/api\"\n    - absolute api\n  project: \"work/api\"\n    - relative api\n  project: \"/work/api/\"\n    - trailing api\n  project: \"//work//api\"\n    - repeated api\n"
+        "READY\n  project: \"/work/api\"\n    - 1 absolute api\n  project: \"work/api\"\n    - 2 relative api\n  project: \"/work/api/\"\n    - 3 trailing api\n  project: \"//work//api\"\n    - 4 repeated api\n"
     );
     assert!(
         !output.stdout.contains("(scope "),
@@ -1074,6 +1074,7 @@ fn list_equals_project_form_accepts_dash_leading_scope() {
         serde_json::from_str::<Vec<serde_json::Value>>(&output.stdout).expect("JSON rows"),
         vec![serde_json::json!({
             "id": state.tasks()[0].id,
+            "number": 1,
             "title": "maintenance task",
             "status": "ready",
             "project": "-maintenance",
@@ -1237,7 +1238,7 @@ fn list_task_prints_step_lines_with_state_and_short_id() {
     assert!(output.stderr.is_empty());
     assert_eq!(
         output.stdout,
-        format!("READY\n - steps target\n   [x] aaa1 First step\n   [ ] aaa2 Second step\n"),
+        format!("READY\n - 1 steps target\n   [x] aaa1 First step\n   [ ] aaa2 Second step\n"),
         "one line per step with state and unambiguous short id"
     );
     assert!(
@@ -1256,7 +1257,7 @@ fn list_task_prints_step_lines_with_state_and_short_id() {
     assert_eq!(json.code, 0);
     let rows: Vec<serde_json::Value> = serde_json::from_str(&json.stdout).expect("JSON rows");
     assert_eq!(rows.len(), 1);
-    for key in ["id", "project", "status", "thread", "title"] {
+    for key in ["id", "number", "project", "status", "thread", "title"] {
         assert!(rows[0].get(key).is_some(), "single-task row keeps {key}");
     }
     assert_eq!(
@@ -1302,7 +1303,7 @@ fn list_task_without_steps_keeps_task_rows_and_rejects_conflicting_flags() {
         state_dir_arg(&dir),
     ]);
     assert_eq!(plain.code, 0);
-    assert_eq!(plain.stdout, "READY\n - plain target\n");
+    assert_eq!(plain.stdout, "READY\n - 1 plain target\n");
 
     let plain_json = list(&[
         "tsk".into(),
@@ -1322,7 +1323,7 @@ fn list_task_without_steps_keeps_task_rows_and_rejects_conflicting_flags() {
             .keys()
             .map(String::as_str)
             .collect::<Vec<_>>(),
-        vec!["id", "project", "status", "thread", "title"],
+        vec!["id", "number", "project", "status", "thread", "title"],
         "a task without steps keeps today's exact JSON row shape"
     );
 
@@ -1482,6 +1483,243 @@ fn json_rows_always_carry_thread_field() {
 }
 
 #[test]
+fn json_list_rows_include_number() {
+    let _env = env_lock();
+    let dir = temp_state_dir("json-number");
+    let mut state = DomainState::new();
+    create_task(
+        &mut state,
+        "numbered task",
+        TaskScope::Global,
+        HumanStatus::Ready,
+    );
+    TaskStore::new(&dir).save(&state).expect("seed store");
+
+    let output = list(&[
+        "tsk".into(),
+        "list".into(),
+        "--desk".into(),
+        "--json".into(),
+        "--state-dir".into(),
+        state_dir_arg(&dir),
+    ]);
+
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    let rows: Vec<serde_json::Value> = serde_json::from_str(&output.stdout).expect("JSON rows");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["number"], 1);
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn human_list_rows_show_bare_digits() {
+    let _env = env_lock();
+    let dir = temp_state_dir("human-number");
+    let mut state = DomainState::new();
+    create_task(
+        &mut state,
+        "numbered task",
+        TaskScope::Global,
+        HumanStatus::Ready,
+    );
+    TaskStore::new(&dir).save(&state).expect("seed store");
+
+    let output = list(&[
+        "tsk".into(),
+        "list".into(),
+        "--desk".into(),
+        "--state-dir".into(),
+        state_dir_arg(&dir),
+    ]);
+
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    assert_eq!(output.stdout, "READY\n - 1 numbered task\n");
+    assert!(!output.stdout.contains("#1"));
+    assert!(!output.stdout.contains("T1"));
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn list_bare_digits_finds_the_task_from_another_cwd() {
+    let _env = env_lock();
+    let invocation_repo = project_repo("number-invocation");
+    let _context = EnvironmentGuard::context_for(&invocation_repo);
+    let dir = temp_state_dir("number-other-cwd");
+    let mut state = DomainState::new();
+    let task = create_task_with_thread(
+        &mut state,
+        "other project task",
+        TaskScope::Project {
+            path: "/projects/other".into(),
+        },
+        HumanStatus::Ready,
+        None,
+    );
+    TaskStore::new(&dir).save(&state).expect("seed store");
+    let number = TaskStore::new(&dir)
+        .load()
+        .expect("load store")
+        .get(task)
+        .expect("task")
+        .number
+        .expect("task number");
+
+    let output = list(&[
+        "tsk".into(),
+        "list".into(),
+        number.to_string(),
+        "--json".into(),
+        "--state-dir".into(),
+        state_dir_arg(&dir),
+    ]);
+
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    let rows: Vec<serde_json::Value> = serde_json::from_str(&output.stdout).expect("JSON rows");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["id"], task.to_string());
+    let _ = std::fs::remove_dir_all(invocation_repo);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn list_bare_digits_finds_done_and_deleted_tasks() {
+    let dir = temp_state_dir("number-done-deleted");
+    let mut state = DomainState::new();
+    let done = create_task_with_thread(
+        &mut state,
+        "done target",
+        TaskScope::Global,
+        HumanStatus::Done,
+        None,
+    );
+    let deleted = create_task_with_thread(
+        &mut state,
+        "deleted target",
+        TaskScope::Global,
+        HumanStatus::Ready,
+        None,
+    );
+    state.soft_delete(deleted).expect("soft delete task");
+    TaskStore::new(&dir).save(&state).expect("seed store");
+
+    let persisted = TaskStore::new(&dir).load().expect("load store");
+    for task in [done, deleted] {
+        let number = persisted
+            .get(task)
+            .expect("task")
+            .number
+            .expect("task number");
+        let output = list(&[
+            "tsk".into(),
+            "list".into(),
+            number.to_string(),
+            "--json".into(),
+            "--state-dir".into(),
+            state_dir_arg(&dir),
+        ]);
+        assert_eq!(output.code, 0, "{}", output.stderr);
+        let rows: Vec<serde_json::Value> = serde_json::from_str(&output.stdout).expect("JSON rows");
+        assert_eq!(rows[0]["id"], task.to_string());
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn list_uuid_still_finds_the_task() {
+    let dir = temp_state_dir("uuid-address");
+    let mut state = DomainState::new();
+    let task = create_task_with_thread(
+        &mut state,
+        "uuid target",
+        TaskScope::Global,
+        HumanStatus::Ready,
+        None,
+    );
+    TaskStore::new(&dir).save(&state).expect("seed store");
+
+    let output = list(&[
+        "tsk".into(),
+        "list".into(),
+        task.to_string(),
+        "--json".into(),
+        "--state-dir".into(),
+        state_dir_arg(&dir),
+    ]);
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    assert_eq!(
+        serde_json::from_str::<Vec<serde_json::Value>>(&output.stdout).expect("JSON rows")[0]["id"],
+        task.to_string()
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn list_bare_digits_with_scope_or_status_flags_is_usage() {
+    let dir = temp_state_dir("number-filter-usage");
+    let mut state = DomainState::new();
+    let task = create_task_with_thread(
+        &mut state,
+        "number target",
+        TaskScope::Global,
+        HumanStatus::Ready,
+        None,
+    );
+    TaskStore::new(&dir).save(&state).expect("seed store");
+    let number = TaskStore::new(&dir)
+        .load()
+        .expect("load store")
+        .get(task)
+        .expect("task")
+        .number
+        .expect("task number")
+        .to_string();
+
+    for flag in ["--desk", "--all", "--thread=release", "--done", "--deleted"] {
+        let output = list(&[
+            "tsk".into(),
+            "list".into(),
+            number.clone(),
+            flag.into(),
+            "--state-dir".into(),
+            state_dir_arg(&dir),
+        ]);
+        assert_eq!(output.code, 2, "number with {flag}");
+        assert!(output.stdout.is_empty());
+        assert!(output.stderr.contains("usage: tsk list"));
+        assert!(output.stderr.contains("cannot be used with"));
+        assert!(!output.stderr.contains("invalid task id"));
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn list_unknown_number_matches_unknown_uuid_refusal() {
+    let dir = temp_state_dir("unknown-number");
+    let unknown_number = list(&[
+        "tsk".into(),
+        "list".into(),
+        "999".into(),
+        "--state-dir".into(),
+        state_dir_arg(&dir),
+    ]);
+    let unknown_uuid = list(&[
+        "tsk".into(),
+        "list".into(),
+        "00000000-0000-4000-8000-000000000001".into(),
+        "--state-dir".into(),
+        state_dir_arg(&dir),
+    ]);
+    assert_eq!(unknown_number.code, unknown_uuid.code);
+    assert!(unknown_number.stdout.is_empty());
+    assert_eq!(unknown_number.stderr, unknown_uuid.stderr);
+    assert!(unknown_number.stderr.contains("unknown task"));
+    assert!(!unknown_number.stderr.contains("invalid task id"));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn human_output_appends_thread_marker_iff_row_threaded_snapshots() {
     let _env = env_lock();
     let repo = project_repo("thread-human");
@@ -1534,7 +1772,7 @@ fn human_output_appends_thread_marker_iff_row_threaded_snapshots() {
     ]);
     assert_eq!(
         scoped.stdout,
-        "READY\n - scoped threaded #alpha\n - scoped unthreaded\n"
+        "READY\n - 1 scoped threaded #alpha\n - 2 scoped unthreaded\n"
     );
 
     let all = list(&[
@@ -1547,7 +1785,7 @@ fn human_output_appends_thread_marker_iff_row_threaded_snapshots() {
     assert_eq!(
         all.stdout,
         format!(
-            "READY\n  {project_name}\n    - scoped threaded #alpha\n    - scoped unthreaded\n  desk\n    - global threaded #ops\n"
+            "READY\n  {project_name}\n    - 1 scoped threaded #alpha\n    - 2 scoped unthreaded\n  desk\n    - 3 global threaded #ops\n"
         )
     );
 
@@ -1560,7 +1798,7 @@ fn human_output_appends_thread_marker_iff_row_threaded_snapshots() {
     ]);
     assert_eq!(
         single.stdout,
-        format!("DONE\n - step threaded #steps\n   [ ] {step_short_id} Keep this line\n")
+        format!("DONE\n - 4 step threaded #steps\n   [ ] {step_short_id} Keep this line\n")
     );
 
     let _ = std::fs::remove_dir_all(repo);

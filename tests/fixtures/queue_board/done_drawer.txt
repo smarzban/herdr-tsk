@@ -4,17 +4,17 @@
 │                                                                                │
 │ IN MOTION ───────────────────────────────────────────────────────────────────2 │
 │                                                                                │
-│  ▸ Smoke-test worktree dispatch                                       tsk · 3m │
-│  ▸ Edit target binding pin                                         herdr · 12m │
+│  ▸ Smoke-test worktree dispatch                                   1 · tsk · 3m │
+│  ▸ Edit target binding pin                                     2 · herdr · 12m │
 │                                                                                │
 │ desk ────────────────────────────────────────────────────────────────────────1 │
 │                                                                                │
-│  ○ Global backlog note                                                      2d │
+│  ○ Global backlog note                                                  7 · 2d │
 │                                                                                │
 │ DONE ────────────────────────────────────────────────────────────────────────2 │
 │                                                                                │
-│  ✓ Ship the queue board milestone                                     tsk · 5h │
-│  ✓ Retire classic board chrome                                              6h │
+│  ✓ Ship the queue board milestone                                 8 · tsk · 5h │
+│  ✓ Retire classic board chrome                                          9 · 6h │
 │                                                                                │
 │                                                                                │
 │                                                                                │
