@@ -347,16 +347,27 @@ import { parseCapture } from "./capture.js";
     return bits.join(" · ");
   }
 
-  function copyTaskIdentifier(task) {
-    const identifier = `T${task.number}`;
-    navigator.clipboard?.writeText(identifier).catch(() => {});
-    state.copyNotice = `copy sent: ${identifier}`;
+  function showCopyNotice(message) {
+    state.copyNotice = message;
     setTimeout(() => {
-      if (state.copyNotice === `copy sent: ${identifier}`) {
+      if (state.copyNotice === message) {
         state.copyNotice = "";
         render();
       }
     }, 2000);
+    render();
+  }
+
+  function copyTaskIdentifier(task) {
+    const identifier = `T${task.number}`;
+    if (!navigator.clipboard?.writeText) {
+      showCopyNotice("copy unavailable");
+      return;
+    }
+    navigator.clipboard
+      .writeText(identifier)
+      .then(() => showCopyNotice(`copied ${identifier}`))
+      .catch(() => showCopyNotice("copy failed"));
   }
 
   function verbItems(task) {

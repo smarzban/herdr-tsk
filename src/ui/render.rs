@@ -443,7 +443,7 @@ pub enum QueueOverlay<'a> {
         /// bare segments the painter indents under it. View mode wraps the stored
         /// title; edit mode wraps the draft.
         header_rows: Vec<String>,
-        /// Underlined leading identifier on a persisted task page in view mode only.
+        /// Dim leading identifier on a persisted task page in view mode only.
         header_identifier: Option<String>,
         /// Task the header identifier refers to, kept separate from paint text for hit testing.
         header_identifier_task: Option<Uuid>,
@@ -549,7 +549,7 @@ pub enum QueueHitTarget {
     /// The quick-add input row. Clicking it keeps the already-focused line focused.
     QuickAddInput,
     Task(Uuid),
-    /// Underlined presentation-only identifier on a persisted task.
+    /// Dim presentation-only identifier on a persisted task.
     TaskNumber(Uuid),
     Verb(usize),
     /// The DONE section header (painted only while the drawer is open): toggles it shut,
@@ -1939,6 +1939,12 @@ fn paint_task_page(
     // to the content viewport below.
     let header_width = width.saturating_sub(2);
     let word = display_width(status_word);
+    // The broad title region sits beneath the identifier hit so a view-mode header can
+    // reserve the prefix for copy without making the rest of the title interactive.
+    hits.push(
+        QueueHitTarget::FormTitle,
+        Rect::new(0, lay.title_y, width, title_row_count),
+    );
     for (offset, row_text) in header_rows.iter().enumerate() {
         let y = lay.title_y.saturating_add(offset as u16);
         // The builder caps `header_rows` to the page body; this clamp holds even
@@ -1988,11 +1994,15 @@ fn paint_task_page(
             }
             Line::from(spans)
         } else {
-            let painted = format!("    {row_text}");
-            let title_cells = display_width(&painted).saturating_sub(4);
+            let has_identifier = header_identifier.is_some_and(|identifier| !identifier.is_empty());
+            let title_indent = 4usize
+                .saturating_add(header_identifier.map(display_width).unwrap_or(0))
+                .saturating_add(usize::from(has_identifier));
+            let painted = format!("{}{row_text}", " ".repeat(title_indent));
+            let title_cells = display_width(&painted).saturating_sub(title_indent);
             if title_cells > 0 {
                 hits.push_copyable(Rect::new(
-                    4,
+                    u16::try_from(title_indent).unwrap_or(u16::MAX),
                     y,
                     u16::try_from(title_cells).unwrap_or(u16::MAX),
                     1,
@@ -2002,10 +2012,6 @@ fn paint_task_page(
         };
         put_line(frame, y, header_width, line);
     }
-    hits.push(
-        QueueHitTarget::FormTitle,
-        Rect::new(0, lay.title_y, width, title_row_count),
-    );
     if let Some((cursor_row, cursor_col)) = title_cursor {
         // Every title row shares the four-cell gutter (two leading blanks plus
         // glyph and space), so the wrapped field starts at column 4 on all of them.

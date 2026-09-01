@@ -1036,6 +1036,11 @@ fn task_page_header_identifier_precedes_the_title_and_footer_scope() {
         .find(|hit| hit.target == QueueHitTarget::TaskNumber(id))
         .expect("identifier hit");
     assert_eq!(identifier.area.width, 2, "only T1 is clickable");
+    let footer = row_text(&terminal, width, scope.area.y);
+    assert!(
+        !footer.contains("1 ·"),
+        "the production footer must not repeat the identifier: {footer:?}"
+    );
     assert_eq!(scope.area.x, 2, "scope starts at the footer inset");
 }
 

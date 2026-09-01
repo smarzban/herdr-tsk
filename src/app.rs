@@ -2377,6 +2377,47 @@ mod tests {
     }
 
     #[test]
+    fn copy_task_number_intent_uses_the_app_loop_handoff_without_mutating() {
+        let temp = TempStore::new("copy-task-number");
+        let mut domain = DomainState::new();
+        let id = domain
+            .create(
+                "Copy me",
+                None,
+                TaskScope::Global,
+                None,
+                None,
+                ProvenanceOrigin::Manual,
+            )
+            .expect("seed task");
+        temp.store.save(&domain).expect("persist numbered task");
+        let mut domain = temp.store.load().expect("reload numbered task");
+        let number = domain.get(id).expect("task").number.expect("task number");
+        let mut model = BoardModel::from_domain(&domain, None);
+        let selection = model.selected_id();
+        let mut recovery = SaveRecovery::new();
+
+        let quit = handle_board_intent(
+            &temp.store,
+            &mut domain,
+            &mut model,
+            BoardIntent::CopyTaskNumber(id),
+            &mut recovery,
+        )
+        .expect("copy intent");
+
+        assert!(!quit);
+        assert_eq!(
+            model.selected_id(),
+            selection,
+            "copy must not move selection"
+        );
+        assert_eq!(domain.get(id).expect("task").number, Some(number));
+        let message = format!("copy sent: T{number}");
+        assert_eq!(model.message(), Some(message.as_str()));
+    }
+
+    #[test]
     fn ctrl_enter_step_save_uses_the_real_app_save_boundary() {
         let temp = TempStore::new("ctrl-enter-step");
         let mut domain = DomainState::new();

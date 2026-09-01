@@ -539,6 +539,7 @@ pub fn map_board_mouse(
         BoardInputMode::QuickAdd => match hit_at(hits, pos) {
             // The line already owns keyboard focus, so its click is intentionally inert.
             Some(QueueHitTarget::QuickAddInput) => None,
+            Some(QueueHitTarget::TaskNumber(id)) => Some(BoardIntent::CopyTaskNumber(id)),
             Some(QueueHitTarget::Task(id)) => model
                 .visible_ids()
                 .iter()
