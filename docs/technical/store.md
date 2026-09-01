@@ -21,9 +21,11 @@ Lock: `tsk.json.lock` (`OpenOptions` create/read/write, `File::lock()`, unlock o
 else peek `format_version` (missing → 1), refuse if `found > STORE_FORMAT_VERSION`,
 then serde.
 
-**Save.** Lock, clone, `clear_merge_bases`, `stamp_format_version`, then unlocked
-write. Prefer `reload_merge_save` when another process may have written since this
-snapshot was loaded (board + capture).
+**Save.** Takes the exclusive lock, clones, `clear_merge_bases`,
+`stamp_format_version`, then writes while that lock is still held
+(`save_unlocked` is the helper that assumes the caller already locked). Prefer
+`reload_merge_save` when another process may have written since this snapshot
+was loaded (board + capture).
 
 **`reload_merge_save`.** Lock, load disk, `check_format_version`, `merge_for_save`
 (local mutations kept only if disk still has their merge base; siblings merged in;

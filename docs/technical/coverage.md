@@ -11,8 +11,8 @@ rather than a row per function.
 
 ## Target
 
-Repo root `/Users/saeed/Workspace/herdr-tasks` (crate `tsk-tui` + `site/` + plugin
-manifest). Not a self/special docs repo.
+This repository (crate `tsk-tui` + `site/` + plugin manifest). Not a
+self/special docs repo.
 
 ## Subsystems and modules
 
