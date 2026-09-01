@@ -1551,12 +1551,21 @@ fn unnumbered_rows_and_drafts_register_no_identifier_hit() {
     );
 
     apply_intent(&mut domain, &mut model, BoardIntent::OpenCapture, None).expect("open draft");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::QuickAddInsertText("Draft title".to_string()),
+        None,
+    )
+    .expect("type draft");
+    apply_intent(&mut domain, &mut model, BoardIntent::ExpandQuickAdd, None)
+        .expect("expand draft onto the task page");
     assert!(
         !board_hit_map(STANDARD, &model)
             .regions
             .iter()
             .any(|hit| matches!(hit.target, QueueHitTarget::TaskNumber(_))),
-        "an unsaved quick-add draft must not synthesize an identifier"
+        "an unsaved quick-add task page must not synthesize an identifier"
     );
 }
 

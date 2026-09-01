@@ -1201,11 +1201,20 @@ pub fn refresh_before_mutation(
 
 /// Copy a visible task identifier without changing selection, page state, or persistence.
 fn copy_task_number(domain: &DomainState, model: &mut BoardModel, id: uuid::Uuid) {
+    copy_task_number_with(domain, model, id, copy_to_clipboard);
+}
+
+fn copy_task_number_with(
+    domain: &DomainState,
+    model: &mut BoardModel,
+    id: uuid::Uuid,
+    copy: impl FnOnce(&str) -> bool,
+) {
     let Some(number) = domain.get(id).and_then(|task| task.number) else {
         return;
     };
     let identifier = format!("T{number}");
-    let message = if copy_to_clipboard(&identifier) {
+    let message = if copy(&identifier) {
         format!("copy sent: {identifier}")
     } else {
         "copy failed".to_string()
@@ -2374,6 +2383,34 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.dir);
         }
+    }
+
+    #[test]
+    fn copy_task_number_sends_the_exact_displayed_identifier() {
+        let temp = TempStore::new("copy-task-number-payload");
+        let mut domain = DomainState::new();
+        let id = domain
+            .create(
+                "Copy me",
+                None,
+                TaskScope::Global,
+                None,
+                None,
+                ProvenanceOrigin::Manual,
+            )
+            .expect("seed task");
+        temp.store.save(&domain).expect("persist numbered task");
+        let domain = temp.store.load().expect("reload numbered task");
+        let mut model = BoardModel::from_domain(&domain, None);
+        let mut copied = None;
+
+        copy_task_number_with(&domain, &mut model, id, |text| {
+            copied = Some(text.to_string());
+            true
+        });
+
+        assert_eq!(copied.as_deref(), Some("T1"));
+        assert_eq!(model.message(), Some("copy sent: T1"));
     }
 
     #[test]
