@@ -35,7 +35,7 @@ steal Alt-chords.
 | `Esc` | close one layer |
 | `alt+q` | quit |
 
-Click a row to peek. Click it again to close. A fast double-click opens the page.
+Click a dim task identifier (`T30`) to copy it. Click elsewhere on a row to peek, click it again to close, and fast double-click to open the page.
 
 `Esc` closes one layer at a time.
 

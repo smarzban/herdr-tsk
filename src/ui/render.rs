@@ -102,9 +102,10 @@ pub fn style_reverse_bold() -> Style {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TaskRowPaint<'a> {
     pub glyph: &'a str,
+    /// Presentation-only task identifier, for example `T30`. Drafts have none.
+    pub identifier: Option<&'a str>,
     pub title: &'a str,
-    /// Trailing meta (number / age / project). At compact widths a bare number still reserves
-    /// its own small trailing run so it remains visible while the title wraps.
+    /// Trailing age / project metadata. The task identifier belongs with the title, not here.
     pub meta: &'a str,
     pub selected: bool,
     /// Bold the title when unselected (e.g. attention emphasis).
@@ -112,53 +113,63 @@ pub struct TaskRowPaint<'a> {
 }
 
 /// One painted task-row line plus the title-content cells a text selection may copy.
-///
-/// `content_x` / `content_width` skip the leading indent, status glyph, and (on the
-/// first line) the right-aligned meta column — chrome the clipboard must not see.
 pub struct TaskRowLine {
     pub line: Line<'static>,
     pub content_x: u16,
     pub content_width: u16,
+    /// The leading identifier's exact cells, on the first line only.
+    pub identifier: Option<(u16, u16)>,
 }
 
-/// Paint one task as ONE OR MORE list lines: the first is the classic glyph + title +
-/// right-aligned meta row; a title too wide for its budget wraps at word boundaries onto
-/// continuation lines indented into its own column, with no meta. Nothing is cut.
+/// Paint one task as ONE OR MORE list lines. Persisted tasks lead with a dim,
+/// presentation-only identifier; wrapped title continuations align under the title text.
 pub fn paint_task_row_lines(
     row: &TaskRowPaint<'_>,
     geo: &TierGeometry,
     leading_indent: usize,
 ) -> Vec<TaskRowLine> {
-    // The title room `paint_task_row_with_indent` derives must match here, so both
-    // share one computation of the prefix cells.
     let row_w = geo.row_width as usize;
     let meta_budget = task_meta_budget(row, geo);
     let title_budget = row_w.saturating_sub(meta_budget);
     let glyph_cells = display_width(&super::terminal_text(row.glyph));
     let prefix_cells = leading_indent + 2 + glyph_cells + 1;
-    let room = title_budget.saturating_sub(prefix_cells).max(1);
-    let content_x = u16::try_from(prefix_cells).unwrap_or(u16::MAX);
-    let content_width = u16::try_from(room).unwrap_or(1).max(1);
+    let identifier_width = row.identifier.map(display_width).unwrap_or(0);
+    let identifier_gap = usize::from(identifier_width > 0);
+    let title_x = prefix_cells.saturating_add(identifier_width + identifier_gap);
+    let room = title_budget.saturating_sub(title_x).max(1);
+    let head_content_x = u16::try_from(prefix_cells).unwrap_or(u16::MAX);
+    let head_content_width = u16::try_from(identifier_width + identifier_gap + room)
+        .unwrap_or(u16::MAX)
+        .max(1);
+    let title_content_x = u16::try_from(title_x).unwrap_or(u16::MAX);
+    let title_content_width = u16::try_from(room).unwrap_or(1).max(1);
+    let identifier = row.identifier.map(|_| {
+        (
+            head_content_x,
+            u16::try_from(identifier_width).unwrap_or(u16::MAX),
+        )
+    });
     let segments: Vec<String> = crate::ui::edit::wrap_text(row.title, room)
         .into_iter()
         .map(|wrapped| wrapped.text)
         .collect();
 
     let mut lines = Vec::with_capacity(segments.len());
-    // The first line reuses the classic painter verbatim with segment 0.
     let head = TaskRowPaint {
         title: &segments[0],
         ..*row
     };
     lines.push(TaskRowLine {
         line: paint_task_row_with_indent(&head, geo, leading_indent),
-        content_x,
-        content_width,
+        content_x: head_content_x,
+        content_width: head_content_width,
+        identifier,
     });
-    // Continuations indent into the title column (past glyph and space).
-    let indent = " ".repeat(prefix_cells);
+    let indent = " ".repeat(title_x);
     let continuation_style = if row.selected {
         style_reverse()
+    } else if row.title_bold {
+        style_bold()
     } else {
         style_plain()
     };
@@ -171,8 +182,9 @@ pub fn paint_task_row_lines(
                 )),
                 row_w,
             ),
-            content_x,
-            content_width,
+            content_x: title_content_x,
+            content_width: title_content_width,
+            identifier: None,
         });
     }
     lines
@@ -199,27 +211,26 @@ fn paint_task_row_with_indent(
 
     let glyph = super::terminal_text(row.glyph);
     let prefix = format!("{}  {glyph} ", " ".repeat(leading_indent));
-    let title_room = title_budget.saturating_sub(display_width(&prefix));
+    let identifier = row.identifier.unwrap_or_default();
+    let identifier_gap = if identifier.is_empty() { "" } else { " " };
+    let title_room = title_budget
+        .saturating_sub(display_width(&prefix))
+        .saturating_sub(display_width(identifier))
+        .saturating_sub(display_width(identifier_gap));
     let title = present_line(row.title, title_room);
-    let left = fit_left(&format!("{prefix}{title}"), title_budget);
-    let left_w = display_width(&left);
+    let left_w = display_width(&prefix)
+        .saturating_add(display_width(identifier))
+        .saturating_add(display_width(identifier_gap))
+        .saturating_add(display_width(&title));
 
-    // The prototype leaves one trailing column past the meta text (matched by section
-    // headers' own trailing-space right budget); reserve it here so task rows agree with
-    // the rest of the frame instead of running meta flush to the frame edge.
     let margin_w = if meta_budget == 0 { 0 } else { 1 };
     let meta_content_budget = meta_budget.saturating_sub(margin_w);
-
-    // Compact (or empty meta): title zone only, padded out to the row width.
     let meta = if meta_budget == 0 || row.meta.is_empty() {
         String::new()
     } else {
         present_line(row.meta, meta_content_budget)
     };
     let meta_w = display_width(&meta);
-
-    // Leader = pad title zone to `title_budget` + right-align pad inside the meta column.
-    // When meta is absent the leader simply fills through the end of the row.
     let leader_w = if meta.is_empty() {
         row_w.saturating_sub(left_w)
     } else {
@@ -229,19 +240,33 @@ fn paint_task_row_with_indent(
     };
     let leader = " ".repeat(leader_w);
 
-    let (left_style, leader_style, meta_style) = if row.selected {
-        (style_reverse(), style_reverse_dim(), style_reverse_dim())
+    let (title_style, identifier_style, leader_style, meta_style) = if row.selected {
+        (
+            style_reverse(),
+            style_reverse_dim(),
+            style_reverse_dim(),
+            style_reverse_dim(),
+        )
     } else {
-        let title_style = if row.title_bold {
-            style_bold()
-        } else {
-            style_plain()
-        };
-        (title_style, style_dim(), style_dim())
+        (
+            if row.title_bold {
+                style_bold()
+            } else {
+                style_plain()
+            },
+            style_dim(),
+            style_dim(),
+            style_dim(),
+        )
     };
 
-    let mut spans: Vec<Span<'static>> = Vec::with_capacity(3);
-    spans.push(Span::styled(left, left_style));
+    let mut spans: Vec<Span<'static>> = Vec::with_capacity(5);
+    spans.push(Span::styled(prefix, title_style));
+    if !identifier.is_empty() {
+        spans.push(Span::styled(identifier.to_string(), identifier_style));
+        spans.push(Span::styled(identifier_gap.to_string(), title_style));
+    }
+    spans.push(Span::styled(title, title_style));
     if !leader.is_empty() {
         spans.push(Span::styled(leader, leader_style));
     }
@@ -256,19 +281,8 @@ fn paint_task_row_with_indent(
     bound_line(Line::from(spans), row_w)
 }
 
-/// Compact rows normally omit their age/project run, but a persisted task's bare number is
-/// still board chrome at the 40×10 floor. Reserve only that number plus the usual margin.
-fn task_meta_budget(row: &TaskRowPaint<'_>, geo: &TierGeometry) -> usize {
-    let standard = geo.meta_column_width as usize;
-    if standard > 0 {
-        standard
-    } else if !row.meta.is_empty() && row.meta.bytes().all(|byte| byte.is_ascii_digit()) {
-        display_width(row.meta)
-            .saturating_add(1)
-            .min(geo.row_width as usize)
-    } else {
-        0
-    }
+fn task_meta_budget(_row: &TaskRowPaint<'_>, geo: &TierGeometry) -> usize {
+    geo.meta_column_width as usize
 }
 
 /// Present untrusted text into a single mono-styled line bounded to `width` cells.
@@ -429,6 +443,10 @@ pub enum QueueOverlay<'a> {
         /// bare segments the painter indents under it. View mode wraps the stored
         /// title; edit mode wraps the draft.
         header_rows: Vec<String>,
+        /// Underlined leading identifier on a persisted task page in view mode only.
+        header_identifier: Option<String>,
+        /// Task the header identifier refers to, kept separate from paint text for hit testing.
+        header_identifier_task: Option<Uuid>,
         /// Terminal cursor (row, col) inside `header_rows` while the title is edited.
         title_cursor: Option<(u16, u16)>,
         /// The task's status word, dim and right-aligned on the header row.
@@ -531,6 +549,8 @@ pub enum QueueHitTarget {
     /// The quick-add input row. Clicking it keeps the already-focused line focused.
     QuickAddInput,
     Task(Uuid),
+    /// Underlined presentation-only identifier on a persisted task.
+    TaskNumber(Uuid),
     Verb(usize),
     /// The DONE section header (painted only while the drawer is open): toggles it shut,
     /// the mouse path onto the same [`BoardIntent::ToggleDoneDrawer`] `z` dispatches
@@ -1132,6 +1152,8 @@ fn paint_overlay(
         QueueOverlay::QuickAdd { .. } => {}
         QueueOverlay::TaskPage {
             ref header_rows,
+            ref header_identifier,
+            header_identifier_task,
             ref title_cursor,
             status_word,
             ref notes_rows,
@@ -1153,6 +1175,8 @@ fn paint_overlay(
                 frame,
                 geo,
                 header_rows,
+                header_identifier.as_deref(),
+                *header_identifier_task,
                 *title_cursor,
                 status_word,
                 notes_rows,
@@ -1872,6 +1896,8 @@ fn paint_task_page(
     frame: &mut Frame<'_>,
     geo: &TierGeometry,
     header_rows: &[String],
+    header_identifier: Option<&str>,
+    header_identifier_task: Option<Uuid>,
     title_cursor: Option<(u16, u16)>,
     status_word: &str,
     notes_rows: &[String],
@@ -1922,17 +1948,35 @@ fn paint_task_page(
             break;
         }
         let line = if offset == 0 {
-            let header = format!("  {row_text}");
-            let mut line = Line::from(Span::styled(header.clone(), style_bold()));
-            let used = display_width(&header);
-            if used + word < header_width as usize {
-                line.spans
-                    .push(Span::raw(" ".repeat(header_width as usize - used - word)));
-                line.spans
-                    .push(Span::styled(status_word.to_string(), style_dim()));
+            let (glyph, title) = row_text.split_once(' ').unwrap_or((row_text, ""));
+            let prefix = format!("  {glyph} ");
+            let identifier = header_identifier.unwrap_or_default();
+            let identifier_gap = if identifier.is_empty() { "" } else { " " };
+            let used = display_width(&prefix)
+                .saturating_add(display_width(identifier))
+                .saturating_add(display_width(identifier_gap))
+                .saturating_add(display_width(title));
+            let mut spans = vec![Span::styled(prefix, style_bold())];
+            if !identifier.is_empty() {
+                spans.push(Span::styled(identifier.to_string(), style_dim()));
+                spans.push(Span::styled(identifier_gap.to_string(), style_bold()));
+                if let Some(task) = header_identifier_task {
+                    hits.push(
+                        QueueHitTarget::TaskNumber(task),
+                        Rect::new(
+                            4,
+                            y,
+                            u16::try_from(display_width(identifier)).unwrap_or(u16::MAX),
+                            1,
+                        ),
+                    );
+                }
             }
-            // `  {glyph} {title}` — title words start at column 4; the glyph and the
-            // right-aligned status word are chrome and stay out of the copy.
+            spans.push(Span::styled(title.to_string(), style_bold()));
+            if used + word < header_width as usize {
+                spans.push(Span::raw(" ".repeat(header_width as usize - used - word)));
+                spans.push(Span::styled(status_word.to_string(), style_dim()));
+            }
             let title_cells = used.saturating_sub(4);
             if title_cells > 0 {
                 hits.push_copyable(Rect::new(
@@ -1942,7 +1986,7 @@ fn paint_task_page(
                     1,
                 ));
             }
-            line
+            Line::from(spans)
         } else {
             let painted = format!("    {row_text}");
             let title_cells = display_width(&painted).saturating_sub(4);
@@ -2348,9 +2392,11 @@ enum ListRow {
     Task {
         id: Uuid,
         line: Line<'static>,
-        /// First column of the title text (past indent + glyph).
+        /// Exact first-line identifier cells, if this persisted task has one.
+        identifier: Option<(u16, u16)>,
+        /// First copyable content column, past indent + glyph.
         content_x: u16,
-        /// Title-zone width (excludes right-aligned meta).
+        /// Content width (identifier + title on the first line, title only on continuations).
         content_width: u16,
     },
     /// Read-only accordion content under a task, full-width and un-hit-tested.
@@ -2457,12 +2503,16 @@ fn paint_list_row(
         ListRow::Task {
             id,
             line,
+            identifier,
             content_x,
             content_width: copy_w,
         } => {
             put_line(frame, y, content_width, line.clone());
             if base_list_interactive {
                 hits.push(QueueHitTarget::Task(*id), Rect::new(0, y, content_width, 1));
+                if let Some((x, width)) = identifier {
+                    hits.push(QueueHitTarget::TaskNumber(*id), Rect::new(*x, y, *width, 1));
+                }
             }
             hits.push_copyable(Rect::new(*content_x, y, *copy_w, 1));
         }
@@ -2555,10 +2605,6 @@ fn detail_lines_for_task(
         format_age(now, task.created_at),
         format_age(now, task.updated_at)
     );
-    let age_text = task
-        .number
-        .map(|number| format!("{number} · {age_text}"))
-        .unwrap_or(age_text);
     push(
         &mut lines,
         paint_bounded_line(&format!("{indent}scope {scope_text}"), width, style_dim()),
@@ -2601,13 +2647,7 @@ fn build_list_rows(
             // Stale ids may outlive a snapshot refresh. Skip them without inventing a row.
             return;
         };
-        let meta = if geo.meta_column_width == 0 {
-            task.number
-                .map(|number| number.to_string())
-                .unwrap_or_default()
-        } else {
-            row_meta(task, model.now, in_project_section)
-        };
+        let meta = row_meta(task, model.now, in_project_section);
         let selected = model.selection_id == Some(task.id)
             && !matches!(model.overlay, QueueOverlay::ScopeDropdown { .. });
         // A long title wraps onto continuation lines indented under its own first
@@ -2615,6 +2655,7 @@ fn build_list_rows(
         let lines = paint_task_row_lines(
             &TaskRowPaint {
                 glyph: status_glyph(task.status),
+                identifier: task.number.map(|number| format!("T{number}")).as_deref(),
                 title: &task.title,
                 meta: &meta,
                 selected,
@@ -2630,6 +2671,7 @@ fn build_list_rows(
             out.push(ListRow::Task {
                 id: task.id,
                 line: painted.line,
+                identifier: painted.identifier,
                 content_x: painted.content_x,
                 content_width: painted.content_width,
             });
@@ -3242,7 +3284,6 @@ fn paint_verb_bar(
 
 fn row_meta(task: &Task, now: SystemTime, in_project_section: bool) -> String {
     let age = format_age(now, task.updated_at);
-    let number = task.number.map(|number| number.to_string());
     let project = if !in_project_section {
         match &task.scope {
             TaskScope::Project { path } => Some(short_project(path).to_string()),
@@ -3251,34 +3292,22 @@ fn row_meta(task: &Task, now: SystemTime, in_project_section: bool) -> String {
     } else {
         None
     };
-    fit_row_meta(number, project, age)
+    fit_row_meta(project, age)
 }
 
-/// Keep number and age intact; shrink the project basename so the standard
-/// meta column (28 cells including the trailing margin) does not clip age.
-fn fit_row_meta(number: Option<String>, project: Option<String>, age: String) -> String {
+/// Keep the age intact and shrink the project basename inside the standard meta column.
+fn fit_row_meta(project: Option<String>, age: String) -> String {
     const CONTENT: usize = 27;
     const SEP: &str = " · ";
-    let sep_w = display_width(SEP);
-    let mut reserved = display_width(&age);
-    if let Some(n) = number.as_deref() {
-        reserved = reserved
-            .saturating_add(display_width(n))
-            .saturating_add(sep_w);
-    }
     let project = project.and_then(|name| {
-        let room = CONTENT.saturating_sub(reserved.saturating_add(sep_w));
+        let room = CONTENT.saturating_sub(display_width(&age).saturating_add(display_width(SEP)));
         (room > 0).then(|| present_line(&name, room))
     });
-    let mut parts = Vec::new();
-    if let Some(n) = number {
-        parts.push(n);
-    }
-    if let Some(p) = project {
-        parts.push(p);
-    }
-    parts.push(age);
-    parts.join(SEP)
+    [project, Some(age)]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(SEP)
 }
 
 pub(crate) fn format_age(now: SystemTime, then: SystemTime) -> String {
@@ -3326,14 +3355,6 @@ fn put_line_at(frame: &mut Frame<'_>, rect: Rect, line: Line<'static>) {
 
 pub(crate) fn display_width(s: &str) -> usize {
     Line::from(s).width()
-}
-
-fn fit_left(raw: &str, budget: usize) -> String {
-    if display_width(raw) <= budget {
-        return raw.to_string();
-    }
-    // present_line already applied to the title; this only guards prefix edge cases.
-    present_line(raw, budget)
 }
 
 fn bound_line(line: Line<'static>, max_width: usize) -> Line<'static> {
@@ -3447,6 +3468,7 @@ mod tests {
         let line = paint_task_row(
             &TaskRowPaint {
                 glyph: "○",
+                identifier: None,
                 title: &long_title,
                 meta: long_meta,
                 selected: false,
@@ -3492,6 +3514,7 @@ mod tests {
         let title_only = paint_task_row(
             &TaskRowPaint {
                 glyph: "○",
+                identifier: None,
                 title: &long_title,
                 meta: "1h",
                 selected: false,
@@ -3507,6 +3530,7 @@ mod tests {
         let meta_only = paint_task_row(
             &TaskRowPaint {
                 glyph: "○",
+                identifier: None,
                 title: "short",
                 meta: long_meta,
                 selected: false,
@@ -3553,6 +3577,7 @@ mod tests {
                         let line = paint_task_row(
                             &TaskRowPaint {
                                 glyph: "◓",
+                                identifier: None,
                                 title,
                                 meta,
                                 selected,
@@ -3596,6 +3621,49 @@ mod tests {
     }
 
     #[test]
+    fn task_identifier_is_dimmed_without_underline() {
+        let geo = tier::resolve(80, 24);
+        let line = paint_task_row(
+            &TaskRowPaint {
+                glyph: "○",
+                identifier: Some("T30"),
+                title: "copy this",
+                meta: "1m",
+                selected: false,
+                title_bold: false,
+            },
+            &geo,
+        );
+        let identifier = line
+            .spans
+            .iter()
+            .find(|span| span.content.as_ref() == "T30")
+            .expect("identifier span");
+        assert!(identifier.style.add_modifier.contains(Modifier::DIM));
+        assert!(!identifier.style.add_modifier.contains(Modifier::UNDERLINED));
+
+        let selected = paint_task_row(
+            &TaskRowPaint {
+                glyph: "○",
+                identifier: Some("T30"),
+                title: "copy this",
+                meta: "1m",
+                selected: true,
+                title_bold: false,
+            },
+            &geo,
+        );
+        let identifier = selected
+            .spans
+            .iter()
+            .find(|span| span.content.as_ref() == "T30")
+            .expect("selected identifier span");
+        assert!(identifier.style.add_modifier.contains(Modifier::DIM));
+        assert!(identifier.style.add_modifier.contains(Modifier::REVERSED));
+        assert!(!identifier.style.add_modifier.contains(Modifier::UNDERLINED));
+    }
+
+    #[test]
     fn frame_escape_scan_finds_no_sgr_color_codes_only_bold_dim_underline_reverse() {
         // Scanner accepts mono SGR and rejects color SGR.
         assert_no_color_sgr("plain text");
@@ -3625,6 +3693,7 @@ mod tests {
         let variants = [
             TaskRowPaint {
                 glyph: "○",
+                identifier: None,
                 title: "plain row",
                 meta: "1h",
                 selected: false,
@@ -3632,6 +3701,7 @@ mod tests {
             },
             TaskRowPaint {
                 glyph: "▲",
+                identifier: None,
                 title: "bold title",
                 meta: "tsk · 2m",
                 selected: false,
@@ -3639,6 +3709,7 @@ mod tests {
             },
             TaskRowPaint {
                 glyph: "◓",
+                identifier: None,
                 title: "selected row",
                 meta: "3d",
                 selected: true,

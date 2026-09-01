@@ -1494,6 +1494,31 @@ fn a_row_click_selects_and_peeks_and_a_second_click_opens_the_task_page() {
 }
 
 #[test]
+fn task_identifier_click_copies_without_falling_through_to_row_or_page_actions() {
+    let (domain, _model, id) = board_with_task("Copy this identifier", HumanStatus::Ready);
+    let mut task = domain.get(id).expect("task").clone();
+    task.number = Some(30);
+    let model = BoardModel::from_tasks(vec![task], Some(PathBuf::from(THIS_REPO)));
+
+    let hits = board_hit_map(STANDARD, &model);
+    let identifier = hits
+        .regions
+        .iter()
+        .find(|hit| hit.target == QueueHitTarget::TaskNumber(id))
+        .expect("identifier hit")
+        .area;
+    assert_eq!(
+        identifier.width, 3,
+        "the T30 cells are the whole click target"
+    );
+    assert_eq!(
+        map_board_mouse(&model, &hits, left_click(identifier.x, identifier.y)),
+        Some(BoardIntent::CopyTaskNumber(id)),
+        "identifier click must not become a row selection"
+    );
+}
+
+#[test]
 fn page_field_clicks_stay_inert_including_the_scope_footer() {
     let (mut domain, mut model) = deck_of(1);
     apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open the page");

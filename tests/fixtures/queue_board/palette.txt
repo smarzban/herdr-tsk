@@ -4,12 +4,12 @@
 │                                                                                │
 │ IN MOTION ───────────────────────────────────────────────────────────────────2 │
 │                                                                                │
-│  ▸ Smoke┌─ command ───────────────────────────────────────────── [x]─┐tsk · 3m │
-│  ▸ Edit │                                                            │dr · 12m │
+│  ▸ T1 Sm┌─ command ───────────────────────────────────────────── [x]─┐tsk · 3m │
+│  ▸ T2 Ed│                                                            │dr · 12m │
 │         │   set status: ready                                        │         │
 │ desk ───│   set status: started                                      │───────1 │
 │         │ ▸ set status: blocked                                      │         │
-│  ○ Globa│   set status: review                                       │  7 · 2d │
+│  ○ T7 Gl│   set status: review                                       │      2d │
 │         │                                                            │         │
 │         ├────────────────────────────────────────────────────────────┤         │
 │         │ ↑/↓ move · enter run · esc close                           │         │

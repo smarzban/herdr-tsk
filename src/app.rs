@@ -1199,6 +1199,20 @@ pub fn refresh_before_mutation(
     true
 }
 
+/// Copy a visible task identifier without changing selection, page state, or persistence.
+fn copy_task_number(domain: &DomainState, model: &mut BoardModel, id: uuid::Uuid) {
+    let Some(number) = domain.get(id).and_then(|task| task.number) else {
+        return;
+    };
+    let identifier = format!("T{number}");
+    let message = if copy_to_clipboard(&identifier) {
+        format!("copy sent: {identifier}")
+    } else {
+        "copy failed".to_string()
+    };
+    model.set_ephemeral_message(message, Duration::from_secs(2));
+}
+
 /// Apply a board intent. Returns `true` when the board loop should quit.
 fn handle_board_intent(
     store: &TaskStore,
@@ -1207,6 +1221,11 @@ fn handle_board_intent(
     intent: BoardIntent,
     save_recovery: &mut SaveRecovery<DomainState>,
 ) -> io::Result<bool> {
+    if let BoardIntent::CopyTaskNumber(id) = intent {
+        copy_task_number(domain, model, id);
+        return Ok(false);
+    }
+
     let baseline = if save_recovery.is_pending() || !board_intent_may_persist(&intent) {
         DomainState::new()
     } else {

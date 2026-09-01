@@ -23,10 +23,14 @@ impl TaskAddress {
     }
 }
 
-/// Parse a task UUID or its bare-decimal human number.
+/// Parse a task UUID, bare-decimal human number, or the displayed `T<number>` form.
 pub fn parse_task_address(value: &str) -> Result<TaskAddress, String> {
-    if value.bytes().all(|byte| byte.is_ascii_digit()) {
-        return value
+    let number = value
+        .strip_prefix('T')
+        .or_else(|| value.strip_prefix('t'))
+        .unwrap_or(value);
+    if !number.is_empty() && number.bytes().all(|byte| byte.is_ascii_digit()) {
+        return number
             .parse::<u64>()
             .map(TaskAddress::Number)
             .map_err(|_| format!("invalid task id {value}"));
@@ -34,6 +38,19 @@ pub fn parse_task_address(value: &str) -> Result<TaskAddress, String> {
     Uuid::parse_str(value)
         .map(TaskAddress::Id)
         .map_err(|_| format!("invalid task id {value}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_task_address, TaskAddress};
+
+    #[test]
+    fn task_addresses_accept_the_displayed_identifier_case_insensitively() {
+        assert_eq!(parse_task_address("T30"), Ok(TaskAddress::Number(30)));
+        assert_eq!(parse_task_address("t30"), Ok(TaskAddress::Number(30)));
+        assert_eq!(parse_task_address("30"), Ok(TaskAddress::Number(30)));
+        assert!(parse_task_address("T-30").is_err());
+    }
 }
 
 /// Parsed add input. A plan source is selected by `file` or piped stdin.

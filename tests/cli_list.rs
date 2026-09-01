@@ -1542,7 +1542,7 @@ fn human_list_rows_show_bare_digits() {
 }
 
 #[test]
-fn list_bare_digits_finds_the_task_from_another_cwd() {
+fn list_displayed_or_bare_number_finds_the_task_from_another_cwd() {
     let _env = env_lock();
     let invocation_repo = project_repo("number-invocation");
     let _context = EnvironmentGuard::context_for(&invocation_repo);
@@ -1566,19 +1566,25 @@ fn list_bare_digits_finds_the_task_from_another_cwd() {
         .number
         .expect("task number");
 
-    let output = list(&[
-        "tsk".into(),
-        "list".into(),
+    for operand in [
         number.to_string(),
-        "--json".into(),
-        "--state-dir".into(),
-        state_dir_arg(&dir),
-    ]);
+        format!("T{number}"),
+        format!("t{number}"),
+    ] {
+        let output = list(&[
+            "tsk".into(),
+            "list".into(),
+            operand,
+            "--json".into(),
+            "--state-dir".into(),
+            state_dir_arg(&dir),
+        ]);
 
-    assert_eq!(output.code, 0, "{}", output.stderr);
-    let rows: Vec<serde_json::Value> = serde_json::from_str(&output.stdout).expect("JSON rows");
-    assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0]["id"], task.to_string());
+        assert_eq!(output.code, 0, "{}", output.stderr);
+        let rows: Vec<serde_json::Value> = serde_json::from_str(&output.stdout).expect("JSON rows");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["id"], task.to_string());
+    }
     let _ = std::fs::remove_dir_all(invocation_repo);
     let _ = std::fs::remove_dir_all(dir);
 }

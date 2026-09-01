@@ -567,6 +567,7 @@ pub fn map_board_mouse(
             _ => None,
         },
         BoardInputMode::TaskPage => match hit_at(hits, pos) {
+            Some(QueueHitTarget::TaskNumber(id)) => Some(BoardIntent::CopyTaskNumber(id)),
             Some(QueueHitTarget::FormScope) | Some(QueueHitTarget::FormThread) => None,
             // A click on an step row selects it (AC-21) — the board's click
             // convention: a click selects, never mutates.
@@ -603,6 +604,7 @@ pub fn map_board_mouse(
                 subgroup_idx,
             }),
             Some(QueueHitTarget::Drawer) => Some(BoardIntent::ToggleDoneDrawer),
+            Some(QueueHitTarget::TaskNumber(id)) => Some(BoardIntent::CopyTaskNumber(id)),
             Some(QueueHitTarget::Task(id)) => model
                 .visible_ids()
                 .iter()

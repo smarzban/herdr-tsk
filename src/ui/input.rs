@@ -118,6 +118,8 @@ pub enum BoardIntent {
     SelectPrev,
     /// Select visible list row by index (mouse row click).
     SelectIndex(usize),
+    /// Copy the presentation-only `T<number>` identifier for one persisted task.
+    CopyTaskNumber(uuid::Uuid),
     /// Jump the list viewport to a content offset without changing selection or peek
     /// (list scrollbar track click / thumb drag).
     ListScrollTo(usize),
@@ -813,6 +815,7 @@ pub fn intent_primary_action(intent: &BoardIntent) -> Option<PrimaryBoardAction>
         | BoardIntent::ExpandQuickAdd
         | BoardIntent::CancelQuickAdd
         | BoardIntent::QuickAddSelectIndex(_)
+        | BoardIntent::CopyTaskNumber(_)
         | BoardIntent::FormFocusNext
         | BoardIntent::FormFocusPrev
         | BoardIntent::FocusFormField(_)

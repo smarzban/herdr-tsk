@@ -63,8 +63,8 @@ desk outside a repository.
 - `--deleted` soft-deleted only
 - `--thread` filters within the selected scope
 
-A store-global task number (bare digits, like `12`) or a task UUID lists that
-one task and its steps (`[x]` / `[ ]` plus the step short id). Direct lookup
+A store-global task number (`T12`, `t12`, or bare `12`) or a task UUID lists
+that one task and its steps (`[x]` / `[ ]` plus the step short id). Direct lookup
 ignores cwd. A task operand cannot combine with scope, thread, or status
 filters.
 

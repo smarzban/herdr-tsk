@@ -21,8 +21,8 @@ Project focus (`P` → a project) hides the tabs and paints the project name chi
 on the right (`P ▾`). At home the chip is hidden. Collapse state is session-only.
 It does not persist.
 
-Each row's dim meta includes its store-global task number as bare digits,
-alongside its age and project when shown.
+Each persisted row begins with a dim store-global identifier such as
+`T30`. Click the identifier to copy it. Age and project remain trailing meta when shown.
 
 ## Sections
 
@@ -54,15 +54,16 @@ palette (`:` → `set status: review`), not from a dedicated letter.
 `→` peeks notes under the selected row (up to five wrapped lines). `←` closes
 the peek.
 
-Click a row to peek. Click the same row again to close. A fast double-click opens
-the [task page](/docs/task-page/). The wheel scrolls the list.
+Click a dim task identifier to copy it. Click elsewhere on a row to peek.
+Click the same row again to close. A fast double-click opens the
+[task page](/docs/task-page/). The wheel scrolls the list.
 
 ## Pane size
 
 | Pane | What you get |
 | --- | --- |
 | at least 78×24 | standard board: section headers, row meta, full verb legend |
-| smaller | compact: glyph, bare task number, and title; help, palette, and the task page take the full pane |
+| smaller | compact: glyph, `T` identifier, and title; help, palette, and the task page take the full pane |
 | down to 40×10 | still operable |
 
 A typical herdr split is 78 columns, which is the standard board.

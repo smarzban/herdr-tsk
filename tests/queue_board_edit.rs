@@ -988,10 +988,10 @@ fn task_page_footer_hits_use_display_columns_and_stay_within_the_painted_row() {
     );
 }
 
-/// AC-25: a persisted task page paints its bare number before the footer scope, while the
-/// FormScope target starts after that non-interactive number chrome.
+/// A persisted task page presents its identifier in the title and leaves the footer scope
+/// as a direct, independent hit target.
 #[test]
-fn ac_25_task_page_footer_number_precedes_the_form_scope_hit_target() {
+fn task_page_header_identifier_precedes_the_title_and_footer_scope() {
     let mut domain = DomainState::new();
     let id = domain
         .create(
@@ -1022,16 +1022,21 @@ fn ac_25_task_page_footer_number_precedes_the_form_scope_hit_target() {
         .into_iter()
         .find(|hit| hit.target == QueueHitTarget::FormScope)
         .expect("scope hit");
-    let footer = row_text(&terminal, width, scope.area.y);
+    let header = (0..height)
+        .map(|y| row_text(&terminal, width, y))
+        .find(|row| row.contains("Numbered task"))
+        .expect("task page header");
     assert!(
-        footer.trim_start().starts_with("1 · app"),
-        "the painted footer must start with the persisted bare number: {footer:?}"
+        header.contains("T1 Numbered task"),
+        "the header must lead with the identifier: {header:?}"
     );
-    assert_eq!(
-        scope.area.x,
-        2 + "1 · ".chars().count() as u16,
-        "FormScope starts after the inset and non-interactive number chrome"
-    );
+    let identifier = board_hit_map(Rect::new(0, 0, width, height), &model)
+        .regions
+        .into_iter()
+        .find(|hit| hit.target == QueueHitTarget::TaskNumber(id))
+        .expect("identifier hit");
+    assert_eq!(identifier.area.width, 2, "only T1 is clickable");
+    assert_eq!(scope.area.x, 2, "scope starts at the footer inset");
 }
 
 #[test]
