@@ -1731,9 +1731,8 @@ pub enum StepsSection {
     /// editor no longer reserves a section row — since T-7 it paints on the page
     /// footer, so an open line over an empty steps is still no section.
     None,
-    /// At least one step: the content region halves and the section owns the bottom
-    /// half, however many steps there are — the `+N more ↓` affordance names the
-    /// tail the half cannot show.
+    /// At least one step: the section follows the notes after two blank rows, and
+    /// the shared content viewport scrolls when the resulting page overflows.
     Steps,
 }
 
@@ -1765,8 +1764,8 @@ pub struct StepsWindow {
     pub affordance: bool,
 }
 
-/// A shared page-content flow: notes occupy at least the first half when steps
-/// exist, longer notes push the steps down, and the whole resulting stream scrolls.
+/// A shared page-content flow: steps follow the notes with two blank rows between
+/// them, and the whole resulting stream scrolls.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PageContentLayout {
     pub steps_start: usize,
@@ -1781,13 +1780,13 @@ pub fn page_content_layout(
 ) -> PageContentLayout {
     let note_rows = note_rows.max(1);
     let viewport = viewport_rows as usize;
-    // The blank after notes is part of the flow, even when their natural height
-    // already exceeds half the viewport. A trailing blank similarly separates the
-    // final content section from the fixed footer when it scrolls into view.
+    // Two blank rows after notes keep the steps visually separated from the note,
+    // regardless of viewport size. A trailing blank similarly separates the final
+    // content section from the fixed footer when it scrolls into view.
     let steps_start = if steps == 0 {
         note_rows
     } else {
-        note_rows.saturating_add(1).max(viewport.div_ceil(2))
+        note_rows.saturating_add(2)
     };
     let total_rows = steps_start + usize::from(steps > 0) + steps + 1;
     PageContentLayout {
@@ -2004,9 +2003,8 @@ fn paint_task_page(
         );
     }
 
-    // Notes and steps form one vertical stream. With steps, short notes reserve the
-    // first half of the viewport; long notes take the rows they need and push the
-    // steps downward. The header and metadata footer never participate in this scroll.
+    // Notes and steps form one vertical stream. Steps begin two blank rows after the
+    // notes, and the header and metadata footer never participate in this scroll.
     let note_count = notes_rows.len().max(1);
     let content = page_content_layout(note_count, step_views.len(), lay.notes_rows);
     let scroll = step_scroll.min(content.max_scroll);
@@ -3426,6 +3424,15 @@ mod tests {
             })
             .expect("draw");
         terminal.backend().buffer().clone()
+    }
+
+    #[test]
+    fn steps_start_two_rows_after_the_notes_block() {
+        let layout = page_content_layout(1, 3, 16);
+        assert_eq!(layout.steps_start, 3);
+
+        let layout = page_content_layout(5, 3, 16);
+        assert_eq!(layout.steps_start, 7);
     }
 
     #[test]

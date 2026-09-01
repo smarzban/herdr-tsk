@@ -177,10 +177,8 @@ fn build_task_page_overlay<'a>(
     let bound_task = form
         .task_id()
         .and_then(|id| model.tasks.iter().find(|task| task.id == id));
-    // The section consumes the extracted step views, never the raw storage; with
-    // steps the layout halves the content region (AC-24), so the notes window —
-    // and with it the notes scroll bound recorded below — keys off the same halved
-    // budget the painter lays out.
+    // The section consumes the extracted step views, never the raw storage. Notes and
+    // steps share one scrollable stream, with two blank rows separating the sections.
     let step_views = bound_task.map(super::model::step_views).unwrap_or_default();
     // A step draft is windowed for the shared bottom input slot: the row less
     // the two-cell `▎ ` prompt that owns the terminal cursor.
@@ -327,9 +325,9 @@ fn build_task_page_overlay<'a>(
     let editing_notes = model.input_mode() == BoardInputMode::EditNotes;
     let (notes_rows, notes_cursor, more_lines, notes_scroll) = if editing_notes {
         let (all_rows, cursor_row, cursor_column) = wrapped_edit_rows(&form.notes, notes_width);
-        // Wheel and arrow scrolling are inert while the editor owns the page, so the
-        // frame's scroll may follow the caret without fighting a reading position:
-        // keep the minimal window that still shows the caret's wrapped row.
+        // The notes editor owns the page viewport, so wheel and page scrolling stay inert
+        // while the caret is active. Keep the minimal window that shows the caret's wrapped
+        // row; Esc returns to page view, where below-fold steps can be scrolled into view.
         let follow = form.notes_scroll.clamp(
             cursor_row.saturating_sub(want.saturating_sub(1)),
             cursor_row,
