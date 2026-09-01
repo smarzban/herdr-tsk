@@ -1,0 +1,17 @@
+# tsk
+
+> A task board for your terminal. Capture work and move it through ready, started, blocked, review, done.
+
+User guide: https://tsk-gules.vercel.app/docs/
+
+- [Overview](https://tsk-gules.vercel.app/docs/)
+- [Install](https://tsk-gules.vercel.app/docs/install/)
+- [Board](https://tsk-gules.vercel.app/docs/board/)
+- [Keys](https://tsk-gules.vercel.app/docs/keys/)
+- [Capture](https://tsk-gules.vercel.app/docs/capture/)
+- [Task page](https://tsk-gules.vercel.app/docs/task-page/)
+- [Steps](https://tsk-gules.vercel.app/docs/steps/)
+- [CLI](https://tsk-gules.vercel.app/docs/cli/)
+
+Source: https://github.com/smarzban/herdr-tsk
+Maintainer internals: https://github.com/smarzban/herdr-tsk/tree/main/docs/technical

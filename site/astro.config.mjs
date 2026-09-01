@@ -41,6 +41,8 @@ export default defineConfig({
             { label: 'Board', slug: 'docs/board' },
             { label: 'Keys', slug: 'docs/keys' },
             { label: 'Capture', slug: 'docs/capture' },
+            { label: 'Task page', slug: 'docs/task-page' },
+            { label: 'Steps', slug: 'docs/steps' },
             { label: 'CLI', slug: 'docs/cli' },
           ],
         },
