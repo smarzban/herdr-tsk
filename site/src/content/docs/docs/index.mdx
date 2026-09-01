@@ -1,27 +1,31 @@
 ---
 title: Overview
-description: What tsk is and how the board works.
+description: What tsk is and where to read how to use it.
 ---
 
-**tsk** is a task board for your terminal. It captures work and moves it through
-human status: ready, started, blocked, review, done.
+**tsk** is a task board for your terminal. Capture work, then move it through human
+status: ready, started, blocked, review, done.
 
-It ships as the herdr plugin `herdr-tsk`, and the `tsk` binary also runs
-standalone against `~/.tsk`.
+It ships as the herdr plugin `herdr-tsk`. The `tsk` binary also runs standalone
+against `~/.tsk`. The pane, the capture overlay, and the CLI edit the same board.
 
-## What is in scope
+This site is the user guide. Maintainer internals live in the repo under
+[`docs/technical/`](https://github.com/smarzban/herdr-tsk/tree/main/docs/technical).
 
-- Queue board with desk · projects · threads
-- Quick-add capture on the board
-- Task page for title, notes, thread, and scope
-- Headless `tsk add` and `tsk list`
+## What you can do
 
-Park, resume, attention, linking, and dispatch are not part of this tree.
+- Keep a queue with **desk**, **projects**, and **threads**
+- Capture with `+` on the board, or a herdr overlay
+- Open a task page for title, notes, thread, scope, and steps
+- Script the same store with `tsk add`, `tsk list`, and `tsk steps`
 
-## Next
+Park, resume, attention, linking, and dispatch are not in this product.
 
-- [Install](/docs/install/)
-- [Board](/docs/board/)
-- [Keys](/docs/keys/)
-- [Capture](/docs/capture/)
-- [CLI](/docs/cli/)
+## Start here
+
+1. [Install](/docs/install/) and open the board
+2. [Board](/docs/board/) for tabs, sections, and status
+3. [Keys](/docs/keys/) for the keymap
+4. [Capture](/docs/capture/) to add work
+5. [Task page](/docs/task-page/) and [steps](/docs/steps/) for detail
+6. [CLI](/docs/cli/) when you want the board without the TUI

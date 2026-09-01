@@ -1,8 +1,10 @@
 # tsk site
 
-Marketing page and docs for tsk. Lives in this repo as `site/` — same split as
-[herdr's `website/`](https://github.com/herdrdev/herdr/tree/master/website).
+Marketing page and **user guide** for tsk. Lives in this repo as `site/` — same
+split as [herdr's `website/`](https://github.com/herdrdev/herdr/tree/master/website).
 Astro + Starlight; the homepage is a custom page, not the Starlight index.
+How-to pages are `src/content/docs/docs/`. Maintainer internals stay in
+`docs/technical/` at the repo root.
 
 This directory is **not** part of the `tsk` binary. `cargo build` ignores it.
 
