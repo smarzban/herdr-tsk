@@ -39,18 +39,19 @@ active.
 ## From the CLI
 
 ```bash
-tsk steps <task-id> add "Write the failing test"
-tsk steps <task-id> toggle <step-short-id>
-tsk list <task-id>
+tsk steps <task> add "Write the failing test"
+tsk steps <task> toggle <step-short-id>
+tsk list <task>
 ```
 
-The task id is a task UUID from `tsk add --json` or `tsk list --json`.
+The task is a store-global number (bare digits) or a UUID from `tsk add --json`
+or `tsk list --json`. Direct lookup ignores cwd.
 
 A step short id is the shortest unambiguous prefix of that step's id, as printed
-by `tsk list <task-id>`.
+by `tsk list <task>`.
 
 `toggle` flips the flag. A blind retry after an unseen success flips it back.
-Verify with `tsk list <task-id>` before retrying.
+Verify with `tsk list <task>` before retrying.
 
 Soft-deleted tasks refuse step changes.
 

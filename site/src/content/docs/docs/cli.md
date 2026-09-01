@@ -76,8 +76,8 @@ To recover a typo scope: `tsk list --all --json`.
 ## steps
 
 ```
-tsk steps <task-id> add <text> [--state-dir <dir>]
-tsk steps <task-id> toggle <step-short-id> [--state-dir <dir>]
+tsk steps <task> add <text> [--state-dir <dir>]
+tsk steps <task> toggle <step-short-id> [--state-dir <dir>]
 ```
 
 See [steps](/docs/steps/) for the board side. `toggle` is not idempotent. Verify
