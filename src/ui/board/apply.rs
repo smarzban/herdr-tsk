@@ -653,8 +653,10 @@ fn apply_board_intent(
                     }
                 }
             }
-            // The page already open: move focus into the asked field, keep every draft.
+            // The page already open: move focus into the asked field, keep every draft, and
+            // transfer input ownership before the editor can accept a key.
             if model.form.as_ref().is_some_and(BoardForm::is_task) {
+                model.focused_surface = FocusedSurface::Task;
                 model.focus_form_field(focus);
                 return Ok(IntentOutcome::None);
             }

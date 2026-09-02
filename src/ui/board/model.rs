@@ -1287,6 +1287,22 @@ impl BoardModel {
             .unwrap_or(0)
     }
 
+    #[cfg(test)]
+    pub(crate) fn page_scroll_horizon(&self) -> usize {
+        self.form
+            .as_ref()
+            .filter(|form| form.is_task())
+            .map(|form| form.notes_max_scroll.get())
+            .unwrap_or(0)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_page_scroll_horizon_for_test(&self, horizon: usize) {
+        if let Some(form) = self.form.as_ref().filter(|form| form.is_task()) {
+            form.notes_max_scroll.set(horizon);
+        }
+    }
+
     /// Retained stored-step cursor, if active.
     pub fn step_cursor(&self) -> Option<usize> {
         self.form

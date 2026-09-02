@@ -445,10 +445,30 @@ pub fn map_responsive_board_mouse(
         _ => return None,
     }
 
-    if !matches!(
+    let view_mode = matches!(
         model.input_mode(),
         BoardInputMode::Normal | BoardInputMode::TaskPage
-    ) {
+    );
+    let clean_or_dirty_task_editor = model.edit_target().is_some()
+        && matches!(
+            model.input_mode(),
+            BoardInputMode::EditTitle
+                | BoardInputMode::EditNotes
+                | BoardInputMode::EditThread
+                | BoardInputMode::EditScope
+                | BoardInputMode::FormScopeDropdown
+        );
+    if responsive.board.contains(pos) && (view_mode || clean_or_dirty_task_editor) {
+        if let Some(QueueHitTarget::Task(id)) = hit_at(hits, pos) {
+            return model
+                .visible_ids()
+                .iter()
+                .position(|&visible| visible == id)
+                .map(BoardIntent::FocusBoardAndSelectIndex);
+        }
+    }
+
+    if !view_mode {
         if focused_mouse_area(model, area).contains(pos) {
             return map_board_mouse(model, hits, mouse);
         }
@@ -460,13 +480,6 @@ pub fn map_responsive_board_mouse(
     }
 
     if responsive.board.contains(pos) {
-        if let Some(QueueHitTarget::Task(id)) = hit_at(hits, pos) {
-            return model
-                .visible_ids()
-                .iter()
-                .position(|&visible| visible == id)
-                .map(BoardIntent::FocusBoardAndSelectIndex);
-        }
         return (model.focused_surface() == FocusedSurface::Board)
             .then(|| map_board_mouse(model, hits, mouse))?;
     }

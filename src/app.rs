@@ -424,30 +424,26 @@ fn run_board() -> Result<(), Box<dyn Error>> {
                     let area = terminal_area(terminal)?;
                     let task_focus_candidate =
                         wide_mouse_focus_intent(&model, &frame_hits, area, mouse);
-                    let task_scrollbar_press =
-                        matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
-                            && matches!(
-                                scrollbar_hit_at(
-                                    &frame_hits,
-                                    Position::new(mouse.column, mouse.row)
-                                ),
-                                Some(BoardIntent::PageScrollTo(_))
-                            );
-                    if task_scrollbar_press {
-                        if let Some(focus) = task_focus_candidate.clone() {
-                            if handle_board_intent(
+                    let (quit, mode, scrollbar) = board_scrollbar_mouse_route(
+                        area,
+                        &mut model,
+                        &frame_hits,
+                        mouse,
+                        &mut scrollbar_drag,
+                        |model, focus| {
+                            handle_board_intent(
                                 &store,
                                 &mut domain,
-                                &mut model,
+                                model,
                                 focus,
                                 &mut save_recovery,
-                            )? {
-                                break;
-                            }
-                        }
+                            )
+                        },
+                    )?;
+                    if quit {
+                        break;
                     }
-                    let mode = resolve_board_surface(area, &mut model);
-                    match map_scrollbar_mouse(mode, &frame_hits, mouse, &mut scrollbar_drag) {
+                    match scrollbar {
                         ScrollbarMouse::Miss => {}
                         ScrollbarMouse::Intent(intent) => {
                             drag_gesture.clear();
@@ -590,18 +586,25 @@ fn run_board() -> Result<(), Box<dyn Error>> {
                         _ => {}
                     }
                     let area = terminal_area(terminal)?;
-                    if let Some(focus) = wide_mouse_focus_intent(&model, &frame_hits, area, click) {
-                        if handle_board_intent(
-                            &store,
-                            &mut domain,
-                            &mut model,
-                            focus,
-                            &mut save_recovery,
-                        )? {
-                            break;
-                        }
+                    let (quit, intent) = board_mouse_click_intent_after_focus(
+                        area,
+                        &mut model,
+                        &frame_hits,
+                        click,
+                        |model, focus| {
+                            handle_board_intent(
+                                &store,
+                                &mut domain,
+                                model,
+                                focus,
+                                &mut save_recovery,
+                            )
+                        },
+                    )?;
+                    if quit {
+                        break;
                     }
-                    let Some(intent) = board_mouse_intent(area, &mut model, click) else {
+                    let Some(intent) = intent else {
                         continue;
                     };
                     if handle_board_intent(
@@ -1167,6 +1170,66 @@ fn board_paste_intent(area: Rect, model: &mut BoardModel, text: &str) -> Option<
     let intent = map_edit_paste(mode, text)?;
     let intent = board_intent_for_area(area, intent)?;
     resolve_board_command(model, intent)
+}
+
+/// Run the release-time task focus handoff before mapping the same click.
+///
+/// The dispatcher is the real save-recovery-aware event-loop boundary in production and a
+/// direct reducer in tests. Keeping both operations in this helper pins their ordering.
+fn board_mouse_click_intent_after_focus<E>(
+    area: Rect,
+    model: &mut BoardModel,
+    painted_hits: &crate::ui::render::QueueHitMap,
+    click: crossterm::event::MouseEvent,
+    mut dispatch_focus: impl FnMut(&mut BoardModel, BoardIntent) -> Result<bool, E>,
+) -> Result<(bool, Option<BoardIntent>), E> {
+    if let Some(focus) = wide_mouse_focus_intent(model, painted_hits, area, click) {
+        if dispatch_focus(model, focus)? {
+            return Ok((true, None));
+        }
+    }
+    Ok((false, board_mouse_intent(area, model, click)))
+}
+
+/// Route a scrollbar event, focusing and repainting a task preview before page dispatch.
+///
+/// Board-focused previews paint from a clone, so their scrollbar can advertise a different
+/// wrapping bound from the retained page session. Once focus transfers, one scratch paint
+/// refreshes that retained bound before the clicked offset reaches the reducer.
+fn board_scrollbar_mouse_route<E>(
+    area: Rect,
+    model: &mut BoardModel,
+    painted_hits: &crate::ui::render::QueueHitMap,
+    mouse: crossterm::event::MouseEvent,
+    dragging: &mut bool,
+    mut dispatch_focus: impl FnMut(&mut BoardModel, BoardIntent) -> Result<bool, E>,
+) -> Result<(bool, BoardInputMode, ScrollbarMouse), E> {
+    use crossterm::event::{MouseButton, MouseEventKind};
+
+    let task_scrollbar_press = matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
+        && matches!(
+            scrollbar_hit_at(painted_hits, Position::new(mouse.column, mouse.row)),
+            Some(BoardIntent::PageScrollTo(_))
+        );
+    let preview_focus = if task_scrollbar_press {
+        wide_mouse_focus_intent(model, painted_hits, area, mouse)
+    } else {
+        None
+    };
+    let refresh_retained_bound = preview_focus.is_some();
+    if let Some(focus) = preview_focus {
+        if dispatch_focus(model, focus)? {
+            return Ok((true, model.input_mode(), ScrollbarMouse::Consumed));
+        }
+    }
+    let mode = resolve_board_surface(area, model);
+    let routed = if refresh_retained_bound {
+        let refreshed_hits = crate::ui::board::board_hit_map(area, model);
+        map_scrollbar_mouse(mode, &refreshed_hits, mouse, dragging)
+    } else {
+        map_scrollbar_mouse(mode, painted_hits, mouse, dragging)
+    };
+    Ok((false, mode, routed))
 }
 
 /// Route a mouse event to the board intent the painted frame accepts.
@@ -2004,7 +2067,9 @@ mod tests {
     use super::*;
     use std::path::Path;
 
-    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use crossterm::event::{
+        KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+    };
 
     use crate::context::InvocationSnapshot;
     use crate::domain::{HumanStatus, ProvenanceOrigin, TaskScope};
@@ -2015,6 +2080,189 @@ mod tests {
     use crate::ui::queue::BoardTab;
 
     static TEMP_DIR_SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+    fn board_fixture(title: &str, notes: Option<String>) -> (DomainState, BoardModel) {
+        let mut domain = DomainState::new();
+        domain
+            .create(
+                title,
+                notes,
+                TaskScope::Global,
+                None,
+                None,
+                ProvenanceOrigin::Manual,
+            )
+            .expect("create board fixture");
+        let model = BoardModel::from_domain(&domain, None);
+        (domain, model)
+    }
+
+    fn click_at(area: Rect) -> MouseEvent {
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: area.x,
+            row: area.y,
+            modifiers: KeyModifiers::NONE,
+        }
+    }
+
+    #[test]
+    fn app_keyboard_route_owns_responsive_focus_handoffs() {
+        let (mut domain, mut model) = board_fixture("keyboard focus", None);
+        let wide = Rect::new(0, 0, 110, 24);
+        let single = Rect::new(0, 0, 109, 24);
+        for key in [KeyCode::Enter, KeyCode::Right] {
+            let mode = resolve_board_surface(wide, &mut model);
+            assert_eq!(
+                board_keyboard_intent_for_area(
+                    &model,
+                    wide,
+                    mode,
+                    KeyEvent::new(key, KeyModifiers::NONE),
+                ),
+                Some(BoardIntent::FocusTaskSurface)
+            );
+        }
+        let (_, mut single_board_model) = board_fixture("single keyboard", None);
+        let mode = resolve_board_surface(single, &mut single_board_model);
+        assert_eq!(
+            board_keyboard_intent_for_area(
+                &single_board_model,
+                single,
+                mode,
+                KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+            ),
+            Some(BoardIntent::OpenTaskPage)
+        );
+        assert_eq!(
+            board_keyboard_intent_for_area(
+                &single_board_model,
+                single,
+                mode,
+                KeyEvent::new(KeyCode::Right, KeyModifiers::NONE),
+            ),
+            Some(BoardIntent::PeekDetail)
+        );
+        apply_intent(&mut domain, &mut model, BoardIntent::FocusTaskSurface, None)
+            .expect("focus task");
+        for (area, key) in [
+            (wide, KeyCode::Esc),
+            (wide, KeyCode::Left),
+            (single, KeyCode::Esc),
+            (single, KeyCode::Left),
+        ] {
+            let mode = resolve_board_surface(area, &mut model);
+            assert_eq!(
+                board_keyboard_intent_for_area(
+                    &model,
+                    area,
+                    mode,
+                    KeyEvent::new(key, KeyModifiers::NONE),
+                ),
+                Some(BoardIntent::FocusBoardSurface),
+                "{area:?} {key:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn app_mouse_click_focuses_task_before_dispatching_same_control() {
+        let (mut domain, mut model) = board_fixture("mouse focus", None);
+        let area = Rect::new(0, 0, 110, 24);
+        let task_area =
+            crate::ui::tier::resolve_responsive(area.width, area.height, model.focused_surface())
+                .task;
+        let hits = crate::ui::board::board_hit_map(area, &model);
+        let control = hits
+            .regions
+            .iter()
+            .find(|hit| {
+                task_area.contains(hit.area.as_position())
+                    && matches!(hit.target, crate::ui::render::QueueHitTarget::Verb(0))
+            })
+            .expect("task-side primary control");
+        let click = click_at(control.area);
+        let (quit, intent) =
+            board_mouse_click_intent_after_focus(area, &mut model, &hits, click, |model, focus| {
+                apply_intent(&mut domain, model, focus, None)?;
+                Ok::<bool, DomainError>(false)
+            })
+            .expect("route click");
+
+        assert!(!quit);
+        assert_eq!(
+            model.focused_surface(),
+            crate::ui::tier::FocusedSurface::Task
+        );
+        let intent = intent.expect("same click dispatches after focus");
+        assert_eq!(intent, BoardIntent::BeginEditTitle);
+        apply_intent(&mut domain, &mut model, intent, None).expect("apply task control");
+        assert_eq!(model.input_mode(), BoardInputMode::EditTitle);
+        assert_eq!(
+            model.focused_surface(),
+            crate::ui::tier::FocusedSurface::Task
+        );
+    }
+
+    #[test]
+    fn app_task_scrollbar_focuses_refreshes_bound_and_routes_page_scroll() {
+        let (mut domain, mut model) =
+            board_fixture("scrollbar focus", Some("long notes ".repeat(500)));
+        apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None)
+            .expect("open task page");
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::FocusBoardSurface,
+            None,
+        )
+        .expect("park narrow page");
+
+        let wide = Rect::new(0, 0, 110, 24);
+        let preview_hits = crate::ui::board::board_hit_map(wide, &model);
+        let bottom = preview_hits
+            .regions
+            .iter()
+            .filter_map(|hit| match hit.target {
+                crate::ui::render::QueueHitTarget::PageScroll(offset) => Some((offset, hit.area)),
+                _ => None,
+            })
+            .max_by_key(|(offset, _)| *offset)
+            .expect("task preview scrollbar");
+        assert!(bottom.0 > 0);
+        model.set_page_scroll_horizon_for_test(0);
+        let mut dragging = false;
+        let (quit, mode, routed) = board_scrollbar_mouse_route(
+            wide,
+            &mut model,
+            &preview_hits,
+            click_at(bottom.1),
+            &mut dragging,
+            |model, focus| {
+                apply_intent(&mut domain, model, focus, None)?;
+                Ok::<bool, DomainError>(false)
+            },
+        )
+        .expect("route task scrollbar");
+
+        assert!(!quit);
+        assert_eq!(mode, BoardInputMode::TaskPage);
+        assert_eq!(model.page_scroll_horizon(), bottom.0);
+        assert_eq!(
+            model.focused_surface(),
+            crate::ui::tier::FocusedSurface::Task
+        );
+        assert_eq!(
+            routed,
+            ScrollbarMouse::Intent(BoardIntent::PageScrollTo(bottom.0))
+        );
+        let ScrollbarMouse::Intent(intent) = routed else {
+            unreachable!("asserted scrollbar intent")
+        };
+        apply_intent(&mut domain, &mut model, intent, None).expect("apply page scroll");
+        assert_eq!(model.page_scroll(), bottom.0);
+        assert!(dragging);
+    }
 
     #[test]
     fn default_mode_is_board() {

@@ -8,6 +8,7 @@ use tsk_tui::domain::{DomainState, HumanStatus, ProvenanceOrigin, TaskScope};
 use tsk_tui::ui::board::{
     resolve_responsive, FocusedSurface, ResponsivePresentation, WIDE_SPLIT_MIN_WIDTH,
 };
+use tsk_tui::ui::capture::CaptureField;
 use tsk_tui::ui::input::{map_key, map_responsive_key};
 use tsk_tui::ui::mouse::{
     left_click, map_board_mouse, map_responsive_board_mouse, map_scrollbar_mouse,
@@ -1124,12 +1125,14 @@ fn wide_task_step_click_preserves_scrolled_step_target() {
 }
 
 #[test]
-fn wide_board_row_click_is_inert_during_active_title_edit() {
+fn wide_dirty_task_editor_refuses_board_row_click_without_exposing_hidden_controls() {
     let mut domain = domain_with_tasks(&[("editing task", "notes"), ("other row", "notes")]);
     let mut model = board_model(&domain);
     focus_task(&mut domain, &mut model);
     apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None).expect("edit title");
+    apply_intent(&mut domain, &mut model, BoardIntent::EditInsert('!'), None).expect("dirty title");
     let selected = model.selected_id();
+    let draft = model.edit_buffer().to_string();
     let (_, hits) = render_board(&model, 110, 24);
     let other_row = hits
         .regions
@@ -1137,13 +1140,17 @@ fn wide_board_row_click_is_inert_during_active_title_edit() {
         .find(|hit| matches!(hit.target, QueueHitTarget::Task(id) if Some(id) != selected))
         .expect("other board row");
     let click = left_click(other_row.area.x, other_row.area.y);
+    let intent = map_responsive_board_mouse(&model, &hits, Rect::new(0, 0, 110, 24), click)
+        .expect("board row remains an explicit retarget attempt");
 
-    assert_eq!(
-        map_responsive_board_mouse(&model, &hits, Rect::new(0, 0, 110, 24), click),
-        None
-    );
+    apply_intent(&mut domain, &mut model, intent, None).expect("refuse dirty retarget");
+    assert_eq!(model.selected_id(), selected);
     assert_eq!(model.focused_surface(), FocusedSurface::Task);
     assert_eq!(model.input_mode(), BoardInputMode::EditTitle);
+    assert_eq!(model.edit_buffer(), draft);
+    assert!(model
+        .message()
+        .is_some_and(|message| message.contains("save or cancel")));
 }
 
 #[test]
@@ -1693,4 +1700,162 @@ fn task_session_dirty_uses_only_approved_step_changes() {
     )
     .expect("stage removal");
     assert!(removal_model.task_session_dirty());
+}
+
+#[test]
+fn board_focused_task_field_edit_focuses_and_paints_live_editor() {
+    let mut domain = domain_with_tasks(&[("parked editor", "notes")]);
+    let mut model = board_model(&domain);
+    focus_task(&mut domain, &mut model);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::FocusBoardSurface,
+        None,
+    )
+    .expect("park task session");
+    assert_eq!(model.focused_surface(), FocusedSurface::Board);
+
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+        .expect("enter title editor from board focus");
+    assert_eq!(model.focused_surface(), FocusedSurface::Task);
+    assert_eq!(model.input_mode(), BoardInputMode::EditTitle);
+    apply_intent(&mut domain, &mut model, BoardIntent::EditInsert('!'), None)
+        .expect("edit visible draft");
+
+    let (rows, _) = render_board(&model, 110, 24);
+    let task = resolve_responsive(110, 24, FocusedSurface::Task).task;
+    assert!(region_text(&rows, task).contains(model.edit_buffer()));
+}
+
+#[test]
+fn clean_task_editor_board_click_retargets_and_focuses_board() {
+    let mut domain =
+        domain_with_tasks(&[("clean editor", "notes"), ("clicked clean row", "notes")]);
+    let mut model = board_model(&domain);
+    focus_task(&mut domain, &mut model);
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+        .expect("enter unchanged editor");
+    assert!(!model.task_session_dirty());
+    let selected = model.selected_id();
+    let (_, hits) = render_board(&model, 110, 24);
+    let other_row = hits
+        .regions
+        .iter()
+        .find(|hit| matches!(hit.target, QueueHitTarget::Task(id) if Some(id) != selected))
+        .expect("other board row");
+    let target = match other_row.target {
+        QueueHitTarget::Task(id) => id,
+        _ => unreachable!("task hit selected above"),
+    };
+    let intent = map_responsive_board_mouse(
+        &model,
+        &hits,
+        Rect::new(0, 0, 110, 24),
+        left_click(other_row.area.x, other_row.area.y),
+    )
+    .expect("clean editor row click must route");
+
+    apply_intent(&mut domain, &mut model, intent, None).expect("retarget clean editor");
+    assert_eq!(model.focused_surface(), FocusedSurface::Board);
+    assert_eq!(model.selected_id(), Some(target));
+    assert_eq!(model.edit_target(), Some(target));
+}
+
+#[test]
+fn changed_thread_draft_refuses_task_retarget() {
+    let mut domain = domain_with_tasks(&[("thread bound", "notes"), ("thread other", "notes")]);
+    let mut model = board_model(&domain);
+    focus_task(&mut domain, &mut model);
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+        .expect("enter task edit");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::FocusFormField(CaptureField::Thread),
+        None,
+    )
+    .expect("select thread");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ToggleThreadEditing,
+        None,
+    )
+    .expect("edit thread");
+    apply_intent(&mut domain, &mut model, BoardIntent::EditInsert('x'), None)
+        .expect("change thread");
+    let bound = model.edit_target().expect("bound task");
+    let draft = model.edit_buffer().to_string();
+    let other = model
+        .visible_ids()
+        .iter()
+        .position(|&id| id != bound)
+        .expect("other row");
+
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::FocusBoardAndSelectIndex(other),
+        None,
+    )
+    .expect("refuse dirty thread retarget");
+    assert_eq!(model.selected_id(), Some(bound));
+    assert_eq!(model.edit_target(), Some(bound));
+    assert_eq!(model.edit_buffer(), draft);
+    assert!(model
+        .message()
+        .is_some_and(|message| message.contains("save or cancel")));
+}
+
+#[test]
+fn changed_scope_draft_refuses_task_retarget() {
+    let mut domain = domain_with_tasks(&[("scope bound", "notes"), ("scope other", "notes")]);
+    domain
+        .create(
+            "scope option",
+            None,
+            TaskScope::Project {
+                path: "/repos/other".to_string(),
+            },
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("create project scope option");
+    let mut model = board_model(&domain);
+    focus_task(&mut domain, &mut model);
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+        .expect("enter task edit");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::FocusFormField(CaptureField::Scope),
+        None,
+    )
+    .expect("focus scope");
+    let original_scope = model.form_scope().cloned();
+    apply_intent(&mut domain, &mut model, BoardIntent::FormCycleScope, None).expect("change scope");
+    assert_ne!(model.form_scope(), original_scope.as_ref());
+    let bound = model.edit_target().expect("bound task");
+    let changed_scope = model.form_scope().cloned();
+    let other = model
+        .visible_ids()
+        .iter()
+        .position(|&id| id != bound)
+        .expect("other row");
+
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::FocusBoardAndSelectIndex(other),
+        None,
+    )
+    .expect("refuse dirty scope retarget");
+    assert_eq!(model.selected_id(), Some(bound));
+    assert_eq!(model.edit_target(), Some(bound));
+    assert_eq!(model.form_scope(), changed_scope.as_ref());
+    assert!(model
+        .message()
+        .is_some_and(|message| message.contains("save or cancel")));
 }
