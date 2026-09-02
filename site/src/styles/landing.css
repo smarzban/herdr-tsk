@@ -329,7 +329,7 @@ html[data-theme="light"] .theme-toggle .icon-moon {
 
 .headline {
   margin: 0;
-  font-size: clamp(2.35rem, 5.6vw, 4.6rem);
+  font-size: clamp(2.35rem, 5.4vw, 4.4rem);
   font-weight: 800;
   line-height: 1.02;
   letter-spacing: -0.045em;
@@ -1028,6 +1028,30 @@ html[data-theme="light"] .pane {
 .cycle.is-tick .cycle-glyph,
 .cycle.is-tick .cycle-sec {
   animation: tick 420ms var(--ease);
+}
+
+.next {
+  list-style: none;
+  margin: 1rem 0 0;
+  padding: 0.6rem 1.1rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 1.5rem;
+  border: 1px dashed var(--line-2);
+  border-radius: var(--radius);
+  font-size: 0.82rem;
+  color: var(--ink-2);
+}
+
+.next-label {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.next-note {
+  margin-left: auto;
+  font-size: 0.74rem;
 }
 
 /* ── 02 · pillars ────────────────────────────────────────────────────────── */
@@ -1797,5 +1821,9 @@ html[data-theme="light"] .pane {
 
   .foot-inner {
     flex-direction: column;
+  }
+
+  .next-note {
+    margin-left: 0;
   }
 }
