@@ -66,7 +66,7 @@ does not read it.
 
 `herdr-plugin.toml`:
 
-- id / name `herdr-tsk`, version `0.3.0`, `min_herdr_version = "0.7.5"`, platforms
+- id / name `herdr-tsk`, version `0.4.0`, `min_herdr_version = "0.7.5"`, platforms
   linux + macos
 - `[[build]]` `cargo build --release`
 - `[[panes]]` id `board`, title `tsk` (**must** equal `BOARD_PANE_LABEL`), placement

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.4.0
+
 The landing page and docs live in `site/` again (Astro + Starlight, moved back
 from `smarzban/tsk-site`). They are not part of the `tsk` binary. Site CI is
 `npm ci && npm run build`; Vercel Root Directory is `site`.
