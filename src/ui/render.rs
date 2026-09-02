@@ -994,7 +994,7 @@ pub(crate) const PALETTE_VERBS: &[VerbEntry<'static>] = &[
 /// painted Save or Cancel control cannot promise a key route different from the one it sends.
 const FORM_TITLE_VERBS: &[VerbEntry<'static>] = &[
     VerbEntry {
-        key: "enter",
+        key: "shift+enter",
         label: "save",
     },
     VerbEntry {
@@ -1022,7 +1022,7 @@ const FORM_NOTES_VERBS: &[VerbEntry<'static>] = &[
 ];
 const FORM_THREAD_VERBS: &[VerbEntry<'static>] = &[
     VerbEntry {
-        key: "enter",
+        key: "shift+enter",
         label: "save",
     },
     VerbEntry {
@@ -1079,10 +1079,10 @@ pub(crate) fn form_verb_items(
 }
 
 /// Verb bar for the Title editor: one field, so Tab has nothing to move focus
-/// between and plain Enter saves.
+/// between and Shift+Enter saves.
 const EDIT_TITLE_VERBS: &[VerbEntry<'static>] = &[
     VerbEntry {
-        key: "enter",
+        key: "shift+enter",
         label: "save",
     },
     VerbEntry {

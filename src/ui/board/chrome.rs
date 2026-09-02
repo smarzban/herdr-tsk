@@ -48,9 +48,12 @@ fn edit_chrome_legends(mode: BoardInputMode) -> [&'static str; 3] {
             "Space cycle · Enter choose · Esc",
             "Enter choose · Esc",
         ],
-        BoardInputMode::EditTitle
-        | BoardInputMode::EditThread
-        | BoardInputMode::EditStep
+        BoardInputMode::EditTitle | BoardInputMode::EditThread => [
+            "Shift+Enter save · Esc cancel",
+            "Shift+Enter save · Esc cancel",
+            "Shift+Enter save · Esc",
+        ],
+        BoardInputMode::EditStep
         | BoardInputMode::QuickAdd
         | BoardInputMode::FormScopeDropdown
         | BoardInputMode::Normal

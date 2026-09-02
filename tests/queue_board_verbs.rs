@@ -1496,6 +1496,15 @@ fn task_edit_save_uses_shift_enter_while_capture_keeps_its_ctrl_chord() {
         None,
         "Ctrl+Alt+Enter must not be a hidden capture save chord"
     );
+
+    let (mut domain, mut model, _) = board_with_task("Shift save label", HumanStatus::Ready);
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+        .expect("open task title");
+    let frame = rendered_board(&model, 80, 24);
+    assert!(
+        frame.contains("shift+enter save"),
+        "the visible task-title legend names the save chord:\n{frame}"
+    );
 }
 
 #[test]
