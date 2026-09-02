@@ -58,68 +58,7 @@ pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
         None
     };
     if let Some(task) = page_task {
-        let mut entries = Vec::with_capacity(6);
-        entries.push(VerbEntry {
-            key: "e",
-            label: "edit",
-        });
-        let selected_step_done = model
-            .form
-            .as_ref()
-            .and_then(|form| form.steps.cursor)
-            .and_then(|index| task.steps.get(index))
-            .map(|step| step.done);
-        if selected_step_done.is_some() {
-            entries.push(VerbEntry {
-                key: "s",
-                label: "toggle step",
-            });
-        } else {
-            match task.status {
-                HumanStatus::Ready => entries.push(VerbEntry {
-                    key: "s",
-                    label: "start",
-                }),
-                HumanStatus::Done => entries.push(VerbEntry {
-                    key: "s",
-                    label: "reopen",
-                }),
-                HumanStatus::Started | HumanStatus::Blocked | HumanStatus::Review => {}
-            }
-        }
-        if selected_step_done.unwrap_or(task.status == HumanStatus::Done) {
-            entries.push(VerbEntry {
-                key: "o",
-                label: help("o", "reopen"),
-            });
-        } else {
-            entries.push(VerbEntry {
-                key: "d",
-                label: help("d", "done"),
-            });
-            entries.push(VerbEntry {
-                key: "b",
-                label: if task.status == HumanStatus::Blocked {
-                    "unblock"
-                } else {
-                    help("b", "block")
-                },
-            });
-        }
-        entries.push(VerbEntry {
-            key: "esc",
-            label: "close",
-        });
-        // Steps are editable only after a task field entered edit mode. The add route stays
-        // visible there even for an empty checklist, and its final position preserves the
-        // compact bar's established action priority.
-        if model.task_editing() {
-            entries.push(VerbEntry {
-                key: "a",
-                label: "step",
-            });
-        }
-        return entries;
+        return task_page_verb_items(model, task);
     }
 
     let mut entries = Vec::with_capacity(7);
@@ -182,6 +121,69 @@ pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
         key: "+",
         label: "capture",
     });
+    entries
+}
+
+fn task_page_verb_items(model: &BoardModel, task: &crate::domain::Task) -> Vec<VerbEntry<'static>> {
+    let help = |chord: &str, fallback: &'static str| keymap_help_label(chord).unwrap_or(fallback);
+    let mut entries = Vec::with_capacity(6);
+    entries.push(VerbEntry {
+        key: "e",
+        label: "edit",
+    });
+    let selected_step_done = model
+        .form
+        .as_ref()
+        .and_then(|form| form.steps.cursor)
+        .and_then(|index| task.steps.get(index))
+        .map(|step| step.done);
+    if selected_step_done.is_some() {
+        entries.push(VerbEntry {
+            key: "s",
+            label: "toggle step",
+        });
+    } else {
+        match task.status {
+            HumanStatus::Ready => entries.push(VerbEntry {
+                key: "s",
+                label: "start",
+            }),
+            HumanStatus::Done => entries.push(VerbEntry {
+                key: "s",
+                label: "reopen",
+            }),
+            HumanStatus::Started | HumanStatus::Blocked | HumanStatus::Review => {}
+        }
+    }
+    if selected_step_done.unwrap_or(task.status == HumanStatus::Done) {
+        entries.push(VerbEntry {
+            key: "o",
+            label: help("o", "reopen"),
+        });
+    } else {
+        entries.push(VerbEntry {
+            key: "d",
+            label: help("d", "done"),
+        });
+        entries.push(VerbEntry {
+            key: "b",
+            label: if task.status == HumanStatus::Blocked {
+                "unblock"
+            } else {
+                help("b", "block")
+            },
+        });
+    }
+    entries.push(VerbEntry {
+        key: "esc",
+        label: "close",
+    });
+    if model.task_editing() {
+        entries.push(VerbEntry {
+            key: "a",
+            label: "step",
+        });
+    }
     entries
 }
 
@@ -576,9 +578,24 @@ pub fn board_hit_map(area: ratatui::layout::Rect, model: &BoardModel) -> render:
     hits
 }
 
+fn surface_geometry(area: ratatui::layout::Rect, density_width: u16) -> tier::TierGeometry {
+    let mut geometry = tier::resolve(density_width, area.height).with_row_width(area.width);
+    geometry.width = area.width;
+    geometry
+}
+
 fn draw_board_impl(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap {
     let area = frame.area();
-    let geo = tier::resolve(area.width, area.height);
+    let responsive = tier::resolve_responsive(area.width, area.height, tier::FocusedSurface::Board);
+    let wide = responsive.presentation == tier::ResponsivePresentation::WideSplit;
+    let board_area = if wide { responsive.board } else { area };
+    let shared_width = responsive.board.width.min(responsive.task.width);
+    let geo = if wide {
+        surface_geometry(board_area, shared_width)
+    } else {
+        tier::resolve(area.width, area.height)
+    };
+    let task_geo = wide.then(|| surface_geometry(responsive.task, shared_width));
     let queue_view = model.queue_view();
     let scope_label = match &model.board_location {
         BoardLocation::Home { .. } => String::new(),
@@ -728,31 +745,127 @@ fn draw_board_impl(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap
                 selected: scope_selected,
             },
         );
-        build_task_page_overlay(model, form, &geo, scope_dropdown)
+        let form_geo = task_geo.as_ref().unwrap_or(&geo);
+        build_task_page_overlay(model, form, form_geo, scope_dropdown)
     } else {
         QueueOverlay::None
     };
 
-    let frame_model = QueueFrameModel {
-        tasks: &model.tasks,
-        view: &queue_view,
-        selection_id: model.saved_task.or(model.selection_id),
-        at_home: model.at_home(),
-        home_tab: model.home_tab(),
-        scope_label: &scope_label,
-        collapsed_projects: &model.collapsed_projects,
-        collapsed_threads: &model.collapsed_threads,
-        collapsed_thread_projects: &model.collapsed_thread_projects,
-        status_message: status_owned.as_deref(),
-        status_undo_offset,
-        verb_items: &verbs,
-        now: SystemTime::now(),
-        overlay,
-        detail_open: model.detail_open,
-        list_scroll: model.list_scroll.get(),
-        follow_list: model.follow_list.get(),
+    let selection_id = model.saved_task.or(model.selection_id);
+    let selected_task = selection_id.and_then(|id| model.tasks.iter().find(|task| task.id == id));
+    let preview_form = (wide && !matches!(&overlay, QueueOverlay::TaskPage { .. }))
+        .then(|| {
+            selected_task.map(|task| {
+                BoardForm::task(
+                    task,
+                    model.this_repo.as_deref(),
+                    &model.tasks,
+                    CaptureField::Title,
+                )
+            })
+        })
+        .flatten();
+    let preview_overlay = task_geo.map(|task_geo| {
+        preview_form
+            .as_ref()
+            .map(|form| build_task_page_overlay(model, form, &task_geo, None))
+            .unwrap_or(QueueOverlay::TaskEmpty)
+    });
+
+    let (hits, painted_list_scroll) = if let Some(task_geo) = task_geo {
+        let (board_overlay, task_overlay, task_is_preview) = match overlay {
+            task_overlay @ QueueOverlay::TaskPage { .. } => {
+                (QueueOverlay::None, task_overlay, false)
+            }
+            board_overlay => (
+                board_overlay,
+                preview_overlay.unwrap_or(QueueOverlay::TaskEmpty),
+                true,
+            ),
+        };
+        let board_frame = QueueFrameModel {
+            tasks: &model.tasks,
+            view: &queue_view,
+            selection_id,
+            at_home: model.at_home(),
+            home_tab: model.home_tab(),
+            scope_label: &scope_label,
+            collapsed_projects: &model.collapsed_projects,
+            collapsed_threads: &model.collapsed_threads,
+            collapsed_thread_projects: &model.collapsed_thread_projects,
+            status_message: status_owned.as_deref(),
+            status_undo_offset,
+            verb_items: &verbs,
+            now: SystemTime::now(),
+            overlay: board_overlay,
+            detail_open: None,
+            list_scroll: model.list_scroll.get(),
+            follow_list: model.follow_list.get(),
+        };
+        let task_verbs = selected_task
+            .map(|task| task_page_verb_items(model, task))
+            .unwrap_or_default();
+        let task_frame = QueueFrameModel {
+            tasks: &model.tasks,
+            view: &queue_view,
+            selection_id,
+            at_home: false,
+            home_tab: model.home_tab(),
+            scope_label: "",
+            collapsed_projects: &model.collapsed_projects,
+            collapsed_threads: &model.collapsed_threads,
+            collapsed_thread_projects: &model.collapsed_thread_projects,
+            status_message: None,
+            status_undo_offset: None,
+            verb_items: &task_verbs,
+            now: SystemTime::now(),
+            overlay: task_overlay,
+            detail_open: None,
+            list_scroll: 0,
+            follow_list: false,
+        };
+        let (mut board_hits, painted_list_scroll) =
+            render::draw_queue_frame(frame, &board_frame, &geo, board_area);
+        let (mut task_hits, _) =
+            render::draw_queue_frame(frame, &task_frame, &task_geo, responsive.task);
+        if task_is_preview {
+            task_hits
+                .regions
+                .retain(|hit| matches!(hit.target, render::QueueHitTarget::TaskNumber(_)));
+        }
+        board_hits.regions.append(&mut task_hits.regions);
+        board_hits.copyable.append(&mut task_hits.copyable);
+        if let Some(divider) = responsive.divider {
+            let buffer = frame.buffer_mut();
+            for y in divider.y..divider.y.saturating_add(divider.height) {
+                buffer[(divider.x, y)]
+                    .set_symbol("│")
+                    .set_style(render::style_dim());
+            }
+        }
+        (board_hits, painted_list_scroll)
+    } else {
+        let frame_model = QueueFrameModel {
+            tasks: &model.tasks,
+            view: &queue_view,
+            selection_id,
+            at_home: model.at_home(),
+            home_tab: model.home_tab(),
+            scope_label: &scope_label,
+            collapsed_projects: &model.collapsed_projects,
+            collapsed_threads: &model.collapsed_threads,
+            collapsed_thread_projects: &model.collapsed_thread_projects,
+            status_message: status_owned.as_deref(),
+            status_undo_offset,
+            verb_items: &verbs,
+            now: SystemTime::now(),
+            overlay,
+            detail_open: model.detail_open,
+            list_scroll: model.list_scroll.get(),
+            follow_list: model.follow_list.get(),
+        };
+        render::draw_queue_frame(frame, &frame_model, &geo, area)
     };
-    let (hits, painted_list_scroll) = render::draw_queue_frame(frame, &frame_model, &geo);
     if let Some((scroll, max_scroll)) = painted_list_scroll {
         model.list_scroll.set(scroll);
         model.list_max_scroll.set(max_scroll);
@@ -761,7 +874,12 @@ fn draw_board_impl(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap
     // Board-form edits use the task page's status and verb rows rather than an inline rule row.
     if model.open_field_edit().is_some() && model.form.is_none() {
         if let Some(row) = geo.rule_row {
-            let toast_area = ratatui::layout::Rect::new(0, row, area.width, 1);
+            let toast_area = ratatui::layout::Rect::new(
+                board_area.x,
+                board_area.y.saturating_add(row),
+                board_area.width,
+                1,
+            );
             // Use the mono-only helpers so no product frame emits foreground or background
             // color SGR codes.
             frame.render_widget(

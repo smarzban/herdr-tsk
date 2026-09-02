@@ -448,6 +448,8 @@ pub enum QueueOverlay<'a> {
         project_scope: bool,
         recovery: bool,
     },
+    /// An inert task surface shown when wide split has no selected task.
+    TaskEmpty,
     /// The task page: a full-height, view-first takeover for one bound task. `focus` is
     /// `None` in view mode; field edits focus the same drafts the board form carries.
     TaskPage {
@@ -678,6 +680,47 @@ impl QueueHitMap {
             self.copyable.push(area);
         }
     }
+
+    fn translate_and_clip(&mut self, area: Rect) {
+        for hit in &mut self.regions {
+            hit.area = local_rect(area, hit.area);
+        }
+        self.regions
+            .retain(|hit| hit.area.width > 0 && hit.area.height > 0);
+        for copyable in &mut self.copyable {
+            *copyable = local_rect(area, *copyable);
+        }
+        self.copyable
+            .retain(|copyable| copyable.width > 0 && copyable.height > 0);
+    }
+}
+
+fn clipped_area(area: Rect, frame: Rect) -> Rect {
+    let x = area.x.max(frame.x);
+    let y = area.y.max(frame.y);
+    let right = u32::from(area.x)
+        .saturating_add(u32::from(area.width))
+        .min(u32::from(frame.x).saturating_add(u32::from(frame.width)));
+    let bottom = u32::from(area.y)
+        .saturating_add(u32::from(area.height))
+        .min(u32::from(frame.y).saturating_add(u32::from(frame.height)));
+    Rect::new(
+        x,
+        y,
+        u16::try_from(right.saturating_sub(u32::from(x))).unwrap_or(0),
+        u16::try_from(bottom.saturating_sub(u32::from(y))).unwrap_or(0),
+    )
+}
+
+fn local_rect(area: Rect, local: Rect) -> Rect {
+    let x = local.x.min(area.width);
+    let y = local.y.min(area.height);
+    Rect::new(
+        area.x.saturating_add(x),
+        area.y.saturating_add(y),
+        local.width.min(area.width.saturating_sub(x)),
+        local.height.min(area.height.saturating_sub(y)),
+    )
 }
 
 /// Status glyph for a human status (the: static; no agent spin).
@@ -699,7 +742,9 @@ pub fn draw_queue_frame(
     frame: &mut Frame<'_>,
     model: &QueueFrameModel<'_>,
     geo: &TierGeometry,
+    surface: Rect,
 ) -> (QueueHitMap, Option<(usize, usize)>) {
+    let surface = clipped_area(surface, frame.area());
     let input_slot_geo = bottom_input_slot_geometry(*geo, &model.overlay);
     let geo = &input_slot_geo;
     let mut hits = QueueHitMap::default();
@@ -710,17 +755,20 @@ pub fn draw_queue_frame(
         return (hits, None);
     }
 
-    // Clear the frame so leftover cells never leak chrome between sizes.
-    let full = Rect::new(0, 0, width, height);
+    // Clear the surface so leftover cells never leak chrome between sizes.
+    let full = local_rect(surface, Rect::new(0, 0, width, height));
     frame.render_widget(Paragraph::new(Line::from("")), full);
 
-    // The task page owns the whole frame above the bottom chrome: the selector row stays
+    // The task page owns the whole surface above the bottom chrome: the selector row stays
     // hidden while it is open (list navigation does not apply to a single-task surface).
-    let page_active = matches!(model.overlay, QueueOverlay::TaskPage { .. });
+    let page_active = matches!(
+        model.overlay,
+        QueueOverlay::TaskPage { .. } | QueueOverlay::TaskEmpty
+    );
     if let Some(row) = geo.selector_row {
         if !page_active {
             let (line, regions) = paint_selector_row(model, geo);
-            put_line(frame, row, width, line);
+            put_line(frame, surface, row, width, line);
             for (target, x, w) in regions {
                 hits.push(target, Rect::new(x, row, w, 1));
             }
@@ -790,12 +838,13 @@ pub fn draw_queue_frame(
         let first_is_header = list_rows.get(scroll).is_some_and(ListRow::is_sticky_header);
         let mut y = top;
         if sticky.is_some() || first_is_header {
-            put_line(frame, y, content_width, Line::from(""));
+            put_line(frame, surface, y, content_width, Line::from(""));
             y = y.saturating_add(1);
         }
         if let Some(header_idx) = sticky {
             paint_list_row(
                 frame,
+                surface,
                 &mut hits,
                 &list_rows[header_idx],
                 y,
@@ -808,6 +857,7 @@ pub fn draw_queue_frame(
         for (offset, list_row) in list_rows.iter().skip(scroll).take(content_h).enumerate() {
             paint_list_row(
                 frame,
+                surface,
                 &mut hits,
                 list_row,
                 y.saturating_add(offset as u16),
@@ -817,7 +867,7 @@ pub fn draw_queue_frame(
         }
         if let Some(track) = track {
             let total = list_rows.len();
-            scrollbar::paint(frame, track, scroll, total);
+            scrollbar::paint(frame, local_rect(surface, track), scroll, total);
             if base_list_interactive {
                 let zone = scrollbar::grab_zone(track);
                 for row in 0..track.height {
@@ -833,7 +883,7 @@ pub fn draw_queue_frame(
     }
 
     if let Some(row) = geo.rule_row {
-        put_line(frame, row, width, paint_rule_row(width));
+        put_line(frame, surface, row, width, paint_rule_row(width));
     }
 
     if let Some(row) = geo.status_row {
@@ -845,10 +895,10 @@ pub fn draw_queue_frame(
                 .filter(|message_row| geo.rule_row.is_some_and(|rule_row| *message_row > rule_row))
             {
                 if let Some(message) = input.message {
-                    paint_bottom_input_message(frame, message_row, width, message);
+                    paint_bottom_input_message(frame, surface, message_row, width, message);
                 }
             }
-            paint_bottom_input_slot(frame, row, width, input);
+            paint_bottom_input_slot(frame, surface, row, width, input);
             if matches!(model.overlay, QueueOverlay::QuickAdd { .. }) {
                 hits.push(QueueHitTarget::QuickAddInput, Rect::new(0, row, width, 1));
             }
@@ -859,7 +909,7 @@ pub fn draw_queue_frame(
                 model.view.counts,
                 width,
             );
-            put_line(frame, row, width, line);
+            put_line(frame, surface, row, width, line);
             if let Some((x, w)) = undo_hit {
                 hits.push(QueueHitTarget::DeleteNoticeUndo, Rect::new(x, row, w, 1));
             }
@@ -876,6 +926,7 @@ pub fn draw_queue_frame(
             | QueueOverlay::ScopeDropdown { .. } => &[],
             QueueOverlay::QuickAdd { recovery, .. } if *recovery => &[],
             QueueOverlay::QuickAdd { .. } => QUICK_ADD_VERBS,
+            QueueOverlay::TaskEmpty => &[],
             // The page's field edits keep the form legends; its view mode reads the
             // model-computed page verbs (status-dependent, like the board row's own).
             QueueOverlay::TaskPage {
@@ -903,6 +954,7 @@ pub fn draw_queue_frame(
         {
             paint_quick_add_hint(
                 frame,
+                surface,
                 row,
                 width,
                 *project_scope,
@@ -911,14 +963,15 @@ pub fn draw_queue_frame(
             );
         } else {
             let (line, verb_hits) = paint_verb_bar(verb_items, budget, width, prefix_verbs);
-            put_line(frame, row, width, line);
+            put_line(frame, surface, row, width, line);
             for (index, x, w) in verb_hits {
                 hits.push(QueueHitTarget::Verb(index), Rect::new(x, row, w, 1));
             }
         }
     }
 
-    paint_overlay(frame, model, geo, &mut hits);
+    paint_overlay(frame, model, geo, surface, &mut hits);
+    hits.translate_and_clip(surface);
 
     (hits, painted_list_scroll)
 }
@@ -1127,33 +1180,43 @@ fn paint_overlay(
     frame: &mut Frame<'_>,
     model: &QueueFrameModel<'_>,
     geo: &TierGeometry,
+    surface: Rect,
     hits: &mut QueueHitMap,
 ) {
     match &model.overlay {
         QueueOverlay::None => {}
         QueueOverlay::Palette { query, commands } => {
-            paint_palette_overlay(frame, geo, query, commands, hits);
+            paint_palette_overlay(frame, geo, surface, query, commands, hits);
         }
         QueueOverlay::Help { lines } => {
-            paint_help_overlay(frame, geo, lines, hits);
+            paint_help_overlay(frame, geo, surface, lines, hits);
         }
         QueueOverlay::ScopeDropdown { options, selected } => {
-            paint_scope_dropdown(frame, geo, options, *selected, hits);
+            paint_scope_dropdown(frame, geo, surface, options, *selected, hits);
         }
         QueueOverlay::EditTitle {
             ref draft,
             cursor_col,
         } => {
-            paint_edit_title_overlay(frame, geo, draft, *cursor_col);
+            paint_edit_title_overlay(frame, geo, surface, draft, *cursor_col);
         }
         QueueOverlay::EditNotes {
             ref rows,
             cursor_row,
             cursor_col,
         } => {
-            paint_edit_notes_overlay(frame, geo, rows, *cursor_row, *cursor_col);
+            paint_edit_notes_overlay(frame, geo, surface, rows, *cursor_row, *cursor_col);
         }
         QueueOverlay::QuickAdd { .. } => {}
+        QueueOverlay::TaskEmpty => {
+            put_line(
+                frame,
+                surface,
+                1.min(geo.height.saturating_sub(1)),
+                geo.row_width,
+                paint_bounded_line("  no task selected", geo.row_width, style_dim()),
+            );
+        }
         QueueOverlay::TaskPage {
             ref header_rows,
             ref header_identifier,
@@ -1181,6 +1244,7 @@ fn paint_overlay(
             paint_task_page(
                 frame,
                 geo,
+                surface,
                 header_rows,
                 header_identifier.as_deref(),
                 *header_identifier_task,
@@ -1205,26 +1269,27 @@ fn paint_overlay(
                 hits,
             );
             if let Some(dropdown) = scope_dropdown {
-                paint_page_scope_dropdown(frame, geo, *dropdown, hits);
+                paint_page_scope_dropdown(frame, geo, surface, *dropdown, hits);
             }
         }
     }
 }
 
-fn clear_compact_takeover(frame: &mut Frame<'_>, geo: &TierGeometry) {
+fn clear_compact_takeover(frame: &mut Frame<'_>, geo: &TierGeometry, surface: Rect) {
     // `Clear` resets every cell in the region to a blank default cell. A `Paragraph::new("")`
     // does not: it only sets style over the area and writes no symbols, so it never erases
     // whatever the base list already painted underneath it. Compact is a full-viewport
     // takeover, so the whole viewport is cleared before the editor paints its own rows.
     if geo.tier == Tier::Compact && geo.viewport_height > 0 {
         let area = Rect::new(0, geo.viewport_top, geo.row_width, geo.viewport_height);
-        frame.render_widget(Clear, area);
+        frame.render_widget(Clear, local_rect(surface, area));
     }
 }
 
 fn paint_edit_title_overlay(
     frame: &mut Frame<'_>,
     geo: &TierGeometry,
+    surface: Rect,
     draft: &str,
     cursor_col: u16,
 ) {
@@ -1233,7 +1298,7 @@ fn paint_edit_title_overlay(
     if width == 0 || height == 0 {
         return;
     }
-    clear_compact_takeover(frame, geo);
+    clear_compact_takeover(frame, geo, surface);
     let y = geo.viewport_top;
     let label = "  title  ";
     let avail = editor_field_width(geo);
@@ -1244,6 +1309,7 @@ fn paint_edit_title_overlay(
     let text = format!("{}{}", label, shown);
     put_line(
         frame,
+        surface,
         y,
         width,
         paint_bounded_line(&text, width, style_bold()),
@@ -1254,13 +1320,18 @@ fn paint_edit_title_overlay(
         (avail as u16).min(width),
         1,
     );
-    place_edit_cursor(frame, region, cursor_col.min(avail as u16));
+    place_edit_cursor(
+        frame,
+        local_rect(surface, region),
+        cursor_col.min(avail as u16),
+    );
 }
 
 /// Paint full-width notes editor (standard or compact takeover).
 fn paint_edit_notes_overlay(
     frame: &mut Frame<'_>,
     geo: &TierGeometry,
+    surface: Rect,
     rows: &[String],
     cursor_row: u16,
     cursor_col: u16,
@@ -1270,7 +1341,7 @@ fn paint_edit_notes_overlay(
     if width == 0 || height == 0 {
         return;
     }
-    clear_compact_takeover(frame, geo);
+    clear_compact_takeover(frame, geo, surface);
     let start_y = geo.viewport_top;
     // Bound by the takeover region, not just the frame height: an over-tall draft must not
     // paint into the rule or status rows below it.
@@ -1292,6 +1363,7 @@ fn paint_edit_notes_overlay(
         };
         put_line(
             frame,
+            surface,
             y,
             width,
             paint_bounded_line(&text, width, style_bold()),
@@ -1308,7 +1380,12 @@ fn paint_edit_notes_overlay(
             (avail as u16).min(width),
             painted_rows,
         );
-        place_edit_cursor_at(frame, region, cursor_row, cursor_col.min(avail as u16));
+        place_edit_cursor_at(
+            frame,
+            local_rect(surface, region),
+            cursor_row,
+            cursor_col.min(avail as u16),
+        );
     }
 }
 
@@ -1359,6 +1436,7 @@ fn modal_chrome_rows(tier: Tier, has_footer: bool) -> u16 {
 fn paint_modal_card(
     frame: &mut Frame<'_>,
     geo: &TierGeometry,
+    surface: Rect,
     bounds: Rect,
     spec: ModalCardSpec<'_>,
     hits: &mut QueueHitMap,
@@ -1387,11 +1465,11 @@ fn paint_modal_card(
     let y0 = bounds.y + bounds.height.saturating_sub(card_h) / 2;
     let area = Rect::new(x0, y0, card_w, card_h);
 
-    frame.render_widget(Clear, area);
+    frame.render_widget(Clear, local_rect(surface, area));
     hits.push(QueueHitTarget::ModalChrome, area);
 
     let (top_line, close_x) = modal_title_border_row(title, card_w);
-    paint_row_in(frame, area, 0, top_line);
+    paint_row_in(frame, surface, area, 0, top_line);
     if close_x < card_w {
         let close_w = 3.min(card_w.saturating_sub(close_x));
         hits.push(
@@ -1404,6 +1482,7 @@ fn paint_modal_card(
     if bottom_offset > 0 {
         paint_row_in(
             frame,
+            surface,
             area,
             bottom_offset,
             modal_plain_border_row('└', '─', '┘', card_w),
@@ -1418,12 +1497,14 @@ fn paint_modal_card(
         let legend_offset = bottom_offset.saturating_sub(1);
         paint_row_in(
             frame,
+            surface,
             area,
             rule_offset,
             modal_plain_border_row('├', '─', '┤', card_w),
         );
         paint_row_in(
             frame,
+            surface,
             area,
             legend_offset,
             modal_legend_line(legend, card_w as usize),
@@ -1437,7 +1518,7 @@ fn paint_modal_card(
         if rule_offset == Some(row_offset) {
             continue;
         }
-        paint_modal_side_borders(frame, area, row_offset);
+        paint_modal_side_borders(frame, surface, area, row_offset);
     }
 
     Rect::new(
@@ -1449,10 +1530,11 @@ fn paint_modal_card(
 }
 
 /// Dim `│` on the left and right edges of one card row (content / padding / legend).
-fn paint_modal_side_borders(frame: &mut Frame<'_>, area: Rect, row_offset: u16) {
+fn paint_modal_side_borders(frame: &mut Frame<'_>, surface: Rect, area: Rect, row_offset: u16) {
     if row_offset >= area.height || area.width == 0 {
         return;
     }
+    let area = local_rect(surface, area);
     let y = area.y.saturating_add(row_offset);
     let style = style_dim();
     let buffer = frame.buffer_mut();
@@ -1465,12 +1547,18 @@ fn paint_modal_side_borders(frame: &mut Frame<'_>, area: Rect, row_offset: u16) 
 
 /// One row of a modal card's border/legend, painted at `area`'s `row_offset`-th row
 /// (never past `area`'s own height).
-fn paint_row_in(frame: &mut Frame<'_>, area: Rect, row_offset: u16, line: Line<'static>) {
+fn paint_row_in(
+    frame: &mut Frame<'_>,
+    surface: Rect,
+    area: Rect,
+    row_offset: u16,
+    line: Line<'static>,
+) {
     if row_offset >= area.height {
         return;
     }
     let rect = Rect::new(area.x, area.y.saturating_add(row_offset), area.width, 1);
-    put_line_at(frame, rect, line);
+    put_line_at(frame, surface, rect, line);
 }
 
 /// A plain dim border row: one corner glyph, a fill of `card_w - 2` cells, the other
@@ -1592,6 +1680,7 @@ fn titled_with_scroll_marker(title: &str, above: bool, below: bool) -> String {
 fn paint_palette_overlay(
     frame: &mut Frame<'_>,
     geo: &TierGeometry,
+    surface: Rect,
     query: &str,
     commands: &[PaletteCommandRow<'_>],
     hits: &mut QueueHitMap,
@@ -1631,6 +1720,7 @@ fn paint_palette_overlay(
     let content = paint_modal_card(
         frame,
         geo,
+        surface,
         bounds,
         ModalCardSpec {
             title: &title,
@@ -1652,7 +1742,12 @@ fn paint_palette_overlay(
                 style_plain()
             };
             let rect = Rect::new(content.x, y, content.width, 1);
-            put_line_at(frame, rect, paint_bounded_line(&text, content.width, style));
+            put_line_at(
+                frame,
+                surface,
+                rect,
+                paint_bounded_line(&text, content.width, style),
+            );
             // Index into the full (unscrolled) command list, so a click resolves to the
             // same command `BoardModel::visible_commands()` would name at that position
             // regardless of which window is currently painted.
@@ -1668,6 +1763,7 @@ fn paint_palette_overlay(
     let q = format!(" :{query}");
     put_line(
         frame,
+        surface,
         query_row,
         width,
         paint_bounded_line(&q, width, style_bold()),
@@ -1683,6 +1779,7 @@ fn paint_palette_overlay(
 fn paint_help_overlay(
     frame: &mut Frame<'_>,
     geo: &TierGeometry,
+    surface: Rect,
     lines: &[String],
     hits: &mut QueueHitMap,
 ) {
@@ -1718,6 +1815,7 @@ fn paint_help_overlay(
     let content = paint_modal_card(
         frame,
         geo,
+        surface,
         bounds,
         ModalCardSpec {
             title: &title,
@@ -1739,6 +1837,7 @@ fn paint_help_overlay(
         let rect = Rect::new(content.x, y, content.width, 1);
         put_line_at(
             frame,
+            surface,
             rect,
             paint_bounded_line(ln, content.width, style_plain()),
         );
@@ -1904,6 +2003,7 @@ pub fn task_page_layout(
 fn paint_task_page(
     frame: &mut Frame<'_>,
     geo: &TierGeometry,
+    surface: Rect,
     header_rows: &[String],
     header_identifier: Option<&str>,
     header_identifier_task: Option<Uuid>,
@@ -1943,7 +2043,10 @@ fn paint_task_page(
     if lay.bottom == 0 {
         return;
     }
-    frame.render_widget(Clear, Rect::new(0, 0, width, lay.bottom));
+    frame.render_widget(
+        Clear,
+        local_rect(surface, Rect::new(0, 0, width, lay.bottom)),
+    );
 
     // Header: every wrapped title row paints bold under a shared left gutter;
     // row 0 carries the status glyph and frames the dim right-aligned status
@@ -2022,7 +2125,7 @@ fn paint_task_page(
             }
             Line::from(Span::styled(painted, style_bold()))
         };
-        put_line(frame, y, header_width, line);
+        put_line(frame, surface, y, header_width, line);
     }
     if let Some((cursor_row, cursor_col)) = title_cursor {
         // Every title row shares the four-cell gutter (two leading blanks plus
@@ -2030,11 +2133,14 @@ fn paint_task_page(
         let field_x = 4u16.min(width.saturating_sub(1));
         place_edit_cursor_at(
             frame,
-            Rect::new(
-                field_x,
-                lay.title_y,
-                width.saturating_sub(field_x),
-                title_row_count,
+            local_rect(
+                surface,
+                Rect::new(
+                    field_x,
+                    lay.title_y,
+                    width.saturating_sub(field_x),
+                    title_row_count,
+                ),
             ),
             cursor_row.min(title_row_count.saturating_sub(1)),
             cursor_col.min(width.saturating_sub(field_x).saturating_sub(1)),
@@ -2056,6 +2162,7 @@ fn paint_task_page(
         let dashes = "─".repeat(dash_count);
         put_line(
             frame,
+            surface,
             y,
             divider_width,
             Line::from(vec![
@@ -2127,7 +2234,7 @@ fn paint_task_page(
                     &mut in_fence,
                 )
             };
-            put_line(frame, y, content_width, painted);
+            put_line(frame, surface, y, content_width, painted);
             hits.push(
                 QueueHitTarget::FormNotes(absolute),
                 Rect::new(0, y, content_width, 1),
@@ -2137,6 +2244,7 @@ fn paint_task_page(
         } else if absolute == content.steps_start {
             put_line(
                 frame,
+                surface,
                 y,
                 content_width,
                 paint_bounded_line(
@@ -2191,6 +2299,7 @@ fn paint_task_page(
                 };
                 put_line(
                     frame,
+                    surface,
                     y,
                     content_width,
                     paint_bounded_line(
@@ -2215,6 +2324,7 @@ fn paint_task_page(
             } else if row == 0 {
                 put_line(
                     frame,
+                    surface,
                     y,
                     content_width,
                     paint_bounded_line(
@@ -2240,11 +2350,14 @@ fn paint_task_page(
         if cursor_row >= scroll && cursor_row < scroll.saturating_add(lay.notes_rows as usize) {
             place_edit_cursor_at(
                 frame,
-                Rect::new(
-                    4,
-                    lay.notes_y,
-                    content_width.saturating_sub(5),
-                    lay.notes_rows,
+                local_rect(
+                    surface,
+                    Rect::new(
+                        4,
+                        lay.notes_y,
+                        content_width.saturating_sub(5),
+                        lay.notes_rows,
+                    ),
                 ),
                 u16::try_from(cursor_row.saturating_sub(scroll)).unwrap_or(u16::MAX),
                 editor.cursor_col.min(content_width.saturating_sub(5)),
@@ -2254,11 +2367,14 @@ fn paint_task_page(
     if let Some((row, col)) = notes_cursor {
         place_edit_cursor_at(
             frame,
-            Rect::new(
-                2,
-                lay.notes_y,
-                content_width.saturating_sub(3),
-                lay.notes_rows,
+            local_rect(
+                surface,
+                Rect::new(
+                    2,
+                    lay.notes_y,
+                    content_width.saturating_sub(3),
+                    lay.notes_rows,
+                ),
             ),
             row.saturating_sub(u16::try_from(scroll).unwrap_or(u16::MAX))
                 .min(lay.notes_rows.saturating_sub(1)),
@@ -2266,7 +2382,15 @@ fn paint_task_page(
         );
     }
     if content.max_scroll > 0 {
-        paint_page_scrollbar(frame, hits, &lay, width, scroll, content.total_rows);
+        paint_page_scrollbar(
+            frame,
+            surface,
+            hits,
+            &lay,
+            width,
+            scroll,
+            content.total_rows,
+        );
     }
 
     // Meta footer: scope · thread · created · updated. Inline step drafts leave this footer
@@ -2274,6 +2398,7 @@ fn paint_task_page(
     if let Some(y) = lay.meta_y {
         put_line(
             frame,
+            surface,
             y,
             width,
             paint_bounded_line(&format!("  {meta}"), width, style_dim()),
@@ -2298,7 +2423,8 @@ fn paint_task_page(
             let selected_width = selected_width.min(width.saturating_sub(selected_x));
             let buffer = frame.buffer_mut();
             for x in selected_x..selected_x.saturating_add(selected_width) {
-                buffer[(x, y)].set_style(style_reverse());
+                buffer[(surface.x.saturating_add(x), surface.y.saturating_add(y))]
+                    .set_style(style_reverse());
             }
         }
         if footer_input_open {
@@ -2328,6 +2454,7 @@ fn paint_task_page(
 /// render notes and steps.
 fn paint_page_scrollbar(
     frame: &mut Frame<'_>,
+    surface: Rect,
     hits: &mut QueueHitMap,
     lay: &TaskPageLayout,
     width: u16,
@@ -2339,7 +2466,7 @@ fn paint_page_scrollbar(
         return;
     }
     let track = Rect::new(width - 1, lay.notes_y, 1, viewport);
-    scrollbar::paint(frame, track, scroll, total_rows);
+    scrollbar::paint(frame, local_rect(surface, track), scroll, total_rows);
     let zone = scrollbar::grab_zone(track);
     for row in 0..track.height {
         let jump = scrollbar::click_to_offset(row, track.height, total_rows, viewport as usize);
@@ -2356,6 +2483,7 @@ fn paint_page_scrollbar(
 fn paint_page_scope_dropdown(
     frame: &mut Frame<'_>,
     geo: &TierGeometry,
+    surface: Rect,
     dropdown: FormScopeDropdown<'_>,
     hits: &mut QueueHitMap,
 ) {
@@ -2401,6 +2529,7 @@ fn paint_page_scope_dropdown(
         };
         put_line(
             frame,
+            surface,
             y,
             width,
             paint_bounded_line(&format!("  {text}"), width, style_plain()),
@@ -2419,6 +2548,7 @@ fn paint_page_scope_dropdown(
 fn paint_scope_dropdown(
     frame: &mut Frame<'_>,
     geo: &TierGeometry,
+    surface: Rect,
     options: &[String],
     selected: usize,
     hits: &mut QueueHitMap,
@@ -2454,6 +2584,7 @@ fn paint_scope_dropdown(
     let content = paint_modal_card(
         frame,
         geo,
+        surface,
         bounds,
         ModalCardSpec {
             title: &title,
@@ -2477,7 +2608,12 @@ fn paint_scope_dropdown(
             style_plain()
         };
         let rect = Rect::new(content.x, y, content.width, 1);
-        put_line_at(frame, rect, paint_bounded_line(&text, content.width, style));
+        put_line_at(
+            frame,
+            surface,
+            rect,
+            paint_bounded_line(&text, content.width, style),
+        );
         // `j` remains the source index after windowing, so a click selects the same option
         // Up/Down plus Enter would confirm rather than its position within this paint slice.
         hits.push(QueueHitTarget::ProjectOption(j), rect);
@@ -2568,6 +2704,7 @@ fn header_chrome_rows(rows: &[ListRow], scroll: usize) -> usize {
 
 fn paint_list_row(
     frame: &mut Frame<'_>,
+    surface: Rect,
     hits: &mut QueueHitMap,
     list_row: &ListRow,
     y: u16,
@@ -2575,15 +2712,15 @@ fn paint_list_row(
     base_list_interactive: bool,
 ) {
     match list_row {
-        ListRow::Blank => put_line(frame, y, content_width, Line::from("")),
+        ListRow::Blank => put_line(frame, surface, y, content_width, Line::from("")),
         ListRow::Header(kind, _section_idx, line) => {
-            put_line(frame, y, content_width, line.clone());
+            put_line(frame, surface, y, content_width, line.clone());
             if *kind == SectionKind::Done && base_list_interactive {
                 hits.push(QueueHitTarget::Drawer, Rect::new(0, y, content_width, 1));
             }
         }
         ListRow::ProjectGroupHeader { section_idx, line } => {
-            put_line(frame, y, content_width, line.clone());
+            put_line(frame, surface, y, content_width, line.clone());
             if base_list_interactive {
                 hits.push(
                     QueueHitTarget::SectionProject(*section_idx),
@@ -2592,7 +2729,7 @@ fn paint_list_row(
             }
         }
         ListRow::ThreadGroupHeader { section_idx, line } => {
-            put_line(frame, y, content_width, line.clone());
+            put_line(frame, surface, y, content_width, line.clone());
             if base_list_interactive {
                 hits.push(
                     QueueHitTarget::SectionThread(*section_idx),
@@ -2605,7 +2742,7 @@ fn paint_list_row(
             subgroup_idx,
             line,
         } => {
-            put_line(frame, y, content_width, line.clone());
+            put_line(frame, surface, y, content_width, line.clone());
             if base_list_interactive {
                 hits.push(
                     QueueHitTarget::SectionThreadProject {
@@ -2617,7 +2754,7 @@ fn paint_list_row(
             }
         }
         ListRow::Hint(line) | ListRow::ThreadHeader(line) => {
-            put_line(frame, y, content_width, line.clone())
+            put_line(frame, surface, y, content_width, line.clone())
         }
         ListRow::Task {
             id,
@@ -2626,7 +2763,7 @@ fn paint_list_row(
             content_x,
             content_width: copy_w,
         } => {
-            put_line(frame, y, content_width, line.clone());
+            put_line(frame, surface, y, content_width, line.clone());
             if base_list_interactive {
                 hits.push(QueueHitTarget::Task(*id), Rect::new(0, y, content_width, 1));
                 if let Some((x, width)) = identifier {
@@ -2640,7 +2777,7 @@ fn paint_list_row(
             content_x,
             content_width: copy_w,
         } => {
-            put_line(frame, y, content_width, line.clone());
+            put_line(frame, surface, y, content_width, line.clone());
             hits.push_copyable(Rect::new(*content_x, y, *copy_w, 1));
         }
     }
@@ -3086,6 +3223,7 @@ fn paint_rule_row(width: u16) -> Line<'static> {
 /// text at `width - 2` cells, exactly matching the cursor budget below.
 pub(crate) fn paint_bottom_input_slot(
     frame: &mut Frame<'_>,
+    surface: Rect,
     row: u16,
     width: u16,
     input: &BottomInputSlot<'_>,
@@ -3104,6 +3242,7 @@ pub(crate) fn paint_bottom_input_slot(
         }
         put_line(
             frame,
+            surface,
             y,
             width,
             bound_line(
@@ -3138,6 +3277,7 @@ pub(crate) fn paint_bottom_input_slot(
     }
     put_line(
         frame,
+        surface,
         row,
         width,
         bound_line(Line::from(spans), width as usize),
@@ -3147,20 +3287,30 @@ pub(crate) fn paint_bottom_input_slot(
         .unwrap_or(row);
     place_edit_cursor(
         frame,
-        Rect::new(
-            prefix_width.min(width.saturating_sub(1)),
-            caret_row,
-            width.saturating_sub(prefix_width),
-            1,
+        local_rect(
+            surface,
+            Rect::new(
+                prefix_width.min(width.saturating_sub(1)),
+                caret_row,
+                width.saturating_sub(prefix_width),
+                1,
+            ),
         ),
         cursor_col,
     );
 }
 
 /// Paint a shared input-slot message in its reserved blank row, never over the cursor.
-fn paint_bottom_input_message(frame: &mut Frame<'_>, row: u16, width: u16, message: &str) {
+fn paint_bottom_input_message(
+    frame: &mut Frame<'_>,
+    surface: Rect,
+    row: u16,
+    width: u16,
+    message: &str,
+) {
     put_line(
         frame,
+        surface,
         row,
         width,
         bound_line(
@@ -3175,6 +3325,7 @@ fn paint_bottom_input_message(frame: &mut Frame<'_>, row: u16, width: u16, messa
 
 fn paint_quick_add_hint(
     frame: &mut Frame<'_>,
+    surface: Rect,
     row: u16,
     width: u16,
     project_scope: bool,
@@ -3202,6 +3353,7 @@ fn paint_quick_add_hint(
     };
     put_line(
         frame,
+        surface,
         row,
         width,
         bound_line(
@@ -3425,14 +3577,15 @@ pub(crate) fn short_project(path: &str) -> &str {
         .unwrap_or(path)
 }
 
-fn put_line(frame: &mut Frame<'_>, row: u16, width: u16, line: Line<'static>) {
-    put_line_at(frame, Rect::new(0, row, width, 1), line);
+fn put_line(frame: &mut Frame<'_>, area: Rect, row: u16, width: u16, line: Line<'static>) {
+    put_line_at(frame, area, Rect::new(0, row, width, 1), line);
 }
 
-/// Paint `line` at an arbitrary single-row `rect`, padding with plain spaces to `rect.width`
-/// so whatever the base frame painted underneath cannot bleed through a short line.
-fn put_line_at(frame: &mut Frame<'_>, rect: Rect, line: Line<'static>) {
-    if rect.width == 0 {
+/// Paint `line` at an arbitrary local single-row `rect`, padding with plain spaces to
+/// `rect.width` so whatever the surface painted underneath cannot bleed through.
+fn put_line_at(frame: &mut Frame<'_>, area: Rect, rect: Rect, line: Line<'static>) {
+    let rect = local_rect(area, rect);
+    if rect.width == 0 || rect.height == 0 {
         return;
     }
     let w = rect.width as usize;
