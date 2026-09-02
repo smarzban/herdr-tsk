@@ -24,28 +24,10 @@ pub enum TaskEventKind {
     Reopened,
     SoftDeleted,
     Restored,
-    /// Context capsule / agent meta refreshed on an existing task.
-    Parked,
-    /// Explicit agent/pane link set.
-    AgentLinked,
-    /// Explicit agent/pane link cleared.
-    AgentUnlinked,
-    /// Successful dispatch: agent started and linked.
-    Dispatched,
-    /// Step appended to the task. Old stores name this `checklist_item_added`.
-    #[serde(alias = "checklist_item_added")]
     StepAdded,
-    /// Step flipped to done. Old stores name this `checklist_item_checked`.
-    #[serde(alias = "checklist_item_checked")]
     StepChecked,
-    /// Step flipped back to open. Old stores name this `checklist_item_unchecked`.
-    #[serde(alias = "checklist_item_unchecked")]
     StepUnchecked,
-    /// Step text changed. Old stores name this `checklist_item_renamed`.
-    #[serde(alias = "checklist_item_renamed")]
     StepRenamed,
-    /// Step removed from the task. Old stores name this `checklist_item_removed`.
-    #[serde(alias = "checklist_item_removed")]
     StepRemoved,
 }
 

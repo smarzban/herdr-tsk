@@ -109,9 +109,8 @@ fn board_with_task(title: &str, status: HumanStatus) -> (DomainState, BoardModel
             title,
             None,
             project(THIS_REPO),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create task");
     if status != HumanStatus::Ready {
@@ -130,9 +129,8 @@ fn scoped_board() -> (DomainState, BoardModel, uuid::Uuid) {
             "here",
             None,
             project(THIS_REPO),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create here");
     domain
@@ -140,9 +138,8 @@ fn scoped_board() -> (DomainState, BoardModel, uuid::Uuid) {
             "elsewhere",
             None,
             project(OTHER_REPO),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create elsewhere");
     let model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
@@ -160,9 +157,8 @@ fn deck_of(n: usize) -> (DomainState, BoardModel) {
                 format!("task {i}"),
                 None,
                 project(THIS_REPO),
-                None,
-                None,
                 ProvenanceOrigin::Manual,
+                None,
             )
             .expect("create task");
     }
@@ -346,9 +342,8 @@ fn scoped_project_named_all_projects_has_no_group_header_hit_target() {
             "name collision",
             None,
             project(COLLIDING_REPO),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create task");
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(COLLIDING_REPO)));
@@ -375,9 +370,8 @@ fn task_form_mouse_fields_dropdown_and_verbs_match_keyboard_while_scrolled() {
             "Selected form target",
             Some("first\nsecond".to_string()),
             project(THIS_REPO),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create selected task");
     domain
@@ -385,9 +379,8 @@ fn task_form_mouse_fields_dropdown_and_verbs_match_keyboard_while_scrolled() {
             "other project",
             None,
             project(OTHER_REPO),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create scope option");
     for index in 0..30 {
@@ -396,9 +389,8 @@ fn task_form_mouse_fields_dropdown_and_verbs_match_keyboard_while_scrolled() {
                 format!("padding task {index}"),
                 None,
                 project(THIS_REPO),
-                None,
-                None,
                 ProvenanceOrigin::Manual,
+                None,
             )
             .expect("create padding task");
     }
@@ -781,9 +773,8 @@ fn empty_thread_target_follows_a_scope_name_containing_the_thread_label() {
             "Task",
             None,
             project(scope_path),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create");
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(scope_path)));
@@ -922,9 +913,8 @@ fn a_dropdown_option_over_a_task_row_still_selects_that_option_not_the_task_unde
             "third repo",
             None,
             project("/repos/third"),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create third project for a longer selector");
     model.sync_from_domain(&domain);
@@ -1423,12 +1413,10 @@ fn non_left_clicks_over_a_live_control_are_ignored() {
 fn header_line_registers_no_hit_target() {
     let mut domain = DomainState::new();
     domain
-        .create_with_thread(
+        .create(
             "threaded row",
             None,
             project(THIS_REPO),
-            None,
-            None,
             ProvenanceOrigin::Manual,
             Some("release".to_string()),
         )
@@ -2142,9 +2130,8 @@ fn peek_on_project_board_copy_excludes_pipe_gutter() {
             "hi",
             Some(notes.to_string()),
             project(THIS_REPO),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create");
     domain.set_status(id, HumanStatus::Started).expect("start");
@@ -2606,9 +2593,8 @@ fn task_page_scrollbar_click_jumps_notes_without_changing_selection() {
             "Page scrollbar",
             Some(notes),
             project(THIS_REPO),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create");
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
@@ -2741,9 +2727,8 @@ fn task_page_autoscroll_tick_moves_notes() {
             "Page autoscroll",
             Some(notes),
             project(THIS_REPO),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create");
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));

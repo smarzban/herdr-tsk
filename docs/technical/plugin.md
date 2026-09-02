@@ -12,7 +12,7 @@ find_board_pane_from_stdin, find_board_pane_id}`.
 
 Manifest (`herdr-plugin.toml`):
 
-- `id` / `name`: `herdr-tsk`, version `0.3.0` (same as crate `tsk-tui`)
+- `id` / `name`: `herdr-tsk`, version `0.4.0` (same as crate `tsk-tui`)
 - `min_herdr_version`: `0.7.5`
 - platforms: linux, macos
 - build: `cargo build --release`

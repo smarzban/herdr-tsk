@@ -52,7 +52,7 @@ impl From<StoreError> for CaptureError {
 /// Create one task from a capture form submission.
 ///
 /// - Scope: `scope_override` when set, else `snapshot.default_scope`.
-/// - Capsule, agent meta, and provenance origin come from the snapshot.
+/// - Provenance origin comes from the snapshot.
 /// - `thread`, when supplied, is already normalized and enters the same create mutation.
 /// - Empty/whitespace title is rejected by the domain; no task is created.
 /// - When `store` is `Some`, persists domain state after a successful create.
@@ -66,15 +66,7 @@ pub fn capture_save(
     thread: Option<String>,
 ) -> Result<TaskId, CaptureError> {
     let scope = scope_override.unwrap_or_else(|| snapshot.default_scope.clone());
-    let id = state.create_with_thread(
-        title,
-        notes,
-        scope,
-        snapshot.capsule.clone(),
-        snapshot.agent_meta.clone(),
-        snapshot.provenance,
-        thread,
-    )?;
+    let id = state.create(title, notes, scope, snapshot.provenance, thread)?;
     if let Some(store) = store {
         // Merge with any concurrent writer before persist (board + capture).
         store.reload_merge_save(state)?;
@@ -86,7 +78,7 @@ pub fn capture_save(
 mod tests {
     use super::*;
     use crate::context::{build_snapshot, RawHostContext};
-    use crate::domain::{AgentMeta, ContextCapsule, HumanStatus, ProvenanceOrigin, TaskEventKind};
+    use crate::domain::{HumanStatus, ProvenanceOrigin, TaskEventKind};
     use std::env;
     use std::fs;
     use std::path::PathBuf;
@@ -120,16 +112,6 @@ mod tests {
             this_repo: Some(PathBuf::from(path)),
             title_prefill: None,
             provenance: ProvenanceOrigin::Capture,
-            capsule: Some(ContextCapsule {
-                repo_path: Some(path.to_string()),
-                cwd: Some(format!("{path}/src")),
-                ..ContextCapsule::default()
-            }),
-            agent_meta: Some(AgentMeta {
-                agent_id: Some("agent-1".into()),
-                pane_id: Some("w0:p1".into()),
-                agent_session: None,
-            }),
         }
     }
 
@@ -139,11 +121,6 @@ mod tests {
             this_repo: None,
             title_prefill: None,
             provenance: ProvenanceOrigin::Capture,
-            capsule: Some(ContextCapsule {
-                cwd: Some("/tmp/nongit".into()),
-                ..ContextCapsule::default()
-            }),
-            agent_meta: None,
         }
     }
 
@@ -164,14 +141,6 @@ mod tests {
         assert_eq!(task.title, "Ship capture");
         assert_eq!(task.status, HumanStatus::Ready);
         assert_eq!(task.provenance, ProvenanceOrigin::Capture);
-        assert_eq!(
-            task.capsule.as_ref().and_then(|c| c.repo_path.as_deref()),
-            Some("/repos/app")
-        );
-        assert_eq!(
-            task.agent_meta.as_ref().and_then(|m| m.agent_id.as_deref()),
-            Some("agent-1")
-        );
         assert_eq!(state.tasks().len(), 1);
     }
 
@@ -229,11 +198,6 @@ mod tests {
         let task = state.get(id).expect("task");
         assert_eq!(task.scope, TaskScope::Global);
         assert_eq!(task.notes.as_deref(), Some("notes"));
-        // Capsule still from snapshot even when scope overridden.
-        assert_eq!(
-            task.capsule.as_ref().and_then(|c| c.repo_path.as_deref()),
-            Some("/repos/app")
-        );
     }
 
     #[test]
@@ -286,12 +250,6 @@ mod tests {
             .expect("create");
         let task = state.get(id).expect("task");
         assert_eq!(task.provenance, ProvenanceOrigin::Selection);
-        assert_eq!(
-            task.capsule
-                .as_ref()
-                .and_then(|c| c.selected_text.as_deref()),
-            Some("from selection")
-        );
     }
 
     #[test]

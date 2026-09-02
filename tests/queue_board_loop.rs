@@ -296,9 +296,8 @@ fn threshold_crossings_without_task_verbs_leave_domain_unchanged() {
             "immutable through resize",
             Some("domain must not move".to_string()),
             TaskScope::Global,
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create task");
     let before = domain.get(id).expect("task").clone();

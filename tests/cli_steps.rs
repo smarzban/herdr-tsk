@@ -36,9 +36,8 @@ fn seed_task(dir: &std::path::Path, title: &str) -> Uuid {
             title,
             None,
             TaskScope::Global,
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("seed task");
     TaskStore::new(dir).save(&state).expect("seed store");
@@ -174,9 +173,8 @@ fn state_with_shared_prefix_steps() -> (DomainState, Uuid) {
             "prefix target",
             None,
             TaskScope::Global,
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("seed task");
     state.add_step(task, "shared one").expect("seed first step");
@@ -246,9 +244,8 @@ fn steps_toggle_empty_operand_refuses_without_mutation() {
             "empty operand target",
             None,
             TaskScope::Global,
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("seed task");
     state.add_step(task, "only step").expect("seed one step");
@@ -329,9 +326,8 @@ fn steps_on_soft_deleted_task_refuses_without_mutation() {
             "deleted target",
             None,
             TaskScope::Global,
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("seed task");
     state.soft_delete(task).expect("soft delete seed");

@@ -56,9 +56,8 @@ fn board_with_task(title: &str, status: HumanStatus) -> (DomainState, BoardModel
             title,
             None,
             project(THIS_REPO),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create");
     if status != HumanStatus::Ready {
@@ -270,9 +269,8 @@ fn z_toggles_done_drawer_membership_on_list() {
             "still open",
             None,
             project(THIS_REPO),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("open task");
     model.sync_from_domain(&domain);
@@ -614,46 +612,6 @@ fn palette_excludes_park_resume_link_dispatch() {
             );
         }
     }
-
-    // The case that actually exercises the exclusion: a selected task with an active
-    // dispatch attempt, which is exactly the state that used to add "Resume dispatch" /
-    // "Cleanup dispatch" to the catalog.
-    let mut domain = DomainState::new();
-    let id = domain
-        .create(
-            "has an attempt",
-            None,
-            project(THIS_REPO),
-            None,
-            None,
-            ProvenanceOrigin::Manual,
-        )
-        .expect("create");
-    domain
-        .start_dispatch_attempt(id, tsk_tui::domain::DispatchAttemptMode::Here, "grok")
-        .expect("start attempt");
-    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
-    assert!(
-        model.selected_id() == Some(id),
-        "fixture must select the task carrying the active attempt"
-    );
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::OpenCommandPalette,
-        None,
-    )
-    .expect("palette with active attempt");
-    for cmd in model.visible_commands() {
-        let lower = cmd.label.to_ascii_lowercase();
-        for word in ["park", "resume", "link", "dispatch", "cleanup"] {
-            assert!(
-                !lower.contains(word),
-                "palette label {:?} must not mention {word} even with an active attempt selected",
-                cmd.label
-            );
-        }
-    }
 }
 
 /// The palette window follows a wrapped selection, so Enter never targets an invisible row.
@@ -754,9 +712,8 @@ fn project_scope_chip_and_dropdown_filter_all_visible_sections_matching_ac5() {
             "motion app",
             None,
             project(THIS_REPO),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("motion app");
     domain
@@ -767,9 +724,8 @@ fn project_scope_chip_and_dropdown_filter_all_visible_sections_matching_ac5() {
             "motion other",
             None,
             project("/repos/other"),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("motion other");
     domain
@@ -780,9 +736,8 @@ fn project_scope_chip_and_dropdown_filter_all_visible_sections_matching_ac5() {
             "motion global",
             None,
             TaskScope::Global,
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("motion global");
     domain
@@ -793,9 +748,8 @@ fn project_scope_chip_and_dropdown_filter_all_visible_sections_matching_ac5() {
             "deck app",
             None,
             project(THIS_REPO),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("deck app");
     let deck_other = domain
@@ -803,9 +757,8 @@ fn project_scope_chip_and_dropdown_filter_all_visible_sections_matching_ac5() {
             "deck other",
             None,
             project("/repos/other"),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("deck other");
     let deck_global = domain
@@ -813,9 +766,8 @@ fn project_scope_chip_and_dropdown_filter_all_visible_sections_matching_ac5() {
             "deck global",
             None,
             TaskScope::Global,
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("deck global");
     let done_app = domain
@@ -823,9 +775,8 @@ fn project_scope_chip_and_dropdown_filter_all_visible_sections_matching_ac5() {
             "done app",
             None,
             project(THIS_REPO),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("done app");
     domain
@@ -836,9 +787,8 @@ fn project_scope_chip_and_dropdown_filter_all_visible_sections_matching_ac5() {
             "done other",
             None,
             project("/repos/other"),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("done other");
     domain
@@ -849,9 +799,8 @@ fn project_scope_chip_and_dropdown_filter_all_visible_sections_matching_ac5() {
             "done global",
             None,
             TaskScope::Global,
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("done global");
     domain
@@ -863,9 +812,8 @@ fn project_scope_chip_and_dropdown_filter_all_visible_sections_matching_ac5() {
             "done only",
             None,
             project("/repos/empty"),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("empty project done");
     domain
@@ -1066,9 +1014,8 @@ fn x_soft_deletes_and_status_line_names_task_with_undo_hint() {
             "delete me",
             None,
             project(THIS_REPO),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create");
     domain
@@ -1076,9 +1023,8 @@ fn x_soft_deletes_and_status_line_names_task_with_undo_hint() {
             "keep me",
             None,
             project(THIS_REPO),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("keep");
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
@@ -1119,9 +1065,8 @@ fn u_undoes_with_domain_coverage_and_stale_undo_refused_visibly() {
             "undo me",
             None,
             project(THIS_REPO),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create");
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
@@ -1175,9 +1120,8 @@ fn board_with_noted_task() -> (DomainState, BoardModel, uuid::Uuid) {
             "paged task",
             Some("line one\nline two".into()),
             project(THIS_REPO),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create");
     let model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
@@ -1355,9 +1299,8 @@ fn page_scroll_reaches_the_bottom_of_a_wrapping_note() {
             "wrapping note",
             Some(long),
             project(THIS_REPO),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create task");
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
@@ -1421,9 +1364,8 @@ fn closing_the_page_after_completing_its_task_reanchors_to_a_visible_row() {
             "page target",
             None,
             project(THIS_REPO),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create target");
     let other = domain
@@ -1431,9 +1373,8 @@ fn closing_the_page_after_completing_its_task_reanchors_to_a_visible_row() {
             "still open",
             None,
             project(THIS_REPO),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create other");
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
@@ -1617,9 +1558,8 @@ fn board_with_steps(
             title,
             notes.map(str::to_string),
             project(THIS_REPO),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create");
     for step in steps {
@@ -1660,9 +1600,8 @@ fn view_mode_add_starts_the_normal_inline_step_flow() {
             "View-only steps",
             None,
             project(THIS_REPO),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create");
     domain.add_step(id, "first step").expect("step");
@@ -1733,9 +1672,8 @@ fn view_tab_selection_wraps_without_starting_task_edit_and_ctrl_e_opens_inline_s
             "View tab selection",
             None,
             project(THIS_REPO),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create");
     domain.add_step(id, "first step").expect("first");
@@ -2587,9 +2525,8 @@ fn down_activates_the_cursor_when_content_overflows() {
             "Reactivation witness",
             Some(wrapping_notes()),
             project(THIS_REPO),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("task");
     domain.add_step(id, "alpha step").expect("first");
@@ -3093,8 +3030,6 @@ fn t_token_capture_threads_while_item_text_stays_literal() {
         this_repo: Some(PathBuf::from(THIS_REPO)),
         title_prefill: None,
         provenance: ProvenanceOrigin::Capture,
-        capsule: None,
-        agent_meta: None,
     };
 
     apply_intent(

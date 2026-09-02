@@ -19,7 +19,7 @@ The committed `.gitignore` already covers it.
 board for capture and human-status verbs. It ships as the herdr plugin
 `herdr-tsk`, and the built binary (`tsk`) also runs standalone. Attention,
 park/resume, linking, and dispatch are not in this tree; reference lives on
-`archive/dark-engine-pre-v1`. Crate (`tsk-tui`) and plugin are `0.3.0`.
+`archive/dark-engine-pre-v1`. Crate (`tsk-tui`) and plugin are `0.4.0`.
 
 A gitignored `HANDOFF.md` may hold this clone’s live working state.
 
@@ -46,8 +46,7 @@ For scriptable board work, use `tsk add` and `tsk list`; read
   Persisted task rows paint a dim `T<number>` prefix before the title, including task page
   and done drawer; clicking that prefix copies it. Peek relies on its parent row's prefix.
   Drafts without a number paint none.
-- Human status: `ready` · `started` · `blocked` · `review` · `done`. The store
-  still reads old `todo`/`doing` values.
+- Human status: `ready` · `started` · `blocked` · `review` · `done`.
 - Mutating verbs (`s` `d` `o` `b` `e` `n` `x` `u` `q`) need Ctrl. Bare
   letters do nothing. Nav, peek,
   `Enter`, `P`, `1`/`2`/`3`, `z`, `:`, `?`, `+`, and `Esc` stay bare.

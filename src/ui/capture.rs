@@ -1063,8 +1063,6 @@ mod tests {
             this_repo: Some(PathBuf::from(path)),
             title_prefill: None,
             provenance: ProvenanceOrigin::Capture,
-            capsule: None,
-            agent_meta: None,
         }
     }
 
@@ -1075,8 +1073,6 @@ mod tests {
             this_repo: None,
             title_prefill: None,
             provenance: ProvenanceOrigin::Capture,
-            capsule: None,
-            agent_meta: None,
         }
     }
 

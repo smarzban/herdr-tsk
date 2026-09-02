@@ -1,71 +1,51 @@
 # Store
 
 **Responsibility.** Durable `DomainState` as pretty-printed JSON in one directory.
-Atomic replace, exclusive inter-process lock, format-version gate, last-good backup.
-Does not interpret human status.
+It owns atomic replacement, an exclusive inter-process lock, a strict format guard,
+and a last-good backup. It does not interpret human status.
 
-**Public surface.** `TaskStore`, `TaskStateStore`, `StoreError`, `default_state_dir`.
-The trait exists so dispatch-era tests could inject save failures; production is
-`TaskStore`.
+**Public surface.** `TaskStore`, `StoreError`, and `default_state_dir`.
 
 ## How it works
 
-`TaskStore::new` takes the **directory**, not the file. Live document: `tsk.json`.
-Lock: `tsk.json.lock` (`OpenOptions` create/read/write, `File::lock()`, unlock on
-`Drop`). Backup: `tsk.json.1`.
+`TaskStore::new` takes a directory. The live document is `tsk.json`; the lock is
+`tsk.json.lock`; the previous successful document is `tsk.json.1`.
 
-`default_state_dir`: non-empty `TSK_STATE_DIR`, else non-empty `$HOME/.tsk`, else
-`.tsk-state`. Empty strings fall through. `HERDR_PLUGIN_STATE_DIR` is not read.
+`default_state_dir` chooses non-empty `TSK_STATE_DIR`, then non-empty `$HOME/.tsk`,
+then `.tsk-state`. It ignores `HERDR_PLUGIN_STATE_DIR`.
 
-**Load.** Lock, sweep orphan `.tsk.json.tmp.*`, missing file → `DomainState::new()`,
-else peek `format_version` (missing → 1), refuse if `found > STORE_FORMAT_VERSION`,
-then serde.
+**Load.** Under the lock, orphan temp files are swept. A missing document returns
+`DomainState::new()`. A present document must contain `format_version: 1`. Missing,
+older, and newer versions return `StoreError::UnsupportedFormat` without any write.
+Only then does serde deserialize the strict current schema.
 
-**Save.** Takes the exclusive lock, clones, `clear_merge_bases`,
-`stamp_format_version`, then writes while that lock is still held
-(`save_unlocked` is the helper that assumes the caller already locked). Prefer
-`reload_merge_save` when another process may have written since this snapshot
-was loaded (board + capture).
+**Save.** A state whose format is not 1 is refused. Under the lock, task numbers are
+allocated and merge bases are cleared before atomic replacement. `reload_merge_save` reloads
+disk under that same lock and accepts a local mutation only when its task revision
+base still matches disk. On a write-stage failure, the caller keeps merge bases for
+save recovery retry.
 
-**`reload_merge_save`.** Lock, load disk, `check_format_version`, `merge_for_save`
-(local mutations kept only if disk still has their merge base; siblings merged in;
-attempts that vanished on disk are dropped), write a clone with bases cleared, then
-clear bases on the caller's state. On any write-stage failure the caller's merge
-bases stay set so [save recovery](app.md#save-recovery) retries the same intent.
+`locked_transition` and `locked_transition_if_changed` hold load, transition, and
+optional save under one lock. CLI add and steps use the latter for idempotent work.
 
-**`locked_transition` / `locked_transition_if_changed`.** Load → closure → optional
-save under one lock. CLI add/steps use `if_changed` so an idempotent existing match
-does not rewrite the file.
-
-**Atomic write.** Unique temp `.tsk.json.tmp.{pid}.{nanos}` in the same directory
-(so rename is atomic on the same filesystem). Write, `sync_file`, rename over
-`tsk.json`, `sync_directory` (Linux/macOS; other OS: no-op). Failure unlinks the
-temp. Before replacing a *valid* live file, `retain_last_good` hard-links it to
-`tsk.json.1` (remove old backup first). A live file that fails JSON parse is
-replaced without touching the backup — a corrupt live document must not clobber
-last-good.
-
-`AtomicFilesystem` is a private trait so tests can fail create/write/sync/rename
-independently. Production is `StdFilesystem`.
+**Atomic write.** A unique `.tsk.json.tmp.{pid}.{nanos}` file is created in the same
+directory, written and synced, renamed over `tsk.json`, then the directory is synced
+on Linux and macOS. A valid live document is hard-linked to `tsk.json.1` before
+replacement. Corrupt JSON is replaced without changing an existing backup.
 
 ## Invariants
 
-[Invariants](invariants.md) §§12–16. Additional:
-
-- Sweep temps only under the exclusive lock (a concurrent writer's in-flight temp
-  must not be deleted).
-- Never fall back to `std::env::temp_dir()` for the state directory.
-- Peek format version before full serde so an unsupported newer document is a typed
-  error, not a confusing serde failure.
+- Format version is exactly 1, never upgraded automatically.
+- A refused document is never rewritten.
+- Temp sweeping runs only under the exclusive lock.
+- The state directory never falls back to a shared temporary path.
 
 ## Error paths
 
-`StoreError::Io`, `StoreError::Json`, `StoreError::UnsupportedFormat { found, supported }`.
-CLI maps store errors to exit 3. Board save maps them into `SaveRecovery`.
+`StoreError` is I/O, JSON, or unsupported format. CLI maps store errors to exit 3;
+board save maps them into save recovery.
 
 ## Extension points
 
-A format bump: increment `STORE_FORMAT_VERSION`, keep `LEGACY_STORE_FORMAT_VERSION`
-at 1, teach serde defaults/aliases for new fields, never rewrite a newer file. A
-second document (index, attachments) is a new filename beside `tsk.json`, not a
-silent new meaning for this one.
+A future incompatible schema must use a new format version and an explicit migration
+command or tool. Do not add automatic upgrades or read aliases to the runtime store.

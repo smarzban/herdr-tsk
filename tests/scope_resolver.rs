@@ -14,8 +14,6 @@ fn snapshot() -> InvocationSnapshot {
         this_repo: Some(PathBuf::from("/repos/tsk-board")),
         title_prefill: None,
         provenance: ProvenanceOrigin::Capture,
-        capsule: None,
-        agent_meta: None,
     }
 }
 
@@ -25,9 +23,8 @@ fn create_project(domain: &mut DomainState, path: &str) {
             "known project",
             None,
             TaskScope::Project { path: path.into() },
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create fixture project");
 }

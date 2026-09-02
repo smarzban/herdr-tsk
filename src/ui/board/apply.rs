@@ -909,8 +909,7 @@ fn apply_board_intent(
 
         BoardIntent::OpenProjectSelector => {
             // the project-scope chip opens this dropdown from any board surface.
-            // Modals that own their own decision (save failure or dispatch recovery) keep
-            // that decision rather than being dismissed by the chip.
+            // A save-failure modal owns its decision rather than being dismissed by the chip.
             if matches!(model.popup, BoardPopup::SaveRecovery) {
                 return Ok(IntentOutcome::None);
             }

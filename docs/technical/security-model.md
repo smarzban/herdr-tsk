@@ -8,7 +8,7 @@ what the process will execute, and what fails open vs closed.
 
 | Surface | Trust | Enforcement |
 | --- | --- | --- |
-| `tsk.json` on disk | Trusted as the user's own file, untrusted as *terminal content* | JSON parse; newer `format_version` refused; titles/notes escaped at paint |
+| `tsk.json` on disk | Trusted as the user's own file, untrusted as *terminal content* | JSON parse; non-1 `format_version` refused; titles/notes escaped at paint |
 | `walkthrough.json` | Same | Malformed or unreadable means not dismissed |
 | `HERDR_PLUGIN_CONTEXT_JSON` | Untrusted structured input from the host | serde; unknown keys ignored; missing/malformed → empty snapshot; no field invented |
 | herdr `pane list` JSON on stdin | Untrusted | Must parse; label must equal `tsk`; pane id must be flag-safe before it is passed to another CLI |
@@ -22,13 +22,12 @@ ignored so a host cannot silently point the plugin at a different board than the
 
 ## What is not trusted to change status
 
-Agent identity (`AgentMeta`), host observations (`ObservedStatus`), and dispatch-attempt
-phase are **not** authorities. Human verbs (and the CLI commands that wrap the same
-domain functions) are. Auto-complete from agent status is forbidden.
+Human verbs, and CLI commands that wrap the same domain functions, are the only status
+authority. Auto-complete from external host state is forbidden.
 
 ## Fail closed
 
-- Newer store `format_version` than this binary: refuse load/save
+- Missing or non-1 store `format_version`: refuse load/save
   (`StoreError::UnsupportedFormat`). Do not rewrite the file.
 - Concurrent same-task mutation: `merge_for_save` returns a typed failure; disk is not
   overwritten.

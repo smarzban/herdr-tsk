@@ -6,7 +6,7 @@ surface inventory. This tree is the internals.
 The **user guide** is the Starlight site (`site/src/content/docs/docs/`), published at
 https://tsk-gules.vercel.app/docs/. The repo README is the front door and points there.
 
-Crate: `tsk-tui` 0.3.0. Binary: `tsk`. Plugin: `herdr-tsk`.
+Crate: `tsk-tui` 0.4.0. Binary: `tsk`. Plugin: `herdr-tsk`.
 
 ## Start here by need
 
@@ -25,7 +25,7 @@ Crate: `tsk-tui` 0.3.0. Binary: `tsk`. Plugin: `herdr-tsk`.
 
 | Subsystem | Responsibility |
 | --- | --- |
-| [Domain](domain.md) | Task lifecycle, human status, steps, threads, undo, dispatch-attempt journal |
+| [Domain](domain.md) | Task lifecycle, human status, steps, threads, and undo |
 | [Store](store.md) | One JSON document, exclusive lock, revision merge, atomic replace |
 | [Config](config.md) | `walkthrough.json` dismissal record and config-directory resolution |
 | [Context and scope](context.md) | Host JSON → invocation snapshot; project path / desk resolution |

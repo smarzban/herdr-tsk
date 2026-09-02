@@ -13,11 +13,9 @@ This crate (`tsk-tui`) is the v1 board: capture, human-status verbs, steps, thre
 headless `add` / `list` / `steps`. It ships as the herdr plugin `herdr-tsk` and as a
 standalone `tsk` binary against `~/.tsk`.
 
-Park, resume, attention, linking, and dispatch *execution* are not in this tree. Their
-older engines live only on `archive/dark-engine-pre-v1`. Domain types for capsules,
-agent meta, observed status, and dispatch attempts remain on the store document so older
-files still load. The board does not apply observations to human status and does not
-start host dispatch.
+Park, resume, attention, linking, and dispatch execution are not in this tree. Their
+older engines live only on `archive/dark-engine-pre-v1`; their persistence and domain
+types are not part of the current schema.
 
 ## Components
 
@@ -81,7 +79,7 @@ domain + session; the query is a pure function of tasks; paint consumes both.
   loop persists.
 - `Tab` expands that draft onto the task page (Notes edit, because a draft has nothing to view).
 - herdr **Quick capture** launches the same binary with `TSK_MODE=capture` (`scripts/open-capture.sh`) into `AppMode::Capture`.
-- All three create through `DomainState::create` / `create_with_thread`. Empty titles never persist.
+- All three create through `DomainState::create`. Empty titles never persist.
 
 ### Headless add / list / steps
 
@@ -90,13 +88,13 @@ domain + session; the query is a pure function of tasks; paint consumes both.
 ## Constraints that shaped the design
 
 1. **One store everywhere.** herdr injects `HERDR_PLUGIN_STATE_DIR` / `HERDR_PLUGIN_CONFIG_DIR`. tsk ignores them. Pane, overlay, and CLI all read `TSK_STATE_DIR` else `~/.tsk`. Two boards would otherwise silently diverge.
-2. **Human status is truth.** Capsule, agent meta, and `last_observed` are retained data. Completing every step never completes the task.
+2. **Human status is truth.** Completing every step never completes the task.
 3. **Local, concurrent writers.** Board + capture overlay + `tsk add` share one JSON file. The lock plus per-task revision (not wall clock) is the concurrency model. Same-task concurrent edits refuse rather than last-write-win.
 4. **Terminal as a hostile display.** Task titles and notes are untrusted. C0/C1 never reach the emulator as controls (`ui::terminal_text`). Text wraps; it does not truncate (chrome ellipsis is a different budget).
 5. **Operable in a herdr split.** Standard layout at ≥78×24 (typical split width), compact below, no panic to 40×10. Sections are computed, never navigated.
 6. **Mono modifiers only.** Bold, dim, underline, reverse. No color theme module. Markdown on notes is a styled subset of those modifiers.
 7. **Mutating keys are chording.** Bare letters do nothing on the board so a focused pane cannot complete or delete work. Nav, peek, `Enter`, `P`, `1`/`2`/`3`, `z`, `:`, `?`, `+`, `Esc` stay bare.
-8. **v1 cuts fold of dispatch.** Dispatch-attempt types persist for serde compatibility; the board has no host attention poll, park/resume, linking, or dispatch recovery.
+8. **v1 cuts dispatch.** The board has no host attention poll, park/resume, linking, or dispatch recovery.
 
 ## Alternatives considered
 
@@ -109,7 +107,7 @@ Recorded as ADRs; do not restate them here:
 Other standing rejections (from code comments and `AGENTS.md`, not a numbered ADR):
 
 - SQLite for search: in-memory filter over `DomainState` until open/save is felt-slow or the file is regularly above ~10 MB.
-- Auto-complete from agent observation: forbidden.
+- Auto-complete from external host state: forbidden.
 - Renaming `TaskScope::Global` or the on-disk `"global"` to `"desk"`: display-only. A rename is a store migration.
 - Shared `/tmp` fallback for a missing `HOME`: refused; last resort is a *relative* `.tsk-state` / `.tsk-config` in the process cwd.
 

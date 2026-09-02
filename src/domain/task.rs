@@ -1,7 +1,6 @@
 //! Task model and lifecycle commands.
 //!
-//! Capsule and agent identity fields stay on [`Task`] for store serde compatibility.
-//! Human status remains the source of truth; observation fields are retained data only.
+//! Human status remains the source of truth.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::SystemTime;
@@ -9,20 +8,13 @@ use std::time::SystemTime;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::{
-    DispatchAttempt, DispatchAttemptError, DispatchAttemptMode, DispatchAttemptTransition,
-    ProvenanceOrigin, TaskEvent, TaskEventKind, UndoEntry,
-};
+use super::{ProvenanceOrigin, TaskEvent, TaskEventKind, UndoEntry};
 
 /// Human-facing task progress. Source of truth for board state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HumanStatus {
-    /// Previously serialized as `todo`. Old stores still load via the alias.
-    #[serde(alias = "todo")]
     Ready,
-    /// Previously serialized as `doing`. Old stores still load via the alias.
-    #[serde(alias = "doing")]
     Started,
     Blocked,
     Review,
@@ -37,81 +29,6 @@ pub enum TaskScope {
     Project { path: String },
 }
 
-/// Frozen capture context. Missing fields stay `None`; never invent values.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub struct ContextCapsule {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub repo_path: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub worktree_path: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub branch: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cwd: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub source_pane_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub selected_text: Option<String>,
-    /// Optional file path for a file/line reference.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub file: Option<String>,
-    /// Optional 1-based line for a file/line reference.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub line: Option<u32>,
-}
-
-impl ContextCapsule {
-    /// True when every capsule field is absent.
-    pub fn is_empty(&self) -> bool {
-        self.repo_path.is_none()
-            && self.worktree_path.is_none()
-            && self.branch.is_none()
-            && self.cwd.is_none()
-            && self.source_pane_id.is_none()
-            && self.selected_text.is_none()
-            && self.file.is_none()
-            && self.line.is_none()
-    }
-}
-
-/// Exact stable identity reported by the host for one agent session.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AgentSessionIdentity {
-    pub source: String,
-    pub value: String,
-}
-
-/// Agent/session/pane identity only. No lifecycle field; status lives on [`ObservedStatus`].
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub struct AgentMeta {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub agent_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pane_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub agent_session: Option<AgentSessionIdentity>,
-}
-
-impl AgentMeta {
-    /// True when no agent, pane, or stable session identity is present.
-    pub fn is_empty(&self) -> bool {
-        self.agent_id.is_none() && self.pane_id.is_none() && self.agent_session.is_none()
-    }
-}
-
-/// Host-observed agent lifecycle retained for store serde compatibility.
-///
-/// V1 board code does not apply observations to human status.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ObservedStatus {
-    Working,
-    Blocked,
-    Idle,
-    Done,
-    Unknown,
-}
-
 /// One step in a task's flat, ordered steps collection.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Step {
@@ -124,37 +41,30 @@ pub struct Step {
 
 /// One unit of intended work.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Task {
     pub id: Uuid,
     /// Store-global human task number. Absent until the locked persistence boundary assigns it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub number: Option<u64>,
-    /// Opaque semantic revision used to guard concurrent operations. Legacy tasks
-    /// decode without one and receive a revision on their next mutation.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub revision: Option<Uuid>,
+    /// Opaque semantic revision used to guard concurrent operations.
+    pub revision: Uuid,
     /// Revision observed before an in-memory mutation. It is transient save intent carried to
     /// the locked store merge, never retained after a successful durable write.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub merge_base_revision: Option<Uuid>,
     pub title: String,
     pub notes: Option<String>,
-    /// Optional normalized thread name. Missing fields in older stores decode as unthreaded.
+    /// Optional normalized thread name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread: Option<String>,
     pub status: HumanStatus,
     pub scope: TaskScope,
-    pub capsule: Option<ContextCapsule>,
-    pub agent_meta: Option<AgentMeta>,
-    /// Last host observation retained for store serde. Absent when never observed.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub last_observed: Option<ObservedStatus>,
     pub provenance: ProvenanceOrigin,
     /// Append-only domain event history.
     pub history: Vec<TaskEvent>,
-    /// Flat, ordered steps. Absent on pre-steps stores; never reordered by a verb.
-    /// Old stores name this field `checklist`; new writes use `steps` only.
-    #[serde(default, alias = "checklist", skip_serializing_if = "Vec::is_empty")]
+    /// Flat, ordered steps; never reordered by a verb.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub steps: Vec<Step>,
     pub soft_deleted: bool,
     #[serde(with = "super::time_serde")]
@@ -174,16 +84,10 @@ pub enum DomainError {
     SoftDeleted(Uuid),
     /// Undo target changed after the undoable action was recorded.
     StaleUndo(Uuid),
-    /// No active dispatch attempt with this id exists in the domain state.
-    UnknownDispatchAttempt(Uuid),
     /// Step text was empty or whitespace-only after trim.
     EmptyStepText,
     /// No step with this id exists on the task.
     UnknownStep(Uuid),
-    /// A task already owns an active dispatch attempt and cannot start another.
-    ActiveDispatchAttempt { task_id: Uuid, attempt_id: Uuid },
-    /// Dispatch-attempt transition was refused without changing the journal.
-    DispatchAttempt(DispatchAttemptError),
 }
 
 impl std::fmt::Display for DomainError {
@@ -195,72 +99,36 @@ impl std::fmt::Display for DomainError {
             DomainError::StaleUndo(id) => {
                 write!(f, "task {id} changed since the undoable action")
             }
-            DomainError::UnknownDispatchAttempt(id) => write!(f, "unknown dispatch attempt {id}"),
             DomainError::EmptyStepText => write!(f, "step text must be non-empty after trim"),
             DomainError::UnknownStep(id) => write!(f, "unknown step id {id}"),
-            DomainError::ActiveDispatchAttempt {
-                task_id,
-                attempt_id,
-            } => write!(
-                f,
-                "task {task_id} already has active dispatch attempt {attempt_id}"
-            ),
-            DomainError::DispatchAttempt(error) => error.fmt(f),
         }
     }
 }
 
 impl std::error::Error for DomainError {}
 
-impl From<DispatchAttemptError> for DomainError {
-    fn from(value: DispatchAttemptError) -> Self {
-        Self::DispatchAttempt(value)
-    }
-}
-
-/// Sentinel carried only in memory to represent a legacy task's absent revision as a save base.
-/// UUID v4 revisions can never equal nil.
-const LEGACY_MERGE_BASE_REVISION: Uuid = Uuid::nil();
-
 fn record_mutation(task: &mut Task, kind: TaskEventKind) {
     let now = SystemTime::now();
-    task.merge_base_revision = Some(task.revision.unwrap_or(LEGACY_MERGE_BASE_REVISION));
-    task.revision = Some(Uuid::new_v4());
+    task.merge_base_revision = Some(task.revision);
+    task.revision = Uuid::new_v4();
     task.updated_at = now;
     task.history.push(TaskEvent { kind, at: now });
 }
 
 /// Document version written by this binary.
-/// Bump when an older writer cannot round-trip a newly persisted field.
-pub const STORE_FORMAT_VERSION: u32 = 2;
-
-/// Version of documents written before `format_version` existed.
-/// Stay on 1 when [`STORE_FORMAT_VERSION`] is bumped.
-pub const LEGACY_STORE_FORMAT_VERSION: u32 = 1;
-
-fn default_store_format_version() -> u32 {
-    LEGACY_STORE_FORMAT_VERSION
-}
-
-fn default_next_task_number() -> u64 {
-    1
-}
+pub const STORE_FORMAT_VERSION: u32 = 1;
 
 /// In-memory task set. Persistence is Task Store.
 ///
 /// SHORTCUT: Vec scan by id; fine until store loads many tasks.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DomainState {
-    /// Store document version. Missing on older files loads as [`LEGACY_STORE_FORMAT_VERSION`].
-    #[serde(default = "default_store_format_version")]
+    /// Store document version.
     format_version: u32,
     /// The next store-global task number, allocated only while holding the store lock.
-    #[serde(default = "default_next_task_number")]
     pub next_task_number: u64,
     tasks: Vec<Task>,
-    /// Active recovery records sharing the task store's lock and atomic replacement boundary.
-    #[serde(default)]
-    active_attempts: Vec<DispatchAttempt>,
     /// LIFO undo records for soft-delete and complete.
     undo_stack: Vec<UndoEntry>,
 }
@@ -277,18 +145,12 @@ impl DomainState {
             format_version: STORE_FORMAT_VERSION,
             next_task_number: 1,
             tasks: Vec::new(),
-            active_attempts: Vec::new(),
             undo_stack: Vec::new(),
         }
     }
 
     pub fn format_version(&self) -> u32 {
         self.format_version
-    }
-
-    /// Stamp this binary's format version before a durable write.
-    pub(crate) fn stamp_format_version(&mut self) {
-        self.format_version = STORE_FORMAT_VERSION;
     }
 
     /// Inspect the top undo entry without consuming it.
@@ -305,125 +167,20 @@ impl DomainState {
         &self.tasks
     }
 
-    /// Active durable dispatch attempts. Entries remain until a later explicit success or
-    /// fully-completed cleanup removes them.
-    pub fn active_attempts(&self) -> &[DispatchAttempt] {
-        &self.active_attempts
-    }
-
-    pub fn active_attempt(&self, id: Uuid) -> Option<&DispatchAttempt> {
-        self.active_attempts
-            .iter()
-            .find(|attempt| attempt.id() == id)
-    }
-
-    /// Active attempt for one task, if any. A task can own only one until completion
-    /// or full cleanup removes it.
-    pub fn active_attempt_for_task(&self, task_id: Uuid) -> Option<&DispatchAttempt> {
-        self.active_attempts
-            .iter()
-            .find(|attempt| attempt.task_id() == task_id)
-    }
-
-    /// Record an empty durable attempt before starting host dispatch work. This never
-    /// mutates the task's human status.
-    pub fn start_dispatch_attempt(
-        &mut self,
-        task_id: Uuid,
-        mode: DispatchAttemptMode,
-        kind: impl Into<String>,
-    ) -> Result<Uuid, DomainError> {
-        let task = self.get(task_id).ok_or(DomainError::UnknownId(task_id))?;
-        if task.soft_deleted {
-            return Err(DomainError::SoftDeleted(task_id));
-        }
-        if let Some(existing) = self.active_attempt_for_task(task_id) {
-            return Err(DomainError::ActiveDispatchAttempt {
-                task_id,
-                attempt_id: existing.id(),
-            });
-        }
-        let attempt = DispatchAttempt::start(task_id, mode, kind);
-        let id = attempt.id();
-        self.active_attempts.push(attempt);
-        Ok(id)
-    }
-
-    /// Replace one attempt through its revision-guarded journal transition.
-    pub fn transition_dispatch_attempt(
-        &mut self,
-        attempt_id: Uuid,
-        expected_revision: Uuid,
-        transition: DispatchAttemptTransition,
-    ) -> Result<(), DomainError> {
-        let attempt = self
-            .active_attempts
-            .iter_mut()
-            .find(|attempt| attempt.id() == attempt_id)
-            .ok_or(DomainError::UnknownDispatchAttempt(attempt_id))?;
-        *attempt = attempt.transition(expected_revision, transition)?;
-        Ok(())
-    }
-
-    /// Remove an active attempt only when the caller still holds its current revision.
-    /// Completion and fully-cleaned removal are explicit higher-level operations.
-    pub fn remove_dispatch_attempt(
-        &mut self,
-        attempt_id: Uuid,
-        expected_revision: Uuid,
-    ) -> Result<(), DomainError> {
-        let index = self
-            .active_attempts
-            .iter()
-            .position(|attempt| attempt.id() == attempt_id)
-            .ok_or(DomainError::UnknownDispatchAttempt(attempt_id))?;
-        let current = self.active_attempts[index].revision();
-        if current != expected_revision {
-            return Err(DispatchAttemptError::StaleRevision {
-                expected: expected_revision,
-                current,
-            }
-            .into());
-        }
-        self.active_attempts.remove(index);
-        Ok(())
-    }
-
     /// Lookup by id. Soft-deleted tasks remain findable.
     pub fn get(&self, id: Uuid) -> Option<&Task> {
         self.tasks.iter().find(|t| t.id == id)
     }
 
-    /// Create a task with human status `ready` and the given provenance origin.
+    /// Create a task with human status `ready`, provenance, and an optional normalized thread.
     ///
-    /// Rejects empty/whitespace-only titles. On success, stores exactly one
-    /// task with the trimmed title and optional notes, and appends a
-    /// `Created` event.
-    ///
-    /// `agent_meta` is stored as-is. It does not affect `status`.
+    /// Rejects empty/whitespace-only titles. On success, stores exactly one task with the
+    /// trimmed title and optional notes, and appends a `Created` event.
     pub fn create(
         &mut self,
         title: impl AsRef<str>,
         notes: Option<String>,
         scope: TaskScope,
-        capsule: Option<ContextCapsule>,
-        agent_meta: Option<AgentMeta>,
-        provenance: ProvenanceOrigin,
-    ) -> Result<Uuid, DomainError> {
-        self.create_with_thread(title, notes, scope, capsule, agent_meta, provenance, None)
-    }
-
-    /// Create a task with an already-normalized optional thread in its initial mutation.
-    ///
-    /// [`Self::create`] remains the unthreaded compatibility path for existing callers.
-    #[allow(clippy::too_many_arguments)] // Mirrors the stable `create` field list plus thread.
-    pub fn create_with_thread(
-        &mut self,
-        title: impl AsRef<str>,
-        notes: Option<String>,
-        scope: TaskScope,
-        capsule: Option<ContextCapsule>,
-        agent_meta: Option<AgentMeta>,
         provenance: ProvenanceOrigin,
         thread: Option<String>,
     ) -> Result<Uuid, DomainError> {
@@ -434,21 +191,16 @@ impl DomainState {
 
         let now = SystemTime::now();
         let id = Uuid::new_v4();
-        // Soft link: store non-empty meta only (missing omitted, not invented).
-        let agent_meta = agent_meta.filter(|m| !m.is_empty());
         self.tasks.push(Task {
             id,
             number: None,
-            revision: Some(Uuid::new_v4()),
+            revision: Uuid::new_v4(),
             merge_base_revision: None,
             title: title.to_string(),
             notes,
             thread,
             status: HumanStatus::Ready,
             scope,
-            capsule,
-            agent_meta,
-            last_observed: None,
             provenance,
             history: vec![TaskEvent {
                 kind: TaskEventKind::Created,
@@ -470,7 +222,7 @@ impl DomainState {
     /// Complete: set human status to `done`. Pushes an undo entry.
     pub fn complete(&mut self, id: Uuid) -> Result<(), DomainError> {
         self.apply_status(id, HumanStatus::Done, TaskEventKind::Completed)?;
-        let expected_revision = self.get(id).and_then(|task| task.revision);
+        let expected_revision = self.get(id).expect("completed task exists").revision;
         self.undo_stack.push(UndoEntry::Complete {
             id,
             expected_revision,
@@ -718,7 +470,6 @@ impl DomainState {
             }
         }
         self.merge_undo_entries(other);
-        self.merge_attempts_from_disk(other);
     }
 
     /// Merge one local save intent under the store lock without using wall-clock ordering.
@@ -734,10 +485,7 @@ impl DomainState {
             if local.revision == incoming.revision || local.merge_base_revision.is_none() {
                 // This local copy did not mutate the task, so fresh disk state wins.
                 *local = incoming.clone();
-            } else if local.merge_base_revision == incoming.revision
-                || (local.merge_base_revision == Some(LEGACY_MERGE_BASE_REVISION)
-                    && incoming.revision.is_none())
-            {
+            } else if local.merge_base_revision == Some(incoming.revision) {
                 // The disk still holds exactly the version this local mutation was based on.
             } else {
                 return Err(format!("task {} changed during save", local.id));
@@ -745,7 +493,6 @@ impl DomainState {
         }
         self.next_task_number = self.next_task_number.max(disk.next_task_number);
         self.merge_undo_entries(disk);
-        self.merge_attempts_for_save(disk);
         Ok(())
     }
 
@@ -798,31 +545,6 @@ impl DomainState {
             }
         }
     }
-
-    /// Disk owns dispatch-attempt lifecycle under the store lock. Unlike tasks, attempts are
-    /// physically removed on completion or cleanup, so a stale board copy must not recreate one
-    /// that no longer exists on disk.
-    fn merge_attempts_for_save(&mut self, other: &DomainState) {
-        self.active_attempts
-            .retain(|local| other.active_attempt(local.id()).is_some());
-        self.merge_attempts_from_disk(other);
-    }
-
-    fn merge_attempts_from_disk(&mut self, other: &DomainState) {
-        for incoming in &other.active_attempts {
-            match self
-                .active_attempts
-                .iter_mut()
-                .find(|attempt| attempt.id() == incoming.id())
-            {
-                Some(existing) if existing.revision() != incoming.revision() => {
-                    *existing = incoming.clone();
-                }
-                Some(_) => {}
-                None => self.active_attempts.push(incoming.clone()),
-            }
-        }
-    }
 }
 
 #[cfg(test)]
@@ -835,56 +557,10 @@ mod tests {
                 "Fix flake",
                 None,
                 TaskScope::Global,
-                None,
-                None,
                 ProvenanceOrigin::Manual,
+                None,
             )
             .expect("valid title creates a task")
-    }
-
-    #[test]
-    fn merge_prefers_higher_attempt_revision_when_timestamps_are_equal() {
-        let task_id = Uuid::new_v4();
-        let base = DispatchAttempt::start(task_id, DispatchAttemptMode::Here, "grok");
-        let existing = base
-            .transition(
-                base.revision(),
-                DispatchAttemptTransition::Fail {
-                    message: "older transition".into(),
-                },
-            )
-            .expect("first transition");
-        let incoming = existing
-            .transition(existing.revision(), DispatchAttemptTransition::Resume)
-            .expect("newer transition");
-        let equal_timestamp = serde_json::json!([1_700_000_000_u64, 0_u32]);
-        let with_timestamp = |attempt: DispatchAttempt| {
-            let mut json = serde_json::to_value(attempt).expect("serialize attempt");
-            json["updated_at"] = equal_timestamp.clone();
-            serde_json::from_value(json).expect("deserialize attempt")
-        };
-        let existing = with_timestamp(existing);
-        let incoming = with_timestamp(incoming);
-
-        let mut local = DomainState::new();
-        local.active_attempts.push(existing);
-        let mut disk = DomainState::new();
-        disk.active_attempts.push(incoming.clone());
-
-        local.merge_tasks_from_disk(&disk);
-
-        assert_eq!(local.active_attempts(), &[incoming]);
-    }
-
-    #[test]
-    fn missing_format_version_loads_as_legacy() {
-        let state: DomainState = serde_json::from_value(serde_json::json!({
-            "tasks": [],
-            "undo_stack": []
-        }))
-        .expect("legacy document");
-        assert_eq!(state.format_version(), LEGACY_STORE_FORMAT_VERSION);
-        assert_eq!(state.format_version(), 1);
     }
 
     #[test]
@@ -895,9 +571,8 @@ mod tests {
                 "   \t\n  ",
                 None,
                 TaskScope::Global,
-                None,
-                None,
                 ProvenanceOrigin::Manual,
+                None,
             )
             .expect_err("whitespace-only title must fail");
         assert_eq!(err, DomainError::EmptyTitle);
@@ -926,9 +601,8 @@ mod tests {
                 "Fix flake",
                 Some("flaky under load".into()),
                 TaskScope::Global,
-                None,
-                None,
                 ProvenanceOrigin::Manual,
+                None,
             )
             .expect("valid title creates a task");
         assert_eq!(state.tasks()[0].notes.as_deref(), Some("flaky under load"));
@@ -942,9 +616,8 @@ mod tests {
                 "From capture",
                 None,
                 TaskScope::Global,
-                None,
-                None,
                 ProvenanceOrigin::Capture,
+                None,
             )
             .expect("valid title creates a task");
         assert_eq!(
@@ -961,9 +634,8 @@ mod tests {
                 "From selection",
                 None,
                 TaskScope::Global,
-                None,
-                None,
                 ProvenanceOrigin::Selection,
+                None,
             )
             .expect("valid title creates a task");
         assert_eq!(
@@ -1030,10 +702,10 @@ mod tests {
     fn every_semantic_mutation_refreshes_the_opaque_revision() {
         let mut state = DomainState::new();
         let id = create_sample(&mut state);
-        let mut previous = state.get(id).expect("task").revision.expect("revision");
+        let mut previous = state.get(id).expect("task").revision;
 
         let mut assert_refreshed = |state: &DomainState| {
-            let current = state.get(id).expect("task").revision.expect("revision");
+            let current = state.get(id).expect("task").revision;
             assert_ne!(current, previous);
             previous = current;
         };
@@ -1164,7 +836,7 @@ mod tests {
         assert_eq!(task.title, "Edited title");
         assert_eq!(task.steps[0].text, "first revised");
         assert_eq!(task.steps[1].text, "second revised");
-        assert_eq!(task.merge_base_revision, before.revision);
+        assert_eq!(task.merge_base_revision, Some(before.revision));
         assert_ne!(task.revision, before.revision);
         assert_eq!(
             task.history
@@ -1280,12 +952,12 @@ mod tests {
     fn steps_mutations_journal_events_and_bump_revision() {
         let mut state = DomainState::new();
         let id = create_sample(&mut state);
-        let mut previous_revision = state.get(id).expect("task").revision.expect("revision");
+        let mut previous_revision = state.get(id).expect("task").revision;
         let mut previous_len = state.get(id).expect("task").history.len();
 
         let mut assert_journaled = |state: &DomainState, kind: TaskEventKind| {
             let task = state.get(id).expect("task exists");
-            let revision = task.revision.expect("revision");
+            let revision = task.revision;
             assert_ne!(revision, previous_revision, "revision must change");
             previous_revision = revision;
             assert_eq!(
@@ -1422,9 +1094,8 @@ mod tests {
                         "first",
                         None,
                         TaskScope::Global,
-                        None,
-                        None,
                         ProvenanceOrigin::Manual,
+                        None,
                     )
                     .map_err(|error| error.to_string())
             })
@@ -1436,9 +1107,8 @@ mod tests {
                         "second",
                         None,
                         TaskScope::Global,
-                        None,
-                        None,
                         ProvenanceOrigin::Manual,
+                        None,
                     )
                     .map_err(|error| error.to_string())
             })
@@ -1486,22 +1156,70 @@ mod tests {
     }
 
     #[test]
-    fn ready_and_started_load_legacy_todo_and_doing_and_write_new_names() {
-        assert_eq!(
-            serde_json::from_str::<HumanStatus>("\"todo\"").expect("todo"),
-            HumanStatus::Ready
-        );
-        assert_eq!(
-            serde_json::from_str::<HumanStatus>("\"doing\"").expect("doing"),
-            HumanStatus::Started
-        );
-        assert_eq!(
-            serde_json::to_string(&HumanStatus::Ready).expect("ready"),
-            "\"ready\""
-        );
-        assert_eq!(
-            serde_json::to_string(&HumanStatus::Started).expect("started"),
-            "\"started\""
-        );
+    fn removed_status_and_step_wire_names_are_rejected() {
+        assert!(serde_json::from_str::<HumanStatus>("\"todo\"").is_err());
+        assert!(serde_json::from_str::<HumanStatus>("\"doing\"").is_err());
+        assert!(serde_json::from_str::<TaskEventKind>("\"checklist_item_added\"").is_err());
+
+        let mut state = DomainState::new();
+        let id = create_sample(&mut state);
+        let mut document = serde_json::to_value(&state).expect("serialize current task");
+        document["tasks"][0]["checklist"] = serde_json::json!([]);
+        let error = serde_json::from_value::<DomainState>(document)
+            .expect_err("old checklist field must be rejected");
+        assert!(error.to_string().contains("checklist"));
+        assert_eq!(state.get(id).expect("task").steps, Vec::<Step>::new());
+    }
+
+    #[test]
+    fn current_schema_requires_counter_task_revision_and_undo_revision() {
+        let mut document = serde_json::to_value(DomainState::new()).expect("serialize state");
+        document
+            .as_object_mut()
+            .expect("state object")
+            .remove("next_task_number");
+        assert!(serde_json::from_value::<DomainState>(document).is_err());
+
+        let mut state = DomainState::new();
+        let id = create_sample(&mut state);
+        let mut document = serde_json::to_value(&state).expect("serialize task");
+        document["tasks"][0]
+            .as_object_mut()
+            .expect("task object")
+            .remove("revision");
+        assert!(serde_json::from_value::<DomainState>(document).is_err());
+
+        state.complete(id).expect("complete");
+        let mut document = serde_json::to_value(state).expect("serialize undo");
+        let variant = document["undo_stack"][0]
+            .as_object_mut()
+            .expect("undo variant")
+            .values_mut()
+            .next()
+            .expect("variant payload")
+            .as_object_mut()
+            .expect("undo payload");
+        variant.remove("expected_revision");
+        assert!(serde_json::from_value::<DomainState>(document).is_err());
+    }
+
+    #[test]
+    fn removed_dark_engine_fields_are_rejected() {
+        let mut state = DomainState::new();
+        create_sample(&mut state);
+        let document = serde_json::to_value(state).expect("serialize current task");
+
+        for field in ["capsule", "agent_meta", "last_observed"] {
+            let mut with_removed_field = document.clone();
+            with_removed_field["tasks"][0][field] = serde_json::Value::Null;
+            assert!(
+                serde_json::from_value::<DomainState>(with_removed_field).is_err(),
+                "removed task field {field} must be rejected"
+            );
+        }
+
+        let mut with_attempts = document;
+        with_attempts["active_attempts"] = serde_json::json!([]);
+        assert!(serde_json::from_value::<DomainState>(with_attempts).is_err());
     }
 }

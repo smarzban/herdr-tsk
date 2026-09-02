@@ -2152,7 +2152,7 @@ mod tests {
 
     fn create(domain: &mut DomainState, title: &str, scope: TaskScope) -> Uuid {
         domain
-            .create(title, None, scope, None, None, ProvenanceOrigin::Manual)
+            .create(title, None, scope, ProvenanceOrigin::Manual, None)
             .expect("create")
     }
 

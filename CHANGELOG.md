@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.4.0
+
 The landing page and docs live in `site/` again (Astro + Starlight, moved back
 from `smarzban/tsk-site`). They are not part of the `tsk` binary. Site CI is
 `npm ci && npm run build`; Vercel Root Directory is `site`.
@@ -32,11 +34,9 @@ under the tabs with a one-row gap once it would scroll off, and the next header
 replaces it. The task page body scrollbar uses the same paint helper, including
 gutter click and thumb drag.
 
-Removed dark engines from the live tree: attention / NEEDS YOU poll, park/resume,
-dispatch/worktree recovery UI, and agent-link board plumbing. Store fields that
-old documents may still carry (`capsule`, `agent_meta`, `last_observed`,
-`active_attempts`, related event kinds) keep loading. Local reference only:
-`archive/dark-engine-pre-v1`.
+Pre-v0.4 store cleanup: `tsk.json` is now strict `format_version: 1` schema.
+Missing or non-1 formats refuse without rewrite; legacy status, checklist, revision,
+undo, dark-engine, and host-metadata compatibility shapes are no longer loaded.
 
 Modal overlays: `?` help, `:` command palette, and `P` project scope now open
 as a shared, centered mono card (dim box-drawing border on all four sides, bold
@@ -65,10 +65,10 @@ The projectless scope is now **desk**: board header, `tsk list` labels, and the 
 `--desk` flag. Stored scope values are unchanged,
 so no data migration is needed.
 
-Store hardening: `tsk.json` carries `format_version` (currently 1) and a
-newer document is refused rather than rewritten; each replace keeps the previous
-file as `tsk.json.1`; leftover `.tsk.json.tmp.*` files are swept under the
-lock; the exclusive lock uses `std::fs::File::lock` instead of `fs2`.
+Store hardening: `tsk.json` carries `format_version` (currently 1), and every
+other format is refused rather than rewritten; each replace keeps the previous file
+as `tsk.json.1`; leftover `.tsk.json.tmp.*` files are swept under the lock; the
+exclusive lock uses `std::fs::File::lock` instead of `fs2`.
 
 Rebrand to **tsk** ("a task board for your terminal"). The crate is now
 `tsk-tui` building the `tsk` binary. The store unifies at `~/.tsk` (`tsk.json`

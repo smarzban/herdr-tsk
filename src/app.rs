@@ -1478,8 +1478,8 @@ fn handle_board_intent(
         refresh_before_mutation(&intent, &baseline, domain, model);
     }
 
-    // OpenCapture needs the invocation snapshot `load_board` seeded the board
-    // with (scope/capsule/provenance): the reducer stores it on `model.capture_snapshot` at
+    // OpenCapture needs the invocation snapshot `load_board` seeded the board with
+    // scope and provenance: the reducer stores it on `model.capture_snapshot` at
     // open and reads it back at ConfirmEdit, so a `None` here is what silently turned board
     // `a` into a no-op save that still reported success.
     let loaded_snapshot;
@@ -1649,9 +1649,8 @@ mod idle_store_revalidation_tests {
                 "Quick capture from another pane",
                 None,
                 project_scope(),
-                None,
-                None,
                 ProvenanceOrigin::Capture,
+                None,
             )
             .unwrap();
         writer_store.save(&writer_domain).unwrap();
@@ -1741,9 +1740,8 @@ mod idle_store_revalidation_tests {
                 "Quick capture during save recovery",
                 None,
                 project_scope(),
-                None,
-                None,
                 ProvenanceOrigin::Capture,
+                None,
             )
             .unwrap();
         writer_store.save(&writer_domain).unwrap();
@@ -1816,9 +1814,8 @@ mod idle_store_revalidation_tests {
                 "Recovered after a transient load failure",
                 None,
                 project_scope(),
-                None,
-                None,
                 ProvenanceOrigin::Capture,
+                None,
             )
             .unwrap();
         store.save(&repaired).unwrap();
@@ -1854,9 +1851,8 @@ mod idle_store_revalidation_tests {
                 "Alpha",
                 None,
                 project_scope(),
-                None,
-                None,
                 ProvenanceOrigin::Manual,
+                None,
             )
             .unwrap();
         store.save(&domain).unwrap();
@@ -1879,9 +1875,8 @@ mod idle_store_revalidation_tests {
                 "Quick capture while a title edit is open",
                 None,
                 project_scope(),
-                None,
-                None,
                 ProvenanceOrigin::Capture,
+                None,
             )
             .unwrap();
         writer_store.save(&writer_domain).unwrap();
@@ -1958,9 +1953,8 @@ mod idle_store_revalidation_tests {
                 "Quick capture while a draft is open",
                 None,
                 project_scope(),
-                None,
-                None,
                 ProvenanceOrigin::Capture,
+                None,
             )
             .unwrap();
         writer_store.save(&writer_domain).unwrap();
@@ -2026,9 +2020,8 @@ mod idle_store_revalidation_tests {
                 "Quick capture, real idle path",
                 None,
                 project_scope(),
-                None,
-                None,
                 ProvenanceOrigin::Capture,
+                None,
             )
             .unwrap();
         writer_store.save(&writer_domain).unwrap();
@@ -2075,7 +2068,7 @@ mod tests {
     use crate::domain::{HumanStatus, ProvenanceOrigin, TaskScope};
     use crate::ui::board::CommandSurface;
     use crate::ui::capture::CaptureField;
-    use crate::ui::input::map_key;
+    use crate::ui::input::{map_key, CaptureIntent};
     use crate::ui::mouse::map_board_mouse;
     use crate::ui::queue::BoardTab;
 
@@ -2088,9 +2081,8 @@ mod tests {
                 title,
                 notes,
                 TaskScope::Global,
-                None,
-                None,
                 ProvenanceOrigin::Manual,
+                None,
             )
             .expect("create board fixture");
         let model = BoardModel::from_domain(&domain, None);
@@ -2344,9 +2336,8 @@ mod tests {
                     "Stay todo",
                     None,
                     TaskScope::Global,
-                    None,
-                    None,
                     ProvenanceOrigin::Capture,
+                    None,
                 )
                 .expect("create task");
             let mut model = BoardModel::from_domain(&domain, None);
@@ -2364,9 +2355,8 @@ mod tests {
                     "Stay todo",
                     None,
                     TaskScope::Global,
-                    None,
-                    None,
                     ProvenanceOrigin::Capture,
+                    None,
                 )
                 .expect("create task");
             let mut model = BoardModel::from_domain(&domain, None);
@@ -2384,9 +2374,8 @@ mod tests {
                     "Stay todo",
                     None,
                     TaskScope::Global,
-                    None,
-                    None,
                     ProvenanceOrigin::Capture,
+                    None,
                 )
                 .expect("create task");
             let mut model = BoardModel::from_domain(&domain, None);
@@ -2403,9 +2392,8 @@ mod tests {
                     "Stay todo",
                     None,
                     TaskScope::Global,
-                    None,
-                    None,
                     ProvenanceOrigin::Capture,
+                    None,
                 )
                 .expect("create task");
             let mut model = BoardModel::from_domain(&domain, None);
@@ -2446,9 +2434,8 @@ mod tests {
                 TaskScope::Project {
                     path: "/repos/app".into(),
                 },
-                None,
-                None,
                 ProvenanceOrigin::Manual,
+                None,
             )
             .expect("create task");
         let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/app")));
@@ -2557,9 +2544,8 @@ mod tests {
                 TaskScope::Project {
                     path: "/repos/alpha".into(),
                 },
-                None,
-                None,
                 ProvenanceOrigin::Manual,
+                None,
             )
             .expect("create task");
         domain
@@ -2569,9 +2555,8 @@ mod tests {
                 TaskScope::Project {
                     path: "/repos/beta".into(),
                 },
-                None,
-                None,
                 ProvenanceOrigin::Manual,
+                None,
             )
             .expect("create other");
         let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/alpha")));
@@ -2680,9 +2665,8 @@ mod tests {
                 TaskScope::Project {
                     path: "/repos/app".into(),
                 },
-                None,
-                None,
                 ProvenanceOrigin::Manual,
+                None,
             )
             .expect("create task");
         let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/app")));
@@ -2808,9 +2792,8 @@ mod tests {
                 "Copy me",
                 None,
                 TaskScope::Global,
-                None,
-                None,
                 ProvenanceOrigin::Manual,
+                None,
             )
             .expect("seed task");
         temp.store.save(&domain).expect("persist numbered task");
@@ -2836,9 +2819,8 @@ mod tests {
                 "Copy me",
                 None,
                 TaskScope::Global,
-                None,
-                None,
                 ProvenanceOrigin::Manual,
+                None,
             )
             .expect("seed task");
         temp.store.save(&domain).expect("persist numbered task");
@@ -2877,9 +2859,8 @@ mod tests {
                 "Shift Enter",
                 None,
                 TaskScope::Global,
-                None,
-                None,
                 ProvenanceOrigin::Manual,
+                None,
             )
             .expect("seed task");
         temp.store.save(&domain).expect("seed store");
@@ -2997,14 +2978,72 @@ mod tests {
     }
 
     #[test]
+    fn selected_text_provenance_survives_standalone_and_board_capture_save_paths() {
+        let raw = crate::context::RawHostContext {
+            cwd: Some("/tmp/no-repo-selected-capture".into()),
+            selected_text: Some("Selected capture".into()),
+            ..crate::context::RawHostContext::default()
+        };
+        let snapshot = crate::context::build_snapshot(&raw, "/tmp/no-repo-selected-capture");
+        assert_eq!(snapshot.provenance, ProvenanceOrigin::Selection);
+
+        let standalone = TempStore::new("selected-standalone-capture");
+        let mut standalone_domain = DomainState::new();
+        let mut capture_model = CaptureModel::from_snapshot(&snapshot);
+        assert_eq!(capture_model.title(), "Selected capture");
+        apply_capture_intent(
+            &mut standalone_domain,
+            Some(&standalone.store),
+            &snapshot,
+            &mut capture_model,
+            CaptureIntent::Save,
+        )
+        .expect("save standalone selected-text capture");
+        let saved = standalone.store.load().expect("reload standalone capture");
+        assert_eq!(saved.tasks()[0].provenance, ProvenanceOrigin::Selection);
+
+        let board = TempStore::new("selected-board-capture");
+        let mut board_domain = DomainState::new();
+        let mut board_model = BoardModel::from_domain(&board_domain, None);
+        let mut recovery = SaveRecovery::new();
+        apply_intent(
+            &mut board_domain,
+            &mut board_model,
+            BoardIntent::OpenCapture,
+            Some(&snapshot),
+        )
+        .expect("open board capture with selected-text snapshot");
+        assert_eq!(board_model.quick_add_title_value(), "Selected capture");
+
+        let outcome = apply_board_intent_with_save_recovery(
+            &mut board_domain,
+            &mut board_model,
+            &mut recovery,
+            BoardSaveContext {
+                baseline: DomainState::new(),
+                intent: BoardIntent::QuickAddSave,
+                snapshot: None,
+            },
+            |working| {
+                board
+                    .store
+                    .reload_merge_save(working)
+                    .map_err(|error| error.to_string())
+            },
+        )
+        .expect("save board selected-text capture");
+        assert_eq!(outcome, IntentOutcome::Persisted);
+        let saved = board.store.load().expect("reload board capture");
+        assert_eq!(saved.tasks()[0].provenance, ProvenanceOrigin::Selection);
+    }
+
+    #[test]
     fn quick_add_project_token_matches_a_project_basename_case_insensitively() {
         let snapshot = InvocationSnapshot {
             default_scope: TaskScope::Global,
             this_repo: Some(PathBuf::from("/repos/tsk-board")),
             title_prefill: None,
             provenance: ProvenanceOrigin::Capture,
-            capsule: None,
-            agent_meta: None,
         };
         let mut domain = DomainState::new();
         let mut model = BoardModel::from_domain(&domain, snapshot.this_repo.clone());
@@ -3048,8 +3087,6 @@ mod tests {
             this_repo: None,
             title_prefill: None,
             provenance: ProvenanceOrigin::Capture,
-            capsule: None,
-            agent_meta: None,
         };
         let mut domain = DomainState::new();
         let mut model = BoardModel::from_domain(&domain, None);
@@ -3105,8 +3142,6 @@ mod tests {
             this_repo: Some(PathBuf::from("/repos/chosen")),
             title_prefill: Some("Retained title".into()),
             provenance: ProvenanceOrigin::Capture,
-            capsule: None,
-            agent_meta: None,
         };
         let mut domain = DomainState::new();
         let mut model = BoardModel::from_domain(&domain, snapshot.this_repo.clone());
@@ -3219,8 +3254,6 @@ mod tests {
             this_repo: None,
             title_prefill: Some("Expanded saved task".into()),
             provenance: ProvenanceOrigin::Capture,
-            capsule: None,
-            agent_meta: None,
         };
         let mut domain = DomainState::new();
         let mut model = BoardModel::from_domain(&domain, None);
@@ -3322,9 +3355,8 @@ mod tests {
                 TaskScope::Project {
                     path: "/repos/app".into(),
                 },
-                None,
-                None,
                 ProvenanceOrigin::Capture,
+                None,
             )
             .expect("create task");
         let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/app")));
@@ -3530,9 +3562,8 @@ mod tests {
                 TaskScope::Project {
                     path: "/repos/app".into(),
                 },
-                None,
-                None,
                 ProvenanceOrigin::Manual,
+                None,
             )
             .expect("create task");
         let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/app")));
@@ -3576,9 +3607,8 @@ mod tests {
                 "Original",
                 None,
                 TaskScope::Global,
-                None,
-                None,
                 ProvenanceOrigin::Manual,
+                None,
             )
             .expect("create task");
 
@@ -3643,8 +3673,6 @@ mod tests {
             this_repo: None,
             title_prefill: None,
             provenance: ProvenanceOrigin::Capture,
-            capsule: None,
-            agent_meta: None,
         };
         let mut domain = DomainState::new();
         let mut model = CaptureModel::from_snapshot(&snap);
@@ -3702,8 +3730,6 @@ mod tests {
             this_repo: None,
             title_prefill: None,
             provenance: ProvenanceOrigin::Capture,
-            capsule: None,
-            agent_meta: None,
         };
         let mut domain = DomainState::new();
         let mut model = CaptureModel::from_snapshot(&snap);
@@ -3748,8 +3774,6 @@ mod tests {
             this_repo: None,
             title_prefill: None,
             provenance: ProvenanceOrigin::Capture,
-            capsule: None,
-            agent_meta: None,
         };
         let mut domain = DomainState::new();
         let mut model = CaptureModel::from_snapshot(&snap);
@@ -3928,12 +3952,10 @@ mod thread_project_double_click_tests {
             ("beta release task", "/repos/beta"),
         ] {
             domain
-                .create_with_thread(
+                .create(
                     title,
                     None,
                     crate::domain::TaskScope::Project { path: path.into() },
-                    None,
-                    None,
                     ProvenanceOrigin::Manual,
                     Some("release".into()),
                 )

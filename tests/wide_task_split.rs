@@ -26,9 +26,8 @@ fn domain_with_tasks(tasks: &[(&str, &str)]) -> DomainState {
                 title,
                 Some(notes.to_string()),
                 TaskScope::Global,
-                None,
-                None,
                 ProvenanceOrigin::Manual,
+                None,
             )
             .expect("create fixture task");
     }
@@ -193,9 +192,8 @@ fn wide_split_never_paints_or_hits_outside_supported_frames() {
                 format!("bounded list task {index}"),
                 Some("more bounded notes".to_string()),
                 TaskScope::Global,
-                None,
-                None,
                 ProvenanceOrigin::Manual,
+                None,
             )
             .expect("create overflowing fixture task");
     }
@@ -1818,9 +1816,8 @@ fn changed_scope_draft_refuses_task_retarget() {
             TaskScope::Project {
                 path: "/repos/other".to_string(),
             },
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create project scope option");
     let mut model = board_model(&domain);

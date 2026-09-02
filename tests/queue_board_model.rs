@@ -26,16 +26,13 @@ fn task(id: u128, title: &str, status: HumanStatus, scope: TaskScope, updated_se
     Task {
         id: Uuid::from_u128(id),
         number: None,
-        revision: Some(Uuid::from_u128(id)),
+        revision: Uuid::from_u128(id),
         merge_base_revision: None,
         title: title.into(),
         notes: None,
         thread: None,
         status,
         scope,
-        capsule: None,
-        agent_meta: None,
-        last_observed: None,
         provenance: ProvenanceOrigin::Manual,
         history: vec![TaskEvent {
             kind: TaskEventKind::Created,
@@ -162,9 +159,8 @@ fn from_domain_seeds_selection_on_first_in_motion_else_first_deck_row() {
             "motion-new",
             None,
             project(THIS_REPO),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .unwrap();
     domain.set_status(id_new, HumanStatus::Started).unwrap();
@@ -173,9 +169,8 @@ fn from_domain_seeds_selection_on_first_in_motion_else_first_deck_row() {
             "motion-old",
             None,
             project(THIS_REPO),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .unwrap();
     domain.set_status(id_old, HumanStatus::Started).unwrap();
@@ -184,9 +179,8 @@ fn from_domain_seeds_selection_on_first_in_motion_else_first_deck_row() {
             "deck",
             None,
             project(THIS_REPO),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .unwrap();
     // Domain create stamps wall-clock times; seed still lands on some IN MOTION id.
@@ -237,9 +231,8 @@ fn confirming_project_choice_changes_visible_queue_sections() {
             "app task",
             None,
             project(THIS_REPO),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .unwrap();
     let other_id = domain
@@ -247,9 +240,8 @@ fn confirming_project_choice_changes_visible_queue_sections() {
             "other task",
             None,
             project("/repos/other"),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .unwrap();
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
@@ -302,9 +294,8 @@ fn sync_from_domain_reanchors_by_id() {
             "doing",
             None,
             project(THIS_REPO),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .unwrap();
     domain.set_status(id_doing, HumanStatus::Started).unwrap();
@@ -313,9 +304,8 @@ fn sync_from_domain_reanchors_by_id() {
             "todo",
             None,
             project(THIS_REPO),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .unwrap();
 
@@ -635,23 +625,19 @@ fn all_scope_in_motion_and_drawer_emit_no_blocks() {
 fn selection_stays_on_task_id_across_thread_block_reorder() {
     let mut domain = DomainState::new();
     let alpha = domain
-        .create_with_thread(
+        .create(
             "alpha",
             None,
             project(THIS_REPO),
-            None,
-            None,
             ProvenanceOrigin::Manual,
             Some("alpha".into()),
         )
         .unwrap();
     let beta = domain
-        .create_with_thread(
+        .create(
             "beta",
             None,
             project(THIS_REPO),
-            None,
-            None,
             ProvenanceOrigin::Manual,
             Some("beta".into()),
         )
@@ -736,23 +722,19 @@ fn board_rows(model: &BoardModel, width: u16, height: u16) -> Vec<String> {
 fn arrow_navigation_crosses_painted_header_task_to_task() {
     let mut domain = DomainState::new();
     domain
-        .create_with_thread(
+        .create(
             "alpha task",
             None,
             project(THIS_REPO),
-            None,
-            None,
             ProvenanceOrigin::Manual,
             Some("alpha".to_string()),
         )
         .expect("create alpha");
     domain
-        .create_with_thread(
+        .create(
             "beta task",
             None,
             project(THIS_REPO),
-            None,
-            None,
             ProvenanceOrigin::Manual,
             Some("beta".to_string()),
         )
@@ -809,9 +791,8 @@ fn two_fresh_models_from_same_store_share_no_ui_state_and_no_ui_writes_under_sta
             "shared",
             None,
             project(THIS_REPO),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .unwrap();
     store.save(&domain).expect("save domain");
