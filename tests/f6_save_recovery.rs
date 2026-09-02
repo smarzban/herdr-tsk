@@ -1685,7 +1685,7 @@ fn successful_task_page_save_refreshes_the_retained_form_once() {
 }
 
 #[test]
-fn successful_board_row_edit_keeps_its_task_edit_session_on_the_page() {
+fn successful_board_row_edit_exits_its_task_edit_session_on_the_page() {
     let (mut domain, mut model, _) = board_with_two_tasks();
     let baseline = snapshot_of(&domain);
     let mut recovery = SaveRecovery::new();
@@ -1710,7 +1710,12 @@ fn successful_board_row_edit_keeps_its_task_edit_session_on_the_page() {
     assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
     assert!(model.board_form_open());
     apply_intent(&mut domain, &mut model, BoardIntent::BeginAddStep, None)
-        .expect("start a step from the saved page");
+        .expect("add is inert after the saved session closes");
+    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+        .expect("start a fresh task edit session");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginAddStep, None)
+        .expect("start a step from the fresh session");
     assert_eq!(model.input_mode(), BoardInputMode::EditStep);
 }
 

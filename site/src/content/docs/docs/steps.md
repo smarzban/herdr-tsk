@@ -19,9 +19,9 @@ selects it, and `Enter` keeps that selection read-only.
 
 - `ctrl+space` toggles a selected step in either view or an edit session
 - `ctrl+e` on a selected step starts the task edit session and opens its inline editor
-- From an inline editor, `Tab` cycles Title, Notes, Thread, Scope, then returns to steps
-- From an inline editor, clicking any task field moves focus there and keeps the step draft
-- In an edit session, clicking a clean step opens its inline editor; save or cancel a changed draft before switching steps
+- From an existing-step editor, `Tab` cycles Title, Notes, Thread, Scope, then returns to steps
+- Clicking a task field or another existing step moves the one active text cursor there and stages the prior step draft
+- Scope is a choice, not text: it has focus but never a blinking cursor
 - `↑` / `↓` move a selected step; `↑` from the first step returns to page reading
 
 With the cursor selected, the usual verbs act on that step:
@@ -33,10 +33,11 @@ With the cursor selected, the usual verbs act on that step:
 | `ctrl+e` | edit the highlighted step inline |
 | `ctrl+x` | mark, then a second press removes |
 
-The add/rename draft lives in the steps section. `Shift+Enter` is its only save
-chord. In add mode it saves and opens an empty next row, in rename mode it returns
-to the retained task edit session. Plain `Enter` does not save. `Esc` cancels. A
-failed save keeps the draft until you retry or cancel.
+A new-step draft lives in the steps section. `Shift+Enter` is its only save chord
+and opens an empty next row. Existing-step changes join the task edit session with
+Title, Notes, Thread, and Scope: move among them freely, then `Shift+Enter` saves
+all staged changes and exits editing. Plain `Enter` does not save. `Esc` cancels
+the active field. A failed save keeps its drafts until you retry or cancel.
 
 Wheel still scrolls the page. Before a step is selected, arrows read the page;
 a selected step owns them during the edit session.

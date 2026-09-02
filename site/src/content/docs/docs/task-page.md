@@ -9,14 +9,16 @@ header copies that task identifier when clicked.
 It is view-first. Nothing is in edit mode until you ask. `ctrl+e` edits the title,
 `ctrl+n` edits notes, and `Tab` selects and cycles steps when they exist. A step
 click also selects it, while `Enter` remains read-only. `ctrl+e` on that selection
-starts task editing with the step inline. From that inline row, Tab cycles Title,
-Notes, Thread, Scope, then the steps, and clicks open any of those fields while
-keeping the step draft. A clean step click switches inline rows, while a changed
-draft must be saved or cancelled first. The scope footer does nothing until task
-editing starts.
+starts task editing with the step inline. From an existing-step row, Tab cycles
+Title, Notes, Thread, Scope, then the steps. Clicking a field or another existing
+step moves the one active text cursor there and stages the prior step change. Scope
+has focus but no blinking cursor. The scope footer does nothing until task editing
+starts.
 
-`Shift+Enter` is the only task save chord. Field `Esc` cancels that field. Page
-`Esc` closes the page.
+`Shift+Enter` is the only task-session save chord: it saves Title, Notes, Thread,
+Scope, and every staged existing-step edit, then exits editing. A new step keeps
+its own Shift+Enter save-and-next loop. Field `Esc` cancels that field. Page `Esc`
+closes the page.
 
 Notes are multiline, so `Enter` inserts a line. `Shift+Enter` saves and does not
 insert a line.

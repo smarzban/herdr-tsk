@@ -1,7 +1,7 @@
 //! Session-only board state, forms, selection, and recovery presentation.
 
 use std::cell::Cell;
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -182,6 +182,9 @@ pub(super) struct TaskEditSave {
     pub(super) notes: Option<String>,
     pub(super) scope: TaskScope,
     pub(super) thread: Option<String>,
+    /// Existing-step names staged alongside the ordinary task fields. They reach the
+    /// domain only when the task session is confirmed with Shift+Enter.
+    pub(super) step_renames: BTreeMap<Uuid, String>,
 }
 
 #[derive(Debug, Clone)]
@@ -445,6 +448,10 @@ pub(super) struct StepsPageState {
     pub(super) delete_mark: Option<usize>,
     /// The open in-place add/rename editor, if any.
     pub(super) editor: Option<StepEditor>,
+    /// Existing-step text staged by the task edit session. Leaving an inline rename parks its
+    /// buffer here, so another field or step can receive the one terminal cursor without
+    /// committing either change.
+    pub(super) drafts: BTreeMap<Uuid, EditBuffer>,
     /// An editor apply the save boundary has not confirmed yet (AC-14). While it is
     /// set, the editor and its input mode are held exactly as the user left them.
     pub(super) pending_save: Option<StepEditorSave>,
@@ -1368,6 +1375,11 @@ impl BoardModel {
                 && task.notes == pending.notes
                 && task.scope == pending.scope
                 && task.thread == pending.thread
+                && pending.step_renames.iter().all(|(step_id, text)| {
+                    task.steps
+                        .iter()
+                        .any(|step| step.id == *step_id && step.text == *text)
+                })
         });
         if !landed {
             self.task_edit_save = Some(pending);
@@ -1386,6 +1398,9 @@ impl BoardModel {
                 .unwrap_or(0);
             form.thread = seeded_draft(pending.thread.as_deref().unwrap_or_default());
             form.thread_refusal = None;
+            form.editing = false;
+            form.steps.editor = None;
+            form.steps.drafts.clear();
         }
         self.input_mode = BoardInputMode::TaskPage;
         self.clear_message();
@@ -1510,8 +1525,31 @@ impl BoardModel {
         self.input_mode = form.parent_mode();
     }
 
+    /// Park an existing-step draft before another task field becomes active. New-step add keeps
+    /// its focused save-and-next workflow, so it deliberately cannot leave its inline row.
+    pub(super) fn park_rename_step_draft(&mut self) -> bool {
+        if self.input_mode != BoardInputMode::EditStep {
+            return true;
+        }
+        let Some(form) = self.form.as_mut().filter(|form| form.is_task()) else {
+            return false;
+        };
+        let Some(editor) = form.steps.editor.take() else {
+            return true;
+        };
+        let Some(step_id) = editor.rename else {
+            form.steps.editor = Some(editor);
+            return false;
+        };
+        form.steps.drafts.insert(step_id, editor.buffer);
+        true
+    }
+
     /// Focus one already-painted field without reopening or rebinding the shared form.
     pub(super) fn focus_form_field(&mut self, focus: CaptureField) {
+        if !self.park_rename_step_draft() {
+            return;
+        }
         let Some(form) = self.form.as_mut() else {
             return;
         };
@@ -1556,6 +1594,9 @@ impl BoardModel {
     }
 
     pub(super) fn open_form_scope_dropdown(&mut self) {
+        if !self.park_rename_step_draft() {
+            return;
+        }
         let Some(form) = self.form.as_mut() else {
             return;
         };

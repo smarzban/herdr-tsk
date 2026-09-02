@@ -13,6 +13,7 @@ use tsk_tui::ui::board::{
     resolve_board_command, BoardInputMode, BoardModel, BoardTab, CommandSurface, IntentOutcome,
     ProjectScopeOption,
 };
+use tsk_tui::ui::capture::CaptureField;
 use tsk_tui::ui::input::{map_capture_key, map_key, normal_help_bindings, BoardIntent};
 use tsk_tui::ui::mouse::BoardPopup;
 use tsk_tui::ui::queue::SectionKind;
@@ -1745,12 +1746,16 @@ fn view_tab_selection_wraps_without_starting_task_edit_and_ctrl_e_opens_inline_s
 }
 
 #[test]
-fn task_edit_tab_cycles_fields_then_returns_to_the_selected_steps() {
+fn task_edit_tab_cycles_every_step_between_scope_and_title() {
     let (mut domain, mut model, _) = board_with_steps("Tab fields", None, &["first", "second"]);
     assert!(rendered_board(&model, 80, 24).contains("▸ ▪ first"));
 
     apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
-        .expect("Tab leaves selected steps for Title");
+        .expect("Tab reaches the second selected step");
+    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+    assert!(rendered_board(&model, 80, 24).contains("▸ ▪ second"));
+    apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
+        .expect("Tab leaves the last step for Title");
     assert_eq!(model.input_mode(), BoardInputMode::EditTitle);
     apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
         .expect("Tab reaches Notes");
@@ -1767,7 +1772,7 @@ fn task_edit_tab_cycles_fields_then_returns_to_the_selected_steps() {
     assert!(rendered_board(&model, 80, 24).contains("▸ ▪ first"));
 
     apply_intent(&mut domain, &mut model, BoardIntent::FormFocusPrev, None)
-        .expect("Shift+Tab leaves selected steps for Scope");
+        .expect("Shift+Tab leaves the first step for Scope");
     assert_eq!(model.input_mode(), BoardInputMode::EditScope);
 }
 
@@ -2390,8 +2395,9 @@ fn step_editor_shift_enter_reopens_and_retains_task_editing() {
         "saving a step must retain the whole task edit session"
     );
     apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
-        .expect("Tab reaches the task title after a step save");
-    assert_eq!(model.input_mode(), BoardInputMode::EditTitle);
+        .expect("Tab reaches the next existing step after a step save");
+    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+    assert!(rendered_board(&model, 80, 24).contains("▸ ▪ bravo step"));
     let texts: Vec<&str> = domain
         .get(id)
         .expect("task")
@@ -2424,11 +2430,11 @@ fn step_editor_shift_enter_reopens_and_retains_task_editing() {
     assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
 }
 
-/// Rename mode: Shift+Enter behaves as plain Enter, saving and closing without reopening.
+/// Existing step rename shares the enclosing task session's Shift+Enter save and close.
 #[test]
-fn rename_mode_shift_enter_saves_and_closes() {
+fn rename_mode_shift_enter_saves_the_task_session_and_closes() {
     let (mut domain, mut model, id) =
-        board_with_steps("Rename ctrl witness", None, &["alpha step"]);
+        board_with_steps("Rename ctrl witness", None, &["alpha step", "bravo step"]);
 
     apply_intent(&mut domain, &mut model, BoardIntent::PageScrollDown, None)
         .expect("activate cursor");
@@ -2437,29 +2443,55 @@ fn rename_mode_shift_enter_saves_and_closes() {
     assert_eq!(model.input_mode(), BoardInputMode::EditStep);
     for ch in " twice".chars() {
         apply_intent(&mut domain, &mut model, BoardIntent::EditInsert(ch), None)
-            .expect("extend step text");
+            .expect("extend first step text");
     }
+    apply_intent(&mut domain, &mut model, BoardIntent::SelectStep(0), None)
+        .expect("park first draft and open second");
+    for ch in " again".chars() {
+        apply_intent(&mut domain, &mut model, BoardIntent::EditInsert(ch), None)
+            .expect("extend second step text");
+    }
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::FocusFormField(CaptureField::Title),
+        None,
+    )
+    .expect("park second draft and focus title");
+    apply_intent(&mut domain, &mut model, BoardIntent::EditInsert('!'), None)
+        .expect("edit title in the same session");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::FocusFormField(CaptureField::Scope),
+        None,
+    )
+    .expect("scope has focus without a text cursor");
+    assert_eq!(model.input_mode(), BoardInputMode::EditScope);
+    let staged = rendered_board(&model, 80, 24);
+    assert!(staged.contains("alpha step again"), "first draft: {staged}");
+    assert!(
+        staged.contains("bravo step twice"),
+        "second draft: {staged}"
+    );
     let shift_enter = map_key(model.input_mode(), shift(KeyCode::Enter))
-        .expect("shift+enter maps in the step editor");
+        .expect("shift+enter maps in the scope field");
     let outcome =
-        apply_intent(&mut domain, &mut model, shift_enter, None).expect("rename via shift+enter");
+        apply_intent(&mut domain, &mut model, shift_enter, None).expect("save task session");
     assert_eq!(outcome, IntentOutcome::Persist);
     assert_eq!(
         model.input_mode(),
-        BoardInputMode::EditStep,
-        "the editor and its mode outlive the save call until the boundary confirms"
-    );
-    model.sync_from_domain(&domain);
-    assert_eq!(
-        model.input_mode(),
         BoardInputMode::TaskPage,
-        "Shift+Enter in rename mode saves and closes like Enter"
+        "Shift+Enter in rename mode saves the whole task session and exits editing"
     );
-    assert_eq!(
-        domain.get(id).expect("task").steps[0].text,
-        "alpha step twice",
-        "the rename landed"
+    assert!(
+        !model.task_editing(),
+        "the confirmed task session returns to its read-only page"
     );
+    let task = domain.get(id).expect("task");
+    assert_eq!(task.title, "Rename ctrl witness!");
+    assert_eq!(task.steps[0].text, "alpha step again");
+    assert_eq!(task.steps[1].text, "bravo step twice");
     let closed = rendered_board(&model, 80, 24);
     assert!(
         !closed.lines().any(|row| row.contains("step…")),

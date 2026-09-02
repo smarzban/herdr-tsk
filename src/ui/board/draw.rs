@@ -32,7 +32,7 @@ pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
     let help = |chord: &str, fallback: &'static str| keymap_help_label(chord).unwrap_or(fallback);
 
     // An inline step editor saves only through Shift+Enter. Add mode reopens an empty row;
-    // rename mode returns to the retained task-edit session.
+    // an existing-step rename commits the complete task edit session and exits it.
     if model.input_mode() == BoardInputMode::EditStep {
         return vec![
             VerbEntry {
@@ -199,8 +199,17 @@ fn build_task_page_overlay<'a>(
         .map(|task| super::model::step_views(task, step_text_width))
         .unwrap_or_default();
     let stored_step_count = step_views.len();
-    // Step add and rename edit in the page body. A rename replaces its stored row; an add
-    // appends one transient row without changing the stored done/count header.
+    // Existing-step edits are task-session drafts. Paint every parked draft first, then the
+    // active row over it. Only the active EditStep mode receives cursor metadata, so moving to
+    // Title, Notes, Thread, or Scope leaves the changed step visible without a second cursor.
+    if let Some(task) = bound_task {
+        for (index, step) in task.steps.iter().enumerate() {
+            if let Some(draft) = form.steps.drafts.get(&step.id) {
+                let (rows, _, _) = wrapped_edit_rows(draft, step_text_width);
+                step_views[index].rows = rows;
+            }
+        }
+    }
     let inline_step_editor = form.steps.editor.as_ref().and_then(|editor| {
         let index = match editor.rename {
             Some(step_id) => bound_task?
@@ -215,7 +224,7 @@ fn build_task_page_overlay<'a>(
         } else {
             step_views.push(render::StepView { done: false, rows });
         }
-        Some(render::InlineStepEditor {
+        (model.input_mode() == BoardInputMode::EditStep).then_some(render::InlineStepEditor {
             index,
             cursor_row: u16::try_from(cursor_row).unwrap_or(u16::MAX),
             cursor_col: u16::try_from(cursor_col).unwrap_or(u16::MAX),

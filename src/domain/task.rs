@@ -528,6 +528,54 @@ impl DomainState {
         Ok(())
     }
 
+    /// Atomically apply a task-page edit session, including existing-step renames.
+    ///
+    /// All input is validated before the task changes. The session takes one revision based on
+    /// the pre-edit task, which keeps a locked store save mergeable instead of making each
+    /// staged step point at the previous staged revision.
+    pub fn edit_with_step_renames(
+        &mut self,
+        id: Uuid,
+        title: impl AsRef<str>,
+        notes: Option<String>,
+        scope: TaskScope,
+        thread: Option<String>,
+        step_renames: &[(Uuid, String)],
+    ) -> Result<(), DomainError> {
+        let title = title.as_ref().trim();
+        if title.is_empty() {
+            return Err(DomainError::EmptyTitle);
+        }
+        if step_renames.iter().any(|(_, text)| text.trim().is_empty()) {
+            return Err(DomainError::EmptyStepText);
+        }
+        let task = self.task_mut(id)?;
+        for (step_id, _) in step_renames {
+            if !task.steps.iter().any(|step| step.id == *step_id) {
+                return Err(DomainError::UnknownStep(*step_id));
+            }
+        }
+        task.title = title.to_string();
+        task.notes = notes;
+        task.scope = scope;
+        task.thread = thread;
+        for (step_id, text) in step_renames {
+            let step = task
+                .steps
+                .iter_mut()
+                .find(|step| step.id == *step_id)
+                .expect("validated step stays in its task");
+            step.text = text.trim().to_string();
+        }
+        record_mutation(task, TaskEventKind::Edited);
+        let at = task.updated_at;
+        task.history.extend(step_renames.iter().map(|_| TaskEvent {
+            kind: TaskEventKind::StepRenamed,
+            at,
+        }));
+        Ok(())
+    }
+
     /// Add one step at the end of the task's steps.
     ///
     /// Trims text and refuses empty-after-trim. Returns the new step's id.
@@ -1057,6 +1105,49 @@ mod tests {
         assert_eq!(task.title, "New title");
         assert_eq!(task.notes.as_deref(), Some("updated notes"));
         assert_eq!(task.scope, project);
+    }
+
+    #[test]
+    fn task_session_edit_renames_steps_on_one_revision() {
+        let mut state = DomainState::new();
+        let id = create_sample(&mut state);
+        let first = state.add_step(id, "first").expect("first step");
+        let second = state.add_step(id, "second").expect("second step");
+        let before = state.get(id).expect("task").clone();
+
+        state
+            .edit_with_step_renames(
+                id,
+                "Edited title",
+                Some("edited notes".into()),
+                TaskScope::Global,
+                None,
+                &[
+                    (first, "first revised".into()),
+                    (second, "second revised".into()),
+                ],
+            )
+            .expect("atomic session edit");
+
+        let task = state.get(id).expect("task");
+        assert_eq!(task.title, "Edited title");
+        assert_eq!(task.steps[0].text, "first revised");
+        assert_eq!(task.steps[1].text, "second revised");
+        assert_eq!(task.merge_base_revision, before.revision);
+        assert_ne!(task.revision, before.revision);
+        assert_eq!(
+            task.history
+                .iter()
+                .rev()
+                .take(3)
+                .map(|event| &event.kind)
+                .collect::<Vec<_>>(),
+            vec![
+                &TaskEventKind::StepRenamed,
+                &TaskEventKind::StepRenamed,
+                &TaskEventKind::Edited,
+            ]
+        );
     }
 
     #[test]

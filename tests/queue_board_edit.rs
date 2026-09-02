@@ -858,7 +858,7 @@ fn editing_an_unthreaded_task_paints_a_labeled_thread_footer_slot() {
 #[test]
 fn thread_field_is_reachable_while_the_inline_step_editor_keeps_its_draft() {
     let mut domain = DomainState::new();
-    domain
+    let task_id = domain
         .create_with_thread(
             "Task",
             None,
@@ -869,6 +869,7 @@ fn thread_field_is_reachable_while_the_inline_step_editor_keeps_its_draft() {
             Some("release".into()),
         )
         .expect("create");
+    domain.add_step(task_id, "first").expect("step");
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
     apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("page");
     assert!(
@@ -882,7 +883,9 @@ fn thread_field_is_reachable_while_the_inline_step_editor_keeps_its_draft() {
         .expect("enter task edit mode");
     apply_intent(&mut domain, &mut model, BoardIntent::CancelEdit, None)
         .expect("return to task page");
-    apply_intent(&mut domain, &mut model, BoardIntent::BeginAddStep, None).expect("item editor");
+    apply_intent(&mut domain, &mut model, BoardIntent::SelectStep(0), None)
+        .expect("existing item editor");
+    apply_intent(&mut domain, &mut model, BoardIntent::EditInsert('!'), None).expect("draft step");
     apply_intent(
         &mut domain,
         &mut model,
@@ -902,7 +905,7 @@ fn thread_field_is_reachable_while_the_inline_step_editor_keeps_its_draft() {
         .flat_map(|y| (0..80).map(move |x| buffer[(x, y)].symbol()))
         .collect::<String>();
     assert!(
-        painted.contains("step…"),
+        painted.contains("first!"),
         "moving to Thread keeps the inline step draft visible: {painted}"
     );
 }

@@ -417,10 +417,11 @@ fn apply_board_intent(
                 model.focus_form_field(CaptureField::Title);
             } else if model.input_mode == BoardInputMode::TaskPage {
                 if model.task_editing() {
-                    // In an active task session, Tab leaves selected steps for the form fields.
-                    // The form's normal Title → Notes → Thread → Scope cycle later returns to
-                    // the first step through `select_step_from_tab`.
-                    model.focus_form_field(CaptureField::Title);
+                    // A task edit session treats its selected steps as the final tab group:
+                    // walk them in order, then return to Title after the last one.
+                    if !move_step_within_edit_group(model, true) {
+                        model.focus_form_field(CaptureField::Title);
+                    }
                 } else if !move_step_with_tab(model, true) && !select_first_step_from_page(model) {
                     // View pages use Tab strictly as a read-only step selector.
                     model.enter_page_field_focus();
@@ -438,9 +439,11 @@ fn apply_board_intent(
                 model.focus_form_field(CaptureField::Scope);
             } else if model.input_mode == BoardInputMode::TaskPage {
                 if model.task_editing() {
-                    // Reverse cycling from steps reaches Scope, the field immediately before
-                    // the step group in the task-edit traversal.
-                    model.focus_form_field(CaptureField::Scope);
+                    // Reverse through the selected step group, then reach Scope before its
+                    // first row, matching Title → Notes → Thread → Scope → steps.
+                    if !move_step_within_edit_group(model, false) {
+                        model.focus_form_field(CaptureField::Scope);
+                    }
                 } else if !move_step_with_tab(model, false) {
                     model.enter_page_field_focus();
                 }
@@ -749,19 +752,26 @@ fn apply_board_intent(
             return Ok(IntentOutcome::None);
         }
         BoardIntent::ConfirmEditNext => {
-            // Shift+Enter in the inline step editor saves and reopens an empty next row in
-            // add mode. Rename mode downgrades to a plain save, decided inside
-            // `confirm_step_editor` from the editor's own mode. No other task surface maps
-            // the key, so anywhere else this is the plain confirm.
+            // A newly added step retains its dedicated Shift+Enter save-and-next workflow.
+            // An existing step is part of the enclosing task draft, so the same chord commits
+            // every staged field and exits task editing.
             if model.input_mode == BoardInputMode::EditStep {
+                if model.park_rename_step_draft() {
+                    let outcome = confirm_edit(domain, model)?;
+                    model.sync_from_domain(domain);
+                    return Ok(outcome);
+                }
                 return confirm_step_editor(domain, model, true);
             }
             return apply_intent(domain, model, BoardIntent::ConfirmEdit, snapshot);
         }
         BoardIntent::ConfirmEdit => {
-            // The inline step editor applies its own domain command (add or rename) and
-            // returns to page view; it never saves the task form's title/notes drafts.
             if model.input_mode == BoardInputMode::EditStep {
+                if model.park_rename_step_draft() {
+                    let outcome = confirm_edit(domain, model)?;
+                    model.sync_from_domain(domain);
+                    return Ok(outcome);
+                }
                 return confirm_step_editor(domain, model, false);
             }
             if model.form.as_ref().is_some_and(|form| !form.is_task()) {
@@ -1067,9 +1077,14 @@ fn apply_board_intent(
             return Ok(IntentOutcome::None);
         }
         BoardIntent::SelectStep(index) => {
-            // A task-page click always selects its stored step. It opens the inline editor only
-            // after task editing has begun, so view-mode clicks remain read-only.
+            // Existing steps belong to the enclosing task draft. Parking a rename before
+            // selecting another row permits several step edits before one final Shift+Enter.
+            // New-step add remains a focused save-and-next line and cannot be abandoned by a
+            // row click.
             let editing = model.task_editing();
+            if editing && !model.park_rename_step_draft() {
+                return Ok(IntentOutcome::None);
+            }
             let selected = model
                 .form
                 .as_ref()
@@ -1079,40 +1094,10 @@ fn apply_board_intent(
                     domain.get(task_id).and_then(|task| {
                         task.steps
                             .get(index)
-                            .map(|step| (task_id, step.id, step.text.clone()))
+                            .map(|step| (step.id, step.text.clone()))
                     })
                 });
-            if let Some((task_id, step_id, text)) = selected {
-                if editing {
-                    let active_editor = model
-                        .form
-                        .as_ref()
-                        .and_then(|form| form.steps.editor.as_ref())
-                        .cloned();
-                    if let Some(editor) = active_editor {
-                        let same_step = editor.rename == Some(step_id);
-                        let dirty = match editor.rename {
-                            Some(current) => domain
-                                .get(task_id)
-                                .and_then(|task| task.steps.iter().find(|step| step.id == current))
-                                .is_some_and(|step| step.text != editor.buffer.value()),
-                            None => !editor.buffer.value().trim().is_empty(),
-                        };
-                        if same_step {
-                            if let Some(form) = model.form.as_mut() {
-                                form.steps.cursor = Some(index);
-                                steps_scroll_to_cursor(form, index);
-                            }
-                            model.input_mode = BoardInputMode::EditStep;
-                            model.clear_message();
-                            return Ok(IntentOutcome::None);
-                        }
-                        if dirty {
-                            model.set_message("save or cancel this step before switching");
-                            return Ok(IntentOutcome::None);
-                        }
-                    }
-                }
+            if let Some((step_id, text)) = selected {
                 if let Some(form) = model.form.as_mut() {
                     form.steps.cursor = Some(index);
                     steps_scroll_to_cursor(form, index);
@@ -1560,6 +1545,16 @@ fn confirm_edit(
             return Ok(IntentOutcome::None);
         }
     };
+    let step_renames = form
+        .steps
+        .drafts
+        .iter()
+        .map(|(step_id, draft)| (*step_id, draft.value().trim().to_string()))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    if step_renames.values().any(String::is_empty) {
+        model.set_message(STEP_TEXT_REQUIRED);
+        return Ok(IntentOutcome::None);
+    }
     let task = domain.get(id).ok_or(DomainError::UnknownId(id))?.clone();
     // `DomainState::edit` does not reject a soft-deleted task itself. Refuse before touching
     // the form so's bound-task and draft-recovery guarantees remain intact.
@@ -1567,17 +1562,31 @@ fn confirm_edit(
         return Err(DomainError::SoftDeleted(id));
     }
 
-    // One existing DomainState::edit call updates title, Notes, scope, and thread together.
-    domain.edit(id, &title, notes.clone(), scope.clone(), thread.clone())?;
+    // The full page session changes under one revision, then the app persists exactly once.
+    // A chained `edit` plus `rename_step` sequence would advance the merge base after each
+    // draft and make the store correctly refuse the later revision as a conflicting writer.
+    let step_rename_list = step_renames
+        .iter()
+        .map(|(step_id, text)| (*step_id, text.clone()))
+        .collect::<Vec<_>>();
+    domain.edit_with_step_renames(
+        id,
+        &title,
+        notes.clone(),
+        scope.clone(),
+        thread.clone(),
+        &step_rename_list,
+    )?;
 
     // Retain the complete form and mode until the persistence boundary confirms this exact
-    // atomic edit. A failed save can then Retry or Cancel without orphaning the input state.
+    // task-session save. A failed save can then Retry or Cancel without orphaning drafts.
     model.task_edit_save = Some(TaskEditSave {
         id,
         title,
         notes,
         scope,
         thread,
+        step_renames,
     });
     Ok(IntentOutcome::Persist)
 }
@@ -1671,6 +1680,39 @@ fn move_step_with_tab(model: &mut BoardModel, forward: bool) -> bool {
     let form = model.form.as_mut().expect("the checked form remains open");
     form.steps.cursor = Some(next);
     steps_scroll_to_cursor(form, next);
+    true
+}
+
+/// Move within the task edit session's step group without wrapping. The caller crosses to the
+/// adjacent form field when this reports `false`, making all steps reachable by Tab in either
+/// direction instead of trapping the traversal on the first selected row.
+fn move_step_within_edit_group(model: &mut BoardModel, forward: bool) -> bool {
+    let target = model.form.as_ref().and_then(|form| {
+        if !form.is_task() || !form.editing {
+            return None;
+        }
+        let index = form.steps.cursor?;
+        let task_id = form.task_id()?;
+        let count = model
+            .tasks
+            .iter()
+            .find(|task| task.id == task_id)
+            .map(|task| task.steps.len())?;
+        if index >= count {
+            return None;
+        }
+        if forward {
+            (index + 1 < count).then_some(index + 1)
+        } else {
+            index.checked_sub(1)
+        }
+    });
+    let Some(target) = target else {
+        return false;
+    };
+    let form = model.form.as_mut().expect("the checked form remains open");
+    form.steps.cursor = Some(target);
+    steps_scroll_to_cursor(form, target);
     true
 }
 
@@ -1799,8 +1841,11 @@ fn open_step_editor(model: &mut BoardModel, text: &str, rename: Option<Uuid>) {
             model.clear_message();
             return;
         }
+        let buffer = rename
+            .and_then(|step_id| form.steps.drafts.remove(&step_id))
+            .unwrap_or_else(|| crate::ui::edit::seeded_draft(text));
         form.steps.editor = Some(StepEditor {
-            buffer: crate::ui::edit::seeded_draft(text),
+            buffer,
             rename,
             refusal: None,
         });
