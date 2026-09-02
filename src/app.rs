@@ -1964,7 +1964,7 @@ mod tests {
                 "{area:?}: 'd' must actually complete the task through the live route"
             );
 
-            // space (PrimaryVerb): Todo -> Doing, actually applied.
+            // s (PrimaryVerb): Ready -> Started, actually applied.
             let mut domain = DomainState::new();
             let id = domain
                 .create(
@@ -1977,11 +1977,11 @@ mod tests {
                 )
                 .expect("create task");
             let mut model = BoardModel::from_domain(&domain, None);
-            drive(&mut domain, &mut model, area, ctrl(KeyCode::Char(' ')));
+            drive(&mut domain, &mut model, area, ctrl(KeyCode::Char('s')));
             assert_eq!(
                 domain.get(id).expect("task").status,
                 HumanStatus::Started,
-                "{area:?}: space must actually start the task through the live route"
+                "{area:?}: Ctrl+S must actually start the task through the live route"
             );
 
             // x (SoftDelete): actually applied.
@@ -2963,7 +2963,7 @@ mod tests {
                 BoardIntent::Complete,
             ),
             (
-                KeyEvent::new(KeyCode::Char(' '), KeyModifiers::CONTROL),
+                KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL),
                 BoardIntent::PrimaryVerb,
             ),
         ] {

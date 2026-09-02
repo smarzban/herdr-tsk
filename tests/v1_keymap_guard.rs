@@ -28,7 +28,7 @@ fn normal_mode_keymap_equals_the_readme_and_queue_board_v1_set() {
         (KeyCode::Down, BoardIntent::SelectNext),
         (KeyCode::Char('k'), BoardIntent::SelectPrev),
         (KeyCode::Up, BoardIntent::SelectPrev),
-        (KeyCode::Char(' '), BoardIntent::PrimaryVerb),
+        (KeyCode::Char('s'), BoardIntent::PrimaryVerb),
         (KeyCode::Char('d'), BoardIntent::Complete),
         (KeyCode::Char('o'), BoardIntent::Reopen),
         (KeyCode::Char('b'), BoardIntent::ToggleBlock),
@@ -52,7 +52,7 @@ fn normal_mode_keymap_equals_the_readme_and_queue_board_v1_set() {
     );
     let mutating = [
         KeyCode::Char('q'),
-        KeyCode::Char(' '),
+        KeyCode::Char('s'),
         KeyCode::Char('d'),
         KeyCode::Char('o'),
         KeyCode::Char('b'),
@@ -121,6 +121,7 @@ fn bare_page_keys_never_mutate_steps() {
     let before = domain.get(id).expect("task").clone();
     for key in [
         KeyCode::Char('a'),
+        KeyCode::Char('s'),
         KeyCode::Char(' '),
         KeyCode::Char('x'),
         KeyCode::Char('e'),

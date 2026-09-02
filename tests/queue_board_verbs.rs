@@ -15,7 +15,7 @@ use tsk_tui::ui::board::{
 };
 use tsk_tui::ui::capture::CaptureField;
 use tsk_tui::ui::input::{
-    map_capture_key, map_key, map_task_form_key, normal_help_bindings, BoardIntent,
+    map_capture_key, map_key, map_task_form_key, normal_help_bindings, BoardIntent, CaptureIntent,
 };
 use tsk_tui::ui::mouse::BoardPopup;
 use tsk_tui::ui::queue::SectionKind;
@@ -39,6 +39,10 @@ fn ctrl(code: KeyCode) -> KeyEvent {
 
 fn shift(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::SHIFT)
+}
+
+fn alt(code: KeyCode) -> KeyEvent {
+    KeyEvent::new(code, KeyModifiers::ALT)
 }
 
 fn ctrl_alt(code: KeyCode) -> KeyEvent {
@@ -1463,7 +1467,7 @@ fn closing_the_page_after_completing_its_task_reanchors_to_a_visible_row() {
 }
 
 #[test]
-fn task_edit_save_uses_shift_enter_while_capture_keeps_its_ctrl_chord() {
+fn task_edit_save_uses_shift_enter_with_alt_enter_as_the_legacy_fallback() {
     assert_eq!(
         map_key(BoardInputMode::EditTitle, ctrl(KeyCode::Enter)),
         None,
@@ -1480,9 +1484,27 @@ fn task_edit_save_uses_shift_enter_while_capture_keeps_its_ctrl_chord() {
         "plain Enter saves one inline step and returns to the target"
     );
     assert_eq!(
+        map_key(BoardInputMode::EditStep, alt(KeyCode::Enter)),
+        Some(BoardIntent::ConfirmEditNext),
+        "Alt+Enter must exactly match the inline editor's Shift+Enter save-next route"
+    );
+    assert_eq!(
         map_key(BoardInputMode::EditNotes, shift(KeyCode::Enter)),
         Some(BoardIntent::ConfirmEdit),
         "Shift+Enter saves task notes without inserting a line break"
+    );
+    assert_eq!(
+        map_key(BoardInputMode::EditNotes, alt(KeyCode::Enter)),
+        Some(BoardIntent::ConfirmEdit),
+        "Alt+Enter remains usable when Shift+Enter is encoded as bare Enter"
+    );
+    assert_eq!(
+        map_capture_key(
+            tsk_tui::ui::capture::CaptureField::Notes,
+            alt(KeyCode::Enter)
+        ),
+        Some(CaptureIntent::Save),
+        "Alt+Enter remains the legacy capture save fallback"
     );
     assert_eq!(
         map_key(BoardInputMode::EditTitle, ctrl_alt(KeyCode::Enter)),
@@ -1510,6 +1532,27 @@ fn task_edit_save_uses_shift_enter_while_capture_keeps_its_ctrl_chord() {
     assert!(
         frame.contains("shift+enter save"),
         "the visible task-title legend names the save chord:\n{frame}"
+    );
+}
+
+#[test]
+fn ctrl_s_replaces_ctrl_space_as_the_primary_verb() {
+    for mode in [BoardInputMode::Normal, BoardInputMode::TaskPage] {
+        assert_eq!(
+            map_key(mode, ctrl(KeyCode::Char('s'))),
+            Some(BoardIntent::PrimaryVerb),
+            "Ctrl+S must own the primary verb in {mode:?}"
+        );
+        assert_eq!(
+            map_key(mode, ctrl(KeyCode::Char(' '))),
+            None,
+            "Ctrl+Space must be retired in {mode:?}"
+        );
+    }
+    assert_eq!(
+        map_key(BoardInputMode::TaskPage, press(KeyCode::Null)),
+        None,
+        "the legacy NUL encoding of Ctrl+Space must also be retired"
     );
 }
 
@@ -1715,7 +1758,7 @@ fn view_tab_selection_wraps_without_starting_task_edit_and_ctrl_e_opens_inline_s
     assert!(!model.task_editing(), "wrapping remains task view mode");
 
     let primary =
-        map_key(BoardInputMode::TaskPage, press(KeyCode::Null)).expect("terminal Ctrl+Space NUL");
+        map_key(BoardInputMode::TaskPage, ctrl(KeyCode::Char('s'))).expect("Ctrl+S primary verb");
     apply_intent(&mut domain, &mut model, primary, None).expect("toggle selected step");
     assert!(domain.get(id).expect("task").steps[0].done);
     assert_eq!(domain.get(id).expect("task").status, HumanStatus::Ready);
@@ -1802,9 +1845,23 @@ fn task_edit_tab_cycles_every_step_between_notes_and_scope() {
     assert_eq!(model.input_mode(), BoardInputMode::EditStep);
     assert!(rendered_board(&model, 80, 24).contains("▸ ▪ first"));
 
+    apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
+        .expect("Tab reaches the second step again");
+    apply_intent(&mut domain, &mut model, BoardIntent::EditInsert('!'), None)
+        .expect("edit the second step");
     apply_intent(&mut domain, &mut model, BoardIntent::FormFocusPrev, None)
-        .expect("Shift+Tab leaves the first step");
-    assert_eq!(model.input_mode(), BoardInputMode::EditTitle);
+        .expect("Shift+Tab returns to the first step");
+    assert_eq!(model.input_mode(), BoardInputMode::EditStep);
+    let first_again = rendered_board(&model, 80, 24);
+    assert!(first_again.contains("▸ ▪ first"));
+    assert!(
+        first_again.contains("second!"),
+        "Shift+Tab must park the second step draft: {first_again}"
+    );
+
+    apply_intent(&mut domain, &mut model, BoardIntent::FormFocusPrev, None)
+        .expect("Shift+Tab leaves the first step for Notes");
+    assert_eq!(model.input_mode(), BoardInputMode::EditNotes);
 }
 
 #[test]
@@ -2426,7 +2483,7 @@ fn first_step_up_deactivates_before_inactive_up_scrolls_then_down_reactivates() 
     assert!(
         active_verbs
             .iter()
-            .any(|entry| entry.key == "space" && entry.label == "toggle step"),
+            .any(|entry| entry.key == "s" && entry.label == "toggle step"),
         "active step cursor must advertise the step primary verb"
     );
 
@@ -2508,13 +2565,13 @@ fn stale_step_cursor_falls_back_to_the_live_task_status_verb() {
     assert!(
         verbs
             .iter()
-            .any(|entry| entry.key == "space" && entry.label == "start"),
+            .any(|entry| entry.key == "s" && entry.label == "start"),
         "a stale cursor must not advertise toggle step: {verbs:?}"
     );
     assert!(
         !verbs
             .iter()
-            .any(|entry| entry.key == "space" && entry.label == "toggle step"),
+            .any(|entry| entry.key == "s" && entry.label == "toggle step"),
         "a stale cursor must not advertise a dead step: {verbs:?}"
     );
     apply_intent(&mut domain, &mut model, BoardIntent::PrimaryVerb, None).expect("primary verb");

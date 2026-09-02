@@ -1537,6 +1537,131 @@ fn retried_step_rename_save_applies_the_held_rename() {
     assert_eq!(domain.get(id).expect("task").steps[0].text, "renamed step");
 }
 
+#[test]
+fn cancelling_a_failed_task_session_save_discards_all_staged_step_changes() {
+    let mut domain = DomainState::new();
+    let id = domain
+        .create(
+            "Cancel staged steps",
+            None,
+            TaskScope::Global,
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("task");
+    for text in ["alpha", "bravo", "charlie"] {
+        domain.add_step(id, text).expect("step");
+    }
+    let mut model = BoardModel::from_domain(&domain, None);
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+        .expect("start task editing");
+    apply_intent(&mut domain, &mut model, BoardIntent::SelectStep(0), None).expect("open alpha");
+    apply_intent(&mut domain, &mut model, BoardIntent::EditInsert('!'), None)
+        .expect("rename alpha");
+    apply_intent(&mut domain, &mut model, BoardIntent::ConfirmEdit, None).expect("park rename");
+    apply_intent(&mut domain, &mut model, BoardIntent::SelectStep(1), None).expect("select bravo");
+    apply_intent(&mut domain, &mut model, BoardIntent::SoftDelete, None)
+        .expect("stage bravo removal");
+
+    let baseline = snapshot_of(&domain);
+    let mut recovery = SaveRecovery::new();
+    apply_board_intent_with_save_recovery(
+        &mut domain,
+        &mut model,
+        &mut recovery,
+        BoardSaveContext {
+            baseline,
+            intent: BoardIntent::ConfirmEditNext,
+            snapshot: None,
+        },
+        |_| Err(INJECTED.into()),
+    )
+    .expect("fail task-session save");
+    assert!(recovery.is_pending());
+
+    apply_board_intent_with_save_recovery(
+        &mut domain,
+        &mut model,
+        &mut recovery,
+        BoardSaveContext {
+            baseline: DomainState::new(),
+            intent: BoardIntent::CancelSave,
+            snapshot: None,
+        },
+        |_| panic!("cancel must not persist"),
+    )
+    .expect("cancel save");
+
+    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+    assert!(!model.task_editing());
+    assert_eq!(
+        domain
+            .get(id)
+            .expect("task")
+            .steps
+            .iter()
+            .map(|step| step.text.as_str())
+            .collect::<Vec<_>>(),
+        vec!["alpha", "bravo", "charlie"]
+    );
+    let page = board_painted(&model);
+    assert!(page.contains("alpha") && page.contains("bravo") && page.contains("charlie"));
+    assert!(!page.contains("alpha!"), "cancelled rename leaked: {page}");
+}
+
+#[test]
+fn successful_step_removal_keeps_the_cursor_on_the_same_step_id() {
+    let mut domain = DomainState::new();
+    let id = domain
+        .create(
+            "Cursor after removal",
+            None,
+            TaskScope::Global,
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("task");
+    for text in ["alpha", "bravo", "charlie"] {
+        domain.add_step(id, text).expect("step");
+    }
+    let mut model = BoardModel::from_domain(&domain, None);
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+        .expect("start task editing");
+    apply_intent(&mut domain, &mut model, BoardIntent::SelectStep(0), None).expect("select alpha");
+    apply_intent(&mut domain, &mut model, BoardIntent::SoftDelete, None)
+        .expect("stage alpha removal");
+
+    let baseline = snapshot_of(&domain);
+    let mut recovery = SaveRecovery::new();
+    apply_board_intent_with_save_recovery(
+        &mut domain,
+        &mut model,
+        &mut recovery,
+        BoardSaveContext {
+            baseline,
+            intent: BoardIntent::ConfirmEditNext,
+            snapshot: None,
+        },
+        |_| Ok(()),
+    )
+    .expect("save removal");
+
+    let page = board_painted(&model);
+    assert!(
+        page.contains("▸ ▪ bravo"),
+        "the cursor must stay on bravo after alpha is removed: {page}"
+    );
+    apply_intent(&mut domain, &mut model, BoardIntent::PrimaryVerb, None)
+        .expect("toggle selected step");
+    let task = domain.get(id).expect("task");
+    assert!(task.steps[0].done, "bravo must be toggled");
+    assert!(!task.steps[1].done, "charlie must remain open");
+}
+
 /// Remediation round 1 / Important 1: the step editor's two save chords share one
 /// refusal discipline. When another actor soft-deleted the bound task on the
 /// durable record between open and confirm, Shift+Enter (`ConfirmEditNext`) must

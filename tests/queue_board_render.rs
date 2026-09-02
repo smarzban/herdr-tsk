@@ -168,7 +168,7 @@ fn fixture_verbs() -> &'static [VerbEntry<'static>] {
 }
 
 /// Imp-A (round 3 finding): a **Todo**-selected model, so `board_verb_items` yields six
-/// entries (`space start` plus the base five) instead of the Doing selection's five. Used
+/// entries (`s start` plus the base five) instead of the Doing selection's five. Used
 /// only where the trim-the-sixth path needs a budget-5 bar to actually drop an entry --
 /// `fixture_verbs()`'s Doing selection is exactly 5 against a budget of 5, so `take(5)`
 /// never drops anything and a test built on it can't fail.
@@ -871,7 +871,7 @@ fn overlay_rows_are_padded_exact_no_base_bleed() {
 fn compact_77x24_and_48x19_and_40x10_paint_glyph_title_only_rows_and_leq_5_verb_entries() {
     let tasks = fixture_tasks();
     let view = fixture_view(&tasks, false);
-    // Imp-A: a Todo selection gives `board_verb_items` six entries (`space start` plus the
+    // Imp-A: a Todo selection gives `board_verb_items` six entries (`s start` plus the
     // base five), so the budget-5 trim below is genuinely exercised -- the Doing selection
     // `fixture_model` otherwise uses yields exactly five, which `take(5)` never trims.
     let verbs = todo_verbs();
@@ -1313,38 +1313,54 @@ fn task_page_paints_steps_section_between_notes_and_footer() {
     assert!(saw_third, "compact scrolling never reached the third step");
 }
 
-/// A task with no stored steps still paints its trailing add target.
+/// A task with no stored steps can scroll all the way to its trailing add target.
 #[test]
-fn task_page_without_steps_paints_trailing_add_target() {
-    let mut domain = DomainState::new();
-    domain
-        .create(
-            "Notes-only page task",
-            Some("still just notes".into()),
-            TaskScope::Global,
-            None,
-            None,
-            ProvenanceOrigin::Manual,
-        )
-        .expect("create task");
-    let mut model = BoardModel::from_domain(&domain, None);
-    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open task page");
+fn task_page_without_steps_reaches_its_trailing_add_target() {
+    let notes = (0..20)
+        .map(|index| format!("overflow line {index}"))
+        .collect::<Vec<_>>()
+        .join("\n");
 
     for &(width, height) in &[(78u16, 24u16), (40u16, 10u16)] {
-        let rows = board_rows(&model, width, height);
-        let shown: Vec<String> = rows.iter().map(|row| trimmed(row)).collect();
-        let body = shown.join("\n");
-        // Sanity first: the page itself rendered, so absence below is not a blank frame.
-        assert!(
-            body.contains("still just notes") && body.contains("created"),
-            "{width}x{height} page did not render notes + meta:\n{body}"
-        );
-        if width >= 78 {
-            assert!(
-                body.contains("steps 0/0") && body.contains("+ step"),
-                "{width}x{height} empty-steps page must paint its add target:\n{body}"
-            );
+        let mut domain = DomainState::new();
+        domain
+            .create(
+                "Notes-only page task",
+                Some(notes.clone()),
+                TaskScope::Global,
+                None,
+                None,
+                ProvenanceOrigin::Manual,
+            )
+            .expect("create task");
+        let mut model = BoardModel::from_domain(&domain, None);
+        apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None)
+            .expect("open task page");
+
+        let mut body = String::new();
+        for _ in 0..64 {
+            let rows = board_rows(&model, width, height);
+            body = rows
+                .iter()
+                .map(|row| trimmed(row))
+                .collect::<Vec<_>>()
+                .join("\n");
+            if body.contains("steps 0/0") && body.contains("+ step") {
+                break;
+            }
+            apply_intent(
+                &mut domain,
+                &mut model,
+                BoardIntent::PageWheelScrollDown,
+                None,
+            )
+            .expect("scroll toward add target");
         }
+
+        assert!(
+            body.contains("steps 0/0") && body.contains("+ step"),
+            "{width}x{height} empty-steps page never reached its add target:\n{body}"
+        );
         // `✓`/`▪` are step glyphs (the task is ready, so the header glyph is `○`).
         assert!(
             !body.contains('✓') && !body.contains('▪'),
@@ -2624,7 +2640,7 @@ fn footer_lists_the_step_add_verb() {
 
     let floor = page_verb_row_with(&["only step"], 78);
     assert!(
-        floor.contains("ct…"),
+        floor.contains("ctrl+a…"),
         "the compact verb-bar budget may ellipsize the final Ctrl chord, without making the bar overflow:\n{floor}"
     );
 }

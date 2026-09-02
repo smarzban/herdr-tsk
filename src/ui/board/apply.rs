@@ -461,6 +461,7 @@ fn apply_board_intent(
                         model.focus_form_field(CaptureField::Notes);
                     }
                 }
+                return Ok(IntentOutcome::None);
             } else if model.input_mode == BoardInputMode::TaskPage {
                 if model.task_editing() {
                     if model
@@ -1702,6 +1703,11 @@ fn confirm_edit(
         return Ok(IntentOutcome::None);
     }
     let task = domain.get(id).ok_or(DomainError::UnknownId(id))?.clone();
+    let selected_step = form
+        .steps
+        .cursor
+        .and_then(|source_index| task.steps.get(source_index))
+        .map(|step| step.id);
     // `DomainState::edit` does not reject a soft-deleted task itself. Refuse before touching
     // the form so's bound-task and draft-recovery guarantees remain intact.
     if task.soft_deleted {
@@ -1735,6 +1741,7 @@ fn confirm_edit(
         thread,
         step_renames,
         step_removals,
+        selected_step,
     });
     Ok(IntentOutcome::Persist)
 }
@@ -2126,16 +2133,13 @@ fn close_step_editor(model: &mut BoardModel) {
 /// on the row itself, never the board status row.
 const STEP_TEXT_REQUIRED: &str = "text required";
 
-/// Apply the step editor's draft through the domain command (add or rename).
+/// Persist a new-step editor draft through the domain command.
 ///
-/// The editor and its input mode OUTLIVE the save call (AC-14): a successful apply
-/// records the touched step on the page's pending-save slot and leaves the line
-/// exactly as the user left it. Only the persistence boundary's confirmed sync —
-/// `BoardModel::sync_from_domain` → `finish_step_editor_save` — releases it:
-/// closing for a plain Enter, reopening empty for Shift+Enter in add mode
-/// (`keep_open`, downgraded to a close in rename mode). A failed save therefore
-/// holds the line behind SaveRecovery until Retry/Cancel resolve it, and a Cancelled
-/// resolution unwinds it to page view with no orphan edit mode.
+/// Existing-step editors are parked into the enclosing task session before this function is
+/// reached. A successful add records the touched step on the page's pending-save slot and
+/// leaves the line exactly as the user left it. Only the persistence boundary's confirmed
+/// sync releases it, closing for Enter or reopening empty for Shift+Enter. A failed save
+/// therefore holds the line behind SaveRecovery until Retry/Cancel resolve it.
 ///
 /// An empty-after-trim draft is the line's own refusal (AC-13), painted on the line
 /// and cleared when it closes or its buffer changes; it never reaches the board
@@ -2156,14 +2160,11 @@ fn confirm_step_editor(
         return Ok(IntentOutcome::None);
     };
     let text = editor.buffer.value().to_string();
-    let rename = editor.rename;
-    let touched = match rename {
-        Some(step_id) => domain
-            .rename_step(task_id, step_id, &text)
-            .map(|()| step_id),
-        None => domain.add_step(task_id, &text),
-    };
-    let touched = match touched {
+    debug_assert!(
+        editor.rename.is_none(),
+        "existing-step drafts are staged by the task session"
+    );
+    let touched = match domain.add_step(task_id, &text) {
         Ok(step) => step,
         Err(DomainError::EmptyStepText) => {
             if let Some(editor) = model
@@ -2181,7 +2182,7 @@ fn confirm_step_editor(
     form.steps.pending_save = Some(StepEditorSave {
         step: touched,
         text: text.trim().to_string(),
-        reopen: keep_open && rename.is_none(),
+        reopen: keep_open,
     });
     Ok(IntentOutcome::Persist)
 }

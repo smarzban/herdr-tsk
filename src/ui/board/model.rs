@@ -188,6 +188,9 @@ pub(super) struct TaskEditSave {
     pub(super) step_renames: BTreeMap<Uuid, String>,
     /// Existing steps staged for removal by the task edit session.
     pub(super) step_removals: BTreeSet<Uuid>,
+    /// Stable identity of the selected step when the save began. Source indices shift after
+    /// removals, so the retained page cursor must reanchor through this id after sync.
+    pub(super) selected_step: Option<Uuid>,
 }
 
 #[derive(Debug, Clone)]
@@ -777,6 +780,13 @@ impl BoardModel {
                     form.thread_refusal = None;
                     form.scope = task.scope.clone();
                     form.select_current_scope();
+                    form.editing = false;
+                    form.steps.editor = None;
+                    form.steps.pending_save = None;
+                    form.steps.drafts.clear();
+                    form.steps.removals.clear();
+                    form.steps.add_selected = false;
+                    form.steps.delete_mark = None;
                 }
                 self.hold_task_edit_save = false;
                 self.input_mode = BoardInputMode::TaskPage;
@@ -1375,6 +1385,12 @@ impl BoardModel {
             self.task_edit_save = Some(pending);
             return;
         }
+        let selected_step_cursor = pending.selected_step.and_then(|selected_step| {
+            self.tasks
+                .iter()
+                .find(|task| task.id == pending.id)
+                .and_then(|task| task.steps.iter().position(|step| step.id == selected_step))
+        });
         if let Some(form) = self.form.as_mut().filter(|form| form.is_task()) {
             // Domain normalization (notably title trimming) is now durable. Refresh the
             // retained drafts so the page never paints a value that was not saved.
@@ -1392,6 +1408,7 @@ impl BoardModel {
             form.steps.editor = None;
             form.steps.drafts.clear();
             form.steps.removals.clear();
+            form.steps.cursor = selected_step_cursor;
             form.steps.add_selected = false;
         }
         self.input_mode = BoardInputMode::TaskPage;
@@ -1413,10 +1430,9 @@ impl BoardModel {
     ///
     /// Mirrors [`Self::finish_quick_add_save`]'s identity check: the touched step
     /// must be present carrying its new text in the synced tasks before the row may
-    /// close, or reopen empty for Shift+Enter in add mode. The Cancel path syncs the
-    /// rolled-back baseline first, where the step is absent (an add) or still carries
-    /// its old text (a rename), so the line stays held for [`Self::end_save_recovery`]
-    /// to unwind to page view instead. The editor and its input mode outlive the save
+    /// close, or reopen empty for Shift+Enter. The Cancel path syncs the rolled-back
+    /// baseline first, where the added step is absent, so the line stays held for
+    /// [`Self::end_save_recovery`] to unwind to page view instead. The editor and its input mode outlive the save
     /// call precisely because nothing but this confirmed landing releases them.
     fn finish_step_editor_save(&mut self) {
         let Some(form) = self.form.as_ref().filter(|form| form.is_task()) else {

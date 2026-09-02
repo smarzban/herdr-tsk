@@ -118,7 +118,7 @@ what fails if it is violated. Subsystem pages restate the subset they own.
     Quick-add owns its refusals and clears them on close. Otherwise the message is
     invisible during the overlay and leaks onto the board afterwards.
 
-22. **Mutating verbs need Ctrl.** Bare `space` `d` `o` `b`
+22. **Mutating verbs need Ctrl.** Bare `s` `d` `o` `b`
     `e` `n` `x` `u` `q` do nothing. Nav, peek, `Enter`, `P`, `1`/`2`/`3`, `z`, `:`
     `?`, `+`, `Esc` stay bare. Existing modifier settings are ignored.
 

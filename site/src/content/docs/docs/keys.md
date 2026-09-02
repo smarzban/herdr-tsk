@@ -19,7 +19,7 @@ and the palette offers the same command.
 | --- | --- |
 | `j` `k` or `↑` `↓` | move selection |
 | wheel | scroll the list |
-| `ctrl+space` | start the selected task, or reopen it if it is done |
+| `ctrl+s` | start the selected task, or reopen it if it is done |
 | `ctrl+d` | done |
 | `ctrl+o` | reopen |
 | `ctrl+b` | toggle blocked |
@@ -54,10 +54,10 @@ The page is view-first. Verbs still need the modifier, except Tab and arrows.
 | `Enter` | opens or saves selected `+ step`, parks an existing-step rename, opens Scope's picker, or toggles Thread's selected text editor |
 | click a step | selects it in view, opens it inline only during task editing; click `   + step` to add from any page edit state |
 | `↓` `↑` | Down activates the first stored step, then arrows move selected steps; an open add row scrolls the page |
-| `ctrl+space` | toggle the selected step, otherwise start or reopen the task |
+| `ctrl+s` | toggle the selected step, otherwise start or reopen the task |
 | `ctrl+d` / `ctrl+o` | complete / reopen the selected step, otherwise act on the task |
 | `ctrl+x` | in view, first mark then remove a selected step on a second press; in task edit immediately hide and stage its removal, otherwise delete the task |
-| `Shift+Enter` | task-edit save, or save a step and open the next empty step editor |
+| `Shift+Enter` | task-edit save, or save a step and open the next empty step editor (`Alt+Enter` is the legacy-terminal save fallback) |
 | `Esc` | cancel the field, restore staged task-edit changes, or close the page |
 
 Title, Notes, Thread, and Scope clicks are inert until task editing starts. Once it
@@ -71,7 +71,7 @@ selects, then opens or closes its text editor on a second click.
 | `Tab` / `Shift+Tab` | Title, Notes, Thread, Scope |
 | `Enter` in Title | save |
 | `Enter` in Notes | new line |
-| `Ctrl+Enter` | save from any field |
+| `Ctrl+Enter` | save from any field (`Alt+Enter` is the legacy-terminal fallback) |
 | `Esc` | cancel |
 
 On the board `+` line: `Enter` saves and closes, `Shift+Enter` saves and stays

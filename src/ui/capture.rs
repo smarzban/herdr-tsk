@@ -1869,8 +1869,7 @@ mod tests {
         apply(&mut domain, &snap, &mut model, CaptureIntent::FocusNext);
         assert_eq!(model.focused(), CaptureField::Notes);
         let plain = render_plain(&model, 100, 16);
-        assert!(plain.contains("Ctrl+Enter save"), "{plain}");
-        assert!(!plain.contains("Alt+Enter"), "{plain}");
+        assert!(plain.contains("Ctrl+Enter/Alt+Enter save"), "{plain}");
         assert!(plain.contains("Enter newline"), "{plain}");
 
         // Title is one line: Enter still saves there.

@@ -25,7 +25,7 @@ use super::model::{
 
 /// Verb bar for the base board list: labels follow the selected task.
 ///
-/// `space` starts a ready task or reopens a done one. On started/blocked/review it is
+/// `s` starts a ready task or reopens a done one. On started/blocked/review it is
 /// omitted (`PrimaryVerb` is inert on started/blocked/review). `b` reads `unblock` only on a blocked task.
 /// Done tasks show `o reopen` instead of `d`/`b`. `:` / `?` take their word from the keymap.
 pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
@@ -71,17 +71,17 @@ pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
             .map(|step| step.done);
         if selected_step_done.is_some() {
             entries.push(VerbEntry {
-                key: "space",
+                key: "s",
                 label: "toggle step",
             });
         } else {
             match task.status {
                 HumanStatus::Ready => entries.push(VerbEntry {
-                    key: "space",
+                    key: "s",
                     label: "start",
                 }),
                 HumanStatus::Done => entries.push(VerbEntry {
-                    key: "space",
+                    key: "s",
                     label: "reopen",
                 }),
                 HumanStatus::Started | HumanStatus::Blocked | HumanStatus::Review => {}
@@ -131,13 +131,13 @@ pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
         match task.status {
             HumanStatus::Ready => {
                 entries.push(VerbEntry {
-                    key: "space",
+                    key: "s",
                     label: "start",
                 });
             }
             HumanStatus::Done => {
                 entries.push(VerbEntry {
-                    key: "space",
+                    key: "s",
                     label: "reopen",
                 });
             }
@@ -448,8 +448,11 @@ fn build_task_page_overlay<'a>(
             form.notes_scroll,
         )
     };
-    let step_rows = step_views.iter().map(|step| step.rows.len().max(1)).sum();
-    let content = render::page_content_layout(notes_rows.len(), step_rows, lay.notes_rows);
+    let step_rows: usize = step_views.iter().map(|step| step.rows.len().max(1)).sum();
+    // Match the painter's stream exactly: it always paints one notes row and a trailing
+    // `+ step` row, even when both stored notes and stored steps are empty.
+    let content =
+        render::page_content_layout(notes_rows.len().max(1), step_rows + 1, lay.notes_rows);
     form.notes_max_scroll.set(content.max_scroll);
     form.steps.content_start.set(content.steps_start);
     form.notes_width.set(notes_width);

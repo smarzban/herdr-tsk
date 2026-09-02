@@ -58,7 +58,7 @@ fn ctrl(code: KeyCode) -> KeyEvent {
 
 fn mapped_key(code: KeyCode) -> KeyEvent {
     match code {
-        KeyCode::Char(' ' | 'd' | 'o' | 'b' | 'a' | 'e' | 'x' | 'u' | 'q') | KeyCode::Delete => {
+        KeyCode::Char('s' | 'd' | 'o' | 'b' | 'a' | 'e' | 'x' | 'u' | 'q') | KeyCode::Delete => {
             ctrl(code)
         }
         _ => press(code),
@@ -619,7 +619,7 @@ fn assert_verb_parity(title: &str, status: HumanStatus, chord: &str, key: KeyCod
 #[test]
 fn click_and_wheel_match_keyboard_effects_for_each_control() {
     // Verb bar: every chord a Todo task shows, plus the Done-only reopen chord.
-    assert_verb_parity("space", HumanStatus::Ready, "space", KeyCode::Char(' '));
+    assert_verb_parity("s", HumanStatus::Ready, "s", KeyCode::Char('s'));
     assert_verb_parity("enter", HumanStatus::Ready, "enter", KeyCode::Enter);
     assert_verb_parity("d", HumanStatus::Ready, "d", KeyCode::Char('d'));
     assert_verb_parity("b", HumanStatus::Ready, "b", KeyCode::Char('b'));
@@ -1916,6 +1916,35 @@ fn step_editor_verb_chips_follow_their_keyboard_intents() {
         map_board_mouse(&model, &hits, left_click(area.x + 1, area.y)),
         Some(BoardIntent::ConfirmEditNext),
         "{key} click matches the keyboard route"
+    );
+
+    let cancel_index = verbs
+        .iter()
+        .position(|entry| entry.key == "esc")
+        .expect("painted step-editor cancel verb");
+    let cancel_area = hits
+        .regions
+        .iter()
+        .find(|hit| hit.target == QueueHitTarget::Verb(cancel_index))
+        .expect("step-editor cancel hit")
+        .area;
+    let cancel = map_board_mouse(&model, &hits, left_click(cancel_area.x + 1, cancel_area.y));
+    assert_eq!(
+        cancel,
+        Some(BoardIntent::CancelEdit),
+        "the mouse cancel chip must preserve the enclosing task edit session like keyboard Esc"
+    );
+    apply_intent(
+        &mut domain,
+        &mut model,
+        cancel.expect("cancel intent"),
+        None,
+    )
+    .expect("cancel only the step field");
+    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+    assert!(
+        model.task_editing(),
+        "mouse Esc must leave the enclosing task edit session active"
     );
 }
 

@@ -12,7 +12,7 @@ It is view-first. Nothing is in edit mode until you ask. `ctrl+e` edits the titl
 `ctrl+a`, or a click on it opens its independent editor, then Enter saves one step
 and selects that new stored step.
 
-Bare `↓` activates the first stored step, then arrows move the selection. `ctrl+space`
+Bare `↓` activates the first stored step, then arrows move the selection. `ctrl+s`
 toggles that selected step without changing the task's human status.
 
 `ctrl+e` on a stored-step selection starts task editing with the step inline. In task
@@ -25,8 +25,9 @@ second click, opens or closes its text editor without leaving the task edit sess
 The scope footer does nothing until task editing starts.
 
 Plain `Enter` parks an existing-step rename without saving the task session.
-`Shift+Enter` is the only task-session save chord: it saves Title, Notes, Thread,
-Scope, staged existing-step edits, and staged removals, then exits editing. A staged
+`Shift+Enter` is the visible task-session save chord: it saves Title, Notes, Thread,
+Scope, staged existing-step edits, and staged removals, then exits editing. `Alt+Enter`
+is the legacy-terminal fallback. A staged
 `ctrl+x` removal disappears immediately and returns if task editing is cancelled. New
 steps save independently from view or task edit: Enter saves one and selects it,
 Shift+Enter saves one and opens the next empty editor. Field `Esc` cancels that

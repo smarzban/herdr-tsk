@@ -380,9 +380,9 @@ import { parseCapture } from "./capture.js";
       ];
     }
     const items = [{ id: "open", label: "enter open" }];
-    if (task.status === "ready") items.push({ id: "start", label: "space start" });
+    if (task.status === "ready") items.push({ id: "start", label: "s start" });
     if (task.status === "done") {
-      items.push({ id: "reopen", label: "space reopen" });
+      items.push({ id: "reopen", label: "s reopen" });
       items.push({ id: "reopen", label: "o reopen" });
     } else {
       items.push({ id: "done", label: "d done" });
@@ -560,7 +560,7 @@ import { parseCapture } from "./capture.js";
         <div class="tsk-help-title">keys</div>
         <div class="tsk-help-body">
           <div>esc close | click a verb to run it</div>
-          <div>j/k · ↑/↓ move | space primary</div>
+          <div>j/k · ↑/↓ move | s primary</div>
           <div>d done | o reopen | b block</div>
           <div>enter open | →/← peek | + capture</div>
           <div>e title | n notes | x delete | u undo</div>
@@ -971,7 +971,7 @@ import { parseCapture } from "./capture.js";
       render();
       return;
     }
-    if (e.key === " " || e.code === "Space") {
+    if (e.key === "s") {
       e.preventDefault();
       primaryVerb();
       render();

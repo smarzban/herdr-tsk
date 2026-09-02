@@ -88,10 +88,10 @@ pub enum CaptureIntent {
 /// Bottom chrome: compact key legend for capture form.
 pub const CAPTURE_HELP_LINE: &str =
     "Tab fields  ·  1–3 scope  ·  3 other path  ·  Enter save  ·  Esc cancel";
-/// Bottom chrome while Notes has focus: Enter opens a line there, so the Ctrl save chord has
-/// to be on screen. Wording mirrors the board's Notes chrome.
+/// Bottom chrome while Notes has focus: Enter opens a line there, so both save encodings stay
+/// visible. Alt+Enter works when a legacy terminal cannot distinguish modified Enter keys.
 pub const CAPTURE_NOTES_HELP_LINE: &str =
-    "Tab fields  ·  Ctrl+Enter save  ·  Enter newline  ·  Esc cancel";
+    "Tab fields  ·  Ctrl+Enter/Alt+Enter save  ·  Enter newline  ·  Esc cancel";
 /// Compact legend shown while a Capture save is unresolved.
 pub const CAPTURE_SAVE_RECOVERY_HELP_LINE: &str = "r retry  ·  c cancel";
 
@@ -287,7 +287,7 @@ pub enum BoardIntent {
 }
 
 /// Bottom chrome: compact key legend for primary board actions.
-pub const BOARD_HELP_LINE: &str = "↑↓/jk  ·  ctrl+space primary  ·  enter open  ·  → peek  ·  ctrl+d done  ·  ctrl+o reopen  ·  ctrl+b block  ·  + capture  ·  ctrl+e title  ·  ctrl+x del  ·  ctrl+u undo  ·  ctrl+g groups  ·  z drawer  ·  : palette  ·  ? help  ·  ctrl+q quit";
+pub const BOARD_HELP_LINE: &str = "↑↓/jk  ·  ctrl+s primary  ·  enter open  ·  → peek  ·  ctrl+d done  ·  ctrl+o reopen  ·  ctrl+b block  ·  + capture  ·  ctrl+e title  ·  ctrl+x del  ·  ctrl+u undo  ·  ctrl+g groups  ·  z drawer  ·  : palette  ·  ? help  ·  ctrl+q quit";
 /// Compact legend shown while the action sheet or command palette is open.
 pub const COMMAND_SURFACE_HELP_LINE: &str =
     "↑↓ select  ·  type to filter  ·  Enter run  ·  Esc close";
@@ -305,7 +305,7 @@ struct NormalKeyEntry {
     intent: BoardIntent,
     help_chord: &'static str,
     help_label: &'static str,
-    /// True when this binding requires the configured verb modifier (Alt by default).
+    /// True when this binding requires Ctrl.
     verb: bool,
 }
 
@@ -354,9 +354,9 @@ const NORMAL_KEYMAP: &[NormalKeyEntry] = &[
         verb: false,
     },
     NormalKeyEntry {
-        code: KeyCode::Char(' '),
+        code: KeyCode::Char('s'),
         intent: BoardIntent::PrimaryVerb,
-        help_chord: "space",
+        help_chord: "s",
         help_label: "primary",
         verb: true,
     },
@@ -511,7 +511,7 @@ pub fn normal_help_bindings() -> Vec<(&'static str, &'static str)> {
 }
 
 fn help_chord_shown(chord: &str) -> String {
-    const MUTATING: &[&str] = &["q", "space", "d", "o", "b", "a", "e", "x/Delete", "u"];
+    const MUTATING: &[&str] = &["q", "s", "d", "o", "b", "a", "e", "x/Delete", "u"];
     if MUTATING.contains(&chord) {
         format!("ctrl+{chord}")
     } else {
@@ -565,14 +565,18 @@ pub fn map_key(mode: BoardInputMode, key: KeyEvent) -> Option<BoardIntent> {
         BoardInputMode::EditThread => map_thread_edit_key(key),
         BoardInputMode::EditTitle | BoardInputMode::EditNotes => map_edit(mode, key),
         // A step edit belongs to the retained task form, not a modal editor. Enter saves one
-        // independent add; Shift+Enter saves and opens the next empty add row.
+        // independent add; Shift+Enter saves and opens the next empty add row. Alt+Enter is
+        // the same save-next intent for terminals that cannot distinguish Shift+Enter.
         BoardInputMode::EditStep => {
-            if key.code == KeyCode::Enter
-                && key.modifiers.contains(KeyModifiers::SHIFT)
+            let shift_save = key.modifiers.contains(KeyModifiers::SHIFT)
                 && !key
                     .modifiers
-                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
-            {
+                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER);
+            let alt_save = key.modifiers.contains(KeyModifiers::ALT)
+                && !key
+                    .modifiers
+                    .intersects(KeyModifiers::CONTROL | KeyModifiers::SHIFT | KeyModifiers::SUPER);
+            if key.code == KeyCode::Enter && (shift_save || alt_save) {
                 Some(BoardIntent::ConfirmEditNext)
             } else if key.code == KeyCode::Enter && key.modifiers.is_empty() {
                 Some(BoardIntent::ConfirmEdit)
@@ -743,11 +747,14 @@ fn map_form_edit_key(
     let ctrl = mods.contains(KeyModifiers::CONTROL);
     let alt = mods.contains(KeyModifiers::ALT);
     let shift = mods.contains(KeyModifiers::SHIFT);
+    let super_key = mods.contains(KeyModifiers::SUPER);
 
     match key.code {
-        // Shift+Enter saves every task field, Scope included. Ctrl and Alt remain unbound so
-        // task editing has one visible save chord.
-        KeyCode::Enter if shift && !ctrl && !alt => return Some(BoardIntent::ConfirmEdit),
+        // Shift+Enter is the visible task-session save chord. Alt+Enter is the legacy-terminal
+        // fallback because an unenhanced terminal cannot distinguish Shift+Enter from Enter.
+        KeyCode::Enter if shift != alt && !ctrl && !super_key => {
+            return Some(BoardIntent::ConfirmEdit)
+        }
         KeyCode::Tab => match navigation {
             FormEditNavigation::None => {}
             FormEditNavigation::Form => return Some(BoardIntent::FormFocusNext),
@@ -984,7 +991,7 @@ fn map_normal(key: KeyEvent) -> Option<BoardIntent> {
 /// page's task. Ctrl+E/Ctrl+N enter its edit session, while Tab selects and cycles steps in
 /// task view. Bare arrows scroll unless a step has been selected. Esc closes.
 ///
-/// The step verbs reuse this map's existing intents: Ctrl+Space, Ctrl+E, and Ctrl+X act on a
+/// The step verbs reuse this map's existing intents: Ctrl+S, Ctrl+E, and Ctrl+X act on a
 /// selected step, otherwise on the task. The reducer disambiguates using the model cursor.
 fn map_task_page(key: KeyEvent) -> Option<BoardIntent> {
     let mods = key.modifiers;
@@ -997,15 +1004,7 @@ fn map_task_page(key: KeyEvent) -> Option<BoardIntent> {
         KeyCode::Esc if !extra => Some(BoardIntent::CloseLayer),
         KeyCode::Char('q') if verb => Some(BoardIntent::CloseLayer),
         KeyCode::Enter if !extra => Some(BoardIntent::OpenTaskPage),
-        // Conventional terminal input encodes Ctrl+Space as a bare NUL, losing the Ctrl
-        // modifier. Enhanced terminals retain Ctrl and may use either Null or a printable
-        // space. All three representations are the task page's primary verb.
-        KeyCode::Null | KeyCode::Char('\0')
-            if !mods.intersects(KeyModifiers::ALT | KeyModifiers::SUPER) =>
-        {
-            Some(BoardIntent::PrimaryVerb)
-        }
-        KeyCode::Char(' ') if verb => Some(BoardIntent::PrimaryVerb),
+        KeyCode::Char('s') if verb => Some(BoardIntent::PrimaryVerb),
         KeyCode::Char('a') if verb => Some(BoardIntent::BeginAddStep),
         KeyCode::Char('d') if verb => Some(BoardIntent::Complete),
         KeyCode::Char('o') if verb => Some(BoardIntent::Reopen),
@@ -1214,18 +1213,19 @@ pub fn map_capture_key_state(
     }
 }
 
-/// The Capture text fields' chord table, matching the board's.
+/// The Capture text fields' modified-chord table.
 ///
 /// A pure function of the key event: it never queries a terminal capability. It runs before
-/// Capture's modified-chord rejection so a bound Ctrl press cannot fall through to the
-/// printable-character route, and everything still modified after it stays unbound. `Ctrl+C`
-/// is not listed: Capture already cancels on it, ahead of this table.
+/// Capture's modified-chord rejection so a bound Ctrl or Alt press cannot fall through to the
+/// printable-character route. `Ctrl+C` is not listed: Capture already cancels on it first.
 fn map_capture_edit_chord(key: KeyEvent) -> Option<CaptureIntent> {
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
     let alt = key.modifiers.contains(KeyModifiers::ALT);
+    let shift = key.modifiers.contains(KeyModifiers::SHIFT);
+    let super_key = key.modifiers.contains(KeyModifiers::SUPER);
 
     match key.code {
-        KeyCode::Enter if ctrl && !alt => Some(CaptureIntent::Save),
+        KeyCode::Enter if ctrl != alt && !shift && !super_key => Some(CaptureIntent::Save),
         KeyCode::Char('a') if ctrl => Some(CaptureIntent::MoveLineStart),
         KeyCode::Char('e') if ctrl => Some(CaptureIntent::MoveLineEnd),
         KeyCode::Left if ctrl => Some(CaptureIntent::MoveWordLeft),

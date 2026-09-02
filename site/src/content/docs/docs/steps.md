@@ -20,7 +20,7 @@ leaving task view. The target sits immediately below the final stored step as ` 
 start task editing. `ctrl+a` also opens that editor from every task-edit field or
 inline step state.
 
-- `ctrl+space` toggles the selected step, otherwise it starts or reopens the task
+- `ctrl+s` toggles the selected step, otherwise it starts or reopens the task
 - `ctrl+d` completes a selected open step, `ctrl+o` reopens a selected done step
 - `ctrl+e` on a selected stored step starts task editing and opens it inline
 - In task editing, Tab runs Title, Notes, stored steps, `+ step`, Scope, Thread
@@ -33,7 +33,8 @@ independently: it never joins the enclosing task edit session. Plain `Enter` sav
 step and selects that new stored step. `Shift+Enter` saves one and opens the next
 empty editor. Existing-step renames and removals are staged with Title, Notes,
 Thread, and Scope. Plain `Enter` parks an existing-step rename in that session,
-then `Shift+Enter` saves all staged changes. `Esc` cancels a field; Esc from task
+then `Shift+Enter` saves all staged changes (`Alt+Enter` is the legacy-terminal
+fallback). `Esc` cancels a field; Esc from task
 editing restores staged removals. A failed save keeps its drafts until you retry or cancel.
 
 Wheel still scrolls the page. Bare `↓` activates the first stored step, then arrows

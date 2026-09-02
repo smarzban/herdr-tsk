@@ -304,7 +304,7 @@ fn verb_intent(model: &BoardModel, index: usize) -> Option<BoardIntent> {
     match entry.key {
         "shift+enter" => Some(BoardIntent::ConfirmEditNext),
         "enter" if model.input_mode() == BoardInputMode::EditStep => Some(BoardIntent::ConfirmEdit),
-        "space" => Some(BoardIntent::PrimaryVerb),
+        "s" => Some(BoardIntent::PrimaryVerb),
         "enter" => Some(BoardIntent::OpenTaskPage),
         "d" => Some(BoardIntent::Complete),
         "o" => Some(BoardIntent::Reopen),
@@ -314,6 +314,7 @@ fn verb_intent(model: &BoardModel, index: usize) -> Option<BoardIntent> {
         "e" => Some(BoardIntent::BeginEditTitle),
         "n" => Some(BoardIntent::BeginEditNotes),
         "a" => Some(BoardIntent::BeginAddStep),
+        "esc" if model.input_mode() == BoardInputMode::EditStep => Some(BoardIntent::CancelEdit),
         "esc" => Some(BoardIntent::CloseLayer),
         ":" => Some(BoardIntent::OpenCommandPalette),
         "?" => Some(BoardIntent::OpenHelp),

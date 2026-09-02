@@ -44,7 +44,7 @@ For scriptable board work, use `tsk add` and `tsk list`; read
   that prefix copies it. Peek relies on its parent row's prefix. Drafts without a number paint none.
 - Human status: `ready` · `started` · `blocked` · `review` · `done`. The store
   still reads old `todo`/`doing` values.
-- Mutating verbs (`space` `d` `o` `b` `e` `n` `x` `u` `q`) need Ctrl. Bare
+- Mutating verbs (`s` `d` `o` `b` `e` `n` `x` `u` `q`) need Ctrl. Bare
   letters do nothing. Nav, peek,
   `Enter`, `P`, `1`/`2`/`3`, `z`, `:`, `?`, `+`, and `Esc` stay bare.
 - Task creation is the quick-add bar, never a form takeover. `+` opens a one-line
