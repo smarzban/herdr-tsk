@@ -72,23 +72,6 @@ impl AtomicFilesystem for StdFilesystem {
     }
 }
 
-/// Persistence boundary for task-domain operations.
-///
-/// `TaskStore` is the production implementation. The trait keeps callers independent from the
-/// concrete store while preserving the lock and atomic-write boundary.
-pub trait TaskStateStore {
-    fn load(&self) -> Result<DomainState, StoreError>;
-    fn save(&self, state: &DomainState) -> Result<(), StoreError>;
-
-    /// Hold the store's record lock across load, one state transition, and save.
-    ///
-    /// This is the boundary for transitions that must not race another process.
-    fn locked_transition<T>(
-        &self,
-        transition: impl FnOnce(&mut DomainState) -> Result<T, String>,
-    ) -> Result<T, String>;
-}
-
 /// Load/save `DomainState` as JSON under a state directory.
 #[derive(Debug, Clone)]
 pub struct TaskStore {
@@ -180,6 +163,7 @@ impl TaskStore {
         local: &mut DomainState,
         filesystem: &F,
     ) -> Result<(), StoreError> {
+        check_format_version(local.format_version())?;
         let _guard = self.lock_exclusive()?;
         let disk = self.load_unlocked()?;
         check_format_version(disk.format_version())?;
@@ -284,23 +268,6 @@ impl TaskStore {
             .map(|d| d.as_nanos())
             .unwrap_or(0);
         self.path.join(format!(".{STATE_FILE}.tmp.{pid}.{nanos}"))
-    }
-}
-
-impl TaskStateStore for TaskStore {
-    fn load(&self) -> Result<DomainState, StoreError> {
-        Self::load(self)
-    }
-
-    fn save(&self, state: &DomainState) -> Result<(), StoreError> {
-        Self::save(self, state)
-    }
-
-    fn locked_transition<T>(
-        &self,
-        transition: impl FnOnce(&mut DomainState) -> Result<T, String>,
-    ) -> Result<T, String> {
-        Self::locked_transition(self, transition)
     }
 }
 
@@ -921,6 +888,37 @@ mod tests {
             }
         ));
         assert!(!dir.join(STATE_FILE).exists());
+    }
+
+    #[test]
+    fn reload_merge_save_refuses_noncurrent_local_state_without_rewriting() {
+        let dir = temp_dir("format-merge-local");
+        let _guard = TempDirGuard(dir.clone());
+        let store = TaskStore::new(&dir);
+        store.save(&DomainState::new()).expect("seed v1 store");
+        let before = fs::read(dir.join(STATE_FILE)).expect("read v1 store");
+        let mut local: DomainState = serde_json::from_value(serde_json::json!({
+            "format_version": 2,
+            "next_task_number": 1,
+            "tasks": [],
+            "undo_stack": []
+        }))
+        .expect("shape is otherwise valid");
+
+        let error = store
+            .reload_merge_save(&mut local)
+            .expect_err("noncurrent local state must refuse");
+        assert!(matches!(
+            error,
+            StoreError::UnsupportedFormat {
+                found: 2,
+                supported: 1
+            }
+        ));
+        assert_eq!(
+            fs::read(dir.join(STATE_FILE)).expect("read unchanged"),
+            before
+        );
     }
 
     #[test]

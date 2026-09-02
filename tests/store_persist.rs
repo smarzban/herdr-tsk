@@ -30,6 +30,132 @@ impl Drop for TempDirGuard {
     }
 }
 
+fn current_store_fixture() -> serde_json::Value {
+    serde_json::from_str(include_str!("fixtures/current_store_v1.json"))
+        .expect("current store fixture is valid JSON")
+}
+
+fn assert_store_document_refused_without_rewrite(document: serde_json::Value) {
+    let dir = temp_state_dir();
+    let _guard = TempDirGuard(dir.clone());
+    let bytes = serde_json::to_vec_pretty(&document).expect("encode test document");
+    fs::write(dir.join("tsk.json"), &bytes).expect("install test document");
+
+    TaskStore::new(&dir)
+        .load()
+        .expect_err("removed wire shape must be refused");
+    assert_eq!(
+        fs::read(dir.join("tsk.json")).expect("read refused document"),
+        bytes,
+        "a refused document must not be rewritten"
+    );
+}
+
+#[test]
+fn literal_current_v1_fixture_pins_the_complete_store_wire_shape() {
+    let dir = temp_state_dir();
+    let _guard = TempDirGuard(dir.clone());
+    fs::write(
+        dir.join("tsk.json"),
+        include_bytes!("fixtures/current_store_v1.json"),
+    )
+    .expect("install current fixture");
+
+    let mut state = TaskStore::new(&dir).load().expect("load current fixture");
+    assert_eq!(state.format_version(), 1);
+    assert_eq!(state.next_task_number, 8);
+    let task = state.tasks().first().expect("fixture task");
+    assert_eq!(task.id.to_string(), "11111111-1111-4111-8111-111111111111");
+    assert_eq!(task.number, Some(7));
+    assert_eq!(
+        task.revision.to_string(),
+        "22222222-2222-4222-8222-222222222222"
+    );
+    assert_eq!(task.title, "Pinned wire task");
+    assert_eq!(task.notes.as_deref(), Some("Line one\nLine two"));
+    assert_eq!(task.thread.as_deref(), Some("release-2026"));
+    assert_eq!(task.status, HumanStatus::Done);
+    assert_eq!(
+        task.scope,
+        TaskScope::Project {
+            path: "/tmp/example-project".into()
+        }
+    );
+    assert_eq!(task.provenance, ProvenanceOrigin::Selection);
+    assert_eq!(
+        task.history
+            .iter()
+            .map(|event| event.kind)
+            .collect::<Vec<_>>(),
+        vec![
+            TaskEventKind::Created,
+            TaskEventKind::StepAdded,
+            TaskEventKind::Completed
+        ]
+    );
+    assert_eq!(task.steps.len(), 1);
+    assert_eq!(task.steps[0].text, "Pinned step");
+    assert!(task.steps[0].done);
+    assert!(!task.soft_deleted);
+    assert_eq!(
+        task.created_at
+            .duration_since(UNIX_EPOCH)
+            .expect("created after epoch"),
+        std::time::Duration::new(1_700_000_000, 123_456_789)
+    );
+    assert_eq!(
+        task.updated_at
+            .duration_since(UNIX_EPOCH)
+            .expect("updated after epoch"),
+        std::time::Duration::new(1_700_000_100, 987_654_321)
+    );
+
+    state.undo().expect("fixture undo entry is current");
+    assert_eq!(
+        state
+            .tasks()
+            .first()
+            .expect("fixture task after undo")
+            .status,
+        HumanStatus::Ready
+    );
+}
+
+#[test]
+fn every_removed_wire_token_is_refused_at_the_store_boundary() {
+    for status in ["todo", "doing"] {
+        let mut document = current_store_fixture();
+        document["tasks"][0]["status"] = serde_json::json!(status);
+        assert_store_document_refused_without_rewrite(document);
+    }
+
+    for kind in [
+        "checklist_item_added",
+        "checklist_item_checked",
+        "checklist_item_unchecked",
+        "checklist_item_renamed",
+        "checklist_item_removed",
+        "parked",
+        "agent_linked",
+        "agent_unlinked",
+        "dispatched",
+    ] {
+        let mut document = current_store_fixture();
+        document["tasks"][0]["history"][0]["kind"] = serde_json::json!(kind);
+        assert_store_document_refused_without_rewrite(document);
+    }
+
+    for field in ["checklist", "capsule", "agent_meta", "last_observed"] {
+        let mut document = current_store_fixture();
+        document["tasks"][0][field] = serde_json::Value::Null;
+        assert_store_document_refused_without_rewrite(document);
+    }
+
+    let mut document = current_store_fixture();
+    document["active_attempts"] = serde_json::json!([]);
+    assert_store_document_refused_without_rewrite(document);
+}
+
 #[test]
 fn thread_round_trips_through_save_and_load() {
     let dir = temp_state_dir();

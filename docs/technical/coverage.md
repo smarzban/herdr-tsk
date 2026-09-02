@@ -84,7 +84,7 @@ self/special docs repo.
 | `TaskEvent`, `ProvenanceOrigin` | data model | [data-model.md](data-model.md) | done |
 | `UndoEntry` | data model | [data-model.md](data-model.md) | done |
 | `walkthrough.json` | data model | [data-model.md](data-model.md) | done |
-| CLI plan/flag/list JSON | data model | [data-model.md](data-model.md) | done |
+| CLI plan/flag/list JSON | data model | [cli.md](cli.md#machine-readable-wire-formats) | done |
 | `HERDR_PLUGIN_CONTEXT_JSON` | data model | [context.md](context.md) | done |
 
 ## Exclusions (declared)

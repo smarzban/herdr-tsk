@@ -4,8 +4,7 @@
 It owns atomic replacement, an exclusive inter-process lock, a strict format guard,
 and a last-good backup. It does not interpret human status.
 
-**Public surface.** `TaskStore`, `TaskStateStore`, `StoreError`, and
-`default_state_dir`.
+**Public surface.** `TaskStore`, `StoreError`, and `default_state_dir`.
 
 ## How it works
 

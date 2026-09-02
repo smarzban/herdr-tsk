@@ -68,6 +68,68 @@ the stable `code()` token on stderr for flag add/steps. Plan add prints the JSON
 object even when `failed` is non-empty (exit 1). Untrusted titles pass through
 `terminal_text` on human list output.
 
+## Machine-readable wire formats
+
+These shapes are process output or input, not fields in `tsk.json`.
+
+### Flag add `--json`
+
+```json
+{
+  "outcome": "created" | "existing",
+  "id": "<uuid>",
+  "number": 42,
+  "title": "<string>",
+  "project": "<path>" | null
+}
+```
+
+`project` is null for desk.
+
+### Plan add
+
+Input is a JSON array of objects. `title` is required. `notes` is optional;
+`project` may be a string, JSON null for desk, or omitted for the invocation
+default; `thread` may be a normalized string or null.
+
+Output:
+
+```json
+{
+  "created":  [{ "i": 0, "id": "<uuid>", "number": 42, "title": "..." }],
+  "existing": [{ "i": 1, "id": "<uuid>", "number": 43, "title": "..." }],
+  "failed":   [{ "i": 2, "title": "..." | null, "code": "empty-title", "error": "..." }]
+}
+```
+
+`i` is the input index. Notes are not echoed. Stable refusal codes are
+`empty-title`, `invalid-title`, and `invalid-item`; store failures use
+`store-error`. The `code` is the machine contract, the human `error` text is not.
+
+### `list --json`
+
+The standard result is an array of:
+
+```json
+{
+  "id": "<uuid>",
+  "number": 42,
+  "title": "<string>",
+  "status": "ready" | "started" | "blocked" | "review" | "done",
+  "project": "<path>" | null,
+  "thread": "<name>" | null
+}
+```
+
+A single-task listing additionally carries `steps` on its one row:
+`[{ "id", "done", "short_id", "text" }, ...]` in stored order.
+
+### `--find-board-pane` stdin
+
+Expected shape: `{ "result": { "panes": [{ "pane_id", "label", ... }] } }`.
+The first flag-safe `pane_id` whose label is exactly `tsk` wins. Invalid JSON
+produces no match; the process exits 1 when no pane matches.
+
 ## Invariants
 
 [Invariants](invariants.md) §§31–33. Idempotency includes thread (ADR-0002). C0
