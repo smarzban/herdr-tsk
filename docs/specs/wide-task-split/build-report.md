@@ -130,9 +130,32 @@ Ran the release binary with isolated `TSK_STATE_DIR` and `TSK_CONFIG_DIR` in a c
 - A task-side step mouse click focused the task and selected the intended step, reflected by the `toggle step` verb.
 - Five repeated 109/110 threshold crossings left the process alive. The smoke process was then exited and its isolated state/config directories were deleted.
 
+## Post-build PR review repairs
+
+Review panel discovery kept F-14, F-7, F-8, F-1, F-10, F-13, and F-9. Commit `4ee409d` added visible editor focus, app-level keyboard/mouse/scrollbar handoff coverage, retained scroll-bound refresh, thread/scope dirty tests, and clean-editor retargeting. Verification then found same-bound editor clicks could hide the editor; commit `4586803` made those clicks inert and added clean/dirty regressions.
+
+Final repair green bar:
+
+```text
+$ cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && cargo build --release && cd site && npm ci && npm test && npm run build
+exit 0
+cargo test aggregate: 728 passed, 0 failed, 5 ignored across 26 result blocks
+app_keyboard_route_owns_responsive_focus_handoffs: ok
+app_mouse_click_focuses_task_before_dispatching_same_control: ok
+app_task_scrollbar_focuses_refreshes_bound_and_routes_page_scroll: ok
+board_focused_task_field_edit_focuses_and_paints_live_editor: ok
+clean_task_editor_board_click_retargets_and_focuses_board: ok
+clean_task_editor_same_bound_row_click_keeps_task_focus: ok
+dirty_task_scope_dropdown_same_bound_row_click_keeps_visible_editor: ok
+site npm test: 6 passed, 0 failed
+site build: 10 pages built
+```
+
+Final two-seat Review panel verification reported no regressions. Terra marked every kept finding resolved. Claude marked six resolved and returned F-8 as still present without evidence; the harness judged F-8 resolved from the concrete app-level helper and test evidence.
+
 ## Final build corroboration
 
-`sdlc-check 0.20.1 --require ledger`: 0 findings, 0 notes. `git diff --check main...HEAD`: clean. The worktree is clean at `a9c7523`.
+`sdlc-check 0.20.1 --require ledger --require verification-report`: 0 findings, 0 notes after report refresh. `git diff --check main...HEAD`: clean at product head `4586803`.
 
 ## Deviations
 

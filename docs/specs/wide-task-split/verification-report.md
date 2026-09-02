@@ -1,7 +1,7 @@
 # Verification report: wide task split
 
 Date: 2026-09-03
-Branch head before report commit: `a9c7523`
+Final reviewed product head before report refresh: `4586803`
 
 ## Result
 
@@ -37,7 +37,7 @@ The full Rust green bar, site checks, criterion-linked tests, and isolated live 
 ```text
 $ cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && cargo build --release && cd site && npm ci && npm test && npm run build
 exit 0
-cargo test: 719 passed, 0 failed, 5 ignored across 26 result blocks
+cargo test after Review panel repairs: 728 passed, 0 failed, 5 ignored across 26 result blocks
 site npm test: 6 passed, 0 failed
 site build: 10 pages built
 ```
@@ -46,6 +46,12 @@ site build: 10 pages built
 
 Using isolated state and config directories, the release binary was exercised at 184, 110, and 109 columns. Verified side-by-side rendering, selected-task retargeting, keyboard focus transfer, task-side mouse focus-before-dispatch, editor-preserving shrink/grow, editor-safe board clicks, intended step selection, cancellation, and repeated threshold crossings. The process remained live and the isolated data was removed afterward.
 
+## Review panel and repair verification
+
+Review panel discovery ran 9 seats, with 8 votes and one lost qwen holistic seat. Seven findings were kept for repair: F-14, F-7, F-8, F-1, F-10, F-13, and F-9. Two repair commits added live-editor focus, app-level keyboard/mouse/scrollbar wiring tests, refreshed retained scroll bounds, dirty thread/scope coverage, clean-editor retargeting, and same-bound editor safety.
+
+The final two-seat verification found no regressions. Terra marked all kept findings resolved. Claude marked six resolved and returned F-8 as still present without evidence; the harness judged F-8 resolved from the concrete app-level focus-before-dispatch helpers and tests cited by Terra and present in `src/app.rs`.
+
 ## Mechanical corroboration
 
-`sdlc-check 0.20.1 --require ledger --require verification-report`: passed with 0 findings and 0 notes before push.
+`sdlc-check 0.20.1 --require ledger --require verification-report`: passed with 0 findings and 0 notes before the initial push and again after Review panel repairs and report refresh.
