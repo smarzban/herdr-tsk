@@ -6,6 +6,10 @@ mod commands;
 mod draw;
 mod model;
 
+pub use crate::ui::tier::{
+    resolve_responsive, FocusedSurface, ResponsiveGeometry, ResponsivePresentation,
+    WIDE_SPLIT_MIN_WIDTH,
+};
 pub use apply::{apply_intent, board_intent_may_persist};
 pub use chrome::DELETE_NOTICE_UNDO;
 pub use commands::{resolve_board_command, BoardCommand, CommandSurface};

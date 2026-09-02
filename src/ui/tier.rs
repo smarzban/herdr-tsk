@@ -1,11 +1,41 @@
 //! Tier Layout Resolver: map terminal size to standard/compact frame geometry.
 
+use ratatui::layout::Rect;
+
 /// Layout tier for the queue board (the: standard + compact; wide is not returned).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tier {
     Standard,
     Compact,
 }
+
+/// Surface that retains focus while responsive presentation changes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FocusedSurface {
+    Board,
+    Task,
+}
+
+/// Responsive presentation selected for the usable frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResponsivePresentation {
+    SingleBoard,
+    SingleTask,
+    WideSplit,
+}
+
+/// Bounded surface rectangles and shared internal density for one usable frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResponsiveGeometry {
+    pub presentation: ResponsivePresentation,
+    pub board: Rect,
+    pub task: Rect,
+    pub divider: Option<Rect>,
+    pub density: Tier,
+}
+
+/// Minimum usable width for the wide split view.
+pub const WIDE_SPLIT_MIN_WIDTH: u16 = 110;
 
 /// Pure frame geometry for one terminal size.
 ///
@@ -116,6 +146,44 @@ pub fn resolve(width: u16, height: u16) -> TierGeometry {
         meta_column_width,
         selector_chip_max: SELECTOR_CHIP_MAX_CELLS,
         verb_bar_entry_budget,
+    }
+}
+
+/// Map usable dimensions and retained focus to one or two bounded surfaces.
+///
+/// Wide split reserves one divider column, then divides the remainder equally.
+/// Both halves use the density selected by the narrower half.
+pub fn resolve_responsive(width: u16, height: u16, focused: FocusedSurface) -> ResponsiveGeometry {
+    if width < WIDE_SPLIT_MIN_WIDTH {
+        let frame = Rect::new(0, 0, width, height);
+        return match focused {
+            FocusedSurface::Board => ResponsiveGeometry {
+                presentation: ResponsivePresentation::SingleBoard,
+                board: frame,
+                task: Rect::default(),
+                divider: None,
+                density: resolve(width, height).tier,
+            },
+            FocusedSurface::Task => ResponsiveGeometry {
+                presentation: ResponsivePresentation::SingleTask,
+                board: Rect::default(),
+                task: frame,
+                divider: None,
+                density: resolve(width, height).tier,
+            },
+        };
+    }
+
+    let surface_columns = width - 1;
+    let board_width = surface_columns / 2;
+    let task_width = surface_columns - board_width;
+    let divider_x = board_width;
+    ResponsiveGeometry {
+        presentation: ResponsivePresentation::WideSplit,
+        board: Rect::new(0, 0, board_width, height),
+        task: Rect::new(divider_x + 1, 0, task_width, height),
+        divider: Some(Rect::new(divider_x, 0, 1, height)),
+        density: resolve(board_width.min(task_width), height).tier,
     }
 }
 
