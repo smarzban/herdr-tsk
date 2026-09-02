@@ -68,8 +68,11 @@ For scriptable board work, use `tsk add` and `tsk list`; read
   the page.
 - Task page is view-first. Only `ctrl+e`, `ctrl+n`, or bare Tab enter edit mode,
   the one exception being a quick-add draft expanded with `Tab`, which opens
-  straight into Notes edit mode because a draft has nothing to view. The scope
-  footer is inert until an edit has started.
+  straight into Notes edit mode because a draft has nothing to view. `ctrl+s`
+  toggles a selected step, otherwise it starts or reopens the task. Plain `Enter`
+  parks an existing-step rename; `Shift+Enter` saves the complete task-edit
+  session, with `Alt+Enter` as the legacy-terminal fallback. The scope footer is
+  inert until an edit has started.
 - Mono modifiers only. No color theme module.
 - No host attention poll, park/resume, linking, or dispatch recovery on the board.
 - Text wraps, never truncates: one wrap engine (`edit::wrap_text`, word-boundary,
@@ -107,7 +110,7 @@ For scriptable board work, use `tsk add` and `tsk list`; read
 - Changes to the keymap, status verbs, or tab/section semantics need a matching
   `site/` update (`src/content/docs/docs/{keys,board,capture,cli}.md` and
   `public/board-demo.js`). The web demo uses bare verb keys on purpose (browsers
-  steal Alt-chords); do not "fix" that to match the TUI.
+  reserve control chords); do not "fix" that to match the TUI.
 
 ### Live herdr smoke
 
