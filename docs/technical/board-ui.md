@@ -5,8 +5,8 @@ mouse to `BoardIntent`, reduce intents against domain + `BoardModel`, paint with
 ratatui. Persistence is [app](app.md) / [store](store.md).
 
 **Public surface.** Re-exported from `ui`: `BoardModel`, `BoardInputMode`,
-`apply_intent`, `draw_board`, `board_hit_map`, `BoardIntent`, `map_key` /
-`map_key_with`, `map_board_mouse`, queue types, render helpers, tier geometry,
+`apply_intent`, `draw_board`, `board_hit_map`, `BoardIntent`, `map_key`,
+`map_board_mouse`, queue types, render helpers, tier geometry,
 scrollbar, markdown painters, text-select. Internal split:
 `ui/board/{model,apply,commands,chrome,draw}`.
 
@@ -40,7 +40,7 @@ number of live done tasks (the `drawer_open` branches currently agree).
 
 `BoardModel` is session-only: location (home tab vs project path), selection id,
 scroll, peek, collapse sets, input mode, optional `BoardForm` / `QuickAddState`,
-palette, help, save-recovery presentation, verb modifier, text selection,
+palette, help, save-recovery presentation, text selection,
 ephemeral message + delete-recovery notice.
 
 `BoardFormBinding` is `Task(id)` XOR `Capture(snapshot)` for the form's lifetime.
@@ -65,7 +65,7 @@ open without deleting it.
 
 ### Keys
 
-`map_key_with(mode, key, verb_modifier)`. Mutating letters require Alt or Ctrl.
+`map_key(mode, key)`. Mutating letters require the fixed Ctrl modifier.
 `1`/`2`/`3` select home tabs only in `Normal` at home without ctrl/alt/super.
 `map_board_form_key` shares `map_form_edit_key` with capture. Task-page view mode
 (`TaskPage`) keeps the board keymap so bare `e` enters edit rather than inserting
@@ -125,4 +125,4 @@ already consume budget). New keys: `BoardIntent` + mapper + reducer; if it
 persists, add it to `board_intent_may_persist`. Keymap/status/tab changes also
 need `site/src/content/docs/docs/{keys,board,capture,cli}.md` and
 `site/public/board-demo.js`. The web demo uses **bare** verb keys on purpose
-(browsers steal Alt); do not “fix” it to match the TUI.
+(browsers steal control chords); do not “fix” it to match the TUI.

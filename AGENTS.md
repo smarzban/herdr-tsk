@@ -44,12 +44,12 @@ For scriptable board work, use `tsk add` and `tsk list`; read
   that prefix copies it. Peek relies on its parent row's prefix. Drafts without a number paint none.
 - Human status: `ready` · `started` · `blocked` · `review` · `done`. The store
   still reads old `todo`/`doing` values.
-- Mutating verbs (`space` `d` `o` `b` `e` `n` `x` `u` `q`) need Alt, or Ctrl
-  if the user flipped it in the palette. Bare letters do nothing. Nav, peek,
+- Mutating verbs (`s` `d` `o` `b` `e` `n` `x` `u` `q`) need Ctrl. Bare
+  letters do nothing. Nav, peek,
   `Enter`, `P`, `1`/`2`/`3`, `z`, `:`, `?`, `+`, and `Esc` stay bare.
 - Task creation is the quick-add bar, never a form takeover. `+` opens a one-line
   title input on the status-row slot with a blank row above and below, list still
-  visible. `Enter` saves and closes, `Ctrl+Enter` saves and stays open, `Tab`
+  visible. `Enter` saves and closes, `Shift+Enter` saves and stays open, `Tab`
   expands the draft onto the task page with a title·notes·scope stash, so Esc
   returns to the line and a second `Tab` restores what was typed. A project board
   defaults the draft to that project, a project-less board defaults it to your desk, and home
@@ -66,8 +66,8 @@ For scriptable board work, use `tsk add` and `tsk list`; read
   separate surface reached through the host launcher.
 - Row click peeks. Click the same row again closes peek. Fast double-click opens
   the page.
-- Task page is view-first. Only `e`/`n`/Tab (with the verb modifier) enter edit
-  mode, the one exception being a quick-add draft expanded with `Tab`, which opens
+- Task page is view-first. Only `ctrl+e`, `ctrl+n`, or bare Tab enter edit mode,
+  the one exception being a quick-add draft expanded with `Tab`, which opens
   straight into Notes edit mode because a draft has nothing to view. The scope
   footer is inert until an edit has started.
 - Mono modifiers only. No color theme module.
@@ -115,7 +115,9 @@ When the change touches the board, host integration, or panes, do not call it
 done on unit tests alone.
 
 If `HERDR_ENV=1`: rebuild in-repo, drive the real path with herdr, read the pane,
-and fix anything that only fails live.
+and fix anything that only fails live. Every UI-affecting addition or behavior change needs a
+real UI smoke of its new flow, using isolated state when it would mutate a user's tasks; unit
+and render tests alone are not enough.
 
 If `HERDR_ENV` is unset, say that live smoke was not run.
 
@@ -125,9 +127,9 @@ If `HERDR_ENV` is unset, say that live smoke was not run.
 - The projectless scope displays as `desk` but serializes as `global` in tsk.json and
   keeps its internal name `TaskScope::Global`; do not "fix" either without a store
   migration.
-- State is `$HOME/.tsk/tsk.json`, config `$HOME/.tsk/settings.json`, overridable
-  with `TSK_STATE_DIR` / `TSK_CONFIG_DIR`. Host-injected `HERDR_PLUGIN_*` dirs are
-  ignored. Verb modifier is `settings.json`; the palette flips it.
+- State is `$HOME/.tsk/tsk.json`, walkthrough dismissal is
+  `$HOME/.tsk/walkthrough.json`, overridable with `TSK_STATE_DIR` / `TSK_CONFIG_DIR`.
+  Host-injected `HERDR_PLUGIN_*` dirs are ignored. Mutating verbs always use Ctrl.
 - Golden fixtures regenerate via `cargo test --test queue_board_render regenerate_golden_fixtures -- --ignored`; never hand-edit the `.txt` files.
 - Pane label matching is exact against `board_pane::BOARD_PANE_LABEL`; the manifest pane title must equal it.
 - UI chrome lives in `src/ui/` (`board/` model·apply·commands·chrome·draw,

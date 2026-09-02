@@ -380,9 +380,9 @@ import { parseCapture } from "./capture.js";
       ];
     }
     const items = [{ id: "open", label: "enter open" }];
-    if (task.status === "ready") items.push({ id: "start", label: "space start" });
+    if (task.status === "ready") items.push({ id: "start", label: "s start" });
     if (task.status === "done") {
-      items.push({ id: "reopen", label: "space reopen" });
+      items.push({ id: "reopen", label: "s reopen" });
       items.push({ id: "reopen", label: "o reopen" });
     } else {
       items.push({ id: "done", label: "d done" });
@@ -408,17 +408,8 @@ import { parseCapture } from "./capture.js";
 
   function peekLines(task) {
     const notes = (task.notes || "").trim();
-    const lines = [];
-    if (!notes) lines.push("no notes yet");
-    else {
-      const parts = notes.split(/\n/);
-      lines.push(...parts.slice(0, 5));
-      if (parts.length > 5) lines.push(`… ${parts.length - 5} more lines`);
-    }
-    if (task.thread) lines.push(`thread #${task.thread}`);
-    lines.push(`scope ${projectName(task)}`);
-    lines.push(`created ${age(task.createdAt)} ago · updated ${age(task.updatedAt)} ago`);
-    return lines;
+    if (!notes) return ["no notes yet"];
+    return notes.split(/\n/).slice(0, 5);
   }
 
   function rule(label, count) {
@@ -441,6 +432,9 @@ import { parseCapture } from "./capture.js";
       { id: "help", label: "help", run: () => (state.overlay = "help") },
       { id: "reset", label: "reset demo", run: resetDemo },
     ];
+    if (!state.focusProject && ["projects", "threads"].includes(state.tab)) {
+      all.push({ id: "groups", label: "toggle groups", run: toggleAllGroups });
+    }
     return all.filter((c) => !q || c.label.includes(q) || c.id.includes(q));
   }
 
@@ -464,6 +458,16 @@ import { parseCapture } from "./capture.js";
     state.focusProject = null;
     state.peekId = null;
     state.overlay = null;
+  }
+
+  function toggleAllGroups() {
+    if (state.focusProject || !["projects", "threads"].includes(state.tab)) return;
+    const groups = buildRows().filter((row) => row.kind === "group" && !row.indent);
+    const collapse = groups.some((row) => !state.collapsed.has(row.collapseKey));
+    for (const row of groups) {
+      if (collapse) state.collapsed.add(row.collapseKey);
+      else state.collapsed.delete(row.collapseKey);
+    }
   }
 
   function resetDemo() {
@@ -556,13 +560,13 @@ import { parseCapture } from "./capture.js";
         <div class="tsk-help-title">keys</div>
         <div class="tsk-help-body">
           <div>esc close | click a verb to run it</div>
-          <div>j/k · ↑/↓ move | space primary</div>
+          <div>j/k · ↑/↓ move | s primary</div>
           <div>d done | o reopen | b block</div>
           <div>enter open | →/← peek | + capture</div>
           <div>e title | n notes | x delete | u undo</div>
           <div>z drawer | : palette | ? help</div>
-          <div>P project | 1 2 3 tabs</div>
-          <div class="dim">app needs alt on verbs · demo also accepts bare keys</div>
+          <div>P project | 1 2 3 tabs | g groups (projects/threads)</div>
+          <div class="dim">app needs ctrl on verbs · demo also accepts bare keys</div>
           <div class="dim">any key to close</div>
         </div>
       </div>`;
@@ -623,7 +627,7 @@ import { parseCapture } from "./capture.js";
         ${title}
         <div class="dim">${esc(task.status)} · ${esc(projectName(task))}${task.thread ? ` · #${esc(task.thread)}` : ""}</div>
         ${notes}
-        <div class="foot dim">esc close · alt+e title · alt+n notes · alt+d done · alt+b block</div>
+        <div class="foot dim">esc close · e title · n notes · d done · b block</div>
       </div>`;
   }
 
@@ -655,9 +659,10 @@ import { parseCapture } from "./capture.js";
         const indent = "  ".repeat(row.indent || 0);
         const peek =
           state.peekId === task.id
-            ? peekLines(task)
-                .map((line) => `<div class="tsk-peek dim">${indent}    │ ${esc(line)}</div>`)
-                .join("")
+            ? [
+                ...peekLines(task).map((line) => `<div class="tsk-peek dim">${indent}    │ ${esc(line)}</div>`),
+                `<div class="tsk-peek dim">${indent}    └</div>`,
+              ].join("")
             : "";
         return `<button type="button" class="tsk-row ${selected ? "is-sel" : ""} ${flash ? "is-flash" : ""}" data-task="${task.id}">
           <span class="tsk-row-main">${indent}  <span class="${selected ? "sel" : "glyph"}">${glyph}</span> <span class="tsk-task-id ${selected ? "sel-text" : ""}" data-copy-task="${esc(task.id)}" title="copy T${task.number}">T${task.number}</span> <span class="${selected ? "sel-text" : ""}">${esc(task.title)}</span></span>
@@ -671,7 +676,7 @@ import { parseCapture } from "./capture.js";
     const footer =
       state.overlay === "quick"
         ? `<div class="tsk-input-row"><span class="tsk-prompt">+</span><input class="tsk-field" id="tsk-add" value="${esc(state.draft)}" placeholder="title  ·  !p project  ·  !t thread" autocomplete="off" /><span class="cursor">█</span></div>
-           <div class="foot dim">${state.refuse ? esc(state.refuse) : "enter save · ctrl+enter stay · tab page · esc close"}</div>`
+           <div class="foot dim">${state.refuse ? esc(state.refuse) : "enter save · shift+enter stay · tab page · esc close"}</div>`
         : `<button type="button" class="tsk-done-count foot" data-drawer="1">${doneN} done</button>
            <div class="foot dim tsk-verbs">${verbItems(task)
              .map((v) => `<button type="button" class="tsk-verb" data-verb="${esc(v.id)}">${esc(v.label)}</button>`)
@@ -755,10 +760,10 @@ import { parseCapture } from "./capture.js";
         render();
         return;
       }
-      if (e.key === "Enter") {
+      if (e.key === "Enter" && !e.ctrlKey && !e.altKey && !e.metaKey) {
         e.preventDefault();
-        saveDraft(e.ctrlKey || e.metaKey);
-        if (!e.ctrlKey) frame.focus();
+        saveDraft(e.shiftKey);
+        if (!e.shiftKey) frame.focus();
         render();
         return;
       }
@@ -930,6 +935,12 @@ import { parseCapture } from "./capture.js";
       render();
       return;
     }
+    if (e.key === "g" && !e.altKey && !e.ctrlKey && !e.metaKey) {
+      e.preventDefault();
+      toggleAllGroups();
+      render();
+      return;
+    }
     if (e.key === "j" || e.key === "ArrowDown") {
       e.preventDefault();
       move(1);
@@ -960,7 +971,7 @@ import { parseCapture } from "./capture.js";
       render();
       return;
     }
-    if (e.key === " " || e.code === "Space") {
+    if (e.key === "s") {
       e.preventDefault();
       primaryVerb();
       render();

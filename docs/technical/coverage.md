@@ -86,7 +86,6 @@ self/special docs repo.
 | `TaskEvent`, `ProvenanceOrigin` | data model | [data-model.md](data-model.md) | done |
 | `UndoEntry` | data model | [data-model.md](data-model.md) | done |
 | `DispatchAttempt` and receipts | data model | [data-model.md](data-model.md) | done |
-| `settings.json` / `VerbModifier` | data model | [data-model.md](data-model.md) | done |
 | `walkthrough.json` | data model | [data-model.md](data-model.md) | done |
 | CLI plan/flag/list JSON | data model | [data-model.md](data-model.md) | done |
 | `HERDR_PLUGIN_CONTEXT_JSON` | data model | [context.md](context.md) | done |

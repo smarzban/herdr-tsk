@@ -25,8 +25,8 @@ The binary is `target/release/tsk`.
 ./target/release/tsk
 ```
 
-State lives in `~/.tsk`: `tsk.json` next to `settings.json`. Override with
-`TSK_STATE_DIR` / `TSK_CONFIG_DIR`.
+State lives in `~/.tsk/tsk.json`; walkthrough dismissal is kept beside it in
+`walkthrough.json`. Override with `TSK_STATE_DIR` / `TSK_CONFIG_DIR`.
 
 ```bash
 tsk add -t "Draft release notes"

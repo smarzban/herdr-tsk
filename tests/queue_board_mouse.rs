@@ -52,14 +52,14 @@ fn press(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)
 }
 
-fn alt(code: KeyCode) -> KeyEvent {
-    KeyEvent::new(code, KeyModifiers::ALT)
+fn ctrl(code: KeyCode) -> KeyEvent {
+    KeyEvent::new(code, KeyModifiers::CONTROL)
 }
 
 fn mapped_key(code: KeyCode) -> KeyEvent {
     match code {
-        KeyCode::Char(' ' | 'd' | 'o' | 'b' | 'a' | 'e' | 'x' | 'u' | 'q') | KeyCode::Delete => {
-            alt(code)
+        KeyCode::Char('s' | 'd' | 'o' | 'b' | 'a' | 'e' | 'x' | 'u' | 'q') | KeyCode::Delete => {
+            ctrl(code)
         }
         _ => press(code),
     }
@@ -432,9 +432,9 @@ fn task_form_mouse_fields_dropdown_and_verbs_match_keyboard_while_scrolled() {
         map_board_form_key(
             CaptureField::Title,
             false,
-            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT),
         ),
-        "task-form Save verb must match Title's Enter route"
+        "task-form Save verb must match Title's Shift+Enter route"
     );
     assert_eq!(
         intent_for(QueueHitTarget::Verb(2)),
@@ -449,7 +449,7 @@ fn task_form_mouse_fields_dropdown_and_verbs_match_keyboard_while_scrolled() {
     // This form was opened with `BeginEditTitle`, so edit mode is ALREADY open: a field click
     // must move focus. The
     // separate view-state rule -- that a click must not ENTER edit mode -- is exercised in
-    // `page_field_clicks_stay_inert_and_the_scope_footer_opens_its_dropdown`, which asserts
+    // `page_field_clicks_activate_after_task_editing_starts`, which asserts
     // `input_mode() == TaskPage` first. Conflating the two is what previously let this test
     // assert inertness while sitting in edit mode.
     for (target, field) in [
@@ -619,7 +619,7 @@ fn assert_verb_parity(title: &str, status: HumanStatus, chord: &str, key: KeyCod
 #[test]
 fn click_and_wheel_match_keyboard_effects_for_each_control() {
     // Verb bar: every chord a Todo task shows, plus the Done-only reopen chord.
-    assert_verb_parity("space", HumanStatus::Ready, "space", KeyCode::Char(' '));
+    assert_verb_parity("s", HumanStatus::Ready, "s", KeyCode::Char('s'));
     assert_verb_parity("enter", HumanStatus::Ready, "enter", KeyCode::Enter);
     assert_verb_parity("d", HumanStatus::Ready, "d", KeyCode::Char('d'));
     assert_verb_parity("b", HumanStatus::Ready, "b", KeyCode::Char('b'));
@@ -1309,7 +1309,7 @@ fn delete_notice_undo_control_is_clickable_and_matches_the_keyboard() {
         .iter()
         .find(|hit| matches!(hit.target, QueueHitTarget::DeleteNoticeUndo))
         .expect("no hit region for the painted Undo control");
-    let keyboard_intent = map_key(BoardInputMode::Normal, alt(KeyCode::Char('u'))).expect("u key");
+    let keyboard_intent = map_key(BoardInputMode::Normal, ctrl(KeyCode::Char('u'))).expect("u key");
     assert_eq!(keyboard_intent, BoardIntent::Undo);
     assert_eq!(click(undo_hit, &model, &hits), Some(BoardIntent::Undo));
 
@@ -1346,7 +1346,7 @@ fn delete_notice_undo_region_survives_a_title_containing_the_literal_u_undo() {
         .expect("no hit region for the painted Undo control");
 
     // The region must dispatch Undo when clicked, exactly as the plain-title case does.
-    let keyboard_intent = map_key(BoardInputMode::Normal, alt(KeyCode::Char('u'))).expect("u key");
+    let keyboard_intent = map_key(BoardInputMode::Normal, ctrl(KeyCode::Char('u'))).expect("u key");
     assert_eq!(keyboard_intent, BoardIntent::Undo);
     assert_eq!(click(undo_hit, &model, &hits), Some(BoardIntent::Undo));
 
@@ -1593,7 +1593,7 @@ fn task_page_identifier_click_copies_instead_of_hitting_the_title_region() {
 }
 
 #[test]
-fn page_field_clicks_stay_inert_including_the_scope_footer() {
+fn page_field_clicks_activate_after_task_editing_starts() {
     let (mut domain, mut model) = deck_of(1);
     apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open the page");
     assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
@@ -1637,6 +1637,55 @@ fn page_field_clicks_stay_inert_including_the_scope_footer() {
         "clicking the scope footer must not open the dropdown in view mode"
     );
     assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+        .expect("start task edit session");
+    apply_intent(&mut domain, &mut model, BoardIntent::CancelEdit, None).expect("return page");
+    let hits = board_hit_map(STANDARD, &model);
+    assert_eq!(
+        map_board_mouse(&model, &hits, left_click(title_area.x + 3, title_area.y)),
+        Some(BoardIntent::FocusFormField(CaptureField::Title)),
+        "an active task session lets Title clicks edit"
+    );
+    assert_eq!(
+        map_board_mouse(&model, &hits, left_click(notes_area.x + 3, notes_area.y)),
+        Some(BoardIntent::FocusFormField(CaptureField::Notes)),
+        "an active task session lets Notes clicks edit"
+    );
+    let active_scope_hit = hits
+        .regions
+        .iter()
+        .find(|hit| hit.target == QueueHitTarget::FormScope)
+        .expect("the active page footer paints a scope hit");
+    assert_eq!(
+        click(active_scope_hit, &model, &hits),
+        Some(BoardIntent::OpenFormScopeDropdown),
+        "an active task session lets Scope clicks edit"
+    );
+    let thread_hit = hits
+        .regions
+        .iter()
+        .find(|hit| hit.target == QueueHitTarget::FormThread)
+        .expect("the active page paints the empty Thread target");
+    assert_eq!(
+        click(thread_hit, &model, &hits),
+        Some(BoardIntent::FocusFormField(CaptureField::Thread)),
+        "the first Thread click selects it"
+    );
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::FocusFormField(CaptureField::Thread),
+        None,
+    )
+    .expect("select Thread");
+    assert_eq!(model.input_mode(), BoardInputMode::SelectThread);
+    let hits = board_hit_map(STANDARD, &model);
+    assert_eq!(
+        click(thread_hit, &model, &hits),
+        Some(BoardIntent::ToggleThreadEditing),
+        "the second Thread click opens its text editor"
+    );
 }
 
 #[test]
@@ -1659,6 +1708,65 @@ fn the_wheel_scrolls_the_page_notes_not_the_board_list() {
         "the page's wheel never moves the board's selection"
     );
     assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+}
+
+#[test]
+fn the_wheel_keeps_scrolling_while_a_step_add_is_open() {
+    let (mut domain, mut model, id) = board_with_task("Scrollable step add", HumanStatus::Ready);
+    for index in 0..30 {
+        domain
+            .add_step(id, format!("step {index:02}"))
+            .expect("add overflowing step");
+    }
+    model.sync_from_domain(&domain);
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
+    let _ = page_rows(&model);
+    for _ in 0..64 {
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::PageWheelScrollDown,
+            None,
+        )
+        .expect("reach page bottom");
+    }
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginAddStep, None)
+        .expect("open inline step add");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::EditInsertText("draft survives wheel".into()),
+        None,
+    )
+    .expect("type draft");
+    let before = page_rows(&model);
+    assert_eq!(model.input_mode(), BoardInputMode::EditStep);
+    assert!(before
+        .iter()
+        .any(|row| row.contains("draft survives wheel")));
+
+    let hits = board_hit_map(STANDARD, &model);
+    let up = map_board_mouse(&model, &hits, wheel_up(5, 5))
+        .expect("wheel remains routed while the step add is open");
+    assert_eq!(up, BoardIntent::PageWheelScrollUp);
+    apply_intent(&mut domain, &mut model, up, None).expect("scroll with open draft");
+
+    let after = page_rows(&model);
+    assert_ne!(
+        before, after,
+        "the open step add must not lock page scrolling"
+    );
+
+    let hits = board_hit_map(STANDARD, &model);
+    let down = map_board_mouse(&model, &hits, wheel_down(5, 5))
+        .expect("wheel down remains routed while the step add is open");
+    assert_eq!(down, BoardIntent::PageWheelScrollDown);
+    apply_intent(&mut domain, &mut model, down, None).expect("scroll back to draft");
+    let returned = page_rows(&model);
+    assert!(returned
+        .iter()
+        .any(|row| row.contains("draft survives wheel")));
+    assert_eq!(model.input_mode(), BoardInputMode::EditStep);
 }
 
 #[test]
@@ -1698,6 +1806,9 @@ fn page_step_add_footer_chip_routes_to_begin_add_step() {
     domain.add_step(id, "existing step").expect("add step");
     model = BoardModel::from_domain(&domain, None);
     apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+        .expect("enter task edit mode");
+    apply_intent(&mut domain, &mut model, BoardIntent::CancelEdit, None).expect("return to page");
     let verbs = board_verb_items(&model);
     let step_index = verbs
         .iter()
@@ -1713,6 +1824,127 @@ fn page_step_add_footer_chip_routes_to_begin_add_step() {
     assert_eq!(
         map_board_mouse(&model, &hits, left_click(area.x + 1, area.y)),
         Some(BoardIntent::BeginAddStep)
+    );
+}
+
+/// The painted trailing add control is a direct pointer route from task view and every
+/// task-edit state, including the selected and active Thread states plus an inline editor.
+#[test]
+fn clicking_trailing_step_add_works_from_every_task_page_edit_mode() {
+    let (mut domain, mut model, id) = board_with_task("step add click", HumanStatus::Ready);
+    domain.add_step(id, "stored step").expect("add stored step");
+    model.sync_from_domain(&domain);
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
+
+    let assert_add_click = |model: &BoardModel| {
+        let hits = board_hit_map(STANDARD, model);
+        let area = hits
+            .regions
+            .iter()
+            .find(|hit| hit.target == QueueHitTarget::StepAdd)
+            .expect("trailing add hit")
+            .area;
+        assert_eq!(
+            map_board_mouse(model, &hits, left_click(area.x, area.y)),
+            Some(BoardIntent::BeginAddStep),
+            "StepAdd must remain clickable in {:?}",
+            model.input_mode()
+        );
+    };
+
+    // Task view is the independent-add path.
+    assert_add_click(&model);
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None).expect("title");
+    assert_add_click(&model);
+
+    for field in [
+        CaptureField::Notes,
+        CaptureField::Scope,
+        CaptureField::Thread,
+    ] {
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::FocusFormField(field),
+            None,
+        )
+        .expect("focus task-edit field");
+        assert_add_click(&model);
+    }
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ToggleThreadEditing,
+        None,
+    )
+    .expect("open thread editor");
+    assert_eq!(model.input_mode(), BoardInputMode::EditThread);
+    assert_add_click(&model);
+
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginAddStep, None).expect("inline add");
+    assert_eq!(model.input_mode(), BoardInputMode::EditStep);
+    assert_add_click(&model);
+}
+
+#[test]
+fn step_editor_verb_chips_follow_their_keyboard_intents() {
+    let (mut domain, mut model) = deck_of(1);
+    let id = model.selected_id().expect("task");
+    domain.add_step(id, "existing step").expect("add step");
+    model = BoardModel::from_domain(&domain, None);
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+        .expect("enter edit session");
+    apply_intent(&mut domain, &mut model, BoardIntent::CancelEdit, None).expect("return page");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginAddStep, None).expect("add step");
+    assert_eq!(model.input_mode(), BoardInputMode::EditStep);
+
+    let hits = board_hit_map(STANDARD, &model);
+    let verbs = board_verb_items(&model);
+    let key = "shift+enter";
+    let index = verbs
+        .iter()
+        .position(|entry| entry.key == key)
+        .expect("painted step-editor verb");
+    let area = hits
+        .regions
+        .iter()
+        .find(|hit| hit.target == QueueHitTarget::Verb(index))
+        .expect("step-editor verb hit")
+        .area;
+    assert_eq!(
+        map_board_mouse(&model, &hits, left_click(area.x + 1, area.y)),
+        Some(BoardIntent::ConfirmEditNext),
+        "{key} click matches the keyboard route"
+    );
+
+    let cancel_index = verbs
+        .iter()
+        .position(|entry| entry.key == "esc")
+        .expect("painted step-editor cancel verb");
+    let cancel_area = hits
+        .regions
+        .iter()
+        .find(|hit| hit.target == QueueHitTarget::Verb(cancel_index))
+        .expect("step-editor cancel hit")
+        .area;
+    let cancel = map_board_mouse(&model, &hits, left_click(cancel_area.x + 1, cancel_area.y));
+    assert_eq!(
+        cancel,
+        Some(BoardIntent::CancelEdit),
+        "the mouse cancel chip must preserve the enclosing task edit session like keyboard Esc"
+    );
+    apply_intent(
+        &mut domain,
+        &mut model,
+        cancel.expect("cancel intent"),
+        None,
+    )
+    .expect("cancel only the step field");
+    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+    assert!(
+        model.task_editing(),
+        "mouse Esc must leave the enclosing task edit session active"
     );
 }
 
@@ -1736,19 +1968,19 @@ fn page_rows(model: &BoardModel) -> Vec<String> {
         .collect()
 }
 
-/// AC-21: a single click on a step row moves the step cursor onto
-/// that step — a click selects, it never toggles, never opens the editor,
-/// never arms a delete mark — and a click on the notes half changes nothing
-/// about the cursor.
+/// A click on a step in an active task edit session opens that row in place. It neither
+/// persists nor toggles, and it never falls back to the retired footer editor.
 #[test]
-fn clicking_a_step_row_selects_it() {
+fn clicking_a_step_row_opens_its_inline_editor() {
     let (mut domain, mut model, id) = board_with_task("Click target", HumanStatus::Ready);
     for text in ["alpha step", "bravo step", "charlie step"] {
         domain.add_step(id, text).expect("add step");
     }
     model.sync_from_domain(&domain);
     apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open the page");
-    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+        .expect("enter task edit mode");
+    assert_eq!(model.input_mode(), BoardInputMode::EditTitle);
 
     // The click lands on step 3's painted row, located from the same frame the
     // hit map was recorded beside.
@@ -1771,8 +2003,13 @@ fn clicking_a_step_row_selects_it() {
     );
     assert_eq!(
         model.input_mode(),
-        BoardInputMode::TaskPage,
-        "a click never opens the editor"
+        BoardInputMode::EditStep,
+        "a click opens the selected row's inline editor"
+    );
+    assert!(
+        !selected.iter().any(|row| row.contains("▎")),
+        "the step editor no longer occupies the footer:\n{}",
+        selected.join("\n")
     );
     let task = domain.get(id).expect("task");
     assert_eq!(
@@ -1787,23 +2024,45 @@ fn clicking_a_step_row_selects_it() {
         selected.join("\n")
     );
 
-    // A click on the notes half changes nothing about the cursor.
-    let notes_area = hits
+    // Inline step editing is part of the task form, not a modal: page field clicks move focus
+    // without discarding the displayed row draft.
+    let title_hit = hits
         .regions
         .iter()
-        .find(|hit| matches!(hit.target, QueueHitTarget::FormNotes(_)))
-        .expect("the page body paints notes hits")
-        .area;
+        .find(|hit| hit.target == QueueHitTarget::FormTitle)
+        .expect("task page paints a title hit");
     assert_eq!(
-        map_board_mouse(&model, &hits, left_click(notes_area.x + 3, notes_area.y)),
-        None,
-        "a notes-half click dispatches nothing"
+        click(title_hit, &model, &hits),
+        Some(BoardIntent::FocusFormField(CaptureField::Title))
     );
-    let after = page_rows(&model);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::FocusFormField(CaptureField::Title),
+        None,
+    )
+    .expect("focus title from inline step editor");
+    assert_eq!(model.input_mode(), BoardInputMode::EditTitle);
+
+    // A clean inline draft also permits switching straight to another step editor.
+    let hits = board_hit_map(STANDARD, &model);
+    let bravo_hit = hits
+        .regions
+        .iter()
+        .find(|hit| hit.target == QueueHitTarget::Step(1))
+        .expect("second step hit");
+    assert_eq!(
+        click(bravo_hit, &model, &hits),
+        Some(BoardIntent::SelectStep(1))
+    );
+    apply_intent(&mut domain, &mut model, BoardIntent::SelectStep(1), None)
+        .expect("switch inline editor to second step");
+    assert_eq!(model.input_mode(), BoardInputMode::EditStep);
     assert!(
-        after.iter().any(|row| row.contains("▸ ▪ charlie step")),
-        "the cursor stays on the clicked step after a notes-half click:\n{}",
-        after.join("\n")
+        page_rows(&model)
+            .iter()
+            .any(|row| row.contains("▸ ▪ bravo step")),
+        "the second click switches the inline editor"
     );
 }
 

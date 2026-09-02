@@ -11,7 +11,7 @@ use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::layout::{Position, Rect};
 use ratatui::DefaultTerminal;
 
-use crate::config::{default_config_dir, SettingsRecord, WalkthroughRecord};
+use crate::config::{default_config_dir, WalkthroughRecord};
 use crate::context::{build_snapshot, InvocationSnapshot, RawHostContext};
 use crate::domain::{DomainError, DomainState};
 use crate::save_recovery::SaveRecovery;
@@ -24,8 +24,8 @@ use crate::ui::capture::{
     apply_capture_intent, draw_capture, CaptureModel, CaptureOutcome, TITLE_REQUIRED_MESSAGE,
 };
 use crate::ui::input::{
-    map_board_form_key, map_capture_key_state, map_capture_paste_state, map_edit_paste,
-    map_key_with, BoardIntent, CaptureIntent,
+    map_board_form_key, map_capture_key_state, map_capture_paste_state, map_edit_paste, map_key,
+    map_task_form_key, BoardIntent, CaptureIntent,
 };
 use crate::ui::mouse::{
     capture_layout_for_model, enable_terminal_input, keyboard_enhancement_supported,
@@ -88,8 +88,7 @@ pub fn load_board() -> Result<(TaskStore, DomainState, BoardModel), Box<dyn Erro
     let store = TaskStore::new(default_state_dir());
     let state = store.load()?;
     let snapshot = load_snapshot();
-    let mut model = BoardModel::from_domain(&state, snapshot.this_repo.clone());
-    model.verb_modifier = SettingsRecord::new(default_config_dir()).verb_modifier();
+    let model = BoardModel::from_domain(&state, snapshot.this_repo.clone());
     Ok((store, state, model))
 }
 
@@ -799,6 +798,24 @@ fn board_keyboard_intent(
             | BoardInputMode::EditScope
             | BoardInputMode::FormScopeDropdown
     );
+    // A selected task-page add target has no field mapper, but its enclosing edit session
+    // still owns the one Shift+Enter task-save chord.
+    if mode == BoardInputMode::TaskPage
+        && model.task_editing()
+        && key.code == KeyCode::Enter
+        && key.modifiers == KeyModifiers::SHIFT
+    {
+        return Some(BoardIntent::ConfirmEdit);
+    }
+    // Task-page Thread has a selected state before its text cursor opens. It owns Enter and
+    // Tab itself, while capture's direct Thread editor keeps the shared form mapper.
+    if matches!(
+        mode,
+        BoardInputMode::SelectThread | BoardInputMode::EditThread
+    ) && model.task_editing()
+    {
+        return map_key(mode, key);
+    }
     // `form_focus()` is Some whenever a form is open, so this reads as an invariant. It is still
     // not worth an `expect` here: this runs on every keypress inside the raw-mode event loop, so
     // a panic would abort with the terminal still in raw mode and take the user's shell with it.
@@ -823,8 +840,11 @@ fn board_keyboard_intent(
     }
 
     match model.form_focus().filter(|_| form_field_mode) {
+        Some(focus) if model.edit_target().is_some() => {
+            map_task_form_key(focus, mode == BoardInputMode::FormScopeDropdown, key)
+        }
         Some(focus) => map_board_form_key(focus, mode == BoardInputMode::FormScopeDropdown, key),
-        None => map_key_with(mode, key, model.verb_modifier),
+        None => map_key(mode, key),
     }
 }
 
@@ -911,7 +931,7 @@ pub fn apply_board_intent_with_save_recovery(
     // happens and the session (mode, draft, cursor, binding) survives the refusal intact. The
     // caller presents the returned error on the message row. Both save chords on a line
     // editor are this one surface, so they refuse identically: Enter (`ConfirmEdit`)
-    // and Ctrl+Enter (`ConfirmEditNext`).
+    // and Shift+Enter (`ConfirmEditNext`).
     if matches!(
         intent,
         BoardIntent::ConfirmEdit | BoardIntent::ConfirmEditNext
@@ -925,9 +945,10 @@ pub fn apply_board_intent_with_save_recovery(
         intent,
         BoardIntent::ConfirmEdit | BoardIntent::ConfirmEditNext
     ) && model.edit_target().is_some()
-        // Step saves use the same intent but their own pending-save state. Holding the task
-        // form here would retain stale task-edit state that was never created.
-        && model.input_mode() != BoardInputMode::EditStep;
+        // New-step adds own their save state. Existing-step renames belong to the task session,
+        // so Shift+Enter must retain that complete form through the persistence boundary.
+        && (model.input_mode() != BoardInputMode::EditStep
+            || (intent == BoardIntent::ConfirmEditNext && model.has_active_step_rename()));
     if holds_task_edit {
         model.hold_task_edit_save();
     }
@@ -1915,7 +1936,7 @@ mod tests {
             apply_intent(domain, model, intent, None)
                 .unwrap_or_else(|e| panic!("{area:?}: {key:?} must apply cleanly: {e:?}"))
         }
-        let alt = |code| KeyEvent::new(code, KeyModifiers::ALT);
+        let ctrl = |code| KeyEvent::new(code, KeyModifiers::CONTROL);
         let bare = |code| KeyEvent::new(code, KeyModifiers::NONE);
 
         for area in [
@@ -1936,14 +1957,14 @@ mod tests {
                 )
                 .expect("create task");
             let mut model = BoardModel::from_domain(&domain, None);
-            drive(&mut domain, &mut model, area, alt(KeyCode::Char('d')));
+            drive(&mut domain, &mut model, area, ctrl(KeyCode::Char('d')));
             assert_eq!(
                 domain.get(id).expect("task").status,
                 HumanStatus::Done,
                 "{area:?}: 'd' must actually complete the task through the live route"
             );
 
-            // space (PrimaryVerb): Todo -> Doing, actually applied.
+            // s (PrimaryVerb): Ready -> Started, actually applied.
             let mut domain = DomainState::new();
             let id = domain
                 .create(
@@ -1956,11 +1977,11 @@ mod tests {
                 )
                 .expect("create task");
             let mut model = BoardModel::from_domain(&domain, None);
-            drive(&mut domain, &mut model, area, alt(KeyCode::Char(' ')));
+            drive(&mut domain, &mut model, area, ctrl(KeyCode::Char('s')));
             assert_eq!(
                 domain.get(id).expect("task").status,
                 HumanStatus::Started,
-                "{area:?}: space must actually start the task through the live route"
+                "{area:?}: Ctrl+S must actually start the task through the live route"
             );
 
             // x (SoftDelete): actually applied.
@@ -1976,7 +1997,7 @@ mod tests {
                 )
                 .expect("create task");
             let mut model = BoardModel::from_domain(&domain, None);
-            drive(&mut domain, &mut model, area, alt(KeyCode::Char('x')));
+            drive(&mut domain, &mut model, area, ctrl(KeyCode::Char('x')));
             assert!(
                 domain.get(id).expect("task").soft_deleted,
                 "{area:?}: 'x' must actually soft-delete the task through the live route"
@@ -2455,12 +2476,12 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_enter_step_save_uses_the_real_app_save_boundary() {
-        let temp = TempStore::new("ctrl-enter-step");
+    fn shift_enter_step_save_uses_the_real_app_save_boundary() {
+        let temp = TempStore::new("shift-enter-step");
         let mut domain = DomainState::new();
         let id = domain
             .create(
-                "Ctrl Enter",
+                "Shift Enter",
                 None,
                 TaskScope::Global,
                 None,
@@ -2472,6 +2493,10 @@ mod tests {
         let mut model = BoardModel::from_domain(&domain, None);
         let mut recovery = SaveRecovery::new();
         apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open");
+        apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+            .expect("enter task edit mode");
+        apply_intent(&mut domain, &mut model, BoardIntent::CancelEdit, None)
+            .expect("return to task page");
         apply_intent(&mut domain, &mut model, BoardIntent::BeginAddStep, None).expect("edit");
         for ch in "next step".chars() {
             apply_intent(&mut domain, &mut model, BoardIntent::EditInsert(ch), None).expect("type");
@@ -2483,7 +2508,7 @@ mod tests {
             BoardIntent::ConfirmEditNext,
             &mut recovery,
         )
-        .expect("real ctrl-enter save");
+        .expect("real shift-enter save");
         assert_eq!(
             temp.store
                 .load()
@@ -2498,7 +2523,7 @@ mod tests {
         assert_eq!(
             model.input_mode(),
             BoardInputMode::EditStep,
-            "successful Ctrl+Enter reopens add editor"
+            "successful Shift+Enter reopens add editor"
         );
     }
 
@@ -2926,19 +2951,19 @@ mod tests {
 
         for (key, expected) in [
             (
-                KeyEvent::new(KeyCode::Char('e'), KeyModifiers::ALT),
+                KeyEvent::new(KeyCode::Char('e'), KeyModifiers::CONTROL),
                 BoardIntent::BeginEditTitle,
             ),
             (
-                KeyEvent::new(KeyCode::Char('n'), KeyModifiers::ALT),
+                KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL),
                 BoardIntent::BeginEditNotes,
             ),
             (
-                KeyEvent::new(KeyCode::Char('d'), KeyModifiers::ALT),
+                KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL),
                 BoardIntent::Complete,
             ),
             (
-                KeyEvent::new(KeyCode::Char(' '), KeyModifiers::ALT),
+                KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL),
                 BoardIntent::PrimaryVerb,
             ),
         ] {
@@ -3042,7 +3067,7 @@ mod tests {
             ),
         ] {
             let mods = if mode == BoardInputMode::TaskPage {
-                KeyModifiers::ALT
+                KeyModifiers::CONTROL
             } else {
                 KeyModifiers::NONE
             };

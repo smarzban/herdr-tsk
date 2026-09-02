@@ -42,12 +42,11 @@ How to use the board and CLI lives on the site, not in this file:
 - [Steps](https://tsk-gules.vercel.app/docs/steps/)
 - [CLI](https://tsk-gules.vercel.app/docs/cli/)
 
-The store is `~/.tsk` (`tsk.json` and `settings.json`). Override with
-`TSK_STATE_DIR` / `TSK_CONFIG_DIR`. herdr's injected plugin dirs are ignored, so
+The store is `~/.tsk/tsk.json`; walkthrough dismissal is kept beside it in
+`walkthrough.json`. Override with `TSK_STATE_DIR` / `TSK_CONFIG_DIR`. herdr's injected plugin dirs are ignored, so
 the pane and the CLI edit the same board.
 
-Mutating keys need Alt (or Ctrl, flipped in the palette). Bare letters do
-nothing.
+Mutating keys need Ctrl. Bare letters do nothing. Legacy modifier settings are ignored.
 
 ## Docs
 

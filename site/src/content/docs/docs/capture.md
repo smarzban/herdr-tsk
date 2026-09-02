@@ -6,7 +6,7 @@ description: Quick-add on the board, title tokens, and the capture overlay.
 Press `+` for a one-line title on the status-row slot. The list stays visible.
 
 - `Enter` saves and closes
-- `Ctrl+Enter` saves and stays open
+- `Shift+Enter` saves and stays open
 - `Tab` expands onto the [task page](/docs/task-page/) (title · notes · scope)
 
 A project board defaults the draft to that project. A project-less board defaults
@@ -45,8 +45,8 @@ herdr plugin action invoke quick-capture --plugin herdr-tsk
 ```
 
 Tab through Title, Notes, Thread, Scope. `Enter` in Title saves. `Enter` in Notes
-inserts a line. `Ctrl+Enter` or `Alt+Enter` save from any field. `Esc` cancels
-and leaves.
+inserts a line. `Ctrl+Enter` saves from any field, with `Alt+Enter` as the
+legacy-terminal fallback. `Esc` cancels and leaves.
 
 An idle board watching the same `~/.tsk` picks up the new task on the next tick.
 

@@ -3,6 +3,7 @@
 //! Capsule and agent identity fields stay on [`Task`] for store serde compatibility.
 //! Human status remains the source of truth; observation fields are retained data only.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
@@ -525,6 +526,83 @@ impl DomainState {
         task.scope = scope;
         task.thread = thread;
         record_mutation(task, TaskEventKind::Edited);
+        Ok(())
+    }
+
+    /// Atomically apply task fields, staged step renames, and staged step removals.
+    ///
+    /// All input is validated before the task changes. The session takes one revision based on
+    /// the pre-edit task, which keeps a locked store save mergeable instead of making each
+    /// staged step point at the previous staged revision. Duplicate changes collapse to one;
+    /// removal wins over a rename of the same step, and unchanged text is not journaled.
+    #[allow(clippy::too_many_arguments)] // Mirrors the stable edit-with-renames field list.
+    pub fn edit_with_step_changes(
+        &mut self,
+        id: Uuid,
+        title: impl AsRef<str>,
+        notes: Option<String>,
+        scope: TaskScope,
+        thread: Option<String>,
+        step_renames: &[(Uuid, String)],
+        step_removals: &[Uuid],
+    ) -> Result<(), DomainError> {
+        let title = title.as_ref().trim();
+        if title.is_empty() {
+            return Err(DomainError::EmptyTitle);
+        }
+        if step_renames.iter().any(|(_, text)| text.trim().is_empty()) {
+            return Err(DomainError::EmptyStepText);
+        }
+        let task = self.task_mut(id)?;
+        let removals = step_removals.iter().copied().collect::<BTreeSet<_>>();
+        let renames = step_renames
+            .iter()
+            .map(|(step_id, text)| (*step_id, text.trim().to_string()))
+            .collect::<BTreeMap<_, _>>();
+        for step_id in renames.keys().chain(removals.iter()) {
+            if !task.steps.iter().any(|step| step.id == *step_id) {
+                return Err(DomainError::UnknownStep(*step_id));
+            }
+        }
+        let actual_renames = renames
+            .into_iter()
+            .filter(|(step_id, text)| {
+                !removals.contains(step_id)
+                    && task
+                        .steps
+                        .iter()
+                        .any(|step| step.id == *step_id && step.text != *text)
+            })
+            .collect::<Vec<_>>();
+        let actual_removals = task
+            .steps
+            .iter()
+            .filter(|step| removals.contains(&step.id))
+            .map(|step| step.id)
+            .collect::<Vec<_>>();
+
+        task.title = title.to_string();
+        task.notes = notes;
+        task.scope = scope;
+        task.thread = thread;
+        task.steps.retain(|step| !removals.contains(&step.id));
+        for (step_id, text) in &actual_renames {
+            if let Some(step) = task.steps.iter_mut().find(|step| step.id == *step_id) {
+                step.text.clone_from(text);
+            }
+        }
+        record_mutation(task, TaskEventKind::Edited);
+        let at = task.updated_at;
+        task.history
+            .extend(actual_renames.iter().map(|_| TaskEvent {
+                kind: TaskEventKind::StepRenamed,
+                at,
+            }));
+        task.history
+            .extend(actual_removals.iter().map(|_| TaskEvent {
+                kind: TaskEventKind::StepRemoved,
+                at,
+            }));
         Ok(())
     }
 
@@ -1057,6 +1135,85 @@ mod tests {
         assert_eq!(task.title, "New title");
         assert_eq!(task.notes.as_deref(), Some("updated notes"));
         assert_eq!(task.scope, project);
+    }
+
+    #[test]
+    fn task_session_edit_renames_steps_on_one_revision() {
+        let mut state = DomainState::new();
+        let id = create_sample(&mut state);
+        let first = state.add_step(id, "first").expect("first step");
+        let second = state.add_step(id, "second").expect("second step");
+        let before = state.get(id).expect("task").clone();
+
+        state
+            .edit_with_step_changes(
+                id,
+                "Edited title",
+                Some("edited notes".into()),
+                TaskScope::Global,
+                None,
+                &[
+                    (first, "first revised".into()),
+                    (second, "second revised".into()),
+                ],
+                &[],
+            )
+            .expect("atomic session edit");
+
+        let task = state.get(id).expect("task");
+        assert_eq!(task.title, "Edited title");
+        assert_eq!(task.steps[0].text, "first revised");
+        assert_eq!(task.steps[1].text, "second revised");
+        assert_eq!(task.merge_base_revision, before.revision);
+        assert_ne!(task.revision, before.revision);
+        assert_eq!(
+            task.history
+                .iter()
+                .rev()
+                .take(3)
+                .map(|event| &event.kind)
+                .collect::<Vec<_>>(),
+            vec![
+                &TaskEventKind::StepRenamed,
+                &TaskEventKind::StepRenamed,
+                &TaskEventKind::Edited,
+            ]
+        );
+    }
+
+    #[test]
+    fn task_session_edit_ignores_unchanged_and_removed_step_renames() {
+        let mut state = DomainState::new();
+        let id = create_sample(&mut state);
+        let unchanged = state.add_step(id, "unchanged").expect("unchanged step");
+        let removed = state.add_step(id, "removed").expect("removed step");
+        let before = state.get(id).expect("task").history.len();
+
+        state
+            .edit_with_step_changes(
+                id,
+                "Sample task",
+                None,
+                TaskScope::Global,
+                None,
+                &[
+                    (unchanged, " unchanged ".into()),
+                    (removed, "renamed but removed".into()),
+                ],
+                &[removed, removed],
+            )
+            .expect("normalize overlapping changes");
+
+        let task = state.get(id).expect("task");
+        assert_eq!(task.steps.len(), 1);
+        assert_eq!(task.steps[0].text, "unchanged");
+        assert_eq!(
+            task.history[before..]
+                .iter()
+                .map(|event| event.kind)
+                .collect::<Vec<_>>(),
+            vec![TaskEventKind::Edited, TaskEventKind::StepRemoved]
+        );
     }
 
     #[test]

@@ -13,28 +13,34 @@ Markdown `- [ ]` in notes is ordinary text. Use steps for checklists.
 
 ## On the task page
 
-Open the task with `Enter`. The step cursor starts inactive.
+Open the task with `Enter`. The step cursor begins inactive. In view mode, `Tab`
+and `Shift+Tab` cycle stored steps and the trailing dim `+ step` target without
+leaving task view. The target sits immediately below the final stored step as `   + step`.
+`Enter`, `ctrl+a`, or a click on it opens an independent new-step editor, it does not
+start task editing. `ctrl+a` also opens that editor from every task-edit field or
+inline step state.
 
-- Bare `↓` activates it on the first step (again after you deactivate it)
-- `↑` / `↓` move it while it is active
-- `↑` from the first step deactivates it
-- A click on a step row moves the cursor there
+- `ctrl+s` toggles the selected step, otherwise it starts or reopens the task
+- `ctrl+d` completes a selected open step, `ctrl+o` reopens a selected done step
+- `ctrl+e` on a selected stored step starts task editing and opens it inline
+- In task editing, Tab runs Title, Notes, stored steps, `+ step`, Scope, Thread
+- Reaching a stored step through Tab or arrows opens its inline editor
+- `ctrl+x` in view first marks the selected step and the second press removes it,
+  while task editing immediately hides and stages its removal until save
 
-With the cursor active, the usual verbs act on that step:
+A new-step draft lives in the steps section. From view or task edit, it persists
+independently: it never joins the enclosing task edit session. Plain `Enter` saves one new
+step and selects that new stored step. `Shift+Enter` saves one and opens the next
+empty editor. Existing-step renames and removals are staged with Title, Notes,
+Thread, and Scope. Plain `Enter` parks an existing-step rename in that session,
+then `Shift+Enter` saves all staged changes (`Alt+Enter` is the legacy-terminal
+fallback). `Esc` cancels a field; Esc from task
+editing restores staged removals. A failed save keeps its drafts until you retry or cancel.
 
-| Key | Does |
-| --- | --- |
-| `alt+a` | add a step (footer line) |
-| `alt+space` | toggle done |
-| `alt+e` | rename the highlighted step |
-| `alt+x` | mark, then a second press removes |
-
-The add/rename line is a one-line draft. `Enter` applies it. `Ctrl+Enter` adds
-and leaves the line open empty. `Esc` cancels. A failed save keeps the line
-until you retry or cancel.
-
-Wheel still scrolls the page. Arrows belong to the step cursor while it is
-active.
+Wheel still scrolls the page. Bare `↓` activates the first stored step, then arrows
+move the selected stored step. In an existing-step editor, arrows move among stored
+steps and stage the prior draft; in an add editor, arrows scroll the shared page
+without closing or trapping that row.
 
 ## From the CLI
 

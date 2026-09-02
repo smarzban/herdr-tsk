@@ -45,8 +45,8 @@ Unthreaded tasks list after thread groups in the same deck.
 Human status is the source of truth. Completing every step does not complete the
 task. Agents do not auto-complete work.
 
-`alt+space` starts a ready task, or reopens a done one. `alt+d` marks done.
-`alt+o` reopens. `alt+b` toggles blocked. **review** is set from the command
+`ctrl+s` starts a ready task, or reopens a done one. `ctrl+d` marks done.
+`ctrl+o` reopens. `ctrl+b` toggles blocked. **review** is set from the command
 palette (`:` → `set status: review`), not from a dedicated letter.
 
 ## Peek and mouse
@@ -73,7 +73,7 @@ A typical herdr split is 78 columns, which is the standard board.
 `:` opens a searchable command palette. Type to filter. `q` is a query character
 here, not quit. Leave with `Esc`.
 
-The palette is also how you flip mutating keys from Alt to Ctrl (`verb keys: use
-ctrl`). That choice is stored in `~/.tsk/settings.json`.
+Mutating keys always use Ctrl. Legacy `verb_modifier: "alt"` settings are read as
+Ctrl.
 
 `?` opens the help card. Any key closes it.

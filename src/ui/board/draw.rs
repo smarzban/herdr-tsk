@@ -10,11 +10,11 @@ use crate::ui::capture::CaptureField;
 use crate::ui::edit::{escaped_line_window, wrap_text, wrapped_draft_rows, wrapped_edit_rows};
 use crate::ui::input::{help_card_lines, keymap_help_label};
 use crate::ui::mouse::BoardPopup;
-use crate::ui::present_line;
 use crate::ui::render::{
     self, FormScopeDropdown, PaletteCommandRow, QueueFrameModel, QueueOverlay, VerbEntry,
 };
 use crate::ui::tier;
+use crate::ui::{present_line, terminal_text};
 
 use super::chrome::{notice_framed, row_width, DELETE_NOTICE_UNDO};
 use super::commands::CommandSurface;
@@ -25,11 +25,26 @@ use super::model::{
 
 /// Verb bar for the base board list: labels follow the selected task.
 ///
-/// `space` starts a ready task or reopens a done one. On started/blocked/review it is
+/// `s` starts a ready task or reopens a done one. On started/blocked/review it is
 /// omitted (`PrimaryVerb` is inert on started/blocked/review). `b` reads `unblock` only on a blocked task.
 /// Done tasks show `o reopen` instead of `d`/`b`. `:` / `?` take their word from the keymap.
 pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
     let help = |chord: &str, fallback: &'static str| keymap_help_label(chord).unwrap_or(fallback);
+
+    // An inline step editor saves only through Shift+Enter. Add mode reopens an empty row;
+    // an existing-step rename commits the complete task edit session and exits it.
+    if model.input_mode() == BoardInputMode::EditStep {
+        return vec![
+            VerbEntry {
+                key: "shift+enter",
+                label: "save",
+            },
+            VerbEntry {
+                key: "esc",
+                label: "cancel",
+            },
+        ];
+    }
 
     // The task page's view mode: its own legend, true for the bound task.
     let page_task = if model.input_mode() == BoardInputMode::TaskPage {
@@ -48,25 +63,31 @@ pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
             key: "e",
             label: "edit",
         });
-        if model.has_live_step_cursor() {
+        let selected_step_done = model
+            .form
+            .as_ref()
+            .and_then(|form| form.steps.cursor)
+            .and_then(|index| task.steps.get(index))
+            .map(|step| step.done);
+        if selected_step_done.is_some() {
             entries.push(VerbEntry {
-                key: "space",
+                key: "s",
                 label: "toggle step",
             });
         } else {
             match task.status {
                 HumanStatus::Ready => entries.push(VerbEntry {
-                    key: "space",
+                    key: "s",
                     label: "start",
                 }),
                 HumanStatus::Done => entries.push(VerbEntry {
-                    key: "space",
+                    key: "s",
                     label: "reopen",
                 }),
                 HumanStatus::Started | HumanStatus::Blocked | HumanStatus::Review => {}
             }
         }
-        if task.status == HumanStatus::Done {
+        if selected_step_done.unwrap_or(task.status == HumanStatus::Done) {
             entries.push(VerbEntry {
                 key: "o",
                 label: help("o", "reopen"),
@@ -89,11 +110,10 @@ pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
             key: "esc",
             label: "close",
         });
-        // AC-22: the footer verb bar lists the step-add verb while the page's task
-        // has at least one step. Last, like the board's capture entry, so the
-        // compact budget keeps the established verbs; the bar's prefix convention
-        // implies the modifier, exactly as for every other mutating key.
-        if !task.steps.is_empty() {
+        // Steps are editable only after a task field entered edit mode. The add route stays
+        // visible there even for an empty checklist, and its final position preserves the
+        // compact bar's established action priority.
+        if model.task_editing() {
             entries.push(VerbEntry {
                 key: "a",
                 label: "step",
@@ -111,13 +131,13 @@ pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
         match task.status {
             HumanStatus::Ready => {
                 entries.push(VerbEntry {
-                    key: "space",
+                    key: "s",
                     label: "start",
                 });
             }
             HumanStatus::Done => {
                 entries.push(VerbEntry {
-                    key: "space",
+                    key: "s",
                     label: "reopen",
                 });
             }
@@ -177,52 +197,117 @@ fn build_task_page_overlay<'a>(
     let bound_task = form
         .task_id()
         .and_then(|id| model.tasks.iter().find(|task| task.id == id));
-    // The section consumes the extracted step views, never the raw storage. Notes and
-    // steps share one scrollable stream, with two blank rows separating the sections.
-    let step_views = bound_task.map(super::model::step_views).unwrap_or_default();
-    // A step draft is windowed for the shared bottom input slot: the row less
-    // the two-cell `▎ ` prompt that owns the terminal cursor.
-    let step_editor = form
-        .steps
-        .editor
-        .as_ref()
-        .map(|editor| {
-            let avail = (geo.row_width as usize).saturating_sub(2);
-            let (text, cursor_col) = escaped_line_window(&editor.buffer, avail);
-            crate::ui::render::BottomInputSlot {
-                text,
-                cursor_col,
-                placeholder: "step…   enter save · ctrl+enter save+next · esc cancel",
-                refusal: editor.refusal.as_deref(),
-                above_rows: Vec::new(),
-                cursor_row_offset: 0,
-                // The bottom input replaces the shared status row. Forward recovery
-                // and record-refusal feedback to the surface that is actually visible.
-                message: model.message(),
-            }
+    // The section consumes extracted, word-wrapped step views, never the raw storage. The
+    // reserved width is the scrollbar-safe content width less the step glyph and trailing
+    // pad, matching Notes' no-truncation behavior.
+    let step_text_width = width.saturating_sub(8);
+    // Task-edit removals are staged, not durable, but they immediately leave the rendered
+    // list. Keep the task's source index only in the session state, then derive this compact
+    // visible list so the renderer never receives a row it must hide conditionally.
+    let mut step_views: Vec<render::StepView> = bound_task
+        .map(|task| {
+            task.steps
+                .iter()
+                .filter(|step| !form.steps.removals.contains(&step.id))
+                .map(|step| render::StepView {
+                    done: step.done,
+                    rows: crate::ui::edit::wrap_text(&step.text, step_text_width)
+                        .into_iter()
+                        .map(|row| row.text)
+                        .collect(),
+                })
+                .collect()
         })
-        .or_else(|| {
-            (model.input_mode() == BoardInputMode::EditThread).then(|| {
-                let avail = (geo.row_width as usize).saturating_sub(2);
-                let (text, cursor_col) = escaped_line_window(&form.thread, avail);
-                crate::ui::render::BottomInputSlot {
-                    text,
-                    cursor_col,
-                    placeholder: "thread…   enter save · esc cancel",
-                    refusal: None,
-                    above_rows: Vec::new(),
-                    cursor_row_offset: 0,
-                    // The shared bottom slot owns this refusal while it is visible, so it
-                    // never leaks through the status row and remains legible at 40x10.
-                    message: form.thread_refusal.as_deref(),
-                }
+        .unwrap_or_default();
+    let stored_step_count = step_views.len();
+    // Existing-step edits are task-session drafts. Paint every parked draft first, then the
+    // active row over it. Only the active EditStep mode receives cursor metadata, so moving to
+    // Title, Notes, Thread, or Scope leaves the changed step visible without a second cursor.
+    if let Some(task) = bound_task {
+        for (visible, step) in task
+            .steps
+            .iter()
+            .filter(|step| !form.steps.removals.contains(&step.id))
+            .enumerate()
+        {
+            if let Some(draft) = form.steps.drafts.get(&step.id) {
+                let (rows, _, _) = wrapped_edit_rows(draft, step_text_width);
+                step_views[visible].rows = rows;
+            }
+        }
+    }
+    let inline_step_editor = form.steps.editor.as_ref().and_then(|editor| {
+        let index = match editor.rename {
+            Some(step_id) => bound_task?
+                .steps
+                .iter()
+                .filter(|step| !form.steps.removals.contains(&step.id))
+                .position(|step| step.id == step_id)?,
+            None => step_views.len(),
+        };
+        let (rows, cursor_row, cursor_col) = wrapped_edit_rows(&editor.buffer, step_text_width);
+        if index < step_views.len() {
+            step_views[index].rows = rows;
+        } else {
+            step_views.push(render::StepView { done: false, rows });
+        }
+        (model.input_mode() == BoardInputMode::EditStep).then_some(render::InlineStepEditor {
+            index,
+            cursor_row: u16::try_from(cursor_row).unwrap_or(u16::MAX),
+            cursor_col: u16::try_from(cursor_col).unwrap_or(u16::MAX),
+            refusal: editor.refusal.as_deref(),
+        })
+    });
+    // The page cursor stores source indices, while the overlay only carries visible rows.
+    // Translate at the boundary, so a staged removal cannot make the selector jump to a
+    // different stored step just because its former array slot disappeared.
+    let visible_step_index = |source_index: usize| {
+        bound_task.and_then(|task| {
+            task.steps
+                .iter()
+                .enumerate()
+                .filter(|(_, step)| !form.steps.removals.contains(&step.id))
+                .position(|(index, _)| index == source_index)
+        })
+    };
+    // Cursor state uses source indices, so keep the recorded row counts source-aligned too.
+    // Staged removals occupy zero rows; the active add row is not addressable by this cursor.
+    let mut visible_counts = step_views
+        .iter()
+        .take(stored_step_count)
+        .map(|step| step.rows.len().max(1));
+    form.steps.row_counts.replace(
+        bound_task
+            .map(|task| {
+                task.steps
+                    .iter()
+                    .map(|step| {
+                        if form.steps.removals.contains(&step.id) {
+                            0
+                        } else {
+                            visible_counts.next().unwrap_or(1)
+                        }
+                    })
+                    .collect()
             })
-        });
+            .unwrap_or_default(),
+    );
+    let bottom_input = (model.input_mode() == BoardInputMode::EditThread).then(|| {
+        let avail = (geo.row_width as usize).saturating_sub(2);
+        let (text, cursor_col) = escaped_line_window(&form.thread, avail);
+        crate::ui::render::BottomInputSlot {
+            text,
+            cursor_col,
+            placeholder: "thread…   enter close · shift+enter save · esc cancel",
+            refusal: None,
+            above_rows: Vec::new(),
+            cursor_row_offset: 0,
+            message: form.thread_refusal.as_deref(),
+        }
+    });
     // A notes edit always keeps one row: the layout reserves it (the section caps
-    // around it), so an active edit can never be scrolled/clamped out of the frame
-    // entirely. The step editor uses the shared bottom slot, so steps alone
-    // classify the page section.
-    let page_geo = render::bottom_input_geometry(*geo, step_editor.is_some());
+    // around it), so an active edit can never be scrolled/clamped out of the frame.
+    let page_geo = render::bottom_input_geometry(*geo, bottom_input.is_some());
     let status = bound_task
         .map(|task| task.status)
         .unwrap_or(HumanStatus::Ready);
@@ -363,7 +448,11 @@ fn build_task_page_overlay<'a>(
             form.notes_scroll,
         )
     };
-    let content = render::page_content_layout(notes_rows.len(), step_views.len(), lay.notes_rows);
+    let step_rows: usize = step_views.iter().map(|step| step.rows.len().max(1)).sum();
+    // Match the painter's stream exactly: it always paints one notes row and a trailing
+    // `+ step` row, even when both stored notes and stored steps are empty.
+    let content =
+        render::page_content_layout(notes_rows.len().max(1), step_rows + 1, lay.notes_rows);
     form.notes_max_scroll.set(content.max_scroll);
     form.steps.content_start.set(content.steps_start);
     form.notes_width.set(notes_width);
@@ -380,16 +469,24 @@ fn build_task_page_overlay<'a>(
     meta.push_str(&meta_scope);
     let mut thread_slot = None;
     if let Some(task) = bound_task {
-        thread_slot = if let Some(thread) = task.thread.as_deref() {
-            Some(format!(" · #{thread}"))
-        } else if matches!(
-            model.input_mode(),
-            BoardInputMode::EditTitle
-                | BoardInputMode::EditNotes
-                | BoardInputMode::EditThread
-                | BoardInputMode::EditScope
-                | BoardInputMode::FormScopeDropdown
-        ) {
+        let shown_thread = if form.is_task() && form.editing {
+            Some(form.thread.value())
+        } else {
+            task.thread.as_deref()
+        };
+        thread_slot = if let Some(thread) = shown_thread.filter(|thread| !thread.is_empty()) {
+            Some(format!(" · #{}", terminal_text(thread)))
+        } else if (form.is_task() && form.editing)
+            || matches!(
+                model.input_mode(),
+                BoardInputMode::EditTitle
+                    | BoardInputMode::EditNotes
+                    | BoardInputMode::SelectThread
+                    | BoardInputMode::EditThread
+                    | BoardInputMode::EditScope
+                    | BoardInputMode::FormScopeDropdown
+            )
+        {
             // An empty thread still needs a visible field-sized footer target while the form
             // is editing, otherwise mouse users can only reach Thread after it already exists.
             Some(" · thread".to_string())
@@ -414,7 +511,7 @@ fn build_task_page_overlay<'a>(
     let focus = match model.input_mode() {
         BoardInputMode::EditTitle => Some(CaptureField::Title),
         BoardInputMode::EditNotes => Some(CaptureField::Notes),
-        BoardInputMode::EditThread => Some(CaptureField::Thread),
+        BoardInputMode::SelectThread | BoardInputMode::EditThread => Some(CaptureField::Thread),
         BoardInputMode::EditScope | BoardInputMode::FormScopeDropdown => Some(CaptureField::Scope),
         _ => None,
     };
@@ -429,10 +526,13 @@ fn build_task_page_overlay<'a>(
         notes_cursor,
         more_lines,
         step_views,
-        step_cursor: form.steps.cursor,
+        stored_step_count,
+        step_cursor: form.steps.cursor.and_then(visible_step_index),
+        step_add_selected: form.steps.add_selected,
         step_scroll: notes_scroll,
-        step_marked: form.steps.delete_mark,
-        step_editor,
+        step_marked: form.steps.delete_mark.and_then(visible_step_index),
+        inline_step_editor,
+        bottom_input,
         meta,
         meta_scope_x,
         meta_scope_width,
@@ -515,7 +615,7 @@ fn draw_board_impl(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap
     let verbs = board_verb_items(model);
     // Overlay payloads must outlive the frame_model borrow of their slices.
     let help_lines = if model.input_mode() == BoardInputMode::Help {
-        help_card_lines(model.verb_modifier)
+        help_card_lines()
     } else {
         Vec::new()
     };
@@ -646,7 +746,6 @@ fn draw_board_impl(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap
         status_message: status_owned.as_deref(),
         status_undo_offset,
         verb_items: &verbs,
-        verb_modifier: model.verb_modifier,
         now: SystemTime::now(),
         overlay,
         detail_open: model.detail_open,

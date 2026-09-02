@@ -7,8 +7,8 @@ use std::time::{Duration, SystemTime};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::backend::TestBackend;
+use ratatui::style::Modifier;
 use ratatui::{Frame, Terminal};
-use tsk_tui::config::VerbModifier;
 use tsk_tui::domain::{
     DomainState, HumanStatus, ProvenanceOrigin, Task, TaskEvent, TaskEventKind, TaskScope,
 };
@@ -168,7 +168,7 @@ fn fixture_verbs() -> &'static [VerbEntry<'static>] {
 }
 
 /// Imp-A (round 3 finding): a **Todo**-selected model, so `board_verb_items` yields six
-/// entries (`space start` plus the base five) instead of the Doing selection's five. Used
+/// entries (`s start` plus the base five) instead of the Doing selection's five. Used
 /// only where the trim-the-sixth path needs a budget-5 bar to actually drop an entry --
 /// `fixture_verbs()`'s Doing selection is exactly 5 against a budget of 5, so `take(5)`
 /// never drops anything and a test built on it can't fail.
@@ -338,7 +338,6 @@ fn fixture_model_on_tab<'a>(
         status_message: None,
         status_undo_offset: None,
         verb_items: fixture_verbs(),
-        verb_modifier: VerbModifier::Alt,
         now: now(),
         overlay: QueueOverlay::None,
         detail_open: None,
@@ -397,6 +396,37 @@ fn board_rows(model: &BoardModel, width: u16, height: u16) -> Vec<String> {
                 .collect::<String>()
         })
         .collect()
+}
+
+#[test]
+fn inactive_home_tabs_are_dimmed() {
+    let model = base_board_model();
+    let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("terminal");
+    terminal
+        .draw(|frame| {
+            let _ = draw_board(frame, &model);
+        })
+        .expect("draw board");
+    let buffer = terminal.backend().buffer();
+    let (tab_y, row) = (0..24)
+        .map(|y| {
+            let row = (0..80).map(|x| buffer[(x, y)].symbol()).collect::<String>();
+            (y, row)
+        })
+        .find(|(_, row)| {
+            row.contains("desk") && row.contains("projects") && row.contains("threads")
+        })
+        .expect("tab row");
+    for label in ["projects", "threads"] {
+        let x = row.find(label).expect("tab label") as u16;
+        assert!(
+            buffer[(x, tab_y)]
+                .style()
+                .add_modifier
+                .contains(Modifier::DIM),
+            "inactive {label} tab must be dimmed"
+        );
+    }
 }
 
 fn trimmed(row: &str) -> String {
@@ -841,7 +871,7 @@ fn overlay_rows_are_padded_exact_no_base_bleed() {
 fn compact_77x24_and_48x19_and_40x10_paint_glyph_title_only_rows_and_leq_5_verb_entries() {
     let tasks = fixture_tasks();
     let view = fixture_view(&tasks, false);
-    // Imp-A: a Todo selection gives `board_verb_items` six entries (`space start` plus the
+    // Imp-A: a Todo selection gives `board_verb_items` six entries (`s start` plus the
     // base five), so the budget-5 trim below is genuinely exercised -- the Doing selection
     // `fixture_model` otherwise uses yields exactly five, which `take(5)` never trims.
     let verbs = todo_verbs();
@@ -1004,10 +1034,13 @@ fn task_page_header_shows_identifier_not_footer() {
         notes_cursor: None,
         more_lines: 0,
         step_views: Vec::new(),
+        stored_step_count: 0,
         step_cursor: None,
+        step_add_selected: false,
         step_scroll: 0,
         step_marked: None,
-        step_editor: None,
+        inline_step_editor: None,
+        bottom_input: None,
         meta: "desk · created 1m ago · updated 1m ago".to_string(),
         meta_scope_x: 0,
         meta_scope_width: 4,
@@ -1105,10 +1138,13 @@ fn task_page_renders_header_notes_and_meta_as_a_full_takeover_in_both_tiers() {
         notes_cursor: None,
         more_lines: 0,
         step_views: Vec::new(),
+        stored_step_count: 0,
         step_cursor: None,
+        step_add_selected: false,
         step_scroll: 0,
         step_marked: None,
-        step_editor: None,
+        inline_step_editor: None,
+        bottom_input: None,
         meta: "tsk \u{b7} created 1h ago \u{b7} updated 1h ago".to_string(),
         meta_scope_x: 0,
         meta_scope_width: 11,
@@ -1277,36 +1313,53 @@ fn task_page_paints_steps_section_between_notes_and_footer() {
     assert!(saw_third, "compact scrolling never reached the third step");
 }
 
-/// T-2 (AC-6): a task with no steps steps paints no steps section at all --
-/// the page is identical to pre-feature for such tasks.
+/// A task with no stored steps can scroll all the way to its trailing add target.
 #[test]
-fn task_page_without_steps_paints_no_steps_section() {
-    let mut domain = DomainState::new();
-    domain
-        .create(
-            "Notes-only page task",
-            Some("still just notes".into()),
-            TaskScope::Global,
-            None,
-            None,
-            ProvenanceOrigin::Manual,
-        )
-        .expect("create task");
-    let mut model = BoardModel::from_domain(&domain, None);
-    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open task page");
+fn task_page_without_steps_reaches_its_trailing_add_target() {
+    let notes = (0..20)
+        .map(|index| format!("overflow line {index}"))
+        .collect::<Vec<_>>()
+        .join("\n");
 
     for &(width, height) in &[(78u16, 24u16), (40u16, 10u16)] {
-        let rows = board_rows(&model, width, height);
-        let shown: Vec<String> = rows.iter().map(|row| trimmed(row)).collect();
-        let body = shown.join("\n");
-        // Sanity first: the page itself rendered, so absence below is not a blank frame.
+        let mut domain = DomainState::new();
+        domain
+            .create(
+                "Notes-only page task",
+                Some(notes.clone()),
+                TaskScope::Global,
+                None,
+                None,
+                ProvenanceOrigin::Manual,
+            )
+            .expect("create task");
+        let mut model = BoardModel::from_domain(&domain, None);
+        apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None)
+            .expect("open task page");
+
+        let mut body = String::new();
+        for _ in 0..64 {
+            let rows = board_rows(&model, width, height);
+            body = rows
+                .iter()
+                .map(|row| trimmed(row))
+                .collect::<Vec<_>>()
+                .join("\n");
+            if body.contains("steps 0/0") && body.contains("+ step") {
+                break;
+            }
+            apply_intent(
+                &mut domain,
+                &mut model,
+                BoardIntent::PageWheelScrollDown,
+                None,
+            )
+            .expect("scroll toward add target");
+        }
+
         assert!(
-            body.contains("still just notes") && body.contains("created"),
-            "{width}x{height} page did not render notes + meta:\n{body}"
-        );
-        assert!(
-            !body.contains("steps"),
-            "{width}x{height} empty-steps page must paint no section label:\n{body}"
+            body.contains("steps 0/0") && body.contains("+ step"),
+            "{width}x{height} empty-steps page never reached its add target:\n{body}"
         );
         // `✓`/`▪` are step glyphs (the task is ready, so the header glyph is `○`).
         assert!(
@@ -1601,7 +1654,7 @@ fn shift_tab_from_scope_resets_notes_stream_origin_and_aligns_caret() {
         .map(|line| format!("note line {line}"))
         .collect::<Vec<_>>()
         .join("\n");
-    let id = domain
+    let _id = domain
         .create(
             "Shift tab Notes",
             Some(notes),
@@ -1611,11 +1664,6 @@ fn shift_tab_from_scope_resets_notes_stream_origin_and_aligns_caret() {
             ProvenanceOrigin::Manual,
         )
         .expect("create task");
-    for index in 0..30 {
-        domain
-            .add_step(id, format!("step {index}"))
-            .expect("add step");
-    }
     let mut model = BoardModel::from_domain(&domain, None);
     apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open");
     board_rows(&model, 80, 24);
@@ -1640,15 +1688,10 @@ fn shift_tab_from_scope_resets_notes_stream_origin_and_aligns_caret() {
         shift_tab.clone().expect("Shift+Tab intent"),
         None,
     )
-    .expect("Shift+Tab into Thread");
-    assert_eq!(model.input_mode(), BoardInputMode::EditThread);
-    apply_intent(
-        &mut domain,
-        &mut model,
-        shift_tab.expect("second Shift+Tab intent"),
-        None,
-    )
-    .expect("Shift+Tab into Notes");
+    .expect("Shift+Tab selects the trailing add target");
+    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+    apply_intent(&mut domain, &mut model, BoardIntent::FormFocusPrev, None)
+        .expect("Shift+Tab from the add target enters Notes");
     assert_eq!(model.input_mode(), BoardInputMode::EditNotes);
 
     let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("terminal");
@@ -1812,10 +1855,8 @@ fn task_page_scrolls_notes_and_steps_as_one_content_region() {
         .position(|row| row.contains("▪ only step"))
         .expect("step visible after scrolling");
     assert!(
-        shown[step_row + 1]
-            .chars()
-            .all(|cell| matches!(cell, ' ' | '▌')),
-        "the steps section needs its trailing blank row:\n{}",
+        shown[step_row + 1].contains("+ step"),
+        "the trailing add target follows the last step:\n{}",
         shown.join("\n")
     );
     let note_row = initial
@@ -1998,12 +2039,20 @@ fn standard_accordion_expands_full_width_under_selection_without_mutating_domain
         .map(|r| trimmed(r))
         .collect::<Vec<_>>()
         .join("\n");
-    for expected in ["no notes yet", "scope tsk", "created", "updated"] {
-        assert!(
-            body_joined.contains(expected),
-            "accordion body missing {expected:?}:\n{body_joined}"
-        );
-    }
+    assert!(
+        body_joined.contains("no notes yet"),
+        "accordion body must show its notes preview:\n{body_joined}"
+    );
+    assert!(
+        !body_joined.contains("scope") && !body_joined.contains("created"),
+        "peek must omit task metadata:\n{body_joined}"
+    );
+    assert!(
+        rows.get(selected_idx + 1 + body.len())
+            .is_some_and(|row| row.contains('└')),
+        "the notes gutter must end in a connected corner:\n{}",
+        rows.join("\n")
+    );
     // Every other task and every section header the base fixture paints (drawer open) must
     // still be present: the accordion expands the list, it never mutates or hides it.
     let joined = rows
@@ -2032,7 +2081,7 @@ fn standard_accordion_expands_full_width_under_selection_without_mutating_domain
 }
 
 /// Peek (`→`) body: up to five note lines, then a dim "N more lines" tail naming what did
-/// not fit, then the scope/age lines. Tasks with five or fewer note lines show no tail.
+/// not fit. Task metadata stays on the full page, and a final corner closes the note gutter.
 #[test]
 fn standard_peek_body_caps_notes_at_five_lines_with_a_more_lines_tail() {
     let mut tasks = fixture_tasks();
@@ -2074,8 +2123,14 @@ fn standard_peek_body_caps_notes_at_five_lines_with_a_more_lines_tail() {
         "peek must name the three hidden lines:\n{joined}"
     );
     assert!(
-        joined.contains("scope tsk") && joined.contains("created"),
-        "peek keeps the scope and age lines:\n{joined}"
+        !joined.contains("scope") && !joined.contains("created"),
+        "peek must omit task metadata:\n{joined}"
+    );
+    assert!(
+        rows.get(selected_idx + 1 + body.len())
+            .is_some_and(|row| row.contains('└')),
+        "the more-lines tail must be followed by the connected corner:\n{}",
+        rows.join("\n")
     );
 }
 
@@ -2146,12 +2201,10 @@ fn standard_accordion_on_a_task_below_the_fold_scrolls_the_whole_block_into_view
         viewport.contains("Padding task 29"),
         "the expanded task's own row must be scrolled into view:\n{viewport}"
     );
-    for expected in ["no notes yet", "scope tsk", "created", "updated"] {
-        assert!(
-            viewport.contains(expected),
-            "accordion body missing {expected:?} once scrolled into view:\n{viewport}"
-        );
-    }
+    assert!(
+        viewport.contains("no notes yet") && viewport.contains('└'),
+        "accordion body must show the notes preview and connected corner once scrolled into view:\n{viewport}"
+    );
 }
 
 /// G-2 (gate round 1, PR #11): with no expanded accordion open, the list once painted from
@@ -2231,7 +2284,7 @@ fn compact_peek_is_inline_and_editors_stay_full_screen_takeovers() {
         );
         if h > 10 {
             assert!(
-                viewport.contains("scope tsk"),
+                viewport.contains("no notes yet"),
                 "{w}x{h}: the peek body must weave inline under the row:\n{viewport}"
             );
         } else {
@@ -2384,8 +2437,7 @@ fn golden_scenes() -> Vec<GoldenScene> {
     // intentional for the (deck-only, no lenses/dispatch keyboard surface yet), not a gap;
     // recorded here so a reviewer does not re-litigate the divergence as a bug.
     let mut help_model = fixture_model(&tasks, &board_view);
-    let help_lines: Vec<String> =
-        tsk_tui::ui::input::help_card_lines(tsk_tui::config::VerbModifier::Alt);
+    let help_lines: Vec<String> = tsk_tui::ui::input::help_card_lines();
     help_model.overlay = QueueOverlay::Help { lines: &help_lines };
     let (help_rows, _) = paint(80, 24, &help_model);
 
@@ -2563,6 +2615,10 @@ fn footer_lists_the_step_add_verb() {
         let mut model = BoardModel::from_domain(&domain, None);
         apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None)
             .expect("open task page");
+        apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+            .expect("enter task edit mode");
+        apply_intent(&mut domain, &mut model, BoardIntent::CancelEdit, None)
+            .expect("return to task page");
         let rows = board_rows(&model, width, 24);
         let verb_row = tier::resolve(width, 24).verb_row.expect("verb row");
         trimmed(&rows[verb_row as usize])
@@ -2571,27 +2627,21 @@ fn footer_lists_the_step_add_verb() {
     let with = page_verb_row_with(&["only step"], 100);
     let without = page_verb_row_with(&[], 100);
 
-    assert!(
-        with.contains("alt+a step"),
-        "view mode + steps must list the step-add verb (modifier by the bar's convention):\n{with}"
-    );
-    assert!(
-        !without.contains("step"),
-        "view mode + no steps keeps the pre-T-7 verb bar:\n{without}"
-    );
-    let suffix = " · alt+a step";
-    let stripped = with
-        .strip_suffix(suffix)
-        .unwrap_or_else(|| panic!("the with-steps bar must end in the step-add entry:\n{with}"));
+    for row in [&with, &without] {
+        assert!(
+            row.contains("ctrl+a step"),
+            "task edit mode must list the step-add verb, including an empty checklist:\n{row}"
+        );
+    }
     assert_eq!(
-        stripped, without,
-        "the step-add verb must be the footer verb bar's only change"
+        with, without,
+        "step availability belongs to task edit mode, not to whether a step already exists"
     );
 
     let floor = page_verb_row_with(&["only step"], 78);
     assert!(
-        floor.contains("alt+a"),
-        "the step-add key chord must stay listed at the standard width floor:\n{floor}"
+        floor.contains("ctrl+a…"),
+        "the compact verb-bar budget may ellipsize the final Ctrl chord, without making the bar overflow:\n{floor}"
     );
 }
 
@@ -2857,7 +2907,7 @@ fn board_with_headers_paints_within_40x10_and_all_tasks_reachable() {
 }
 
 #[test]
-fn peek_shows_thread_line_only_for_threaded_task() {
+fn peek_omits_thread_metadata_for_every_task() {
     let mut threaded = task(200, "threaded", HumanStatus::Ready, TaskScope::Global, 1);
     threaded.thread = Some("release".to_string());
     let mut threaded_model = BoardModel::from_tasks(vec![threaded], None);
@@ -2870,10 +2920,10 @@ fn peek_shows_thread_line_only_for_threaded_task() {
     )
     .expect("open threaded peek");
     assert!(
-        board_rows(&threaded_model, 80, 24)
+        !board_rows(&threaded_model, 80, 24)
             .join("\n")
             .contains("thread #release"),
-        "threaded peek must name its thread"
+        "thread metadata belongs to the task page, not the peek"
     );
 
     let mut unthreaded_model = BoardModel::from_tasks(
@@ -3164,7 +3214,7 @@ fn task_page_caps_a_wrapped_header_inside_the_page_body() {
         rows.join("\n")
     );
     assert!(
-        rows[9].contains("alt+e"),
+        rows[9].contains("ctrl+e"),
         "the verb row was overwritten by the header:\n{}",
         rows.join("\n")
     );

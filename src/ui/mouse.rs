@@ -302,7 +302,9 @@ fn point(column: u16, row: u16) -> Position {
 fn verb_intent(model: &BoardModel, index: usize) -> Option<BoardIntent> {
     let entry = *board_verb_items(model).get(index)?;
     match entry.key {
-        "space" => Some(BoardIntent::PrimaryVerb),
+        "shift+enter" => Some(BoardIntent::ConfirmEditNext),
+        "enter" if model.input_mode() == BoardInputMode::EditStep => Some(BoardIntent::ConfirmEdit),
+        "s" => Some(BoardIntent::PrimaryVerb),
         "enter" => Some(BoardIntent::OpenTaskPage),
         "d" => Some(BoardIntent::Complete),
         "o" => Some(BoardIntent::Reopen),
@@ -312,6 +314,7 @@ fn verb_intent(model: &BoardModel, index: usize) -> Option<BoardIntent> {
         "e" => Some(BoardIntent::BeginEditTitle),
         "n" => Some(BoardIntent::BeginEditNotes),
         "a" => Some(BoardIntent::BeginAddStep),
+        "esc" if model.input_mode() == BoardInputMode::EditStep => Some(BoardIntent::CancelEdit),
         "esc" => Some(BoardIntent::CloseLayer),
         ":" => Some(BoardIntent::OpenCommandPalette),
         "?" => Some(BoardIntent::OpenHelp),
@@ -323,7 +326,7 @@ fn verb_intent(model: &BoardModel, index: usize) -> Option<BoardIntent> {
 fn quick_add_verb_intent(index: usize) -> Option<BoardIntent> {
     match QUICK_ADD_VERBS.get(index)?.key {
         "enter" => Some(BoardIntent::QuickAddSave),
-        "ctrl+enter" => Some(BoardIntent::QuickAddSaveNext),
+        "shift+enter" => Some(BoardIntent::QuickAddSaveNext),
         "tab" => Some(BoardIntent::ExpandQuickAdd),
         "esc" => Some(BoardIntent::CancelQuickAdd),
         _ => None,
@@ -342,7 +345,7 @@ fn form_verb_intent(model: &BoardModel, index: usize) -> Option<BoardIntent> {
     let dropdown_open = model.input_mode() == BoardInputMode::FormScopeDropdown;
     let focus = model.form_focus()?;
     match form_verb_items(focus, dropdown_open).get(index)?.key {
-        "ctrl+enter" | "alt+enter" => Some(BoardIntent::ConfirmEdit),
+        "shift+enter" => Some(BoardIntent::ConfirmEdit),
         "enter" if dropdown_open => Some(BoardIntent::ConfirmFormScopeDropdown),
         "enter" if focus == CaptureField::Scope => Some(BoardIntent::OpenFormScopeDropdown),
         "enter" => Some(BoardIntent::ConfirmEdit),
@@ -465,7 +468,7 @@ pub fn map_scrollbar_mouse(
 
 fn wheel_board_intent(model: &BoardModel, kind: MouseEventKind) -> Option<BoardIntent> {
     match model.input_mode() {
-        BoardInputMode::TaskPage => match kind {
+        BoardInputMode::TaskPage | BoardInputMode::EditStep => match kind {
             MouseEventKind::ScrollUp => Some(BoardIntent::PageWheelScrollUp),
             MouseEventKind::ScrollDown => Some(BoardIntent::PageWheelScrollDown),
             _ => None,
@@ -550,10 +553,28 @@ pub fn map_board_mouse(
             // triggering a second board action behind the capture surface.
             _ => Some(BoardIntent::CancelQuickAdd),
         },
-        BoardInputMode::EditTitle
-        | BoardInputMode::EditNotes
-        | BoardInputMode::EditThread
-        | BoardInputMode::EditScope => match hit_at(hits, pos) {
+        BoardInputMode::EditTitle | BoardInputMode::EditNotes | BoardInputMode::EditScope => {
+            match hit_at(hits, pos) {
+                Some(QueueHitTarget::FormTitle) => {
+                    Some(BoardIntent::FocusFormField(CaptureField::Title))
+                }
+                Some(QueueHitTarget::FormNotes(_)) => {
+                    Some(BoardIntent::FocusFormField(CaptureField::Notes))
+                }
+                Some(QueueHitTarget::FormScope) => Some(BoardIntent::OpenFormScopeDropdown),
+                Some(QueueHitTarget::FormThread) => {
+                    Some(BoardIntent::FocusFormField(CaptureField::Thread))
+                }
+                Some(QueueHitTarget::Step(index)) if model.task_editing() => {
+                    Some(BoardIntent::SelectStep(index))
+                }
+                Some(QueueHitTarget::StepAdd) => Some(BoardIntent::BeginAddStep),
+                Some(QueueHitTarget::Verb(index)) => form_verb_intent(model, index),
+                _ => None,
+            }
+        }
+        BoardInputMode::SelectThread | BoardInputMode::EditThread => match hit_at(hits, pos) {
+            Some(QueueHitTarget::FormThread) => Some(BoardIntent::ToggleThreadEditing),
             Some(QueueHitTarget::FormTitle) => {
                 Some(BoardIntent::FocusFormField(CaptureField::Title))
             }
@@ -561,18 +582,31 @@ pub fn map_board_mouse(
                 Some(BoardIntent::FocusFormField(CaptureField::Notes))
             }
             Some(QueueHitTarget::FormScope) => Some(BoardIntent::OpenFormScopeDropdown),
-            Some(QueueHitTarget::FormThread) => {
-                Some(BoardIntent::FocusFormField(CaptureField::Thread))
+            Some(QueueHitTarget::Step(index)) if model.task_editing() => {
+                Some(BoardIntent::SelectStep(index))
             }
+            Some(QueueHitTarget::StepAdd) => Some(BoardIntent::BeginAddStep),
             Some(QueueHitTarget::Verb(index)) => form_verb_intent(model, index),
             _ => None,
         },
         BoardInputMode::TaskPage => match hit_at(hits, pos) {
             Some(QueueHitTarget::TaskNumber(id)) => Some(BoardIntent::CopyTaskNumber(id)),
-            Some(QueueHitTarget::FormScope) | Some(QueueHitTarget::FormThread) => None,
-            // A click on an step row selects it (AC-21) — the board's click
-            // convention: a click selects, never mutates.
+            Some(QueueHitTarget::FormTitle) if model.task_editing() => {
+                Some(BoardIntent::FocusFormField(CaptureField::Title))
+            }
+            Some(QueueHitTarget::FormNotes(_)) if model.task_editing() => {
+                Some(BoardIntent::FocusFormField(CaptureField::Notes))
+            }
+            Some(QueueHitTarget::FormThread) if model.task_editing() => {
+                Some(BoardIntent::FocusFormField(CaptureField::Thread))
+            }
+            Some(QueueHitTarget::FormScope) if model.task_editing() => {
+                Some(BoardIntent::OpenFormScopeDropdown)
+            }
+            // Step clicks always select. In view mode this remains read-only; the reducer opens
+            // the inline editor only when the task edit session is already active.
             Some(QueueHitTarget::Step(index)) => Some(BoardIntent::SelectStep(index)),
+            Some(QueueHitTarget::StepAdd) => Some(BoardIntent::BeginAddStep),
             Some(QueueHitTarget::PageScroll(offset)) => Some(BoardIntent::PageScrollTo(offset)),
             Some(QueueHitTarget::Verb(index)) => verb_intent(model, index),
             _ => None,
@@ -584,10 +618,23 @@ pub fn map_board_mouse(
             Some(QueueHitTarget::Verb(index)) => form_verb_intent(model, index),
             _ => None,
         },
-        // The step line editor is keyboard-only in this slice: the mouse has no hit
-        // region on the section's line yet, so every click is inert rather than
-        // reaching the page behind the editor.
-        BoardInputMode::EditStep | BoardInputMode::SaveRecovery => None,
+        BoardInputMode::EditStep => match hit_at(hits, pos) {
+            Some(QueueHitTarget::FormTitle) => {
+                Some(BoardIntent::FocusFormField(CaptureField::Title))
+            }
+            Some(QueueHitTarget::FormNotes(_)) => {
+                Some(BoardIntent::FocusFormField(CaptureField::Notes))
+            }
+            Some(QueueHitTarget::FormThread) => {
+                Some(BoardIntent::FocusFormField(CaptureField::Thread))
+            }
+            Some(QueueHitTarget::FormScope) => Some(BoardIntent::OpenFormScopeDropdown),
+            Some(QueueHitTarget::Step(index)) => Some(BoardIntent::SelectStep(index)),
+            Some(QueueHitTarget::StepAdd) => Some(BoardIntent::BeginAddStep),
+            Some(QueueHitTarget::Verb(index)) => verb_intent(model, index),
+            _ => None,
+        },
+        BoardInputMode::SaveRecovery => None,
         BoardInputMode::Normal => match hit_at(hits, pos) {
             Some(QueueHitTarget::ProjectChip) => Some(BoardIntent::OpenProjectSelector),
             Some(QueueHitTarget::HomeTab(tab)) => Some(BoardIntent::SelectHomeTab(tab)),

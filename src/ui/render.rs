@@ -361,7 +361,19 @@ pub struct PaletteCommandRow<'a> {
 #[derive(Debug, Clone)]
 pub struct StepView {
     pub done: bool,
-    pub text: String,
+    /// Word-boundary wrapped text rows. The first carries the step glyph, later rows align
+    /// under its text so step content never truncates at the page edge.
+    pub rows: Vec<String>,
+}
+
+/// The task page's in-place step editor. Its rows replace the selected stored step's text, or
+/// follow the stored rows while an add is pending, so the editor never takes over the footer.
+#[derive(Debug, Clone)]
+pub struct InlineStepEditor<'a> {
+    pub index: usize,
+    pub cursor_row: u16,
+    pub cursor_col: u16,
+    pub refusal: Option<&'a str>,
 }
 
 /// A focused one-line input in the board's shared bottom slot. The slot reserves
@@ -458,20 +470,24 @@ pub enum QueueOverlay<'a> {
         notes_cursor: Option<(u16, u16)>,
         /// Wrapped note rows hidden below the window, named by the divider's tail.
         more_lines: usize,
-        /// The extracted steps step views, in storage order. Empty paints no
-        /// steps section at all: the page is identical to pre-feature for a task
-        /// with no steps.
+        /// The extracted steps step views, in storage order. An inline add contributes a
+        /// final transient view, while `stored_step_count` stays tied to persisted steps.
         step_views: Vec<StepView>,
+        /// Persisted step count, excluding an inline unsaved add draft.
+        stored_step_count: usize,
         /// Absolute index of the step cursor's row, when active. The painter turns it
         /// into the row's `▸` gutter marker.
         step_cursor: Option<usize>,
+        /// Whether the trailing `+ step` control owns selection.
+        step_add_selected: bool,
         /// First step index the section's window shows (the cursor's scroll window).
         step_scroll: usize,
         /// Absolute index of the step the delete verb visibly marked, when armed.
         step_marked: Option<usize>,
-        /// The page's add/rename step draft. When present it uses the shared
-        /// bottom input slot, leaving the meta footer visible in the page above.
-        step_editor: Option<BottomInputSlot<'a>>,
+        /// The page's in-place add/rename step draft, if one is active.
+        inline_step_editor: Option<InlineStepEditor<'a>>,
+        /// The thread field still uses the shared bottom input slot.
+        bottom_input: Option<BottomInputSlot<'a>>,
         /// Footer: task number · scope · thread · created · updated.
         meta: String,
         /// Display width before the scope inside `meta`. The number is chrome, not a scope hit.
@@ -526,8 +542,6 @@ pub struct QueueFrameModel<'a> {
     pub status_undo_offset: Option<usize>,
     /// Verb-bar entries (trimmed to the geometry budget at paint time).
     pub verb_items: &'a [VerbEntry<'a>],
-    /// Prefix painted on mutating verb keys (`alt+` / `ctrl+`).
-    pub verb_modifier: crate::config::VerbModifier,
     /// Clock for age labels (tests inject a fixed instant).
     pub now: SystemTime,
     /// Optional transient overlay (palette / help / scope dropdown).
@@ -597,6 +611,8 @@ pub enum QueueHitTarget {
     /// scroll painted it — the same absolute-index discipline [`Command`] follows.
     /// A click moves the step cursor onto that step (AC-21): select, never toggle.
     Step(usize),
+    /// The dim trailing task-page control that starts a new inline step.
+    StepAdd,
     /// One painted option in a shared form's scope dropdown, indexed into that form's own
     /// `TaskScope` choices. It cannot name the board selector's all-projects choice.
     FormScopeOption(usize),
@@ -878,8 +894,7 @@ pub fn draw_queue_frame(
         let prefix_verbs = matches!(
             model.overlay,
             QueueOverlay::None | QueueOverlay::TaskPage { focus: None, .. },
-        )
-        .then_some(model.verb_modifier);
+        );
         if let QueueOverlay::QuickAdd {
             project_scope,
             recovery: true,
@@ -937,7 +952,7 @@ pub(crate) fn bottom_input_geometry(mut geo: TierGeometry, active: bool) -> Tier
 fn bottom_input_slot<'a>(overlay: &'a QueueOverlay<'a>) -> Option<&'a BottomInputSlot<'a>> {
     match overlay {
         QueueOverlay::QuickAdd { input, .. } => Some(input),
-        QueueOverlay::TaskPage { step_editor, .. } => step_editor.as_ref(),
+        QueueOverlay::TaskPage { bottom_input, .. } => bottom_input.as_ref(),
         _ => None,
     }
 }
@@ -948,7 +963,7 @@ pub(crate) const QUICK_ADD_VERBS: &[VerbEntry<'static>] = &[
         label: "save",
     },
     VerbEntry {
-        key: "ctrl+enter",
+        key: "shift+enter",
         label: "save+next",
     },
     VerbEntry {
@@ -980,7 +995,7 @@ pub(crate) const PALETTE_VERBS: &[VerbEntry<'static>] = &[
 /// painted Save or Cancel control cannot promise a key route different from the one it sends.
 const FORM_TITLE_VERBS: &[VerbEntry<'static>] = &[
     VerbEntry {
-        key: "enter",
+        key: "shift+enter",
         label: "save",
     },
     VerbEntry {
@@ -994,16 +1009,12 @@ const FORM_TITLE_VERBS: &[VerbEntry<'static>] = &[
 ];
 const FORM_NOTES_VERBS: &[VerbEntry<'static>] = &[
     VerbEntry {
-        key: "ctrl+enter",
-        label: "save",
-    },
-    VerbEntry {
-        key: "alt+enter",
+        key: "shift+enter",
         label: "save",
     },
     VerbEntry {
         key: "tab",
-        label: "scope",
+        label: "next",
     },
     VerbEntry {
         key: "esc",
@@ -1012,12 +1023,12 @@ const FORM_NOTES_VERBS: &[VerbEntry<'static>] = &[
 ];
 const FORM_THREAD_VERBS: &[VerbEntry<'static>] = &[
     VerbEntry {
-        key: "enter",
+        key: "shift+enter",
         label: "save",
     },
     VerbEntry {
         key: "tab",
-        label: "scope",
+        label: "next",
     },
     VerbEntry {
         key: "esc",
@@ -1069,10 +1080,10 @@ pub(crate) fn form_verb_items(
 }
 
 /// Verb bar for the Title editor: one field, so Tab has nothing to move focus
-/// between and plain Enter saves.
+/// between and Shift+Enter saves.
 const EDIT_TITLE_VERBS: &[VerbEntry<'static>] = &[
     VerbEntry {
-        key: "enter",
+        key: "shift+enter",
         label: "save",
     },
     VerbEntry {
@@ -1081,18 +1092,11 @@ const EDIT_TITLE_VERBS: &[VerbEntry<'static>] = &[
     },
 ];
 
-/// Verb bar for the Notes editor: plain Enter opens a line (multi-line
-/// field), so the real save chord is Ctrl+Enter -- and, per ADR 0006, Alt+Enter is an
-/// *equal* save chord, not a fallback: Ctrl+Enter arrives bare (indistinguishable from a
-/// plain Enter) on terminals without the disambiguating keyboard protocol, where the
-/// advertised key would insert a line break instead of saving. Name both. Tab stays unbound.
+/// Verb bar for the Notes editor: plain Enter opens a line, so Shift+Enter saves. Tab stays
+/// unbound.
 const EDIT_NOTES_VERBS: &[VerbEntry<'static>] = &[
     VerbEntry {
-        key: "ctrl+enter",
-        label: "save",
-    },
-    VerbEntry {
-        key: "alt+enter",
+        key: "shift+enter",
         label: "save",
     },
     VerbEntry {
@@ -1160,10 +1164,13 @@ fn paint_overlay(
             notes_cursor,
             more_lines,
             ref step_views,
+            stored_step_count,
             step_cursor,
+            step_add_selected,
             step_scroll,
             step_marked,
-            ref step_editor,
+            ref inline_step_editor,
+            bottom_input: _,
             ref meta,
             meta_scope_x,
             meta_scope_width,
@@ -1183,15 +1190,18 @@ fn paint_overlay(
                 *notes_cursor,
                 *more_lines,
                 step_views,
+                *stored_step_count,
                 *step_cursor,
+                *step_add_selected,
                 *step_scroll,
                 *step_marked,
+                inline_step_editor.as_ref(),
                 meta,
                 *meta_scope_x,
                 *meta_scope_width,
                 *thread_slot_width,
                 *focus,
-                step_editor.is_some(),
+                bottom_input_slot(&model.overlay).is_some(),
                 hits,
             );
             if let Some(dropdown) = scope_dropdown {
@@ -1751,9 +1761,8 @@ pub struct TaskPageLayout {
 /// What the page's steps section asks of the layout (AC-24).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StepsSection {
-    /// No steps: no section paints, notes keep the full content region. The step
-    /// editor no longer reserves a section row — since T-7 it paints on the page
-    /// footer, so an open line over an empty steps is still no section.
+    /// No stored or draft steps: no section paints, so notes keep the full content region.
+    /// An inline add draft contributes a transient step view and therefore uses `Steps`.
     None,
     /// At least one step: the section follows the notes after two blank rows, and
     /// the shared content viewport scrolls when the resulting page overflows.
@@ -1904,9 +1913,12 @@ fn paint_task_page(
     notes_cursor: Option<(u16, u16)>,
     more_lines: usize,
     step_views: &[StepView],
+    stored_step_count: usize,
     step_cursor: Option<usize>,
+    step_add_selected: bool,
     step_scroll: usize,
     step_marked: Option<usize>,
+    inline_step_editor: Option<&InlineStepEditor<'_>>,
     meta: &str,
     meta_scope_x: u16,
     meta_scope_width: u16,
@@ -2056,7 +2068,9 @@ fn paint_task_page(
     // Notes and steps form one vertical stream. Steps begin two blank rows after the
     // notes, and the header and metadata footer never participate in this scroll.
     let note_count = notes_rows.len().max(1);
-    let content = page_content_layout(note_count, step_views.len(), lay.notes_rows);
+    let step_rows: usize = step_views.iter().map(|step| step.rows.len().max(1)).sum();
+    // Every checklist has a trailing add control, including an empty one.
+    let content = page_content_layout(note_count, step_rows + 1, lay.notes_rows);
     let scroll = step_scroll.min(content.max_scroll);
     // Content has a two-cell gutter on both sides. An overflowing page keeps its
     // scrollbar outside that right gutter at the frame edge.
@@ -2066,7 +2080,20 @@ fn paint_task_page(
     } else {
         style_plain()
     };
-    let done = step_views.iter().filter(|step| step.done).count();
+    let done = step_views
+        .iter()
+        .take(stored_step_count)
+        .filter(|step| step.done)
+        .count();
+    let inline_editor_first_row = inline_step_editor.map(|editor| {
+        content.steps_start.saturating_add(1).saturating_add(
+            step_views
+                .iter()
+                .take(editor.index)
+                .map(|step| step.rows.len().max(1))
+                .sum::<usize>(),
+        )
+    });
     for visible in 0..lay.notes_rows as usize {
         let absolute = scroll + visible;
         if absolute >= content.total_rows {
@@ -2107,21 +2134,31 @@ fn paint_task_page(
             );
             // Notes body past the two-cell gutter (and the trailing pad space).
             hits.push_copyable(Rect::new(2, y, content_width.saturating_sub(3), 1));
-        } else if !step_views.is_empty() && absolute == content.steps_start {
+        } else if absolute == content.steps_start {
             put_line(
                 frame,
                 y,
                 content_width,
                 paint_bounded_line(
-                    &format!("  steps {done}/{}", step_views.len()),
+                    &format!("  steps {done}/{stored_step_count}"),
                     content_width,
                     style_dim(),
                 ),
             );
         } else if absolute > content.steps_start {
-            let index = absolute - content.steps_start - 1;
-            if let Some(step) = step_views.get(index) {
-                let gutter = if Some(index) == step_cursor {
+            let mut row = absolute - content.steps_start - 1;
+            let mut found = None;
+            for (index, step) in step_views.iter().enumerate() {
+                let rows = step.rows.len().max(1);
+                if row < rows {
+                    found = Some((index, step, row));
+                    break;
+                }
+                row -= rows;
+            }
+            if let Some((index, step, row_in_step)) = found {
+                let first_row = row_in_step == 0;
+                let gutter = if first_row && Some(index) == step_cursor {
                     "▸ "
                 } else {
                     "  "
@@ -2133,29 +2170,85 @@ fn paint_task_page(
                 } else {
                     "▪"
                 };
+                let text = step
+                    .rows
+                    .get(row_in_step)
+                    .map(String::as_str)
+                    .unwrap_or_default();
+                let prefix = if first_row {
+                    format!("{gutter}{glyph} ")
+                } else {
+                    "    ".to_string()
+                };
+                let editing = inline_step_editor.is_some_and(|editor| editor.index == index);
+                let shown_text = if editing && text.trim().is_empty() && first_row {
+                    inline_step_editor
+                        .and_then(|editor| editor.refusal)
+                        .map(|refusal| format!("step… · {refusal}"))
+                        .unwrap_or_else(|| "step…".to_string())
+                } else {
+                    text.to_string()
+                };
                 put_line(
                     frame,
                     y,
                     content_width,
                     paint_bounded_line(
-                        &format!("{gutter}{glyph} {} ", step.text),
+                        &format!("{prefix}{shown_text} "),
                         content_width,
-                        style_plain(),
+                        if editing { style_bold() } else { style_plain() },
                     ),
                 );
                 hits.push(
                     QueueHitTarget::Step(index),
                     Rect::new(0, y, content_width, 1),
                 );
-                // Step text past `▸ `/`  ` + glyph + space; trailing pad stays out.
-                let step_prefix = 2u16 + display_width(glyph) as u16 + 1;
+                // Every wrapped row belongs to the same step. The continuation aligns with
+                // the first row's text and remains copyable without its selection gutter.
+                let step_prefix = 4u16;
                 hits.push_copyable(Rect::new(
                     step_prefix,
                     y,
                     content_width.saturating_sub(step_prefix).saturating_sub(1),
                     1,
                 ));
+            } else if row == 0 {
+                put_line(
+                    frame,
+                    y,
+                    content_width,
+                    paint_bounded_line(
+                        if step_add_selected {
+                            "▸ + step"
+                        } else {
+                            "   + step"
+                        },
+                        content_width,
+                        if step_add_selected {
+                            style_plain()
+                        } else {
+                            style_dim()
+                        },
+                    ),
+                );
+                hits.push(QueueHitTarget::StepAdd, Rect::new(0, y, content_width, 1));
             }
+        }
+    }
+    if let (Some(editor), Some(first_row)) = (inline_step_editor, inline_editor_first_row) {
+        let cursor_row = first_row.saturating_add(editor.cursor_row as usize);
+        if cursor_row >= scroll && cursor_row < scroll.saturating_add(lay.notes_rows as usize) {
+            place_edit_cursor_at(
+                frame,
+                Rect::new(
+                    4,
+                    lay.notes_y,
+                    content_width.saturating_sub(5),
+                    lay.notes_rows,
+                ),
+                u16::try_from(cursor_row.saturating_sub(scroll)).unwrap_or(u16::MAX),
+                editor.cursor_col.min(content_width.saturating_sub(5)),
+            );
         }
     }
     if let Some((row, col)) = notes_cursor {
@@ -2176,8 +2269,8 @@ fn paint_task_page(
         paint_page_scrollbar(frame, hits, &lay, width, scroll, content.total_rows);
     }
 
-    // Meta footer: scope · thread · created · updated. It remains available while a step
-    // draft uses the board's separate shared bottom input slot.
+    // Meta footer: scope · thread · created · updated. Inline step drafts leave this footer
+    // visible and do not claim its input slot.
     if let Some(y) = lay.meta_y {
         put_line(
             frame,
@@ -2188,6 +2281,26 @@ fn paint_task_page(
 
         let scope_x = 2u16.saturating_add(meta_scope_x).min(width);
         let thread_x = scope_x.saturating_add(meta_scope_width).min(width);
+        let selected = match focus {
+            Some(CaptureField::Scope) => Some((scope_x, meta_scope_width)),
+            // The separator belongs to footer chrome. Only the thread marker and name are
+            // the selected control, so ` · #auth` keeps its dot dim while `#auth` reverses.
+            Some(CaptureField::Thread) => thread_slot_width.map(|slot_width| {
+                let thread_prefix = 3u16; // ` · #`
+                (
+                    thread_x.saturating_add(thread_prefix),
+                    slot_width.saturating_sub(thread_prefix),
+                )
+            }),
+            _ => None,
+        };
+        if let Some((selected_x, selected_width)) = selected {
+            let selected_width = selected_width.min(width.saturating_sub(selected_x));
+            let buffer = frame.buffer_mut();
+            for x in selected_x..selected_x.saturating_add(selected_width) {
+                buffer[(x, y)].set_style(style_reverse());
+            }
+        }
         if footer_input_open {
             return;
         }
@@ -2533,22 +2646,19 @@ fn paint_list_row(
     }
 }
 
-/// Read-only accordion body under an expanded task: notes preview,
-/// scope, and created/updated age. the has no agent surfaces to show here.
+/// Read-only accordion body under an expanded task: a short notes preview only.
 ///
 /// The peek (`→`) shows up to [`PEEK_NOTES_LINE_LIMIT`] wrapped note lines; a dim
-/// "… N more lines" tail names whatever did not fit. The full text lives behind `Enter`
-/// on the task page.
+/// "… N more lines" tail names whatever did not fit. A final corner closes the gutter,
+/// while the full task details remain behind `Enter` on the task page.
 const PEEK_NOTES_LINE_LIMIT: usize = 5;
 
 /// Peek accordion gutter (`    │ `). Copyable content starts after these cells.
 const PEEK_DETAIL_INDENT: &str = "    │ ";
+/// The final corner joins the note gutter back to the task row above.
+const PEEK_DETAIL_END: &str = "    └";
 
-fn detail_lines_for_task(
-    task: &Task,
-    now: SystemTime,
-    width: u16,
-) -> Vec<(Line<'static>, u16, u16)> {
+fn detail_lines_for_task(task: &Task, width: u16) -> Vec<(Line<'static>, u16, u16)> {
     let indent = PEEK_DETAIL_INDENT;
     let content_x = u16::try_from(display_width(indent)).unwrap_or(0);
     let content_width = width.saturating_sub(content_x);
@@ -2596,28 +2706,9 @@ fn detail_lines_for_task(
             );
         }
     }
-    if let Some(thread) = task.thread.as_deref() {
-        push(
-            &mut lines,
-            paint_bounded_line(&format!("{indent}thread #{thread}"), width, style_dim()),
-        );
-    }
-    let scope_text = match &task.scope {
-        TaskScope::Project { path } => short_project(path).to_string(),
-        TaskScope::Global => "desk".to_string(),
-    };
-    let age_text = format!(
-        "created {} ago · updated {} ago",
-        format_age(now, task.created_at),
-        format_age(now, task.updated_at)
-    );
     push(
         &mut lines,
-        paint_bounded_line(&format!("{indent}scope {scope_text}"), width, style_dim()),
-    );
-    push(
-        &mut lines,
-        paint_bounded_line(&format!("{indent}{age_text}"), width, style_dim()),
+        paint_bounded_line(PEEK_DETAIL_END, width, style_dim()),
     );
     lines
 }
@@ -2688,9 +2779,7 @@ fn build_list_rows(
             *selected_idx = Some(out.len() - 1);
         }
         if detail_target == Some(task.id) {
-            for (line, content_x, content_width) in
-                detail_lines_for_task(task, model.now, geo.row_width)
-            {
+            for (line, content_x, content_width) in detail_lines_for_task(task, geo.row_width) {
                 out.push(ListRow::Detail {
                     line,
                     content_x,
@@ -3199,7 +3288,7 @@ fn paint_selector_row(
                 if active {
                     style_reverse_bold()
                 } else {
-                    style_plain()
+                    style_dim()
                 },
             ));
             left_width += w;
@@ -3241,7 +3330,7 @@ fn paint_selector_row(
 fn mutating_verb_key(key: &str) -> bool {
     matches!(
         key,
-        "space" | "d" | "o" | "b" | "x" | "a" | "e" | "u" | "n" | "q"
+        "s" | "d" | "o" | "b" | "x" | "a" | "e" | "u" | "n" | "q"
     )
 }
 
@@ -3249,7 +3338,7 @@ fn paint_verb_bar(
     entries: &[VerbEntry<'_>],
     budget: usize,
     width: u16,
-    prefix: Option<crate::config::VerbModifier>,
+    prefix: bool,
 ) -> (Line<'static>, Vec<(usize, u16, u16)>) {
     let shown: Vec<&VerbEntry<'_>> = entries.iter().take(budget).collect();
     let mut spans: Vec<Span<'static>> = Vec::new();
@@ -3265,11 +3354,10 @@ fn paint_verb_bar(
             spans.push(Span::styled(sep.to_string(), style_dim()));
             x = x.saturating_add(display_width(sep) as u16);
         }
-        let key = match prefix {
-            Some(modifier) if mutating_verb_key(entry.key) => {
-                format!("{}{}", modifier.prefix(), entry.key)
-            }
-            _ => entry.key.to_string(),
+        let key = if prefix && mutating_verb_key(entry.key) {
+            format!("ctrl+{}", entry.key)
+        } else {
+            entry.key.to_string()
         };
         let key_w = display_width(&key) as u16;
         let start = x;

@@ -35,3 +35,17 @@ test("demo rows lead with copyable T task identifiers", async () => {
   assert.match(demo, /T\$\{task\.number\}/);
   assert.doesNotMatch(demo, /#\$\{task\.number\}/);
 });
+
+test("demo matches the quick-add, peek, and group-toggle contracts", async () => {
+  const demo = await read("../public/board-demo.js");
+  assert.match(demo, /if \(e\.key === "Enter" && !e\.ctrlKey && !e\.altKey && !e\.metaKey\)/);
+  assert.match(demo, /saveDraft\(e\.shiftKey\)/);
+  assert.match(demo, /enter save · shift\+enter stay/);
+  assert.doesNotMatch(demo, /saveDraft\(e\.ctrlKey \|\| e\.metaKey\)/);
+  assert.match(demo, /return notes\.split\(\/\\n\/\)\.slice\(0, 5\);/);
+  assert.doesNotMatch(demo, /thread #\$\{task\.thread\}|scope \$\{projectName\(task\)\}|created \$\{age\(/);
+  assert.match(demo, /<div class="tsk-peek dim">\$\{indent\}    └<\/div>/);
+  assert.match(demo, /function toggleAllGroups\(\)/);
+  assert.match(demo, /id: "groups", label: "toggle groups"/);
+  assert.match(demo, /if \(e\.key === "g" && !e\.altKey && !e\.ctrlKey && !e\.metaKey\)/);
+});

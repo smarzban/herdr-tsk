@@ -31,7 +31,7 @@ dark (`tsk-theme` / `starlight-theme` in localStorage).
 CI: `.github/workflows/site.yml` runs `npm ci && npm test && npm run build` in
 `site/`. The Rust workflow `paths-ignore`s `site/**`.
 
-The web board demo uses **bare** verb keys. Browsers steal Alt-chords; matching
+The web board demo uses **bare** verb keys. Browsers steal Ctrl chords; matching
 the TUI's modifier requirement would make the demo inoperable. When keymap,
 status verbs, or tab/section semantics change, update
 `site/src/content/docs/docs/{keys,board,capture,cli}.md` **and**
@@ -40,7 +40,7 @@ status verbs, or tab/section semantics change, update
 ## Invariants
 
 - Do not fold this tree into the Rust crate or the green-bar `cargo test`.
-- Do not “fix” demo keys to require Alt.
+- Do not “fix” demo keys to require Ctrl.
 - `node_modules/` and `dist/` are generated (excluded from the coverage ledger).
 
 ## Error paths

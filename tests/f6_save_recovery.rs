@@ -1122,7 +1122,8 @@ fn task_form_save_failure_retries_the_exact_atomic_title_notes_and_scope_mutatio
         )
         .expect("type Notes");
     }
-    apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None).expect("focus Thread");
+    apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
+        .expect("select add target");
     apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None).expect("focus Scope");
     apply_intent(&mut domain, &mut model, BoardIntent::FormCycleScope, None)
         .expect("cycle scope to Global");
@@ -1222,6 +1223,10 @@ fn failed_step_editor_save() -> (
     domain.add_step(id, "alpha step").expect("seed one step");
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/app")));
     apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open task page");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+        .expect("enter task edit mode");
+    apply_intent(&mut domain, &mut model, BoardIntent::CancelEdit, None)
+        .expect("return to task page");
     apply_intent(&mut domain, &mut model, BoardIntent::BeginAddStep, None)
         .expect("open step editor");
     for character in "zed step".chars() {
@@ -1251,19 +1256,17 @@ fn failed_step_editor_save() -> (
     assert_eq!(failed, IntentOutcome::None);
     assert!(recovery.is_pending());
 
-    // The editor is HELD while unresolved (AC-14): the surface stays allocated with
-    // its draft on the footer's input line. Closing it before the boundary — the
-    // failure this test exists to catch — paints the plain meta footer instead.
+    // The editor is HELD while unresolved: the surface stays allocated with its draft in
+    // the steps section. Closing it before the boundary would discard that inline row.
     assert_eq!(model.input_mode(), BoardInputMode::SaveRecovery);
     let held = board_painted(&model);
     assert!(
-        held.lines()
-            .any(|row| row.contains("▎") && row.contains("zed step")),
-        "the failed save must hold the editor with its draft on the line:\n{held}"
+        held.lines().any(|row| row.contains("▪ zed step")),
+        "the failed save must hold the editor with its draft on the inline row:\n{held}"
     );
     assert!(
         held.contains("save failed") && held.contains("Retry or Cancel"),
-        "the footer input owns the recovery prompt while it replaces the status row:\n{held}"
+        "the recovery prompt remains visible while the inline draft is held:\n{held}"
     );
     (domain, model, recovery, id)
 }
@@ -1347,16 +1350,22 @@ fn cancelled_failed_step_editor_save_leaves_no_orphan_edit_mode() {
     )
     .expect("esc maps");
     assert_eq!(esc, BoardIntent::CloseLayer);
-    apply_intent(&mut domain, &mut model, esc, None).expect("close the page");
+    apply_intent(&mut domain, &mut model, esc, None).expect("leave task edit");
     assert_eq!(
         model.input_mode(),
-        BoardInputMode::Normal,
-        "no mode is left without its surface"
+        BoardInputMode::TaskPage,
+        "Esc restores task view before closing its page"
     );
+    apply_intent(&mut domain, &mut model, BoardIntent::CloseLayer, None).expect("close the page");
+    assert_eq!(model.input_mode(), BoardInputMode::Normal);
 
     // And a fresh editor session works: the cancelled pending save left no state.
     apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None)
         .expect("reopen the page");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+        .expect("enter task edit mode");
+    apply_intent(&mut domain, &mut model, BoardIntent::CancelEdit, None)
+        .expect("return to task page");
     apply_intent(&mut domain, &mut model, BoardIntent::BeginAddStep, None)
         .expect("open a fresh editor");
     for character in "after cancel".chars() {
@@ -1476,6 +1485,8 @@ fn retried_step_rename_save_applies_the_held_rename() {
     domain.add_step(id, "alpha step").expect("step");
     let mut model = BoardModel::from_domain(&domain, None);
     apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+        .expect("enter task edit mode");
     apply_intent(&mut domain, &mut model, BoardIntent::SelectStep(0), None).expect("select");
     apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
         .expect("contextual rename");
@@ -1495,13 +1506,19 @@ fn retried_step_rename_save_applies_the_held_rename() {
         &mut recovery,
         BoardSaveContext {
             baseline,
-            intent: BoardIntent::ConfirmEdit,
+            intent: BoardIntent::ConfirmEditNext,
             snapshot: None,
         },
         |_| Err(INJECTED.into()),
     )
     .expect("fail rename");
     assert!(recovery.is_pending());
+    assert_eq!(
+        model.open_field_edit(),
+        Some(BoardInputMode::EditStep),
+        "the staged rename editor must outlive the failed persistence boundary"
+    );
+    assert!(board_painted(&model).contains("renamed step"));
     apply_board_intent_with_save_recovery(
         &mut domain,
         &mut model,
@@ -1520,14 +1537,139 @@ fn retried_step_rename_save_applies_the_held_rename() {
     assert_eq!(domain.get(id).expect("task").steps[0].text, "renamed step");
 }
 
+#[test]
+fn cancelling_a_failed_task_session_save_discards_all_staged_step_changes() {
+    let mut domain = DomainState::new();
+    let id = domain
+        .create(
+            "Cancel staged steps",
+            None,
+            TaskScope::Global,
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("task");
+    for text in ["alpha", "bravo", "charlie"] {
+        domain.add_step(id, text).expect("step");
+    }
+    let mut model = BoardModel::from_domain(&domain, None);
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+        .expect("start task editing");
+    apply_intent(&mut domain, &mut model, BoardIntent::SelectStep(0), None).expect("open alpha");
+    apply_intent(&mut domain, &mut model, BoardIntent::EditInsert('!'), None)
+        .expect("rename alpha");
+    apply_intent(&mut domain, &mut model, BoardIntent::ConfirmEdit, None).expect("park rename");
+    apply_intent(&mut domain, &mut model, BoardIntent::SelectStep(1), None).expect("select bravo");
+    apply_intent(&mut domain, &mut model, BoardIntent::SoftDelete, None)
+        .expect("stage bravo removal");
+
+    let baseline = snapshot_of(&domain);
+    let mut recovery = SaveRecovery::new();
+    apply_board_intent_with_save_recovery(
+        &mut domain,
+        &mut model,
+        &mut recovery,
+        BoardSaveContext {
+            baseline,
+            intent: BoardIntent::ConfirmEditNext,
+            snapshot: None,
+        },
+        |_| Err(INJECTED.into()),
+    )
+    .expect("fail task-session save");
+    assert!(recovery.is_pending());
+
+    apply_board_intent_with_save_recovery(
+        &mut domain,
+        &mut model,
+        &mut recovery,
+        BoardSaveContext {
+            baseline: DomainState::new(),
+            intent: BoardIntent::CancelSave,
+            snapshot: None,
+        },
+        |_| panic!("cancel must not persist"),
+    )
+    .expect("cancel save");
+
+    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+    assert!(!model.task_editing());
+    assert_eq!(
+        domain
+            .get(id)
+            .expect("task")
+            .steps
+            .iter()
+            .map(|step| step.text.as_str())
+            .collect::<Vec<_>>(),
+        vec!["alpha", "bravo", "charlie"]
+    );
+    let page = board_painted(&model);
+    assert!(page.contains("alpha") && page.contains("bravo") && page.contains("charlie"));
+    assert!(!page.contains("alpha!"), "cancelled rename leaked: {page}");
+}
+
+#[test]
+fn successful_step_removal_keeps_the_cursor_on_the_same_step_id() {
+    let mut domain = DomainState::new();
+    let id = domain
+        .create(
+            "Cursor after removal",
+            None,
+            TaskScope::Global,
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("task");
+    for text in ["alpha", "bravo", "charlie"] {
+        domain.add_step(id, text).expect("step");
+    }
+    let mut model = BoardModel::from_domain(&domain, None);
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+        .expect("start task editing");
+    apply_intent(&mut domain, &mut model, BoardIntent::SelectStep(0), None).expect("select alpha");
+    apply_intent(&mut domain, &mut model, BoardIntent::SoftDelete, None)
+        .expect("stage alpha removal");
+
+    let baseline = snapshot_of(&domain);
+    let mut recovery = SaveRecovery::new();
+    apply_board_intent_with_save_recovery(
+        &mut domain,
+        &mut model,
+        &mut recovery,
+        BoardSaveContext {
+            baseline,
+            intent: BoardIntent::ConfirmEditNext,
+            snapshot: None,
+        },
+        |_| Ok(()),
+    )
+    .expect("save removal");
+
+    let page = board_painted(&model);
+    assert!(
+        page.contains("▸ ▪ bravo"),
+        "the cursor must stay on bravo after alpha is removed: {page}"
+    );
+    apply_intent(&mut domain, &mut model, BoardIntent::PrimaryVerb, None)
+        .expect("toggle selected step");
+    let task = domain.get(id).expect("task");
+    assert!(task.steps[0].done, "bravo must be toggled");
+    assert!(!task.steps[1].done, "charlie must remain open");
+}
+
 /// Remediation round 1 / Important 1: the step editor's two save chords share one
 /// refusal discipline. When another actor soft-deleted the bound task on the
-/// durable record between open and confirm, Ctrl+Enter (`ConfirmEditNext`) must
-/// refuse in place exactly like Enter — the editor held with its draft, nothing
-/// mutated, the save boundary never reached — not degrade to a failing save behind
+/// durable record between open and confirm, Shift+Enter (`ConfirmEditNext`) must
+/// refuse in place exactly like Enter, with the inline editor held with its draft and nothing
+/// mutated, the save boundary never reached, not degrade to a failing save behind
 /// SaveRecovery.
 #[test]
-fn ctrl_enter_refuses_in_place_when_the_bound_task_was_concurrently_soft_deleted() {
+fn shift_enter_refuses_in_place_when_the_bound_task_was_concurrently_soft_deleted() {
     let mut domain = DomainState::new();
     let id = domain
         .create(
@@ -1544,6 +1686,10 @@ fn ctrl_enter_refuses_in_place_when_the_bound_task_was_concurrently_soft_deleted
     domain.add_step(id, "alpha step").expect("seed one step");
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/app")));
     apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open task page");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+        .expect("enter task edit mode");
+    apply_intent(&mut domain, &mut model, BoardIntent::CancelEdit, None)
+        .expect("return to task page");
     apply_intent(&mut domain, &mut model, BoardIntent::BeginAddStep, None)
         .expect("open step editor");
     for character in "zed step".chars() {
@@ -1585,7 +1731,7 @@ fn ctrl_enter_refuses_in_place_when_the_bound_task_was_concurrently_soft_deleted
     assert_eq!(
         refused,
         Err(DomainError::SoftDeleted(id)),
-        "Ctrl+Enter must refuse against the fresh durable record like Enter"
+        "Shift+Enter must refuse against the fresh durable record like Enter"
     );
     assert_eq!(saves, 0, "a refused chord never reaches the save boundary");
     assert!(!recovery.is_pending(), "the refusal is not a failed save");
@@ -1596,9 +1742,8 @@ fn ctrl_enter_refuses_in_place_when_the_bound_task_was_concurrently_soft_deleted
     );
     let held = board_painted(&model);
     assert!(
-        held.lines()
-            .any(|row| row.contains("▎") && row.contains("zed step")),
-        "the draft survives the refusal on the line:\n{held}"
+        held.lines().any(|row| row.contains("▪ zed step")),
+        "the draft survives the refusal on its inline row:\n{held}"
     );
     let texts: Vec<&str> = domain
         .get(id)
@@ -1615,11 +1760,12 @@ fn ctrl_enter_refuses_in_place_when_the_bound_task_was_concurrently_soft_deleted
 }
 
 #[test]
-fn successful_title_save_with_boundary_whitespace_releases_the_task_form_once() {
+fn successful_task_page_save_refreshes_the_retained_form_once() {
     let (mut domain, mut model, id) = board_with_two_tasks();
     let baseline = snapshot_of(&domain);
     let history_before = domain.get(id).expect("task").history.len();
     let mut recovery = SaveRecovery::new();
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
     apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None).expect("open title");
     apply_intent(&mut domain, &mut model, BoardIntent::EditInsert(' '), None)
         .expect("append boundary whitespace");
@@ -1640,37 +1786,73 @@ fn successful_title_save_with_boundary_whitespace_releases_the_task_form_once() 
         IntentOutcome::Persisted
     );
     assert!(
-        !model.board_form_open(),
-        "successful save releases the form"
+        model.board_form_open(),
+        "successful save retains the task edit session on the page"
     );
-    assert_eq!(model.input_mode(), BoardInputMode::Normal);
+    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
     assert_eq!(domain.get(id).expect("task").title, "Delete me");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None).expect("reopen title");
+    assert_eq!(
+        model.edit_buffer(),
+        "Delete me",
+        "the retained draft reflects domain normalization, not the pre-save whitespace"
+    );
+    apply_intent(&mut domain, &mut model, BoardIntent::CancelEdit, None).expect("return page");
     assert_eq!(
         domain.get(id).expect("task").history.len(),
         history_before + 1,
         "the completed edit records exactly one event"
     );
-    let saved_baseline = snapshot_of(&domain);
+    assert_eq!(
+        map_key(
+            BoardInputMode::TaskPage,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL),
+        ),
+        None,
+        "page view must not expose a stale save chord"
+    );
+    assert_eq!(
+        domain.get(id).expect("task").history.len(),
+        history_before + 1,
+        "page view cannot repeat the edit event"
+    );
+}
+
+#[test]
+fn successful_board_row_edit_exits_its_task_edit_session_on_the_page() {
+    let (mut domain, mut model, _) = board_with_two_tasks();
+    let baseline = snapshot_of(&domain);
+    let mut recovery = SaveRecovery::new();
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None).expect("open title");
+    apply_intent(&mut domain, &mut model, BoardIntent::EditInsert('!'), None).expect("edit");
+
     assert_eq!(
         apply_board_intent_with_save_recovery(
             &mut domain,
             &mut model,
             &mut recovery,
             BoardSaveContext {
-                baseline: saved_baseline,
+                baseline,
                 intent: BoardIntent::ConfirmEdit,
                 snapshot: None,
             },
-            |_| -> Result<(), String> { panic!("released form cannot save again") },
+            |_| Ok(()),
         )
-        .expect("released ConfirmEdit is inert"),
-        IntentOutcome::None
+        .expect("save"),
+        IntentOutcome::Persisted
     );
-    assert_eq!(
-        domain.get(id).expect("task").history.len(),
-        history_before + 1,
-        "an inert confirm cannot repeat the edit event"
-    );
+    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+    assert!(model.board_form_open());
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginAddStep, None)
+        .expect("view mode opens the independent step editor");
+    assert_eq!(model.input_mode(), BoardInputMode::EditStep);
+    apply_intent(&mut domain, &mut model, BoardIntent::CancelEdit, None)
+        .expect("close the independent editor");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+        .expect("start a fresh task edit session");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginAddStep, None)
+        .expect("start a step from the fresh session");
+    assert_eq!(model.input_mode(), BoardInputMode::EditStep);
 }
 
 #[test]
@@ -1895,11 +2077,19 @@ fn failed_save_during_thread_edit_holds_form_until_retry_or_cancel() {
     let (mut domain, mut model, id) = board_with_two_tasks();
     let baseline = snapshot_of(&domain);
     let mut recovery = SaveRecovery::new();
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
     apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None).expect("open form");
-    for _ in 0..2 {
+    for _ in 0..4 {
         apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
-            .expect("focus thread");
+            .expect("select thread");
     }
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ToggleThreadEditing,
+        None,
+    )
+    .expect("activate thread editor");
     for character in "release-2026".chars() {
         apply_intent(
             &mut domain,
@@ -1952,8 +2142,8 @@ fn failed_save_during_thread_edit_holds_form_until_retry_or_cancel() {
         Some("release-2026")
     );
     assert!(
-        !model.board_form_open(),
-        "a successful retry releases the held task form"
+        model.board_form_open(),
+        "a successful retry retains the task edit session on its task page"
     );
-    assert_eq!(model.input_mode(), BoardInputMode::Normal);
+    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
 }

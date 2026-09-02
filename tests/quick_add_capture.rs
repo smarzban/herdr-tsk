@@ -72,7 +72,7 @@ fn plus_opens_focused_bar_regardless_of_shift_and_legacy_chord_is_unbound() {
     assert_eq!(
         map_key(
             BoardInputMode::Normal,
-            KeyEvent::new(KeyCode::Char('a'), KeyModifiers::ALT)
+            KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL)
         ),
         None
     );
@@ -98,6 +98,18 @@ fn plus_opens_focused_bar_regardless_of_shift_and_legacy_chord_is_unbound() {
     assert_eq!(task.provenance, ProvenanceOrigin::Capture);
     assert_eq!(model.selected_id(), Some(task.id));
     assert_eq!(model.message(), None);
+}
+
+#[test]
+fn expanded_capture_keeps_ctrl_a_as_line_start() {
+    assert_eq!(
+        tsk_tui::ui::input::map_board_form_key(
+            tsk_tui::ui::capture::CaptureField::Title,
+            false,
+            KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL),
+        ),
+        Some(BoardIntent::EditMoveLineStart)
+    );
 }
 
 #[test]
@@ -412,7 +424,7 @@ fn project_token_with_a_slash_stays_verbatim() {
 }
 
 #[test]
-fn ctrl_enter_uses_the_same_project_basename_resolution() {
+fn shift_enter_uses_the_same_project_basename_resolution() {
     let mut domain = DomainState::new();
     create_project_fixture(&mut domain, "/work/ctrl-target");
     let mut model = BoardModel::from_domain(&domain, None);
@@ -538,7 +550,23 @@ fn empty_enter_stays_open_esc_discards_and_tab_expands_the_seeded_task_page() {
             KeyEvent::new(KeyCode::Enter, KeyModifiers::ALT)
         ),
         None,
-        "Alt+Enter no longer expands quick add"
+        "Alt+Enter is ignored, it does not expand quick add"
+    );
+    assert_eq!(
+        map_key(
+            BoardInputMode::QuickAdd,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT)
+        ),
+        Some(BoardIntent::QuickAddSaveNext),
+        "Shift+Enter is the only save-and-stay quick-add chord"
+    );
+    assert_eq!(
+        map_key(
+            BoardInputMode::QuickAdd,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL)
+        ),
+        None,
+        "Ctrl+Enter no longer saves-and-stays on quick add"
     );
     apply(&mut domain, &mut model, BoardIntent::ExpandQuickAdd, None);
     assert_eq!(model.input_mode(), BoardInputMode::EditNotes);
@@ -1005,7 +1033,7 @@ fn capture_bar_renders_spaced_three_row_block_and_stays_bounded_without_color_sg
     for text in [
         "visible task",
         "title…   !p = desk · !p name = project · !t name = thread",
-        "enter save · ctrl+enter save+next · tab details · esc close",
+        "enter save · shift+enter save+next · tab details · esc close",
     ] {
         assert!(standard.contains(text), "missing {text:?}: {standard}");
     }

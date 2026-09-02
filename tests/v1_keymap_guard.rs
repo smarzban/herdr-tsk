@@ -12,10 +12,10 @@ fn normal(code: KeyCode) -> Option<BoardIntent> {
     )
 }
 
-fn alt(code: KeyCode) -> Option<BoardIntent> {
+fn ctrl(code: KeyCode) -> Option<BoardIntent> {
     map_key(
         BoardInputMode::Normal,
-        KeyEvent::new(code, KeyModifiers::ALT),
+        KeyEvent::new(code, KeyModifiers::CONTROL),
     )
 }
 
@@ -28,7 +28,7 @@ fn normal_mode_keymap_equals_the_readme_and_queue_board_v1_set() {
         (KeyCode::Down, BoardIntent::SelectNext),
         (KeyCode::Char('k'), BoardIntent::SelectPrev),
         (KeyCode::Up, BoardIntent::SelectPrev),
-        (KeyCode::Char(' '), BoardIntent::PrimaryVerb),
+        (KeyCode::Char('s'), BoardIntent::PrimaryVerb),
         (KeyCode::Char('d'), BoardIntent::Complete),
         (KeyCode::Char('o'), BoardIntent::Reopen),
         (KeyCode::Char('b'), BoardIntent::ToggleBlock),
@@ -52,7 +52,7 @@ fn normal_mode_keymap_equals_the_readme_and_queue_board_v1_set() {
     );
     let mutating = [
         KeyCode::Char('q'),
-        KeyCode::Char(' '),
+        KeyCode::Char('s'),
         KeyCode::Char('d'),
         KeyCode::Char('o'),
         KeyCode::Char('b'),
@@ -64,7 +64,7 @@ fn normal_mode_keymap_equals_the_readme_and_queue_board_v1_set() {
     for (key, intent) in documented {
         if mutating.contains(&key) {
             assert_eq!(normal(key), None, "bare mutating key {key:?} must be dead");
-            assert_eq!(alt(key), Some(intent), "alt+{key:?}");
+            assert_eq!(ctrl(key), Some(intent), "ctrl+{key:?}");
         } else {
             assert_eq!(normal(key), Some(intent), "documented key {key:?}");
         }
@@ -99,10 +99,8 @@ fn ctrl_c_quits_from_normal_and_task_page_modes() {
     );
 }
 
-/// T-3 (AC-9): bare `a`/`space`/`x`/`e` on the task page view produce no steps
-/// mutation. The guard runs with the step cursor active (the state the modifier-protected
-/// verbs would target), so a bare key that slipped past the verb-modifier gate would be
-/// caught acting on the highlighted step.
+/// Bare `a`/`space`/`x`/`e` on the task page view produce no steps mutation. The page is
+/// view-only until a field edit begins, so a bare key must never enter that edit session.
 #[test]
 fn bare_page_keys_never_mutate_steps() {
     let mut domain = DomainState::new();
@@ -120,12 +118,10 @@ fn bare_page_keys_never_mutate_steps() {
     domain.add_step(id, "bravo step").expect("step 2");
     let mut model = BoardModel::from_domain(&domain, None);
     apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
-    // Activate the step cursor (the first bare Down on a task with steps).
-    apply_intent(&mut domain, &mut model, BoardIntent::PageScrollDown, None).expect("cursor press");
-
     let before = domain.get(id).expect("task").clone();
     for key in [
         KeyCode::Char('a'),
+        KeyCode::Char('s'),
         KeyCode::Char(' '),
         KeyCode::Char('x'),
         KeyCode::Char('e'),

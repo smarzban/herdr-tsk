@@ -6,16 +6,35 @@ description: "View and edit one task: title, notes, thread, and scope."
 `Enter` opens the selected task full height. The dim `T30` prefix in the
 header copies that task identifier when clicked.
 
-It is view-first. Nothing is in edit mode until you ask. `alt+e` edits the title,
-`alt+n` edits notes, `Tab` moves between title, notes, thread, and scope. The
-scope footer does nothing until an edit has started.
+It is view-first. Nothing is in edit mode until you ask. `ctrl+e` edits the title,
+`ctrl+n` edits notes. In view, Tab and Shift+Tab loop only through stored steps and
+`+ step`, never task fields. The trailing dim target paints as `   + step`. `Enter`,
+`ctrl+a`, or a click on it opens its independent editor, then Enter saves one step
+and selects that new stored step.
 
-`Ctrl+Enter` or `Alt+Enter` saves from any field. Field `Esc` cancels that field.
-Page `Esc` closes the page.
+Bare `↓` activates the first stored step, then arrows move the selection. `ctrl+s`
+toggles that selected step without changing the task's human status.
 
-Notes are multiline, so `Enter` inserts a line. `Ctrl+Enter` saves when the
-terminal reports it. `Alt+Enter` saves everywhere else. Both save. Neither
-inserts a line.
+`ctrl+e` on a stored-step selection starts task editing with the step inline. In task
+editing, Tab runs Title, Notes, stored steps, `+ step`, Scope, Thread, then Title.
+Shift+Tab reverses that same loop. Clicking a field or another existing step moves
+the one active text cursor there and stages the prior step change. Scope and Thread
+first show as selected controls, with no blinking cursor. `Enter` on Scope opens its
+picker and `Enter` again chooses the highlighted scope. `Enter` on Thread, or a
+second click, opens or closes its text editor without leaving the task edit session.
+The scope footer does nothing until task editing starts.
+
+Plain `Enter` parks an existing-step rename without saving the task session.
+`Shift+Enter` is the visible task-session save chord: it saves Title, Notes, Thread,
+Scope, staged existing-step edits, and staged removals, then exits editing. `Alt+Enter`
+is the legacy-terminal fallback. A staged
+`ctrl+x` removal disappears immediately and returns if task editing is cancelled. New
+steps save independently from view or task edit: Enter saves one and selects it,
+Shift+Enter saves one and opens the next empty editor. Field `Esc` cancels that
+field, while Esc from task editing restores staged removals.
+
+Notes are multiline, so `Enter` inserts a line. `Shift+Enter` saves and does not
+insert a line.
 
 Thread uses the same name rules as capture `!t`. The field is optional.
 
@@ -36,7 +55,8 @@ color.
 Unmatched `*` and word-internal `_` stay literal. `- [ ]` stays text.
 [Steps](/docs/steps/) own checklists.
 
-Peek paints the same markers, then dims every span, with a `│` gutter.
+Peek paints the same markers, then dims every span, with a `│` gutter closed by
+an L-shaped `└` connector.
 
 ## Peek vs page
 
