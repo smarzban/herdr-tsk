@@ -460,6 +460,9 @@ pub fn map_responsive_board_mouse(
         );
     if responsive.board.contains(pos) && (view_mode || clean_or_dirty_task_editor) {
         if let Some(QueueHitTarget::Task(id)) = hit_at(hits, pos) {
+            if clean_or_dirty_task_editor && model.edit_target() == Some(id) {
+                return None;
+            }
             return model
                 .visible_ids()
                 .iter()

@@ -1859,3 +1859,87 @@ fn changed_scope_draft_refuses_task_retarget() {
         .message()
         .is_some_and(|message| message.contains("save or cancel")));
 }
+
+#[test]
+fn clean_task_editor_same_bound_row_click_keeps_task_focus() {
+    let mut domain = domain_with_tasks(&[("same clean row", "notes"), ("other row", "notes")]);
+    let mut model = board_model(&domain);
+    focus_task(&mut domain, &mut model);
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+        .expect("enter clean title editor");
+    assert!(!model.task_session_dirty());
+    let bound = model.edit_target().expect("bound task");
+    let (_, hits) = render_board(&model, 110, 24);
+    let row = hits
+        .regions
+        .iter()
+        .find(|hit| matches!(hit.target, QueueHitTarget::Task(id) if id == bound))
+        .expect("bound board row");
+    let click = left_click(row.area.x, row.area.y);
+    let mapped = map_responsive_board_mouse(&model, &hits, Rect::new(0, 0, 110, 24), click);
+    if let Some(intent) = mapped.clone() {
+        apply_intent(&mut domain, &mut model, intent, None).expect("apply same-row click");
+    }
+
+    assert_eq!(mapped, None);
+    assert_eq!(model.focused_surface(), FocusedSurface::Task);
+    assert_eq!(model.input_mode(), BoardInputMode::EditTitle);
+    assert_eq!(model.edit_target(), Some(bound));
+}
+
+#[test]
+fn dirty_task_scope_dropdown_same_bound_row_click_keeps_visible_editor() {
+    let mut domain = domain_with_tasks(&[("same dirty row", "notes"), ("other row", "notes")]);
+    let mut model = board_model(&domain);
+    focus_task(&mut domain, &mut model);
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+        .expect("enter title editor");
+    apply_intent(&mut domain, &mut model, BoardIntent::EditInsert('!'), None).expect("dirty title");
+    let draft = model.edit_buffer().to_string();
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::FocusFormField(CaptureField::Scope),
+        None,
+    )
+    .expect("focus scope");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenFormScopeDropdown,
+        None,
+    )
+    .expect("open scope dropdown");
+    let bound = model.edit_target().expect("bound task");
+    let (_, hits) = render_board(&model, 110, 24);
+    let row = hits
+        .regions
+        .iter()
+        .find(|hit| matches!(hit.target, QueueHitTarget::Task(id) if id == bound))
+        .expect("bound board row");
+    let click = left_click(row.area.x, row.area.y);
+    let mapped = map_responsive_board_mouse(&model, &hits, Rect::new(0, 0, 110, 24), click);
+    if let Some(intent) = mapped.clone() {
+        apply_intent(&mut domain, &mut model, intent, None).expect("apply same-row click");
+    }
+
+    assert_eq!(mapped, None);
+    assert_eq!(model.focused_surface(), FocusedSurface::Task);
+    assert_eq!(model.input_mode(), BoardInputMode::FormScopeDropdown);
+    assert_eq!(model.edit_target(), Some(bound));
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::CancelFormScopeDropdown,
+        None,
+    )
+    .expect("close scope dropdown");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::FocusFormField(CaptureField::Title),
+        None,
+    )
+    .expect("return to dirty title");
+    assert_eq!(model.edit_buffer(), draft);
+}
