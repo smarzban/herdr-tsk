@@ -23,6 +23,7 @@ use crate::ui::queue::{
 use crate::ui::selection;
 use crate::ui::terminal_text;
 use crate::ui::text_select::TextSelection;
+use crate::ui::tier::FocusedSurface;
 
 use super::commands::CommandSurface;
 
@@ -522,6 +523,8 @@ pub struct BoardModel {
     pub(super) this_repo: Option<PathBuf>,
     /// Session board location (home tab or focused project). Not durable.
     pub(super) board_location: BoardLocation,
+    /// Surface that owns input and single-pane presentation. Session-only.
+    pub(super) focused_surface: FocusedSurface,
     /// Project-group headers collapsed on the Projects tab.
     pub(super) collapsed_projects: HashSet<String>,
     /// Thread-group headers collapsed on the Threads tab.
@@ -626,6 +629,7 @@ impl BoardModel {
             board_location: BoardLocation::Home {
                 tab: BoardTab::Desk,
             },
+            focused_surface: FocusedSurface::Board,
             collapsed_projects: HashSet::new(),
             collapsed_threads: HashSet::new(),
             collapsed_thread_projects: HashSet::new(),
@@ -971,13 +975,14 @@ impl BoardModel {
     }
 
     fn content_scroll(&self) -> usize {
-        match self.input_mode() {
-            BoardInputMode::TaskPage => self
-                .form
+        if self.focused_surface == FocusedSurface::Task {
+            self.form
                 .as_ref()
+                .filter(|form| form.is_task())
                 .map(|form| form.notes_scroll)
-                .unwrap_or(0),
-            _ => self.list_scroll.get(),
+                .unwrap_or(0)
+        } else {
+            self.list_scroll.get()
         }
     }
 
@@ -1244,6 +1249,28 @@ impl BoardModel {
     pub fn list_scroll(&self) -> usize {
         self.list_scroll.get()
     }
+
+    /// Surface that currently owns keyboard and pointer routing.
+    pub fn focused_surface(&self) -> FocusedSurface {
+        self.focused_surface
+    }
+
+    /// Retained task-page viewport offset.
+    pub fn page_scroll(&self) -> usize {
+        self.form
+            .as_ref()
+            .filter(|form| form.is_task())
+            .map(|form| form.notes_scroll)
+            .unwrap_or(0)
+    }
+
+    /// Retained stored-step cursor, if active.
+    pub fn step_cursor(&self) -> Option<usize> {
+        self.form
+            .as_ref()
+            .filter(|form| form.is_task())
+            .and_then(|form| form.steps.cursor)
+    }
 }
 
 impl BoardModel {
@@ -1262,6 +1289,11 @@ impl BoardModel {
         match self.popup {
             BoardPopup::SaveRecovery => BoardInputMode::SaveRecovery,
             _ if self.project_picker.is_some() => BoardInputMode::ProjectPicker,
+            _ if self.focused_surface == FocusedSurface::Board
+                && self.input_mode == BoardInputMode::TaskPage =>
+            {
+                BoardInputMode::Normal
+            }
             _ => self.input_mode,
         }
     }

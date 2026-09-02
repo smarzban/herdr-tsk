@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::backend::TestBackend;
 use ratatui::layout::Rect;
 use ratatui::Terminal;
@@ -7,10 +8,11 @@ use tsk_tui::domain::{DomainState, ProvenanceOrigin, TaskScope};
 use tsk_tui::ui::board::{
     resolve_responsive, FocusedSurface, ResponsivePresentation, WIDE_SPLIT_MIN_WIDTH,
 };
+use tsk_tui::ui::input::map_responsive_key;
 use tsk_tui::ui::mouse::{left_click, map_board_mouse};
 use tsk_tui::ui::render::{assert_buffer_mono, QueueHitMap, QueueHitTarget};
 use tsk_tui::ui::tier::Tier;
-use tsk_tui::ui::{apply_intent, draw_board, BoardIntent, BoardModel};
+use tsk_tui::ui::{apply_intent, draw_board, BoardInputMode, BoardIntent, BoardModel};
 
 fn domain_with_tasks(tasks: &[(&str, &str)]) -> DomainState {
     let mut domain = DomainState::new();
@@ -304,4 +306,347 @@ fn wide_preview_task_side_controls_are_inert_until_focus_routing_exists() {
         None,
         "task-side preview controls must not enter the board mouse map"
     );
+}
+
+fn focus_task(domain: &mut DomainState, model: &mut BoardModel) {
+    let outcome = apply_intent(domain, model, BoardIntent::FocusTaskSurface, None)
+        .expect("focus selected task");
+    assert_eq!(outcome, tsk_tui::ui::IntentOutcome::None);
+    assert_eq!(model.focused_surface(), FocusedSurface::Task);
+}
+
+#[test]
+fn wide_board_enter_and_right_focus_the_same_selected_task() {
+    for code in [KeyCode::Enter, KeyCode::Right] {
+        let mut domain = domain_with_tasks(&[("focus target", "focus notes")]);
+        let mut model = board_model(&domain);
+        let selected = model.selected_id();
+        let intent = map_responsive_key(
+            BoardInputMode::Normal,
+            FocusedSurface::Board,
+            ResponsivePresentation::WideSplit,
+            false,
+            KeyEvent::new(code, KeyModifiers::NONE),
+        )
+        .expect("wide board focus key");
+
+        apply_intent(&mut domain, &mut model, intent, None).expect("apply focus transfer");
+        assert_eq!(model.focused_surface(), FocusedSurface::Task);
+        assert_eq!(model.selected_id(), selected);
+        assert_eq!(model.edit_target(), selected);
+        assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+    }
+
+    assert_eq!(
+        map_responsive_key(
+            BoardInputMode::Normal,
+            FocusedSurface::Board,
+            ResponsivePresentation::SingleBoard,
+            false,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+        ),
+        Some(BoardIntent::OpenTaskPage),
+        "below-threshold Enter keeps the existing task-page route"
+    );
+}
+
+#[test]
+fn task_view_escape_and_left_return_focus_without_resetting_page_session() {
+    for code in [KeyCode::Esc, KeyCode::Left] {
+        let mut domain = domain_with_tasks(&[("retained task", &"long notes ".repeat(100))]);
+        let id = domain.tasks()[0].id;
+        domain.add_step(id, "retained step").expect("add step");
+        let mut model = board_model(&domain);
+        focus_task(&mut domain, &mut model);
+        let _ = render_board(&model, 110, 24);
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::PageWheelScrollDown,
+            None,
+        )
+        .expect("scroll page");
+        apply_intent(&mut domain, &mut model, BoardIntent::PageScrollDown, None)
+            .expect("select first step");
+        let before = (
+            model.page_scroll(),
+            model.step_cursor(),
+            model.edit_target(),
+        );
+        assert!(before.0 > 0, "fixture must exercise retained page scroll");
+        assert_eq!(
+            before.1,
+            Some(0),
+            "fixture must exercise retained step cursor"
+        );
+        let intent = map_responsive_key(
+            BoardInputMode::TaskPage,
+            FocusedSurface::Task,
+            ResponsivePresentation::WideSplit,
+            false,
+            KeyEvent::new(code, KeyModifiers::NONE),
+        )
+        .expect("task return key");
+
+        apply_intent(&mut domain, &mut model, intent, None).expect("return board focus");
+        assert_eq!(model.focused_surface(), FocusedSurface::Board);
+        assert_eq!(model.input_mode(), BoardInputMode::Normal);
+        assert_eq!(
+            (
+                model.page_scroll(),
+                model.step_cursor(),
+                model.edit_target()
+            ),
+            before
+        );
+    }
+
+    assert_eq!(
+        map_responsive_key(
+            BoardInputMode::EditTitle,
+            FocusedSurface::Task,
+            ResponsivePresentation::WideSplit,
+            true,
+            KeyEvent::new(KeyCode::Left, KeyModifiers::NONE),
+        ),
+        Some(BoardIntent::EditMoveLeft),
+        "an active editor retains its existing left-arrow handling"
+    );
+}
+
+#[test]
+fn shrinking_with_board_focus_preserves_selection_and_list_scroll() {
+    let tasks: Vec<(String, String)> = (0..30)
+        .map(|index| (format!("board task {index}"), "notes".to_string()))
+        .collect();
+    let refs: Vec<(&str, &str)> = tasks
+        .iter()
+        .map(|(title, notes)| (title.as_str(), notes.as_str()))
+        .collect();
+    let mut domain = domain_with_tasks(&refs);
+    let mut model = board_model(&domain);
+    for _ in 0..8 {
+        apply_intent(&mut domain, &mut model, BoardIntent::SelectNext, None)
+            .expect("move selection");
+    }
+    apply_intent(&mut domain, &mut model, BoardIntent::ListScrollTo(3), None)
+        .expect("set list scroll");
+    let before = (model.selected_id(), model.list_scroll());
+    assert_eq!(before.1, 3, "fixture must exercise retained list scroll");
+
+    let _ = render_board(&model, 110, 10);
+    let _ = render_board(&model, 109, 10);
+
+    assert_eq!(model.focused_surface(), FocusedSurface::Board);
+    assert_eq!((model.selected_id(), model.list_scroll()), before);
+}
+
+#[test]
+fn shrinking_with_task_focus_preserves_page_scroll_and_session() {
+    let mut domain = domain_with_tasks(&[
+        ("task survives shrink", &"wide notes ".repeat(100)),
+        ("board-only sibling", "other notes"),
+    ]);
+    let mut model = board_model(&domain);
+    focus_task(&mut domain, &mut model);
+    let bound = model.edit_target().expect("bound task");
+    let sibling_title = domain
+        .tasks()
+        .iter()
+        .find(|task| task.id != bound)
+        .expect("sibling")
+        .title
+        .clone();
+    let _ = render_board(&model, 110, 24);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::PageWheelScrollDown,
+        None,
+    )
+    .expect("scroll task");
+    let before = (
+        model.page_scroll(),
+        model.step_cursor(),
+        model.edit_target(),
+    );
+
+    let (rows, _) = render_board(&model, 109, 24);
+
+    assert_eq!(model.focused_surface(), FocusedSurface::Task);
+    assert_eq!(
+        (
+            model.page_scroll(),
+            model.step_cursor(),
+            model.edit_target()
+        ),
+        before
+    );
+    let rendered = rows.join("\n");
+    assert!(rendered.contains(&domain.get(bound).expect("bound task").title));
+    assert!(!rendered.contains(&sibling_title));
+}
+
+#[test]
+fn growing_back_to_wide_restores_focus_and_page_session() {
+    let mut domain = domain_with_tasks(&[("task survives growth", &"growth notes ".repeat(100))]);
+    let mut model = board_model(&domain);
+    focus_task(&mut domain, &mut model);
+    let _ = render_board(&model, 109, 24);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::PageWheelScrollDown,
+        None,
+    )
+    .expect("scroll task");
+    let before = (
+        model.page_scroll(),
+        model.step_cursor(),
+        model.edit_target(),
+    );
+
+    let (rows, _) = render_board(&model, 110, 24);
+    let geometry = resolve_responsive(110, 24, FocusedSurface::Task);
+
+    assert_eq!(model.focused_surface(), FocusedSurface::Task);
+    assert_eq!(
+        (
+            model.page_scroll(),
+            model.step_cursor(),
+            model.edit_target()
+        ),
+        before
+    );
+    assert!(region_text(&rows, geometry.board).contains("task survives growth"));
+    assert!(region_text(&rows, geometry.task).contains("task survives growth"));
+}
+
+#[test]
+fn board_focused_primary_verb_ignores_parked_step_cursor() {
+    let mut domain = domain_with_tasks(&[("parked task", "notes"), ("board target", "notes")]);
+    let parked = board_model(&domain)
+        .selected_id()
+        .expect("initial selection");
+    domain.add_step(parked, "parked step").expect("add step");
+    let mut model = board_model(&domain);
+    focus_task(&mut domain, &mut model);
+    let bound = model.edit_target().expect("parked binding");
+    apply_intent(&mut domain, &mut model, BoardIntent::PageScrollDown, None)
+        .expect("select parked step");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::FocusBoardSurface,
+        None,
+    )
+    .expect("return board focus");
+    apply_intent(&mut domain, &mut model, BoardIntent::SelectNext, None)
+        .expect("select board target");
+    let selected = model.selected_id().expect("selected board target");
+    assert_ne!(selected, bound);
+
+    apply_intent(&mut domain, &mut model, BoardIntent::PrimaryVerb, None)
+        .expect("apply board primary verb");
+
+    assert_eq!(
+        domain.get(selected).expect("selected task").status,
+        tsk_tui::domain::HumanStatus::Started
+    );
+    assert!(!domain.get(bound).expect("parked task").steps[0].done);
+}
+
+#[test]
+fn board_selection_after_focus_return_repaints_right_side() {
+    let mut domain = domain_with_tasks(&[("parked right side", "old"), ("new right side", "new")]);
+    let mut model = board_model(&domain);
+    focus_task(&mut domain, &mut model);
+    let parked = model.edit_target().expect("parked binding");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::FocusBoardSurface,
+        None,
+    )
+    .expect("return board focus");
+    apply_intent(&mut domain, &mut model, BoardIntent::SelectNext, None)
+        .expect("change board selection");
+    let selected = model.selected_id().expect("new selection");
+    assert_ne!(selected, parked);
+
+    let (rows, _) = render_board(&model, 110, 24);
+    let task = resolve_responsive(110, 24, FocusedSurface::Board).task;
+    let task_text = region_text(&rows, task);
+
+    assert!(task_text.contains(&domain.get(selected).expect("selected task").title));
+    assert!(!task_text.contains(&domain.get(parked).expect("parked task").title));
+}
+
+#[test]
+fn narrow_board_after_focus_return_uses_board_verbs_and_row_clicks() {
+    let mut domain = domain_with_tasks(&[("narrow parked", "notes"), ("narrow row", "notes")]);
+    let mut model = board_model(&domain);
+    focus_task(&mut domain, &mut model);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::FocusBoardSurface,
+        None,
+    )
+    .expect("return board focus");
+
+    let (rows, hits) = render_board(&model, 109, 24);
+    assert_eq!(model.input_mode(), BoardInputMode::Normal);
+    let verb_row = &rows[23];
+    assert!(verb_row.contains("enter open"), "board verbs: {verb_row}");
+    assert!(!verb_row.contains("esc close"), "board verbs: {verb_row}");
+    let row = hits
+        .regions
+        .iter()
+        .find(|hit| matches!(hit.target, QueueHitTarget::Task(_)))
+        .expect("board row hit");
+    assert!(matches!(
+        map_board_mouse(&model, &hits, left_click(row.area.x, row.area.y)),
+        Some(BoardIntent::SelectIndex(_))
+    ));
+}
+
+#[test]
+fn editing_task_session_escape_and_left_keep_editor_semantics() {
+    for code in [KeyCode::Esc, KeyCode::Left] {
+        let mut domain = domain_with_tasks(&[("editor target", "notes")]);
+        let mut model = board_model(&domain);
+        focus_task(&mut domain, &mut model);
+        apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+            .expect("begin title edit");
+        apply_intent(&mut domain, &mut model, BoardIntent::EditInsert('!'), None)
+            .expect("change title draft");
+        for _ in 0..8 {
+            if model.input_mode() == BoardInputMode::TaskPage {
+                break;
+            }
+            apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
+                .expect("advance task edit focus");
+        }
+        assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+        assert!(model.task_editing());
+        let intent = map_responsive_key(
+            BoardInputMode::TaskPage,
+            FocusedSurface::Task,
+            ResponsivePresentation::WideSplit,
+            true,
+            KeyEvent::new(code, KeyModifiers::NONE),
+        );
+
+        if code == KeyCode::Esc {
+            assert_eq!(intent, Some(BoardIntent::CloseLayer));
+            apply_intent(&mut domain, &mut model, intent.expect("Esc intent"), None)
+                .expect("cancel task edit");
+            assert!(!model.task_editing());
+        } else {
+            assert_eq!(intent, None);
+            assert!(model.task_editing());
+        }
+        assert_eq!(model.focused_surface(), FocusedSurface::Task);
+    }
 }

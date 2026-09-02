@@ -12,6 +12,7 @@ use crate::ui::edit::{flatten_line_breaks, EditBuffer};
 use crate::ui::input::BoardIntent;
 use crate::ui::mouse::BoardPopup;
 use crate::ui::queue::ThreadProjectCollapseKey;
+use crate::ui::tier::FocusedSurface;
 
 use super::commands::{resolve_board_command, CommandSurface};
 use super::model::{
@@ -172,8 +173,12 @@ fn apply_board_intent(
     // the pin still named the hidden task, and the next `space` or `d` mutated something the
     // user could not see. Excluding them lets `reanchor_selection` move the pin to a visible
     // row, which is what it already does for every other way a task leaves the deck.
-    let closes_the_page = matches!(intent, BoardIntent::CloseLayer | BoardIntent::OpenTaskPage);
-    if !closes_the_page
+    let closes_the_page = matches!(
+        intent,
+        BoardIntent::CloseLayer | BoardIntent::OpenTaskPage | BoardIntent::FocusBoardSurface
+    );
+    if model.focused_surface == FocusedSurface::Task
+        && !closes_the_page
         && matches!(
             model.input_mode,
             BoardInputMode::TaskPage
@@ -578,6 +583,9 @@ fn apply_board_intent(
             return Ok(IntentOutcome::None);
         }
         BoardIntent::ListScrollTo(offset) => {
+            if model.focused_surface != FocusedSurface::Board {
+                return Ok(IntentOutcome::None);
+            }
             model.set_list_scroll(offset);
             return Ok(IntentOutcome::None);
         }
@@ -642,6 +650,7 @@ fn apply_board_intent(
                     form.editing = true;
                     model.input_mode = form.parent_mode();
                     model.form = Some(form);
+                    model.focused_surface = FocusedSurface::Task;
                     model.clear_message();
                 }
             }
@@ -1102,6 +1111,27 @@ fn apply_board_intent(
                 }
             }
         }
+        BoardIntent::FocusTaskSurface => {
+            if model.focused_surface != FocusedSurface::Board {
+                return Ok(IntentOutcome::None);
+            }
+            let Some(id) = model.selected_id() else {
+                return Ok(IntentOutcome::None);
+            };
+            if model.edit_target() != Some(id) || model.input_mode != BoardInputMode::TaskPage {
+                open_task_page_on(domain, model, id);
+            }
+            model.focused_surface = FocusedSurface::Task;
+            return Ok(IntentOutcome::None);
+        }
+        BoardIntent::FocusBoardSurface => {
+            if model.focused_surface == FocusedSurface::Task
+                && model.input_mode == BoardInputMode::TaskPage
+            {
+                model.focused_surface = FocusedSurface::Board;
+            }
+            return Ok(IntentOutcome::None);
+        }
         BoardIntent::OpenTaskPage => {
             // Enter never opens inline step editing. A selected step remains selected in either
             // page state; Ctrl+E is the deliberate route into its editor.
@@ -1117,9 +1147,20 @@ fn apply_board_intent(
                 return Ok(IntentOutcome::None);
             }
             if model.form.as_ref().is_some_and(BoardForm::is_task) {
-                model.form = None;
-                model.input_mode = BoardInputMode::Normal;
-                model.clear_message();
+                if model.focused_surface == FocusedSurface::Board {
+                    let Some(id) = model.selected_id() else {
+                        return Ok(IntentOutcome::None);
+                    };
+                    if model.edit_target() != Some(id) {
+                        open_task_page_on(domain, model, id);
+                    }
+                    model.focused_surface = FocusedSurface::Task;
+                } else {
+                    model.form = None;
+                    model.input_mode = BoardInputMode::Normal;
+                    model.focused_surface = FocusedSurface::Board;
+                    model.clear_message();
+                }
                 return Ok(IntentOutcome::None);
             }
             let Some(id) = model.selected_id() else {
@@ -1168,6 +1209,9 @@ fn apply_board_intent(
             return Ok(IntentOutcome::None);
         }
         BoardIntent::PageScrollTo(offset) => {
+            if model.focused_surface != FocusedSurface::Task {
+                return Ok(IntentOutcome::None);
+            }
             if let Some(form) = model.form.as_mut().filter(|form| form.is_task()) {
                 if model.input_mode == BoardInputMode::TaskPage {
                     let horizon = form.notes_max_scroll.get();
@@ -1177,6 +1221,9 @@ fn apply_board_intent(
             return Ok(IntentOutcome::None);
         }
         BoardIntent::PageWheelScrollUp | BoardIntent::PageWheelScrollDown => {
+            if model.focused_surface != FocusedSurface::Task {
+                return Ok(IntentOutcome::None);
+            }
             if let Some(form) = model.form.as_mut().filter(|form| form.is_task()) {
                 if matches!(
                     model.input_mode,
@@ -1195,6 +1242,9 @@ fn apply_board_intent(
             return Ok(IntentOutcome::None);
         }
         BoardIntent::PageScrollUp => {
+            if model.focused_surface != FocusedSurface::Task {
+                return Ok(IntentOutcome::None);
+            }
             // A fresh add is independent of the surrounding task edit session, so it may be
             // open directly from task view. It has no rename draft to park: keep its cursor
             // alive and scroll the same shared body that task view uses.
@@ -1237,6 +1287,9 @@ fn apply_board_intent(
             return Ok(IntentOutcome::None);
         }
         BoardIntent::PageScrollDown => {
+            if model.focused_surface != FocusedSurface::Task {
+                return Ok(IntentOutcome::None);
+            }
             // See Up above. This must precede `task_editing()`, because Ctrl+A and the trailing
             // add target also open a fresh editor directly from task view.
             if model.input_mode == BoardInputMode::EditStep && !model.park_rename_step_draft() {
@@ -1351,6 +1404,7 @@ fn apply_board_intent(
                 } else {
                     BoardInputMode::Normal
                 };
+                model.focused_surface = FocusedSurface::Board;
                 model.clear_message();
                 return Ok(IntentOutcome::None);
             }
@@ -1531,6 +1585,7 @@ fn open_task_page_on(domain: &DomainState, model: &mut BoardModel, id: Uuid) {
     );
     model.form = Some(form);
     model.input_mode = BoardInputMode::TaskPage;
+    model.focused_surface = FocusedSurface::Task;
     model.clear_message();
 }
 
@@ -1952,10 +2007,12 @@ fn select_last_step_for_edit(model: &mut BoardModel) {
 /// Resolve the page's selected step to live task and step ids, declining a stale index after
 /// a domain change. Task view and task edit sessions share this selection.
 fn selected_step(domain: &DomainState, model: &BoardModel) -> Option<(Uuid, Uuid)> {
-    if !matches!(
-        model.input_mode,
-        BoardInputMode::TaskPage | BoardInputMode::EditStep
-    ) {
+    if model.focused_surface != FocusedSurface::Task
+        || !matches!(
+            model.input_mode,
+            BoardInputMode::TaskPage | BoardInputMode::EditStep
+        )
+    {
         return None;
     }
     let form = model.form.as_ref().filter(|form| form.is_task())?;

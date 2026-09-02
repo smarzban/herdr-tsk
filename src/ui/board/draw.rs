@@ -586,16 +586,21 @@ fn surface_geometry(area: ratatui::layout::Rect, density_width: u16) -> tier::Ti
 
 fn draw_board_impl(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap {
     let area = frame.area();
-    let responsive = tier::resolve_responsive(area.width, area.height, tier::FocusedSurface::Board);
+    let responsive = tier::resolve_responsive(area.width, area.height, model.focused_surface());
     let wide = responsive.presentation == tier::ResponsivePresentation::WideSplit;
-    let board_area = if wide { responsive.board } else { area };
-    let shared_width = responsive.board.width.min(responsive.task.width);
+    let board_area = responsive.board;
+    let shared_width = if wide {
+        responsive.board.width.min(responsive.task.width)
+    } else {
+        area.width
+    };
     let geo = if wide {
         surface_geometry(board_area, shared_width)
     } else {
         tier::resolve(area.width, area.height)
     };
-    let task_geo = wide.then(|| surface_geometry(responsive.task, shared_width));
+    let task_geo =
+        (responsive.task.width > 0).then(|| surface_geometry(responsive.task, shared_width));
     let queue_view = model.queue_view();
     let scope_label = match &model.board_location {
         BoardLocation::Home { .. } => String::new(),
@@ -753,7 +758,7 @@ fn draw_board_impl(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap
 
     let selection_id = model.saved_task.or(model.selection_id);
     let selected_task = selection_id.and_then(|id| model.tasks.iter().find(|task| task.id == id));
-    let preview_form = (wide && !matches!(&overlay, QueueOverlay::TaskPage { .. }))
+    let preview_form = (wide && model.focused_surface() == tier::FocusedSurface::Board)
         .then(|| {
             selected_task.map(|task| {
                 BoardForm::task(
@@ -773,15 +778,26 @@ fn draw_board_impl(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap
     });
 
     let (hits, painted_list_scroll) = if let Some(task_geo) = task_geo {
-        let (board_overlay, task_overlay, task_is_preview) = match overlay {
-            task_overlay @ QueueOverlay::TaskPage { .. } => {
-                (QueueOverlay::None, task_overlay, false)
-            }
-            board_overlay => (
+        let (board_overlay, task_overlay) = if model.focused_surface()
+            == tier::FocusedSurface::Board
+        {
+            let board_overlay = if matches!(overlay, QueueOverlay::TaskPage { .. }) {
+                QueueOverlay::None
+            } else {
+                overlay
+            };
+            (
                 board_overlay,
                 preview_overlay.unwrap_or(QueueOverlay::TaskEmpty),
-                true,
-            ),
+            )
+        } else {
+            match overlay {
+                task_overlay @ QueueOverlay::TaskPage { .. } => (QueueOverlay::None, task_overlay),
+                board_overlay => (
+                    board_overlay,
+                    preview_overlay.unwrap_or(QueueOverlay::TaskEmpty),
+                ),
+            }
         };
         let board_frame = QueueFrameModel {
             tasks: &model.tasks,
@@ -815,8 +831,8 @@ fn draw_board_impl(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap
             collapsed_projects: &model.collapsed_projects,
             collapsed_threads: &model.collapsed_threads,
             collapsed_thread_projects: &model.collapsed_thread_projects,
-            status_message: None,
-            status_undo_offset: None,
+            status_message: if wide { None } else { status_owned.as_deref() },
+            status_undo_offset: if wide { None } else { status_undo_offset },
             verb_items: &task_verbs,
             now: SystemTime::now(),
             overlay: task_overlay,
@@ -828,7 +844,7 @@ fn draw_board_impl(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap
             render::draw_queue_frame(frame, &board_frame, &geo, board_area);
         let (mut task_hits, _) =
             render::draw_queue_frame(frame, &task_frame, &task_geo, responsive.task);
-        if task_is_preview {
+        if model.focused_surface() == tier::FocusedSurface::Board {
             task_hits
                 .regions
                 .retain(|hit| matches!(hit.target, render::QueueHitTarget::TaskNumber(_)));
@@ -859,7 +875,14 @@ fn draw_board_impl(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap
             status_undo_offset,
             verb_items: &verbs,
             now: SystemTime::now(),
-            overlay,
+            overlay: if model.focused_surface() == tier::FocusedSurface::Board
+                && model.form.as_ref().is_some_and(BoardForm::is_task)
+                && matches!(overlay, QueueOverlay::TaskPage { .. })
+            {
+                QueueOverlay::None
+            } else {
+                overlay
+            },
             detail_open: model.detail_open,
             list_scroll: model.list_scroll.get(),
             follow_list: model.follow_list.get(),

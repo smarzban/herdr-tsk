@@ -25,7 +25,7 @@ use crate::ui::capture::{
 };
 use crate::ui::input::{
     map_board_form_key, map_capture_key_state, map_capture_paste_state, map_edit_paste, map_key,
-    map_task_form_key, BoardIntent, CaptureIntent,
+    map_responsive_key, map_task_form_key, BoardIntent, CaptureIntent,
 };
 use crate::ui::mouse::{
     capture_layout_for_model, enable_terminal_input, keyboard_enhancement_supported,
@@ -392,7 +392,8 @@ fn run_board() -> Result<(), Box<dyn Error>> {
                     // longer varies by area, per fix 1's gate removal), so no held-open modal
                     // can end up invisible under a shrunk pane and leave q / Esc unreachable.
                     let mode = resolve_board_surface(area, &mut model);
-                    let Some(intent) = board_keyboard_intent(&model, mode, key) else {
+                    let Some(intent) = board_keyboard_intent_for_area(&model, area, mode, key)
+                    else {
                         continue;
                     };
                     let Some(intent) = board_intent_for_area(area, intent) else {
@@ -419,12 +420,9 @@ fn run_board() -> Result<(), Box<dyn Error>> {
                     // so a drag does not also fire the Down-time peek/select path.
                     use crate::ui::text_select::{DragSelectOutcome, DragSelectPhase};
                     use crossterm::event::{MouseButton, MouseEventKind};
-                    match map_scrollbar_mouse(
-                        model.input_mode(),
-                        &frame_hits,
-                        mouse,
-                        &mut scrollbar_drag,
-                    ) {
+                    let area = terminal_area(terminal)?;
+                    let mode = resolve_board_surface(area, &mut model);
+                    match map_scrollbar_mouse(mode, &frame_hits, mouse, &mut scrollbar_drag) {
                         ScrollbarMouse::Miss => {}
                         ScrollbarMouse::Intent(intent) => {
                             drag_gesture.clear();
@@ -605,17 +603,29 @@ fn copy_drag_selection(
 
 /// Content rect that edge auto-scroll watches during a text drag.
 pub fn drag_content_area(model: &BoardModel, area: Rect) -> Rect {
-    let geo = crate::ui::tier::resolve(area.width, area.height);
-    match model.input_mode() {
-        BoardInputMode::TaskPage => {
-            // Approximate the shared notes/steps viewport: below a one-row header,
-            // above the rule. Exact step halving is unnecessary for edge detection.
-            let top = geo.viewport_top.saturating_add(1);
-            let bottom = geo.rule_row.unwrap_or(geo.height.saturating_sub(2));
-            let height = bottom.saturating_sub(top);
-            Rect::new(0, top, area.width, height)
-        }
-        _ => Rect::new(0, geo.viewport_top, area.width, geo.viewport_height),
+    let responsive =
+        crate::ui::tier::resolve_responsive(area.width, area.height, model.focused_surface());
+    let surface = if model.focused_surface() == crate::ui::tier::FocusedSurface::Task {
+        responsive.task
+    } else {
+        responsive.board
+    };
+    let geo = crate::ui::tier::resolve(surface.width, surface.height);
+    if model.focused_surface() == crate::ui::tier::FocusedSurface::Task {
+        // Approximate the shared notes/steps viewport: below a one-row header,
+        // above the rule. Exact step halving is unnecessary for edge detection.
+        let top = surface.y.saturating_add(geo.viewport_top).saturating_add(1);
+        let bottom = surface
+            .y
+            .saturating_add(geo.rule_row.unwrap_or(geo.height.saturating_sub(2)));
+        Rect::new(surface.x, top, surface.width, bottom.saturating_sub(top))
+    } else {
+        Rect::new(
+            surface.x,
+            surface.y.saturating_add(geo.viewport_top),
+            surface.width,
+            geo.viewport_height,
+        )
     }
 }
 
@@ -628,9 +638,23 @@ pub fn tick_drag_autoscroll(
     copyable: &[Rect],
     content: Rect,
 ) {
-    let delta = match model.input_mode() {
-        BoardInputMode::TaskPage => model.nudge_notes_scroll(auto.direction, auto.speed),
-        BoardInputMode::Normal => model.nudge_list_scroll(auto.direction, auto.speed),
+    let delta = match model.focused_surface() {
+        crate::ui::tier::FocusedSurface::Task
+            if matches!(
+                model.input_mode(),
+                BoardInputMode::TaskPage | BoardInputMode::EditStep
+            ) =>
+        {
+            model.nudge_notes_scroll(auto.direction, auto.speed)
+        }
+        crate::ui::tier::FocusedSurface::Board
+            if matches!(
+                model.input_mode(),
+                BoardInputMode::Normal | BoardInputMode::TaskPage
+            ) =>
+        {
+            model.nudge_list_scroll(auto.direction, auto.speed)
+        }
         _ => 0,
     };
     if delta == 0 {
@@ -778,6 +802,31 @@ pub struct BoardSaveContext<'a> {
 /// field of the open form actually has focus (or its scope dropdown is open). The task
 /// page's view mode keeps its own keymap even though a form is open -- otherwise a bare
 /// `e` on the page would be inserted into the title draft instead of entering edit mode.
+fn board_keyboard_intent_for_area(
+    model: &BoardModel,
+    area: Rect,
+    mode: BoardInputMode,
+    key: crossterm::event::KeyEvent,
+) -> Option<BoardIntent> {
+    let presentation =
+        crate::ui::tier::resolve_responsive(area.width, area.height, model.focused_surface())
+            .presentation;
+    let responsive = map_responsive_key(
+        mode,
+        model.focused_surface(),
+        presentation,
+        model.task_editing(),
+        key,
+    );
+    if matches!(
+        responsive,
+        Some(BoardIntent::FocusTaskSurface | BoardIntent::FocusBoardSurface)
+    ) {
+        return responsive;
+    }
+    board_keyboard_intent(model, mode, key)
+}
+
 fn board_keyboard_intent(
     model: &BoardModel,
     mode: BoardInputMode,
@@ -913,6 +962,8 @@ pub fn apply_board_intent_with_save_recovery(
             | BoardIntent::OpenHelp
             | BoardIntent::CloseLayer
             | BoardIntent::OpenTaskPage
+            | BoardIntent::FocusTaskSurface
+            | BoardIntent::FocusBoardSurface
             | BoardIntent::PeekDetail
             | BoardIntent::CollapseDetail
             | BoardIntent::PageScrollUp

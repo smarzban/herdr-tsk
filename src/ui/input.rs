@@ -8,6 +8,7 @@ use crate::domain::HumanStatus;
 
 use super::board::BoardInputMode;
 use super::capture::{CaptureField, CaptureScopeChoice};
+use super::tier::{FocusedSurface, ResponsivePresentation};
 
 /// Board primary actions reachable by keyboard inside the board.
 ///
@@ -262,8 +263,12 @@ pub enum BoardIntent {
     PrimaryVerb,
     /// `b` — toggle blocked ↔ doing. Reducer lands in.
     ToggleBlock,
-    /// `Enter` — open the selected task's full-page view; on the page itself it closes it.
+    /// `Enter` opens the selected task as a full-page view in single-pane presentation.
     OpenTaskPage,
+    /// Transfer keyboard ownership to the selected task without persisting.
+    FocusTaskSurface,
+    /// Return keyboard ownership to the board without discarding task-page session state.
+    FocusBoardSurface,
     /// `→` — expand the selected row's inline peek (notes preview under the row).
     PeekDetail,
     /// `←` — collapse the inline peek when one is open; a no-op otherwise.
@@ -607,6 +612,33 @@ pub fn map_key(mode: BoardInputMode, key: KeyEvent) -> Option<BoardIntent> {
     }
 }
 
+/// Map focus-transfer keys before delegating every other key to the existing surface map.
+pub fn map_responsive_key(
+    mode: BoardInputMode,
+    focus: FocusedSurface,
+    presentation: ResponsivePresentation,
+    task_editing: bool,
+    key: KeyEvent,
+) -> Option<BoardIntent> {
+    if matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) && key.modifiers.is_empty() {
+        if focus == FocusedSurface::Board
+            && presentation == ResponsivePresentation::WideSplit
+            && mode == BoardInputMode::Normal
+            && matches!(key.code, KeyCode::Enter | KeyCode::Right)
+        {
+            return Some(BoardIntent::FocusTaskSurface);
+        }
+        if focus == FocusedSurface::Task
+            && mode == BoardInputMode::TaskPage
+            && !task_editing
+            && matches!(key.code, KeyCode::Esc | KeyCode::Left)
+        {
+            return Some(BoardIntent::FocusBoardSurface);
+        }
+    }
+    map_key(mode, key)
+}
+
 /// Map the selected task-page Thread footer. It is a navigation target until Enter or a
 /// second click deliberately opens the text cursor.
 fn map_selected_thread_key(key: KeyEvent) -> Option<BoardIntent> {
@@ -931,6 +963,8 @@ pub fn intent_primary_action(intent: &BoardIntent) -> Option<PrimaryBoardAction>
         | BoardIntent::PrimaryVerb
         | BoardIntent::ToggleBlock
         | BoardIntent::OpenTaskPage
+        | BoardIntent::FocusTaskSurface
+        | BoardIntent::FocusBoardSurface
         | BoardIntent::PeekDetail
         | BoardIntent::CollapseDetail
         | BoardIntent::PageScrollUp
