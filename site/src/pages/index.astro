@@ -1,4 +1,5 @@
 ---
+import Wordmark from '../components/Wordmark.astro';
 import '../styles/landing.css';
 
 const VERSION = '0.4.0';
@@ -88,9 +89,7 @@ const REPO = 'https://github.com/smarzban/herdr-tsk';
 
     <header class="top">
       <div class="top-inner">
-        <a class="wordmark" href="/" aria-label="tsk home">
-          <span class="wordmark-text">tsk</span><span class="wordmark-caret" aria-hidden="true"></span>
-        </a>
+        <a class="wordmark" href="/" aria-label="tsk home"><Wordmark /></a>
         <span class="ver" title="crate and plugin version">v{VERSION}</span>
         <nav class="top-nav" aria-label="Primary">
           <a href="#demo">demo</a>
@@ -552,7 +551,7 @@ const REPO = 'https://github.com/smarzban/herdr-tsk';
     <footer class="site-foot">
       <div class="foot-inner">
         <p>
-          <span class="wordmark-text">tsk</span>
+          <span class="wordmark wordmark-foot"><Wordmark /></span>
           <span class="dim">· a task board for you and your agents · v{VERSION} · MIT</span>
         </p>
         <p class="foot-links">
