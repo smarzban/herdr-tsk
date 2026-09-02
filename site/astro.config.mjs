@@ -11,7 +11,7 @@ export default defineConfig({
     sitemap(),
     starlight({
       title: 'tsk',
-      description: 'A task board for your terminal.',
+      description: 'A task board for you and your agents, in your terminal.',
       favicon: '/icon-dark.svg',
       logo: {
         light: './src/assets/wordmark-light.svg',
