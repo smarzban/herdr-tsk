@@ -28,8 +28,8 @@ fn press(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)
 }
 
-fn alt(code: KeyCode) -> KeyEvent {
-    KeyEvent::new(code, KeyModifiers::ALT)
+fn ctrl(code: KeyCode) -> KeyEvent {
+    KeyEvent::new(code, KeyModifiers::CONTROL)
 }
 
 fn board_with_task(title: &str, status: HumanStatus) -> (DomainState, BoardModel, uuid::Uuid) {
@@ -362,7 +362,7 @@ fn esc_closes_transient_then_detail_then_quit_and_q_quits_only_in_normal() {
         apply_intent(&mut domain, &mut model, BoardIntent::CloseLayer, None).expect("esc quit");
     assert_eq!(outcome, IntentOutcome::Quit);
 
-    // alt+q quits from normal only; bare q is dead
+    // ctrl+q quits from normal only; bare q is dead
     assert_eq!(
         map_key(BoardInputMode::Normal, press(KeyCode::Char('q'))),
         None
@@ -370,7 +370,7 @@ fn esc_closes_transient_then_detail_then_quit_and_q_quits_only_in_normal() {
     assert_eq!(
         map_key(
             BoardInputMode::Normal,
-            KeyEvent::new(KeyCode::Char('q'), KeyModifiers::ALT),
+            KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL),
         ),
         Some(BoardIntent::Quit)
     );
@@ -454,7 +454,7 @@ fn palette_lists_exactly_m1_commands_for_selection_filters_by_subsequence_and_di
         "delete",
         "undo",
         "done drawer",
-        "verb keys: use ctrl",
+        "toggle groups",
         "help",
         "quit",
     ];
@@ -552,7 +552,7 @@ fn palette_lists_exactly_m1_commands_for_selection_filters_by_subsequence_and_di
 
     // Direct key route lands on the same intent.
     assert_eq!(
-        map_key(BoardInputMode::Normal, alt(KeyCode::Char('o'))),
+        map_key(BoardInputMode::Normal, ctrl(KeyCode::Char('o'))),
         Some(BoardIntent::Reopen)
     );
 
@@ -1171,7 +1171,7 @@ fn board_with_noted_task() -> (DomainState, BoardModel, uuid::Uuid) {
 fn esc_and_q_close_the_task_page_from_view_mode() {
     for (key, mods) in [
         (KeyCode::Esc, KeyModifiers::NONE),
-        (KeyCode::Char('q'), KeyModifiers::ALT),
+        (KeyCode::Char('q'), KeyModifiers::CONTROL),
     ] {
         let (mut domain, mut model, _id) = board_with_noted_task();
         apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
@@ -1204,7 +1204,7 @@ fn task_page_navigation_ignores_unrelated_modifier_chords() {
             BoardInputMode::TaskPage,
             KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL),
         ),
-        Some(BoardIntent::ConfirmEdit)
+        None
     );
     assert_eq!(
         map_key(
@@ -1221,20 +1221,20 @@ fn page_verbs_act_on_the_page_task_and_the_page_stays_open() {
     apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
 
     // `d` completes the page's task; the page remains its surface.
-    let complete = map_key(BoardInputMode::TaskPage, alt(KeyCode::Char('d'))).expect("d");
+    let complete = map_key(BoardInputMode::TaskPage, ctrl(KeyCode::Char('d'))).expect("d");
     assert_eq!(complete, BoardIntent::Complete);
     apply_intent(&mut domain, &mut model, complete, None).expect("complete");
     assert_eq!(domain.get(id).expect("task").status, HumanStatus::Done);
     assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
 
     // `o` reopens it, still from the page.
-    let reopen = map_key(BoardInputMode::TaskPage, alt(KeyCode::Char('o'))).expect("o");
+    let reopen = map_key(BoardInputMode::TaskPage, ctrl(KeyCode::Char('o'))).expect("o");
     apply_intent(&mut domain, &mut model, reopen, None).expect("reopen");
     assert_eq!(domain.get(id).expect("task").status, HumanStatus::Ready);
     assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
 
     // `b` blocks, `b` again unblocks.
-    let block = map_key(BoardInputMode::TaskPage, alt(KeyCode::Char('b'))).expect("b");
+    let block = map_key(BoardInputMode::TaskPage, ctrl(KeyCode::Char('b'))).expect("b");
     apply_intent(&mut domain, &mut model, block.clone(), None).expect("block");
     assert_eq!(domain.get(id).expect("task").status, HumanStatus::Blocked);
     apply_intent(&mut domain, &mut model, block, None).expect("unblock");
@@ -1245,7 +1245,7 @@ fn page_verbs_act_on_the_page_task_and_the_page_stays_open() {
 fn deleting_from_the_page_closes_it_and_undo_restores() {
     let (mut domain, mut model, id) = board_with_noted_task();
     apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
-    let delete = map_key(BoardInputMode::TaskPage, alt(KeyCode::Char('x'))).expect("x");
+    let delete = map_key(BoardInputMode::TaskPage, ctrl(KeyCode::Char('x'))).expect("x");
     assert_eq!(delete, BoardIntent::SoftDelete);
     apply_intent(&mut domain, &mut model, delete, None).expect("delete");
     assert!(domain.get(id).expect("task").soft_deleted);
@@ -1292,7 +1292,7 @@ fn field_entry_intents_refocus_an_open_page_without_recreating_its_drafts() {
 }
 
 #[test]
-fn ctrl_enter_from_the_page_saves_and_returns_to_the_board() {
+fn ctrl_enter_from_the_page_saves_and_keeps_the_task_page_open() {
     let (mut domain, mut model, id) = board_with_noted_task();
     apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
     apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None).expect("edit title");
@@ -1306,7 +1306,7 @@ fn ctrl_enter_from_the_page_saves_and_returns_to_the_board() {
     let outcome = apply_intent(&mut domain, &mut model, save, None).expect("save");
     assert_eq!(outcome, IntentOutcome::Persist);
     assert_eq!(domain.get(id).expect("task").title, "paged task!");
-    assert_eq!(model.input_mode(), BoardInputMode::Normal);
+    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
 }
 
 #[test]
@@ -1463,9 +1463,9 @@ fn closing_the_page_after_completing_its_task_reanchors_to_a_visible_row() {
 // ---------------------------------------------------------------------------
 // T-3: page step cursor and modifier-protected steps verbs. Bare arrows own
 // the cursor lifecycle (first Down activates, Up from the first step
-// deactivates); Alt+space toggles the highlighted step, Alt+x marks then
-// removes, Alt+e renames the highlighted step or the title by cursor state,
-// Alt+a opens the one-line add editor.
+// deactivates); Ctrl+space toggles the highlighted step, Ctrl+x marks then
+// removes, Ctrl+e renames the highlighted step or the title by cursor state,
+// Ctrl+a opens the one-line add editor.
 // ---------------------------------------------------------------------------
 
 /// A task page opened on a task carrying `steps`, painted at the standard
@@ -1491,6 +1491,14 @@ fn board_with_steps(
     }
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
     apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open task page");
+    if !steps.is_empty() {
+        // Step interactions are reachable only from the task edit session. Walk the same Tab
+        // route a user takes, including its final Scope-to-first-step transition.
+        for _ in 0..5 {
+            apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
+                .expect("tab into first step");
+        }
+    }
     (domain, model, id)
 }
 
@@ -1539,7 +1547,7 @@ fn arrow_keys_move_the_cursor_through_shared_steps() {
     );
 }
 
-/// Alt+space with the cursor active toggles exactly the highlighted step
+/// Ctrl+space with the cursor active toggles exactly the highlighted step
 /// through the real apply/save path: domain command, revision bump, journaled
 /// event, Persist outcome -- and the task's human status never changes.
 #[test]
@@ -1551,12 +1559,10 @@ fn modifier_toggle_flips_step_under_cursor() {
     );
     let revision_before = domain.get(id).expect("task").revision;
 
-    // Activate + one Down: cursor on "bravo step".
-    for intent in [BoardIntent::PageScrollDown, BoardIntent::PageScrollDown] {
-        apply_intent(&mut domain, &mut model, intent, None).expect("cursor down");
-    }
+    // Tab selected the first step in the edit session, then Down moves to "bravo step".
+    apply_intent(&mut domain, &mut model, BoardIntent::PageScrollDown, None).expect("cursor down");
 
-    let toggle = map_key(BoardInputMode::TaskPage, alt(KeyCode::Char(' '))).expect("alt+space");
+    let toggle = map_key(BoardInputMode::TaskPage, ctrl(KeyCode::Char(' '))).expect("ctrl+space");
     assert_eq!(toggle, BoardIntent::PrimaryVerb);
     let outcome = apply_intent(&mut domain, &mut model, toggle, None).expect("toggle");
     assert_eq!(
@@ -1598,7 +1604,7 @@ fn modifier_toggle_flips_step_under_cursor() {
     );
 }
 
-/// Alt+e is contextual: with the cursor active it opens the section's one-line
+/// Ctrl+e is contextual: with the cursor active it opens the section's one-line
 /// editor seeded with the highlighted step's text (Enter renames the step);
 /// with the cursor inactive it is the existing title-edit verb, unchanged.
 #[test]
@@ -1606,10 +1612,8 @@ fn rename_verb_targets_step_or_title_by_cursor() {
     let (mut domain, mut model, id) =
         board_with_steps("Rename target", None, &["alpha step", "bravo step"]);
 
-    // Cursor on the first step, then Alt+e opens the step editor seeded with it.
-    apply_intent(&mut domain, &mut model, BoardIntent::PageScrollDown, None)
-        .expect("activate cursor");
-    let rename = map_key(BoardInputMode::TaskPage, alt(KeyCode::Char('e'))).expect("alt+e");
+    // Tab selected the first step, then Ctrl+e opens the step editor seeded with it.
+    let rename = map_key(BoardInputMode::TaskPage, ctrl(KeyCode::Char('e'))).expect("ctrl+e");
     assert_eq!(rename, BoardIntent::BeginEditTitle);
     apply_intent(&mut domain, &mut model, rename.clone(), None).expect("open step editor");
 
@@ -1648,20 +1652,20 @@ fn rename_verb_targets_step_or_title_by_cursor() {
     );
     assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
 
-    // Cursor inactive (fresh page session): Alt+e is the existing title edit.
+    // Cursor inactive (fresh page session): Ctrl+e is the existing title edit.
     apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("close page");
     apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("reopen page");
-    apply_intent(&mut domain, &mut model, rename, None).expect("alt+e inactive cursor");
+    apply_intent(&mut domain, &mut model, rename, None).expect("ctrl+e inactive cursor");
     assert_eq!(
         model.input_mode(),
         BoardInputMode::EditTitle,
-        "with the cursor inactive Alt+e edits the title, unchanged"
+        "with the cursor inactive Ctrl+e edits the title, unchanged"
     );
     assert_eq!(model.edit_buffer(), "Rename target");
 }
 
-/// Alt+x is mark-then-confirm: the first press visibly marks the cursor's step,
-/// any intervening key clears the mark without removing, and a second Alt+x
+/// Ctrl+x is mark-then-confirm: the first press visibly marks the cursor's step,
+/// any intervening key clears the mark without removing, and a second Ctrl+x
 /// with nothing between removes the step through the domain command.
 #[test]
 fn delete_verb_marks_then_removes_on_second_press() {
@@ -1672,9 +1676,7 @@ fn delete_verb_marks_then_removes_on_second_press() {
     );
     let revision_before = domain.get(id).expect("task").revision;
 
-    apply_intent(&mut domain, &mut model, BoardIntent::PageScrollDown, None)
-        .expect("activate cursor");
-    let delete = map_key(BoardInputMode::TaskPage, alt(KeyCode::Char('x'))).expect("alt+x");
+    let delete = map_key(BoardInputMode::TaskPage, ctrl(KeyCode::Char('x'))).expect("ctrl+x");
     assert_eq!(delete, BoardIntent::SoftDelete);
 
     // First press: visible mark, no mutation.
@@ -1708,7 +1710,7 @@ fn delete_verb_marks_then_removes_on_second_press() {
         "clearing the mark removes nothing"
     );
 
-    // Mark again, then confirm with a second Alt+x and nothing between.
+    // Mark again, then confirm with a second Ctrl+x and nothing between.
     apply_intent(&mut domain, &mut model, delete.clone(), None).expect("mark again");
     let removed = rendered_board(&model, 80, 24);
     assert!(
@@ -1735,10 +1737,9 @@ fn delete_verb_marks_then_removes_on_second_press() {
     );
 }
 
-/// With overflowing notes and steps, the first Down activates the cursor and
-/// leaves the shared content in place. Wheel input is the reading route.
+/// With overflowing notes and steps, a step selected through Tab owns the next Down.
 #[test]
-fn first_bare_down_activates_cursor_before_shared_content() {
+fn a_tab_selected_step_receives_bare_down_before_shared_content() {
     let notes = wrapping_notes();
     let (mut domain, mut model, _) = board_with_steps(
         "Scroll witness",
@@ -1747,11 +1748,11 @@ fn first_bare_down_activates_cursor_before_shared_content() {
     );
     let before = rendered_board(&model, 80, 24);
     apply_intent(&mut domain, &mut model, BoardIntent::PageScrollDown, None)
-        .expect("activate cursor");
+        .expect("move selected step");
     let after = rendered_board(&model, 80, 24);
     assert!(
-        after.contains("▸ ▪ alpha step"),
-        "Down must activate the first step cursor"
+        after.contains("▸ ▪ bravo step"),
+        "Down must move the Tab-selected step cursor"
     );
     assert!(
         before.contains("L0"),
@@ -1816,8 +1817,8 @@ fn active_cursor_up_precedes_shared_scroll() {
     );
 }
 
-/// AC-18: Up from the active first step deactivates without moving the shared
-/// body. Only a subsequent inactive Up scrolls, and Down reactivates the cursor.
+/// Up from the active first step deactivates without moving the shared body. A subsequent
+/// inactive Up scrolls, and Tab selects a step again from the task edit session.
 #[test]
 fn first_step_up_deactivates_before_inactive_up_scrolls_then_down_reactivates() {
     let (mut domain, mut model, _) = board_with_steps(
@@ -1826,21 +1827,8 @@ fn first_step_up_deactivates_before_inactive_up_scrolls_then_down_reactivates() 
         &["first step", "second step"],
     );
     rendered_board(&model, 80, 24);
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::PageWheelScrollDown,
-        None,
-    )
-    .expect("wheel stream");
-    let wheeled = rendered_board(&model, 80, 24);
-    assert!(
-        !wheeled.contains("▸"),
-        "wheel must not activate an inactive cursor:\n{wheeled}"
-    );
-
-    apply_intent(&mut domain, &mut model, BoardIntent::PageScrollDown, None)
-        .expect("activate first step");
+    apply_intent(&mut domain, &mut model, BoardIntent::SelectStep(0), None)
+        .expect("select the first step after layout");
     let active = rendered_board(&model, 80, 24);
     assert!(
         active.contains("▸ ▪ first step"),
@@ -1892,11 +1880,14 @@ fn first_step_up_deactivates_before_inactive_up_scrolls_then_down_reactivates() 
         "inactive Up must scroll the shared content"
     );
 
-    apply_intent(&mut domain, &mut model, BoardIntent::PageScrollDown, None).expect("reactivate");
+    for _ in 0..2 {
+        apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
+            .expect("Tab returns to the first step");
+    }
     let reactivated = rendered_board(&model, 80, 24);
     assert!(
         reactivated.contains("▸ ▪ first step"),
-        "Down must re-activate the first cursor:\n{reactivated}"
+        "Tab must re-select the first cursor:\n{reactivated}"
     );
 }
 
@@ -1943,13 +1934,11 @@ fn stale_step_cursor_falls_back_to_the_live_task_status_verb() {
 /// Step cursor navigation stays available when the shared content already fits.
 #[test]
 fn down_activates_the_cursor_when_shared_content_does_not_overflow() {
-    let (mut domain, mut model, _) = board_with_steps(
+    let (_domain, model, _) = board_with_steps(
         "Reactivation witness",
         Some("short note"),
         &["alpha step", "bravo step"],
     );
-    apply_intent(&mut domain, &mut model, BoardIntent::PageScrollDown, None)
-        .expect("activate cursor");
     let activated = rendered_board(&model, 80, 24);
     assert!(activated.contains("▸ ▪ alpha step"));
 }
@@ -1988,14 +1977,14 @@ fn no_step_task_arrows_scroll_notes_unchanged() {
     );
 }
 
-/// Alt+a opens the section's one-line editor empty; Enter applies the add
+/// Ctrl+a opens the section's one-line editor empty; Enter applies the add
 /// through the domain command and closes, Esc cancels and closes.
 #[test]
 fn add_verb_opens_editor_enter_applies_esc_cancels() {
     let (mut domain, mut model, id) = board_with_steps("Add witness", None, &["alpha step"]);
 
-    let add = map_key(BoardInputMode::TaskPage, alt(KeyCode::Char('a')))
-        .expect("alt+a must open the step editor");
+    let add = map_key(BoardInputMode::TaskPage, ctrl(KeyCode::Char('a')))
+        .expect("ctrl+a must open the step editor");
     apply_intent(&mut domain, &mut model, add, None).expect("open add editor");
     assert_ne!(
         model.input_mode(),
@@ -2031,8 +2020,8 @@ fn add_verb_opens_editor_enter_applies_esc_cancels() {
     assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
 
     // Esc cancels: the draft is discarded, nothing is appended.
-    let add = map_key(BoardInputMode::TaskPage, alt(KeyCode::Char('a')))
-        .expect("alt+a reopens the editor");
+    let add = map_key(BoardInputMode::TaskPage, ctrl(KeyCode::Char('a')))
+        .expect("ctrl+a reopens the editor");
     apply_intent(&mut domain, &mut model, add, None).expect("reopen add editor");
     for ch in "junk".chars() {
         apply_intent(&mut domain, &mut model, BoardIntent::EditInsert(ch), None)
@@ -2064,7 +2053,7 @@ fn add_verb_opens_editor_enter_applies_esc_cancels() {
 fn step_editor_enter_saves_ctrl_enter_reopens_esc_cancels() {
     let (mut domain, mut model, id) = board_with_steps("Loop witness", None, &["alpha step"]);
 
-    // Alt+a opens the add line; type, then Ctrl+Enter saves and reopens it empty.
+    // Ctrl+a opens the add line; type, then Ctrl+Enter saves and reopens it empty.
     apply_intent(&mut domain, &mut model, BoardIntent::BeginAddStep, None)
         .expect("open add editor");
     for ch in "bravo step".chars() {
@@ -2147,7 +2136,7 @@ fn rename_mode_ctrl_enter_saves_and_closes() {
 
     apply_intent(&mut domain, &mut model, BoardIntent::PageScrollDown, None)
         .expect("activate cursor");
-    let rename = map_key(BoardInputMode::TaskPage, alt(KeyCode::Char('e'))).expect("alt+e");
+    let rename = map_key(BoardInputMode::TaskPage, ctrl(KeyCode::Char('e'))).expect("ctrl+e");
     apply_intent(&mut domain, &mut model, rename, None).expect("open rename editor");
     assert_eq!(model.input_mode(), BoardInputMode::EditStep);
     for ch in " twice".chars() {
@@ -2451,9 +2440,7 @@ fn delete_mark_shows_press_again_footer_message() {
     let (mut domain, mut model, id) =
         board_with_steps("Hint witness", None, &["alpha step", "bravo step"]);
 
-    apply_intent(&mut domain, &mut model, BoardIntent::PageScrollDown, None)
-        .expect("activate cursor");
-    let delete = map_key(BoardInputMode::TaskPage, alt(KeyCode::Char('x'))).expect("alt+x");
+    let delete = map_key(BoardInputMode::TaskPage, ctrl(KeyCode::Char('x'))).expect("ctrl+x");
     assert_eq!(delete, BoardIntent::SoftDelete);
 
     // First press: the mark is visible AND the footer hint is painted.
@@ -2465,12 +2452,12 @@ fn delete_mark_shows_press_again_footer_message() {
         "the marked step must stay visible:\n{marked}"
     );
     assert!(
-        marked.contains("press alt+x again to remove"),
+        marked.contains("press ctrl+x again to remove"),
         "the footer must prompt the second press while the mark is armed:\n{marked}"
     );
     assert_eq!(
         model.message().expect("hint message"),
-        "press alt+x again to remove"
+        "press ctrl+x again to remove"
     );
 
     // An intervening key clears the mark AND the hint.
@@ -2560,6 +2547,10 @@ fn t_token_capture_threads_while_item_text_stays_literal() {
     );
 
     apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open task page");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+        .expect("enter task edit mode");
+    apply_intent(&mut domain, &mut model, BoardIntent::CancelEdit, None)
+        .expect("return to task page");
     apply_intent(&mut domain, &mut model, BoardIntent::BeginAddStep, None)
         .expect("open item editor");
     for character in "literal !t release-2026 #word".chars() {

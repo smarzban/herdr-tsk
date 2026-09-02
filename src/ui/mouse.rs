@@ -302,6 +302,8 @@ fn point(column: u16, row: u16) -> Position {
 fn verb_intent(model: &BoardModel, index: usize) -> Option<BoardIntent> {
     let entry = *board_verb_items(model).get(index)?;
     match entry.key {
+        "ctrl+enter" => Some(BoardIntent::ConfirmEditNext),
+        "enter" if model.input_mode() == BoardInputMode::EditStep => Some(BoardIntent::ConfirmEdit),
         "space" => Some(BoardIntent::PrimaryVerb),
         "enter" => Some(BoardIntent::OpenTaskPage),
         "d" => Some(BoardIntent::Complete),
@@ -323,7 +325,7 @@ fn verb_intent(model: &BoardModel, index: usize) -> Option<BoardIntent> {
 fn quick_add_verb_intent(index: usize) -> Option<BoardIntent> {
     match QUICK_ADD_VERBS.get(index)?.key {
         "enter" => Some(BoardIntent::QuickAddSave),
-        "ctrl+enter" => Some(BoardIntent::QuickAddSaveNext),
+        "shift+enter" => Some(BoardIntent::QuickAddSaveNext),
         "tab" => Some(BoardIntent::ExpandQuickAdd),
         "esc" => Some(BoardIntent::CancelQuickAdd),
         _ => None,
@@ -342,7 +344,7 @@ fn form_verb_intent(model: &BoardModel, index: usize) -> Option<BoardIntent> {
     let dropdown_open = model.input_mode() == BoardInputMode::FormScopeDropdown;
     let focus = model.form_focus()?;
     match form_verb_items(focus, dropdown_open).get(index)?.key {
-        "ctrl+enter" | "alt+enter" => Some(BoardIntent::ConfirmEdit),
+        "ctrl+enter" => Some(BoardIntent::ConfirmEdit),
         "enter" if dropdown_open => Some(BoardIntent::ConfirmFormScopeDropdown),
         "enter" if focus == CaptureField::Scope => Some(BoardIntent::OpenFormScopeDropdown),
         "enter" => Some(BoardIntent::ConfirmEdit),
@@ -564,15 +566,20 @@ pub fn map_board_mouse(
             Some(QueueHitTarget::FormThread) => {
                 Some(BoardIntent::FocusFormField(CaptureField::Thread))
             }
+            Some(QueueHitTarget::Step(index)) if model.task_editing() => {
+                Some(BoardIntent::SelectStep(index))
+            }
             Some(QueueHitTarget::Verb(index)) => form_verb_intent(model, index),
             _ => None,
         },
         BoardInputMode::TaskPage => match hit_at(hits, pos) {
             Some(QueueHitTarget::TaskNumber(id)) => Some(BoardIntent::CopyTaskNumber(id)),
             Some(QueueHitTarget::FormScope) | Some(QueueHitTarget::FormThread) => None,
-            // A click on an step row selects it (AC-21) — the board's click
-            // convention: a click selects, never mutates.
-            Some(QueueHitTarget::Step(index)) => Some(BoardIntent::SelectStep(index)),
+            // A click selects a step only in the task edit session. View-first pages keep
+            // their step rows read-only until a field edit has begun.
+            Some(QueueHitTarget::Step(index)) if model.task_editing() => {
+                Some(BoardIntent::SelectStep(index))
+            }
             Some(QueueHitTarget::PageScroll(offset)) => Some(BoardIntent::PageScrollTo(offset)),
             Some(QueueHitTarget::Verb(index)) => verb_intent(model, index),
             _ => None,

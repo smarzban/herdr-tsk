@@ -1222,6 +1222,10 @@ fn failed_step_editor_save() -> (
     domain.add_step(id, "alpha step").expect("seed one step");
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/app")));
     apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open task page");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+        .expect("enter task edit mode");
+    apply_intent(&mut domain, &mut model, BoardIntent::CancelEdit, None)
+        .expect("return to task page");
     apply_intent(&mut domain, &mut model, BoardIntent::BeginAddStep, None)
         .expect("open step editor");
     for character in "zed step".chars() {
@@ -1357,6 +1361,10 @@ fn cancelled_failed_step_editor_save_leaves_no_orphan_edit_mode() {
     // And a fresh editor session works: the cancelled pending save left no state.
     apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None)
         .expect("reopen the page");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+        .expect("enter task edit mode");
+    apply_intent(&mut domain, &mut model, BoardIntent::CancelEdit, None)
+        .expect("return to task page");
     apply_intent(&mut domain, &mut model, BoardIntent::BeginAddStep, None)
         .expect("open a fresh editor");
     for character in "after cancel".chars() {
@@ -1476,6 +1484,8 @@ fn retried_step_rename_save_applies_the_held_rename() {
     domain.add_step(id, "alpha step").expect("step");
     let mut model = BoardModel::from_domain(&domain, None);
     apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+        .expect("enter task edit mode");
     apply_intent(&mut domain, &mut model, BoardIntent::SelectStep(0), None).expect("select");
     apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
         .expect("contextual rename");
@@ -1544,6 +1554,10 @@ fn ctrl_enter_refuses_in_place_when_the_bound_task_was_concurrently_soft_deleted
     domain.add_step(id, "alpha step").expect("seed one step");
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/app")));
     apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open task page");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+        .expect("enter task edit mode");
+    apply_intent(&mut domain, &mut model, BoardIntent::CancelEdit, None)
+        .expect("return to task page");
     apply_intent(&mut domain, &mut model, BoardIntent::BeginAddStep, None)
         .expect("open step editor");
     for character in "zed step".chars() {
@@ -1640,36 +1654,28 @@ fn successful_title_save_with_boundary_whitespace_releases_the_task_form_once() 
         IntentOutcome::Persisted
     );
     assert!(
-        !model.board_form_open(),
-        "successful save releases the form"
+        model.board_form_open(),
+        "successful save retains the task edit session on the page"
     );
-    assert_eq!(model.input_mode(), BoardInputMode::Normal);
+    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
     assert_eq!(domain.get(id).expect("task").title, "Delete me");
     assert_eq!(
         domain.get(id).expect("task").history.len(),
         history_before + 1,
         "the completed edit records exactly one event"
     );
-    let saved_baseline = snapshot_of(&domain);
     assert_eq!(
-        apply_board_intent_with_save_recovery(
-            &mut domain,
-            &mut model,
-            &mut recovery,
-            BoardSaveContext {
-                baseline: saved_baseline,
-                intent: BoardIntent::ConfirmEdit,
-                snapshot: None,
-            },
-            |_| -> Result<(), String> { panic!("released form cannot save again") },
-        )
-        .expect("released ConfirmEdit is inert"),
-        IntentOutcome::None
+        map_key(
+            BoardInputMode::TaskPage,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL),
+        ),
+        None,
+        "page view must not expose a stale save chord"
     );
     assert_eq!(
         domain.get(id).expect("task").history.len(),
         history_before + 1,
-        "an inert confirm cannot repeat the edit event"
+        "page view cannot repeat the edit event"
     );
 }
 
@@ -1952,8 +1958,8 @@ fn failed_save_during_thread_edit_holds_form_until_retry_or_cancel() {
         Some("release-2026")
     );
     assert!(
-        !model.board_form_open(),
-        "a successful retry releases the held task form"
+        model.board_form_open(),
+        "a successful retry retains the task edit session on its task page"
     );
-    assert_eq!(model.input_mode(), BoardInputMode::Normal);
+    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
 }

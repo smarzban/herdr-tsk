@@ -24,10 +24,10 @@ With the cursor active, the usual verbs act on that step:
 
 | Key | Does |
 | --- | --- |
-| `alt+a` | add a step (footer line) |
-| `alt+space` | toggle done |
-| `alt+e` | rename the highlighted step |
-| `alt+x` | mark, then a second press removes |
+| `ctrl+a` | add a step (footer line, after task editing starts) |
+| `ctrl+space` | toggle done |
+| `ctrl+e` | rename the highlighted step |
+| `ctrl+x` | mark, then a second press removes |
 
 The add/rename line is a one-line draft. `Enter` applies it. `Ctrl+Enter` adds
 and leaves the line open empty. `Esc` cancels. A failed save keeps the line

@@ -168,24 +168,15 @@ impl WalkthroughRecord {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum VerbModifier {
+    /// Old settings that named `alt` migrate to the fixed Ctrl modifier.
+    #[serde(alias = "alt")]
     #[default]
-    Alt,
     Ctrl,
 }
 
 impl VerbModifier {
-    pub fn toggled(self) -> Self {
-        match self {
-            Self::Alt => Self::Ctrl,
-            Self::Ctrl => Self::Alt,
-        }
-    }
-
     pub fn prefix(self) -> &'static str {
-        match self {
-            Self::Alt => "alt+",
-            Self::Ctrl => "ctrl+",
-        }
+        "ctrl+"
     }
 }
 
@@ -452,10 +443,13 @@ mod tests {
     }
 
     #[test]
-    fn missing_settings_default_to_alt() {
+    fn missing_settings_default_to_ctrl() {
         let dir = temp_dir("settings-fresh");
         let _guard = TempDirGuard(dir.clone());
-        assert_eq!(SettingsRecord::new(&dir).verb_modifier(), VerbModifier::Alt);
+        assert_eq!(
+            SettingsRecord::new(&dir).verb_modifier(),
+            VerbModifier::Ctrl
+        );
     }
 
     #[test]
@@ -464,6 +458,19 @@ mod tests {
         let _guard = TempDirGuard(dir.clone());
         let record = SettingsRecord::new(&dir);
         record.set_verb_modifier(VerbModifier::Ctrl).expect("write");
+        assert_eq!(
+            SettingsRecord::new(&dir).verb_modifier(),
+            VerbModifier::Ctrl
+        );
+    }
+
+    #[test]
+    fn legacy_alt_verb_setting_migrates_to_ctrl() {
+        let dir = temp_dir("settings-legacy-alt");
+        let _guard = TempDirGuard(dir.clone());
+        fs::create_dir_all(&dir).expect("settings directory");
+        fs::write(dir.join(SETTINGS_FILE), r#"{"verb_modifier":"alt"}"#).expect("legacy settings");
+
         assert_eq!(
             SettingsRecord::new(&dir).verb_modifier(),
             VerbModifier::Ctrl

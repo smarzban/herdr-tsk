@@ -101,14 +101,10 @@ impl BoardModel {
                 commands.push(command("reopen", BoardIntent::Reopen));
             }
         }
-        let verb_keys = match self.verb_modifier {
-            crate::config::VerbModifier::Alt => "verb keys: use ctrl",
-            crate::config::VerbModifier::Ctrl => "verb keys: use alt",
-        };
         commands.extend_from_slice(&[
             command("undo", BoardIntent::Undo),
             command("done drawer", BoardIntent::ToggleDoneDrawer),
-            command(verb_keys, BoardIntent::ToggleVerbModifier),
+            command("toggle groups", BoardIntent::ToggleAllGroups),
             command("help", BoardIntent::OpenHelp),
             command("quit", BoardIntent::Quit),
         ]);

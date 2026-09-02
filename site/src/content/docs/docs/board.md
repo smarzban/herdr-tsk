@@ -45,8 +45,8 @@ Unthreaded tasks list after thread groups in the same deck.
 Human status is the source of truth. Completing every step does not complete the
 task. Agents do not auto-complete work.
 
-`alt+space` starts a ready task, or reopens a done one. `alt+d` marks done.
-`alt+o` reopens. `alt+b` toggles blocked. **review** is set from the command
+`ctrl+space` starts a ready task, or reopens a done one. `ctrl+d` marks done.
+`ctrl+o` reopens. `ctrl+b` toggles blocked. **review** is set from the command
 palette (`:` → `set status: review`), not from a dedicated letter.
 
 ## Peek and mouse

@@ -80,11 +80,11 @@ fn title_edit_e_obeys_editbuffer_char_index_word_chords_paste_and_bound_task_ref
         .expect("confirm title");
     assert_eq!(outcome, IntentOutcome::Persist);
     assert_eq!(domain.get(id).expect("task").title, expected);
-    assert_eq!(model.input_mode(), BoardInputMode::Normal);
-    assert!(model.edit_target().is_none());
+    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+    assert_eq!(model.edit_target(), Some(id));
 }
 
-/// Palette notes edit obeys notes save chord pair (Ctrl/Alt+Enter) and bound-task refusal.
+/// Palette notes edit obeys the Ctrl+Enter save chord and bound-task refusal.
 #[test]
 fn palette_notes_edit_obeys_notes_save_chord_pair_and_bound_task_refusal() {
     let mut domain = DomainState::new();
@@ -110,8 +110,7 @@ fn palette_notes_edit_obeys_notes_save_chord_pair_and_bound_task_refusal() {
         apply_intent(&mut domain, &mut model, BoardIntent::EditInsert(ch), None).expect("insert");
     }
     // Confirm via the notes save chord intent (bare Enter in Notes inserts a line break;
-    // Ctrl/Alt+Enter is ConfirmEdit here, since both are mapped to the same intent at the
-    // reducer boundary this test drives).
+    // Ctrl+Enter maps to ConfirmEdit at the reducer boundary this test drives).
     let outcome = apply_intent(&mut domain, &mut model, BoardIntent::ConfirmEdit, None)
         .expect("confirm notes");
     assert_eq!(outcome, IntentOutcome::Persist);
@@ -879,6 +878,10 @@ fn thread_field_is_inert_while_step_editor_owns_the_footer() {
             .any(|hit| hit.target == QueueHitTarget::FormThread),
         "the threaded page exposes its footer hit before a step editor opens"
     );
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+        .expect("enter task edit mode");
+    apply_intent(&mut domain, &mut model, BoardIntent::CancelEdit, None)
+        .expect("return to task page");
     apply_intent(&mut domain, &mut model, BoardIntent::BeginAddStep, None).expect("item editor");
     apply_intent(
         &mut domain,

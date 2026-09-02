@@ -6,16 +6,15 @@ description: "View and edit one task: title, notes, thread, and scope."
 `Enter` opens the selected task full height. The dim `T30` prefix in the
 header copies that task identifier when clicked.
 
-It is view-first. Nothing is in edit mode until you ask. `alt+e` edits the title,
-`alt+n` edits notes, `Tab` moves between title, notes, thread, and scope. The
-scope footer does nothing until an edit has started.
+It is view-first. Nothing is in edit mode until you ask. `ctrl+e` edits the title,
+`ctrl+n` edits notes, `Tab` moves through title, notes, thread, scope, and then
+steps. The scope footer does nothing until an edit has started.
 
-`Ctrl+Enter` or `Alt+Enter` saves from any field. Field `Esc` cancels that field.
-Page `Esc` closes the page.
+`Ctrl+Enter` saves from any field. Field `Esc` cancels that field. Page `Esc`
+closes the page.
 
-Notes are multiline, so `Enter` inserts a line. `Ctrl+Enter` saves when the
-terminal reports it. `Alt+Enter` saves everywhere else. Both save. Neither
-inserts a line.
+Notes are multiline, so `Enter` inserts a line. `Ctrl+Enter` saves and does not
+insert a line.
 
 Thread uses the same name rules as capture `!t`. The field is optional.
 
@@ -36,7 +35,8 @@ color.
 Unmatched `*` and word-internal `_` stay literal. `- [ ]` stays text.
 [Steps](/docs/steps/) own checklists.
 
-Peek paints the same markers, then dims every span, with a `│` gutter.
+Peek paints the same markers, then dims every span, with a `│` gutter closed by
+an L-shaped `└` connector.
 
 ## Peek vs page
 

@@ -5,15 +5,15 @@
 │ IN MOTION ───────────────────────────────────────────────────────────────────2 │
 │         ┌─ help ──────────────────────────────────────────────── [x]─┐         │
 │  ▸ T1 Sm│                                                            │tsk · 3m │
-│  ▸ T2 Ed│  alt+q quit | Esc close                                    │dr · 12m │
-│         │  j/k · ↑/↓ move | alt+space primary                        │         │
-│ desk ───│  alt+d done | alt+o reopen                                 │───────1 │
-│         │  alt+b block | enter open                                  │         │
+│  ▸ T2 Ed│  ctrl+q quit | Esc close                                   │dr · 12m │
+│         │  j/k · ↑/↓ move | ctrl+space primary                       │         │
+│ desk ───│  ctrl+d done | ctrl+o reopen                               │───────1 │
+│         │  ctrl+b block | enter open                                 │         │
 │  ○ T7 Gl│  →/← peek | + capture                                      │      2d │
-│         │  alt+e title | alt+x/Delete delete                         │         │
-│         │  alt+u undo | z drawer                                     │         │
+│         │  ctrl+e title | ctrl+x/Delete delete                       │         │
+│         │  ctrl+u undo | z drawer                                    │         │
 │         │  : palette | ? help                                        │         │
-│         │  P project                                                 │         │
+│         │  P project | ctrl+g groups                                 │         │
 │         │                                                            │         │
 │         ├────────────────────────────────────────────────────────────┤         │
 │         │ any key close                                              │         │

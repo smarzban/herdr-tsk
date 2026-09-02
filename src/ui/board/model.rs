@@ -195,6 +195,9 @@ pub(super) struct BoardForm {
     pub(super) thread: EditBuffer,
     /// Field-local validation feedback, painted by the footer input rather than status chrome.
     pub(super) thread_refusal: Option<String>,
+    /// A task page starts view-only. Entering any field makes its steps selectable and editable
+    /// for the rest of that page session; closing the page drops the state with the form.
+    pub(super) editing: bool,
     pub(super) focus: CaptureField,
     pub(super) scope_options: Vec<TaskScope>,
     pub(super) scope_selected: usize,
@@ -285,6 +288,7 @@ impl BoardForm {
             scope,
             thread: seeded_draft(""),
             thread_refusal: None,
+            editing: false,
             focus,
             scope_options,
             scope_selected,
@@ -449,6 +453,9 @@ pub(super) struct StepsPageState {
     pub(super) pending_save: Option<StepEditorSave>,
     /// Shared-content rows the last painted viewport showed (renderer-recorded).
     pub(super) window_rows: std::cell::Cell<usize>,
+    /// Wrapped row count for each stored step at the last painted width. The renderer records
+    /// it so keyboard movement scrolls to the selected step's first wrapped row.
+    pub(super) row_counts: std::cell::RefCell<Vec<usize>>,
 }
 
 /// Scope choices shared by capture and task forms.
@@ -487,18 +494,21 @@ fn board_form_scope_options(
     options
 }
 
-/// Extract the steps step views the task page paints: done flag + text per step,
-/// in storage order.
+/// Extract the steps views the task page paints, wrapping text at the same word boundaries
+/// and display-cell width used by Notes.
 ///
-/// This is the one seam between the page payload and steps storage: the payload
-/// consumes these views and never reads `Task.steps` itself, so later page
-/// consumers (cursor, verbs, editor) swap the view, not the storage shape.
-pub(super) fn step_views(task: &Task) -> Vec<StepView> {
+/// This is the one seam between the page payload and steps storage: the payload consumes
+/// these views and never reads `Task.steps` itself, so later page consumers swap the view,
+/// not the storage shape.
+pub(super) fn step_views(task: &Task, text_width: usize) -> Vec<StepView> {
     task.steps
         .iter()
         .map(|step| StepView {
             done: step.done,
-            text: step.text.clone(),
+            rows: crate::ui::edit::wrap_text(&step.text, text_width)
+                .into_iter()
+                .map(|row| row.text)
+                .collect(),
         })
         .collect()
 }
@@ -597,7 +607,7 @@ pub struct BoardModel {
     pub(super) command_selected: usize,
     /// No separate capture/title/notes state lives beside [`Self::form`]: one board form owns
     /// all field drafts and either its task binding or its immutable capture snapshot.
-    /// Chord required for mutating verbs. Loaded from settings; flipped from the palette.
+    /// Fixed Ctrl chord required for mutating verbs.
     pub verb_modifier: VerbModifier,
 }
 
@@ -653,7 +663,7 @@ impl BoardModel {
             list_max_scroll: Cell::new(0),
             message_expires_at: None,
             message_restore: None,
-            verb_modifier: VerbModifier::Alt,
+            verb_modifier: VerbModifier::Ctrl,
         };
         model.seed_selection();
         model.ensure_home_tab_has_visible_tasks();
@@ -1133,6 +1143,58 @@ impl BoardModel {
         }
     }
 
+    /// Collapse every top-level group on the active home tab, or expand them when they are
+    /// already all collapsed. Thread-project subgroups stay independent: Ctrl+G acts on the
+    /// named thread groups the Threads tab presents at its top level.
+    pub(super) fn toggle_all_groups(&mut self) -> bool {
+        let view = self.queue_view();
+        match self.board_location {
+            BoardLocation::Home {
+                tab: BoardTab::Projects,
+            } => {
+                let paths: Vec<String> = view
+                    .sections
+                    .iter()
+                    .filter_map(|section| section.project_label.clone())
+                    .collect();
+                if paths.is_empty() {
+                    return false;
+                }
+                if paths
+                    .iter()
+                    .all(|path| self.collapsed_projects.contains(path))
+                {
+                    self.collapsed_projects.clear();
+                } else {
+                    self.collapsed_projects.extend(paths);
+                }
+                true
+            }
+            BoardLocation::Home {
+                tab: BoardTab::Threads,
+            } => {
+                let threads: Vec<String> = view
+                    .sections
+                    .iter()
+                    .filter_map(|section| section.thread_label.clone())
+                    .collect();
+                if threads.is_empty() {
+                    return false;
+                }
+                if threads
+                    .iter()
+                    .all(|thread| self.collapsed_threads.contains(thread))
+                {
+                    self.collapsed_threads.clear();
+                } else {
+                    self.collapsed_threads.extend(threads);
+                }
+                true
+            }
+            _ => false,
+        }
+    }
+
     /// Whether the done drawer is open (session-only).
     pub fn drawer_open(&self) -> bool {
         self.drawer_open
@@ -1314,8 +1376,10 @@ impl BoardModel {
             return;
         }
         self.task_edit_save = None;
-        self.form = None;
-        self.input_mode = BoardInputMode::Normal;
+        // A confirmed page edit returns to the same task in view mode. Keep the form and
+        // its immutable task binding so the next edit, step selection, or close acts on the
+        // task the user just saved rather than dropping them back on the board.
+        self.input_mode = BoardInputMode::TaskPage;
         self.clear_message();
     }
 
@@ -1417,6 +1481,7 @@ impl BoardModel {
         let Some(form) = self.form.as_mut().filter(|form| form.is_task()) else {
             return;
         };
+        form.editing = true;
         Self::set_form_focus(form, form.focus);
         self.input_mode = form.parent_mode();
     }
@@ -1429,6 +1494,9 @@ impl BoardModel {
             form.focus_next();
         } else {
             form.focus_prev();
+        }
+        if form.is_task() {
+            form.editing = true;
         }
         Self::set_form_focus(form, form.focus);
         self.input_mode = form.parent_mode();
@@ -1445,6 +1513,9 @@ impl BoardModel {
         ) {
             return;
         }
+        if form.is_task() {
+            form.editing = true;
+        }
         Self::set_form_focus(form, focus);
         self.input_mode = form.parent_mode();
     }
@@ -1457,12 +1528,23 @@ impl BoardModel {
         let Some(form) = self.form.as_ref().filter(|form| form.is_task()) else {
             return false;
         };
+        if !form.editing {
+            return false;
+        }
         let Some(index) = form.steps.cursor else {
             return false;
         };
         form.task_id()
             .and_then(|id| self.tasks.iter().find(|task| task.id == id))
             .is_some_and(|task| task.steps.get(index).is_some())
+    }
+
+    /// Whether the current task page has entered its edit session.
+    pub fn task_editing(&self) -> bool {
+        self.form
+            .as_ref()
+            .filter(|form| form.is_task())
+            .is_some_and(|form| form.editing)
     }
 
     pub(super) fn cycle_form_scope(&mut self) {
@@ -1855,6 +1937,47 @@ mod tests {
         model.set_message("save failed");
         model.expire_ephemeral_message();
         assert_eq!(model.message(), Some("save failed"));
+    }
+
+    #[test]
+    fn toggle_all_groups_toggles_only_the_active_home_tabs_top_level_groups() {
+        let mut domain = DomainState::new();
+        let a = create(&mut domain, "task-a", project(REPO_A));
+        let b = create(&mut domain, "task-b", project(REPO_B));
+        domain
+            .edit(
+                a,
+                "task-a",
+                None,
+                project(REPO_A),
+                Some("release".to_string()),
+            )
+            .expect("thread a");
+        domain
+            .edit(
+                b,
+                "task-b",
+                None,
+                project(REPO_B),
+                Some("release".to_string()),
+            )
+            .expect("thread b");
+
+        let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(REPO_A)));
+        model.set_home_tab(BoardTab::Projects);
+        assert!(model.toggle_all_groups());
+        assert!(model.visible_ids().is_empty());
+        assert!(model.toggle_all_groups());
+        assert_eq!(model.visible_ids().len(), 2);
+
+        model.set_home_tab(BoardTab::Threads);
+        assert!(model.toggle_all_groups());
+        assert!(model.visible_ids().is_empty());
+        assert!(model.toggle_all_groups());
+        assert_eq!(model.visible_ids().len(), 2);
+
+        model.set_home_tab(BoardTab::Desk);
+        assert!(!model.toggle_all_groups());
     }
 
     #[test]

@@ -5,7 +5,6 @@ use std::time::Instant;
 
 use uuid::Uuid;
 
-use crate::config::{default_config_dir, SettingsRecord};
 use crate::context::InvocationSnapshot;
 use crate::domain::{normalize_thread, DomainError, DomainState, HumanStatus, TaskScope};
 use crate::ui::capture::{CaptureField, TITLE_REQUIRED_MESSAGE};
@@ -416,13 +415,18 @@ fn apply_board_intent(
                 // The view names no field: entering from the page lands on the form's own
                 // field (Title at open) rather than advancing past it.
                 model.enter_page_field_focus();
-            } else if model.form.is_some() && model.input_mode != BoardInputMode::FormScopeDropdown
+            } else if model.form.is_some()
+                && model.input_mode != BoardInputMode::FormScopeDropdown
+                && !select_step_from_tab(model, true)
             {
                 model.move_form_focus(true);
             }
             return Ok(IntentOutcome::None);
         }
         BoardIntent::FormFocusPrev => {
+            if model.input_mode == BoardInputMode::EditTitle && select_step_from_tab(model, false) {
+                return Ok(IntentOutcome::None);
+            }
             if model.input_mode == BoardInputMode::TaskPage {
                 model.enter_page_field_focus();
             } else if model.form.is_some() && model.input_mode != BoardInputMode::FormScopeDropdown
@@ -512,9 +516,13 @@ fn apply_board_intent(
         }
         BoardIntent::BeginAddStep => {
             model.close_popup();
-            // The step input lives on the task page's footer row; from any other
-            // surface there is no footer line to paint it on, so the verb is inert.
-            if model.form.as_ref().is_some_and(|form| form.is_task()) {
+            // Steps belong to a task edit session. The view-only page remains read-only until
+            // a field has been entered with Ctrl+E/Ctrl+N or Tab, matching every other edit.
+            if model
+                .form
+                .as_ref()
+                .is_some_and(|form| form.is_task() && form.editing)
+            {
                 open_step_editor(model, "", None);
             }
             return Ok(IntentOutcome::None);
@@ -856,6 +864,15 @@ fn apply_board_intent(
             model.clear_message();
             return Ok(IntentOutcome::None);
         }
+        BoardIntent::ToggleAllGroups => {
+            let previous_visible = model.visible_ids();
+            let previous = model.selection_id;
+            if model.toggle_all_groups() {
+                model.reanchor_selection(previous, &previous_visible);
+            }
+            model.clear_message();
+            return Ok(IntentOutcome::None);
+        }
         BoardIntent::SelectSectionProject(index) => {
             let Some(path) = model
                 .queue_view()
@@ -1019,23 +1036,23 @@ fn apply_board_intent(
             return Ok(IntentOutcome::None);
         }
         BoardIntent::SelectStep(index) => {
-            // AC-21: a click on an step row moves the step cursor onto that step,
-            // scrolling the window to reveal it if hidden. A click only selects —
-            // no toggle, no editor, no delete mark, nothing persisted — and any
-            // armed mark was already cleared as an intervening intent above
-            // (AC-11). The mouse map produces this intent only for the page in
-            // view mode; anywhere else it stays inert.
-            if model.input_mode == BoardInputMode::TaskPage {
-                if let Some(form) = model.form.as_mut().filter(|form| form.is_task()) {
-                    let steps = form
-                        .task_id()
-                        .and_then(|id| domain.get(id))
-                        .map(|task| task.steps.len())
-                        .unwrap_or(0);
-                    if index < steps {
-                        form.steps.cursor = Some(index);
-                        steps_scroll_to_cursor(form, index);
-                    }
+            // A click selects a step only after the page has entered task edit mode. It never
+            // toggles or changes the step by itself, and it returns the page from its field
+            // editor to the selected-step surface so Ctrl+E can rename that exact row.
+            if let Some(form) = model
+                .form
+                .as_mut()
+                .filter(|form| form.is_task() && form.editing)
+            {
+                let steps = form
+                    .task_id()
+                    .and_then(|id| domain.get(id))
+                    .map(|task| task.steps.len())
+                    .unwrap_or(0);
+                if index < steps {
+                    form.steps.cursor = Some(index);
+                    steps_scroll_to_cursor(form, index);
+                    model.input_mode = BoardInputMode::TaskPage;
                 }
             }
             return Ok(IntentOutcome::None);
@@ -1093,13 +1110,8 @@ fn apply_board_intent(
                         .map(|task| task.steps.len())
                         .unwrap_or(0);
                     match form.steps.cursor {
-                        // A bare Down on a task with steps activates the cursor on
-                        // the first step instead of scrolling, including after an
-                        // earlier Up-deactivation (AC-17, AC-18).
-                        None if steps > 0 => {
-                            form.steps.cursor = Some(0);
-                            steps_scroll_to_cursor(form, 0);
-                        }
+                        // Step selection begins with Tab or a click, never with reading
+                        // navigation. Once selected, Down moves within the editable steps.
                         Some(index) if steps > 0 => {
                             let cursor = (index + 1).min(steps - 1);
                             form.steps.cursor = Some(cursor);
@@ -1260,16 +1272,6 @@ fn apply_board_intent(
                 }
                 return Err(error);
             }
-        }
-        BoardIntent::ToggleVerbModifier => {
-            model.verb_modifier = model.verb_modifier.toggled();
-            model.close_command_surface();
-            if let Err(error) =
-                SettingsRecord::new(default_config_dir()).set_verb_modifier(model.verb_modifier)
-            {
-                model.set_message(format!("could not save verb keys: {error}"));
-            }
-            return Ok(IntentOutcome::None);
         }
     }
 
@@ -1518,6 +1520,40 @@ fn confirm_edit(
 // Steps step cursor, verbs, and one-line editor (T-3)
 // ---------------------------------------------------------------------------
 
+/// Move from the form's end fields into an existing step through Tab / Shift+Tab. A task page
+/// must already be in its edit session, so view-mode reading keys cannot select or mutate steps.
+fn select_step_from_tab(model: &mut BoardModel, forward: bool) -> bool {
+    let target = model.form.as_ref().and_then(|form| {
+        if !form.is_task()
+            || !form.editing
+            || (forward && form.focus != CaptureField::Scope)
+            || (!forward && form.focus != CaptureField::Title)
+        {
+            None
+        } else {
+            let task_id = form.task_id()?;
+            let count = model
+                .tasks
+                .iter()
+                .find(|task| task.id == task_id)
+                .map(|task| task.steps.len())?;
+            (count > 0).then_some(if forward { 0 } else { count - 1 })
+        }
+    });
+    let Some(target) = target else {
+        return false;
+    };
+    let form = model
+        .form
+        .as_mut()
+        .filter(|form| form.is_task())
+        .expect("the checked task form stays open");
+    form.steps.cursor = Some(target);
+    steps_scroll_to_cursor(form, target);
+    model.input_mode = BoardInputMode::TaskPage;
+    true
+}
+
 /// The step the page's cursor highlights, as (task id, step id), when the page is in
 /// view mode with a task form open, the step cursor active, and the highlighted index
 /// still naming a live step. `None` in every other case — including a cursor left past
@@ -1527,7 +1563,10 @@ fn cursor_step(domain: &DomainState, model: &BoardModel) -> Option<(Uuid, Uuid)>
     if model.input_mode != BoardInputMode::TaskPage {
         return None;
     }
-    let form = model.form.as_ref().filter(|form| form.is_task())?;
+    let form = model
+        .form
+        .as_ref()
+        .filter(|form| form.is_task() && form.editing)?;
     let task_id = form.task_id()?;
     let index = form.steps.cursor?;
     let step_id = domain.get(task_id)?.steps.get(index).map(|step| step.id)?;
@@ -1536,12 +1575,18 @@ fn cursor_step(domain: &DomainState, model: &BoardModel) -> Option<(Uuid, Uuid)>
 
 /// Keep the selected step in the renderer-recorded shared content viewport.
 fn steps_scroll_to_cursor(form: &mut BoardForm, cursor: usize) {
+    let counts = form.steps.row_counts.borrow();
+    let wrapped_before: usize = if counts.len() >= cursor {
+        counts.iter().take(cursor).copied().sum()
+    } else {
+        cursor
+    };
     let target = form
         .steps
         .content_start
         .get()
         .saturating_add(1)
-        .saturating_add(cursor);
+        .saturating_add(wrapped_before);
     let rows = form.steps.window_rows.get().max(1);
     if target < form.notes_scroll {
         form.notes_scroll = target;

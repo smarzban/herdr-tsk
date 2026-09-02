@@ -11,7 +11,7 @@ use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::layout::{Position, Rect};
 use ratatui::DefaultTerminal;
 
-use crate::config::{default_config_dir, SettingsRecord, WalkthroughRecord};
+use crate::config::{default_config_dir, WalkthroughRecord};
 use crate::context::{build_snapshot, InvocationSnapshot, RawHostContext};
 use crate::domain::{DomainError, DomainState};
 use crate::save_recovery::SaveRecovery;
@@ -88,8 +88,7 @@ pub fn load_board() -> Result<(TaskStore, DomainState, BoardModel), Box<dyn Erro
     let store = TaskStore::new(default_state_dir());
     let state = store.load()?;
     let snapshot = load_snapshot();
-    let mut model = BoardModel::from_domain(&state, snapshot.this_repo.clone());
-    model.verb_modifier = SettingsRecord::new(default_config_dir()).verb_modifier();
+    let model = BoardModel::from_domain(&state, snapshot.this_repo.clone());
     Ok((store, state, model))
 }
 
@@ -1915,7 +1914,7 @@ mod tests {
             apply_intent(domain, model, intent, None)
                 .unwrap_or_else(|e| panic!("{area:?}: {key:?} must apply cleanly: {e:?}"))
         }
-        let alt = |code| KeyEvent::new(code, KeyModifiers::ALT);
+        let ctrl = |code| KeyEvent::new(code, KeyModifiers::CONTROL);
         let bare = |code| KeyEvent::new(code, KeyModifiers::NONE);
 
         for area in [
@@ -1936,7 +1935,7 @@ mod tests {
                 )
                 .expect("create task");
             let mut model = BoardModel::from_domain(&domain, None);
-            drive(&mut domain, &mut model, area, alt(KeyCode::Char('d')));
+            drive(&mut domain, &mut model, area, ctrl(KeyCode::Char('d')));
             assert_eq!(
                 domain.get(id).expect("task").status,
                 HumanStatus::Done,
@@ -1956,7 +1955,7 @@ mod tests {
                 )
                 .expect("create task");
             let mut model = BoardModel::from_domain(&domain, None);
-            drive(&mut domain, &mut model, area, alt(KeyCode::Char(' ')));
+            drive(&mut domain, &mut model, area, ctrl(KeyCode::Char(' ')));
             assert_eq!(
                 domain.get(id).expect("task").status,
                 HumanStatus::Started,
@@ -1976,7 +1975,7 @@ mod tests {
                 )
                 .expect("create task");
             let mut model = BoardModel::from_domain(&domain, None);
-            drive(&mut domain, &mut model, area, alt(KeyCode::Char('x')));
+            drive(&mut domain, &mut model, area, ctrl(KeyCode::Char('x')));
             assert!(
                 domain.get(id).expect("task").soft_deleted,
                 "{area:?}: 'x' must actually soft-delete the task through the live route"
@@ -2472,6 +2471,10 @@ mod tests {
         let mut model = BoardModel::from_domain(&domain, None);
         let mut recovery = SaveRecovery::new();
         apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open");
+        apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+            .expect("enter task edit mode");
+        apply_intent(&mut domain, &mut model, BoardIntent::CancelEdit, None)
+            .expect("return to task page");
         apply_intent(&mut domain, &mut model, BoardIntent::BeginAddStep, None).expect("edit");
         for ch in "next step".chars() {
             apply_intent(&mut domain, &mut model, BoardIntent::EditInsert(ch), None).expect("type");
@@ -2926,19 +2929,19 @@ mod tests {
 
         for (key, expected) in [
             (
-                KeyEvent::new(KeyCode::Char('e'), KeyModifiers::ALT),
+                KeyEvent::new(KeyCode::Char('e'), KeyModifiers::CONTROL),
                 BoardIntent::BeginEditTitle,
             ),
             (
-                KeyEvent::new(KeyCode::Char('n'), KeyModifiers::ALT),
+                KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL),
                 BoardIntent::BeginEditNotes,
             ),
             (
-                KeyEvent::new(KeyCode::Char('d'), KeyModifiers::ALT),
+                KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL),
                 BoardIntent::Complete,
             ),
             (
-                KeyEvent::new(KeyCode::Char(' '), KeyModifiers::ALT),
+                KeyEvent::new(KeyCode::Char(' '), KeyModifiers::CONTROL),
                 BoardIntent::PrimaryVerb,
             ),
         ] {
@@ -3042,7 +3045,7 @@ mod tests {
             ),
         ] {
             let mods = if mode == BoardInputMode::TaskPage {
-                KeyModifiers::ALT
+                KeyModifiers::CONTROL
             } else {
                 KeyModifiers::NONE
             };

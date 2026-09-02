@@ -89,10 +89,10 @@ pub enum CaptureIntent {
 /// Bottom chrome: compact key legend for capture form.
 pub const CAPTURE_HELP_LINE: &str =
     "Tab fields  ·  1–3 scope  ·  3 other path  ·  Enter save  ·  Esc cancel";
-/// Bottom chrome while Notes has focus: Enter opens a line there, so the save chord pair
-/// has to be on screen. Wording mirrors the board's Notes chrome.
+/// Bottom chrome while Notes has focus: Enter opens a line there, so the Ctrl save chord has
+/// to be on screen. Wording mirrors the board's Notes chrome.
 pub const CAPTURE_NOTES_HELP_LINE: &str =
-    "Tab fields  ·  Ctrl+Enter save (or Alt+Enter)  ·  Enter newline  ·  Esc cancel";
+    "Tab fields  ·  Ctrl+Enter save  ·  Enter newline  ·  Esc cancel";
 /// Compact legend shown while a Capture save is unresolved.
 pub const CAPTURE_SAVE_RECOVERY_HELP_LINE: &str = "r retry  ·  c cancel";
 
@@ -280,12 +280,12 @@ pub enum BoardIntent {
     OpenHelp,
     /// `Esc` — layered close. Full layer order lands in.
     CloseLayer,
-    /// Flip mutating verb chords between Alt and Ctrl and persist the choice.
-    ToggleVerbModifier,
+    /// Toggle all group headers on the active home tab (`Ctrl+G`).
+    ToggleAllGroups,
 }
 
 /// Bottom chrome: compact key legend for primary board actions.
-pub const BOARD_HELP_LINE: &str = "↑↓/jk  ·  alt+space primary  ·  enter open  ·  → peek  ·  alt+d done  ·  alt+o reopen  ·  alt+b block  ·  + capture  ·  alt+e title  ·  alt+x del  ·  alt+u undo  ·  z drawer  ·  : palette  ·  ? help  ·  alt+q quit";
+pub const BOARD_HELP_LINE: &str = "↑↓/jk  ·  ctrl+space primary  ·  enter open  ·  → peek  ·  ctrl+d done  ·  ctrl+o reopen  ·  ctrl+b block  ·  + capture  ·  ctrl+e title  ·  ctrl+x del  ·  ctrl+u undo  ·  ctrl+g groups  ·  z drawer  ·  : palette  ·  ? help  ·  ctrl+q quit";
 /// Compact legend shown while the action sheet or command palette is open.
 pub const COMMAND_SURFACE_HELP_LINE: &str =
     "↑↓ select  ·  type to filter  ·  Enter run  ·  Esc close";
@@ -502,6 +502,9 @@ pub fn normal_help_bindings() -> Vec<(&'static str, &'static str)> {
             bindings.push(binding);
         }
     }
+    // Ctrl+G is deliberately not a normal key-map entry: it only acts on the home
+    // Projects and Threads lenses, never while a task page owns input.
+    bindings.push(("ctrl+g", "groups"));
     bindings
 }
 
@@ -543,10 +546,10 @@ pub fn help_card_lines(verbs: VerbModifier) -> Vec<String> {
 ///
 /// Only press (and repeat) events produce intents. Unknown keys → `None`.
 pub fn map_key(mode: BoardInputMode, key: KeyEvent) -> Option<BoardIntent> {
-    map_key_with(mode, key, VerbModifier::Alt)
+    map_key_with(mode, key, VerbModifier::Ctrl)
 }
 
-/// Map a key using the configured mutating-verb modifier (Alt by default, Ctrl if chosen).
+/// Map a key using the fixed Ctrl modifier for mutating verbs.
 pub fn map_key_with(
     mode: BoardInputMode,
     key: KeyEvent,
@@ -592,15 +595,14 @@ pub fn map_quick_add_key(key: KeyEvent) -> Option<BoardIntent> {
     let mods = key.modifiers;
     let ctrl = mods.contains(KeyModifiers::CONTROL);
     let alt = mods.contains(KeyModifiers::ALT);
+    let shift = mods.contains(KeyModifiers::SHIFT);
     match key.code {
-        KeyCode::Enter if ctrl => return Some(BoardIntent::QuickAddSaveNext),
+        KeyCode::Enter if shift && !ctrl && !alt => return Some(BoardIntent::QuickAddSaveNext),
         KeyCode::Tab if mods.is_empty() => return Some(BoardIntent::ExpandQuickAdd),
         KeyCode::Char('a') if ctrl => return Some(BoardIntent::QuickAddMoveLineStart),
         KeyCode::Char('e') if ctrl => return Some(BoardIntent::QuickAddMoveLineEnd),
-        KeyCode::Char('b') if alt => return Some(BoardIntent::QuickAddMoveWordLeft),
-        KeyCode::Char('f') if alt => return Some(BoardIntent::QuickAddMoveWordRight),
-        KeyCode::Left if ctrl || alt => return Some(BoardIntent::QuickAddMoveWordLeft),
-        KeyCode::Right if ctrl || alt => return Some(BoardIntent::QuickAddMoveWordRight),
+        KeyCode::Left if ctrl => return Some(BoardIntent::QuickAddMoveWordLeft),
+        KeyCode::Right if ctrl => return Some(BoardIntent::QuickAddMoveWordRight),
         _ => {}
     }
     if mods.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER) {
@@ -656,9 +658,8 @@ fn map_form_scope_dropdown_key(key: KeyEvent) -> Option<BoardIntent> {
 
 /// Shared field-edit key map for board forms and the legacy mode-only edit entry point.
 ///
-/// The chord table runs before modified-key rejection so bound Ctrl/Alt presses cannot fall
-/// through to printable insertion. `Ctrl+Enter` only carries CONTROL with the disambiguating
-/// keyboard protocol, so `Alt+Enter` remains the equal save chord (ADR 0006).
+/// The chord table runs before modified-key rejection so bound Ctrl presses cannot fall
+/// through to printable insertion.
 fn map_form_edit_key(
     focused: CaptureField,
     navigation: FormEditNavigation,
@@ -669,12 +670,11 @@ fn map_form_edit_key(
     }
     let mods = key.modifiers;
     let ctrl = mods.contains(KeyModifiers::CONTROL);
-    let alt = mods.contains(KeyModifiers::ALT);
 
     match key.code {
         // This saves from EVERY field, Scope included. The modified-key rejection below makes
         // Scope's chord an intentional early return, never a fallthrough to its dropdown route.
-        KeyCode::Enter if ctrl || alt => return Some(BoardIntent::ConfirmEdit),
+        KeyCode::Enter if ctrl => return Some(BoardIntent::ConfirmEdit),
         KeyCode::Tab => match navigation {
             FormEditNavigation::None => {}
             FormEditNavigation::Form => return Some(BoardIntent::FormFocusNext),
@@ -690,16 +690,10 @@ fn map_form_edit_key(
         KeyCode::Char('e') if ctrl && focused != CaptureField::Scope => {
             return Some(BoardIntent::EditMoveLineEnd)
         }
-        KeyCode::Char('b') if alt && focused != CaptureField::Scope => {
+        KeyCode::Left if ctrl && focused != CaptureField::Scope => {
             return Some(BoardIntent::EditMoveWordLeft)
         }
-        KeyCode::Char('f') if alt && focused != CaptureField::Scope => {
-            return Some(BoardIntent::EditMoveWordRight)
-        }
-        KeyCode::Left if (ctrl || alt) && focused != CaptureField::Scope => {
-            return Some(BoardIntent::EditMoveWordLeft)
-        }
-        KeyCode::Right if (ctrl || alt) && focused != CaptureField::Scope => {
+        KeyCode::Right if ctrl && focused != CaptureField::Scope => {
             return Some(BoardIntent::EditMoveWordRight)
         }
         _ => {}
@@ -863,7 +857,7 @@ pub fn intent_primary_action(intent: &BoardIntent) -> Option<PrimaryBoardAction>
         | BoardIntent::ToggleDoneDrawer
         | BoardIntent::OpenHelp
         | BoardIntent::CloseLayer
-        | BoardIntent::ToggleVerbModifier => None,
+        | BoardIntent::ToggleAllGroups => None,
     }
 }
 
@@ -872,29 +866,28 @@ pub fn primary_action_sample_key(action: PrimaryBoardAction) -> KeyEvent {
     let (code, mods) = match action {
         PrimaryBoardAction::SelectTask => (KeyCode::Char('j'), KeyModifiers::NONE),
         PrimaryBoardAction::OpenCapture => (KeyCode::Char('+'), KeyModifiers::NONE),
-        PrimaryBoardAction::EditTitle => (KeyCode::Char('e'), KeyModifiers::ALT),
-        PrimaryBoardAction::Complete => (KeyCode::Char('d'), KeyModifiers::ALT),
-        PrimaryBoardAction::Reopen => (KeyCode::Char('o'), KeyModifiers::ALT),
-        PrimaryBoardAction::SoftDelete => (KeyCode::Char('x'), KeyModifiers::ALT),
-        PrimaryBoardAction::Undo => (KeyCode::Char('u'), KeyModifiers::ALT),
+        PrimaryBoardAction::EditTitle => (KeyCode::Char('e'), KeyModifiers::CONTROL),
+        PrimaryBoardAction::Complete => (KeyCode::Char('d'), KeyModifiers::CONTROL),
+        PrimaryBoardAction::Reopen => (KeyCode::Char('o'), KeyModifiers::CONTROL),
+        PrimaryBoardAction::SoftDelete => (KeyCode::Char('x'), KeyModifiers::CONTROL),
+        PrimaryBoardAction::Undo => (KeyCode::Char('u'), KeyModifiers::CONTROL),
     };
     KeyEvent::new(code, mods)
 }
 
 /// the normal-mode map. Walks [`NORMAL_KEYMAP`], the same table help uses.
-fn verb_mod_held(verbs: VerbModifier, mods: KeyModifiers) -> bool {
-    match verbs {
-        VerbModifier::Alt => {
-            mods.contains(KeyModifiers::ALT) && !mods.contains(KeyModifiers::CONTROL)
-        }
-        VerbModifier::Ctrl => {
-            mods.contains(KeyModifiers::CONTROL) && !mods.contains(KeyModifiers::ALT)
-        }
-    }
+fn verb_mod_held(_verbs: VerbModifier, mods: KeyModifiers) -> bool {
+    mods.contains(KeyModifiers::CONTROL) && !mods.contains(KeyModifiers::ALT)
 }
 
 fn map_normal(key: KeyEvent, verbs: VerbModifier) -> Option<BoardIntent> {
     let mods = key.modifiers;
+    if key.code == KeyCode::Char('g')
+        && mods.contains(KeyModifiers::CONTROL)
+        && !mods.intersects(KeyModifiers::ALT | KeyModifiers::SUPER)
+    {
+        return Some(BoardIntent::ToggleAllGroups);
+    }
     if key.code == KeyCode::Char('c') && mods.contains(KeyModifiers::CONTROL) {
         return Some(BoardIntent::Quit);
     }
@@ -909,21 +902,16 @@ fn map_normal(key: KeyEvent, verbs: VerbModifier) -> Option<BoardIntent> {
     Some(entry.intent.clone())
 }
 
-/// Task page view mode: the page is a focused single-task surface. Verbs act on the
-/// page's task, `e`/`n`/Tab enter field edits, `a` opens the steps step editor,
-/// bare arrows own the step cursor lifecycle (the reducer decides activation vs note
-/// scrolling from page state), Esc closes.
+/// Task page view mode: the page is a focused single-task surface. Ctrl verbs act on the
+/// page's task, Ctrl+E/Ctrl+N or Tab enter its field editing session, and bare arrows scroll
+/// unless a step has been selected. Esc closes.
 ///
-/// The steps verbs reuse this map's existing intents — `space`, `e`, `x` — because
-/// whether they act on the task or on the highlighted steps step depends on the step
-/// cursor state, which lives in the model, not the key event; the reducer disambiguates.
+/// The step verbs reuse this map's existing intents: Ctrl+Space, Ctrl+E, and Ctrl+X act on a
+/// selected step, otherwise on the task. The reducer disambiguates using the model cursor.
 fn map_task_page(key: KeyEvent, verbs: VerbModifier) -> Option<BoardIntent> {
     let mods = key.modifiers;
     if key.code == KeyCode::Char('c') && mods.contains(KeyModifiers::CONTROL) {
         return Some(BoardIntent::Quit);
-    }
-    if key.code == KeyCode::Enter && mods.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) {
-        return Some(BoardIntent::ConfirmEdit);
     }
     let verb = verb_mod_held(verbs, mods);
     let extra = mods.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER);
@@ -1025,12 +1013,8 @@ fn map_palette(key: KeyEvent) -> Option<BoardIntent> {
 ///
 /// The live board carries a `CaptureField` and calls [`map_board_form_key`] directly.
 fn map_edit(mode: BoardInputMode, key: KeyEvent) -> Option<BoardIntent> {
-    // The step editor's Ctrl+Enter is the rapid-capture loop (AC-12): save and
-    // reopen the line empty in add mode; rename mode downgrades to a plain save in
-    // the reducer. Alt+Enter stays the equal save chord (ADR 0006), mapping to
-    // `ConfirmEdit` through the shared form map below — and so does any composite
-    // carrying Alt alongside Control, which the shared chord table already
-    // classifies; excluding it here keeps the two tables agreeing on such an event.
+    // The step editor's Ctrl+Enter is the rapid-capture loop: save and reopen the line empty
+    // in add mode, while rename mode downgrades to a plain save in the reducer.
     if mode == BoardInputMode::EditStep
         && key.code == KeyCode::Enter
         && key.modifiers.contains(KeyModifiers::CONTROL)
@@ -1161,24 +1145,18 @@ pub fn map_capture_key_state(
 /// The Capture text fields' chord table, matching the board's.
 ///
 /// A pure function of the key event: it never queries a terminal capability. It runs before
-/// Capture's modified-chord rejection so a bound `Ctrl`/`Alt` press cannot fall through to
-/// the printable-character route, and everything still modified after it stays unbound.
-///
-/// `Ctrl+Enter` only carries CONTROL when the disambiguating keyboard protocol is active;
-/// without it the same press arrives bare, which is why `Alt+Enter` is an equal save chord
-/// (ADR 0006). `Ctrl+C` is not listed: Capture already cancels on it, ahead of this table.
+/// Capture's modified-chord rejection so a bound Ctrl press cannot fall through to the
+/// printable-character route, and everything still modified after it stays unbound. `Ctrl+C`
+/// is not listed: Capture already cancels on it, ahead of this table.
 fn map_capture_edit_chord(key: KeyEvent) -> Option<CaptureIntent> {
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-    let alt = key.modifiers.contains(KeyModifiers::ALT);
 
     match key.code {
-        KeyCode::Enter if ctrl || alt => Some(CaptureIntent::Save),
+        KeyCode::Enter if ctrl => Some(CaptureIntent::Save),
         KeyCode::Char('a') if ctrl => Some(CaptureIntent::MoveLineStart),
         KeyCode::Char('e') if ctrl => Some(CaptureIntent::MoveLineEnd),
-        KeyCode::Char('b') if alt => Some(CaptureIntent::MoveWordLeft),
-        KeyCode::Char('f') if alt => Some(CaptureIntent::MoveWordRight),
-        KeyCode::Left if ctrl || alt => Some(CaptureIntent::MoveWordLeft),
-        KeyCode::Right if ctrl || alt => Some(CaptureIntent::MoveWordRight),
+        KeyCode::Left if ctrl => Some(CaptureIntent::MoveWordLeft),
+        KeyCode::Right if ctrl => Some(CaptureIntent::MoveWordRight),
         _ => None,
     }
 }

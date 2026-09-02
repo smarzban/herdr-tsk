@@ -52,14 +52,14 @@ fn press(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)
 }
 
-fn alt(code: KeyCode) -> KeyEvent {
-    KeyEvent::new(code, KeyModifiers::ALT)
+fn ctrl(code: KeyCode) -> KeyEvent {
+    KeyEvent::new(code, KeyModifiers::CONTROL)
 }
 
 fn mapped_key(code: KeyCode) -> KeyEvent {
     match code {
         KeyCode::Char(' ' | 'd' | 'o' | 'b' | 'a' | 'e' | 'x' | 'u' | 'q') | KeyCode::Delete => {
-            alt(code)
+            ctrl(code)
         }
         _ => press(code),
     }
@@ -1309,7 +1309,7 @@ fn delete_notice_undo_control_is_clickable_and_matches_the_keyboard() {
         .iter()
         .find(|hit| matches!(hit.target, QueueHitTarget::DeleteNoticeUndo))
         .expect("no hit region for the painted Undo control");
-    let keyboard_intent = map_key(BoardInputMode::Normal, alt(KeyCode::Char('u'))).expect("u key");
+    let keyboard_intent = map_key(BoardInputMode::Normal, ctrl(KeyCode::Char('u'))).expect("u key");
     assert_eq!(keyboard_intent, BoardIntent::Undo);
     assert_eq!(click(undo_hit, &model, &hits), Some(BoardIntent::Undo));
 
@@ -1346,7 +1346,7 @@ fn delete_notice_undo_region_survives_a_title_containing_the_literal_u_undo() {
         .expect("no hit region for the painted Undo control");
 
     // The region must dispatch Undo when clicked, exactly as the plain-title case does.
-    let keyboard_intent = map_key(BoardInputMode::Normal, alt(KeyCode::Char('u'))).expect("u key");
+    let keyboard_intent = map_key(BoardInputMode::Normal, ctrl(KeyCode::Char('u'))).expect("u key");
     assert_eq!(keyboard_intent, BoardIntent::Undo);
     assert_eq!(click(undo_hit, &model, &hits), Some(BoardIntent::Undo));
 
@@ -1698,6 +1698,9 @@ fn page_step_add_footer_chip_routes_to_begin_add_step() {
     domain.add_step(id, "existing step").expect("add step");
     model = BoardModel::from_domain(&domain, None);
     apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+        .expect("enter task edit mode");
+    apply_intent(&mut domain, &mut model, BoardIntent::CancelEdit, None).expect("return to page");
     let verbs = board_verb_items(&model);
     let step_index = verbs
         .iter()
@@ -1748,7 +1751,9 @@ fn clicking_a_step_row_selects_it() {
     }
     model.sync_from_domain(&domain);
     apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open the page");
-    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+        .expect("enter task edit mode");
+    assert_eq!(model.input_mode(), BoardInputMode::EditTitle);
 
     // The click lands on step 3's painted row, located from the same frame the
     // hit map was recorded beside.

@@ -72,7 +72,7 @@ fn plus_opens_focused_bar_regardless_of_shift_and_legacy_chord_is_unbound() {
     assert_eq!(
         map_key(
             BoardInputMode::Normal,
-            KeyEvent::new(KeyCode::Char('a'), KeyModifiers::ALT)
+            KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL)
         ),
         None
     );
@@ -538,7 +538,7 @@ fn empty_enter_stays_open_esc_discards_and_tab_expands_the_seeded_task_page() {
             KeyEvent::new(KeyCode::Enter, KeyModifiers::ALT)
         ),
         None,
-        "Alt+Enter no longer expands quick add"
+        "Alt+Enter is ignored, it does not expand quick add"
     );
     apply(&mut domain, &mut model, BoardIntent::ExpandQuickAdd, None);
     assert_eq!(model.input_mode(), BoardInputMode::EditNotes);
@@ -1005,7 +1005,7 @@ fn capture_bar_renders_spaced_three_row_block_and_stays_bounded_without_color_sg
     for text in [
         "visible task",
         "title…   !p = desk · !p name = project · !t name = thread",
-        "enter save · ctrl+enter save+next · tab details · esc close",
+        "enter save · shift+enter save+next · tab details · esc close",
     ] {
         assert!(standard.contains(text), "missing {text:?}: {standard}");
     }

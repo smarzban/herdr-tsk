@@ -361,7 +361,9 @@ pub struct PaletteCommandRow<'a> {
 #[derive(Debug, Clone)]
 pub struct StepView {
     pub done: bool,
-    pub text: String,
+    /// Word-boundary wrapped text rows. The first carries the step glyph, later rows align
+    /// under its text so step content never truncates at the page edge.
+    pub rows: Vec<String>,
 }
 
 /// A focused one-line input in the board's shared bottom slot. The slot reserves
@@ -526,7 +528,7 @@ pub struct QueueFrameModel<'a> {
     pub status_undo_offset: Option<usize>,
     /// Verb-bar entries (trimmed to the geometry budget at paint time).
     pub verb_items: &'a [VerbEntry<'a>],
-    /// Prefix painted on mutating verb keys (`alt+` / `ctrl+`).
+    /// Prefix painted on mutating verb keys (`ctrl+`).
     pub verb_modifier: crate::config::VerbModifier,
     /// Clock for age labels (tests inject a fixed instant).
     pub now: SystemTime,
@@ -948,7 +950,7 @@ pub(crate) const QUICK_ADD_VERBS: &[VerbEntry<'static>] = &[
         label: "save",
     },
     VerbEntry {
-        key: "ctrl+enter",
+        key: "shift+enter",
         label: "save+next",
     },
     VerbEntry {
@@ -995,10 +997,6 @@ const FORM_TITLE_VERBS: &[VerbEntry<'static>] = &[
 const FORM_NOTES_VERBS: &[VerbEntry<'static>] = &[
     VerbEntry {
         key: "ctrl+enter",
-        label: "save",
-    },
-    VerbEntry {
-        key: "alt+enter",
         label: "save",
     },
     VerbEntry {
@@ -1081,18 +1079,11 @@ const EDIT_TITLE_VERBS: &[VerbEntry<'static>] = &[
     },
 ];
 
-/// Verb bar for the Notes editor: plain Enter opens a line (multi-line
-/// field), so the real save chord is Ctrl+Enter -- and, per ADR 0006, Alt+Enter is an
-/// *equal* save chord, not a fallback: Ctrl+Enter arrives bare (indistinguishable from a
-/// plain Enter) on terminals without the disambiguating keyboard protocol, where the
-/// advertised key would insert a line break instead of saving. Name both. Tab stays unbound.
+/// Verb bar for the Notes editor: plain Enter opens a line, so Ctrl+Enter saves. Tab stays
+/// unbound.
 const EDIT_NOTES_VERBS: &[VerbEntry<'static>] = &[
     VerbEntry {
         key: "ctrl+enter",
-        label: "save",
-    },
-    VerbEntry {
-        key: "alt+enter",
         label: "save",
     },
     VerbEntry {
@@ -2056,7 +2047,8 @@ fn paint_task_page(
     // Notes and steps form one vertical stream. Steps begin two blank rows after the
     // notes, and the header and metadata footer never participate in this scroll.
     let note_count = notes_rows.len().max(1);
-    let content = page_content_layout(note_count, step_views.len(), lay.notes_rows);
+    let step_rows: usize = step_views.iter().map(|step| step.rows.len().max(1)).sum();
+    let content = page_content_layout(note_count, step_rows, lay.notes_rows);
     let scroll = step_scroll.min(content.max_scroll);
     // Content has a two-cell gutter on both sides. An overflowing page keeps its
     // scrollbar outside that right gutter at the frame edge.
@@ -2119,9 +2111,19 @@ fn paint_task_page(
                 ),
             );
         } else if absolute > content.steps_start {
-            let index = absolute - content.steps_start - 1;
-            if let Some(step) = step_views.get(index) {
-                let gutter = if Some(index) == step_cursor {
+            let mut row = absolute - content.steps_start - 1;
+            let mut found = None;
+            for (index, step) in step_views.iter().enumerate() {
+                let rows = step.rows.len().max(1);
+                if row < rows {
+                    found = Some((index, step, row));
+                    break;
+                }
+                row -= rows;
+            }
+            if let Some((index, step, row_in_step)) = found {
+                let first_row = row_in_step == 0;
+                let gutter = if first_row && Some(index) == step_cursor {
                     "▸ "
                 } else {
                     "  "
@@ -2133,22 +2135,29 @@ fn paint_task_page(
                 } else {
                     "▪"
                 };
+                let text = step
+                    .rows
+                    .get(row_in_step)
+                    .map(String::as_str)
+                    .unwrap_or_default();
+                let prefix = if first_row {
+                    format!("{gutter}{glyph} ")
+                } else {
+                    "    ".to_string()
+                };
                 put_line(
                     frame,
                     y,
                     content_width,
-                    paint_bounded_line(
-                        &format!("{gutter}{glyph} {} ", step.text),
-                        content_width,
-                        style_plain(),
-                    ),
+                    paint_bounded_line(&format!("{prefix}{text} "), content_width, style_plain()),
                 );
                 hits.push(
                     QueueHitTarget::Step(index),
                     Rect::new(0, y, content_width, 1),
                 );
-                // Step text past `▸ `/`  ` + glyph + space; trailing pad stays out.
-                let step_prefix = 2u16 + display_width(glyph) as u16 + 1;
+                // Every wrapped row belongs to the same step. The continuation aligns with
+                // the first row's text and remains copyable without its selection gutter.
+                let step_prefix = 4u16;
                 hits.push_copyable(Rect::new(
                     step_prefix,
                     y,
@@ -2533,22 +2542,19 @@ fn paint_list_row(
     }
 }
 
-/// Read-only accordion body under an expanded task: notes preview,
-/// scope, and created/updated age. the has no agent surfaces to show here.
+/// Read-only accordion body under an expanded task: a short notes preview only.
 ///
 /// The peek (`→`) shows up to [`PEEK_NOTES_LINE_LIMIT`] wrapped note lines; a dim
-/// "… N more lines" tail names whatever did not fit. The full text lives behind `Enter`
-/// on the task page.
+/// "… N more lines" tail names whatever did not fit. A final corner closes the gutter,
+/// while the full task details remain behind `Enter` on the task page.
 const PEEK_NOTES_LINE_LIMIT: usize = 5;
 
 /// Peek accordion gutter (`    │ `). Copyable content starts after these cells.
 const PEEK_DETAIL_INDENT: &str = "    │ ";
+/// The final corner joins the note gutter back to the task row above.
+const PEEK_DETAIL_END: &str = "    └";
 
-fn detail_lines_for_task(
-    task: &Task,
-    now: SystemTime,
-    width: u16,
-) -> Vec<(Line<'static>, u16, u16)> {
+fn detail_lines_for_task(task: &Task, width: u16) -> Vec<(Line<'static>, u16, u16)> {
     let indent = PEEK_DETAIL_INDENT;
     let content_x = u16::try_from(display_width(indent)).unwrap_or(0);
     let content_width = width.saturating_sub(content_x);
@@ -2596,28 +2602,9 @@ fn detail_lines_for_task(
             );
         }
     }
-    if let Some(thread) = task.thread.as_deref() {
-        push(
-            &mut lines,
-            paint_bounded_line(&format!("{indent}thread #{thread}"), width, style_dim()),
-        );
-    }
-    let scope_text = match &task.scope {
-        TaskScope::Project { path } => short_project(path).to_string(),
-        TaskScope::Global => "desk".to_string(),
-    };
-    let age_text = format!(
-        "created {} ago · updated {} ago",
-        format_age(now, task.created_at),
-        format_age(now, task.updated_at)
-    );
     push(
         &mut lines,
-        paint_bounded_line(&format!("{indent}scope {scope_text}"), width, style_dim()),
-    );
-    push(
-        &mut lines,
-        paint_bounded_line(&format!("{indent}{age_text}"), width, style_dim()),
+        paint_bounded_line(PEEK_DETAIL_END, width, style_dim()),
     );
     lines
 }
@@ -2688,9 +2675,7 @@ fn build_list_rows(
             *selected_idx = Some(out.len() - 1);
         }
         if detail_target == Some(task.id) {
-            for (line, content_x, content_width) in
-                detail_lines_for_task(task, model.now, geo.row_width)
-            {
+            for (line, content_x, content_width) in detail_lines_for_task(task, geo.row_width) {
                 out.push(ListRow::Detail {
                     line,
                     content_x,
@@ -3199,7 +3184,7 @@ fn paint_selector_row(
                 if active {
                     style_reverse_bold()
                 } else {
-                    style_plain()
+                    style_dim()
                 },
             ));
             left_width += w;

@@ -338,7 +338,7 @@ fn fixture_model_on_tab<'a>(
         status_message: None,
         status_undo_offset: None,
         verb_items: fixture_verbs(),
-        verb_modifier: VerbModifier::Alt,
+        verb_modifier: VerbModifier::Ctrl,
         now: now(),
         overlay: QueueOverlay::None,
         detail_open: None,
@@ -1998,12 +1998,20 @@ fn standard_accordion_expands_full_width_under_selection_without_mutating_domain
         .map(|r| trimmed(r))
         .collect::<Vec<_>>()
         .join("\n");
-    for expected in ["no notes yet", "scope tsk", "created", "updated"] {
-        assert!(
-            body_joined.contains(expected),
-            "accordion body missing {expected:?}:\n{body_joined}"
-        );
-    }
+    assert!(
+        body_joined.contains("no notes yet"),
+        "accordion body must show its notes preview:\n{body_joined}"
+    );
+    assert!(
+        !body_joined.contains("scope") && !body_joined.contains("created"),
+        "peek must omit task metadata:\n{body_joined}"
+    );
+    assert!(
+        rows.get(selected_idx + 1 + body.len())
+            .is_some_and(|row| row.contains('└')),
+        "the notes gutter must end in a connected corner:\n{}",
+        rows.join("\n")
+    );
     // Every other task and every section header the base fixture paints (drawer open) must
     // still be present: the accordion expands the list, it never mutates or hides it.
     let joined = rows
@@ -2032,7 +2040,7 @@ fn standard_accordion_expands_full_width_under_selection_without_mutating_domain
 }
 
 /// Peek (`→`) body: up to five note lines, then a dim "N more lines" tail naming what did
-/// not fit, then the scope/age lines. Tasks with five or fewer note lines show no tail.
+/// not fit. Task metadata stays on the full page, and a final corner closes the note gutter.
 #[test]
 fn standard_peek_body_caps_notes_at_five_lines_with_a_more_lines_tail() {
     let mut tasks = fixture_tasks();
@@ -2074,8 +2082,14 @@ fn standard_peek_body_caps_notes_at_five_lines_with_a_more_lines_tail() {
         "peek must name the three hidden lines:\n{joined}"
     );
     assert!(
-        joined.contains("scope tsk") && joined.contains("created"),
-        "peek keeps the scope and age lines:\n{joined}"
+        !joined.contains("scope") && !joined.contains("created"),
+        "peek must omit task metadata:\n{joined}"
+    );
+    assert!(
+        rows.get(selected_idx + 1 + body.len())
+            .is_some_and(|row| row.contains('└')),
+        "the more-lines tail must be followed by the connected corner:\n{}",
+        rows.join("\n")
     );
 }
 
@@ -2146,12 +2160,10 @@ fn standard_accordion_on_a_task_below_the_fold_scrolls_the_whole_block_into_view
         viewport.contains("Padding task 29"),
         "the expanded task's own row must be scrolled into view:\n{viewport}"
     );
-    for expected in ["no notes yet", "scope tsk", "created", "updated"] {
-        assert!(
-            viewport.contains(expected),
-            "accordion body missing {expected:?} once scrolled into view:\n{viewport}"
-        );
-    }
+    assert!(
+        viewport.contains("no notes yet") && viewport.contains('└'),
+        "accordion body must show the notes preview and connected corner once scrolled into view:\n{viewport}"
+    );
 }
 
 /// G-2 (gate round 1, PR #11): with no expanded accordion open, the list once painted from
@@ -2231,7 +2243,7 @@ fn compact_peek_is_inline_and_editors_stay_full_screen_takeovers() {
         );
         if h > 10 {
             assert!(
-                viewport.contains("scope tsk"),
+                viewport.contains("no notes yet"),
                 "{w}x{h}: the peek body must weave inline under the row:\n{viewport}"
             );
         } else {
@@ -2385,7 +2397,7 @@ fn golden_scenes() -> Vec<GoldenScene> {
     // recorded here so a reviewer does not re-litigate the divergence as a bug.
     let mut help_model = fixture_model(&tasks, &board_view);
     let help_lines: Vec<String> =
-        tsk_tui::ui::input::help_card_lines(tsk_tui::config::VerbModifier::Alt);
+        tsk_tui::ui::input::help_card_lines(tsk_tui::config::VerbModifier::Ctrl);
     help_model.overlay = QueueOverlay::Help { lines: &help_lines };
     let (help_rows, _) = paint(80, 24, &help_model);
 
@@ -2563,6 +2575,10 @@ fn footer_lists_the_step_add_verb() {
         let mut model = BoardModel::from_domain(&domain, None);
         apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None)
             .expect("open task page");
+        apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+            .expect("enter task edit mode");
+        apply_intent(&mut domain, &mut model, BoardIntent::CancelEdit, None)
+            .expect("return to task page");
         let rows = board_rows(&model, width, 24);
         let verb_row = tier::resolve(width, 24).verb_row.expect("verb row");
         trimmed(&rows[verb_row as usize])
@@ -2571,27 +2587,21 @@ fn footer_lists_the_step_add_verb() {
     let with = page_verb_row_with(&["only step"], 100);
     let without = page_verb_row_with(&[], 100);
 
-    assert!(
-        with.contains("alt+a step"),
-        "view mode + steps must list the step-add verb (modifier by the bar's convention):\n{with}"
-    );
-    assert!(
-        !without.contains("step"),
-        "view mode + no steps keeps the pre-T-7 verb bar:\n{without}"
-    );
-    let suffix = " · alt+a step";
-    let stripped = with
-        .strip_suffix(suffix)
-        .unwrap_or_else(|| panic!("the with-steps bar must end in the step-add entry:\n{with}"));
+    for row in [&with, &without] {
+        assert!(
+            row.contains("ctrl+a step"),
+            "task edit mode must list the step-add verb, including an empty checklist:\n{row}"
+        );
+    }
     assert_eq!(
-        stripped, without,
-        "the step-add verb must be the footer verb bar's only change"
+        with, without,
+        "step availability belongs to task edit mode, not to whether a step already exists"
     );
 
     let floor = page_verb_row_with(&["only step"], 78);
     assert!(
-        floor.contains("alt+a"),
-        "the step-add key chord must stay listed at the standard width floor:\n{floor}"
+        floor.contains("ct…"),
+        "the compact verb-bar budget may ellipsize the final Ctrl chord, without making the bar overflow:\n{floor}"
     );
 }
 
@@ -2857,7 +2867,7 @@ fn board_with_headers_paints_within_40x10_and_all_tasks_reachable() {
 }
 
 #[test]
-fn peek_shows_thread_line_only_for_threaded_task() {
+fn peek_omits_thread_metadata_for_every_task() {
     let mut threaded = task(200, "threaded", HumanStatus::Ready, TaskScope::Global, 1);
     threaded.thread = Some("release".to_string());
     let mut threaded_model = BoardModel::from_tasks(vec![threaded], None);
@@ -2870,10 +2880,10 @@ fn peek_shows_thread_line_only_for_threaded_task() {
     )
     .expect("open threaded peek");
     assert!(
-        board_rows(&threaded_model, 80, 24)
+        !board_rows(&threaded_model, 80, 24)
             .join("\n")
             .contains("thread #release"),
-        "threaded peek must name its thread"
+        "thread metadata belongs to the task page, not the peek"
     );
 
     let mut unthreaded_model = BoardModel::from_tasks(
@@ -3164,7 +3174,7 @@ fn task_page_caps_a_wrapped_header_inside_the_page_body() {
         rows.join("\n")
     );
     assert!(
-        rows[9].contains("alt+e"),
+        rows[9].contains("ctrl+e"),
         "the verb row was overwritten by the header:\n{}",
         rows.join("\n")
     );

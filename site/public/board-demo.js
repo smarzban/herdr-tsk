@@ -623,7 +623,7 @@ import { parseCapture } from "./capture.js";
         ${title}
         <div class="dim">${esc(task.status)} · ${esc(projectName(task))}${task.thread ? ` · #${esc(task.thread)}` : ""}</div>
         ${notes}
-        <div class="foot dim">esc close · alt+e title · alt+n notes · alt+d done · alt+b block</div>
+        <div class="foot dim">esc close · e title · n notes · d done · b block</div>
       </div>`;
   }
 

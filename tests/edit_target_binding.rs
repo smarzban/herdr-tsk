@@ -555,8 +555,8 @@ fn a_restored_task_accepts_the_draft_the_deletion_refused() {
     );
     assert_eq!(
         model.input_mode(),
-        BoardInputMode::Normal,
-        "a successful confirm must release the edit session"
+        BoardInputMode::TaskPage,
+        "a successful confirm must return to the saved task page"
     );
 
     let alpha_final = store
@@ -790,7 +790,7 @@ fn a_soft_deleted_bind_opened_through_the_real_key_map_refuses_then_confirms_aft
     // loop and the queue board's key map route it, not a hand-built `BoardIntent`.
     let open_title = map_key(
         BoardInputMode::Normal,
-        KeyEvent::new(KeyCode::Char('e'), KeyModifiers::ALT),
+        KeyEvent::new(KeyCode::Char('e'), KeyModifiers::CONTROL),
     )
     .expect("e opens a title edit");
     assert_eq!(open_title, BoardIntent::BeginEditTitle);
@@ -907,8 +907,8 @@ fn a_soft_deleted_bind_opened_through_the_real_key_map_refuses_then_confirms_aft
     );
     assert_eq!(
         model.input_mode(),
-        BoardInputMode::Normal,
-        "a successful confirm must release the edit session"
+        BoardInputMode::TaskPage,
+        "a successful confirm must return to the saved task page"
     );
 
     let alpha_final = store

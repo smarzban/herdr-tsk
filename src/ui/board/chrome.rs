@@ -39,7 +39,7 @@ impl BoardModel {
 fn edit_chrome_legends(mode: BoardInputMode) -> [&'static str; 3] {
     match mode {
         BoardInputMode::EditNotes => [
-            "Ctrl+Enter save (or Alt+Enter) · Enter newline · Esc cancel",
+            "Ctrl+Enter save · Enter newline · Esc cancel",
             "Ctrl+Enter save · Esc cancel",
             "Ctrl+Enter save · Esc",
         ],

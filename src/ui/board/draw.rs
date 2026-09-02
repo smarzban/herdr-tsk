@@ -31,6 +31,25 @@ use super::model::{
 pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
     let help = |chord: &str, fallback: &'static str| keymap_help_label(chord).unwrap_or(fallback);
 
+    // The one-line step editor keeps its text field free of key-copy. Its save routes belong
+    // in the shared bottom verb bar, where every other action hint lives.
+    if model.input_mode() == BoardInputMode::EditStep {
+        return vec![
+            VerbEntry {
+                key: "enter",
+                label: "save",
+            },
+            VerbEntry {
+                key: "ctrl+enter",
+                label: "save+next",
+            },
+            VerbEntry {
+                key: "esc",
+                label: "cancel",
+            },
+        ];
+    }
+
     // The task page's view mode: its own legend, true for the bound task.
     let page_task = if model.input_mode() == BoardInputMode::TaskPage {
         model
@@ -89,11 +108,10 @@ pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
             key: "esc",
             label: "close",
         });
-        // AC-22: the footer verb bar lists the step-add verb while the page's task
-        // has at least one step. Last, like the board's capture entry, so the
-        // compact budget keeps the established verbs; the bar's prefix convention
-        // implies the modifier, exactly as for every other mutating key.
-        if !task.steps.is_empty() {
+        // Steps are editable only after a task field entered edit mode. The add route stays
+        // visible there even for an empty checklist, and its final position preserves the
+        // compact bar's established action priority.
+        if model.task_editing() {
             entries.push(VerbEntry {
                 key: "a",
                 label: "step",
@@ -177,9 +195,19 @@ fn build_task_page_overlay<'a>(
     let bound_task = form
         .task_id()
         .and_then(|id| model.tasks.iter().find(|task| task.id == id));
-    // The section consumes the extracted step views, never the raw storage. Notes and
-    // steps share one scrollable stream, with two blank rows separating the sections.
-    let step_views = bound_task.map(super::model::step_views).unwrap_or_default();
+    // The section consumes extracted, word-wrapped step views, never the raw storage. The
+    // reserved width is the scrollbar-safe content width less the step glyph and trailing
+    // pad, matching Notes' no-truncation behavior.
+    let step_text_width = width.saturating_sub(8);
+    let step_views = bound_task
+        .map(|task| super::model::step_views(task, step_text_width))
+        .unwrap_or_default();
+    form.steps.row_counts.replace(
+        step_views
+            .iter()
+            .map(|step| step.rows.len().max(1))
+            .collect(),
+    );
     // A step draft is windowed for the shared bottom input slot: the row less
     // the two-cell `▎ ` prompt that owns the terminal cursor.
     let step_editor = form
@@ -192,7 +220,7 @@ fn build_task_page_overlay<'a>(
             crate::ui::render::BottomInputSlot {
                 text,
                 cursor_col,
-                placeholder: "step…   enter save · ctrl+enter save+next · esc cancel",
+                placeholder: "step…",
                 refusal: editor.refusal.as_deref(),
                 above_rows: Vec::new(),
                 cursor_row_offset: 0,
@@ -363,7 +391,8 @@ fn build_task_page_overlay<'a>(
             form.notes_scroll,
         )
     };
-    let content = render::page_content_layout(notes_rows.len(), step_views.len(), lay.notes_rows);
+    let step_rows = step_views.iter().map(|step| step.rows.len().max(1)).sum();
+    let content = render::page_content_layout(notes_rows.len(), step_rows, lay.notes_rows);
     form.notes_max_scroll.set(content.max_scroll);
     form.steps.content_start.set(content.steps_start);
     form.notes_width.set(notes_width);
