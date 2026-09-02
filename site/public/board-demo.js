@@ -412,11 +412,6 @@ import { parseCapture } from "./capture.js";
     return notes.split(/\n/).slice(0, 5);
   }
 
-  function rule(label, count) {
-    const pad = Math.max(4, 52 - label.length);
-    return `${"─".repeat(pad)}${count}`;
-  }
-
   function paletteCommands() {
     const q = state.paletteQ.trim().toLowerCase();
     const all = [
@@ -645,7 +640,7 @@ import { parseCapture } from "./capture.js";
       .map((row) => {
         if (row.kind === "section" || row.kind === "sub") {
           const cls = row.kind === "sub" ? "tsk-sub" : "tsk-sec";
-          return `<div class="${cls}"><span class="sec">${esc(row.label)}</span> <span class="rule">${esc(rule(row.label, row.count))}</span></div>`;
+          return `<div class="${cls}"><span class="sec">${esc(row.label)}</span><span class="rule" aria-hidden="true"></span><span class="count">${row.count}</span></div>`;
         }
         if (row.kind === "group") {
           const mark = row.collapsed ? "▸" : "▾";
@@ -687,7 +682,7 @@ import { parseCapture } from "./capture.js";
       <div class="tsk-tabs">${state.focusProject ? chip : tabs}</div>
       <div class="tsk-list">${body || `<div class="dim">  nothing here</div>`}</div>
       <div class="tsk-foot">
-        <div class="foot-rule">──────────────────────────────────────────────────────────────</div>
+        <div class="foot-rule" aria-hidden="true"></div>
         ${footer}
       </div>`;
   }
