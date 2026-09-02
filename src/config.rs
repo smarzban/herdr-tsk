@@ -164,75 +164,6 @@ impl WalkthroughRecord {
     }
 }
 
-/// Chord used for mutating board verbs (`d`, `e`, `space`, …).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum VerbModifier {
-    /// Old settings that named `alt` migrate to the fixed Ctrl modifier.
-    #[serde(alias = "alt")]
-    #[default]
-    Ctrl,
-}
-
-impl VerbModifier {
-    pub fn prefix(self) -> &'static str {
-        "ctrl+"
-    }
-}
-
-const SETTINGS_FILE: &str = "settings.json";
-
-#[derive(Serialize, Deserialize, Default)]
-struct SettingsDocument {
-    #[serde(default)]
-    verb_modifier: VerbModifier,
-}
-
-/// Durable board settings under the plugin config dir.
-pub struct SettingsRecord {
-    dir: PathBuf,
-}
-
-impl SettingsRecord {
-    pub fn new(dir: impl Into<PathBuf>) -> Self {
-        Self { dir: dir.into() }
-    }
-
-    pub fn verb_modifier(&self) -> VerbModifier {
-        fs::read_to_string(self.dir.join(SETTINGS_FILE))
-            .ok()
-            .and_then(|data| serde_json::from_str::<SettingsDocument>(&data).ok())
-            .map(|document| document.verb_modifier)
-            .unwrap_or_default()
-    }
-
-    pub fn set_verb_modifier(&self, verb_modifier: VerbModifier) -> Result<(), StoreError> {
-        fs::create_dir_all(&self.dir)?;
-        let document = self.dir.join(SETTINGS_FILE);
-        let pid = std::process::id();
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0);
-        let tmp = self.dir.join(format!(".{SETTINGS_FILE}.tmp.{pid}.{nanos}"));
-        let payload = serde_json::to_vec_pretty(&SettingsDocument { verb_modifier })?;
-        let write = (|| {
-            let mut file = File::create(&tmp)?;
-            file.write_all(&payload)?;
-            file.sync_all()
-        })();
-        if let Err(error) = write {
-            let _ = fs::remove_file(&tmp);
-            return Err(error.into());
-        }
-        if let Err(error) = fs::rename(&tmp, &document) {
-            let _ = fs::remove_file(&tmp);
-            return Err(error.into());
-        }
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -439,41 +370,6 @@ mod tests {
         assert!(
             temp_files(&dir).is_empty(),
             "a failed write must leave no temp file behind"
-        );
-    }
-
-    #[test]
-    fn missing_settings_default_to_ctrl() {
-        let dir = temp_dir("settings-fresh");
-        let _guard = TempDirGuard(dir.clone());
-        assert_eq!(
-            SettingsRecord::new(&dir).verb_modifier(),
-            VerbModifier::Ctrl
-        );
-    }
-
-    #[test]
-    fn verb_modifier_round_trips() {
-        let dir = temp_dir("settings-round-trip");
-        let _guard = TempDirGuard(dir.clone());
-        let record = SettingsRecord::new(&dir);
-        record.set_verb_modifier(VerbModifier::Ctrl).expect("write");
-        assert_eq!(
-            SettingsRecord::new(&dir).verb_modifier(),
-            VerbModifier::Ctrl
-        );
-    }
-
-    #[test]
-    fn legacy_alt_verb_setting_migrates_to_ctrl() {
-        let dir = temp_dir("settings-legacy-alt");
-        let _guard = TempDirGuard(dir.clone());
-        fs::create_dir_all(&dir).expect("settings directory");
-        fs::write(dir.join(SETTINGS_FILE), r#"{"verb_modifier":"alt"}"#).expect("legacy settings");
-
-        assert_eq!(
-            SettingsRecord::new(&dir).verb_modifier(),
-            VerbModifier::Ctrl
         );
     }
 }

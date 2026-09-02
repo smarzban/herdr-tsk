@@ -49,18 +49,20 @@ The page is view-first. Verbs still need the modifier, except Tab and arrows.
 | --- | --- |
 | `ctrl+e` | edit title, or start task editing with the highlighted step inline |
 | `ctrl+n` | edit notes |
-| `Tab` / `Shift+Tab` | in view, select and cycle steps; in task editing, cycle Title, Notes, Thread, Scope, then steps |
-| `ctrl+a` | add an inline [step](/docs/steps/) after editing has started |
-| `Enter` | stays in view, it never opens step editing |
-| click a step | selects it in view, opens it inline only during task editing |
-| `↓` `↑` | move a selected step |
-| `ctrl+space` | toggle the highlighted step, or start/reopen the task |
-| `ctrl+x` | mark, then remove, the highlighted step; otherwise delete the task |
-| `Shift+Enter` | the only task-edit save chord; step add saves and opens the next row |
-| `Esc` | cancel the field, or close the page |
+| `Tab` / `Shift+Tab` | in view, loop forward or backward through stored steps and `+ step`; in task editing, loop Title, Notes, stored steps, `+ step`, Scope, Thread |
+| `ctrl+a` | open an independent inline [step](/docs/steps/) editor from view or any task-edit focus |
+| `Enter` | opens or saves selected `+ step`, parks an existing-step rename, opens Scope's picker, or toggles Thread's selected text editor |
+| click a step | selects it in view, opens it inline only during task editing; click `   + step` to add from any page edit state |
+| `↓` `↑` | Down activates the first stored step, then arrows move selected steps; an open add row scrolls the page |
+| `ctrl+space` | toggle the selected step, otherwise start or reopen the task |
+| `ctrl+d` / `ctrl+o` | complete / reopen the selected step, otherwise act on the task |
+| `ctrl+x` | in view, first mark then remove a selected step on a second press; in task edit immediately hide and stage its removal, otherwise delete the task |
+| `Shift+Enter` | task-edit save, or save a step and open the next empty step editor |
+| `Esc` | cancel the field, restore staged task-edit changes, or close the page |
 
 Title, Notes, Thread, and Scope clicks are inert until task editing starts. Once it
-has, each click opens that field; the Scope click opens its picker.
+has, Title and Notes open their fields, Scope opens its picker, and Thread first
+selects, then opens or closes its text editor on a second click.
 
 ## Capture line and form
 

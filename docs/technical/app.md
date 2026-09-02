@@ -24,7 +24,7 @@ commands is `cli::router`, not this helper.
 
 ### Board loop (shape)
 
-1. Load `TaskStore`, `DomainState`, snapshot, `BoardModel`, verb modifier.
+1. Load `TaskStore`, `DomainState`, snapshot, and `BoardModel`.
 2. Seed `StoreWatch` from the file we just loaded so the first idle tick does not
    immediately re-merge. The launch path does **not** call
    `open_walkthrough_for_launch` (that helper is for tests; the palette can still

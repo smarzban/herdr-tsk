@@ -30,7 +30,7 @@ argv / TSK_MODE / --find-board-pane
         ├── Board / Capture ──► tsk_tui::run ──► app::{run_board, run_capture}
         │                           │
         │                           ├── TaskStore  (tsk.json under TSK_STATE_DIR | ~/.tsk)
-        │                           ├── SettingsRecord / WalkthroughRecord  (~/.tsk)
+        │                           ├── WalkthroughRecord  (~/.tsk)
         │                           ├── InvocationSnapshot  (HERDR_PLUGIN_CONTEXT_JSON)
         │                           ├── DomainState  (in memory)
         │                           └── BoardModel / CaptureModel  (session only)
@@ -50,7 +50,7 @@ argv / TSK_MODE / --find-board-pane
 | [`ui/queue`](board-ui.md#queue-query) | Pure section derivation from a task snapshot | Selection, mouse |
 | [`context`](context.md) / [`scope`](context.md) | Invocation default and project tokens | Creating tasks |
 | [`capture`](capture.md) | Form/CLI create path into domain | Board chrome |
-| [`config`](config.md) | Verb modifier, walkthrough dismissal | Task document |
+| [`config`](config.md) | Walkthrough dismissal and config path | Task document |
 | [`plugin`](plugin.md) | herdr pane + actions | Store location (deliberately ignored) |
 | [`site`](site.md) | Marketing + operator docs | Binary behavior |
 
@@ -64,7 +64,7 @@ domain + session; the query is a pure function of tasks; paint consumes both.
 
 1. `cli::router::route` sees no subcommand and no `--find-board-pane` / `--help` → `Surface::Board`.
 2. `app::run` → `run_board`: `TaskStore::load`, `InvocationSnapshot` from env + cwd, `BoardModel::from_domain`.
-3. Settings load the fixed Ctrl verb modifier. Legacy `alt` settings migrate to Ctrl. `run_board` does **not** auto-open the walkthrough; `open_walkthrough_for_launch` remains for tests, and the palette can replay it.
+3. Mutating verbs use fixed Ctrl chords. `run_board` does **not** auto-open the walkthrough; `open_walkthrough_for_launch` remains for tests, and the palette can replay it.
 4. Frame loop is **settle, paint, wait** (`app::board_frame`). Idle ticks cheaply `stat` `tsk.json` and merge if it changed (`StoreWatch` + `merge_tasks_from_disk`).
 
 ### Mutating verb
@@ -124,6 +124,6 @@ Other standing rejections (from code comments and `AGENTS.md`, not a numbered AD
 | Frame loop, idle merge, save recovery | `src/app.rs`, `src/save_recovery.rs` |
 | `tsk add` / `list` / `steps` flags or JSON | `src/cli/` |
 | Invocation default, `!p` / `--project` | `src/context.rs`, `src/scope.rs` |
-| Verb modifier, walkthrough | `src/config.rs` |
+| Walkthrough dismissal | `src/config.rs` |
 | herdr pane open/focus | `herdr-plugin.toml`, `scripts/`, `src/board_pane.rs` |
 | Operator-facing keys/board/cli text | `site/src/content/docs/docs/` *and* `site/public/board-demo.js` |

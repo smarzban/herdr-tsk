@@ -4,7 +4,6 @@
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
-use crate::config::VerbModifier;
 use crate::domain::HumanStatus;
 
 use super::board::BoardInputMode;
@@ -141,6 +140,9 @@ pub enum BoardIntent {
     FormFocusPrev,
     /// Focus one painted field of the already-open shared form (mouse).
     FocusFormField(CaptureField),
+    /// Enter or a second click opens or closes the selected task-page Thread text editor.
+    /// It never commits or leaves the enclosing task edit session.
+    ToggleThreadEditing,
     /// Cycle the shared form's chosen task scope directly from its Scope field.
     FormCycleScope,
     /// Open the shared form's keyboard scope dropdown, move its pending selection, apply it,
@@ -508,10 +510,10 @@ pub fn normal_help_bindings() -> Vec<(&'static str, &'static str)> {
     bindings
 }
 
-fn help_chord_shown(chord: &str, verbs: VerbModifier) -> String {
+fn help_chord_shown(chord: &str) -> String {
     const MUTATING: &[&str] = &["q", "space", "d", "o", "b", "a", "e", "x/Delete", "u"];
     if MUTATING.contains(&chord) {
-        format!("{}{chord}", verbs.prefix())
+        format!("ctrl+{chord}")
     } else {
         chord.to_string()
     }
@@ -521,16 +523,16 @@ fn help_chord_shown(chord: &str, verbs: VerbModifier) -> String {
 ///
 /// No heading or trailing close instruction: the shared modal card's own title (`help`)
 /// and footer legend (`any key close`) already say both.
-pub fn help_card_lines(verbs: VerbModifier) -> Vec<String> {
+pub fn help_card_lines() -> Vec<String> {
     let mut lines = Vec::new();
     let bindings = normal_help_bindings();
     let mut i = 0;
     while i < bindings.len() {
         let (c1, l1) = bindings[i];
-        let c1 = help_chord_shown(c1, verbs);
+        let c1 = help_chord_shown(c1);
         if i + 1 < bindings.len() {
             let (c2, l2) = bindings[i + 1];
-            let c2 = help_chord_shown(c2, verbs);
+            let c2 = help_chord_shown(c2);
             // Compact's 40-column minimum needs both bindings on one line.
             lines.push(format!(" {c1} {l1} | {c2} {l2}"));
             i += 2;
@@ -546,21 +548,12 @@ pub fn help_card_lines(verbs: VerbModifier) -> Vec<String> {
 ///
 /// Only press (and repeat) events produce intents. Unknown keys → `None`.
 pub fn map_key(mode: BoardInputMode, key: KeyEvent) -> Option<BoardIntent> {
-    map_key_with(mode, key, VerbModifier::Ctrl)
-}
-
-/// Map a key using the fixed Ctrl modifier for mutating verbs.
-pub fn map_key_with(
-    mode: BoardInputMode,
-    key: KeyEvent,
-    verbs: VerbModifier,
-) -> Option<BoardIntent> {
     if !matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
         return None;
     }
     match mode {
-        BoardInputMode::Normal => map_normal(key, verbs),
-        BoardInputMode::TaskPage => map_task_page(key, verbs),
+        BoardInputMode::Normal => map_normal(key),
+        BoardInputMode::TaskPage => map_task_page(key),
         BoardInputMode::ProjectPicker => map_project_picker(key),
         BoardInputMode::SaveRecovery => map_save_recovery(key),
         BoardInputMode::Palette => map_palette(key),
@@ -568,11 +561,11 @@ pub fn map_key_with(
         BoardInputMode::QuickAdd => map_quick_add_key(key),
         BoardInputMode::FormScopeDropdown => map_board_form_key(CaptureField::Scope, true, key),
         BoardInputMode::EditScope => map_board_form_key(CaptureField::Scope, false, key),
-        BoardInputMode::EditThread => map_board_form_key(CaptureField::Thread, false, key),
+        BoardInputMode::SelectThread => map_selected_thread_key(key),
+        BoardInputMode::EditThread => map_thread_edit_key(key),
         BoardInputMode::EditTitle | BoardInputMode::EditNotes => map_edit(mode, key),
-        // A step edit belongs to the retained task form, not a modal editor. Tab therefore
-        // enters the task field traversal while its inline draft remains intact, while
-        // Shift+Enter keeps its add-mode save-and-next behavior.
+        // A step edit belongs to the retained task form, not a modal editor. Enter saves one
+        // independent add; Shift+Enter saves and opens the next empty add row.
         BoardInputMode::EditStep => {
             if key.code == KeyCode::Enter
                 && key.modifiers.contains(KeyModifiers::SHIFT)
@@ -581,11 +574,62 @@ pub fn map_key_with(
                     .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
             {
                 Some(BoardIntent::ConfirmEditNext)
+            } else if key.code == KeyCode::Enter && key.modifiers.is_empty() {
+                Some(BoardIntent::ConfirmEdit)
+            } else if matches!(key.code, KeyCode::Up | KeyCode::Down) && key.modifiers.is_empty() {
+                Some(if key.code == KeyCode::Up {
+                    BoardIntent::PageScrollUp
+                } else {
+                    BoardIntent::PageScrollDown
+                })
+            } else if key.modifiers.contains(KeyModifiers::CONTROL)
+                && !key
+                    .modifiers
+                    .intersects(KeyModifiers::ALT | KeyModifiers::SUPER)
+            {
+                match key.code {
+                    KeyCode::Char('a') => Some(BoardIntent::BeginAddStep),
+                    KeyCode::Char('d') => Some(BoardIntent::Complete),
+                    KeyCode::Char('o') => Some(BoardIntent::Reopen),
+                    KeyCode::Char('x') | KeyCode::Delete => Some(BoardIntent::SoftDelete),
+                    _ => {
+                        map_form_edit_key(CaptureField::Title, FormEditNavigation::Form, true, key)
+                    }
+                }
             } else {
-                map_form_edit_key(CaptureField::Title, FormEditNavigation::Form, key)
+                map_form_edit_key(CaptureField::Title, FormEditNavigation::Form, true, key)
             }
         }
     }
+}
+
+/// Map the selected task-page Thread footer. It is a navigation target until Enter or a
+/// second click deliberately opens the text cursor.
+fn map_selected_thread_key(key: KeyEvent) -> Option<BoardIntent> {
+    if key.code == KeyCode::Enter && key.modifiers.is_empty() {
+        return Some(BoardIntent::ToggleThreadEditing);
+    }
+    // A selected footer is navigation, not an invisible editor. Retain only session controls
+    // from the shared field map, so printable input cannot mutate a draft without a cursor.
+    match map_form_edit_key(CaptureField::Thread, FormEditNavigation::Form, true, key) {
+        intent @ Some(
+            BoardIntent::BeginAddStep
+            | BoardIntent::ConfirmEdit
+            | BoardIntent::CancelEdit
+            | BoardIntent::FormFocusNext
+            | BoardIntent::FormFocusPrev,
+        ) => intent,
+        _ => None,
+    }
+}
+
+/// Map an active task-page Thread editor. Plain Enter returns to the selected footer, retaining
+/// its draft and the surrounding task session; Shift+Enter remains the sole save route.
+fn map_thread_edit_key(key: KeyEvent) -> Option<BoardIntent> {
+    if key.code == KeyCode::Enter && key.modifiers.is_empty() {
+        return Some(BoardIntent::ToggleThreadEditing);
+    }
+    map_form_edit_key(CaptureField::Thread, FormEditNavigation::Form, true, key)
 }
 
 /// Focus-navigation intents layered over the shared field editor map.
@@ -648,7 +692,20 @@ pub fn map_board_form_key(
     if dropdown_open {
         return map_form_scope_dropdown_key(key);
     }
-    map_form_edit_key(focused, FormEditNavigation::Form, key)
+    map_form_edit_key(focused, FormEditNavigation::Form, false, key)
+}
+
+/// Map a retained task form, where Ctrl+A owns inline step capture.
+pub fn map_task_form_key(
+    focused: CaptureField,
+    dropdown_open: bool,
+    key: KeyEvent,
+) -> Option<BoardIntent> {
+    if dropdown_open {
+        map_form_scope_dropdown_key(key)
+    } else {
+        map_form_edit_key(focused, FormEditNavigation::Form, true, key)
+    }
 }
 
 /// Scope dropdown keys are the one form-mode extra: it owns its temporary selection rather than
@@ -676,6 +733,7 @@ fn map_form_scope_dropdown_key(key: KeyEvent) -> Option<BoardIntent> {
 fn map_form_edit_key(
     focused: CaptureField,
     navigation: FormEditNavigation,
+    task_steps: bool,
     key: KeyEvent,
 ) -> Option<BoardIntent> {
     if !matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
@@ -699,6 +757,7 @@ fn map_form_edit_key(
             FormEditNavigation::Form => return Some(BoardIntent::FormFocusPrev),
         },
         KeyCode::Char('c') if ctrl => return Some(BoardIntent::CancelEdit),
+        KeyCode::Char('a') if ctrl && task_steps => return Some(BoardIntent::BeginAddStep),
         KeyCode::Char('a') if ctrl && focused != CaptureField::Scope => {
             return Some(BoardIntent::EditMoveLineStart)
         }
@@ -767,7 +826,8 @@ pub fn map_edit_paste(mode: BoardInputMode, text: &str) -> Option<BoardIntent> {
         | BoardInputMode::EditNotes
         | BoardInputMode::EditThread
         | BoardInputMode::EditStep => Some(BoardIntent::EditInsertText(text.to_string())),
-        BoardInputMode::EditScope
+        BoardInputMode::SelectThread
+        | BoardInputMode::EditScope
         | BoardInputMode::FormScopeDropdown
         | BoardInputMode::TaskPage => None,
         BoardInputMode::Palette => Some(BoardIntent::CommandQueryInsertText(text.to_string())),
@@ -830,6 +890,7 @@ pub fn intent_primary_action(intent: &BoardIntent) -> Option<PrimaryBoardAction>
         | BoardIntent::FormFocusNext
         | BoardIntent::FormFocusPrev
         | BoardIntent::FocusFormField(_)
+        | BoardIntent::ToggleThreadEditing
         | BoardIntent::FormCycleScope
         | BoardIntent::OpenFormScopeDropdown
         | BoardIntent::FormScopeNext
@@ -893,11 +954,11 @@ pub fn primary_action_sample_key(action: PrimaryBoardAction) -> KeyEvent {
 }
 
 /// the normal-mode map. Walks [`NORMAL_KEYMAP`], the same table help uses.
-fn verb_mod_held(_verbs: VerbModifier, mods: KeyModifiers) -> bool {
+fn verb_mod_held(mods: KeyModifiers) -> bool {
     mods.contains(KeyModifiers::CONTROL) && !mods.contains(KeyModifiers::ALT)
 }
 
-fn map_normal(key: KeyEvent, verbs: VerbModifier) -> Option<BoardIntent> {
+fn map_normal(key: KeyEvent) -> Option<BoardIntent> {
     let mods = key.modifiers;
     if key.code == KeyCode::Char('g')
         && mods.contains(KeyModifiers::CONTROL)
@@ -910,7 +971,7 @@ fn map_normal(key: KeyEvent, verbs: VerbModifier) -> Option<BoardIntent> {
     }
     let entry = NORMAL_KEYMAP.iter().find(|entry| entry.code == key.code)?;
     if entry.verb {
-        return verb_mod_held(verbs, mods).then(|| entry.intent.clone());
+        return verb_mod_held(mods).then(|| entry.intent.clone());
     }
     // Bare navigation / chrome: reject extra modifiers. Shift is how `:` / `?` arrive.
     if mods.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER) {
@@ -925,12 +986,12 @@ fn map_normal(key: KeyEvent, verbs: VerbModifier) -> Option<BoardIntent> {
 ///
 /// The step verbs reuse this map's existing intents: Ctrl+Space, Ctrl+E, and Ctrl+X act on a
 /// selected step, otherwise on the task. The reducer disambiguates using the model cursor.
-fn map_task_page(key: KeyEvent, verbs: VerbModifier) -> Option<BoardIntent> {
+fn map_task_page(key: KeyEvent) -> Option<BoardIntent> {
     let mods = key.modifiers;
     if key.code == KeyCode::Char('c') && mods.contains(KeyModifiers::CONTROL) {
         return Some(BoardIntent::Quit);
     }
-    let verb = verb_mod_held(verbs, mods);
+    let verb = verb_mod_held(mods);
     let extra = mods.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER);
     match key.code {
         KeyCode::Esc if !extra => Some(BoardIntent::CloseLayer),
@@ -1034,30 +1095,14 @@ fn map_palette(key: KeyEvent) -> Option<BoardIntent> {
     }
 }
 
-/// Thin mode-only wrapper over [`map_form_edit_key`].
-///
-/// The live board carries a `CaptureField` and calls [`map_board_form_key`] directly.
+/// Thin mode-only wrapper for the title and notes task editors.
 fn map_edit(mode: BoardInputMode, key: KeyEvent) -> Option<BoardIntent> {
-    // Shift+Enter is the step add rapid-capture loop. Rename mode downgrades it to a plain
-    // save in the reducer, while Ctrl+Enter stays unbound.
-    if mode == BoardInputMode::EditStep
-        && key.code == KeyCode::Enter
-        && key.modifiers.contains(KeyModifiers::SHIFT)
-        && !key
-            .modifiers
-            .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER)
-    {
-        return Some(BoardIntent::ConfirmEditNext);
-    }
-    // The steps step editor is a single-line draft: it takes Title's map (Enter
-    // confirms, Esc cancels, no line-break insertion) and no form-focus navigation.
     let focused = match mode {
-        BoardInputMode::EditTitle | BoardInputMode::EditStep => CaptureField::Title,
+        BoardInputMode::EditTitle => CaptureField::Title,
         BoardInputMode::EditNotes => CaptureField::Notes,
-        BoardInputMode::EditThread => CaptureField::Thread,
         _ => return None,
     };
-    map_form_edit_key(focused, FormEditNavigation::None, key)
+    map_form_edit_key(focused, FormEditNavigation::None, true, key)
 }
 
 /// Map a key event to a capture form intent for the focused field.

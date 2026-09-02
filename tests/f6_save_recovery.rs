@@ -1122,7 +1122,8 @@ fn task_form_save_failure_retries_the_exact_atomic_title_notes_and_scope_mutatio
         )
         .expect("type Notes");
     }
-    apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None).expect("focus Thread");
+    apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
+        .expect("select add target");
     apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None).expect("focus Scope");
     apply_intent(&mut domain, &mut model, BoardIntent::FormCycleScope, None)
         .expect("cycle scope to Global");
@@ -1349,12 +1350,14 @@ fn cancelled_failed_step_editor_save_leaves_no_orphan_edit_mode() {
     )
     .expect("esc maps");
     assert_eq!(esc, BoardIntent::CloseLayer);
-    apply_intent(&mut domain, &mut model, esc, None).expect("close the page");
+    apply_intent(&mut domain, &mut model, esc, None).expect("leave task edit");
     assert_eq!(
         model.input_mode(),
-        BoardInputMode::Normal,
-        "no mode is left without its surface"
+        BoardInputMode::TaskPage,
+        "Esc restores task view before closing its page"
     );
+    apply_intent(&mut domain, &mut model, BoardIntent::CloseLayer, None).expect("close the page");
+    assert_eq!(model.input_mode(), BoardInputMode::Normal);
 
     // And a fresh editor session works: the cancelled pending save left no state.
     apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None)
@@ -1503,13 +1506,19 @@ fn retried_step_rename_save_applies_the_held_rename() {
         &mut recovery,
         BoardSaveContext {
             baseline,
-            intent: BoardIntent::ConfirmEdit,
+            intent: BoardIntent::ConfirmEditNext,
             snapshot: None,
         },
         |_| Err(INJECTED.into()),
     )
     .expect("fail rename");
     assert!(recovery.is_pending());
+    assert_eq!(
+        model.open_field_edit(),
+        Some(BoardInputMode::EditStep),
+        "the staged rename editor must outlive the failed persistence boundary"
+    );
+    assert!(board_painted(&model).contains("renamed step"));
     apply_board_intent_with_save_recovery(
         &mut domain,
         &mut model,
@@ -1710,8 +1719,10 @@ fn successful_board_row_edit_exits_its_task_edit_session_on_the_page() {
     assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
     assert!(model.board_form_open());
     apply_intent(&mut domain, &mut model, BoardIntent::BeginAddStep, None)
-        .expect("add is inert after the saved session closes");
-    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+        .expect("view mode opens the independent step editor");
+    assert_eq!(model.input_mode(), BoardInputMode::EditStep);
+    apply_intent(&mut domain, &mut model, BoardIntent::CancelEdit, None)
+        .expect("close the independent editor");
     apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
         .expect("start a fresh task edit session");
     apply_intent(&mut domain, &mut model, BoardIntent::BeginAddStep, None)
@@ -1943,10 +1954,17 @@ fn failed_save_during_thread_edit_holds_form_until_retry_or_cancel() {
     let mut recovery = SaveRecovery::new();
     apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
     apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None).expect("open form");
-    for _ in 0..2 {
+    for _ in 0..4 {
         apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
-            .expect("focus thread");
+            .expect("select thread");
     }
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ToggleThreadEditing,
+        None,
+    )
+    .expect("activate thread editor");
     for character in "release-2026".chars() {
         apply_intent(
             &mut domain,

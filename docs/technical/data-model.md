@@ -138,20 +138,10 @@ Transitions are revision-guarded. Do not invent receipts from ambient paths.
 **Relations.** `DispatchAttempt.task_id` → `Task.id`. A task may have at most one active
 attempt. Attempts do not have a foreign-key cascade; removing a task is not implemented.
 
-## Config directory — `settings.json` / `walkthrough.json`
+## Config directory: `walkthrough.json`
 
-Same directory as the store by default (`TSK_CONFIG_DIR` else `$HOME/.tsk`). Distinct
-files so a task-document bump does not disturb settings.
-
-### `settings.json`
-
-```json
-{ "verb_modifier": "ctrl" }
-```
-
-`verb_modifier` is always `ctrl`. Missing, unreadable, or malformed settings default
-to Ctrl. A legacy `alt` value is read as Ctrl. Written pretty-printed via temp+rename
-(no lock, no directory fsync). See [config](config.md).
+The config directory defaults to `$HOME/.tsk` and can be overridden with
+`TSK_CONFIG_DIR`. It is separate from the task document's schema and revision.
 
 ### `walkthrough.json`
 

@@ -27,7 +27,7 @@ Crate: `tsk-tui` 0.3.0. Binary: `tsk`. Plugin: `herdr-tsk`.
 | --- | --- |
 | [Domain](domain.md) | Task lifecycle, human status, steps, threads, undo, dispatch-attempt journal |
 | [Store](store.md) | One JSON document, exclusive lock, revision merge, atomic replace |
-| [Config](config.md) | `settings.json` (verb modifier) and `walkthrough.json` |
+| [Config](config.md) | `walkthrough.json` dismissal record and config-directory resolution |
 | [Context and scope](context.md) | Host JSON → invocation snapshot; project path / desk resolution |
 | [Capture pipeline](capture.md) | Snapshot + user fields → domain create (+ optional persist) |
 | [CLI](cli.md) | `add` / `list` / `steps` routing, parse, persist, present |

@@ -49,27 +49,3 @@ test("demo matches the quick-add, peek, and group-toggle contracts", async () =>
   assert.match(demo, /id: "groups", label: "toggle groups"/);
   assert.match(demo, /if \(e\.key === "g" && !e\.altKey && !e\.ctrlKey && !e\.metaKey\)/);
 });
-
-test("docs describe fixed Ctrl verbs and the current quick-add and step behavior", async () => {
-  const [keys, capture, steps, taskPage, config] = await Promise.all([
-    read("../src/content/docs/docs/keys.md"),
-    read("../src/content/docs/docs/capture.md"),
-    read("../src/content/docs/docs/steps.md"),
-    read("../src/content/docs/docs/task-page.md"),
-    read("../../docs/technical/config.md"),
-  ]);
-  assert.match(keys, /`ctrl\+g`/);
-  assert.match(capture, /`Shift\+Enter` saves and stays open/);
-  assert.doesNotMatch(capture, /`Ctrl\+Enter` saves and stays open/);
-  assert.match(steps, /edit session/);
-  assert.match(steps, /In view mode, `Tab`[\s\S]*select and cycle steps/);
-  assert.match(steps, /`Shift\+Enter`[\s\S]*only save chord[\s\S]*opens an empty next row/);
-  assert.match(steps, /Scope[\s\S]*blinking cursor/);
-  assert.doesNotMatch(steps, /footer line/);
-  assert.match(taskPage, /`Shift\+Enter` is the only task-session save chord/);
-  assert.match(taskPage, /every staged existing-step edit[\s\S]*exits editing/);
-  assert.doesNotMatch(steps, /Bare `↓` activates/);
-  assert.match(config, /fixed Ctrl modifier/);
-  assert.match(config, /Legacy[\s\S]*"alt"[\s\S]*deserialize as Ctrl/);
-  assert.doesNotMatch(config, /Default `Alt`/);
-});

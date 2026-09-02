@@ -118,9 +118,9 @@ what fails if it is violated. Subsystem pages restate the subset they own.
     Quick-add owns its refusals and clears them on close. Otherwise the message is
     invisible during the overlay and leaks onto the board afterwards.
 
-22. **Mutating verbs need Ctrl** (`VerbModifier::Ctrl`). Bare `space` `d` `o` `b`
+22. **Mutating verbs need Ctrl.** Bare `space` `d` `o` `b`
     `e` `n` `x` `u` `q` do nothing. Nav, peek, `Enter`, `P`, `1`/`2`/`3`, `z`, `:`
-    `?`, `+`, `Esc` stay bare. Legacy `alt` settings deserialize as Ctrl.
+    `?`, `+`, `Esc` stay bare. Existing modifier settings are ignored.
 
 23. **Quick-add is the only board create path.** There is no inline board capture form.
     Success has no status message; the row flash is the feedback. `!p` / `!t` tokens

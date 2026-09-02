@@ -101,6 +101,18 @@ fn plus_opens_focused_bar_regardless_of_shift_and_legacy_chord_is_unbound() {
 }
 
 #[test]
+fn expanded_capture_keeps_ctrl_a_as_line_start() {
+    assert_eq!(
+        tsk_tui::ui::input::map_board_form_key(
+            tsk_tui::ui::capture::CaptureField::Title,
+            false,
+            KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL),
+        ),
+        Some(BoardIntent::EditMoveLineStart)
+    );
+}
+
+#[test]
 fn scoped_project_quick_add_defaults_to_the_selected_project() {
     let mut domain = DomainState::new();
     create_project_fixture(&mut domain, "/repos/project-x");

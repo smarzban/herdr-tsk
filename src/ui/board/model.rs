@@ -1,14 +1,13 @@
 //! Session-only board state, forms, selection, and recovery presentation.
 
 use std::cell::Cell;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use ratatui::layout::Position;
 use uuid::Uuid;
 
-use crate::config::VerbModifier;
 use crate::context::InvocationSnapshot;
 use crate::domain::{DomainState, HumanStatus, Task, TaskScope};
 use crate::ui::capture::CaptureField;
@@ -21,7 +20,6 @@ pub use crate::ui::queue::BoardTab;
 use crate::ui::queue::{
     self, visible_task_ids, BoardLens, QueueView, SectionKind, ThreadProjectCollapseKey,
 };
-use crate::ui::render::StepView;
 use crate::ui::selection;
 use crate::ui::terminal_text;
 use crate::ui::text_select::TextSelection;
@@ -38,7 +36,10 @@ pub enum BoardInputMode {
     Normal,
     EditTitle,
     EditNotes,
-    /// The task page footer's optional thread name owns focus.
+    /// The task page footer's optional thread name is selected, ready for Enter or a second
+    /// click to enter its text editor without ending the enclosing task edit session.
+    SelectThread,
+    /// The task page footer's optional thread name owns its text cursor.
     EditThread,
     /// The scope row of an open task form owns focus. The renderer adaptation remains
     /// deliberately thin until, but its keyboard state is a first-class form field.
@@ -185,6 +186,8 @@ pub(super) struct TaskEditSave {
     /// Existing-step names staged alongside the ordinary task fields. They reach the
     /// domain only when the task session is confirmed with Shift+Enter.
     pub(super) step_renames: BTreeMap<Uuid, String>,
+    /// Existing steps staged for removal by the task edit session.
+    pub(super) step_removals: BTreeSet<Uuid>,
 }
 
 #[derive(Debug, Clone)]
@@ -323,6 +326,9 @@ impl BoardForm {
         match self.focus {
             CaptureField::Title => BoardInputMode::EditTitle,
             CaptureField::Notes => BoardInputMode::EditNotes,
+            // Task-page Thread is first a selected footer control. Capture has no separate
+            // selected state, so it continues directly into its text input.
+            CaptureField::Thread if self.is_task() => BoardInputMode::SelectThread,
             CaptureField::Thread => BoardInputMode::EditThread,
             CaptureField::Scope => BoardInputMode::EditScope,
         }
@@ -438,8 +444,10 @@ pub(super) struct StepEditorSave {
 /// (AC-21). A task with no steps never activates a cursor.
 #[derive(Debug, Clone, Default)]
 pub(super) struct StepsPageState {
-    /// Highlighted step index; `None` = inactive.
+    /// Highlighted stored step index; `None` = inactive or the trailing add target.
     pub(super) cursor: Option<usize>,
+    /// The trailing `+ step` target is selected instead of a stored step.
+    pub(super) add_selected: bool,
     /// Absolute content row of the steps label, recorded by the renderer so cursor
     /// movement can keep its selected step inside the shared viewport.
     pub(super) content_start: std::cell::Cell<usize>,
@@ -452,6 +460,8 @@ pub(super) struct StepsPageState {
     /// buffer here, so another field or step can receive the one terminal cursor without
     /// committing either change.
     pub(super) drafts: BTreeMap<Uuid, EditBuffer>,
+    /// Existing steps removed only when the enclosing task form saves. Esc drops this set.
+    pub(super) removals: BTreeSet<Uuid>,
     /// An editor apply the save boundary has not confirmed yet (AC-14). While it is
     /// set, the editor and its input mode are held exactly as the user left them.
     pub(super) pending_save: Option<StepEditorSave>,
@@ -496,25 +506,6 @@ fn board_form_scope_options(
     }
     push(TaskScope::Global, &mut options);
     options
-}
-
-/// Extract the steps views the task page paints, wrapping text at the same word boundaries
-/// and display-cell width used by Notes.
-///
-/// This is the one seam between the page payload and steps storage: the payload consumes
-/// these views and never reads `Task.steps` itself, so later page consumers swap the view,
-/// not the storage shape.
-pub(super) fn step_views(task: &Task, text_width: usize) -> Vec<StepView> {
-    task.steps
-        .iter()
-        .map(|step| StepView {
-            done: step.done,
-            rows: crate::ui::edit::wrap_text(&step.text, text_width)
-                .into_iter()
-                .map(|row| row.text)
-                .collect(),
-        })
-        .collect()
 }
 
 /// Pure board presentation state for one open session.
@@ -609,10 +600,6 @@ pub struct BoardModel {
     pub(super) command_query: String,
     /// Selection into the currently visible command set.
     pub(super) command_selected: usize,
-    /// No separate capture/title/notes state lives beside [`Self::form`]: one board form owns
-    /// all field drafts and either its task binding or its immutable capture snapshot.
-    /// Fixed Ctrl chord required for mutating verbs.
-    pub verb_modifier: VerbModifier,
 }
 
 /// How an unresolved failed save ended.
@@ -667,7 +654,6 @@ impl BoardModel {
             list_max_scroll: Cell::new(0),
             message_expires_at: None,
             message_restore: None,
-            verb_modifier: VerbModifier::Ctrl,
         };
         model.seed_selection();
         model.ensure_home_tab_has_visible_tasks();
@@ -1380,6 +1366,10 @@ impl BoardModel {
                         .iter()
                         .any(|step| step.id == *step_id && step.text == *text)
                 })
+                && pending
+                    .step_removals
+                    .iter()
+                    .all(|step_id| !task.steps.iter().any(|step| step.id == *step_id))
         });
         if !landed {
             self.task_edit_save = Some(pending);
@@ -1401,6 +1391,8 @@ impl BoardModel {
             form.editing = false;
             form.steps.editor = None;
             form.steps.drafts.clear();
+            form.steps.removals.clear();
+            form.steps.add_selected = false;
         }
         self.input_mode = BoardInputMode::TaskPage;
         self.clear_message();
@@ -1451,6 +1443,7 @@ impl BoardModel {
         if pending.reopen {
             // The rapid-capture loop: the in-place row reopens empty for the next step, its
             // mode never having left it.
+            form.steps.add_selected = false;
             form.steps.editor = Some(StepEditor {
                 buffer: seeded_draft(""),
                 rename: None,
@@ -1458,6 +1451,12 @@ impl BoardModel {
             });
         } else {
             form.steps.editor = None;
+            form.steps.cursor = self
+                .tasks
+                .iter()
+                .find(|task| task.id == task_id)
+                .and_then(|task| task.steps.iter().position(|step| step.id == pending.step));
+            form.steps.add_selected = false;
             self.input_mode = BoardInputMode::TaskPage;
         }
         self.clear_message();
@@ -1545,6 +1544,32 @@ impl BoardModel {
         true
     }
 
+    /// Copy the active existing-step buffer into the task session without releasing its row.
+    /// The persistence boundary uses this for Shift+Enter so a failed save retains the editor.
+    pub(super) fn stage_active_rename_draft(&mut self) -> bool {
+        let Some(form) = self.form.as_mut().filter(|form| form.is_task()) else {
+            return false;
+        };
+        let Some(editor) = form.steps.editor.as_ref() else {
+            return false;
+        };
+        let Some(step_id) = editor.rename else {
+            return false;
+        };
+        form.steps.drafts.insert(step_id, editor.buffer.clone());
+        true
+    }
+
+    /// Whether the active inline row is an existing-step draft owned by the task session.
+    pub fn has_active_step_rename(&self) -> bool {
+        self.input_mode == BoardInputMode::EditStep
+            && self
+                .form
+                .as_ref()
+                .and_then(|form| form.steps.editor.as_ref())
+                .is_some_and(|editor| editor.rename.is_some())
+    }
+
     /// Focus one already-painted field without reopening or rebinding the shared form.
     pub(super) fn focus_form_field(&mut self, focus: CaptureField) {
         if !self.park_rename_step_draft() {
@@ -1563,20 +1588,20 @@ impl BoardModel {
         self.input_mode = form.parent_mode();
     }
 
-    /// Whether the task page cursor selects a current step in this synchronized snapshot.
-    pub(super) fn has_live_step_cursor(&self) -> bool {
-        if self.input_mode != BoardInputMode::TaskPage {
-            return false;
-        }
+    /// Toggle the selected task-page Thread control into or out of its text editor without
+    /// closing the encompassing task edit session or discarding its draft.
+    pub(super) fn toggle_thread_editing(&mut self) {
         let Some(form) = self.form.as_ref().filter(|form| form.is_task()) else {
-            return false;
+            return;
         };
-        let Some(index) = form.steps.cursor else {
-            return false;
+        if form.focus != CaptureField::Thread {
+            return;
+        }
+        self.input_mode = match self.input_mode {
+            BoardInputMode::SelectThread => BoardInputMode::EditThread,
+            BoardInputMode::EditThread => BoardInputMode::SelectThread,
+            _ => return,
         };
-        form.task_id()
-            .and_then(|id| self.tasks.iter().find(|task| task.id == id))
-            .is_some_and(|task| task.steps.get(index).is_some())
     }
 
     /// Whether the current task page has entered its edit session.
@@ -1757,8 +1782,10 @@ impl BoardModel {
         match self.input_mode {
             mode @ (BoardInputMode::EditTitle
             | BoardInputMode::EditNotes
+            | BoardInputMode::SelectThread
             | BoardInputMode::EditThread
-            | BoardInputMode::EditScope) => Some(mode),
+            | BoardInputMode::EditScope
+            | BoardInputMode::EditStep) => Some(mode),
             _ => None,
         }
     }

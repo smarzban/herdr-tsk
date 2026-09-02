@@ -7,18 +7,30 @@ description: "View and edit one task: title, notes, thread, and scope."
 header copies that task identifier when clicked.
 
 It is view-first. Nothing is in edit mode until you ask. `ctrl+e` edits the title,
-`ctrl+n` edits notes, and `Tab` selects and cycles steps when they exist. A step
-click also selects it, while `Enter` remains read-only. `ctrl+e` on that selection
-starts task editing with the step inline. From an existing-step row, Tab cycles
-Title, Notes, Thread, Scope, then the steps. Clicking a field or another existing
-step moves the one active text cursor there and stages the prior step change. Scope
-has focus but no blinking cursor. The scope footer does nothing until task editing
-starts.
+`ctrl+n` edits notes. In view, Tab and Shift+Tab loop only through stored steps and
+`+ step`, never task fields. The trailing dim target paints as `   + step`. `Enter`,
+`ctrl+a`, or a click on it opens its independent editor, then Enter saves one step
+and selects that new stored step.
 
+Bare `↓` activates the first stored step, then arrows move the selection. `ctrl+space`
+toggles that selected step without changing the task's human status.
+
+`ctrl+e` on a stored-step selection starts task editing with the step inline. In task
+editing, Tab runs Title, Notes, stored steps, `+ step`, Scope, Thread, then Title.
+Shift+Tab reverses that same loop. Clicking a field or another existing step moves
+the one active text cursor there and stages the prior step change. Scope and Thread
+first show as selected controls, with no blinking cursor. `Enter` on Scope opens its
+picker and `Enter` again chooses the highlighted scope. `Enter` on Thread, or a
+second click, opens or closes its text editor without leaving the task edit session.
+The scope footer does nothing until task editing starts.
+
+Plain `Enter` parks an existing-step rename without saving the task session.
 `Shift+Enter` is the only task-session save chord: it saves Title, Notes, Thread,
-Scope, and every staged existing-step edit, then exits editing. A new step keeps
-its own Shift+Enter save-and-next loop. Field `Esc` cancels that field. Page `Esc`
-closes the page.
+Scope, staged existing-step edits, and staged removals, then exits editing. A staged
+`ctrl+x` removal disappears immediately and returns if task editing is cancelled. New
+steps save independently from view or task edit: Enter saves one and selects it,
+Shift+Enter saves one and opens the next empty editor. Field `Esc` cancels that
+field, while Esc from task editing restores staged removals.
 
 Notes are multiline, so `Enter` inserts a line. `Shift+Enter` saves and does not
 insert a line.

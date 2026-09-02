@@ -1662,6 +1662,30 @@ fn page_field_clicks_activate_after_task_editing_starts() {
         Some(BoardIntent::OpenFormScopeDropdown),
         "an active task session lets Scope clicks edit"
     );
+    let thread_hit = hits
+        .regions
+        .iter()
+        .find(|hit| hit.target == QueueHitTarget::FormThread)
+        .expect("the active page paints the empty Thread target");
+    assert_eq!(
+        click(thread_hit, &model, &hits),
+        Some(BoardIntent::FocusFormField(CaptureField::Thread)),
+        "the first Thread click selects it"
+    );
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::FocusFormField(CaptureField::Thread),
+        None,
+    )
+    .expect("select Thread");
+    assert_eq!(model.input_mode(), BoardInputMode::SelectThread);
+    let hits = board_hit_map(STANDARD, &model);
+    assert_eq!(
+        click(thread_hit, &model, &hits),
+        Some(BoardIntent::ToggleThreadEditing),
+        "the second Thread click opens its text editor"
+    );
 }
 
 #[test]
@@ -1684,6 +1708,65 @@ fn the_wheel_scrolls_the_page_notes_not_the_board_list() {
         "the page's wheel never moves the board's selection"
     );
     assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+}
+
+#[test]
+fn the_wheel_keeps_scrolling_while_a_step_add_is_open() {
+    let (mut domain, mut model, id) = board_with_task("Scrollable step add", HumanStatus::Ready);
+    for index in 0..30 {
+        domain
+            .add_step(id, format!("step {index:02}"))
+            .expect("add overflowing step");
+    }
+    model.sync_from_domain(&domain);
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
+    let _ = page_rows(&model);
+    for _ in 0..64 {
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::PageWheelScrollDown,
+            None,
+        )
+        .expect("reach page bottom");
+    }
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginAddStep, None)
+        .expect("open inline step add");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::EditInsertText("draft survives wheel".into()),
+        None,
+    )
+    .expect("type draft");
+    let before = page_rows(&model);
+    assert_eq!(model.input_mode(), BoardInputMode::EditStep);
+    assert!(before
+        .iter()
+        .any(|row| row.contains("draft survives wheel")));
+
+    let hits = board_hit_map(STANDARD, &model);
+    let up = map_board_mouse(&model, &hits, wheel_up(5, 5))
+        .expect("wheel remains routed while the step add is open");
+    assert_eq!(up, BoardIntent::PageWheelScrollUp);
+    apply_intent(&mut domain, &mut model, up, None).expect("scroll with open draft");
+
+    let after = page_rows(&model);
+    assert_ne!(
+        before, after,
+        "the open step add must not lock page scrolling"
+    );
+
+    let hits = board_hit_map(STANDARD, &model);
+    let down = map_board_mouse(&model, &hits, wheel_down(5, 5))
+        .expect("wheel down remains routed while the step add is open");
+    assert_eq!(down, BoardIntent::PageWheelScrollDown);
+    apply_intent(&mut domain, &mut model, down, None).expect("scroll back to draft");
+    let returned = page_rows(&model);
+    assert!(returned
+        .iter()
+        .any(|row| row.contains("draft survives wheel")));
+    assert_eq!(model.input_mode(), BoardInputMode::EditStep);
 }
 
 #[test]
@@ -1742,6 +1825,65 @@ fn page_step_add_footer_chip_routes_to_begin_add_step() {
         map_board_mouse(&model, &hits, left_click(area.x + 1, area.y)),
         Some(BoardIntent::BeginAddStep)
     );
+}
+
+/// The painted trailing add control is a direct pointer route from task view and every
+/// task-edit state, including the selected and active Thread states plus an inline editor.
+#[test]
+fn clicking_trailing_step_add_works_from_every_task_page_edit_mode() {
+    let (mut domain, mut model, id) = board_with_task("step add click", HumanStatus::Ready);
+    domain.add_step(id, "stored step").expect("add stored step");
+    model.sync_from_domain(&domain);
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
+
+    let assert_add_click = |model: &BoardModel| {
+        let hits = board_hit_map(STANDARD, model);
+        let area = hits
+            .regions
+            .iter()
+            .find(|hit| hit.target == QueueHitTarget::StepAdd)
+            .expect("trailing add hit")
+            .area;
+        assert_eq!(
+            map_board_mouse(model, &hits, left_click(area.x, area.y)),
+            Some(BoardIntent::BeginAddStep),
+            "StepAdd must remain clickable in {:?}",
+            model.input_mode()
+        );
+    };
+
+    // Task view is the independent-add path.
+    assert_add_click(&model);
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None).expect("title");
+    assert_add_click(&model);
+
+    for field in [
+        CaptureField::Notes,
+        CaptureField::Scope,
+        CaptureField::Thread,
+    ] {
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::FocusFormField(field),
+            None,
+        )
+        .expect("focus task-edit field");
+        assert_add_click(&model);
+    }
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ToggleThreadEditing,
+        None,
+    )
+    .expect("open thread editor");
+    assert_eq!(model.input_mode(), BoardInputMode::EditThread);
+    assert_add_click(&model);
+
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginAddStep, None).expect("inline add");
+    assert_eq!(model.input_mode(), BoardInputMode::EditStep);
+    assert_add_click(&model);
 }
 
 #[test]

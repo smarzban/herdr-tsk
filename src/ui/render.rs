@@ -478,6 +478,8 @@ pub enum QueueOverlay<'a> {
         /// Absolute index of the step cursor's row, when active. The painter turns it
         /// into the row's `▸` gutter marker.
         step_cursor: Option<usize>,
+        /// Whether the trailing `+ step` control owns selection.
+        step_add_selected: bool,
         /// First step index the section's window shows (the cursor's scroll window).
         step_scroll: usize,
         /// Absolute index of the step the delete verb visibly marked, when armed.
@@ -540,8 +542,6 @@ pub struct QueueFrameModel<'a> {
     pub status_undo_offset: Option<usize>,
     /// Verb-bar entries (trimmed to the geometry budget at paint time).
     pub verb_items: &'a [VerbEntry<'a>],
-    /// Prefix painted on mutating verb keys (`ctrl+`).
-    pub verb_modifier: crate::config::VerbModifier,
     /// Clock for age labels (tests inject a fixed instant).
     pub now: SystemTime,
     /// Optional transient overlay (palette / help / scope dropdown).
@@ -611,6 +611,8 @@ pub enum QueueHitTarget {
     /// scroll painted it — the same absolute-index discipline [`Command`] follows.
     /// A click moves the step cursor onto that step (AC-21): select, never toggle.
     Step(usize),
+    /// The dim trailing task-page control that starts a new inline step.
+    StepAdd,
     /// One painted option in a shared form's scope dropdown, indexed into that form's own
     /// `TaskScope` choices. It cannot name the board selector's all-projects choice.
     FormScopeOption(usize),
@@ -892,8 +894,7 @@ pub fn draw_queue_frame(
         let prefix_verbs = matches!(
             model.overlay,
             QueueOverlay::None | QueueOverlay::TaskPage { focus: None, .. },
-        )
-        .then_some(model.verb_modifier);
+        );
         if let QueueOverlay::QuickAdd {
             project_scope,
             recovery: true,
@@ -1013,7 +1014,7 @@ const FORM_NOTES_VERBS: &[VerbEntry<'static>] = &[
     },
     VerbEntry {
         key: "tab",
-        label: "scope",
+        label: "next",
     },
     VerbEntry {
         key: "esc",
@@ -1027,7 +1028,7 @@ const FORM_THREAD_VERBS: &[VerbEntry<'static>] = &[
     },
     VerbEntry {
         key: "tab",
-        label: "scope",
+        label: "next",
     },
     VerbEntry {
         key: "esc",
@@ -1165,6 +1166,7 @@ fn paint_overlay(
             ref step_views,
             stored_step_count,
             step_cursor,
+            step_add_selected,
             step_scroll,
             step_marked,
             ref inline_step_editor,
@@ -1190,6 +1192,7 @@ fn paint_overlay(
                 step_views,
                 *stored_step_count,
                 *step_cursor,
+                *step_add_selected,
                 *step_scroll,
                 *step_marked,
                 inline_step_editor.as_ref(),
@@ -1912,6 +1915,7 @@ fn paint_task_page(
     step_views: &[StepView],
     stored_step_count: usize,
     step_cursor: Option<usize>,
+    step_add_selected: bool,
     step_scroll: usize,
     step_marked: Option<usize>,
     inline_step_editor: Option<&InlineStepEditor<'_>>,
@@ -2065,7 +2069,8 @@ fn paint_task_page(
     // notes, and the header and metadata footer never participate in this scroll.
     let note_count = notes_rows.len().max(1);
     let step_rows: usize = step_views.iter().map(|step| step.rows.len().max(1)).sum();
-    let content = page_content_layout(note_count, step_rows, lay.notes_rows);
+    // Every checklist has a trailing add control, including an empty one.
+    let content = page_content_layout(note_count, step_rows + 1, lay.notes_rows);
     let scroll = step_scroll.min(content.max_scroll);
     // Content has a two-cell gutter on both sides. An overflowing page keeps its
     // scrollbar outside that right gutter at the frame edge.
@@ -2129,7 +2134,7 @@ fn paint_task_page(
             );
             // Notes body past the two-cell gutter (and the trailing pad space).
             hits.push_copyable(Rect::new(2, y, content_width.saturating_sub(3), 1));
-        } else if !step_views.is_empty() && absolute == content.steps_start {
+        } else if absolute == content.steps_start {
             put_line(
                 frame,
                 y,
@@ -2207,6 +2212,26 @@ fn paint_task_page(
                     content_width.saturating_sub(step_prefix).saturating_sub(1),
                     1,
                 ));
+            } else if row == 0 {
+                put_line(
+                    frame,
+                    y,
+                    content_width,
+                    paint_bounded_line(
+                        if step_add_selected {
+                            "▸ + step"
+                        } else {
+                            "   + step"
+                        },
+                        content_width,
+                        if step_add_selected {
+                            style_plain()
+                        } else {
+                            style_dim()
+                        },
+                    ),
+                );
+                hits.push(QueueHitTarget::StepAdd, Rect::new(0, y, content_width, 1));
             }
         }
     }
@@ -2256,6 +2281,26 @@ fn paint_task_page(
 
         let scope_x = 2u16.saturating_add(meta_scope_x).min(width);
         let thread_x = scope_x.saturating_add(meta_scope_width).min(width);
+        let selected = match focus {
+            Some(CaptureField::Scope) => Some((scope_x, meta_scope_width)),
+            // The separator belongs to footer chrome. Only the thread marker and name are
+            // the selected control, so ` · #auth` keeps its dot dim while `#auth` reverses.
+            Some(CaptureField::Thread) => thread_slot_width.map(|slot_width| {
+                let thread_prefix = 3u16; // ` · #`
+                (
+                    thread_x.saturating_add(thread_prefix),
+                    slot_width.saturating_sub(thread_prefix),
+                )
+            }),
+            _ => None,
+        };
+        if let Some((selected_x, selected_width)) = selected {
+            let selected_width = selected_width.min(width.saturating_sub(selected_x));
+            let buffer = frame.buffer_mut();
+            for x in selected_x..selected_x.saturating_add(selected_width) {
+                buffer[(x, y)].set_style(style_reverse());
+            }
+        }
         if footer_input_open {
             return;
         }
@@ -3293,7 +3338,7 @@ fn paint_verb_bar(
     entries: &[VerbEntry<'_>],
     budget: usize,
     width: u16,
-    prefix: Option<crate::config::VerbModifier>,
+    prefix: bool,
 ) -> (Line<'static>, Vec<(usize, u16, u16)>) {
     let shown: Vec<&VerbEntry<'_>> = entries.iter().take(budget).collect();
     let mut spans: Vec<Span<'static>> = Vec::new();
@@ -3309,11 +3354,10 @@ fn paint_verb_bar(
             spans.push(Span::styled(sep.to_string(), style_dim()));
             x = x.saturating_add(display_width(sep) as u16);
         }
-        let key = match prefix {
-            Some(modifier) if mutating_verb_key(entry.key) => {
-                format!("{}{}", modifier.prefix(), entry.key)
-            }
-            _ => entry.key.to_string(),
+        let key = if prefix && mutating_verb_key(entry.key) {
+            format!("ctrl+{}", entry.key)
+        } else {
+            entry.key.to_string()
         };
         let key_w = display_width(&key) as u16;
         let start = x;

@@ -40,7 +40,7 @@ number of live done tasks (the `drawer_open` branches currently agree).
 
 `BoardModel` is session-only: location (home tab vs project path), selection id,
 scroll, peek, collapse sets, input mode, optional `BoardForm` / `QuickAddState`,
-palette, help, save-recovery presentation, verb modifier, text selection,
+palette, help, save-recovery presentation, text selection,
 ephemeral message + delete-recovery notice.
 
 `BoardFormBinding` is `Task(id)` XOR `Capture(snapshot)` for the form's lifetime.

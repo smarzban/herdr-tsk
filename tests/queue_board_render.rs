@@ -9,7 +9,6 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::backend::TestBackend;
 use ratatui::style::Modifier;
 use ratatui::{Frame, Terminal};
-use tsk_tui::config::VerbModifier;
 use tsk_tui::domain::{
     DomainState, HumanStatus, ProvenanceOrigin, Task, TaskEvent, TaskEventKind, TaskScope,
 };
@@ -339,7 +338,6 @@ fn fixture_model_on_tab<'a>(
         status_message: None,
         status_undo_offset: None,
         verb_items: fixture_verbs(),
-        verb_modifier: VerbModifier::Ctrl,
         now: now(),
         overlay: QueueOverlay::None,
         detail_open: None,
@@ -1038,6 +1036,7 @@ fn task_page_header_shows_identifier_not_footer() {
         step_views: Vec::new(),
         stored_step_count: 0,
         step_cursor: None,
+        step_add_selected: false,
         step_scroll: 0,
         step_marked: None,
         inline_step_editor: None,
@@ -1141,6 +1140,7 @@ fn task_page_renders_header_notes_and_meta_as_a_full_takeover_in_both_tiers() {
         step_views: Vec::new(),
         stored_step_count: 0,
         step_cursor: None,
+        step_add_selected: false,
         step_scroll: 0,
         step_marked: None,
         inline_step_editor: None,
@@ -1313,10 +1313,9 @@ fn task_page_paints_steps_section_between_notes_and_footer() {
     assert!(saw_third, "compact scrolling never reached the third step");
 }
 
-/// T-2 (AC-6): a task with no steps steps paints no steps section at all --
-/// the page is identical to pre-feature for such tasks.
+/// A task with no stored steps still paints its trailing add target.
 #[test]
-fn task_page_without_steps_paints_no_steps_section() {
+fn task_page_without_steps_paints_trailing_add_target() {
     let mut domain = DomainState::new();
     domain
         .create(
@@ -1340,10 +1339,12 @@ fn task_page_without_steps_paints_no_steps_section() {
             body.contains("still just notes") && body.contains("created"),
             "{width}x{height} page did not render notes + meta:\n{body}"
         );
-        assert!(
-            !body.contains("steps"),
-            "{width}x{height} empty-steps page must paint no section label:\n{body}"
-        );
+        if width >= 78 {
+            assert!(
+                body.contains("steps 0/0") && body.contains("+ step"),
+                "{width}x{height} empty-steps page must paint its add target:\n{body}"
+            );
+        }
         // `✓`/`▪` are step glyphs (the task is ready, so the header glyph is `○`).
         assert!(
             !body.contains('✓') && !body.contains('▪'),
@@ -1637,7 +1638,7 @@ fn shift_tab_from_scope_resets_notes_stream_origin_and_aligns_caret() {
         .map(|line| format!("note line {line}"))
         .collect::<Vec<_>>()
         .join("\n");
-    let id = domain
+    let _id = domain
         .create(
             "Shift tab Notes",
             Some(notes),
@@ -1647,11 +1648,6 @@ fn shift_tab_from_scope_resets_notes_stream_origin_and_aligns_caret() {
             ProvenanceOrigin::Manual,
         )
         .expect("create task");
-    for index in 0..30 {
-        domain
-            .add_step(id, format!("step {index}"))
-            .expect("add step");
-    }
     let mut model = BoardModel::from_domain(&domain, None);
     apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open");
     board_rows(&model, 80, 24);
@@ -1676,15 +1672,10 @@ fn shift_tab_from_scope_resets_notes_stream_origin_and_aligns_caret() {
         shift_tab.clone().expect("Shift+Tab intent"),
         None,
     )
-    .expect("Shift+Tab into Thread");
-    assert_eq!(model.input_mode(), BoardInputMode::EditThread);
-    apply_intent(
-        &mut domain,
-        &mut model,
-        shift_tab.expect("second Shift+Tab intent"),
-        None,
-    )
-    .expect("Shift+Tab into Notes");
+    .expect("Shift+Tab selects the trailing add target");
+    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+    apply_intent(&mut domain, &mut model, BoardIntent::FormFocusPrev, None)
+        .expect("Shift+Tab from the add target enters Notes");
     assert_eq!(model.input_mode(), BoardInputMode::EditNotes);
 
     let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("terminal");
@@ -1848,10 +1839,8 @@ fn task_page_scrolls_notes_and_steps_as_one_content_region() {
         .position(|row| row.contains("▪ only step"))
         .expect("step visible after scrolling");
     assert!(
-        shown[step_row + 1]
-            .chars()
-            .all(|cell| matches!(cell, ' ' | '▌')),
-        "the steps section needs its trailing blank row:\n{}",
+        shown[step_row + 1].contains("+ step"),
+        "the trailing add target follows the last step:\n{}",
         shown.join("\n")
     );
     let note_row = initial
@@ -2432,8 +2421,7 @@ fn golden_scenes() -> Vec<GoldenScene> {
     // intentional for the (deck-only, no lenses/dispatch keyboard surface yet), not a gap;
     // recorded here so a reviewer does not re-litigate the divergence as a bug.
     let mut help_model = fixture_model(&tasks, &board_view);
-    let help_lines: Vec<String> =
-        tsk_tui::ui::input::help_card_lines(tsk_tui::config::VerbModifier::Ctrl);
+    let help_lines: Vec<String> = tsk_tui::ui::input::help_card_lines();
     help_model.overlay = QueueOverlay::Help { lines: &help_lines };
     let (help_rows, _) = paint(80, 24, &help_model);
 

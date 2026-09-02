@@ -24,8 +24,8 @@ use crate::ui::capture::{
     apply_capture_intent, draw_capture, CaptureModel, CaptureOutcome, TITLE_REQUIRED_MESSAGE,
 };
 use crate::ui::input::{
-    map_board_form_key, map_capture_key_state, map_capture_paste_state, map_edit_paste,
-    map_key_with, BoardIntent, CaptureIntent,
+    map_board_form_key, map_capture_key_state, map_capture_paste_state, map_edit_paste, map_key,
+    map_task_form_key, BoardIntent, CaptureIntent,
 };
 use crate::ui::mouse::{
     capture_layout_for_model, enable_terminal_input, keyboard_enhancement_supported,
@@ -798,6 +798,24 @@ fn board_keyboard_intent(
             | BoardInputMode::EditScope
             | BoardInputMode::FormScopeDropdown
     );
+    // A selected task-page add target has no field mapper, but its enclosing edit session
+    // still owns the one Shift+Enter task-save chord.
+    if mode == BoardInputMode::TaskPage
+        && model.task_editing()
+        && key.code == KeyCode::Enter
+        && key.modifiers == KeyModifiers::SHIFT
+    {
+        return Some(BoardIntent::ConfirmEdit);
+    }
+    // Task-page Thread has a selected state before its text cursor opens. It owns Enter and
+    // Tab itself, while capture's direct Thread editor keeps the shared form mapper.
+    if matches!(
+        mode,
+        BoardInputMode::SelectThread | BoardInputMode::EditThread
+    ) && model.task_editing()
+    {
+        return map_key(mode, key);
+    }
     // `form_focus()` is Some whenever a form is open, so this reads as an invariant. It is still
     // not worth an `expect` here: this runs on every keypress inside the raw-mode event loop, so
     // a panic would abort with the terminal still in raw mode and take the user's shell with it.
@@ -822,8 +840,11 @@ fn board_keyboard_intent(
     }
 
     match model.form_focus().filter(|_| form_field_mode) {
+        Some(focus) if model.edit_target().is_some() => {
+            map_task_form_key(focus, mode == BoardInputMode::FormScopeDropdown, key)
+        }
         Some(focus) => map_board_form_key(focus, mode == BoardInputMode::FormScopeDropdown, key),
-        None => map_key_with(mode, key, model.verb_modifier),
+        None => map_key(mode, key),
     }
 }
 
@@ -924,9 +945,10 @@ pub fn apply_board_intent_with_save_recovery(
         intent,
         BoardIntent::ConfirmEdit | BoardIntent::ConfirmEditNext
     ) && model.edit_target().is_some()
-        // Step saves use the same intent but their own pending-save state. Holding the task
-        // form here would retain stale task-edit state that was never created.
-        && model.input_mode() != BoardInputMode::EditStep;
+        // New-step adds own their save state. Existing-step renames belong to the task session,
+        // so Shift+Enter must retain that complete form through the persistence boundary.
+        && (model.input_mode() != BoardInputMode::EditStep
+            || (intent == BoardIntent::ConfirmEditNext && model.has_active_step_rename()));
     if holds_task_edit {
         model.hold_task_edit_save();
     }

@@ -126,10 +126,11 @@ pub fn apply_intent(
     // confirmation routes clears an armed steps delete mark. Command confirmations
     // are excluded here because they recurse below as the intent they resolved to, which
     // then faces this same rule as itself.
-    if model
-        .form
-        .as_ref()
-        .is_some_and(|form| form.steps.delete_mark.is_some())
+    if !model.task_editing()
+        && model
+            .form
+            .as_ref()
+            .is_some_and(|form| form.steps.delete_mark.is_some())
         && !matches!(
             intent,
             BoardIntent::SoftDelete | BoardIntent::ConfirmCommand | BoardIntent::SelectCommand(_)
@@ -412,23 +413,41 @@ fn apply_board_intent(
         }
         BoardIntent::FormFocusNext => {
             if model.input_mode == BoardInputMode::EditStep {
-                // The inline row remains drafted, but Tab moves terminal focus through the
-                // task's ordinary edit fields.
-                model.focus_form_field(CaptureField::Title);
+                if model.park_rename_step_draft() {
+                    model.input_mode = BoardInputMode::TaskPage;
+                    if !move_step_within_edit_group(model, true) {
+                        select_add_step(model);
+                    }
+                }
             } else if model.input_mode == BoardInputMode::TaskPage {
                 if model.task_editing() {
-                    // A task edit session treats its selected steps as the final tab group:
-                    // walk them in order, then return to Title after the last one.
-                    if !move_step_within_edit_group(model, true) {
-                        model.focus_form_field(CaptureField::Title);
+                    if model
+                        .form
+                        .as_ref()
+                        .is_some_and(|form| form.steps.add_selected)
+                    {
+                        model.focus_form_field(CaptureField::Scope);
+                    } else if !move_step_within_edit_group(model, true) {
+                        select_add_step(model);
                     }
                 } else if !move_step_with_tab(model, true) && !select_first_step_from_page(model) {
-                    // View pages use Tab strictly as a read-only step selector.
                     model.enter_page_field_focus();
                 }
-            } else if model.form.is_some()
-                && model.input_mode != BoardInputMode::FormScopeDropdown
-                && !select_step_from_tab(model, true)
+            } else if model.input_mode == BoardInputMode::EditNotes
+                && model.form.as_ref().is_some_and(|form| form.is_task())
+            {
+                select_step_from_tab(model, true);
+            } else if model.input_mode == BoardInputMode::EditScope
+                && model.form.as_ref().is_some_and(|form| form.is_task())
+            {
+                model.focus_form_field(CaptureField::Thread);
+            } else if matches!(
+                model.input_mode,
+                BoardInputMode::SelectThread | BoardInputMode::EditThread
+            ) && model.form.as_ref().is_some_and(|form| form.is_task())
+            {
+                model.focus_form_field(CaptureField::Title);
+            } else if model.form.is_some() && model.input_mode != BoardInputMode::FormScopeDropdown
             {
                 model.move_form_focus(true);
             }
@@ -436,29 +455,54 @@ fn apply_board_intent(
         }
         BoardIntent::FormFocusPrev => {
             if model.input_mode == BoardInputMode::EditStep {
-                model.focus_form_field(CaptureField::Scope);
+                if model.park_rename_step_draft() {
+                    model.input_mode = BoardInputMode::TaskPage;
+                    if !move_step_within_edit_group(model, false) {
+                        model.focus_form_field(CaptureField::Notes);
+                    }
+                }
             } else if model.input_mode == BoardInputMode::TaskPage {
                 if model.task_editing() {
-                    // Reverse through the selected step group, then reach Scope before its
-                    // first row, matching Title → Notes → Thread → Scope → steps.
-                    if !move_step_within_edit_group(model, false) {
-                        model.focus_form_field(CaptureField::Scope);
+                    if model
+                        .form
+                        .as_ref()
+                        .is_some_and(|form| form.steps.add_selected)
+                    {
+                        select_last_step_for_edit(model);
+                    } else if !move_step_within_edit_group(model, false) {
+                        model.focus_form_field(CaptureField::Notes);
                     }
                 } else if !move_step_with_tab(model, false) {
                     model.enter_page_field_focus();
                 }
                 return Ok(IntentOutcome::None);
             }
-            if model.input_mode == BoardInputMode::EditTitle && select_step_from_tab(model, false) {
-                return Ok(IntentOutcome::None);
-            }
-            if model.form.is_some() && model.input_mode != BoardInputMode::FormScopeDropdown {
+            if model.input_mode == BoardInputMode::EditTitle
+                && model.form.as_ref().is_some_and(|form| form.is_task())
+            {
+                model.focus_form_field(CaptureField::Thread);
+            } else if matches!(
+                model.input_mode,
+                BoardInputMode::SelectThread | BoardInputMode::EditThread
+            ) && model.form.as_ref().is_some_and(|form| form.is_task())
+            {
+                model.focus_form_field(CaptureField::Scope);
+            } else if model.input_mode == BoardInputMode::EditScope
+                && model.form.as_ref().is_some_and(|form| form.is_task())
+            {
+                select_step_from_tab(model, false);
+            } else if model.form.is_some() && model.input_mode != BoardInputMode::FormScopeDropdown
+            {
                 model.move_form_focus(false);
             }
             return Ok(IntentOutcome::None);
         }
         BoardIntent::FocusFormField(field) => {
             model.focus_form_field(field);
+            return Ok(IntentOutcome::None);
+        }
+        BoardIntent::ToggleThreadEditing => {
+            model.toggle_thread_editing();
             return Ok(IntentOutcome::None);
         }
         BoardIntent::FormCycleScope => {
@@ -538,12 +582,10 @@ fn apply_board_intent(
         }
         BoardIntent::BeginAddStep => {
             model.close_popup();
-            // Steps belong to a task edit session. The view-only page remains read-only until
-            // a field has been entered with Ctrl+E/Ctrl+N or Tab, matching every other edit.
-            if model
-                .form
-                .as_ref()
-                .is_some_and(|form| form.is_task() && form.editing)
+            // Ctrl+A and the trailing target both open the independent add row from task view
+            // or an active task edit. Park a rename first, so Ctrl+A never drops an existing
+            // staged rename while replacing its cursor with the add row.
+            if model.form.as_ref().is_some_and(BoardForm::is_task) && model.park_rename_step_draft()
             {
                 open_step_editor(model, "", None);
             }
@@ -752,11 +794,11 @@ fn apply_board_intent(
             return Ok(IntentOutcome::None);
         }
         BoardIntent::ConfirmEditNext => {
-            // A newly added step retains its dedicated Shift+Enter save-and-next workflow.
-            // An existing step is part of the enclosing task draft, so the same chord commits
-            // every staged field and exits task editing.
+            // Shift+Enter on an existing step commits the complete task edit session. Keep the
+            // active row allocated until persistence confirms, while an add remains its own
+            // save-and-next operation.
             if model.input_mode == BoardInputMode::EditStep {
-                if model.park_rename_step_draft() {
+                if model.stage_active_rename_draft() {
                     let outcome = confirm_edit(domain, model)?;
                     model.sync_from_domain(domain);
                     return Ok(outcome);
@@ -767,10 +809,11 @@ fn apply_board_intent(
         }
         BoardIntent::ConfirmEdit => {
             if model.input_mode == BoardInputMode::EditStep {
+                // Plain Enter closes an existing-step editor into the task session without
+                // crossing the persistence boundary. New-step adds still save independently.
                 if model.park_rename_step_draft() {
-                    let outcome = confirm_edit(domain, model)?;
-                    model.sync_from_domain(domain);
-                    return Ok(outcome);
+                    model.input_mode = BoardInputMode::TaskPage;
+                    return Ok(IntentOutcome::None);
                 }
                 return confirm_step_editor(domain, model, false);
             }
@@ -1009,8 +1052,8 @@ fn apply_board_intent(
         BoardIntent::RetrySave | BoardIntent::CancelSave => return Ok(IntentOutcome::None),
         BoardIntent::PrimaryVerb => {
             model.close_popup();
-            // A selected page step toggles with Ctrl+Space in either task view or its edit
-            // session. Every other context keeps the state-mapped status verb.
+            // A selected step owns the page primary verb. With no live step selection, retain
+            // the task's start/reopen behavior.
             if let Some((task_id, step_id)) = selected_step(domain, model) {
                 domain.toggle_step(task_id, step_id)?;
             } else {
@@ -1064,6 +1107,14 @@ fn apply_board_intent(
             if selected_step(domain, model).is_some() {
                 return Ok(IntentOutcome::None);
             }
+            if model
+                .form
+                .as_ref()
+                .is_some_and(|form| form.steps.add_selected)
+            {
+                open_step_editor(model, "", None);
+                return Ok(IntentOutcome::None);
+            }
             if model.form.as_ref().is_some_and(BoardForm::is_task) {
                 model.form = None;
                 model.input_mode = BoardInputMode::Normal;
@@ -1089,18 +1140,25 @@ fn apply_board_intent(
                 .form
                 .as_ref()
                 .filter(|form| form.is_task())
-                .and_then(|form| form.task_id())
-                .and_then(|task_id| {
+                .and_then(|form| {
+                    form.task_id()
+                        .map(|task_id| (task_id, &form.steps.removals))
+                })
+                .and_then(|(task_id, removals)| {
                     domain.get(task_id).and_then(|task| {
                         task.steps
-                            .get(index)
-                            .map(|step| (step.id, step.text.clone()))
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, step)| !removals.contains(&step.id))
+                            .nth(index)
+                            .map(|(source_index, step)| (source_index, step.id, step.text.clone()))
                     })
                 });
-            if let Some((step_id, text)) = selected {
+            if let Some((source_index, step_id, text)) = selected {
                 if let Some(form) = model.form.as_mut() {
-                    form.steps.cursor = Some(index);
-                    steps_scroll_to_cursor(form, index);
+                    form.steps.cursor = Some(source_index);
+                    form.steps.add_selected = false;
+                    steps_scroll_to_cursor(form, source_index);
                 }
                 if editing {
                     open_step_editor(model, &text, Some(step_id));
@@ -1119,7 +1177,10 @@ fn apply_board_intent(
         }
         BoardIntent::PageWheelScrollUp | BoardIntent::PageWheelScrollDown => {
             if let Some(form) = model.form.as_mut().filter(|form| form.is_task()) {
-                if model.input_mode == BoardInputMode::TaskPage {
+                if matches!(
+                    model.input_mode,
+                    BoardInputMode::TaskPage | BoardInputMode::EditStep
+                ) {
                     let horizon = form.notes_max_scroll.get();
                     form.notes_scroll = match intent {
                         BoardIntent::PageWheelScrollUp => form.notes_scroll.saturating_sub(1),
@@ -1133,6 +1194,28 @@ fn apply_board_intent(
             return Ok(IntentOutcome::None);
         }
         BoardIntent::PageScrollUp => {
+            // A fresh add is independent of the surrounding task edit session, so it may be
+            // open directly from task view. It has no rename draft to park: keep its cursor
+            // alive and scroll the same shared body that task view uses.
+            if model.input_mode == BoardInputMode::EditStep && !model.park_rename_step_draft() {
+                if let Some(form) = model.form.as_mut() {
+                    form.notes_scroll = form.notes_scroll.saturating_sub(1);
+                }
+                return Ok(IntentOutcome::None);
+            }
+            if model.task_editing() {
+                model.input_mode = BoardInputMode::TaskPage;
+                if model
+                    .form
+                    .as_ref()
+                    .is_some_and(|form| form.steps.add_selected)
+                {
+                    select_last_step_for_edit(model);
+                } else if !move_step_within_edit_group(model, false) {
+                    model.focus_form_field(CaptureField::Notes);
+                }
+                return Ok(IntentOutcome::None);
+            }
             if let Some(form) = model.form.as_mut().filter(|form| form.is_task()) {
                 if model.input_mode == BoardInputMode::TaskPage {
                     // Keyboard arrows own an active step cursor before they move the
@@ -1153,6 +1236,26 @@ fn apply_board_intent(
             return Ok(IntentOutcome::None);
         }
         BoardIntent::PageScrollDown => {
+            // See Up above. This must precede `task_editing()`, because Ctrl+A and the trailing
+            // add target also open a fresh editor directly from task view.
+            if model.input_mode == BoardInputMode::EditStep && !model.park_rename_step_draft() {
+                if let Some(form) = model.form.as_mut() {
+                    let horizon = form.notes_max_scroll.get();
+                    form.notes_scroll = form.notes_scroll.saturating_add(1).min(horizon);
+                }
+                return Ok(IntentOutcome::None);
+            }
+            if model.task_editing() {
+                model.input_mode = BoardInputMode::TaskPage;
+                if !model
+                    .form
+                    .as_ref()
+                    .is_some_and(|form| form.steps.add_selected)
+                {
+                    let _ = move_step_within_edit_group(model, true);
+                }
+                return Ok(IntentOutcome::None);
+            }
             if let Some(form) = model.form.as_mut().filter(|form| form.is_task()) {
                 if model.input_mode == BoardInputMode::TaskPage {
                     let steps = form
@@ -1161,12 +1264,14 @@ fn apply_board_intent(
                         .map(|task| task.steps.len())
                         .unwrap_or(0);
                     match form.steps.cursor {
-                        // Step selection begins with Tab or a click, never with reading
-                        // navigation. Once selected, Down moves within the editable steps.
                         Some(index) if steps > 0 => {
                             let cursor = (index + 1).min(steps - 1);
                             form.steps.cursor = Some(cursor);
                             steps_scroll_to_cursor(form, cursor);
+                        }
+                        None if steps > 0 && !form.steps.add_selected => {
+                            form.steps.cursor = Some(0);
+                            steps_scroll_to_cursor(form, 0);
                         }
                         _ => {
                             let horizon = form.notes_max_scroll.get();
@@ -1220,6 +1325,25 @@ fn apply_board_intent(
                 model.close_form_scope_dropdown(false);
                 return Ok(IntentOutcome::None);
             }
+            if model.task_editing() {
+                let saved = model
+                    .form
+                    .as_ref()
+                    .and_then(BoardForm::task_id)
+                    .and_then(|id| model.tasks.iter().find(|task| task.id == id))
+                    .cloned();
+                if let (Some(form), Some(task)) = (model.form.as_mut(), saved) {
+                    *form = BoardForm::task(
+                        &task,
+                        model.this_repo.as_deref(),
+                        &model.tasks,
+                        CaptureField::Title,
+                    );
+                    model.input_mode = BoardInputMode::TaskPage;
+                    model.clear_message();
+                    return Ok(IntentOutcome::None);
+                }
+            }
             if model.form.take().is_some() {
                 model.input_mode = if model.quick_add.is_some() {
                     BoardInputMode::QuickAdd
@@ -1258,19 +1382,39 @@ fn apply_board_intent(
         }
         BoardIntent::Complete => {
             model.close_popup();
-            let Some(id) = model.selected_id() else {
-                model.set_message(NO_SELECTION);
-                return Ok(IntentOutcome::None);
-            };
-            domain.complete(id)?;
+            if let Some((task_id, step_id)) = selected_step(domain, model) {
+                let done = domain
+                    .get(task_id)
+                    .and_then(|task| task.steps.iter().find(|step| step.id == step_id))
+                    .is_some_and(|step| step.done);
+                if !done {
+                    domain.toggle_step(task_id, step_id)?;
+                }
+            } else {
+                let Some(id) = model.selected_id() else {
+                    model.set_message(NO_SELECTION);
+                    return Ok(IntentOutcome::None);
+                };
+                domain.complete(id)?;
+            }
         }
         BoardIntent::Reopen => {
             model.close_popup();
-            let Some(id) = model.selected_id() else {
-                model.set_message(NO_SELECTION);
-                return Ok(IntentOutcome::None);
-            };
-            domain.reopen(id)?;
+            if let Some((task_id, step_id)) = selected_step(domain, model) {
+                let done = domain
+                    .get(task_id)
+                    .and_then(|task| task.steps.iter().find(|step| step.id == step_id))
+                    .is_some_and(|step| step.done);
+                if done {
+                    domain.toggle_step(task_id, step_id)?;
+                }
+            } else {
+                let Some(id) = model.selected_id() else {
+                    model.set_message(NO_SELECTION);
+                    return Ok(IntentOutcome::None);
+                };
+                domain.reopen(id)?;
+            }
         }
         BoardIntent::SoftDelete => {
             model.close_popup();
@@ -1279,7 +1423,7 @@ fn apply_board_intent(
             // highlighted step, a second press removes it, and the task-level soft
             // delete below never runs.
             match page_step_delete(domain, model)? {
-                PageStepDelete::Marked => return Ok(IntentOutcome::None),
+                PageStepDelete::Marked | PageStepDelete::Staged => return Ok(IntentOutcome::None),
                 PageStepDelete::Removed => {}
                 PageStepDelete::NotApplicable => {
                     let Some(id) = model.selected_id() else {
@@ -1549,8 +1693,10 @@ fn confirm_edit(
         .steps
         .drafts
         .iter()
+        .filter(|(step_id, _)| !form.steps.removals.contains(step_id))
         .map(|(step_id, draft)| (*step_id, draft.value().trim().to_string()))
         .collect::<std::collections::BTreeMap<_, _>>();
+    let step_removals = form.steps.removals.clone();
     if step_renames.values().any(String::is_empty) {
         model.set_message(STEP_TEXT_REQUIRED);
         return Ok(IntentOutcome::None);
@@ -1569,13 +1715,14 @@ fn confirm_edit(
         .iter()
         .map(|(step_id, text)| (*step_id, text.clone()))
         .collect::<Vec<_>>();
-    domain.edit_with_step_renames(
+    domain.edit_with_step_changes(
         id,
         &title,
         notes.clone(),
         scope.clone(),
         thread.clone(),
         &step_rename_list,
+        &step_removals.iter().copied().collect::<Vec<_>>(),
     )?;
 
     // Retain the complete form and mode until the persistence boundary confirms this exact
@@ -1587,6 +1734,7 @@ fn confirm_edit(
         scope,
         thread,
         step_renames,
+        step_removals,
     });
     Ok(IntentOutcome::Persist)
 }
@@ -1595,97 +1743,133 @@ fn confirm_edit(
 // Steps step cursor, verbs, and one-line editor (T-3)
 // ---------------------------------------------------------------------------
 
-/// Move from the form's end fields into an existing step through Tab / Shift+Tab. A task page
-/// must already be in its edit session, so view-mode reading keys cannot select or mutate steps.
-fn select_step_from_tab(model: &mut BoardModel, forward: bool) -> bool {
+/// Move from the form's end fields into its existing-step group or trailing add target.
+fn select_step_from_tab(model: &mut BoardModel, forward: bool) {
     let target = model.form.as_ref().and_then(|form| {
         if !form.is_task()
             || !form.editing
-            || (forward && form.focus != CaptureField::Scope)
-            || (!forward && form.focus != CaptureField::Title)
+            || (forward && form.focus != CaptureField::Notes)
+            || (!forward && form.focus != CaptureField::Scope)
         {
             None
         } else {
             let task_id = form.task_id()?;
-            let count = model
+            let visible: Vec<usize> = model
                 .tasks
                 .iter()
-                .find(|task| task.id == task_id)
-                .map(|task| task.steps.len())?;
-            (count > 0).then_some(if forward { 0 } else { count - 1 })
+                .find(|task| task.id == task_id)?
+                .steps
+                .iter()
+                .enumerate()
+                .filter(|(_, step)| !form.steps.removals.contains(&step.id))
+                .map(|(source_index, _)| source_index)
+                .collect();
+            Some(if forward {
+                visible.first().copied()
+            } else {
+                visible.last().copied()
+            })
         }
     });
     let Some(target) = target else {
-        return false;
+        return;
     };
-    let form = model
-        .form
-        .as_mut()
-        .filter(|form| form.is_task())
-        .expect("the checked task form stays open");
-    form.steps.cursor = Some(target);
-    steps_scroll_to_cursor(form, target);
-    model.input_mode = BoardInputMode::TaskPage;
-    true
+    let Some(index) = target else {
+        select_add_step(model);
+        return;
+    };
+    let text = model.form.as_ref().and_then(|form| {
+        form.task_id().and_then(|task_id| {
+            model
+                .tasks
+                .iter()
+                .find(|task| task.id == task_id)
+                .and_then(|task| {
+                    task.steps
+                        .get(index)
+                        .map(|step| (step.id, step.text.clone()))
+                })
+        })
+    });
+    if let Some((step_id, text)) = text {
+        if let Some(form) = model.form.as_mut() {
+            form.steps.cursor = Some(index);
+            form.steps.add_selected = false;
+            steps_scroll_to_cursor(form, index);
+        }
+        open_step_editor(model, &text, Some(step_id));
+    }
 }
 
-/// Start a task-page Tab cycle on its first step without leaving view mode. Ctrl+E later
-/// promotes that selection into the task edit session and opens its inline editor.
+/// Start a task-page Tab cycle on its first stored step, or its trailing add target when
+/// the checklist is empty, without entering the task edit session.
 fn select_first_step_from_page(model: &mut BoardModel) -> bool {
-    let has_steps = model.form.as_ref().and_then(|form| {
+    let count = model.form.as_ref().and_then(|form| {
         let task_id = form.task_id()?;
         model
             .tasks
             .iter()
             .find(|task| task.id == task_id)
-            .map(|task| !task.steps.is_empty())
+            .map(|task| task.steps.len())
     });
-    if has_steps != Some(true) {
+    let Some(count) = count else {
         return false;
+    };
+    if count == 0 {
+        select_add_step(model);
+    } else if let Some(form) = model.form.as_mut().filter(|form| form.is_task()) {
+        form.steps.cursor = Some(0);
+        form.steps.add_selected = false;
+        steps_scroll_to_cursor(form, 0);
     }
-    let form = model
-        .form
-        .as_mut()
-        .filter(|form| form.is_task())
-        .expect("the checked task form stays open");
-    form.steps.cursor = Some(0);
-    steps_scroll_to_cursor(form, 0);
     true
 }
 
-/// Move a step selected by Tab or Shift+Tab. The selected-step ring wraps at both ends, so
-/// Tab never unexpectedly changes into a task-field editor after the final step.
+/// Cycle view-mode Tab through every stored step and then its trailing add target.
 fn move_step_with_tab(model: &mut BoardModel, forward: bool) -> bool {
-    let target = model.form.as_ref().and_then(|form| {
+    let state = model.form.as_ref().and_then(|form| {
         if !form.is_task() {
             return None;
         }
-        let index = form.steps.cursor?;
         let task_id = form.task_id()?;
         let count = model
             .tasks
             .iter()
-            .find(|task| task.id == task_id)
-            .map(|task| task.steps.len())?;
-        (index < count).then_some((index, count))
+            .find(|task| task.id == task_id)?
+            .steps
+            .len();
+        Some((form.steps.cursor, form.steps.add_selected, count))
     });
-    let Some((index, count)) = target else {
+    let Some((cursor, add_selected, count)) = state else {
         return false;
     };
-    let next = if forward {
-        (index + 1) % count
-    } else {
-        (index + count - 1) % count
+    if add_selected {
+        if count == 0 {
+            return true;
+        }
+        let index = if forward { 0 } else { count - 1 };
+        let form = model.form.as_mut().expect("task form remains open");
+        form.steps.cursor = Some(index);
+        form.steps.add_selected = false;
+        steps_scroll_to_cursor(form, index);
+        return true;
+    }
+    let Some(index) = cursor else {
+        return false;
     };
-    let form = model.form.as_mut().expect("the checked form remains open");
-    form.steps.cursor = Some(next);
-    steps_scroll_to_cursor(form, next);
+    if (forward && index + 1 == count) || (!forward && index == 0) {
+        select_add_step(model);
+    } else {
+        let next = if forward { index + 1 } else { index - 1 };
+        let form = model.form.as_mut().expect("task form remains open");
+        form.steps.cursor = Some(next);
+        form.steps.add_selected = false;
+        steps_scroll_to_cursor(form, next);
+    }
     true
 }
 
-/// Move within the task edit session's step group without wrapping. The caller crosses to the
-/// adjacent form field when this reports `false`, making all steps reachable by Tab in either
-/// direction instead of trapping the traversal on the first selected row.
+/// Move within stored task-edit steps without wrapping, opening the reached row inline.
 fn move_step_within_edit_group(model: &mut BoardModel, forward: bool) -> bool {
     let target = model.form.as_ref().and_then(|form| {
         if !form.is_task() || !form.editing {
@@ -1693,47 +1877,88 @@ fn move_step_within_edit_group(model: &mut BoardModel, forward: bool) -> bool {
         }
         let index = form.steps.cursor?;
         let task_id = form.task_id()?;
-        let count = model
-            .tasks
+        let task = model.tasks.iter().find(|task| task.id == task_id)?;
+        let visible: Vec<usize> = task
+            .steps
             .iter()
-            .find(|task| task.id == task_id)
-            .map(|task| task.steps.len())?;
-        if index >= count {
-            return None;
-        }
-        if forward {
-            (index + 1 < count).then_some(index + 1)
+            .enumerate()
+            .filter(|(_, step)| !form.steps.removals.contains(&step.id))
+            .map(|(source_index, _)| source_index)
+            .collect();
+        let position = visible
+            .iter()
+            .position(|source_index| *source_index == index)?;
+        let target = if forward {
+            *visible.get(position + 1)?
         } else {
-            index.checked_sub(1)
-        }
+            *visible.get(position.checked_sub(1)?)?
+        };
+        task.steps
+            .get(target)
+            .map(|step| (target, step.id, step.text.clone()))
     });
-    let Some(target) = target else {
+    let Some((target, step_id, text)) = target else {
         return false;
     };
-    let form = model.form.as_mut().expect("the checked form remains open");
-    form.steps.cursor = Some(target);
-    steps_scroll_to_cursor(form, target);
+    if let Some(form) = model.form.as_mut() {
+        form.steps.cursor = Some(target);
+        form.steps.add_selected = false;
+        steps_scroll_to_cursor(form, target);
+    }
+    open_step_editor(model, &text, Some(step_id));
     true
+}
+
+fn select_add_step(model: &mut BoardModel) {
+    if let Some(form) = model.form.as_mut().filter(|form| form.is_task()) {
+        form.steps.cursor = None;
+        form.steps.add_selected = true;
+        model.input_mode = BoardInputMode::TaskPage;
+    }
+}
+
+fn select_last_step_for_edit(model: &mut BoardModel) {
+    let target = model.form.as_ref().and_then(|form| {
+        let task = model
+            .tasks
+            .iter()
+            .find(|task| Some(task.id) == form.task_id())?;
+        task.steps
+            .iter()
+            .enumerate()
+            .rev()
+            .find(|(_, step)| !form.steps.removals.contains(&step.id))
+            .map(|(source_index, step)| (source_index, step.id, step.text.clone()))
+    });
+    let Some((index, step_id, text)) = target else {
+        model.focus_form_field(CaptureField::Notes);
+        return;
+    };
+    if let Some(form) = model.form.as_mut() {
+        form.steps.cursor = Some(index);
+        form.steps.add_selected = false;
+        steps_scroll_to_cursor(form, index);
+    }
+    open_step_editor(model, &text, Some(step_id));
 }
 
 /// Resolve the page's selected step to live task and step ids, declining a stale index after
 /// a domain change. Task view and task edit sessions share this selection.
 fn selected_step(domain: &DomainState, model: &BoardModel) -> Option<(Uuid, Uuid)> {
-    if model.input_mode != BoardInputMode::TaskPage {
+    if !matches!(
+        model.input_mode,
+        BoardInputMode::TaskPage | BoardInputMode::EditStep
+    ) {
         return None;
     }
     let form = model.form.as_ref().filter(|form| form.is_task())?;
+    if form.steps.add_selected {
+        return None;
+    }
     let task_id = form.task_id()?;
     let index = form.steps.cursor?;
     let step_id = domain.get(task_id)?.steps.get(index).map(|step| step.id)?;
-    Some((task_id, step_id))
-}
-
-/// Resolve a selected step only while the task's edit session is active. This gates inline
-/// editing and destructive step verbs, while Ctrl+Space may toggle a view-mode selection.
-fn cursor_step(domain: &DomainState, model: &BoardModel) -> Option<(Uuid, Uuid)> {
-    model.task_editing().then_some(())?;
-    selected_step(domain, model)
+    (!form.steps.removals.contains(&step_id)).then_some((task_id, step_id))
 }
 
 /// Keep the selected step in the renderer-recorded shared content viewport.
@@ -1764,9 +1989,11 @@ fn steps_scroll_to_cursor(form: &mut BoardForm, cursor: usize) {
 enum PageStepDelete {
     /// The cursor is not active on the page: the verb is the task soft delete.
     NotApplicable,
-    /// First press: the cursor's step is visibly marked; nothing was removed.
+    /// The edit session owns this removal until its final save.
+    Staged,
+    /// First view-mode press: the cursor's step is visibly marked; nothing was removed.
     Marked,
-    /// Second press: the marked step was removed through the domain command.
+    /// Second view-mode press: the marked step was removed through the domain command.
     Removed,
 }
 
@@ -1777,18 +2004,49 @@ fn page_step_delete(
     domain: &mut DomainState,
     model: &mut BoardModel,
 ) -> Result<PageStepDelete, DomainError> {
-    let Some((task_id, step_id)) = cursor_step(domain, model) else {
+    let Some((task_id, step_id)) = selected_step(domain, model) else {
         return Ok(PageStepDelete::NotApplicable);
     };
     let form = model
         .form
         .as_ref()
         .filter(|form| form.is_task())
-        .expect("cursor_step checked a task form");
+        .expect("selected_step checked a task form");
     let index = form
         .steps
         .cursor
-        .expect("cursor_step checked an active cursor");
+        .expect("selected_step checked an active cursor");
+    if model.task_editing() {
+        let task = domain
+            .get(task_id)
+            .expect("selected_step checked a live task");
+        let form = model.form.as_mut().expect("task form checked above");
+        form.steps.removals.insert(step_id);
+        form.steps.drafts.remove(&step_id);
+        form.steps.editor = None;
+        form.steps.delete_mark = None;
+        // Keep the selector on the nearest remaining stored row. Its source index remains
+        // stable while the renderer filters staged removals, so it cannot point at the row
+        // that just vanished or silently select a different draft.
+        let remaining: Vec<usize> = task
+            .steps
+            .iter()
+            .enumerate()
+            .filter(|(_, step)| !form.steps.removals.contains(&step.id))
+            .map(|(source_index, _)| source_index)
+            .collect();
+        form.steps.cursor = remaining
+            .iter()
+            .copied()
+            .find(|source_index| *source_index >= index)
+            .or_else(|| remaining.last().copied());
+        form.steps.add_selected = false;
+        if let Some(cursor) = form.steps.cursor {
+            steps_scroll_to_cursor(form, cursor);
+        }
+        model.input_mode = BoardInputMode::TaskPage;
+        return Ok(PageStepDelete::Staged);
+    }
     if form.steps.delete_mark != Some(index) {
         model
             .form
@@ -1799,11 +2057,7 @@ fn page_step_delete(
         // AC-23: the footer's message slot carries the press-again hint for exactly
         // as long as the mark is armed — the removal press and every intervening
         // intent clear it with the mark. The verb's own modifier names the key, so
-        // the hint stays truthful when the palette flips the chord.
-        model.set_message(format!(
-            "press {}x again to remove",
-            model.verb_modifier.prefix()
-        ));
+        model.set_message("press ctrl+x again to remove");
         return Ok(PageStepDelete::Marked);
     }
     domain.remove_step(task_id, step_id)?;
@@ -1831,6 +2085,7 @@ fn page_step_delete(
 /// a transient row when `None`.
 fn open_step_editor(model: &mut BoardModel, text: &str, rename: Option<Uuid>) {
     if let Some(form) = model.form.as_mut().filter(|form| form.is_task()) {
+        form.steps.add_selected = false;
         if form
             .steps
             .editor

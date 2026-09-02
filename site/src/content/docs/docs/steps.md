@@ -14,33 +14,32 @@ Markdown `- [ ]` in notes is ordinary text. Use steps for checklists.
 ## On the task page
 
 Open the task with `Enter`. The step cursor begins inactive. In view mode, `Tab`
-and `Shift+Tab` select and cycle steps without leaving task view. A step click also
-selects it, and `Enter` keeps that selection read-only.
+and `Shift+Tab` cycle stored steps and the trailing dim `+ step` target without
+leaving task view. The target sits immediately below the final stored step as `   + step`.
+`Enter`, `ctrl+a`, or a click on it opens an independent new-step editor, it does not
+start task editing. `ctrl+a` also opens that editor from every task-edit field or
+inline step state.
 
-- `ctrl+space` toggles a selected step in either view or an edit session
-- `ctrl+e` on a selected step starts the task edit session and opens its inline editor
-- From an existing-step editor, `Tab` cycles Title, Notes, Thread, Scope, then returns to steps
-- Clicking a task field or another existing step moves the one active text cursor there and stages the prior step draft
-- Scope is a choice, not text: it has focus but never a blinking cursor
-- `↑` / `↓` move a selected step; `↑` from the first step returns to page reading
+- `ctrl+space` toggles the selected step, otherwise it starts or reopens the task
+- `ctrl+d` completes a selected open step, `ctrl+o` reopens a selected done step
+- `ctrl+e` on a selected stored step starts task editing and opens it inline
+- In task editing, Tab runs Title, Notes, stored steps, `+ step`, Scope, Thread
+- Reaching a stored step through Tab or arrows opens its inline editor
+- `ctrl+x` in view first marks the selected step and the second press removes it,
+  while task editing immediately hides and stages its removal until save
 
-With the cursor selected, the usual verbs act on that step:
+A new-step draft lives in the steps section. From view or task edit, it persists
+independently: it never joins the enclosing task edit session. Plain `Enter` saves one new
+step and selects that new stored step. `Shift+Enter` saves one and opens the next
+empty editor. Existing-step renames and removals are staged with Title, Notes,
+Thread, and Scope. Plain `Enter` parks an existing-step rename in that session,
+then `Shift+Enter` saves all staged changes. `Esc` cancels a field; Esc from task
+editing restores staged removals. A failed save keeps its drafts until you retry or cancel.
 
-| Key | Does |
-| --- | --- |
-| `ctrl+a` | add an inline step |
-| `ctrl+space` | toggle done |
-| `ctrl+e` | edit the highlighted step inline |
-| `ctrl+x` | mark, then a second press removes |
-
-A new-step draft lives in the steps section. `Shift+Enter` is its only save chord
-and opens an empty next row. Existing-step changes join the task edit session with
-Title, Notes, Thread, and Scope: move among them freely, then `Shift+Enter` saves
-all staged changes and exits editing. Plain `Enter` does not save. `Esc` cancels
-the active field. A failed save keeps its drafts until you retry or cancel.
-
-Wheel still scrolls the page. Before a step is selected, arrows read the page;
-a selected step owns them during the edit session.
+Wheel still scrolls the page. Bare `↓` activates the first stored step, then arrows
+move the selected stored step. In an existing-step editor, arrows move among stored
+steps and stage the prior draft; in an add editor, arrows scroll the shared page
+without closing or trapping that row.
 
 ## From the CLI
 
