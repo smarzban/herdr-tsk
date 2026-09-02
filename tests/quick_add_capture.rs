@@ -412,7 +412,7 @@ fn project_token_with_a_slash_stays_verbatim() {
 }
 
 #[test]
-fn ctrl_enter_uses_the_same_project_basename_resolution() {
+fn shift_enter_uses_the_same_project_basename_resolution() {
     let mut domain = DomainState::new();
     create_project_fixture(&mut domain, "/work/ctrl-target");
     let mut model = BoardModel::from_domain(&domain, None);

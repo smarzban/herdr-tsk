@@ -34,6 +34,10 @@ fn ctrl(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::CONTROL)
 }
 
+fn shift(code: KeyCode) -> KeyEvent {
+    KeyEvent::new(code, KeyModifiers::SHIFT)
+}
+
 fn ctrl_alt(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::CONTROL | KeyModifiers::ALT)
 }
@@ -1154,7 +1158,7 @@ fn u_undoes_with_domain_coverage_and_stale_undo_refused_visibly() {
 
 // ---------------------------------------------------------------------------
 // Task page: Enter opens a view-first full page; `e`/`n`/Tab enter field edits;
-// verbs act on the page's task; Ctrl+Enter saves; Esc layers back.
+// verbs act on the page's task; Shift+Enter saves; Esc layers back.
 // ---------------------------------------------------------------------------
 
 fn board_with_noted_task() -> (DomainState, BoardModel, uuid::Uuid) {
@@ -1298,16 +1302,12 @@ fn field_entry_intents_refocus_an_open_page_without_recreating_its_drafts() {
 }
 
 #[test]
-fn ctrl_enter_from_the_page_saves_and_keeps_the_task_page_open() {
+fn shift_enter_from_the_page_saves_and_keeps_the_task_page_open() {
     let (mut domain, mut model, id) = board_with_noted_task();
     apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
     apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None).expect("edit title");
     apply_intent(&mut domain, &mut model, BoardIntent::EditInsert('!'), None).expect("type");
-    let save = map_key(
-        BoardInputMode::EditTitle,
-        KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL),
-    )
-    .expect("ctrl+enter");
+    let save = map_key(BoardInputMode::EditTitle, shift(KeyCode::Enter)).expect("shift+enter");
     assert_eq!(save, BoardIntent::ConfirmEdit);
     let outcome = apply_intent(&mut domain, &mut model, save, None).expect("save");
     assert_eq!(outcome, IntentOutcome::Persist);
@@ -1467,7 +1467,17 @@ fn closing_the_page_after_completing_its_task_reanchors_to_a_visible_row() {
 }
 
 #[test]
-fn ctrl_alt_save_chords_are_unbound_for_task_forms_and_capture() {
+fn task_edit_save_uses_shift_enter_while_capture_keeps_its_ctrl_chord() {
+    assert_eq!(
+        map_key(BoardInputMode::EditTitle, ctrl(KeyCode::Enter)),
+        None,
+        "Ctrl+Enter must no longer save a task field"
+    );
+    assert_eq!(
+        map_key(BoardInputMode::EditNotes, shift(KeyCode::Enter)),
+        Some(BoardIntent::ConfirmEdit),
+        "Shift+Enter saves task notes without inserting a line break"
+    );
     assert_eq!(
         map_key(BoardInputMode::EditTitle, ctrl_alt(KeyCode::Enter)),
         None,
@@ -1559,13 +1569,13 @@ fn board_with_steps(
     }
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
     apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open task page");
+    // The page paints before a user can press Tab, recording the shared-content viewport used
+    // to bring the first selected step into view.
+    let _ = rendered_board(&model, 80, 24);
     if !steps.is_empty() {
-        // Step interactions are reachable only from the task edit session. Walk the same Tab
-        // route a user takes, including its final Scope-to-first-step transition.
-        for _ in 0..5 {
-            apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
-                .expect("tab into first step");
-        }
+        // From view mode, Tab begins an edit session on the first available step.
+        apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
+            .expect("tab into first step");
     }
     (domain, model, id)
 }
@@ -1627,7 +1637,7 @@ fn view_mode_rejects_step_clicks_and_add_until_a_task_edit_session_starts() {
 }
 
 #[test]
-fn tab_walks_every_step_then_returns_to_the_adjacent_form_field() {
+fn tab_wraps_the_selected_step_ring_without_entering_a_task_field() {
     let (mut domain, mut model, _) = board_with_steps("Tab ring", None, &["first", "second"]);
     assert!(rendered_board(&model, 80, 24).contains("▸ ▪ first"));
 
@@ -1636,21 +1646,13 @@ fn tab_walks_every_step_then_returns_to_the_adjacent_form_field() {
     assert!(rendered_board(&model, 80, 24).contains("▸ ▪ second"));
 
     apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
-        .expect("Tab after last step");
-    assert_eq!(model.input_mode(), BoardInputMode::EditTitle);
-
-    apply_intent(&mut domain, &mut model, BoardIntent::FormFocusPrev, None)
-        .expect("Shift+Tab from title");
+        .expect("Tab wraps after the last step");
     assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
-    assert!(rendered_board(&model, 80, 24).contains("▸ ▪ second"));
-
-    apply_intent(&mut domain, &mut model, BoardIntent::FormFocusPrev, None)
-        .expect("Shift+Tab to first step");
     assert!(rendered_board(&model, 80, 24).contains("▸ ▪ first"));
 
     apply_intent(&mut domain, &mut model, BoardIntent::FormFocusPrev, None)
-        .expect("Shift+Tab before first step");
-    assert_eq!(model.input_mode(), BoardInputMode::EditScope);
+        .expect("Shift+Tab wraps before the first step");
+    assert!(rendered_board(&model, 80, 24).contains("▸ ▪ second"));
 }
 
 #[test]
@@ -1717,8 +1719,8 @@ fn arrow_keys_move_the_cursor_through_shared_steps() {
     );
 }
 
-/// Ctrl+space with the cursor active toggles exactly the highlighted step
-/// through the real apply/save path: domain command, revision bump, journaled
+/// Terminal-encoded Ctrl+Space (NUL) with the cursor active toggles exactly the highlighted
+/// step through the real apply/save path: domain command, revision bump, journaled
 /// event, Persist outcome -- and the task's human status never changes.
 #[test]
 fn modifier_toggle_flips_step_under_cursor() {
@@ -1732,7 +1734,8 @@ fn modifier_toggle_flips_step_under_cursor() {
     // Tab selected the first step in the edit session, then Down moves to "bravo step".
     apply_intent(&mut domain, &mut model, BoardIntent::PageScrollDown, None).expect("cursor down");
 
-    let toggle = map_key(BoardInputMode::TaskPage, ctrl(KeyCode::Char(' '))).expect("ctrl+space");
+    let toggle =
+        map_key(BoardInputMode::TaskPage, ctrl(KeyCode::Null)).expect("terminal Ctrl+Space NUL");
     assert_eq!(toggle, BoardIntent::PrimaryVerb);
     let outcome = apply_intent(&mut domain, &mut model, toggle, None).expect("toggle");
     assert_eq!(
@@ -1774,18 +1777,17 @@ fn modifier_toggle_flips_step_under_cursor() {
     );
 }
 
-/// Ctrl+e is contextual: with the cursor active it opens the section's one-line
-/// editor seeded with the highlighted step's text (Enter renames the step);
-/// with the cursor inactive it is the existing title-edit verb, unchanged.
+/// Enter opens the selected step's in-place editor. Ctrl+e remains contextual for users who
+/// prefer the edit verb, while an inactive cursor still routes it to task-title editing.
 #[test]
-fn rename_verb_targets_step_or_title_by_cursor() {
+fn enter_or_edit_verb_targets_step_or_title_by_cursor() {
     let (mut domain, mut model, id) =
         board_with_steps("Rename target", None, &["alpha step", "bravo step"]);
 
-    // Tab selected the first step, then Ctrl+e opens the step editor seeded with it.
-    let rename = map_key(BoardInputMode::TaskPage, ctrl(KeyCode::Char('e'))).expect("ctrl+e");
-    assert_eq!(rename, BoardIntent::BeginEditTitle);
-    apply_intent(&mut domain, &mut model, rename.clone(), None).expect("open step editor");
+    // Tab selected the first step, then bare Enter opens its in-place editor.
+    let edit_selected = map_key(BoardInputMode::TaskPage, press(KeyCode::Enter)).expect("enter");
+    assert_eq!(edit_selected, BoardIntent::OpenTaskPage);
+    apply_intent(&mut domain, &mut model, edit_selected, None).expect("open inline step editor");
 
     assert_ne!(
         model.input_mode(),
@@ -1794,10 +1796,12 @@ fn rename_verb_targets_step_or_title_by_cursor() {
     );
     let frame = rendered_board(&model, 80, 24);
     assert!(
-        frame
-            .lines()
-            .any(|row| row.contains("▎") && row.contains("alpha step")),
-        "the footer step input must paint seeded with the step's text:\n{frame}"
+        frame.lines().any(|row| row.contains("▸ ▪ alpha step")),
+        "the selected step itself must paint the inline editor:\n{frame}"
+    );
+    assert!(
+        !frame.lines().any(|row| row.contains("▎")),
+        "the editor must not fall back to the footer:\n{frame}"
     );
 
     // Edit the draft, then Enter applies the rename to the step, not the title.
@@ -1825,6 +1829,7 @@ fn rename_verb_targets_step_or_title_by_cursor() {
     // Cursor inactive (fresh page session): Ctrl+e is the existing title edit.
     apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("close page");
     apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("reopen page");
+    let rename = map_key(BoardInputMode::TaskPage, ctrl(KeyCode::Char('e'))).expect("ctrl+e");
     apply_intent(&mut domain, &mut model, rename, None).expect("ctrl+e inactive cursor");
     assert_eq!(
         model.input_mode(),
@@ -1925,8 +1930,8 @@ fn a_tab_selected_step_receives_bare_down_before_shared_content() {
         "Down must move the Tab-selected step cursor"
     );
     assert!(
-        before.contains("L0"),
-        "fixture must begin at the notes head"
+        before.contains("▸ ▪ alpha step"),
+        "Tab must scroll the first selected step into view"
     );
 }
 
@@ -1958,8 +1963,8 @@ fn active_cursor_up_precedes_shared_scroll() {
         &["first step", "second step"],
     );
     rendered_board(&model, 80, 24);
-    apply_intent(&mut domain, &mut model, BoardIntent::SelectStep(1), None)
-        .expect("select second step");
+    apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
+        .expect("Tab to second step");
     let selected = rendered_board(&model, 80, 24);
     assert!(
         selected.contains("▸ ▪ second step"),
@@ -1997,8 +2002,6 @@ fn first_step_up_deactivates_before_inactive_up_scrolls_then_down_reactivates() 
         &["first step", "second step"],
     );
     rendered_board(&model, 80, 24);
-    apply_intent(&mut domain, &mut model, BoardIntent::SelectStep(0), None)
-        .expect("select the first step after layout");
     let active = rendered_board(&model, 80, 24);
     assert!(
         active.contains("▸ ▪ first step"),
@@ -2050,10 +2053,8 @@ fn first_step_up_deactivates_before_inactive_up_scrolls_then_down_reactivates() 
         "inactive Up must scroll the shared content"
     );
 
-    for _ in 0..2 {
-        apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
-            .expect("Tab returns to the first step");
-    }
+    apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
+        .expect("Tab returns to the first step");
     let reactivated = rendered_board(&model, 80, 24);
     assert!(
         reactivated.contains("▸ ▪ first step"),
@@ -2163,8 +2164,8 @@ fn add_verb_opens_editor_enter_applies_esc_cancels() {
     );
     let frame = rendered_board(&model, 80, 24);
     assert!(
-        frame.lines().any(|row| row.contains("▎")),
-        "the empty editor must paint its prompt on the footer line:\n{frame}"
+        frame.lines().any(|row| row.contains("▪ step…")),
+        "the empty editor must paint inline in the steps section:\n{frame}"
     );
 
     for ch in "zed step".chars() {
@@ -2209,45 +2210,41 @@ fn add_verb_opens_editor_enter_applies_esc_cancels() {
     assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
     let closed = rendered_board(&model, 80, 24);
     assert!(
-        !closed.lines().any(|row| row.contains("▎")),
-        "the footer input line is gone on close:\n{closed}"
+        !closed.lines().any(|row| row.contains("step…")),
+        "the inline input row is gone on close:\n{closed}"
     );
 }
 
-/// T-4 (AC-12, add mode): Enter saves and closes; Ctrl+Enter saves and reopens the
-/// line empty — the rapid-capture loop, proven by two steps added back-to-back; Esc
-/// discards. Every save here drives the reducer then the confirmed sync
-/// (`sync_from_domain`), which is exactly the pair the app save boundary runs on a
-/// successful persist.
+/// Add mode: Enter saves and closes; Shift+Enter saves and reopens the inline row empty,
+/// proven by two steps added back-to-back. Every save here drives the reducer then the
+/// confirmed sync (`sync_from_domain`), which is exactly the pair the app save boundary runs
+/// on a successful persist.
 #[test]
-fn step_editor_enter_saves_ctrl_enter_reopens_esc_cancels() {
+fn step_editor_enter_saves_shift_enter_reopens_esc_cancels() {
     let (mut domain, mut model, id) = board_with_steps("Loop witness", None, &["alpha step"]);
 
-    // Ctrl+a opens the add line; type, then Ctrl+Enter saves and reopens it empty.
+    // Ctrl+a opens the inline add row; type, then Shift+Enter saves and reopens it empty.
     apply_intent(&mut domain, &mut model, BoardIntent::BeginAddStep, None)
         .expect("open add editor");
     for ch in "bravo step".chars() {
         apply_intent(&mut domain, &mut model, BoardIntent::EditInsert(ch), None)
             .expect("type first step");
     }
-    let ctrl_enter = map_key(
-        model.input_mode(),
-        KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL),
-    )
-    .expect("ctrl+enter maps in the step editor");
-    let outcome =
-        apply_intent(&mut domain, &mut model, ctrl_enter, None).expect("save and reopen the line");
+    let shift_enter = map_key(model.input_mode(), shift(KeyCode::Enter))
+        .expect("shift+enter maps in the step editor");
+    let outcome = apply_intent(&mut domain, &mut model, shift_enter, None)
+        .expect("save and reopen the inline row");
     assert_eq!(outcome, IntentOutcome::Persist);
     model.sync_from_domain(&domain);
     assert_eq!(
         model.input_mode(),
         BoardInputMode::EditStep,
-        "Ctrl+Enter in add mode reopens the line for the next step"
+        "Shift+Enter in add mode reopens the inline row for the next step"
     );
     let reopened = rendered_board(&model, 80, 24);
     assert!(
-        reopened.lines().any(|row| row.contains("▎")),
-        "the reopened line paints its prompt on the footer:\n{reopened}"
+        reopened.lines().any(|row| row.contains("▪ step…")),
+        "the reopened line paints inline:\n{reopened}"
     );
 
     // The reopened line is empty: the second step is exactly what is typed next.
@@ -2297,10 +2294,9 @@ fn step_editor_enter_saves_ctrl_enter_reopens_esc_cancels() {
     assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
 }
 
-/// T-4 (AC-12, rename mode): Ctrl+Enter behaves as plain Enter — save and close,
-/// no reopen — and the editor outlives the save call until the boundary confirms.
+/// Rename mode: Shift+Enter behaves as plain Enter, saving and closing without reopening.
 #[test]
-fn rename_mode_ctrl_enter_saves_and_closes() {
+fn rename_mode_shift_enter_saves_and_closes() {
     let (mut domain, mut model, id) =
         board_with_steps("Rename ctrl witness", None, &["alpha step"]);
 
@@ -2313,13 +2309,10 @@ fn rename_mode_ctrl_enter_saves_and_closes() {
         apply_intent(&mut domain, &mut model, BoardIntent::EditInsert(ch), None)
             .expect("extend step text");
     }
-    let ctrl_enter = map_key(
-        model.input_mode(),
-        KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL),
-    )
-    .expect("ctrl+enter maps in the step editor");
+    let shift_enter = map_key(model.input_mode(), shift(KeyCode::Enter))
+        .expect("shift+enter maps in the step editor");
     let outcome =
-        apply_intent(&mut domain, &mut model, ctrl_enter, None).expect("rename via ctrl+enter");
+        apply_intent(&mut domain, &mut model, shift_enter, None).expect("rename via shift+enter");
     assert_eq!(outcome, IntentOutcome::Persist);
     assert_eq!(
         model.input_mode(),
@@ -2330,7 +2323,7 @@ fn rename_mode_ctrl_enter_saves_and_closes() {
     assert_eq!(
         model.input_mode(),
         BoardInputMode::TaskPage,
-        "Ctrl+Enter in rename mode saves and closes like Enter"
+        "Shift+Enter in rename mode saves and closes like Enter"
     );
     assert_eq!(
         domain.get(id).expect("task").steps[0].text,
@@ -2339,8 +2332,8 @@ fn rename_mode_ctrl_enter_saves_and_closes() {
     );
     let closed = rendered_board(&model, 80, 24);
     assert!(
-        !closed.lines().any(|row| row.contains("▎")),
-        "no reopened line in rename mode:\n{closed}"
+        !closed.lines().any(|row| row.contains("step…")),
+        "no reopened inline line in rename mode:\n{closed}"
     );
 }
 
@@ -2375,8 +2368,8 @@ fn empty_step_text_refusal_paints_on_line_and_clears_on_close() {
     assert!(
         refused
             .lines()
-            .any(|row| row.contains("▎") && row.contains("text required")),
-        "the refusal paints on the editor line itself:\n{refused}"
+            .any(|row| row.contains("step…") && row.contains("text required")),
+        "the refusal paints on the inline editor row itself:\n{refused}"
     );
     assert_eq!(
         domain.get(id).expect("task").steps.len(),
@@ -2396,8 +2389,8 @@ fn empty_step_text_refusal_paints_on_line_and_clears_on_close() {
     assert!(
         whitespace
             .lines()
-            .any(|row| row.contains("▎") && row.contains("text required")),
-        "whitespace-only text paints the same refusal:\n{whitespace}"
+            .any(|row| row.contains("step…") && row.contains("text required")),
+        "whitespace-only text paints the same inline refusal:\n{whitespace}"
     );
 
     // Closing the line with Esc clears the refusal; nothing leaks to the board.
@@ -2440,165 +2433,46 @@ fn empty_step_text_refusal_paints_on_line_and_clears_on_close() {
     );
 }
 
-/// A step add/rename uses the reusable quick-add slot: it reserves the two
-/// breathing rows around the input at the bottom of the frame, leaves the task
-/// page's meta footer visible above it, and never puts the editor in the steps
-/// section. Enter/Ctrl+Enter/Esc semantics hold through that shared surface, its
-/// empty-text refusal stays on the input line, and nothing leaks to board status.
+/// Add and rename drafts paint in the steps section, never in the shared footer slot.
 #[test]
-fn step_input_uses_the_shared_quick_add_slot() {
-    let (mut domain, mut model, id) = board_with_steps("Footer witness", None, &["alpha step"]);
+fn step_input_is_inline_and_shift_enter_reopens_an_empty_next_row() {
+    let (mut domain, mut model, id) = board_with_steps("Inline witness", None, &["alpha step"]);
 
-    // The footer row is the row the closed page paints its scope/meta footer on.
-    let closed = rendered_board(&model, 80, 24);
-    let closed_rows: Vec<&str> = closed.lines().collect();
-    let footer_row = closed_rows
-        .iter()
-        .position(|row| row.contains("created"))
-        .expect("the closed page paints its meta footer");
-
-    // The add verb uses the same status-row slot as board quick-add: two rows
-    // below the normal page footer, leaving a blank row around the input and
-    // retaining a relocated page footer above it.
-    let quick_add_row = footer_row + 1;
-    let open_meta_row = footer_row - 2;
     apply_intent(&mut domain, &mut model, BoardIntent::BeginAddStep, None)
-        .expect("open add editor");
+        .expect("open inline add editor");
     for ch in "bravo step".chars() {
         apply_intent(&mut domain, &mut model, BoardIntent::EditInsert(ch), None).expect("type");
     }
     let open = rendered_board(&model, 80, 24);
-    let open_rows: Vec<&str> = open.lines().collect();
     assert!(
-        open_rows[quick_add_row].contains("▎") && open_rows[quick_add_row].contains("bravo step"),
-        "the input line must use the quick-add row with its prompt pattern:\n{open}"
+        open.contains("steps 0/1") && open.contains("▪ bravo step"),
+        "{open}"
     );
     assert!(
-        open_rows[open_meta_row].contains("created"),
-        "the page meta footer must remain visible above the shared input slot:\n{open}"
-    );
-    assert!(
-        !open_rows[footer_row].contains("▎"),
-        "the old footer row must be reserved as spacing, not host the input:\n{open}"
-    );
-    // Not in the steps section: its label row keeps the plain counts, and no
-    // section row carries the prompt or the draft.
-    let label_row = open_rows
-        .iter()
-        .position(|row| row.contains("steps 0/1"))
-        .expect("the section label still paints its counts");
-    assert_ne!(
-        label_row, quick_add_row,
-        "the editor line must not paint on the section's label row"
-    );
-    assert!(
-        !open_rows[label_row].contains("▎") && !open_rows[label_row].contains("bravo step"),
-        "the editor must not paint inside the steps section:\n{open}"
+        !open.contains("▎"),
+        "the editor must not occupy the footer:\n{open}"
     );
 
-    // Enter saves and closes through the footer surface.
-    let enter = map_key(model.input_mode(), press(KeyCode::Enter)).expect("enter");
-    let outcome = apply_intent(&mut domain, &mut model, enter, None).expect("save");
-    assert_eq!(outcome, IntentOutcome::Persist);
+    let save_next = map_key(model.input_mode(), shift(KeyCode::Enter))
+        .expect("Shift+Enter saves the current step and starts the next");
+    assert_eq!(save_next, BoardIntent::ConfirmEditNext);
+    assert_eq!(
+        apply_intent(&mut domain, &mut model, save_next, None).expect("save and continue"),
+        IntentOutcome::Persist
+    );
     model.sync_from_domain(&domain);
-    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
-    assert_eq!(
-        domain.get(id).expect("task").steps.len(),
-        2,
-        "Enter appends through the footer line"
-    );
-    let saved = rendered_board(&model, 80, 24);
-    let saved_rows: Vec<&str> = saved.lines().collect();
-    assert!(
-        !saved_rows.iter().any(|row| row.contains("▎")),
-        "the footer line closes on save:\n{saved}"
-    );
-    assert!(
-        saved_rows[footer_row].contains("created"),
-        "the meta footer returns when the line closes:\n{saved}"
-    );
-
-    // Ctrl+Enter saves and reopens the line empty in add mode, on the footer.
-    apply_intent(&mut domain, &mut model, BoardIntent::BeginAddStep, None)
-        .expect("reopen add editor");
-    for ch in "charlie step".chars() {
-        apply_intent(&mut domain, &mut model, BoardIntent::EditInsert(ch), None)
-            .expect("type second step");
-    }
-    let ctrl_enter = map_key(
-        model.input_mode(),
-        KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL),
-    )
-    .expect("ctrl+enter maps in the step editor");
-    let outcome =
-        apply_intent(&mut domain, &mut model, ctrl_enter, None).expect("save and reopen the line");
-    assert_eq!(outcome, IntentOutcome::Persist);
-    model.sync_from_domain(&domain);
-    assert_eq!(
-        model.input_mode(),
-        BoardInputMode::EditStep,
-        "Ctrl+Enter in add mode reopens the footer line for the next step"
-    );
-    let reopened = rendered_board(&model, 80, 24);
-    let reopened_rows: Vec<&str> = reopened.lines().collect();
-    assert!(
-        reopened_rows[quick_add_row].contains("▎")
-            && !reopened_rows[quick_add_row].contains("charlie"),
-        "the reopened shared quick-add line is empty:\n{reopened}"
-    );
-
-    // Esc cancels: the draft is discarded, the line closes, nothing is appended.
-    for ch in "junk".chars() {
-        apply_intent(&mut domain, &mut model, BoardIntent::EditInsert(ch), None)
-            .expect("type junk");
-    }
-    let esc = map_key(model.input_mode(), press(KeyCode::Esc)).expect("esc");
-    let outcome = apply_intent(&mut domain, &mut model, esc, None).expect("cancel");
-    assert_eq!(outcome, IntentOutcome::None);
-    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
-    assert_eq!(
-        domain.get(id).expect("task").steps.len(),
-        3,
-        "Esc appends nothing"
-    );
-
-    // The empty-text refusal paints on the shared input line itself, never the
-    // board status message, and clears when the line closes.
-    apply_intent(&mut domain, &mut model, BoardIntent::BeginAddStep, None)
-        .expect("reopen add editor");
-    let enter = map_key(model.input_mode(), press(KeyCode::Enter)).expect("enter");
-    let outcome = apply_intent(&mut domain, &mut model, enter, None).expect("refuse");
-    assert_eq!(outcome, IntentOutcome::None);
     assert_eq!(model.input_mode(), BoardInputMode::EditStep);
-    assert_eq!(
-        model.message(),
-        None,
-        "the refusal must not leak to the board status message"
-    );
-    let refused = rendered_board(&model, 80, 24);
-    let refused_rows: Vec<&str> = refused.lines().collect();
+    let reopened = rendered_board(&model, 80, 24);
     assert!(
-        refused_rows[quick_add_row].contains("▎")
-            && refused_rows[quick_add_row].contains("text required"),
-        "the refusal paints on the shared quick-add line itself:\n{refused}"
+        reopened.contains("steps 0/2") && reopened.contains("step…"),
+        "{reopened}"
     );
-    let esc = map_key(model.input_mode(), press(KeyCode::Esc)).expect("esc");
-    apply_intent(&mut domain, &mut model, esc, None).expect("close the line");
-    assert_eq!(
-        model.message(),
-        None,
-        "closing the line leaves no message behind"
-    );
-    let shut = rendered_board(&model, 80, 24);
-    assert!(
-        !shut.contains("text required") && !shut.contains("▎"),
-        "the refusal and the line clear on close:\n{shut}"
-    );
-    assert_eq!(
-        domain.get(id).expect("task").steps.len(),
-        3,
-        "the refused Enter appends nothing"
-    );
+    assert!(!reopened.contains("▎"), "{reopened}");
+
+    let cancel = map_key(model.input_mode(), press(KeyCode::Esc)).expect("Esc");
+    apply_intent(&mut domain, &mut model, cancel, None).expect("cancel empty next row");
+    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+    assert_eq!(domain.get(id).expect("task").steps.len(), 2);
 }
 
 /// T-7 (AC-23): the first delete-verb press arms the visible mark AND paints the

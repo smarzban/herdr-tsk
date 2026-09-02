@@ -49,7 +49,7 @@ For scriptable board work, use `tsk add` and `tsk list`; read
   `Enter`, `P`, `1`/`2`/`3`, `z`, `:`, `?`, `+`, and `Esc` stay bare.
 - Task creation is the quick-add bar, never a form takeover. `+` opens a one-line
   title input on the status-row slot with a blank row above and below, list still
-  visible. `Enter` saves and closes, `Ctrl+Enter` saves and stays open, `Tab`
+  visible. `Enter` saves and closes, `Shift+Enter` saves and stays open, `Tab`
   expands the draft onto the task page with a title·notes·scope stash, so Esc
   returns to the line and a second `Tab` restores what was typed. A project board
   defaults the draft to that project, a project-less board defaults it to your desk, and home

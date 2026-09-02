@@ -173,9 +173,9 @@ pub enum BoardIntent {
     EditMoveWordLeft,
     EditMoveWordRight,
     ConfirmEdit,
-    /// Ctrl+Enter in the steps step line editor (AC-12): save and continue — add
-    /// mode reopens the line empty for the next step, rename mode downgrades to a
-    /// plain save-and-close (decided by the reducer from the editor's own mode).
+    /// Shift+Enter in the inline step editor: save and continue. Add mode reopens the
+    /// empty next row, while rename mode downgrades to a plain save-and-close (decided by
+    /// the reducer from the editor's own mode).
     ConfirmEditNext,
     CancelEdit,
     /// Status-row quick-add edits and actions.
@@ -671,11 +671,12 @@ fn map_form_edit_key(
     let mods = key.modifiers;
     let ctrl = mods.contains(KeyModifiers::CONTROL);
     let alt = mods.contains(KeyModifiers::ALT);
+    let shift = mods.contains(KeyModifiers::SHIFT);
 
     match key.code {
-        // This saves from EVERY field, Scope included. Ctrl must be the only modifier: Alt
-        // stays unbound rather than becoming a hidden equivalent save chord.
-        KeyCode::Enter if ctrl && !alt => return Some(BoardIntent::ConfirmEdit),
+        // Shift+Enter saves every task field, Scope included. Ctrl and Alt remain unbound so
+        // task editing has one visible save chord.
+        KeyCode::Enter if shift && !ctrl && !alt => return Some(BoardIntent::ConfirmEdit),
         KeyCode::Tab => match navigation {
             FormEditNavigation::None => {}
             FormEditNavigation::Form => return Some(BoardIntent::FormFocusNext),
@@ -920,7 +921,8 @@ fn map_task_page(key: KeyEvent, verbs: VerbModifier) -> Option<BoardIntent> {
         KeyCode::Esc if !extra => Some(BoardIntent::CloseLayer),
         KeyCode::Char('q') if verb => Some(BoardIntent::CloseLayer),
         KeyCode::Enter if !extra => Some(BoardIntent::OpenTaskPage),
-        KeyCode::Char(' ') if verb => Some(BoardIntent::PrimaryVerb),
+        // Most terminals encode Ctrl+Space as NUL rather than Ctrl plus a printable space.
+        KeyCode::Char(' ') | KeyCode::Null if verb => Some(BoardIntent::PrimaryVerb),
         KeyCode::Char('a') if verb => Some(BoardIntent::BeginAddStep),
         KeyCode::Char('d') if verb => Some(BoardIntent::Complete),
         KeyCode::Char('o') if verb => Some(BoardIntent::Reopen),
@@ -1014,12 +1016,14 @@ fn map_palette(key: KeyEvent) -> Option<BoardIntent> {
 ///
 /// The live board carries a `CaptureField` and calls [`map_board_form_key`] directly.
 fn map_edit(mode: BoardInputMode, key: KeyEvent) -> Option<BoardIntent> {
-    // The step editor's Ctrl+Enter is the rapid-capture loop: save and reopen the line empty
-    // in add mode, while rename mode downgrades to a plain save in the reducer.
+    // Shift+Enter is the step add rapid-capture loop. Rename mode downgrades it to a plain
+    // save in the reducer, while Ctrl+Enter stays unbound.
     if mode == BoardInputMode::EditStep
         && key.code == KeyCode::Enter
-        && key.modifiers.contains(KeyModifiers::CONTROL)
-        && !key.modifiers.contains(KeyModifiers::ALT)
+        && key.modifiers.contains(KeyModifiers::SHIFT)
+        && !key
+            .modifiers
+            .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER)
     {
         return Some(BoardIntent::ConfirmEditNext);
     }

@@ -910,7 +910,7 @@ pub fn apply_board_intent_with_save_recovery(
     // happens and the session (mode, draft, cursor, binding) survives the refusal intact. The
     // caller presents the returned error on the message row. Both save chords on a line
     // editor are this one surface, so they refuse identically: Enter (`ConfirmEdit`)
-    // and Ctrl+Enter (`ConfirmEditNext`).
+    // and Shift+Enter (`ConfirmEditNext`).
     if matches!(
         intent,
         BoardIntent::ConfirmEdit | BoardIntent::ConfirmEditNext
@@ -2454,12 +2454,12 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_enter_step_save_uses_the_real_app_save_boundary() {
-        let temp = TempStore::new("ctrl-enter-step");
+    fn shift_enter_step_save_uses_the_real_app_save_boundary() {
+        let temp = TempStore::new("shift-enter-step");
         let mut domain = DomainState::new();
         let id = domain
             .create(
-                "Ctrl Enter",
+                "Shift Enter",
                 None,
                 TaskScope::Global,
                 None,
@@ -2486,7 +2486,7 @@ mod tests {
             BoardIntent::ConfirmEditNext,
             &mut recovery,
         )
-        .expect("real ctrl-enter save");
+        .expect("real shift-enter save");
         assert_eq!(
             temp.store
                 .load()
@@ -2501,7 +2501,7 @@ mod tests {
         assert_eq!(
             model.input_mode(),
             BoardInputMode::EditStep,
-            "successful Ctrl+Enter reopens add editor"
+            "successful Shift+Enter reopens add editor"
         );
     }
 

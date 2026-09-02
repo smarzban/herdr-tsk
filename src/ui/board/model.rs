@@ -50,13 +50,11 @@ pub enum BoardInputMode {
     /// click does NOT: field regions are inert in this state, and only move focus once one
     /// of the edit states is already open (see the mouse mapper's form-field arms).
     TaskPage,
-    /// The page footer's one-line add/rename step input owns input (AC-25). It is a
-    /// Title-like single-line draft ([`crate::ui::edit::EditBuffer`]) carried on the
-    /// page form's steps state, not one of the three task-form fields: Enter
-    /// applies the domain command (Ctrl+Enter adds and reopens the line empty), Esc
-    /// cancels. The applied line and this mode outlive the save call — only the
-    /// persistence boundary's confirmed sync closes (or reopens) the line, and a
-    /// failed save holds it until Retry/Cancel resolve; every close returns to
+    /// A one-line add/rename step draft owns input in its own row in the steps section. It is
+    /// a Title-like [`crate::ui::edit::EditBuffer`] carried on the page form's steps state,
+    /// not one of the three task-form fields: Enter applies the domain command, Shift+Enter
+    /// adds and reopens an empty next row, and Esc cancels. The draft and this mode outlive
+    /// the save call until confirmed sync closes or reopens it; every close returns to
     /// [`BoardInputMode::TaskPage`].
     EditStep,
     /// Modal selection over the session project-scope options.
@@ -404,8 +402,7 @@ impl BoardForm {
     }
 }
 
-/// The one-line add/rename step input on the task page's footer row
-/// (page-session only).
+/// The in-place add/rename step input in the task page's steps section (page-session only).
 ///
 /// `rename` names the step being edited; `None` is an add (the buffer starts empty).
 /// `refusal` is the line's own empty-text refusal (AC-13): painted on the line,
@@ -420,7 +417,7 @@ pub(super) struct StepEditor {
 
 /// An step-editor apply waiting for the app save boundary to confirm persistence
 /// (AC-14). `step` + `text` name the mutation that must land before the line may
-/// close — or, for Ctrl+Enter in add mode, reopen empty.
+/// close — or, for Shift+Enter in add mode, reopen empty.
 #[derive(Debug, Clone)]
 pub(super) struct StepEditorSave {
     pub(super) step: Uuid,
@@ -446,7 +443,7 @@ pub(super) struct StepsPageState {
     /// Step index visibly marked by the first press of the delete verb. Any intervening
     /// intent clears it; only the verb's second press removes.
     pub(super) delete_mark: Option<usize>,
-    /// The open one-line add/rename editor, if any.
+    /// The open in-place add/rename editor, if any.
     pub(super) editor: Option<StepEditor>,
     /// An editor apply the save boundary has not confirmed yet (AC-14). While it is
     /// set, the editor and its input mode are held exactly as the user left them.
@@ -793,10 +790,10 @@ impl BoardModel {
                 self.clear_message();
             }
         }
-        // A held step line editor unwinds to page view on Cancel (AC-14): the
-        // baseline Cancel just restored rolled its mutation back, so nothing is left
-        // to hold the line for, and an edit mode whose editor is gone is the orphan
-        // no key can escape. The Cancel path's `sync_from_domain` ran first and left
+        // A held inline step editor unwinds to page view on Cancel: the restored baseline
+        // rolled its mutation back, so nothing is left to hold the row for, and an edit mode
+        // whose editor is gone is the orphan no key can escape. The Cancel path's
+        // `sync_from_domain` ran first and left
         // the pending save unresolved precisely because the mutation is not in the
         // baseline; Retried resolves it there instead and never reaches this branch.
         if resolution == SaveResolution::Cancelled
@@ -1404,12 +1401,12 @@ impl BoardModel {
         self.hold_task_edit_save = false;
     }
 
-    /// Release a held step line editor once persistence has confirmed its mutation
+    /// Release a held inline step editor once persistence has confirmed its mutation
     /// (AC-14's release side).
     ///
     /// Mirrors [`Self::finish_quick_add_save`]'s identity check: the touched step
-    /// must be present carrying its new text in the synced tasks before the line may
-    /// close — or reopen empty, for Ctrl+Enter in add mode. The Cancel path syncs the
+    /// must be present carrying its new text in the synced tasks before the row may
+    /// close, or reopen empty for Shift+Enter in add mode. The Cancel path syncs the
     /// rolled-back baseline first, where the step is absent (an add) or still carries
     /// its old text (a rename), so the line stays held for [`Self::end_save_recovery`]
     /// to unwind to page view instead. The editor and its input mode outlive the save
@@ -1437,7 +1434,7 @@ impl BoardModel {
         let form = self.form.as_mut().expect("task form checked above");
         form.steps.pending_save = None;
         if pending.reopen {
-            // The rapid-capture loop: the line reopens empty for the next step, its
+            // The rapid-capture loop: the in-place row reopens empty for the next step, its
             // mode never having left it.
             form.steps.editor = Some(StepEditor {
                 buffer: seeded_draft(""),

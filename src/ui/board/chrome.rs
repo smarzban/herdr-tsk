@@ -39,9 +39,9 @@ impl BoardModel {
 fn edit_chrome_legends(mode: BoardInputMode) -> [&'static str; 3] {
     match mode {
         BoardInputMode::EditNotes => [
-            "Ctrl+Enter save · Enter newline · Esc cancel",
-            "Ctrl+Enter save · Esc cancel",
-            "Ctrl+Enter save · Esc",
+            "Shift+Enter save · Enter newline · Esc cancel",
+            "Shift+Enter save · Esc cancel",
+            "Shift+Enter save · Esc",
         ],
         BoardInputMode::EditScope => [
             "Space cycle · Enter choose · Esc cancel",
@@ -70,7 +70,7 @@ fn edit_chrome_legends(mode: BoardInputMode) -> [&'static str; 3] {
 ///
 /// Both halves have to survive the narrowest painted board. Browse is 50 columns, so 48
 /// inside the border, and Browse paints no detail panel — this row is then the *only*
-/// statement of `Ctrl+Enter save` on screen, and a Notes draft cannot be committed without
+/// statement of `Shift+Enter save` on screen, and a Notes draft cannot be committed without
 /// it. So the row degrades in a deliberate order:
 ///
 /// 1. **dropped first** — the legend's extra wording, tier by tier
@@ -87,7 +87,7 @@ fn edit_chrome_legends(mode: BoardInputMode) -> [&'static str; 3] {
 /// the field is what never gives. No board the product paints is this narrow (50 columns
 /// leaves this row 48), so this is the guard rather than a width a user reaches. What the
 /// narrowest board *does* reach is the tightest mark in the product: a Notes edit spends 21
-/// of those 48 on `Ctrl+Enter save · Esc` and 7 on the frame, leaving [`fit_chrome_row`] 20
+/// of those 48 on `Shift+Enter save · Esc` and 7 on the frame, leaving [`fit_chrome_row`] 20
 /// columns against a lead floor of 14 -- exactly enough to mark a dropped refusal, and no
 /// more.
 fn edit_chrome_line(mode: BoardInputMode, lead: &[ChromeRowPart<'_>], width: usize) -> String {

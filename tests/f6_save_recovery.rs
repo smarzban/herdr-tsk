@@ -1255,19 +1255,17 @@ fn failed_step_editor_save() -> (
     assert_eq!(failed, IntentOutcome::None);
     assert!(recovery.is_pending());
 
-    // The editor is HELD while unresolved (AC-14): the surface stays allocated with
-    // its draft on the footer's input line. Closing it before the boundary — the
-    // failure this test exists to catch — paints the plain meta footer instead.
+    // The editor is HELD while unresolved: the surface stays allocated with its draft in
+    // the steps section. Closing it before the boundary would discard that inline row.
     assert_eq!(model.input_mode(), BoardInputMode::SaveRecovery);
     let held = board_painted(&model);
     assert!(
-        held.lines()
-            .any(|row| row.contains("▎") && row.contains("zed step")),
-        "the failed save must hold the editor with its draft on the line:\n{held}"
+        held.lines().any(|row| row.contains("▪ zed step")),
+        "the failed save must hold the editor with its draft on the inline row:\n{held}"
     );
     assert!(
         held.contains("save failed") && held.contains("Retry or Cancel"),
-        "the footer input owns the recovery prompt while it replaces the status row:\n{held}"
+        "the recovery prompt remains visible while the inline draft is held:\n{held}"
     );
     (domain, model, recovery, id)
 }
@@ -1532,12 +1530,12 @@ fn retried_step_rename_save_applies_the_held_rename() {
 
 /// Remediation round 1 / Important 1: the step editor's two save chords share one
 /// refusal discipline. When another actor soft-deleted the bound task on the
-/// durable record between open and confirm, Ctrl+Enter (`ConfirmEditNext`) must
-/// refuse in place exactly like Enter — the editor held with its draft, nothing
-/// mutated, the save boundary never reached — not degrade to a failing save behind
+/// durable record between open and confirm, Shift+Enter (`ConfirmEditNext`) must
+/// refuse in place exactly like Enter, with the inline editor held with its draft and nothing
+/// mutated, the save boundary never reached, not degrade to a failing save behind
 /// SaveRecovery.
 #[test]
-fn ctrl_enter_refuses_in_place_when_the_bound_task_was_concurrently_soft_deleted() {
+fn shift_enter_refuses_in_place_when_the_bound_task_was_concurrently_soft_deleted() {
     let mut domain = DomainState::new();
     let id = domain
         .create(
@@ -1599,7 +1597,7 @@ fn ctrl_enter_refuses_in_place_when_the_bound_task_was_concurrently_soft_deleted
     assert_eq!(
         refused,
         Err(DomainError::SoftDeleted(id)),
-        "Ctrl+Enter must refuse against the fresh durable record like Enter"
+        "Shift+Enter must refuse against the fresh durable record like Enter"
     );
     assert_eq!(saves, 0, "a refused chord never reaches the save boundary");
     assert!(!recovery.is_pending(), "the refusal is not a failed save");
@@ -1610,9 +1608,8 @@ fn ctrl_enter_refuses_in_place_when_the_bound_task_was_concurrently_soft_deleted
     );
     let held = board_painted(&model);
     assert!(
-        held.lines()
-            .any(|row| row.contains("▎") && row.contains("zed step")),
-        "the draft survives the refusal on the line:\n{held}"
+        held.lines().any(|row| row.contains("▪ zed step")),
+        "the draft survives the refusal on its inline row:\n{held}"
     );
     let texts: Vec<&str> = domain
         .get(id)

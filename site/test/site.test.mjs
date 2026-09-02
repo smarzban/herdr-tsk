@@ -51,17 +51,21 @@ test("demo matches the quick-add, peek, and group-toggle contracts", async () =>
 });
 
 test("docs describe fixed Ctrl verbs and the current quick-add and step behavior", async () => {
-  const [keys, capture, steps, config] = await Promise.all([
+  const [keys, capture, steps, taskPage, config] = await Promise.all([
     read("../src/content/docs/docs/keys.md"),
     read("../src/content/docs/docs/capture.md"),
     read("../src/content/docs/docs/steps.md"),
+    read("../src/content/docs/docs/task-page.md"),
     read("../../docs/technical/config.md"),
   ]);
   assert.match(keys, /`ctrl\+g`/);
   assert.match(capture, /`Shift\+Enter` saves and stays open/);
   assert.doesNotMatch(capture, /`Ctrl\+Enter` saves and stays open/);
   assert.match(steps, /edit session/);
-  assert.match(steps, /`Tab` \/ `Shift\+Tab`/);
+  assert.match(steps, /`Tab`[\s\S]*`Shift\+Tab` then cycle steps and wrap/);
+  assert.match(steps, /`Shift\+Enter` adds and opens an empty next row/);
+  assert.doesNotMatch(steps, /footer line/);
+  assert.match(taskPage, /`Shift\+Enter` saves from any task field/);
   assert.doesNotMatch(steps, /Bare `↓` activates/);
   assert.match(config, /fixed Ctrl modifier/);
   assert.match(config, /Legacy[\s\S]*"alt"[\s\S]*deserialize as Ctrl/);

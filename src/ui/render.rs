@@ -366,6 +366,16 @@ pub struct StepView {
     pub rows: Vec<String>,
 }
 
+/// The task page's in-place step editor. Its rows replace the selected stored step's text, or
+/// follow the stored rows while an add is pending, so the editor never takes over the footer.
+#[derive(Debug, Clone)]
+pub struct InlineStepEditor<'a> {
+    pub index: usize,
+    pub cursor_row: u16,
+    pub cursor_col: u16,
+    pub refusal: Option<&'a str>,
+}
+
 /// A focused one-line input in the board's shared bottom slot. The slot reserves
 /// breathing rows around the status-row input, places the cursor after the two-cell
 /// prompt, and keeps any refusal on the line itself. New one-line capture surfaces
@@ -460,10 +470,11 @@ pub enum QueueOverlay<'a> {
         notes_cursor: Option<(u16, u16)>,
         /// Wrapped note rows hidden below the window, named by the divider's tail.
         more_lines: usize,
-        /// The extracted steps step views, in storage order. Empty paints no
-        /// steps section at all: the page is identical to pre-feature for a task
-        /// with no steps.
+        /// The extracted steps step views, in storage order. An inline add contributes a
+        /// final transient view, while `stored_step_count` stays tied to persisted steps.
         step_views: Vec<StepView>,
+        /// Persisted step count, excluding an inline unsaved add draft.
+        stored_step_count: usize,
         /// Absolute index of the step cursor's row, when active. The painter turns it
         /// into the row's `▸` gutter marker.
         step_cursor: Option<usize>,
@@ -471,9 +482,10 @@ pub enum QueueOverlay<'a> {
         step_scroll: usize,
         /// Absolute index of the step the delete verb visibly marked, when armed.
         step_marked: Option<usize>,
-        /// The page's add/rename step draft. When present it uses the shared
-        /// bottom input slot, leaving the meta footer visible in the page above.
-        step_editor: Option<BottomInputSlot<'a>>,
+        /// The page's in-place add/rename step draft, if one is active.
+        inline_step_editor: Option<InlineStepEditor<'a>>,
+        /// The thread field still uses the shared bottom input slot.
+        bottom_input: Option<BottomInputSlot<'a>>,
         /// Footer: task number · scope · thread · created · updated.
         meta: String,
         /// Display width before the scope inside `meta`. The number is chrome, not a scope hit.
@@ -939,7 +951,7 @@ pub(crate) fn bottom_input_geometry(mut geo: TierGeometry, active: bool) -> Tier
 fn bottom_input_slot<'a>(overlay: &'a QueueOverlay<'a>) -> Option<&'a BottomInputSlot<'a>> {
     match overlay {
         QueueOverlay::QuickAdd { input, .. } => Some(input),
-        QueueOverlay::TaskPage { step_editor, .. } => step_editor.as_ref(),
+        QueueOverlay::TaskPage { bottom_input, .. } => bottom_input.as_ref(),
         _ => None,
     }
 }
@@ -996,7 +1008,7 @@ const FORM_TITLE_VERBS: &[VerbEntry<'static>] = &[
 ];
 const FORM_NOTES_VERBS: &[VerbEntry<'static>] = &[
     VerbEntry {
-        key: "ctrl+enter",
+        key: "shift+enter",
         label: "save",
     },
     VerbEntry {
@@ -1079,11 +1091,11 @@ const EDIT_TITLE_VERBS: &[VerbEntry<'static>] = &[
     },
 ];
 
-/// Verb bar for the Notes editor: plain Enter opens a line, so Ctrl+Enter saves. Tab stays
+/// Verb bar for the Notes editor: plain Enter opens a line, so Shift+Enter saves. Tab stays
 /// unbound.
 const EDIT_NOTES_VERBS: &[VerbEntry<'static>] = &[
     VerbEntry {
-        key: "ctrl+enter",
+        key: "shift+enter",
         label: "save",
     },
     VerbEntry {
@@ -1151,10 +1163,12 @@ fn paint_overlay(
             notes_cursor,
             more_lines,
             ref step_views,
+            stored_step_count,
             step_cursor,
             step_scroll,
             step_marked,
-            ref step_editor,
+            ref inline_step_editor,
+            bottom_input: _,
             ref meta,
             meta_scope_x,
             meta_scope_width,
@@ -1174,15 +1188,17 @@ fn paint_overlay(
                 *notes_cursor,
                 *more_lines,
                 step_views,
+                *stored_step_count,
                 *step_cursor,
                 *step_scroll,
                 *step_marked,
+                inline_step_editor.as_ref(),
                 meta,
                 *meta_scope_x,
                 *meta_scope_width,
                 *thread_slot_width,
                 *focus,
-                step_editor.is_some(),
+                bottom_input_slot(&model.overlay).is_some(),
                 hits,
             );
             if let Some(dropdown) = scope_dropdown {
@@ -1742,9 +1758,8 @@ pub struct TaskPageLayout {
 /// What the page's steps section asks of the layout (AC-24).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StepsSection {
-    /// No steps: no section paints, notes keep the full content region. The step
-    /// editor no longer reserves a section row — since T-7 it paints on the page
-    /// footer, so an open line over an empty steps is still no section.
+    /// No stored or draft steps: no section paints, so notes keep the full content region.
+    /// An inline add draft contributes a transient step view and therefore uses `Steps`.
     None,
     /// At least one step: the section follows the notes after two blank rows, and
     /// the shared content viewport scrolls when the resulting page overflows.
@@ -1895,9 +1910,11 @@ fn paint_task_page(
     notes_cursor: Option<(u16, u16)>,
     more_lines: usize,
     step_views: &[StepView],
+    stored_step_count: usize,
     step_cursor: Option<usize>,
     step_scroll: usize,
     step_marked: Option<usize>,
+    inline_step_editor: Option<&InlineStepEditor<'_>>,
     meta: &str,
     meta_scope_x: u16,
     meta_scope_width: u16,
@@ -2058,7 +2075,20 @@ fn paint_task_page(
     } else {
         style_plain()
     };
-    let done = step_views.iter().filter(|step| step.done).count();
+    let done = step_views
+        .iter()
+        .take(stored_step_count)
+        .filter(|step| step.done)
+        .count();
+    let inline_editor_first_row = inline_step_editor.map(|editor| {
+        content.steps_start.saturating_add(1).saturating_add(
+            step_views
+                .iter()
+                .take(editor.index)
+                .map(|step| step.rows.len().max(1))
+                .sum::<usize>(),
+        )
+    });
     for visible in 0..lay.notes_rows as usize {
         let absolute = scroll + visible;
         if absolute >= content.total_rows {
@@ -2105,7 +2135,7 @@ fn paint_task_page(
                 y,
                 content_width,
                 paint_bounded_line(
-                    &format!("  steps {done}/{}", step_views.len()),
+                    &format!("  steps {done}/{stored_step_count}"),
                     content_width,
                     style_dim(),
                 ),
@@ -2145,11 +2175,24 @@ fn paint_task_page(
                 } else {
                     "    ".to_string()
                 };
+                let editing = inline_step_editor.is_some_and(|editor| editor.index == index);
+                let shown_text = if editing && text.trim().is_empty() && first_row {
+                    inline_step_editor
+                        .and_then(|editor| editor.refusal)
+                        .map(|refusal| format!("step… · {refusal}"))
+                        .unwrap_or_else(|| "step…".to_string())
+                } else {
+                    text.to_string()
+                };
                 put_line(
                     frame,
                     y,
                     content_width,
-                    paint_bounded_line(&format!("{prefix}{text} "), content_width, style_plain()),
+                    paint_bounded_line(
+                        &format!("{prefix}{shown_text} "),
+                        content_width,
+                        if editing { style_bold() } else { style_plain() },
+                    ),
                 );
                 hits.push(
                     QueueHitTarget::Step(index),
@@ -2165,6 +2208,22 @@ fn paint_task_page(
                     1,
                 ));
             }
+        }
+    }
+    if let (Some(editor), Some(first_row)) = (inline_step_editor, inline_editor_first_row) {
+        let cursor_row = first_row.saturating_add(editor.cursor_row as usize);
+        if cursor_row >= scroll && cursor_row < scroll.saturating_add(lay.notes_rows as usize) {
+            place_edit_cursor_at(
+                frame,
+                Rect::new(
+                    4,
+                    lay.notes_y,
+                    content_width.saturating_sub(5),
+                    lay.notes_rows,
+                ),
+                u16::try_from(cursor_row.saturating_sub(scroll)).unwrap_or(u16::MAX),
+                editor.cursor_col.min(content_width.saturating_sub(5)),
+            );
         }
     }
     if let Some((row, col)) = notes_cursor {
@@ -2185,8 +2244,8 @@ fn paint_task_page(
         paint_page_scrollbar(frame, hits, &lay, width, scroll, content.total_rows);
     }
 
-    // Meta footer: scope · thread · created · updated. It remains available while a step
-    // draft uses the board's separate shared bottom input slot.
+    // Meta footer: scope · thread · created · updated. Inline step drafts leave this footer
+    // visible and do not claim its input slot.
     if let Some(y) = lay.meta_y {
         put_line(
             frame,

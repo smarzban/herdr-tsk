@@ -49,12 +49,13 @@ The page is view-first. Verbs still need the modifier, except Tab and arrows.
 | --- | --- |
 | `ctrl+e` | edit title (or rename the highlighted step) |
 | `ctrl+n` | edit notes |
-| `Tab` / `Shift+Tab` | move through title, notes, thread, scope, then steps |
-| `ctrl+a` | add a [step](/docs/steps/) after editing has started |
-| `↓` `↑` | move a step selected by Tab or click |
+| `Tab` / `Shift+Tab` | select and cycle steps, wrapping at either end; without steps, move through task fields |
+| `ctrl+a` | add an inline [step](/docs/steps/) after editing has started |
+| `Enter` or click | edit the selected step inline, after editing has started |
+| `↓` `↑` | move a step selected by Tab |
 | `ctrl+space` | toggle the highlighted step, or start/reopen the task |
 | `ctrl+x` | mark, then remove, the highlighted step; otherwise delete the task |
-| `Ctrl+Enter` | save from any field |
+| `Shift+Enter` | save task edits; step add saves and opens the next row |
 | `Esc` | cancel the field, or close the page |
 
 The scope footer does nothing until an edit has started. Field clicks are inert

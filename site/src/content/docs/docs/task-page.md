@@ -7,13 +7,14 @@ description: "View and edit one task: title, notes, thread, and scope."
 header copies that task identifier when clicked.
 
 It is view-first. Nothing is in edit mode until you ask. `ctrl+e` edits the title,
-`ctrl+n` edits notes, `Tab` moves through title, notes, thread, scope, and then
-steps. The scope footer does nothing until an edit has started.
+`ctrl+n` edits notes, and `Tab` selects the first step when steps exist. Tab and
+Shift+Tab cycle selected steps, wrapping at either end. The scope footer does
+nothing until an edit has started.
 
-`Ctrl+Enter` saves from any field. Field `Esc` cancels that field. Page `Esc`
-closes the page.
+`Shift+Enter` saves from any task field. Field `Esc` cancels that field. Page
+`Esc` closes the page.
 
-Notes are multiline, so `Enter` inserts a line. `Ctrl+Enter` saves and does not
+Notes are multiline, so `Enter` inserts a line. `Shift+Enter` saves and does not
 insert a line.
 
 Thread uses the same name rules as capture `!t`. The field is optional.

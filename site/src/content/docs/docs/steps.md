@@ -13,25 +13,26 @@ Markdown `- [ ]` in notes is ordinary text. Use steps for checklists.
 
 ## On the task page
 
-Open the task with `Enter`. The step cursor is available only in an edit
-session: start one with a modified edit verb or Tab from the page fields.
+Open the task with `Enter`. The step cursor begins inactive. `Tab` selects the
+first step when one exists, which starts the task edit session. `Tab` and
+`Shift+Tab` then cycle steps and wrap at either end.
 
-- `Tab` / `Shift+Tab`: from Scope selects the first step, from Title selects the last
-- A click on a step row selects it after editing has started
+- In view mode, clicks leave steps alone
+- In an edit session, click a step or press `Enter` on its selected row to edit it inline
 - `↑` / `↓` move a selected step; `↑` from the first step returns to page reading
 
 With the cursor selected, the usual verbs act on that step:
 
 | Key | Does |
 | --- | --- |
-| `ctrl+a` | add a step (footer line, after task editing starts) |
+| `ctrl+a` | add an inline step |
 | `ctrl+space` | toggle done |
-| `ctrl+e` | rename the highlighted step |
+| `ctrl+e` | edit the highlighted step inline |
 | `ctrl+x` | mark, then a second press removes |
 
-The add/rename line is a one-line draft. `Enter` applies it. `Ctrl+Enter` adds
-and leaves the line open empty. `Esc` cancels. A failed save keeps the line
-until you retry or cancel.
+The add/rename draft lives in the steps section. `Enter` applies it.
+`Shift+Enter` adds and opens an empty next row. `Esc` cancels. A failed save
+keeps the draft until you retry or cancel.
 
 Wheel still scrolls the page. Before a step is selected, arrows read the page;
 a selected step owns them during the edit session.

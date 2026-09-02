@@ -1736,7 +1736,7 @@ fn step_editor_verb_chips_follow_their_keyboard_intents() {
     let verbs = board_verb_items(&model);
     for (key, expected) in [
         ("enter", BoardIntent::ConfirmEdit),
-        ("ctrl+enter", BoardIntent::ConfirmEditNext),
+        ("shift+enter", BoardIntent::ConfirmEditNext),
     ] {
         let index = verbs
             .iter()
@@ -1776,12 +1776,10 @@ fn page_rows(model: &BoardModel) -> Vec<String> {
         .collect()
 }
 
-/// AC-21: a single click on a step row moves the step cursor onto
-/// that step — a click selects, it never toggles, never opens the editor,
-/// never arms a delete mark — and a click on the notes half changes nothing
-/// about the cursor.
+/// A click on a step in an active task edit session opens that row in place. It neither
+/// persists nor toggles, and it never falls back to the retired footer editor.
 #[test]
-fn clicking_a_step_row_selects_it() {
+fn clicking_a_step_row_opens_its_inline_editor() {
     let (mut domain, mut model, id) = board_with_task("Click target", HumanStatus::Ready);
     for text in ["alpha step", "bravo step", "charlie step"] {
         domain.add_step(id, text).expect("add step");
@@ -1813,8 +1811,13 @@ fn clicking_a_step_row_selects_it() {
     );
     assert_eq!(
         model.input_mode(),
-        BoardInputMode::TaskPage,
-        "a click never opens the editor"
+        BoardInputMode::EditStep,
+        "a click opens the selected row's inline editor"
+    );
+    assert!(
+        !selected.iter().any(|row| row.contains("▎")),
+        "the step editor no longer occupies the footer:\n{}",
+        selected.join("\n")
     );
     let task = domain.get(id).expect("task");
     assert_eq!(
@@ -1829,23 +1832,11 @@ fn clicking_a_step_row_selects_it() {
         selected.join("\n")
     );
 
-    // A click on the notes half changes nothing about the cursor.
-    let notes_area = hits
-        .regions
-        .iter()
-        .find(|hit| matches!(hit.target, QueueHitTarget::FormNotes(_)))
-        .expect("the page body paints notes hits")
-        .area;
+    // While the inline editor owns focus, its row remains the only editable page surface.
     assert_eq!(
-        map_board_mouse(&model, &hits, left_click(notes_area.x + 3, notes_area.y)),
+        map_board_mouse(&model, &hits, left_click(3, step_y as u16)),
         None,
-        "a notes-half click dispatches nothing"
-    );
-    let after = page_rows(&model);
-    assert!(
-        after.iter().any(|row| row.contains("▸ ▪ charlie step")),
-        "the cursor stays on the clicked step after a notes-half click:\n{}",
-        after.join("\n")
+        "a second click cannot reach through the active inline editor"
     );
 }
 

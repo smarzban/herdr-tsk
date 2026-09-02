@@ -84,7 +84,7 @@ fn title_edit_e_obeys_editbuffer_char_index_word_chords_paste_and_bound_task_ref
     assert_eq!(model.edit_target(), Some(id));
 }
 
-/// Palette notes edit obeys the Ctrl+Enter save chord and bound-task refusal.
+/// Palette notes edit obeys the Shift+Enter save chord and bound-task refusal.
 #[test]
 fn palette_notes_edit_obeys_notes_save_chord_pair_and_bound_task_refusal() {
     let mut domain = DomainState::new();
@@ -110,7 +110,7 @@ fn palette_notes_edit_obeys_notes_save_chord_pair_and_bound_task_refusal() {
         apply_intent(&mut domain, &mut model, BoardIntent::EditInsert(ch), None).expect("insert");
     }
     // Confirm via the notes save chord intent (bare Enter in Notes inserts a line break;
-    // Ctrl+Enter maps to ConfirmEdit at the reducer boundary this test drives).
+    // Shift+Enter maps to ConfirmEdit at the reducer boundary this test drives).
     let outcome = apply_intent(&mut domain, &mut model, BoardIntent::ConfirmEdit, None)
         .expect("confirm notes");
     assert_eq!(outcome, IntentOutcome::Persist);
@@ -856,7 +856,7 @@ fn editing_an_unthreaded_task_paints_a_labeled_thread_footer_slot() {
 }
 
 #[test]
-fn thread_field_is_inert_while_step_editor_owns_the_footer() {
+fn thread_field_is_inert_while_the_inline_step_editor_owns_input() {
     let mut domain = DomainState::new();
     domain
         .create_with_thread(
@@ -891,13 +891,12 @@ fn thread_field_is_inert_while_step_editor_owns_the_footer() {
     )
     .expect("inert focus");
     assert_eq!(model.input_mode(), BoardInputMode::EditStep);
-    let hits = board_hit_map(Rect::new(0, 0, 80, 24), &model);
     assert!(
-        !hits
+        board_hit_map(Rect::new(0, 0, 80, 24), &model)
             .regions
             .iter()
             .any(|hit| hit.target == QueueHitTarget::FormThread),
-        "a step editor owns the footer, so thread has no hit target: {hits:?}"
+        "the meta footer stays painted, but the inline editor keeps focus"
     );
 }
 

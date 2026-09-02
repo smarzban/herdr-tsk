@@ -31,8 +31,8 @@ use super::model::{
 pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
     let help = |chord: &str, fallback: &'static str| keymap_help_label(chord).unwrap_or(fallback);
 
-    // The one-line step editor keeps its text field free of key-copy. Its save routes belong
-    // in the shared bottom verb bar, where every other action hint lives.
+    // An inline step editor keeps its save routes on the shared verb bar, like every other
+    // focused edit surface.
     if model.input_mode() == BoardInputMode::EditStep {
         return vec![
             VerbEntry {
@@ -40,7 +40,7 @@ pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
                 label: "save",
             },
             VerbEntry {
-                key: "ctrl+enter",
+                key: "shift+enter",
                 label: "save+next",
             },
             VerbEntry {
@@ -199,58 +199,55 @@ fn build_task_page_overlay<'a>(
     // reserved width is the scrollbar-safe content width less the step glyph and trailing
     // pad, matching Notes' no-truncation behavior.
     let step_text_width = width.saturating_sub(8);
-    let step_views = bound_task
+    let mut step_views = bound_task
         .map(|task| super::model::step_views(task, step_text_width))
         .unwrap_or_default();
+    let stored_step_count = step_views.len();
+    // Step add and rename edit in the page body. A rename replaces its stored row; an add
+    // appends one transient row without changing the stored done/count header.
+    let inline_step_editor = form.steps.editor.as_ref().and_then(|editor| {
+        let index = match editor.rename {
+            Some(step_id) => bound_task?
+                .steps
+                .iter()
+                .position(|step| step.id == step_id)?,
+            None => step_views.len(),
+        };
+        let (rows, cursor_row, cursor_col) = wrapped_edit_rows(&editor.buffer, step_text_width);
+        if index < step_views.len() {
+            step_views[index].rows = rows;
+        } else {
+            step_views.push(render::StepView { done: false, rows });
+        }
+        Some(render::InlineStepEditor {
+            index,
+            cursor_row: u16::try_from(cursor_row).unwrap_or(u16::MAX),
+            cursor_col: u16::try_from(cursor_col).unwrap_or(u16::MAX),
+            refusal: editor.refusal.as_deref(),
+        })
+    });
     form.steps.row_counts.replace(
         step_views
             .iter()
             .map(|step| step.rows.len().max(1))
             .collect(),
     );
-    // A step draft is windowed for the shared bottom input slot: the row less
-    // the two-cell `▎ ` prompt that owns the terminal cursor.
-    let step_editor = form
-        .steps
-        .editor
-        .as_ref()
-        .map(|editor| {
-            let avail = (geo.row_width as usize).saturating_sub(2);
-            let (text, cursor_col) = escaped_line_window(&editor.buffer, avail);
-            crate::ui::render::BottomInputSlot {
-                text,
-                cursor_col,
-                placeholder: "step…",
-                refusal: editor.refusal.as_deref(),
-                above_rows: Vec::new(),
-                cursor_row_offset: 0,
-                // The bottom input replaces the shared status row. Forward recovery
-                // and record-refusal feedback to the surface that is actually visible.
-                message: model.message(),
-            }
-        })
-        .or_else(|| {
-            (model.input_mode() == BoardInputMode::EditThread).then(|| {
-                let avail = (geo.row_width as usize).saturating_sub(2);
-                let (text, cursor_col) = escaped_line_window(&form.thread, avail);
-                crate::ui::render::BottomInputSlot {
-                    text,
-                    cursor_col,
-                    placeholder: "thread…   enter save · esc cancel",
-                    refusal: None,
-                    above_rows: Vec::new(),
-                    cursor_row_offset: 0,
-                    // The shared bottom slot owns this refusal while it is visible, so it
-                    // never leaks through the status row and remains legible at 40x10.
-                    message: form.thread_refusal.as_deref(),
-                }
-            })
-        });
+    let bottom_input = (model.input_mode() == BoardInputMode::EditThread).then(|| {
+        let avail = (geo.row_width as usize).saturating_sub(2);
+        let (text, cursor_col) = escaped_line_window(&form.thread, avail);
+        crate::ui::render::BottomInputSlot {
+            text,
+            cursor_col,
+            placeholder: "thread…   enter save · esc cancel",
+            refusal: None,
+            above_rows: Vec::new(),
+            cursor_row_offset: 0,
+            message: form.thread_refusal.as_deref(),
+        }
+    });
     // A notes edit always keeps one row: the layout reserves it (the section caps
-    // around it), so an active edit can never be scrolled/clamped out of the frame
-    // entirely. The step editor uses the shared bottom slot, so steps alone
-    // classify the page section.
-    let page_geo = render::bottom_input_geometry(*geo, step_editor.is_some());
+    // around it), so an active edit can never be scrolled/clamped out of the frame.
+    let page_geo = render::bottom_input_geometry(*geo, bottom_input.is_some());
     let status = bound_task
         .map(|task| task.status)
         .unwrap_or(HumanStatus::Ready);
@@ -458,10 +455,12 @@ fn build_task_page_overlay<'a>(
         notes_cursor,
         more_lines,
         step_views,
+        stored_step_count,
         step_cursor: form.steps.cursor,
         step_scroll: notes_scroll,
         step_marked: form.steps.delete_mark,
-        step_editor,
+        inline_step_editor,
+        bottom_input,
         meta,
         meta_scope_x,
         meta_scope_width,

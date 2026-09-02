@@ -302,7 +302,7 @@ fn point(column: u16, row: u16) -> Position {
 fn verb_intent(model: &BoardModel, index: usize) -> Option<BoardIntent> {
     let entry = *board_verb_items(model).get(index)?;
     match entry.key {
-        "ctrl+enter" => Some(BoardIntent::ConfirmEditNext),
+        "shift+enter" => Some(BoardIntent::ConfirmEditNext),
         "enter" if model.input_mode() == BoardInputMode::EditStep => Some(BoardIntent::ConfirmEdit),
         "space" => Some(BoardIntent::PrimaryVerb),
         "enter" => Some(BoardIntent::OpenTaskPage),
@@ -344,7 +344,7 @@ fn form_verb_intent(model: &BoardModel, index: usize) -> Option<BoardIntent> {
     let dropdown_open = model.input_mode() == BoardInputMode::FormScopeDropdown;
     let focus = model.form_focus()?;
     match form_verb_items(focus, dropdown_open).get(index)?.key {
-        "ctrl+enter" => Some(BoardIntent::ConfirmEdit),
+        "shift+enter" => Some(BoardIntent::ConfirmEdit),
         "enter" if dropdown_open => Some(BoardIntent::ConfirmFormScopeDropdown),
         "enter" if focus == CaptureField::Scope => Some(BoardIntent::OpenFormScopeDropdown),
         "enter" => Some(BoardIntent::ConfirmEdit),

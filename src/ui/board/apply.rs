@@ -412,9 +412,10 @@ fn apply_board_intent(
         }
         BoardIntent::FormFocusNext => {
             if model.input_mode == BoardInputMode::TaskPage {
-                // A selected step owns Tab until the list ends, then focus returns to Title.
-                // With no step selected, the view enters its current form field.
-                if !move_step_with_tab(model, true) {
+                // Tab begins at the first step when the page has any. Once a cursor exists it
+                // stays in the step ring, wrapping after the final row rather than entering a
+                // task field.
+                if !move_step_with_tab(model, true) && !select_first_step_from_page(model) {
                     model.enter_page_field_focus();
                 }
             } else if model.form.is_some()
@@ -542,9 +543,8 @@ fn apply_board_intent(
                 BoardIntent::BeginEditScope => CaptureField::Scope,
                 _ => unreachable!("matched task-form entry intent"),
             };
-            // Contextual rename (AC-10): on the page with the step cursor active, `e`
-            // opens the footer's one-line step input seeded with the highlighted
-            // step instead of the title field.
+            // Contextual rename: on the page with the step cursor active, `e` opens the
+            // highlighted step's in-place editor instead of the title field.
             if intent == BoardIntent::BeginEditTitle {
                 if let Some((task_id, step_id)) = cursor_step(domain, model) {
                     let text = domain.get(task_id).and_then(|task| {
@@ -672,8 +672,8 @@ fn apply_board_intent(
             return Ok(IntentOutcome::None);
         }
         BoardIntent::CancelEdit => {
-            // The step line editor cancels to page view: draft discarded, no mutation,
-            // the page and its step cursor state untouched.
+            // The inline step editor cancels to page view: draft discarded, no mutation,
+            // and the page's step cursor state stays intact.
             if model.input_mode == BoardInputMode::EditStep
                 && model.form.as_ref().is_some_and(BoardForm::is_task)
             {
@@ -729,18 +729,17 @@ fn apply_board_intent(
             return Ok(IntentOutcome::None);
         }
         BoardIntent::ConfirmEditNext => {
-            // Ctrl+Enter in the step line editor (AC-12): add mode saves and reopens
-            // the line empty — the rapid-capture loop; rename mode downgrades to a
-            // plain save, decided inside `confirm_step_editor` from the editor's
-            // own mode. No other surface maps the key, so anywhere else it is the
-            // plain confirm.
+            // Shift+Enter in the inline step editor saves and reopens an empty next row in
+            // add mode. Rename mode downgrades to a plain save, decided inside
+            // `confirm_step_editor` from the editor's own mode. No other task surface maps
+            // the key, so anywhere else this is the plain confirm.
             if model.input_mode == BoardInputMode::EditStep {
                 return confirm_step_editor(domain, model, true);
             }
             return apply_intent(domain, model, BoardIntent::ConfirmEdit, snapshot);
         }
         BoardIntent::ConfirmEdit => {
-            // The step line editor applies its own domain command (add or rename) and
+            // The inline step editor applies its own domain command (add or rename) and
             // returns to page view; it never saves the task form's title/notes drafts.
             if model.input_mode == BoardInputMode::EditStep {
                 return confirm_step_editor(domain, model, false);
@@ -1031,8 +1030,19 @@ fn apply_board_intent(
             }
         }
         BoardIntent::OpenTaskPage => {
-            // Toggle: on the page itself Enter closes it; from the board it opens the
-            // selected task's page in view mode (no field focused).
+            // Enter on a selected step starts that row's in-place rename. Otherwise it keeps
+            // the ordinary page toggle: close on page, open from the board.
+            if let Some((task_id, step_id)) = cursor_step(domain, model) {
+                if let Some(text) = domain.get(task_id).and_then(|task| {
+                    task.steps
+                        .iter()
+                        .find(|step| step.id == step_id)
+                        .map(|step| step.text.clone())
+                }) {
+                    open_step_editor(model, &text, Some(step_id));
+                    return Ok(IntentOutcome::None);
+                }
+            }
             if model.form.as_ref().is_some_and(BoardForm::is_task) {
                 model.form = None;
                 model.input_mode = BoardInputMode::Normal;
@@ -1046,24 +1056,26 @@ fn apply_board_intent(
             return Ok(IntentOutcome::None);
         }
         BoardIntent::SelectStep(index) => {
-            // A click selects a step only after the page has entered task edit mode. It never
-            // toggles or changes the step by itself, and it returns the page from its field
-            // editor to the selected-step surface so Ctrl+E can rename that exact row.
-            if let Some(form) = model
+            // In an active task edit session, clicking a stored step focuses that row's
+            // in-place editor. View-mode step clicks remain inert in the mouse mapper.
+            let selected = model
                 .form
-                .as_mut()
+                .as_ref()
                 .filter(|form| form.is_task() && form.editing)
-            {
-                let steps = form
-                    .task_id()
-                    .and_then(|id| domain.get(id))
-                    .map(|task| task.steps.len())
-                    .unwrap_or(0);
-                if index < steps {
+                .and_then(|form| form.task_id())
+                .and_then(|task_id| {
+                    domain.get(task_id).and_then(|task| {
+                        task.steps
+                            .get(index)
+                            .map(|step| (step.id, step.text.clone()))
+                    })
+                });
+            if let Some((step_id, text)) = selected {
+                if let Some(form) = model.form.as_mut() {
                     form.steps.cursor = Some(index);
                     steps_scroll_to_cursor(form, index);
-                    model.input_mode = BoardInputMode::TaskPage;
                 }
+                open_step_editor(model, &text, Some(step_id));
             }
             return Ok(IntentOutcome::None);
         }
@@ -1564,8 +1576,33 @@ fn select_step_from_tab(model: &mut BoardModel, forward: bool) -> bool {
     true
 }
 
-/// Move a step selected by Tab or Shift+Tab. Crossing either end returns to the adjacent
-/// form field, making the focus ring a complete cycle instead of trapping Scope and step zero.
+/// Start a task-page Tab cycle on its first step. This is the intentional bridge from
+/// view-first reading into a task edit session when the task actually has a checklist.
+fn select_first_step_from_page(model: &mut BoardModel) -> bool {
+    let has_steps = model.form.as_ref().and_then(|form| {
+        let task_id = form.task_id()?;
+        model
+            .tasks
+            .iter()
+            .find(|task| task.id == task_id)
+            .map(|task| !task.steps.is_empty())
+    });
+    if has_steps != Some(true) {
+        return false;
+    }
+    let form = model
+        .form
+        .as_mut()
+        .filter(|form| form.is_task())
+        .expect("the checked task form stays open");
+    form.editing = true;
+    form.steps.cursor = Some(0);
+    steps_scroll_to_cursor(form, 0);
+    true
+}
+
+/// Move a step selected by Tab or Shift+Tab. The selected-step ring wraps at both ends, so
+/// Tab never unexpectedly changes into a task-field editor after the final step.
 fn move_step_with_tab(model: &mut BoardModel, forward: bool) -> bool {
     let target = model.form.as_ref().and_then(|form| {
         if !form.is_task() || !form.editing {
@@ -1583,27 +1620,14 @@ fn move_step_with_tab(model: &mut BoardModel, forward: bool) -> bool {
     let Some((index, count)) = target else {
         return false;
     };
-    if forward && index + 1 < count {
-        let form = model.form.as_mut().expect("the checked form remains open");
-        form.steps.cursor = Some(index + 1);
-        steps_scroll_to_cursor(form, index + 1);
-    } else if !forward && index > 0 {
-        let form = model.form.as_mut().expect("the checked form remains open");
-        form.steps.cursor = Some(index - 1);
-        steps_scroll_to_cursor(form, index - 1);
+    let next = if forward {
+        (index + 1) % count
     } else {
-        model
-            .form
-            .as_mut()
-            .expect("the checked form remains open")
-            .steps
-            .cursor = None;
-        model.focus_form_field(if forward {
-            CaptureField::Title
-        } else {
-            CaptureField::Scope
-        });
-    }
+        (index + count - 1) % count
+    };
+    let form = model.form.as_mut().expect("the checked form remains open");
+    form.steps.cursor = Some(next);
+    steps_scroll_to_cursor(form, next);
     true
 }
 
@@ -1717,8 +1741,8 @@ fn page_step_delete(
     Ok(PageStepDelete::Removed)
 }
 
-/// Open the page footer's one-line step input: seeded with `text`, renaming
-/// `step` when given, adding when `None`.
+/// Open an in-place step row seeded with `text`, renaming `step` when given and adding
+/// a transient row when `None`.
 fn open_step_editor(model: &mut BoardModel, text: &str, rename: Option<Uuid>) {
     if let Some(form) = model.form.as_mut().filter(|form| form.is_task()) {
         form.steps.editor = Some(StepEditor {
@@ -1731,9 +1755,9 @@ fn open_step_editor(model: &mut BoardModel, text: &str, rename: Option<Uuid>) {
     }
 }
 
-/// Close the step editor back to page view, discarding its draft. Any pending editor
-/// save goes with it: a closed line has nothing left for the save boundary to
-/// release (the only path that can be here with one pending is a defensive direct
+/// Close the inline step editor back to page view, discarding its draft. Any pending editor
+/// save goes with it: a closed row has nothing left for the save boundary to release (the only
+/// path that can be here with one pending is a defensive direct
 /// intent, never the keyboard).
 fn close_step_editor(model: &mut BoardModel) {
     if let Some(form) = model.form.as_mut() {
@@ -1744,8 +1768,8 @@ fn close_step_editor(model: &mut BoardModel) {
     model.clear_message();
 }
 
-/// What the step line paints when its draft is empty after trim (AC-13): a short dim
-/// refusal on the line itself, never the board status row.
+/// What the inline step row paints when its draft is empty after trim: a short dim refusal
+/// on the row itself, never the board status row.
 const STEP_TEXT_REQUIRED: &str = "text required";
 
 /// Apply the step editor's draft through the domain command (add or rename).
@@ -1754,7 +1778,7 @@ const STEP_TEXT_REQUIRED: &str = "text required";
 /// records the touched step on the page's pending-save slot and leaves the line
 /// exactly as the user left it. Only the persistence boundary's confirmed sync —
 /// `BoardModel::sync_from_domain` → `finish_step_editor_save` — releases it:
-/// closing for a plain Enter, reopening empty for Ctrl+Enter in add mode
+/// closing for a plain Enter, reopening empty for Shift+Enter in add mode
 /// (`keep_open`, downgraded to a close in rename mode). A failed save therefore
 /// holds the line behind SaveRecovery until Retry/Cancel resolve it, and a Cancelled
 /// resolution unwinds it to page view with no orphan edit mode.
