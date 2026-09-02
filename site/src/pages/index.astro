@@ -1,5 +1,6 @@
 ---
 import Wordmark from '../components/Wordmark.astro';
+import Icon from '../components/Icon.astro';
 import '../styles/landing.css';
 
 const VERSION = '0.4.0';
@@ -168,7 +169,7 @@ const REPO = 'https://github.com/smarzban/herdr-tsk';
             aria-label="tsk board live demo"
           >
             <div class="pane-bar">
-              <span class="pane-tab"><span class="pane-dot" aria-hidden="true"></span>tsk</span>
+              <span class="pane-tab"><Icon />tsk</span>
               <span class="pane-title">live demo · a real board, in your browser</span>
               <span class="pane-hint">
                 click to focus · <kbd>j</kbd><kbd>k</kbd> move · <kbd>+</kbd> capture ·
@@ -551,7 +552,7 @@ const REPO = 'https://github.com/smarzban/herdr-tsk';
     <footer class="site-foot">
       <div class="foot-inner">
         <p>
-          <span class="wordmark wordmark-foot"><Wordmark /></span>
+          <span class="wordmark wordmark-foot"><Icon /><Wordmark /></span>
           <span class="dim">· a task board for you and your agents · v{VERSION} · MIT</span>
         </p>
         <p class="foot-links">
