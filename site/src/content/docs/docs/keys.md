@@ -49,17 +49,18 @@ The page is view-first. Verbs still need the modifier, except Tab and arrows.
 | --- | --- |
 | `ctrl+e` | edit title, or start task editing with the highlighted step inline |
 | `ctrl+n` | edit notes |
-| `Tab` / `Shift+Tab` | select and cycle steps, wrapping at either end; without steps, move through task fields |
+| `Tab` / `Shift+Tab` | in view, select and cycle steps; in task editing, cycle Title, Notes, Thread, Scope, then steps |
 | `ctrl+a` | add an inline [step](/docs/steps/) after editing has started |
-| `Enter` or click | edit the selected step inline, after editing has started |
-| `↓` `↑` | move a step selected by Tab |
+| `Enter` | stays in view, it never opens step editing |
+| click a step | selects it in view, opens it inline only during task editing |
+| `↓` `↑` | move a selected step |
 | `ctrl+space` | toggle the highlighted step, or start/reopen the task |
 | `ctrl+x` | mark, then remove, the highlighted step; otherwise delete the task |
-| `Shift+Enter` | save task edits; step add saves and opens the next row |
+| `Shift+Enter` | the only task-edit save chord; step add saves and opens the next row |
 | `Esc` | cancel the field, or close the page |
 
-The scope footer does nothing until an edit has started. Field clicks are inert
-until then too.
+Title, Notes, Thread, and Scope clicks are inert until task editing starts. Once it
+has, each click opens that field; the Scope click opens its picker.
 
 ## Capture line and form
 

@@ -719,7 +719,9 @@ fn map_form_edit_key(
             KeyCode::Enter if focused == CaptureField::Notes => {
                 Some(BoardIntent::EditInsertLineBreak)
             }
-            KeyCode::Enter => Some(BoardIntent::ConfirmEdit),
+            // Task edits save only through Shift+Enter, matched above. A plain Enter must
+            // neither save a title/thread nor close an inline step editor.
+            KeyCode::Enter => None,
             KeyCode::Esc => Some(BoardIntent::CancelEdit),
             KeyCode::Backspace => Some(BoardIntent::EditBackspace),
             KeyCode::Delete => Some(BoardIntent::EditDeleteForward),

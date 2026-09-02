@@ -7,12 +7,13 @@ description: "View and edit one task: title, notes, thread, and scope."
 header copies that task identifier when clicked.
 
 It is view-first. Nothing is in edit mode until you ask. `ctrl+e` edits the title,
-`ctrl+n` edits notes, and `Tab` selects the first step when steps exist. Tab and
-Shift+Tab cycle selected steps, wrapping at either end, without leaving task view.
-`ctrl+e` on that selection starts task editing with the step inline. The scope
-footer does nothing until an edit has started.
+`ctrl+n` edits notes, and `Tab` selects and cycles steps when they exist. A step
+click also selects it, while `Enter` remains read-only. `ctrl+e` on that selection
+starts task editing with the step inline. In that session, Tab cycles Title, Notes,
+Thread, Scope, then the steps, and clicks open any of those fields or a step inline.
+The scope footer does nothing until task editing starts.
 
-`Shift+Enter` saves from any task field. Field `Esc` cancels that field. Page
+`Shift+Enter` is the only task save chord. Field `Esc` cancels that field. Page
 `Esc` closes the page.
 
 Notes are multiline, so `Enter` inserts a line. `Shift+Enter` saves and does not

@@ -115,7 +115,9 @@ When the change touches the board, host integration, or panes, do not call it
 done on unit tests alone.
 
 If `HERDR_ENV=1`: rebuild in-repo, drive the real path with herdr, read the pane,
-and fix anything that only fails live.
+and fix anything that only fails live. Every UI-affecting addition or behavior change needs a
+real UI smoke of its new flow, using isolated state when it would mutate a user's tasks; unit
+and render tests alone are not enough.
 
 If `HERDR_ENV` is unset, say that live smoke was not run.
 

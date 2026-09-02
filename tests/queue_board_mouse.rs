@@ -432,9 +432,9 @@ fn task_form_mouse_fields_dropdown_and_verbs_match_keyboard_while_scrolled() {
         map_board_form_key(
             CaptureField::Title,
             false,
-            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT),
         ),
-        "task-form Save verb must match Title's Enter route"
+        "task-form Save verb must match Title's Shift+Enter route"
     );
     assert_eq!(
         intent_for(QueueHitTarget::Verb(2)),
@@ -449,7 +449,7 @@ fn task_form_mouse_fields_dropdown_and_verbs_match_keyboard_while_scrolled() {
     // This form was opened with `BeginEditTitle`, so edit mode is ALREADY open: a field click
     // must move focus. The
     // separate view-state rule -- that a click must not ENTER edit mode -- is exercised in
-    // `page_field_clicks_stay_inert_and_the_scope_footer_opens_its_dropdown`, which asserts
+    // `page_field_clicks_activate_after_task_editing_starts`, which asserts
     // `input_mode() == TaskPage` first. Conflating the two is what previously let this test
     // assert inertness while sitting in edit mode.
     for (target, field) in [
@@ -1593,7 +1593,7 @@ fn task_page_identifier_click_copies_instead_of_hitting_the_title_region() {
 }
 
 #[test]
-fn page_field_clicks_stay_inert_including_the_scope_footer() {
+fn page_field_clicks_activate_after_task_editing_starts() {
     let (mut domain, mut model) = deck_of(1);
     apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open the page");
     assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
@@ -1637,6 +1637,31 @@ fn page_field_clicks_stay_inert_including_the_scope_footer() {
         "clicking the scope footer must not open the dropdown in view mode"
     );
     assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+        .expect("start task edit session");
+    apply_intent(&mut domain, &mut model, BoardIntent::CancelEdit, None).expect("return page");
+    let hits = board_hit_map(STANDARD, &model);
+    assert_eq!(
+        map_board_mouse(&model, &hits, left_click(title_area.x + 3, title_area.y)),
+        Some(BoardIntent::FocusFormField(CaptureField::Title)),
+        "an active task session lets Title clicks edit"
+    );
+    assert_eq!(
+        map_board_mouse(&model, &hits, left_click(notes_area.x + 3, notes_area.y)),
+        Some(BoardIntent::FocusFormField(CaptureField::Notes)),
+        "an active task session lets Notes clicks edit"
+    );
+    let active_scope_hit = hits
+        .regions
+        .iter()
+        .find(|hit| hit.target == QueueHitTarget::FormScope)
+        .expect("the active page footer paints a scope hit");
+    assert_eq!(
+        click(active_scope_hit, &model, &hits),
+        Some(BoardIntent::OpenFormScopeDropdown),
+        "an active task session lets Scope clicks edit"
+    );
 }
 
 #[test]
@@ -1734,26 +1759,22 @@ fn step_editor_verb_chips_follow_their_keyboard_intents() {
 
     let hits = board_hit_map(STANDARD, &model);
     let verbs = board_verb_items(&model);
-    for (key, expected) in [
-        ("enter", BoardIntent::ConfirmEdit),
-        ("shift+enter", BoardIntent::ConfirmEditNext),
-    ] {
-        let index = verbs
-            .iter()
-            .position(|entry| entry.key == key)
-            .expect("painted step-editor verb");
-        let area = hits
-            .regions
-            .iter()
-            .find(|hit| hit.target == QueueHitTarget::Verb(index))
-            .expect("step-editor verb hit")
-            .area;
-        assert_eq!(
-            map_board_mouse(&model, &hits, left_click(area.x + 1, area.y)),
-            Some(expected),
-            "{key} click matches the keyboard route"
-        );
-    }
+    let key = "shift+enter";
+    let index = verbs
+        .iter()
+        .position(|entry| entry.key == key)
+        .expect("painted step-editor verb");
+    let area = hits
+        .regions
+        .iter()
+        .find(|hit| hit.target == QueueHitTarget::Verb(index))
+        .expect("step-editor verb hit")
+        .area;
+    assert_eq!(
+        map_board_mouse(&model, &hits, left_click(area.x + 1, area.y)),
+        Some(BoardIntent::ConfirmEditNext),
+        "{key} click matches the keyboard route"
+    );
 }
 
 /// The task page painted row by row at the standard board size, so a test can

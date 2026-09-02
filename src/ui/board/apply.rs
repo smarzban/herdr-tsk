@@ -412,10 +412,13 @@ fn apply_board_intent(
         }
         BoardIntent::FormFocusNext => {
             if model.input_mode == BoardInputMode::TaskPage {
-                // Tab begins at the first step when the page has any. Once a cursor exists it
-                // stays in the step ring, wrapping after the final row rather than entering a
-                // task field.
-                if !move_step_with_tab(model, true) && !select_first_step_from_page(model) {
+                if model.task_editing() {
+                    // In an active task session, Tab leaves selected steps for the form fields.
+                    // The form's normal Title → Notes → Thread → Scope cycle later returns to
+                    // the first step through `select_step_from_tab`.
+                    model.focus_form_field(CaptureField::Title);
+                } else if !move_step_with_tab(model, true) && !select_first_step_from_page(model) {
+                    // View pages use Tab strictly as a read-only step selector.
                     model.enter_page_field_focus();
                 }
             } else if model.form.is_some()
@@ -428,9 +431,11 @@ fn apply_board_intent(
         }
         BoardIntent::FormFocusPrev => {
             if model.input_mode == BoardInputMode::TaskPage {
-                // A selected step owns Shift+Tab until the first one, then focus returns to
-                // Scope. A view with no cursor enters its current form field.
-                if !move_step_with_tab(model, false) {
+                if model.task_editing() {
+                    // Reverse cycling from steps reaches Scope, the field immediately before
+                    // the step group in the task-edit traversal.
+                    model.focus_form_field(CaptureField::Scope);
+                } else if !move_step_with_tab(model, false) {
                     model.enter_page_field_focus();
                 }
                 return Ok(IntentOutcome::None);
@@ -1032,19 +1037,8 @@ fn apply_board_intent(
             }
         }
         BoardIntent::OpenTaskPage => {
-            // Enter starts in-place rename only in an active task edit session. A selected step
-            // in task view remains selected and keeps the page open until Ctrl+E starts editing.
-            if let Some((task_id, step_id)) = cursor_step(domain, model) {
-                if let Some(text) = domain.get(task_id).and_then(|task| {
-                    task.steps
-                        .iter()
-                        .find(|step| step.id == step_id)
-                        .map(|step| step.text.clone())
-                }) {
-                    open_step_editor(model, &text, Some(step_id));
-                    return Ok(IntentOutcome::None);
-                }
-            }
+            // Enter never opens inline step editing. A selected step remains selected in either
+            // page state; Ctrl+E is the deliberate route into its editor.
             if selected_step(domain, model).is_some() {
                 return Ok(IntentOutcome::None);
             }
@@ -1061,12 +1055,13 @@ fn apply_board_intent(
             return Ok(IntentOutcome::None);
         }
         BoardIntent::SelectStep(index) => {
-            // In an active task edit session, clicking a stored step focuses that row's
-            // in-place editor. View-mode step clicks remain inert in the mouse mapper.
+            // A task-page click always selects its stored step. It opens the inline editor only
+            // after task editing has begun, so view-mode clicks remain read-only.
+            let editing = model.task_editing();
             let selected = model
                 .form
                 .as_ref()
-                .filter(|form| form.is_task() && form.editing)
+                .filter(|form| form.is_task())
                 .and_then(|form| form.task_id())
                 .and_then(|task_id| {
                     domain.get(task_id).and_then(|task| {
@@ -1080,7 +1075,9 @@ fn apply_board_intent(
                     form.steps.cursor = Some(index);
                     steps_scroll_to_cursor(form, index);
                 }
-                open_step_editor(model, &text, Some(step_id));
+                if editing {
+                    open_step_editor(model, &text, Some(step_id));
+                }
             }
             return Ok(IntentOutcome::None);
         }

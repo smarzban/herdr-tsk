@@ -841,9 +841,9 @@ fn a_soft_deleted_bind_opened_through_the_real_key_map_refuses_then_confirms_aft
 
     let confirm = map_key(
         BoardInputMode::EditTitle,
-        KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT),
     )
-    .expect("Enter confirms a title edit");
+    .expect("Shift+Enter confirms a title edit");
     assert_eq!(confirm, BoardIntent::ConfirmEdit);
 
     let refused = confirm_through_the_board_loop(&store, &mut domain, &mut model);

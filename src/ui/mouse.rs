@@ -574,12 +574,21 @@ pub fn map_board_mouse(
         },
         BoardInputMode::TaskPage => match hit_at(hits, pos) {
             Some(QueueHitTarget::TaskNumber(id)) => Some(BoardIntent::CopyTaskNumber(id)),
-            Some(QueueHitTarget::FormScope) | Some(QueueHitTarget::FormThread) => None,
-            // A click selects a step only in the task edit session. View-first pages keep
-            // their step rows read-only until a field edit has begun.
-            Some(QueueHitTarget::Step(index)) if model.task_editing() => {
-                Some(BoardIntent::SelectStep(index))
+            Some(QueueHitTarget::FormTitle) if model.task_editing() => {
+                Some(BoardIntent::FocusFormField(CaptureField::Title))
             }
+            Some(QueueHitTarget::FormNotes(_)) if model.task_editing() => {
+                Some(BoardIntent::FocusFormField(CaptureField::Notes))
+            }
+            Some(QueueHitTarget::FormThread) if model.task_editing() => {
+                Some(BoardIntent::FocusFormField(CaptureField::Thread))
+            }
+            Some(QueueHitTarget::FormScope) if model.task_editing() => {
+                Some(BoardIntent::OpenFormScopeDropdown)
+            }
+            // Step clicks always select. In view mode this remains read-only; the reducer opens
+            // the inline editor only when the task edit session is already active.
+            Some(QueueHitTarget::Step(index)) => Some(BoardIntent::SelectStep(index)),
             Some(QueueHitTarget::PageScroll(offset)) => Some(BoardIntent::PageScrollTo(offset)),
             Some(QueueHitTarget::Verb(index)) => verb_intent(model, index),
             _ => None,

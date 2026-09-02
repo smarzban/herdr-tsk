@@ -62,10 +62,10 @@ test("docs describe fixed Ctrl verbs and the current quick-add and step behavior
   assert.match(capture, /`Shift\+Enter` saves and stays open/);
   assert.doesNotMatch(capture, /`Ctrl\+Enter` saves and stays open/);
   assert.match(steps, /edit session/);
-  assert.match(steps, /`Tab`[\s\S]*`Shift\+Tab` then cycle steps and wrap/);
-  assert.match(steps, /`Shift\+Enter` adds and opens an empty next row/);
+  assert.match(steps, /In view mode, `Tab`[\s\S]*select and cycle steps/);
+  assert.match(steps, /`Shift\+Enter`[\s\S]*only save[\s\S]*opens an empty next row/);
   assert.doesNotMatch(steps, /footer line/);
-  assert.match(taskPage, /`Shift\+Enter` saves from any task field/);
+  assert.match(taskPage, /`Shift\+Enter` is the only task save chord/);
   assert.doesNotMatch(steps, /Bare `↓` activates/);
   assert.match(config, /fixed Ctrl modifier/);
   assert.match(config, /Legacy[\s\S]*"alt"[\s\S]*deserialize as Ctrl/);

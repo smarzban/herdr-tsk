@@ -31,17 +31,13 @@ use super::model::{
 pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
     let help = |chord: &str, fallback: &'static str| keymap_help_label(chord).unwrap_or(fallback);
 
-    // An inline step editor keeps its save routes on the shared verb bar, like every other
-    // focused edit surface.
+    // An inline step editor saves only through Shift+Enter. Add mode reopens an empty row;
+    // rename mode returns to the retained task-edit session.
     if model.input_mode() == BoardInputMode::EditStep {
         return vec![
             VerbEntry {
-                key: "enter",
-                label: "save",
-            },
-            VerbEntry {
                 key: "shift+enter",
-                label: "save+next",
+                label: "save",
             },
             VerbEntry {
                 key: "esc",

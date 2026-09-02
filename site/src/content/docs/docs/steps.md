@@ -13,14 +13,14 @@ Markdown `- [ ]` in notes is ordinary text. Use steps for checklists.
 
 ## On the task page
 
-Open the task with `Enter`. The step cursor begins inactive. `Tab` selects the
-first step when one exists. `Tab` and `Shift+Tab` then cycle steps and wrap at
-either end without leaving task view.
+Open the task with `Enter`. The step cursor begins inactive. In view mode, `Tab`
+and `Shift+Tab` select and cycle steps without leaving task view. A step click also
+selects it, and `Enter` keeps that selection read-only.
 
-- In view mode, clicks leave steps alone and `Enter` keeps a selected step selected
 - `ctrl+space` toggles a selected step in either view or an edit session
 - `ctrl+e` on a selected step starts the task edit session and opens its inline editor
-- In an edit session, click a step or press `Enter` on its selected row to edit it inline
+- In an edit session, `Tab` cycles Title, Notes, Thread, Scope, then returns to steps
+- In an edit session, clicking a step opens its inline editor
 - `↑` / `↓` move a selected step; `↑` from the first step returns to page reading
 
 With the cursor selected, the usual verbs act on that step:
@@ -32,9 +32,10 @@ With the cursor selected, the usual verbs act on that step:
 | `ctrl+e` | edit the highlighted step inline |
 | `ctrl+x` | mark, then a second press removes |
 
-The add/rename draft lives in the steps section. `Enter` applies it.
-`Shift+Enter` adds and opens an empty next row. `Esc` cancels. A failed save
-keeps the draft until you retry or cancel.
+The add/rename draft lives in the steps section. `Shift+Enter` is its only save
+chord. In add mode it saves and opens an empty next row, in rename mode it returns
+to the retained task edit session. Plain `Enter` does not save. `Esc` cancels. A
+failed save keeps the draft until you retry or cancel.
 
 Wheel still scrolls the page. Before a step is selected, arrows read the page;
 a selected step owns them during the edit session.
