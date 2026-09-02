@@ -40,8 +40,7 @@ clicks.
   from `+`.
 - Create still goes through domain; empty title does not persist.
 - Form + mode outlive a failed save (same as the board).
-- Capsule/provenance come from the snapshot even when the user picks another
-  scope.
+- Provenance comes from the snapshot even when the user picks another scope.
 
 ## Error paths
 

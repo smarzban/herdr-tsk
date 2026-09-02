@@ -110,26 +110,6 @@ pub fn query_lens(
     }
 }
 
-/// Legacy entry retained for tests that still speak in deck-scope terms.
-pub fn query(
-    tasks: &[Task],
-    current_repo: Option<&Path>,
-    scope: DeckScope<'_>,
-    drawer_open: bool,
-) -> QueueView {
-    match scope {
-        DeckScope::Global => query_lens(
-            tasks,
-            current_repo,
-            BoardLens::Home(BoardTab::Desk),
-            drawer_open,
-        ),
-        DeckScope::Project(path) => {
-            query_lens(tasks, current_repo, BoardLens::Project(path), drawer_open)
-        }
-    }
-}
-
 /// Task ids visible for selection, honoring home-tab collapse state.
 pub fn visible_task_ids(
     view: &QueueView,
@@ -596,16 +576,13 @@ mod tests {
         Task {
             id: Uuid::from_u128(id),
             number: None,
-            revision: Some(Uuid::from_u128(id)),
+            revision: Uuid::from_u128(id),
             merge_base_revision: None,
             title: format!("task-{id}"),
             notes: None,
             thread: thread.map(str::to_string),
             status,
             scope,
-            capsule: None,
-            agent_meta: None,
-            last_observed: None,
             provenance: ProvenanceOrigin::Manual,
             history: vec![TaskEvent {
                 kind: TaskEventKind::Created,

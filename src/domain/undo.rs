@@ -9,20 +9,12 @@ use super::{DomainError, DomainState};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum UndoEntry {
-    SoftDelete {
-        id: Uuid,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        expected_revision: Option<Uuid>,
-    },
-    Complete {
-        id: Uuid,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        expected_revision: Option<Uuid>,
-    },
+    SoftDelete { id: Uuid, expected_revision: Uuid },
+    Complete { id: Uuid, expected_revision: Uuid },
 }
 
 impl UndoEntry {
-    fn target(&self) -> (Uuid, Option<Uuid>) {
+    fn target(&self) -> (Uuid, Uuid) {
         match *self {
             UndoEntry::SoftDelete {
                 id,
@@ -39,15 +31,15 @@ impl UndoEntry {
 impl DomainState {
     /// Apply the inverse of the last undo entry when its target revision still matches.
     ///
-    /// Empty stack is a documented no-op. Stale and legacy entries are retained so a
-    /// refused Undo never changes durable state or exposes an older entry accidentally.
+    /// Empty stack is a documented no-op. Stale entries are retained so a refused Undo never
+    /// changes durable state or exposes an older entry accidentally.
     pub fn undo(&mut self) -> Result<(), DomainError> {
         let Some(entry) = self.last_undo().cloned() else {
             return Ok(());
         };
         let (id, expected_revision) = entry.target();
         let current_revision = self.get(id).ok_or(DomainError::UnknownId(id))?.revision;
-        if expected_revision.is_none() || current_revision != expected_revision {
+        if current_revision != expected_revision {
             return Err(DomainError::StaleUndo(id));
         }
 
@@ -72,9 +64,8 @@ mod tests {
                 "Fix flake",
                 None,
                 TaskScope::Global,
-                None,
-                None,
                 ProvenanceOrigin::Manual,
+                None,
             )
             .expect("valid title creates a task")
     }
@@ -95,7 +86,7 @@ mod tests {
     }
 
     #[test]
-    fn complete_then_undo_returns_status_todo() {
+    fn complete_then_undo_returns_status_ready() {
         let mut state = DomainState::new();
         let id = create_sample(&mut state);
         state.complete(id).expect("complete");

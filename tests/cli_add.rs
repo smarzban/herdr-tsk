@@ -435,8 +435,6 @@ fn flag_add_creates_ready_task_and_prints_added_title() {
     assert_eq!(task.title, "hello  world");
     assert_eq!(task.status, HumanStatus::Ready);
     assert!(task.notes.is_none());
-    assert!(task.capsule.is_none());
-    assert!(task.agent_meta.is_none());
     assert_eq!(task.provenance, ProvenanceOrigin::Capture);
 
     let _ = std::fs::remove_dir_all(dir);
@@ -529,9 +527,8 @@ fn flag_add_ignores_soft_deleted_title_and_scope_matches() {
             "same task",
             None,
             TaskScope::Global,
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("seed task");
     seeded.soft_delete(id).expect("soft delete seed");
@@ -662,9 +659,8 @@ fn flag_add_resolves_global_and_project_basename_scopes() {
             TaskScope::Project {
                 path: "/projects/Widget".into(),
             },
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("seed project");
     store.save(&seeded).expect("save seed");
@@ -978,9 +974,8 @@ fn plan_with_only_existing_tasks_is_a_successful_read_only_noop() {
             "same task",
             Some("old notes".into()),
             TaskScope::Global,
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("seed task");
     seeded
@@ -1045,9 +1040,8 @@ fn mixed_plan_exit_1_preserves_created_and_existing_rows_for_failed_only_retry()
             "already exists",
             None,
             TaskScope::Global,
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("seed existing task");
     store.save(&seeded).expect("save seed");
@@ -1390,9 +1384,8 @@ fn plan_project_string_uses_the_shared_basename_resolver() {
             TaskScope::Project {
                 path: "/projects/Widget".into(),
             },
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("seed project");
     store.save(&seeded).expect("save seed");

@@ -60,8 +60,6 @@ fn capture_snapshot() -> InvocationSnapshot {
         this_repo: Some(PathBuf::from("/repos/app")),
         title_prefill: None,
         provenance: ProvenanceOrigin::Capture,
-        capsule: None,
-        agent_meta: None,
     }
 }
 
@@ -343,9 +341,8 @@ fn board_state() -> (DomainState, BoardModel, uuid::Uuid) {
             TaskScope::Project {
                 path: "/repos/app".into(),
             },
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create task");
     let model = BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/app")));
@@ -925,9 +922,8 @@ fn board_with_two_tasks() -> (DomainState, BoardModel, uuid::Uuid) {
             TaskScope::Project {
                 path: "/repos/app".into(),
             },
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create the doomed task");
     domain
@@ -937,9 +933,8 @@ fn board_with_two_tasks() -> (DomainState, BoardModel, uuid::Uuid) {
             TaskScope::Project {
                 path: "/repos/app".into(),
             },
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create the surviving task");
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/app")));
@@ -1215,9 +1210,8 @@ fn failed_step_editor_save() -> (
             TaskScope::Project {
                 path: "/repos/app".into(),
             },
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create task");
     domain.add_step(id, "alpha step").expect("seed one step");
@@ -1477,9 +1471,8 @@ fn retried_step_rename_save_applies_the_held_rename() {
             "Rename witness",
             None,
             TaskScope::Global,
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("task");
     domain.add_step(id, "alpha step").expect("step");
@@ -1545,9 +1538,8 @@ fn cancelling_a_failed_task_session_save_discards_all_staged_step_changes() {
             "Cancel staged steps",
             None,
             TaskScope::Global,
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("task");
     for text in ["alpha", "bravo", "charlie"] {
@@ -1619,9 +1611,8 @@ fn successful_step_removal_keeps_the_cursor_on_the_same_step_id() {
             "Cursor after removal",
             None,
             TaskScope::Global,
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("task");
     for text in ["alpha", "bravo", "charlie"] {
@@ -1678,9 +1669,8 @@ fn shift_enter_refuses_in_place_when_the_bound_task_was_concurrently_soft_delete
             TaskScope::Project {
                 path: "/repos/app".into(),
             },
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create task");
     domain.add_step(id, "alpha step").expect("seed one step");

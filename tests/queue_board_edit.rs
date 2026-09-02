@@ -33,9 +33,8 @@ fn title_edit_e_obeys_editbuffer_char_index_word_chords_paste_and_bound_task_ref
             "Alpha Task",
             None,
             project(THIS_REPO),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create");
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
@@ -94,9 +93,8 @@ fn palette_notes_edit_obeys_notes_save_chord_pair_and_bound_task_refusal() {
             "Notes Task",
             Some("orig notes".into()),
             project(THIS_REPO),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create");
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
@@ -130,9 +128,8 @@ fn open_edit_session_not_redirected_by_sync_from_domain_reorder() {
             "A",
             None,
             project(THIS_REPO),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("a");
     let b = domain
@@ -140,9 +137,8 @@ fn open_edit_session_not_redirected_by_sync_from_domain_reorder() {
             "B",
             None,
             project(THIS_REPO),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("b");
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
@@ -199,9 +195,8 @@ fn title_edit_cursor_and_window_track_the_actual_paint_width_not_a_hardcoded_one
             &title,
             None,
             project(THIS_REPO),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create");
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
@@ -281,9 +276,8 @@ fn task_form_unifies_palette_field_routes_scope_dropdown_and_atomic_save() {
             "Task",
             Some("old".into()),
             project(THIS_REPO),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create target");
     domain
@@ -291,9 +285,8 @@ fn task_form_unifies_palette_field_routes_scope_dropdown_and_atomic_save() {
             "Other project",
             None,
             project("/repos/other"),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create scope source");
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
@@ -516,9 +509,8 @@ fn task_page_scope_dropdown_sits_above_the_footer_with_short_names() {
             TaskScope::Project {
                 path: "/repos/tsk".into(),
             },
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create task");
     domain
@@ -528,9 +520,8 @@ fn task_page_scope_dropdown_sits_above_the_footer_with_short_names() {
             TaskScope::Project {
                 path: "/repos/other-project".into(),
             },
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create second project");
     let mut model = BoardModel::from_domain(&domain, Some(std::path::PathBuf::from("/repos/tsk")));
@@ -589,12 +580,10 @@ fn task_page_scope_dropdown_sits_above_the_footer_with_short_names() {
 fn page_view_shows_thread_beside_scope() {
     let mut domain = DomainState::new();
     domain
-        .create_with_thread(
+        .create(
             "Threaded page",
             None,
             project(THIS_REPO),
-            None,
-            None,
             ProvenanceOrigin::Manual,
             Some("release-2026".into()),
         )
@@ -630,9 +619,8 @@ fn task_page_form_tab_cycle_orders_notes_scope_and_thread() {
             "Unthreaded task",
             None,
             project(THIS_REPO),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create");
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
@@ -677,9 +665,8 @@ fn scope_and_thread_are_selected_controls_with_enter_activation() {
             "Task",
             None,
             project(THIS_REPO),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create");
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
@@ -826,9 +813,8 @@ fn page_edit_sets_thread_and_clearing_unthreads() {
             "Task",
             None,
             project(THIS_REPO),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create");
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
@@ -891,9 +877,8 @@ fn page_thread_field_refuses_invalid_name_without_persisting() {
             "Task",
             None,
             project(THIS_REPO),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create");
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
@@ -933,9 +918,8 @@ fn canceling_thread_edit_keeps_the_task_page_and_resets_the_thread_draft() {
             "Task",
             None,
             project(THIS_REPO),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create");
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
@@ -1000,9 +984,8 @@ fn editing_an_unthreaded_task_paints_a_labeled_thread_footer_slot() {
             "Task",
             None,
             project(THIS_REPO),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create");
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
@@ -1044,12 +1027,10 @@ fn editing_an_unthreaded_task_paints_a_labeled_thread_footer_slot() {
 fn thread_field_is_reachable_while_the_inline_step_editor_keeps_its_draft() {
     let mut domain = DomainState::new();
     let task_id = domain
-        .create_with_thread(
+        .create(
             "Task",
             None,
             project(THIS_REPO),
-            None,
-            None,
             ProvenanceOrigin::Manual,
             Some("release".into()),
         )
@@ -1103,9 +1084,8 @@ fn thread_refusal_paints_inline_and_clears_without_status_leak() {
             "Task",
             None,
             project(THIS_REPO),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create");
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
@@ -1153,12 +1133,10 @@ fn thread_refusal_paints_inline_and_clears_without_status_leak() {
 fn task_page_footer_hits_use_display_columns_and_stay_within_the_painted_row() {
     let mut domain = DomainState::new();
     domain
-        .create_with_thread(
+        .create(
             "Threaded task",
             None,
             project("/repos/プロジェクト"),
-            None,
-            None,
             ProvenanceOrigin::Manual,
             Some("a2345678901234567890123456789012".into()),
         )
@@ -1202,9 +1180,8 @@ fn task_page_header_identifier_precedes_the_title_and_footer_scope() {
             "Numbered task",
             None,
             project(THIS_REPO),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create");
     let mut persisted = domain.get(id).expect("task").clone();
@@ -1256,9 +1233,8 @@ fn long_invalid_thread_refusal_remains_visible_at_40x10() {
             "Task",
             None,
             project(THIS_REPO),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create");
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
@@ -1314,9 +1290,8 @@ fn page_footer_thread_edit_operable_at_40x10() {
             "Task",
             None,
             project(THIS_REPO),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create");
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));

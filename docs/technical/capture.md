@@ -14,16 +14,15 @@ capture_save(state, store, snapshot, title, notes, scope_override, thread)
 ```
 
 - Scope: `scope_override` if `Some`, else `snapshot.default_scope`.
-- Capsule, agent meta, provenance: always from the snapshot (overriding scope does
-  **not** rewrite the capsule).
+- Provenance always comes from the snapshot.
 - `thread` is already normalized by the caller.
-- Create goes through `DomainState::create_with_thread`. Empty title →
+- Create goes through `DomainState::create`. Empty title →
   `CaptureError::Domain(EmptyTitle)`, no task.
 - If `store` is `Some`, `reload_merge_save` so a concurrent board writer is merged
   rather than clobbered.
 
 Board quick-add parses `!p`/`!t` in the reducer, then calls `capture_save` with
-`store: None` so capsule/provenance still come from the snapshot. Persistence is
+`store: None` so provenance still comes from the snapshot. Persistence is
 `IntentOutcome::Persist` through the board save-recovery path — the draft is not
 discarded until that boundary confirms. The expanded Tab form uses `capture_save`
 the same way. Do not add a third create helper that skips the snapshot.
@@ -42,5 +41,5 @@ on-form `TITLE_REQUIRED_MESSAGE` and store errors into capture save-recovery.
 
 ## Extension points
 
-New capture fields belong on the snapshot or as extra domain create arguments —
-do not persist UI-only drafts through this function.
+New capture behavior belongs on the snapshot or as explicit domain create arguments.
+Do not persist UI-only drafts through this function.
