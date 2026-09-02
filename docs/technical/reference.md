@@ -51,8 +51,7 @@ Mechanism belongs on the subsystem page; this is the index.
 | `BoardForm` / `BoardFormBinding` | `pub(super)` | Task id XOR capture snapshot for the form's lifetime | [board UI](board-ui.md) |
 | `board_keyboard_intent` form allowlist | private in `app` | Save-recovery `r`/`c`/Esc must outrank an allocated form | [app](app.md) |
 | `DomainState::merge_for_save` | `pub(crate)` | Revision guard under the store lock | [domain](domain.md), [store](store.md) |
-| `LEGACY_MERGE_BASE_REVISION` | private | Nil UUID base for pre-revision tasks | [invariants](invariants.md) §6 |
-| `DomainState::stamp_format_version` / `clear_merge_bases` | `pub(crate)` | Must run on every successful replace | [store](store.md) |
+| `DomainState::clear_merge_bases` | `pub(crate)` | Must run on every successful replace | [store](store.md) |
 | `time_serde` | private module | Wire times as `[secs, nanos]` | [data model](data-model.md) |
 | `text::non_empty` | `pub(crate)` | Trim + reject empty host strings without allocating | [context](context.md) |
 | `StoreWatch::{poll,record}` | private | Failed idle load must not mark the watch caught up | [app](app.md) |

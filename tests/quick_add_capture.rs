@@ -26,8 +26,6 @@ fn snapshot() -> InvocationSnapshot {
         this_repo: Some(PathBuf::from("/repos/invocation")),
         title_prefill: None,
         provenance: ProvenanceOrigin::Capture,
-        capsule: None,
-        agent_meta: None,
     }
 }
 
@@ -299,9 +297,8 @@ fn create_project_fixture(domain: &mut DomainState, path: &str) {
             "known project",
             None,
             TaskScope::Project { path: path.into() },
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("fixture project task");
 }
@@ -1021,9 +1018,8 @@ fn capture_bar_renders_spaced_three_row_block_and_stays_bounded_without_color_sg
             "visible task",
             None,
             TaskScope::Global,
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("fixture task");
     let mut model = BoardModel::from_domain(&domain, None);

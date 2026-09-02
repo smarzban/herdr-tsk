@@ -6,10 +6,9 @@ what fails if it is violated. Subsystem pages restate the subset they own.
 ## Domain
 
 1. **Human status is the only progress authority.** `HumanStatus` on `Task` is what the
-   board and CLI show. `last_observed`, capsule, and agent meta never drive `set_status`,
-   `complete`, or `reopen`. Completing every step never completes the task
+   board and CLI show. Completing every step never completes the task
    (`DomainState::toggle_step` journals `StepChecked` / `StepUnchecked` only).
-   *Breaks:* an agent observation or a full checklist silently marks work done.
+   *Breaks:* a full checklist silently marks work done.
 
 2. **Create and edit refuse empty titles.** Title is trimmed; whitespace-only is
    `DomainError::EmptyTitle` and adds no task. CLI additionally refuses any C0 control
@@ -31,27 +30,20 @@ what fails if it is violated. Subsystem pages restate the subset they own.
    successful write must not retain it.
    *Enforced by:* `TaskStore::save` / `reload_merge_save` / `locked_transition*`.
 
-6. **Legacy missing revision is a nil UUID base, not a real revision.**
-   `LEGACY_MERGE_BASE_REVISION = Uuid::nil()`. UUID v4 revisions never equal nil. A
-   first mutation of a pre-revision task is accepted against a disk copy that still has
-   `revision: null`.
-   *Breaks:* first edit of an old task spuriously conflicts, or a nil revision is
-   persisted as if it were assigned.
+6. **Revision is required.** Every task has a real UUID revision; no nil sentinel or
+   missing-revision compatibility path exists.
 
 7. **Undo is LIFO, revision-guarded, and a no-op on an empty stack.** Only `complete` and
-   `soft_delete` push. A stale or legacy (no `expected_revision`) entry is *retained* and
-   returns `StaleUndo` — a refused undo must not expose an older entry.
+   `soft_delete` push. A stale entry is retained and returns `StaleUndo`, so a refused
+   undo cannot expose an older entry.
    *Enforced by:* `DomainState::undo` in `src/domain/undo.rs`.
 
-8. **A task owns at most one active dispatch attempt.** `start_dispatch_attempt` refuses
-   `ActiveDispatchAttempt`. Completed / fully-cleaned attempts are removed from
-   `DomainState`, not kept as history. Disk owns attempt lifecycle under the lock: a
-   stale in-memory copy must not recreate an attempt disk already dropped
-   (`merge_attempts_for_save` retains only ids still on disk).
+8. **Steps are a flat ordered list.** One level, stable ids, no reordering by a verb.
+   Notes markdown `- [ ]` stays literal text (ADR-0001).
 
-9. **Steps are a flat ordered list.** One level, stable ids, no reordering by a verb.
-   Old stores name the field `checklist`; new writes use `steps` only. Notes markdown
-   `- [ ]` stays literal text (ADR-0001).
+9. **Host context is invocation input, not retained task metadata.** Cwd determines the
+   default scope and selected text can prefill the title. Capsule, pane, and agent identity
+   fields are not part of the task or store schema.
 
 10. **A thread is a normalized name, not an entity.** No thread id, status, or lifecycle.
     Identity is the name. The field persists on the task regardless of status (ADR-0002).
@@ -65,10 +57,8 @@ what fails if it is violated. Subsystem pages restate the subset they own.
 11. **`TaskScope::Global` serializes as `"global"` and displays as desk.** Do not rename
     either without a store migration.
 
-12. **`STORE_FORMAT_VERSION` is 1.** Missing `format_version` loads as
-    `LEGACY_STORE_FORMAT_VERSION` (also 1). That legacy constant **must stay 1** when
-    the current constant is later bumped, so old files still decode. Newer documents
-    are refused, not rewritten (`StoreError::UnsupportedFormat`).
+12. **`STORE_FORMAT_VERSION` is 1.** `format_version` is required and must be 1.
+    Missing or non-1 documents are refused without rewrite (`StoreError::UnsupportedFormat`).
 
 ## Persistence
 

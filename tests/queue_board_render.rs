@@ -42,16 +42,13 @@ fn task(id: u128, title: &str, status: HumanStatus, scope: TaskScope, secs_ago: 
     Task {
         id: Uuid::from_u128(id),
         number: None,
-        revision: Some(Uuid::from_u128(id)),
+        revision: Uuid::from_u128(id),
         merge_base_revision: None,
         title: title.to_string(),
         notes: None,
         thread: None,
         status,
         scope,
-        capsule: None,
-        agent_meta: None,
-        last_observed: None,
         provenance: ProvenanceOrigin::Manual,
         history: vec![TaskEvent {
             kind: TaskEventKind::Created,
@@ -1203,9 +1200,8 @@ fn task_page_paints_steps_section_between_notes_and_footer() {
             "Page task with steps",
             Some("the notes body".into()),
             TaskScope::Global,
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create task");
     let first = domain.add_step(id, "first step").expect("step 1");
@@ -1328,9 +1324,8 @@ fn task_page_without_steps_reaches_its_trailing_add_target() {
                 "Notes-only page task",
                 Some(notes.clone()),
                 TaskScope::Global,
-                None,
-                None,
                 ProvenanceOrigin::Manual,
+                None,
             )
             .expect("create task");
         let mut model = BoardModel::from_domain(&domain, None);
@@ -1380,9 +1375,8 @@ fn task_page_notes_edit_keeps_a_visible_row_and_spacing_at_the_compact_floor() {
             "Editing notes beside steps",
             Some("draft line under edit".into()),
             TaskScope::Global,
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create task");
     let first = domain.add_step(id, "first step").expect("step 1");
@@ -1460,9 +1454,8 @@ fn notes_edit_shows_raw_markdown_markers_that_view_mode_strips() {
             "Markdown notes",
             Some("see *em* and **strong** here".into()),
             TaskScope::Global,
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create task");
     let mut model = BoardModel::from_domain(&domain, None);
@@ -1496,9 +1489,8 @@ fn task_page_view_leaves_fence_body_unparsed() {
             "Fenced",
             Some("```\n**not bold**\n```".into()),
             TaskScope::Global,
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create");
     let mut model = BoardModel::from_domain(&domain, None);
@@ -1524,9 +1516,8 @@ fn task_page_fence_stays_closed_after_the_opener_scrolls_off() {
             "Long fence",
             Some(notes),
             TaskScope::Global,
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create");
     let mut model = BoardModel::from_domain(&domain, None);
@@ -1555,9 +1546,8 @@ fn notes_edit_caret_accounts_for_shared_stream_scroll() {
             "Caret stream offset",
             Some("first\nsecond\nthird".to_string()),
             TaskScope::Global,
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create task");
     for index in 0..30 {
@@ -1604,9 +1594,8 @@ fn notes_edit_after_deep_stream_scroll_keeps_draft_and_caret_aligned() {
             "Deep Notes",
             Some(notes),
             TaskScope::Global,
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create task");
     for index in 0..30 {
@@ -1659,9 +1648,8 @@ fn shift_tab_from_scope_resets_notes_stream_origin_and_aligns_caret() {
             "Shift tab Notes",
             Some(notes),
             TaskScope::Global,
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create task");
     let mut model = BoardModel::from_domain(&domain, None);
@@ -1724,9 +1712,8 @@ fn notes_edit_wraps_a_long_line_instead_of_scrolling_horizontally() {
             "Long line",
             Some(note),
             TaskScope::Global,
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create task");
     let mut model = BoardModel::from_domain(&domain, None);
@@ -1770,9 +1757,8 @@ fn task_page_view_wraps_long_notes_instead_of_truncating() {
             "Long line",
             Some(note),
             TaskScope::Global,
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create task");
     let mut model = BoardModel::from_domain(&domain, None);
@@ -1806,9 +1792,8 @@ fn task_page_scrolls_notes_and_steps_as_one_content_region() {
             "Scrollable page",
             Some(notes),
             TaskScope::Global,
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create task");
     domain.add_step(id, "only step").expect("add step");
@@ -1884,9 +1869,8 @@ fn steps_stack_from_the_top_below_the_divider() {
             "Stacking page",
             Some("the notes body".into()),
             TaskScope::Global,
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create task");
     for text in ["first step", "second step", "third step"] {
@@ -2604,9 +2588,8 @@ fn footer_lists_the_step_add_verb() {
                 "Verb bar witness",
                 Some("the notes body".into()),
                 TaskScope::Global,
-                None,
-                None,
                 ProvenanceOrigin::Manual,
+                None,
             )
             .expect("create task");
         for text in steps {
@@ -3027,9 +3010,8 @@ fn board_list_wraps_a_long_title_onto_a_continuation_row() {
             &title,
             None,
             TaskScope::Global,
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create task");
     let model = BoardModel::from_domain(&domain, None);
@@ -3124,9 +3106,8 @@ fn notes_edit_arrows_move_across_logical_and_wrapped_rows() {
             "Arrow nav",
             Some("one\n\ntwo".to_string()),
             TaskScope::Global,
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create task");
     let mut model = BoardModel::from_domain(&domain, None);
@@ -3162,9 +3143,8 @@ fn notes_edit_arrows_move_across_logical_and_wrapped_rows() {
             "Wrapped arrows",
             Some("aaaaa bbbbb ccccc ddddd eeeee fffff ggggg".to_string()),
             TaskScope::Global,
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create task");
     let mut model = BoardModel::from_domain(&domain, None);
@@ -3193,9 +3173,8 @@ fn task_page_caps_a_wrapped_header_inside_the_page_body() {
             &title,
             None,
             TaskScope::Global,
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create task");
     let mut model = BoardModel::from_domain(&domain, None);
@@ -3237,9 +3216,8 @@ fn step_cursor_moves_do_not_rescroll_the_page_when_steps_fit() {
             "Steps page",
             Some("n".to_string()),
             TaskScope::Global,
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create task");
     for index in 0..20 {
@@ -3278,9 +3256,8 @@ fn edit_title_caret_parks_at_the_capped_headers_end() {
             &title,
             None,
             TaskScope::Global,
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create task");
     let mut model = BoardModel::from_domain(&domain, None);

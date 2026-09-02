@@ -83,7 +83,7 @@ fn list(args: &[String]) -> tsk_tui::cli::CliOutput {
 
 fn create_task(state: &mut DomainState, title: &str, scope: TaskScope, status: HumanStatus) {
     let id = state
-        .create(title, None, scope, None, None, ProvenanceOrigin::Manual)
+        .create(title, None, scope, ProvenanceOrigin::Manual, None)
         .expect("create task");
     state.set_status(id, status).expect("set status");
 }
@@ -96,12 +96,10 @@ fn create_task_with_thread(
     thread: Option<&str>,
 ) -> uuid::Uuid {
     let id = state
-        .create_with_thread(
+        .create(
             title,
             None,
             scope,
-            None,
-            None,
             ProvenanceOrigin::Manual,
             thread.map(str::to_owned),
         )
@@ -169,9 +167,8 @@ fn list_defaults_to_invocation_project_open_tasks_in_human_and_json_group_order(
             "deleted hidden",
             None,
             project.clone(),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create deleted task");
     state.soft_delete(deleted).expect("soft delete task");
@@ -299,9 +296,8 @@ fn list_done_and_deleted_filters_are_status_and_soft_delete_specific() {
             "deleted ready",
             None,
             project.clone(),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create deleted ready");
     state.soft_delete(deleted_ready).expect("soft delete ready");
@@ -310,9 +306,8 @@ fn list_done_and_deleted_filters_are_status_and_soft_delete_specific() {
             "deleted done",
             None,
             project.clone(),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create deleted done");
     state.complete(deleted_done).expect("complete deleted task");
@@ -435,9 +430,8 @@ fn list_all_groups_each_status_by_concise_scope_for_every_filter() {
             "global deleted",
             None,
             TaskScope::Global,
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create global deleted task");
     state
@@ -450,9 +444,8 @@ fn list_all_groups_each_status_by_concise_scope_for_every_filter() {
             TaskScope::Project {
                 path: "/projects/other".into(),
             },
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create other deleted task");
     state
@@ -806,9 +799,8 @@ fn human_list_escapes_terminal_control_titles_without_changing_json() {
             title,
             None,
             TaskScope::Global,
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create deleted task");
     state.soft_delete(deleted).expect("soft delete task");
@@ -1192,9 +1184,8 @@ fn state_with_steps(done_first: bool) -> (DomainState, tsk_tui::domain::Step) {
             "steps target",
             None,
             TaskScope::Global,
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("seed steps task");
     state.add_step(id, "First step").expect("seed first step");

@@ -31,7 +31,6 @@ self/special docs repo.
 | `src/domain/events.rs` publics | module | rustdoc | generated (rustdoc) |
 | `src/domain/thread.rs` publics | module | rustdoc | generated (rustdoc) |
 | `src/domain/undo.rs` publics | module | rustdoc | generated (rustdoc) |
-| `src/domain/dispatch_attempt.rs` publics | module | rustdoc | generated (rustdoc) |
 | `src/domain/time_serde.rs` | internal — load-bearing | [data-model.md](data-model.md), [reference.md](reference.md) | done |
 | `src/store.rs` | subsystem | [store.md](store.md) | done |
 | `src/config.rs` | subsystem | [config.md](config.md) | done |
@@ -82,10 +81,8 @@ self/special docs repo.
 | --- | --- | --- | --- |
 | `DomainState` / `tsk.json` | data model | [data-model.md](data-model.md) | done |
 | `Task`, `Step`, `HumanStatus`, `TaskScope` | data model | [data-model.md](data-model.md) | done |
-| `ContextCapsule`, `AgentMeta`, `ObservedStatus` | data model | [data-model.md](data-model.md) | done |
 | `TaskEvent`, `ProvenanceOrigin` | data model | [data-model.md](data-model.md) | done |
 | `UndoEntry` | data model | [data-model.md](data-model.md) | done |
-| `DispatchAttempt` and receipts | data model | [data-model.md](data-model.md) | done |
 | `walkthrough.json` | data model | [data-model.md](data-model.md) | done |
 | CLI plan/flag/list JSON | data model | [data-model.md](data-model.md) | done |
 | `HERDR_PLUGIN_CONTEXT_JSON` | data model | [context.md](context.md) | done |

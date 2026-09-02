@@ -109,9 +109,8 @@ fn bare_page_keys_never_mutate_steps() {
             "Guarded page task",
             None,
             TaskScope::Global,
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create");
     domain.add_step(id, "alpha step").expect("step 1");

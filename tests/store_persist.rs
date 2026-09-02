@@ -5,19 +5,10 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, Barrier};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
-use tsk_tui::domain::{
-    AgentMeta, AgentReceipt, AgentSessionIdentity, ContextCapsule, DispatchAttemptError,
-    DispatchAttemptMode, DispatchAttemptPhase, DispatchAttemptStep, DispatchAttemptStepState,
-    DispatchAttemptTransition, DomainError, DomainState, HumanStatus, ObservedStatus,
-    OwnedResourceReceipt, PaneReceipt, ProvenanceOrigin, Step, TaskEvent, TaskEventKind, TaskScope,
-    WorktreeReceipt,
-};
+use tsk_tui::domain::{DomainState, HumanStatus, ProvenanceOrigin, Step, TaskEventKind, TaskScope};
 use tsk_tui::store::TaskStore;
-use tsk_tui::ui::board::{BoardInputMode, BoardModel};
-use tsk_tui::ui::mouse::BoardPopup;
-use uuid::Uuid;
 
 fn temp_state_dir() -> PathBuf {
     let nanos = SystemTime::now()
@@ -39,281 +30,6 @@ impl Drop for TempDirGuard {
     }
 }
 
-fn assert_pre_stabilize_fixture_payload(state: &DomainState, task_id: Uuid, attempt_id: Uuid) {
-    let task = state.get(task_id).expect("fixture task survives");
-    assert_eq!(task.title, "Prepare V1 baseline");
-    assert_eq!(
-        task.notes.as_deref(),
-        Some("Keep the interrupted dispatch recoverable.")
-    );
-    assert_eq!(
-        task.scope,
-        TaskScope::Project {
-            path: "/work/herdr-tasks".into()
-        }
-    );
-    assert_eq!(
-        task.capsule,
-        Some(ContextCapsule {
-            repo_path: Some("/work/herdr-tasks".into()),
-            worktree_path: Some("/work/herdr-tasks/.worktrees/baseline".into()),
-            branch: Some("feat/v1-stabilize".into()),
-            cwd: Some("/work/herdr-tasks/.worktrees/baseline".into()),
-            source_pane_id: Some("workspace-1:pane-4".into()),
-            selected_text: None,
-            file: Some("docs/specs/v1-stabilize.md".into()),
-            line: Some(243),
-        })
-    );
-    assert_eq!(
-        task.agent_meta,
-        Some(AgentMeta {
-            agent_id: Some("grok-baseline".into()),
-            pane_id: Some("workspace-1:pane-4".into()),
-            agent_session: Some(AgentSessionIdentity {
-                source: "herdr:grok".into(),
-                value: "baseline-session".into(),
-            }),
-        })
-    );
-    assert_eq!(task.last_observed, Some(ObservedStatus::Working));
-    assert_eq!(task.provenance, ProvenanceOrigin::Capture);
-    let expected_history = [
-        TaskEvent {
-            kind: TaskEventKind::Created,
-            at: UNIX_EPOCH + Duration::from_secs(1_723_852_800),
-        },
-        TaskEvent {
-            kind: TaskEventKind::Parked,
-            at: UNIX_EPOCH + Duration::from_secs(1_723_852_860),
-        },
-    ];
-    assert!(
-        task.history.len() >= expected_history.len(),
-        "fixture task must retain both history events"
-    );
-    assert_eq!(&task.history[..expected_history.len()], expected_history);
-
-    let attempt = state
-        .active_attempt(attempt_id)
-        .expect("active dispatch attempt survives");
-    assert_eq!(attempt.task_id(), task_id);
-    assert_eq!(attempt.mode(), DispatchAttemptMode::NewWorktree);
-    assert_eq!(attempt.kind(), "grok");
-    assert_eq!(attempt.phase(), DispatchAttemptPhase::Failed);
-    assert_eq!(
-        attempt.steps(),
-        [
-            DispatchAttemptStepState {
-                step: DispatchAttemptStep::CreateWorktree,
-                completed: true,
-            },
-            DispatchAttemptStepState {
-                step: DispatchAttemptStep::OpenPane,
-                completed: true,
-            },
-            DispatchAttemptStepState {
-                step: DispatchAttemptStep::StartAgent,
-                completed: true,
-            },
-            DispatchAttemptStepState {
-                step: DispatchAttemptStep::SendPrompt,
-                completed: false,
-            },
-        ]
-    );
-    assert_eq!(
-        attempt.owned_resources(),
-        [
-            OwnedResourceReceipt::Worktree(WorktreeReceipt {
-                path: "/work/herdr-tasks/.worktrees/baseline".into(),
-                workspace_id: "workspace-3".into(),
-            }),
-            OwnedResourceReceipt::Pane(PaneReceipt {
-                pane_id: "workspace-3:pane-9".into(),
-            }),
-            OwnedResourceReceipt::Agent(AgentReceipt {
-                pane_id: "workspace-3:pane-9".into(),
-                display_name: Some("grok-baseline".into()),
-                agent_session: Some(AgentSessionIdentity {
-                    source: "herdr:grok".into(),
-                    value: "baseline-session".into(),
-                }),
-            }),
-        ]
-    );
-    assert_eq!(
-        attempt.last_error(),
-        Some("agent exited before the initial prompt")
-    );
-}
-
-/// A store document exactly as a pre-steps binary would have written it:
-/// task objects carry no `steps` key anywhere.
-const PRE_STEPS_TASKS_JSON: &str = r#"{
-  "tasks": [
-    {
-      "id": "44444444-4444-4444-8444-444444444444",
-      "revision": "55555555-5555-4555-8555-555555555555",
-      "title": "Written before steps",
-      "notes": "old store, no steps field",
-      "status": "ready",
-      "scope": "global",
-      "provenance": "manual",
-      "history": [
-        { "kind": "created", "at": [1723852800, 0] }
-      ],
-      "soft_deleted": false,
-      "created_at": [1723852800, 0],
-      "updated_at": [1723852800, 0]
-    },
-    {
-      "id": "66666666-6666-4666-8666-666666666666",
-      "revision": "77777777-7777-4777-8777-777777777777",
-      "title": "Also written before steps",
-      "notes": null,
-      "status": "started",
-      "scope": "global",
-      "provenance": "manual",
-      "history": [
-        { "kind": "created", "at": [1723852900, 0] },
-        { "kind": "status_set", "at": [1723852960, 0] }
-      ],
-      "soft_deleted": false,
-      "created_at": [1723852900, 0],
-      "updated_at": [1723852960, 0]
-    }
-  ],
-  "undo_stack": []
-}"#;
-
-/// A store document exactly as a pre-rename binary would have written it: the
-/// collection field named `checklist` and one `checklist_item_checked` history
-/// event naming the old vocabulary.
-const PRE_RENAME_STEPS_JSON: &str = r#"{
-  "tasks": [
-    {
-      "id": "88888888-8888-4888-8888-888888888888",
-      "revision": "99999999-9999-4999-8999-999999999999",
-      "title": "Written before the rename",
-      "notes": "old store, checklist field and event names",
-      "status": "ready",
-      "scope": "global",
-      "provenance": "manual",
-      "history": [
-        { "kind": "created", "at": [1723852800, 0] },
-        { "kind": "checklist_item_checked", "at": [1723852900, 0] }
-      ],
-      "checklist": [
-        {
-          "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-          "text": "First step",
-          "done": true
-        },
-        {
-          "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
-          "text": "Second step",
-          "done": false
-        }
-      ],
-      "soft_deleted": false,
-      "created_at": [1723852800, 0],
-      "updated_at": [1723852900, 0]
-    }
-  ],
-  "undo_stack": []
-}"#;
-
-#[test]
-fn steps_alias_decodes_pre_rename_store_events_and_field() {
-    let dir = temp_state_dir();
-    let _guard = TempDirGuard(dir.clone());
-    fs::write(dir.join("tsk.json"), PRE_RENAME_STEPS_JSON).expect("install pre-rename store");
-
-    let state = TaskStore::new(&dir)
-        .load()
-        .expect("pre-rename store loads without error");
-
-    // A save writes the NEW names only: the steps collection and the renamed
-    // event kind, with the steps and their done flags intact.
-    let document = serde_json::to_value(&state).expect("serialize reloaded state");
-    let task = &document["tasks"][0];
-    task["steps"]
-        .as_array()
-        .expect("a reloaded pre-rename store writes the steps field");
-    assert_eq!(
-        task["steps"],
-        serde_json::json!([
-            {
-                "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-                "text": "First step",
-                "done": true,
-            },
-            {
-                "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
-                "text": "Second step",
-                "done": false,
-            },
-        ]),
-        "steps and their done flags must decode intact from the old checklist name"
-    );
-    assert!(
-        task.as_object()
-            .expect("task object")
-            .get("checklist")
-            .is_none(),
-        "new writes must use the steps name only"
-    );
-    let kinds: Vec<&str> = task["history"]
-        .as_array()
-        .expect("history decodes")
-        .iter()
-        .map(|event| event["kind"].as_str().expect("kind is a string"))
-        .collect();
-    assert_eq!(
-        kinds,
-        vec!["created", "step_checked"],
-        "the renamed event must decode from its old-name alias and re-serialize under the new name"
-    );
-}
-
-#[test]
-fn pre_steps_store_decodes_with_empty_steps() {
-    let dir = temp_state_dir();
-    let _guard = TempDirGuard(dir.clone());
-    fs::write(dir.join("tsk.json"), PRE_STEPS_TASKS_JSON).expect("install pre-steps store");
-
-    let state = TaskStore::new(&dir)
-        .load()
-        .expect("pre-steps store loads without error");
-    let tasks = state.tasks();
-    assert_eq!(tasks.len(), 2, "both fixture tasks decode");
-    for task in tasks {
-        assert!(
-            task.steps.is_empty(),
-            "task {} written before steps must present an empty steps collection",
-            task.id
-        );
-    }
-}
-
-#[test]
-fn pre_thread_store_decodes_with_no_thread() {
-    let dir = temp_state_dir();
-    let _guard = TempDirGuard(dir.clone());
-    fs::copy(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/pre_thread_tasks.json"),
-        dir.join("tsk.json"),
-    )
-    .expect("install pre-thread store");
-
-    let state = TaskStore::new(&dir)
-        .load()
-        .expect("pre-thread store loads without migration");
-    let task = state.tasks().first().expect("fixture task");
-    assert_eq!(task.thread, None);
-}
-
 #[test]
 fn thread_round_trips_through_save_and_load() {
     let dir = temp_state_dir();
@@ -325,9 +41,8 @@ fn thread_round_trips_through_save_and_load() {
             "Threaded task",
             None,
             TaskScope::Global,
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create task");
     state
@@ -359,9 +74,8 @@ fn edit_with_thread_persists_through_one_locked_merge() {
             "Merge thread",
             None,
             TaskScope::Global,
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create task");
     store.save(&seed).expect("seed task");
@@ -405,9 +119,8 @@ fn conflicting_concurrent_thread_edits_reject_via_revision_guard() {
             "Conflicting threads",
             None,
             TaskScope::Global,
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create task");
     store.save(&seed).expect("seed task");
@@ -460,9 +173,8 @@ fn steps_round_trip_preserves_identity_flags_and_order() {
             "Steps round trip",
             None,
             TaskScope::Global,
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create task");
     let first = state.add_step(id, "First").expect("add first");
@@ -499,72 +211,6 @@ fn steps_round_trip_preserves_identity_flags_and_order() {
 }
 
 #[test]
-fn pre_stabilize_fixture_survives_mutation_and_undo() {
-    let dir = temp_state_dir();
-    let _guard = TempDirGuard(dir.clone());
-    fs::copy(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/pre_stabilize_tasks.json"),
-        dir.join("tsk.json"),
-    )
-    .expect("install pre-stabilize fixture");
-    let store = TaskStore::new(&dir);
-    let task_id = Uuid::parse_str("11111111-1111-4111-8111-111111111111").expect("fixture task id");
-    let attempt_id =
-        Uuid::parse_str("33333333-3333-4333-8333-333333333333").expect("fixture attempt id");
-
-    let mut state = store.load().expect("load pre-stabilize store");
-    assert_pre_stabilize_fixture_payload(&state, task_id, attempt_id);
-    assert_eq!(
-        state.get(task_id).expect("fixture task").history.len(),
-        2,
-        "fixture starts with exactly its two durable history events"
-    );
-
-    state.complete(task_id).expect("mutate fixture task");
-    store
-        .reload_merge_save(&mut state)
-        .expect("save fixture mutation");
-    let mut reloaded = store.load().expect("reload saved fixture mutation");
-    assert_pre_stabilize_fixture_payload(&reloaded, task_id, attempt_id);
-    let reloaded_task = reloaded.get(task_id).expect("fixture task");
-    assert_eq!(reloaded_task.status, HumanStatus::Done);
-    assert_eq!(
-        reloaded_task
-            .history
-            .iter()
-            .map(|event| event.kind)
-            .collect::<Vec<_>>(),
-        vec![
-            TaskEventKind::Created,
-            TaskEventKind::Parked,
-            TaskEventKind::Completed,
-        ]
-    );
-
-    reloaded.undo().expect("undo saved fixture mutation");
-    store
-        .reload_merge_save(&mut reloaded)
-        .expect("save undone fixture mutation");
-    let recovered_state = store.load().expect("reload undone fixture mutation");
-    assert_pre_stabilize_fixture_payload(&recovered_state, task_id, attempt_id);
-    let recovered_task = recovered_state.get(task_id).expect("fixture task");
-    assert_eq!(recovered_task.status, HumanStatus::Ready);
-    assert_eq!(
-        recovered_task
-            .history
-            .iter()
-            .map(|event| event.kind)
-            .collect::<Vec<_>>(),
-        vec![
-            TaskEventKind::Created,
-            TaskEventKind::Parked,
-            TaskEventKind::Completed,
-            TaskEventKind::Reopened,
-        ]
-    );
-}
-
-#[test]
 fn save_then_load_preserves_task_id_title_status_and_events() {
     let dir = temp_state_dir();
     let _guard = TempDirGuard(dir.clone());
@@ -575,9 +221,8 @@ fn save_then_load_preserves_task_id_title_status_and_events() {
             "Fix flake",
             None,
             TaskScope::Global,
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create task");
 
@@ -613,9 +258,8 @@ fn two_writers_merge_save_do_not_lose_tasks() {
             "Task A",
             None,
             TaskScope::Global,
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create A");
     store.save(&writer_a).expect("writer A save");
@@ -626,9 +270,8 @@ fn two_writers_merge_save_do_not_lose_tasks() {
             "Task B",
             None,
             TaskScope::Global,
-            None,
-            None,
             ProvenanceOrigin::Capture,
+            None,
         )
         .expect("create B");
     store
@@ -656,9 +299,8 @@ fn stale_undo_refuses_newer_task_revision_without_popping_newer_state() {
             "Concurrent task",
             None,
             TaskScope::Global,
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create task");
     stale_writer.complete(id).expect("complete task");
@@ -697,718 +339,6 @@ fn stale_undo_refuses_newer_task_revision_without_popping_newer_state() {
 }
 
 #[test]
-fn legacy_serialized_tasks_and_undo_entries_decode_safely() {
-    let dir = temp_state_dir();
-    let _guard = TempDirGuard(dir.clone());
-    let store = TaskStore::new(&dir);
-
-    let mut state = DomainState::new();
-    let id = state
-        .create(
-            "Legacy task",
-            None,
-            TaskScope::Global,
-            None,
-            None,
-            ProvenanceOrigin::Manual,
-        )
-        .expect("create task");
-    state.complete(id).expect("create legacy undo entry");
-
-    let mut legacy = serde_json::to_value(&state).expect("serialize state");
-    legacy["tasks"][0]
-        .as_object_mut()
-        .expect("task object")
-        .remove("revision");
-    let undo = legacy["undo_stack"][0]
-        .as_object_mut()
-        .expect("undo enum object")
-        .values_mut()
-        .next()
-        .and_then(serde_json::Value::as_object_mut)
-        .expect("undo fields");
-    undo.remove("expected_revision");
-    fs::write(
-        dir.join("tsk.json"),
-        serde_json::to_string_pretty(&legacy).expect("encode legacy state"),
-    )
-    .expect("write legacy state");
-
-    let mut loaded = store.load().expect("legacy record decodes");
-    let before = loaded.get(id).expect("legacy task present").clone();
-    assert_eq!(before.revision, None);
-    let error = loaded
-        .undo()
-        .expect_err("legacy undo without revision is refused safely");
-    assert!(error.to_string().contains("changed since"));
-    assert_eq!(loaded.get(id), Some(&before));
-}
-
-#[test]
-fn legacy_serialized_domain_without_active_attempts_round_trips() {
-    let dir = temp_state_dir();
-    let _guard = TempDirGuard(dir.clone());
-    let store = TaskStore::new(&dir);
-
-    let mut state = DomainState::new();
-    state
-        .create(
-            "Legacy dispatch record",
-            None,
-            TaskScope::Global,
-            None,
-            None,
-            ProvenanceOrigin::Manual,
-        )
-        .expect("create task");
-    let mut legacy = serde_json::to_value(&state).expect("serialize legacy state");
-    legacy
-        .as_object_mut()
-        .expect("domain object")
-        .remove("active_attempts");
-    fs::write(
-        dir.join("tsk.json"),
-        serde_json::to_string_pretty(&legacy).expect("encode legacy state"),
-    )
-    .expect("write legacy state");
-
-    let loaded = store.load().expect("legacy state decodes");
-    assert_eq!(
-        serde_json::to_value(&loaded).expect("reserialize loaded state")["active_attempts"],
-        serde_json::json!([]),
-        "legacy records gain an empty active-attempt collection"
-    );
-}
-
-#[test]
-fn active_attempt_with_worktree_and_pane_receipts_round_trips() {
-    let dir = temp_state_dir();
-    let _guard = TempDirGuard(dir.clone());
-    let store = TaskStore::new(&dir);
-
-    let mut state = DomainState::new();
-    let task_id = state
-        .create(
-            "Recover dispatch",
-            None,
-            TaskScope::Global,
-            None,
-            None,
-            ProvenanceOrigin::Manual,
-        )
-        .expect("create task");
-    let attempt_id = state
-        .start_dispatch_attempt(task_id, DispatchAttemptMode::NewWorktree, "codex")
-        .expect("start durable attempt");
-    let revision = state
-        .active_attempt(attempt_id)
-        .expect("attempt")
-        .revision();
-    let worktree = OwnedResourceReceipt::Worktree(WorktreeReceipt {
-        path: "/repos/app/.worktrees/recover".into(),
-        workspace_id: "workspace-17".into(),
-    });
-    state
-        .transition_dispatch_attempt(
-            attempt_id,
-            revision,
-            DispatchAttemptTransition::RecordReceipt(worktree.clone()),
-        )
-        .expect("record exact worktree receipt");
-    let revision = state
-        .active_attempt(attempt_id)
-        .expect("attempt")
-        .revision();
-    let pane = OwnedResourceReceipt::Pane(PaneReceipt {
-        pane_id: "w0:p17".into(),
-    });
-    state
-        .transition_dispatch_attempt(
-            attempt_id,
-            revision,
-            DispatchAttemptTransition::RecordReceipt(pane.clone()),
-        )
-        .expect("record exact pane receipt");
-
-    store.save(&state).expect("save active attempt");
-    let loaded = store.load().expect("reload active attempt");
-    let attempt = loaded.active_attempt(attempt_id).expect("attempt survives");
-    assert_eq!(attempt.task_id(), task_id);
-    assert_eq!(attempt.mode(), DispatchAttemptMode::NewWorktree);
-    assert_eq!(attempt.kind(), "codex");
-    assert_eq!(attempt.phase(), DispatchAttemptPhase::Dispatching);
-    assert_eq!(attempt.owned_resources(), &[worktree, pane]);
-}
-
-#[test]
-fn dispatch_attempt_refuses_out_of_order_and_stale_transitions() {
-    let mut state = DomainState::new();
-    let task_id = state
-        .create(
-            "Order dispatch",
-            None,
-            TaskScope::Global,
-            None,
-            None,
-            ProvenanceOrigin::Manual,
-        )
-        .expect("create task");
-    let attempt_id = state
-        .start_dispatch_attempt(task_id, DispatchAttemptMode::NewWorktree, "grok")
-        .expect("start attempt");
-    let before = state.active_attempt(attempt_id).expect("attempt").clone();
-    let revision = before.revision();
-    let pane = OwnedResourceReceipt::Pane(PaneReceipt {
-        pane_id: "w0:p17".into(),
-    });
-
-    let out_of_order = state
-        .transition_dispatch_attempt(
-            attempt_id,
-            revision,
-            DispatchAttemptTransition::RecordReceipt(pane),
-        )
-        .expect_err("pane cannot precede required worktree receipt");
-    assert!(matches!(
-        out_of_order,
-        DomainError::DispatchAttempt(DispatchAttemptError::OutOfOrder { .. })
-    ));
-    assert_eq!(state.active_attempt(attempt_id), Some(&before));
-
-    state
-        .transition_dispatch_attempt(
-            attempt_id,
-            revision,
-            DispatchAttemptTransition::RecordReceipt(OwnedResourceReceipt::Worktree(
-                WorktreeReceipt {
-                    path: "/repos/app/.worktrees/recover".into(),
-                    workspace_id: "workspace-17".into(),
-                },
-            )),
-        )
-        .expect("current transition succeeds");
-    let after_current = state.active_attempt(attempt_id).expect("attempt").clone();
-    let stale = state
-        .transition_dispatch_attempt(
-            attempt_id,
-            revision,
-            DispatchAttemptTransition::Fail {
-                message: "late writer".into(),
-            },
-        )
-        .expect_err("old revision must be refused");
-    assert!(matches!(
-        stale,
-        DomainError::DispatchAttempt(DispatchAttemptError::StaleRevision { .. })
-    ));
-    assert_eq!(state.active_attempt(attempt_id), Some(&after_current));
-
-    state
-        .transition_dispatch_attempt(
-            attempt_id,
-            after_current.revision(),
-            DispatchAttemptTransition::Fail {
-                message: "first failure".into(),
-            },
-        )
-        .expect("first failure is recorded");
-    let failed = state.active_attempt(attempt_id).expect("attempt").clone();
-    let duplicate = state
-        .transition_dispatch_attempt(
-            attempt_id,
-            failed.revision(),
-            DispatchAttemptTransition::Fail {
-                message: "duplicate failure".into(),
-            },
-        )
-        .expect_err("duplicate transition is refused");
-    assert!(matches!(
-        duplicate,
-        DomainError::DispatchAttempt(DispatchAttemptError::InvalidPhase { .. })
-    ));
-    assert_eq!(state.active_attempt(attempt_id), Some(&failed));
-}
-
-#[test]
-fn cleanup_refuses_to_remove_an_unowned_receipt() {
-    let mut state = DomainState::new();
-    let task_id = state
-        .create(
-            "Owned only",
-            None,
-            TaskScope::Global,
-            None,
-            None,
-            ProvenanceOrigin::Manual,
-        )
-        .expect("create task");
-    let attempt_id = state
-        .start_dispatch_attempt(task_id, DispatchAttemptMode::Here, "grok")
-        .expect("start attempt");
-    let revision = state
-        .active_attempt(attempt_id)
-        .expect("attempt")
-        .revision();
-    state
-        .transition_dispatch_attempt(
-            attempt_id,
-            revision,
-            DispatchAttemptTransition::RecordReceipt(OwnedResourceReceipt::Pane(PaneReceipt {
-                pane_id: "w0:p-owned".into(),
-            })),
-        )
-        .expect("record owned pane");
-    let revision = state
-        .active_attempt(attempt_id)
-        .expect("attempt")
-        .revision();
-    state
-        .transition_dispatch_attempt(
-            attempt_id,
-            revision,
-            DispatchAttemptTransition::Fail {
-                message: "agent failed".into(),
-            },
-        )
-        .expect("record failure");
-    let revision = state
-        .active_attempt(attempt_id)
-        .expect("attempt")
-        .revision();
-    state
-        .transition_dispatch_attempt(
-            attempt_id,
-            revision,
-            DispatchAttemptTransition::BeginCleanup,
-        )
-        .expect("begin explicit cleanup");
-    let before = state.active_attempt(attempt_id).expect("attempt").clone();
-
-    let error = state
-        .transition_dispatch_attempt(
-            attempt_id,
-            before.revision(),
-            DispatchAttemptTransition::RemoveOwnedReceipt(OwnedResourceReceipt::Pane(
-                PaneReceipt {
-                    pane_id: "w0:p-not-owned".into(),
-                },
-            )),
-        )
-        .expect_err("cleanup cannot invent ownership");
-    assert!(matches!(
-        error,
-        DomainError::DispatchAttempt(DispatchAttemptError::UnownedReceipt)
-    ));
-    assert_eq!(state.active_attempt(attempt_id), Some(&before));
-}
-
-#[test]
-fn reload_merge_save_merges_attempt_revisions_without_dropping_unrelated_attempts() {
-    let dir = temp_state_dir();
-    let _guard = TempDirGuard(dir.clone());
-    let store = TaskStore::new(&dir);
-
-    let mut base = DomainState::new();
-    let task_a = base
-        .create(
-            "Attempt A",
-            None,
-            TaskScope::Global,
-            None,
-            None,
-            ProvenanceOrigin::Manual,
-        )
-        .expect("create A");
-    let task_b = base
-        .create(
-            "Attempt B",
-            None,
-            TaskScope::Global,
-            None,
-            None,
-            ProvenanceOrigin::Manual,
-        )
-        .expect("create B");
-    let attempt_a = base
-        .start_dispatch_attempt(task_a, DispatchAttemptMode::Here, "grok")
-        .expect("start A");
-    store.save(&base).expect("seed attempt A");
-
-    let mut local = store.load().expect("stale local load");
-    let attempt_b = local
-        .start_dispatch_attempt(task_b, DispatchAttemptMode::Here, "codex")
-        .expect("local start B");
-    // Attempt creation always passes through the durable locked transition in production. Seed
-    // that persisted sibling before exercising the later stale board merge-save.
-    store.save(&local).expect("persist attempt B");
-
-    let mut disk = store.load().expect("disk writer load");
-    let revision = disk
-        .active_attempt(attempt_a)
-        .expect("attempt A")
-        .revision();
-    std::thread::sleep(std::time::Duration::from_millis(5));
-    disk.transition_dispatch_attempt(
-        attempt_a,
-        revision,
-        DispatchAttemptTransition::Fail {
-            message: "disk-side failure".into(),
-        },
-    )
-    .expect("advance disk attempt A");
-    store.save(&disk).expect("save newer attempt A");
-
-    store.reload_merge_save(&mut local).expect("merge attempts");
-    assert_eq!(
-        local
-            .active_attempt(attempt_a)
-            .expect("merged A")
-            .last_error(),
-        Some("disk-side failure")
-    );
-    assert!(
-        local.active_attempt(attempt_b).is_some(),
-        "unrelated local attempt must survive merge"
-    );
-    let reloaded = store.load().expect("reload merge result");
-    assert!(reloaded.active_attempt(attempt_a).is_some());
-    assert!(reloaded.active_attempt(attempt_b).is_some());
-}
-
-#[test]
-fn reload_merge_save_does_not_resurrect_attempt_removed_from_disk() {
-    let dir = temp_state_dir();
-    let _guard = TempDirGuard(dir.clone());
-    let store = TaskStore::new(&dir);
-
-    let mut seed = DomainState::new();
-    let task_id = seed
-        .create(
-            "Attempt owner",
-            None,
-            TaskScope::Global,
-            None,
-            None,
-            ProvenanceOrigin::Manual,
-        )
-        .expect("create task");
-    let attempt_id = seed
-        .start_dispatch_attempt(task_id, DispatchAttemptMode::Here, "grok")
-        .expect("create attempt");
-    store.save(&seed).expect("seed");
-
-    let mut stale_local = store.load().expect("stale board state");
-    stale_local
-        .set_status(task_id, HumanStatus::Started)
-        .expect("stage unrelated board mutation");
-    let mut disk = store.load().expect("dispatch worker state");
-    let revision = disk.active_attempt(attempt_id).expect("attempt").revision();
-    disk.remove_dispatch_attempt(attempt_id, revision)
-        .expect("worker completed cleanup");
-    store.save(&disk).expect("persist removed attempt");
-
-    store
-        .reload_merge_save(&mut stale_local)
-        .expect("merge unrelated board mutation");
-
-    assert!(
-        stale_local.active_attempt(attempt_id).is_none(),
-        "the stale board copy must discard an attempt removed from disk"
-    );
-    let reloaded = store.load().expect("reload");
-    assert!(
-        reloaded.active_attempt(attempt_id).is_none(),
-        "merge-save must not write the removed attempt back"
-    );
-    assert_eq!(
-        reloaded.get(task_id).expect("task").status,
-        HumanStatus::Started
-    );
-}
-
-#[test]
-fn create_with_capsule_and_agent_meta_round_trips() {
-    let dir = temp_state_dir();
-    let _guard = TempDirGuard(dir.clone());
-    let store = TaskStore::new(&dir);
-
-    let capsule = ContextCapsule {
-        repo_path: Some("/repos/app".into()),
-        worktree_path: Some("/repos/app/.worktrees/f2".into()),
-        branch: Some("feat/capsule".into()),
-        cwd: Some("/repos/app/.worktrees/f2".into()),
-        source_pane_id: Some("w0:p7".into()),
-        selected_text: None,
-        file: Some("src/domain/task.rs".into()),
-        line: Some(100),
-    };
-    let meta = AgentMeta {
-        agent_id: Some("agent-meta".into()),
-        pane_id: Some("w0:p7".into()),
-        agent_session: Some(AgentSessionIdentity {
-            source: "herdr:pi".into(),
-            value: "session-store".into(),
-        }),
-    };
-    let mut state = DomainState::new();
-    let id = state
-        .create(
-            "Keep capsule",
-            None,
-            TaskScope::Global,
-            Some(capsule.clone()),
-            Some(meta.clone()),
-            ProvenanceOrigin::Manual,
-        )
-        .expect("create");
-    state.set_status(id, HumanStatus::Started).expect("status");
-
-    store
-        .reload_merge_save(&mut state)
-        .expect("persist via merge-save");
-
-    let loaded = store.load().expect("load after create");
-    let task = loaded.get(id).expect("task present");
-    assert_eq!(task.status, HumanStatus::Started);
-    assert_eq!(task.capsule.as_ref(), Some(&capsule));
-    assert_eq!(task.agent_meta.as_ref(), Some(&meta));
-}
-
-#[test]
-fn legacy_dark_event_kinds_decode_and_round_trip() {
-    // The dark engines are gone, but old stores carry `parked`, `agent_linked`,
-    // `agent_unlinked`, and `dispatched` history entries. They must keep decoding.
-    let dir = temp_state_dir();
-    let _guard = TempDirGuard(dir.clone());
-    let store = TaskStore::new(&dir);
-
-    let mut state = DomainState::new();
-    state
-        .create(
-            "Dark history",
-            None,
-            TaskScope::Global,
-            None,
-            None,
-            ProvenanceOrigin::Manual,
-        )
-        .expect("create task");
-    let mut legacy = serde_json::to_value(&state).expect("serialize state");
-    let at = legacy["tasks"][0]["history"][0]["at"].clone();
-    legacy["tasks"][0]["history"] = serde_json::json!([
-        { "kind": "created", "at": at },
-        { "kind": "parked", "at": at },
-        { "kind": "agent_linked", "at": at },
-        { "kind": "agent_unlinked", "at": at },
-        { "kind": "dispatched", "at": at },
-    ]);
-    fs::write(
-        dir.join("tsk.json"),
-        serde_json::to_string_pretty(&legacy).expect("encode legacy state"),
-    )
-    .expect("write legacy state");
-
-    let loaded = store.load().expect("legacy state decodes");
-    let task = loaded.tasks().first().expect("task present");
-    assert_eq!(
-        task.history
-            .iter()
-            .map(|event| event.kind)
-            .collect::<Vec<_>>(),
-        vec![
-            TaskEventKind::Created,
-            TaskEventKind::Parked,
-            TaskEventKind::AgentLinked,
-            TaskEventKind::AgentUnlinked,
-            TaskEventKind::Dispatched,
-        ],
-    );
-    let round = serde_json::to_value(&loaded).expect("reserialize loaded state");
-    assert_eq!(
-        round["tasks"][0]["history"]
-            .as_array()
-            .expect("history array")
-            .iter()
-            .map(|event| event["kind"].as_str().expect("kind string"))
-            .collect::<Vec<_>>(),
-        vec![
-            "created",
-            "parked",
-            "agent_linked",
-            "agent_unlinked",
-            "dispatched"
-        ],
-        "dark event kinds must round-trip, not be silently dropped"
-    );
-}
-
-#[test]
-fn legacy_agent_meta_without_session_and_last_observed_decode() {
-    // `agent_meta` without `agent_session` and a `last_observed` value are legacy
-    // store shapes; both keep decoding after the dark engines left the tree.
-    let dir = temp_state_dir();
-    let _guard = TempDirGuard(dir.clone());
-    let store = TaskStore::new(&dir);
-
-    let mut state = DomainState::new();
-    state
-        .create(
-            "Legacy link",
-            None,
-            TaskScope::Global,
-            None,
-            None,
-            ProvenanceOrigin::Manual,
-        )
-        .expect("create task");
-    let mut legacy = serde_json::to_value(&state).expect("serialize state");
-    legacy["tasks"][0]["agent_meta"] =
-        serde_json::json!({ "agent_id": "grok", "pane_id": "w0:p3" });
-    legacy["tasks"][0]["last_observed"] = serde_json::json!("working");
-    fs::write(
-        dir.join("tsk.json"),
-        serde_json::to_string_pretty(&legacy).expect("encode legacy state"),
-    )
-    .expect("write legacy state");
-
-    let loaded = store.load().expect("legacy state decodes");
-    let task = loaded.tasks().first().expect("task present");
-    assert_eq!(
-        task.agent_meta,
-        Some(AgentMeta {
-            agent_id: Some("grok".into()),
-            pane_id: Some("w0:p3".into()),
-            agent_session: None,
-        }),
-        "agent_meta decodes with every subfield absent"
-    );
-    assert_eq!(task.last_observed, Some(ObservedStatus::Working));
-}
-
-#[test]
-fn pre_number_store_upgrades_assigning_distinct_numbers_including_done_and_deleted() {
-    let dir = temp_state_dir();
-    let _guard = TempDirGuard(dir.clone());
-    let mut legacy = DomainState::new();
-    let first = legacy
-        .create(
-            "first",
-            None,
-            TaskScope::Global,
-            None,
-            None,
-            ProvenanceOrigin::Manual,
-        )
-        .expect("first");
-    let second = legacy
-        .create(
-            "second",
-            None,
-            TaskScope::Global,
-            None,
-            None,
-            ProvenanceOrigin::Manual,
-        )
-        .expect("second");
-    let third = legacy
-        .create(
-            "third",
-            None,
-            TaskScope::Global,
-            None,
-            None,
-            ProvenanceOrigin::Manual,
-        )
-        .expect("third");
-    legacy.complete(first).expect("done");
-    legacy.soft_delete(second).expect("deleted");
-    let mut document = serde_json::to_value(&legacy).expect("serialize legacy");
-    // Deliberately put creation times out of array order: numbers must follow these times.
-    document["tasks"][0]["created_at"] = serde_json::json!([3, 0]);
-    document["tasks"][1]["created_at"] = serde_json::json!([1, 0]);
-    document["tasks"][2]["created_at"] = serde_json::json!([2, 0]);
-    document["format_version"] = serde_json::json!(1);
-    document
-        .as_object_mut()
-        .expect("document")
-        .remove("next_task_number");
-    for task in document["tasks"].as_array_mut().expect("tasks") {
-        task.as_object_mut().expect("task").remove("number");
-    }
-    fs::write(
-        dir.join("tsk.json"),
-        serde_json::to_vec_pretty(&document).expect("json"),
-    )
-    .expect("write legacy");
-
-    let upgraded = TaskStore::new(&dir).load().expect("upgrade");
-    let on_disk: serde_json::Value =
-        serde_json::from_slice(&fs::read(dir.join("tsk.json")).expect("read upgraded store"))
-            .expect("json");
-    assert_eq!(on_disk["format_version"], 2);
-    assert_eq!(on_disk["next_task_number"], 4);
-    assert_eq!(
-        on_disk["tasks"]
-            .as_array()
-            .expect("tasks")
-            .iter()
-            .map(|task| task["number"].as_u64())
-            .collect::<Vec<_>>(),
-        vec![Some(3), Some(1), Some(2)],
-        "numbers are durably assigned in created_at order"
-    );
-    assert_eq!(upgraded.get(first).and_then(|task| task.number), Some(3));
-    assert_eq!(upgraded.get(second).and_then(|task| task.number), Some(1));
-    assert_eq!(upgraded.get(third).and_then(|task| task.number), Some(2));
-    assert_eq!(upgraded.get(first).expect("done").status, HumanStatus::Done);
-    assert!(upgraded.get(second).expect("deleted").soft_deleted);
-}
-
-#[test]
-fn upgraded_store_preserves_numbers_on_second_load() {
-    let dir = temp_state_dir();
-    let _guard = TempDirGuard(dir.clone());
-    let mut legacy = DomainState::new();
-    legacy
-        .create(
-            "first",
-            None,
-            TaskScope::Global,
-            None,
-            None,
-            ProvenanceOrigin::Manual,
-        )
-        .expect("first");
-    let mut document = serde_json::to_value(&legacy).expect("serialize legacy");
-    document["format_version"] = serde_json::json!(1);
-    document
-        .as_object_mut()
-        .expect("document")
-        .remove("next_task_number");
-    document["tasks"][0]
-        .as_object_mut()
-        .expect("task")
-        .remove("number");
-    fs::write(
-        dir.join("tsk.json"),
-        serde_json::to_vec_pretty(&document).expect("json"),
-    )
-    .expect("write legacy");
-    let store = TaskStore::new(&dir);
-    let first = store.load().expect("first load");
-    let numbers: Vec<Option<u64>> = first.tasks().iter().map(|task| task.number).collect();
-    let second = store.load().expect("second load");
-    assert_eq!(
-        second
-            .tasks()
-            .iter()
-            .map(|task| task.number)
-            .collect::<Vec<_>>(),
-        numbers
-    );
-}
-
-#[test]
 fn reload_merge_save_keeps_numbers_and_counter_across_another_writer() {
     let dir = temp_state_dir();
     let _guard = TempDirGuard(dir.clone());
@@ -1419,9 +349,8 @@ fn reload_merge_save_keeps_numbers_and_counter_across_another_writer() {
             "mine",
             None,
             TaskScope::Global,
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create mine");
     store.reload_merge_save(&mut local).expect("persist mine");
@@ -1437,9 +366,8 @@ fn reload_merge_save_keeps_numbers_and_counter_across_another_writer() {
                     "theirs",
                     None,
                     TaskScope::Global,
-                    None,
-                    None,
                     ProvenanceOrigin::Manual,
+                    None,
                 )
                 .map_err(|error| error.to_string())
         })
@@ -1475,9 +403,8 @@ fn reload_merge_save_keeps_numbers_and_counter_across_another_writer() {
             "later",
             None,
             TaskScope::Global,
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create later");
     store.reload_merge_save(&mut local).expect("persist later");
@@ -1504,9 +431,8 @@ fn overlapping_creates_under_lock_receive_distinct_numbers() {
                                 format!("writer {writer}"),
                                 None,
                                 TaskScope::Global,
-                                None,
-                                None,
                                 ProvenanceOrigin::Manual,
+                                None,
                             )
                             .map_err(|error| error.to_string())
                     })
@@ -1528,50 +454,15 @@ fn overlapping_creates_under_lock_receive_distinct_numbers() {
 }
 
 #[test]
-fn v2_store_is_refused_when_writer_format_is_older_and_the_file_is_unwritten() {
+fn noncurrent_store_is_refused_without_rewriting_the_file() {
     let dir = temp_state_dir();
     let _guard = TempDirGuard(dir.clone());
-    // A v2-only writer would refuse v2 just as this v2 writer refuses the next format.
-    let document = serde_json::json!({ "format_version": 3, "next_task_number": 2, "tasks": [], "undo_stack": [] });
+    let document = serde_json::json!({ "format_version": 2, "next_task_number": 2, "tasks": [], "undo_stack": [] });
     let bytes = serde_json::to_vec_pretty(&document).expect("json");
-    fs::write(dir.join("tsk.json"), &bytes).expect("write newer store");
+    fs::write(dir.join("tsk.json"), &bytes).expect("write noncurrent store");
     let error = TaskStore::new(&dir)
         .save(&DomainState::new())
-        .expect_err("older writer refuses newer store");
-    assert!(error.to_string().contains("newer"));
+        .expect_err("current writer refuses noncurrent store");
+    assert!(error.to_string().contains("expected 1"));
     assert_eq!(fs::read(dir.join("tsk.json")).expect("read"), bytes);
-}
-
-#[test]
-fn persisted_active_attempts_load_to_a_quiet_board() {
-    // Old stores can still carry durable dispatch attempts. The recovery UI is gone:
-    // a board opened over such a store must render normally, not surface a dead popup.
-    let dir = temp_state_dir();
-    let _guard = TempDirGuard(dir.clone());
-
-    let mut state = DomainState::new();
-    let id = state
-        .create(
-            "Carries an attempt",
-            None,
-            TaskScope::Global,
-            None,
-            None,
-            ProvenanceOrigin::Manual,
-        )
-        .expect("create task");
-    let attempt_id = state
-        .start_dispatch_attempt(id, DispatchAttemptMode::Here, "grok")
-        .expect("start attempt");
-    let store = TaskStore::new(&dir);
-    store.save(&state).expect("save with attempt");
-
-    let loaded = store.load().expect("load with attempt");
-    assert!(
-        loaded.active_attempt(attempt_id).is_some(),
-        "the attempt survives the store round-trip"
-    );
-    let model = BoardModel::from_domain(&loaded, None);
-    assert_eq!(model.input_mode(), BoardInputMode::Normal);
-    assert_eq!(model.popup(), BoardPopup::None);
 }

@@ -138,15 +138,7 @@ pub fn run(input: FlagAdd) -> Result<FlagAddResult, AddError> {
             }
             let project = scope_project(&scope);
             let id = domain
-                .create_with_thread(
-                    &title,
-                    notes,
-                    scope,
-                    None,
-                    None,
-                    ProvenanceOrigin::Capture,
-                    thread,
-                )
+                .create(&title, notes, scope, ProvenanceOrigin::Capture, thread)
                 .map_err(|error| error.to_string())?;
             domain.assign_numbers_for_persistence();
             let number = domain
@@ -210,12 +202,10 @@ pub fn run_plan(
                     continue;
                 }
                 let id = domain
-                    .create_with_thread(
+                    .create(
                         &item.title,
                         item.notes,
                         item.scope,
-                        None,
-                        None,
                         ProvenanceOrigin::Capture,
                         item.thread,
                     )

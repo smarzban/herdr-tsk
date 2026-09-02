@@ -107,9 +107,8 @@ fn executable_list_json_reads_state_without_opening_the_board() {
             "listed by executable",
             None,
             TaskScope::Global,
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("seed task");
     TaskStore::new(&dir).save(&state).expect("seed state");

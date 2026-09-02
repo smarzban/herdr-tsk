@@ -27,8 +27,7 @@ Flag form (`-t` / `--title` etc. sets `has_item_flags`): require a title, refuse
 C0 before trim (`invalid-title`), refuse empty after trim (`empty-title`). Under
 `locked_transition_if_changed`, resolve scope (`resolve_flag_scope`), look for a
 non-soft-deleted match on **title + scope + thread**, return `Existing` without
-writing, or `create_with_thread` with `ProvenanceOrigin::Capture`, no capsule, no
-agent meta.
+writing, or `create` with `ProvenanceOrigin::Capture` and the normalized thread.
 
 Plan form: `--file path`, `--file -`, or piped stdin when there are no item flags
 and stdin is not a TTY. JSON must be an **array**. Each object is validated first;

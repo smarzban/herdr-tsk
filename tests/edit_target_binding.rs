@@ -106,9 +106,8 @@ fn attention_cycle_adds_a_task_ahead_of_the_bound_task_and_confirm_still_lands_o
             "Zebra",
             Some("z notes".into()),
             scope(),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create zebra");
     domain.complete(zebra).expect("complete zebra");
@@ -117,9 +116,8 @@ fn attention_cycle_adds_a_task_ahead_of_the_bound_task_and_confirm_still_lands_o
             "Alpha",
             Some("a notes".into()),
             scope(),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create alpha");
     store.save(&domain).expect("save initial snapshot");
@@ -205,9 +203,8 @@ fn attention_cycle_removes_the_bound_task_and_confirm_still_lands_on_it_not_the_
             "Alpha",
             Some("a notes".into()),
             scope(),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create alpha");
     let bravo = domain
@@ -215,9 +212,8 @@ fn attention_cycle_removes_the_bound_task_and_confirm_still_lands_on_it_not_the_
             "Bravo",
             Some("b notes".into()),
             scope(),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create bravo");
     store.save(&domain).expect("save initial snapshot");
@@ -336,9 +332,8 @@ fn board_with_an_open_edit_and_a_bystander(
             "Alpha",
             Some("a notes".into()),
             scope(),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create Alpha");
     let bravo = domain
@@ -346,9 +341,8 @@ fn board_with_an_open_edit_and_a_bystander(
             "Bravo",
             Some("b notes".into()),
             scope(),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create Bravo");
     store.save(&domain).expect("seed the store");
@@ -754,9 +748,8 @@ fn a_soft_deleted_bind_opened_through_the_real_key_map_refuses_then_confirms_aft
             "Alpha",
             Some("a notes".into()),
             scope(),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create alpha");
     let bravo = domain
@@ -764,9 +757,8 @@ fn a_soft_deleted_bind_opened_through_the_real_key_map_refuses_then_confirms_aft
             "Bravo",
             Some("b notes".into()),
             scope(),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create bravo");
     store.save(&domain).expect("seed the store");
@@ -958,9 +950,8 @@ fn board_edit_preserves_existing_thread() {
             "Threaded task",
             Some("original notes".into()),
             scope(),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create threaded task");
     seeded
@@ -1022,9 +1013,8 @@ fn background_sync_cannot_redirect_a_bound_task_form_while_its_scope_dropdown_is
             "Alpha",
             Some("alpha notes".into()),
             scope(),
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create Alpha");
     let bravo = domain
@@ -1032,9 +1022,8 @@ fn background_sync_cannot_redirect_a_bound_task_form_while_its_scope_dropdown_is
             "Bravo",
             Some("bravo notes".into()),
             TaskScope::Global,
-            None,
-            None,
             ProvenanceOrigin::Manual,
+            None,
         )
         .expect("create Bravo");
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));

@@ -42,8 +42,7 @@ For scriptable board work, use `tsk add` and `tsk list`; read
 - Standard ≥78×24, compact below, operable to 40×10. Persisted task rows paint an
   dim `T<number>` prefix before the title, including task page and done drawer; clicking
   that prefix copies it. Peek relies on its parent row's prefix. Drafts without a number paint none.
-- Human status: `ready` · `started` · `blocked` · `review` · `done`. The store
-  still reads old `todo`/`doing` values.
+- Human status: `ready` · `started` · `blocked` · `review` · `done`.
 - Mutating verbs (`s` `d` `o` `b` `e` `n` `x` `u` `q`) need Ctrl. Bare
   letters do nothing. Nav, peek,
   `Enter`, `P`, `1`/`2`/`3`, `z`, `:`, `?`, `+`, and `Esc` stay bare.
