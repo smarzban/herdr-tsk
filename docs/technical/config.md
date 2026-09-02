@@ -18,9 +18,10 @@ run in threads in one process).
 
 ### Settings
 
-`settings.json`: `{ "verb_modifier": "alt" | "ctrl" }`. Default `Alt`. Palette toggle
-calls `VerbModifier::toggled` and `SettingsRecord::set_verb_modifier`. Unreadable
-file → default. `prefix()` returns `"alt+"` or `"ctrl+"` for help/verb-bar labels.
+`settings.json`: `{ "verb_modifier": "ctrl" }`. Ctrl is the fixed Ctrl modifier.
+Missing, unreadable, or malformed files default to Ctrl. Legacy
+`{ "verb_modifier": "alt" }` settings deserialize as Ctrl. `prefix()` always returns
+`"ctrl+"` for help and verb-bar labels.
 
 ### Walkthrough
 

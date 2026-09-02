@@ -64,12 +64,12 @@ domain + session; the query is a pure function of tasks; paint consumes both.
 
 1. `cli::router::route` sees no subcommand and no `--find-board-pane` / `--help` → `Surface::Board`.
 2. `app::run` → `run_board`: `TaskStore::load`, `InvocationSnapshot` from env + cwd, `BoardModel::from_domain`.
-3. Settings load the verb modifier (`alt` default). `run_board` does **not** auto-open the walkthrough; `open_walkthrough_for_launch` remains for tests, and the palette can replay it.
+3. Settings load the fixed Ctrl verb modifier. Legacy `alt` settings migrate to Ctrl. `run_board` does **not** auto-open the walkthrough; `open_walkthrough_for_launch` remains for tests, and the palette can replay it.
 4. Frame loop is **settle, paint, wait** (`app::board_frame`). Idle ticks cheaply `stat` `tsk.json` and merge if it changed (`StoreWatch` + `merge_tasks_from_disk`).
 
 ### Mutating verb
 
-1. Key or mouse becomes a `BoardIntent` (`ui::input` / `ui::mouse`). Mutating letters need the configured verb modifier.
+1. Key or mouse becomes a `BoardIntent` (`ui::input` / `ui::mouse`). Mutating letters need Ctrl.
 2. `apply_board_intent_with_save_recovery` loads a persist baseline *before* the reducer when `board_intent_may_persist` is true.
 3. `apply_intent` calls `DomainState` only. Outcome `Persist` means the caller writes.
 4. `TaskStore::reload_merge_save` takes the exclusive lock, revision-guards the local mutation against disk, then atomic-replaces. Failure enters [`SaveRecovery`](app.md#save-recovery); the form and input mode stay allocated until Retry or Cancel.

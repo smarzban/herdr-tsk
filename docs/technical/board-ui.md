@@ -65,7 +65,7 @@ open without deleting it.
 
 ### Keys
 
-`map_key_with(mode, key, verb_modifier)`. Mutating letters require Alt or Ctrl.
+`map_key_with(mode, key, verb_modifier)`. Mutating letters require the fixed Ctrl modifier.
 `1`/`2`/`3` select home tabs only in `Normal` at home without ctrl/alt/super.
 `map_board_form_key` shares `map_form_edit_key` with capture. Task-page view mode
 (`TaskPage`) keeps the board keymap so bare `e` enters edit rather than inserting
@@ -125,4 +125,4 @@ already consume budget). New keys: `BoardIntent` + mapper + reducer; if it
 persists, add it to `board_intent_may_persist`. Keymap/status/tab changes also
 need `site/src/content/docs/docs/{keys,board,capture,cli}.md` and
 `site/public/board-demo.js`. The web demo uses **bare** verb keys on purpose
-(browsers steal Alt); do not “fix” it to match the TUI.
+(browsers steal control chords); do not “fix” it to match the TUI.

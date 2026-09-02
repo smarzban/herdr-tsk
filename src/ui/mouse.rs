@@ -591,10 +591,13 @@ pub fn map_board_mouse(
             Some(QueueHitTarget::Verb(index)) => form_verb_intent(model, index),
             _ => None,
         },
-        // The step line editor is keyboard-only in this slice: the mouse has no hit
-        // region on the section's line yet, so every click is inert rather than
-        // reaching the page behind the editor.
-        BoardInputMode::EditStep | BoardInputMode::SaveRecovery => None,
+        BoardInputMode::EditStep => match hit_at(hits, pos) {
+            Some(QueueHitTarget::Verb(index)) => verb_intent(model, index),
+            // The text line keeps terminal focus, and every other hit remains inert rather
+            // than reaching the task page behind the editor.
+            _ => None,
+        },
+        BoardInputMode::SaveRecovery => None,
         BoardInputMode::Normal => match hit_at(hits, pos) {
             Some(QueueHitTarget::ProjectChip) => Some(BoardIntent::OpenProjectSelector),
             Some(QueueHitTarget::HomeTab(tab)) => Some(BoardIntent::SelectHomeTab(tab)),

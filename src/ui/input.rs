@@ -670,11 +670,12 @@ fn map_form_edit_key(
     }
     let mods = key.modifiers;
     let ctrl = mods.contains(KeyModifiers::CONTROL);
+    let alt = mods.contains(KeyModifiers::ALT);
 
     match key.code {
-        // This saves from EVERY field, Scope included. The modified-key rejection below makes
-        // Scope's chord an intentional early return, never a fallthrough to its dropdown route.
-        KeyCode::Enter if ctrl => return Some(BoardIntent::ConfirmEdit),
+        // This saves from EVERY field, Scope included. Ctrl must be the only modifier: Alt
+        // stays unbound rather than becoming a hidden equivalent save chord.
+        KeyCode::Enter if ctrl && !alt => return Some(BoardIntent::ConfirmEdit),
         KeyCode::Tab => match navigation {
             FormEditNavigation::None => {}
             FormEditNavigation::Form => return Some(BoardIntent::FormFocusNext),
@@ -1150,9 +1151,10 @@ pub fn map_capture_key_state(
 /// is not listed: Capture already cancels on it, ahead of this table.
 fn map_capture_edit_chord(key: KeyEvent) -> Option<CaptureIntent> {
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    let alt = key.modifiers.contains(KeyModifiers::ALT);
 
     match key.code {
-        KeyCode::Enter if ctrl => Some(CaptureIntent::Save),
+        KeyCode::Enter if ctrl && !alt => Some(CaptureIntent::Save),
         KeyCode::Char('a') if ctrl => Some(CaptureIntent::MoveLineStart),
         KeyCode::Char('e') if ctrl => Some(CaptureIntent::MoveLineEnd),
         KeyCode::Left if ctrl => Some(CaptureIntent::MoveWordLeft),

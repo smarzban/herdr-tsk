@@ -146,12 +146,12 @@ files so a task-document bump does not disturb settings.
 ### `settings.json`
 
 ```json
-{ "verb_modifier": "alt" }
+{ "verb_modifier": "ctrl" }
 ```
 
-`verb_modifier`: `alt` (default) or `ctrl`. Missing / unreadable / malformed → `Alt`.
-Written pretty-printed via temp+rename (no lock, no directory fsync). See
-[config](config.md).
+`verb_modifier` is always `ctrl`. Missing, unreadable, or malformed settings default
+to Ctrl. A legacy `alt` value is read as Ctrl. Written pretty-printed via temp+rename
+(no lock, no directory fsync). See [config](config.md).
 
 ### `walkthrough.json`
 

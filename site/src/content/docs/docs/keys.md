@@ -10,7 +10,8 @@ Nav, peek, `Enter`, `P`, `1` / `2` / `3`, `z`, `:`, `?`, `+`, and `Esc` stay
 bare.
 
 The web demo on the landing page uses bare verb letters on purpose. Browsers
-steal control chords.
+steal control chords. On its projects and threads tabs, bare `g` toggles groups
+and the palette offers the same command.
 
 ## Board
 

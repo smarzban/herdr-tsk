@@ -9,7 +9,7 @@ what the process will execute, and what fails open vs closed.
 | Surface | Trust | Enforcement |
 | --- | --- | --- |
 | `tsk.json` on disk | Trusted as the user's own file, untrusted as *terminal content* | JSON parse; newer `format_version` refused; titles/notes escaped at paint |
-| `settings.json` / `walkthrough.json` | Same | Malformed → safe defaults (Alt modifier / not dismissed) |
+| `settings.json` / `walkthrough.json` | Same | Malformed → safe defaults (Ctrl modifier / not dismissed) |
 | `HERDR_PLUGIN_CONTEXT_JSON` | Untrusted structured input from the host | serde; unknown keys ignored; missing/malformed → empty snapshot; no field invented |
 | herdr `pane list` JSON on stdin | Untrusted | Must parse; label must equal `tsk`; pane id must be flag-safe before it is passed to another CLI |
 | Task title, notes, thread, step text, project path | Untrusted display strings | `ui::terminal_text` (C0/C1 → `\u{00xx}`); wrap rather than clip; markdown is a styled subset with no color and no raw control passthrough |

@@ -6,7 +6,7 @@ description: Quick-add on the board, title tokens, and the capture overlay.
 Press `+` for a one-line title on the status-row slot. The list stays visible.
 
 - `Enter` saves and closes
-- `Ctrl+Enter` saves and stays open
+- `Shift+Enter` saves and stays open
 - `Tab` expands onto the [task page](/docs/task-page/) (title · notes · scope)
 
 A project board defaults the draft to that project. A project-less board defaults

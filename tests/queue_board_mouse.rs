@@ -1719,6 +1719,43 @@ fn page_step_add_footer_chip_routes_to_begin_add_step() {
     );
 }
 
+#[test]
+fn step_editor_verb_chips_follow_their_keyboard_intents() {
+    let (mut domain, mut model) = deck_of(1);
+    let id = model.selected_id().expect("task");
+    domain.add_step(id, "existing step").expect("add step");
+    model = BoardModel::from_domain(&domain, None);
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+        .expect("enter edit session");
+    apply_intent(&mut domain, &mut model, BoardIntent::CancelEdit, None).expect("return page");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginAddStep, None).expect("add step");
+    assert_eq!(model.input_mode(), BoardInputMode::EditStep);
+
+    let hits = board_hit_map(STANDARD, &model);
+    let verbs = board_verb_items(&model);
+    for (key, expected) in [
+        ("enter", BoardIntent::ConfirmEdit),
+        ("ctrl+enter", BoardIntent::ConfirmEditNext),
+    ] {
+        let index = verbs
+            .iter()
+            .position(|entry| entry.key == key)
+            .expect("painted step-editor verb");
+        let area = hits
+            .regions
+            .iter()
+            .find(|hit| hit.target == QueueHitTarget::Verb(index))
+            .expect("step-editor verb hit")
+            .area;
+        assert_eq!(
+            map_board_mouse(&model, &hits, left_click(area.x + 1, area.y)),
+            Some(expected),
+            "{key} click matches the keyboard route"
+        );
+    }
+}
+
 /// The task page painted row by row at the standard board size, so a test can
 /// click the coordinates a row actually painted at.
 fn page_rows(model: &BoardModel) -> Vec<String> {

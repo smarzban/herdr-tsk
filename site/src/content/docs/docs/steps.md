@@ -13,14 +13,14 @@ Markdown `- [ ]` in notes is ordinary text. Use steps for checklists.
 
 ## On the task page
 
-Open the task with `Enter`. The step cursor starts inactive.
+Open the task with `Enter`. The step cursor is available only in an edit
+session: start one with a modified edit verb or Tab from the page fields.
 
-- Bare `↓` activates it on the first step (again after you deactivate it)
-- `↑` / `↓` move it while it is active
-- `↑` from the first step deactivates it
-- A click on a step row moves the cursor there
+- `Tab` / `Shift+Tab`: from Scope selects the first step, from Title selects the last
+- A click on a step row selects it after editing has started
+- `↑` / `↓` move a selected step; `↑` from the first step returns to page reading
 
-With the cursor active, the usual verbs act on that step:
+With the cursor selected, the usual verbs act on that step:
 
 | Key | Does |
 | --- | --- |
@@ -33,8 +33,8 @@ The add/rename line is a one-line draft. `Enter` applies it. `Ctrl+Enter` adds
 and leaves the line open empty. `Esc` cancels. A failed save keeps the line
 until you retry or cancel.
 
-Wheel still scrolls the page. Arrows belong to the step cursor while it is
-active.
+Wheel still scrolls the page. Before a step is selected, arrows read the page;
+a selected step owns them during the edit session.
 
 ## From the CLI
 

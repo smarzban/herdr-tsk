@@ -7,6 +7,7 @@ use std::time::{Duration, SystemTime};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::backend::TestBackend;
+use ratatui::style::Modifier;
 use ratatui::{Frame, Terminal};
 use tsk_tui::config::VerbModifier;
 use tsk_tui::domain::{
@@ -397,6 +398,37 @@ fn board_rows(model: &BoardModel, width: u16, height: u16) -> Vec<String> {
                 .collect::<String>()
         })
         .collect()
+}
+
+#[test]
+fn inactive_home_tabs_are_dimmed() {
+    let model = base_board_model();
+    let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("terminal");
+    terminal
+        .draw(|frame| {
+            let _ = draw_board(frame, &model);
+        })
+        .expect("draw board");
+    let buffer = terminal.backend().buffer();
+    let (tab_y, row) = (0..24)
+        .map(|y| {
+            let row = (0..80).map(|x| buffer[(x, y)].symbol()).collect::<String>();
+            (y, row)
+        })
+        .find(|(_, row)| {
+            row.contains("desk") && row.contains("projects") && row.contains("threads")
+        })
+        .expect("tab row");
+    for label in ["projects", "threads"] {
+        let x = row.find(label).expect("tab label") as u16;
+        assert!(
+            buffer[(x, tab_y)]
+                .style()
+                .add_modifier
+                .contains(Modifier::DIM),
+            "inactive {label} tab must be dimmed"
+        );
+    }
 }
 
 fn trimmed(row: &str) -> String {

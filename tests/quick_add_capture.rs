@@ -540,6 +540,22 @@ fn empty_enter_stays_open_esc_discards_and_tab_expands_the_seeded_task_page() {
         None,
         "Alt+Enter is ignored, it does not expand quick add"
     );
+    assert_eq!(
+        map_key(
+            BoardInputMode::QuickAdd,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT)
+        ),
+        Some(BoardIntent::QuickAddSaveNext),
+        "Shift+Enter is the only save-and-stay quick-add chord"
+    );
+    assert_eq!(
+        map_key(
+            BoardInputMode::QuickAdd,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL)
+        ),
+        None,
+        "Ctrl+Enter no longer saves-and-stays on quick add"
+    );
     apply(&mut domain, &mut model, BoardIntent::ExpandQuickAdd, None);
     assert_eq!(model.input_mode(), BoardInputMode::EditNotes);
     assert_eq!(model.edit_buffer(), "");

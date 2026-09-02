@@ -412,9 +412,11 @@ fn apply_board_intent(
         }
         BoardIntent::FormFocusNext => {
             if model.input_mode == BoardInputMode::TaskPage {
-                // The view names no field: entering from the page lands on the form's own
-                // field (Title at open) rather than advancing past it.
-                model.enter_page_field_focus();
+                // A selected step owns Tab until the list ends, then focus returns to Title.
+                // With no step selected, the view enters its current form field.
+                if !move_step_with_tab(model, true) {
+                    model.enter_page_field_focus();
+                }
             } else if model.form.is_some()
                 && model.input_mode != BoardInputMode::FormScopeDropdown
                 && !select_step_from_tab(model, true)
@@ -424,13 +426,18 @@ fn apply_board_intent(
             return Ok(IntentOutcome::None);
         }
         BoardIntent::FormFocusPrev => {
+            if model.input_mode == BoardInputMode::TaskPage {
+                // A selected step owns Shift+Tab until the first one, then focus returns to
+                // Scope. A view with no cursor enters its current form field.
+                if !move_step_with_tab(model, false) {
+                    model.enter_page_field_focus();
+                }
+                return Ok(IntentOutcome::None);
+            }
             if model.input_mode == BoardInputMode::EditTitle && select_step_from_tab(model, false) {
                 return Ok(IntentOutcome::None);
             }
-            if model.input_mode == BoardInputMode::TaskPage {
-                model.enter_page_field_focus();
-            } else if model.form.is_some() && model.input_mode != BoardInputMode::FormScopeDropdown
-            {
+            if model.form.is_some() && model.input_mode != BoardInputMode::FormScopeDropdown {
                 model.move_form_focus(false);
             }
             return Ok(IntentOutcome::None);
@@ -562,8 +569,11 @@ fn apply_board_intent(
                     // One immutable id and three independent drafts are captured at open.
                     // `sync_from_domain` deliberately never writes this form, so background
                     // refresh can reanchor selection without redirecting its later save.
-                    let form =
+                    let mut form =
                         BoardForm::task(task, model.this_repo.as_deref(), &model.tasks, focus);
+                    // A direct board edit is a real edit session too, so its confirmed task
+                    // page keeps step interaction available after the field saves.
+                    form.editing = true;
                     model.input_mode = form.parent_mode();
                     model.form = Some(form);
                     model.clear_message();
@@ -1551,6 +1561,49 @@ fn select_step_from_tab(model: &mut BoardModel, forward: bool) -> bool {
     form.steps.cursor = Some(target);
     steps_scroll_to_cursor(form, target);
     model.input_mode = BoardInputMode::TaskPage;
+    true
+}
+
+/// Move a step selected by Tab or Shift+Tab. Crossing either end returns to the adjacent
+/// form field, making the focus ring a complete cycle instead of trapping Scope and step zero.
+fn move_step_with_tab(model: &mut BoardModel, forward: bool) -> bool {
+    let target = model.form.as_ref().and_then(|form| {
+        if !form.is_task() || !form.editing {
+            return None;
+        }
+        let index = form.steps.cursor?;
+        let task_id = form.task_id()?;
+        let count = model
+            .tasks
+            .iter()
+            .find(|task| task.id == task_id)
+            .map(|task| task.steps.len())?;
+        (index < count).then_some((index, count))
+    });
+    let Some((index, count)) = target else {
+        return false;
+    };
+    if forward && index + 1 < count {
+        let form = model.form.as_mut().expect("the checked form remains open");
+        form.steps.cursor = Some(index + 1);
+        steps_scroll_to_cursor(form, index + 1);
+    } else if !forward && index > 0 {
+        let form = model.form.as_mut().expect("the checked form remains open");
+        form.steps.cursor = Some(index - 1);
+        steps_scroll_to_cursor(form, index - 1);
+    } else {
+        model
+            .form
+            .as_mut()
+            .expect("the checked form remains open")
+            .steps
+            .cursor = None;
+        model.focus_form_field(if forward {
+            CaptureField::Title
+        } else {
+            CaptureField::Scope
+        });
+    }
     true
 }
 

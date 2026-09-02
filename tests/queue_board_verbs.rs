@@ -4,14 +4,16 @@ use std::path::{Path, PathBuf};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::backend::TestBackend;
+use ratatui::layout::Rect;
 use ratatui::Terminal;
 use tsk_tui::context::InvocationSnapshot;
 use tsk_tui::domain::{DomainState, HumanStatus, ProvenanceOrigin, TaskEventKind, TaskScope};
 use tsk_tui::ui::board::{
-    apply_intent, board_intent_may_persist, board_verb_items, draw_board, resolve_board_command,
-    BoardInputMode, BoardModel, CommandSurface, IntentOutcome, ProjectScopeOption,
+    apply_intent, board_hit_map, board_intent_may_persist, board_verb_items, draw_board,
+    resolve_board_command, BoardInputMode, BoardModel, BoardTab, CommandSurface, IntentOutcome,
+    ProjectScopeOption,
 };
-use tsk_tui::ui::input::{map_key, normal_help_bindings, BoardIntent};
+use tsk_tui::ui::input::{map_capture_key, map_key, normal_help_bindings, BoardIntent};
 use tsk_tui::ui::mouse::BoardPopup;
 use tsk_tui::ui::queue::SectionKind;
 use tsk_tui::ui::tier;
@@ -30,6 +32,10 @@ fn press(code: KeyCode) -> KeyEvent {
 
 fn ctrl(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::CONTROL)
+}
+
+fn ctrl_alt(code: KeyCode) -> KeyEvent {
+    KeyEvent::new(code, KeyModifiers::CONTROL | KeyModifiers::ALT)
 }
 
 fn board_with_task(title: &str, status: HumanStatus) -> (DomainState, BoardModel, uuid::Uuid) {
@@ -1460,6 +1466,68 @@ fn closing_the_page_after_completing_its_task_reanchors_to_a_visible_row() {
     );
 }
 
+#[test]
+fn ctrl_alt_save_chords_are_unbound_for_task_forms_and_capture() {
+    assert_eq!(
+        map_key(BoardInputMode::EditTitle, ctrl_alt(KeyCode::Enter)),
+        None,
+        "Ctrl+Alt+Enter must not be a hidden task-form save chord"
+    );
+    assert_eq!(
+        map_key(BoardInputMode::EditNotes, ctrl_alt(KeyCode::Enter)),
+        None,
+        "Ctrl+Alt+Enter must not be a hidden Notes save chord"
+    );
+    assert_eq!(
+        map_capture_key(
+            tsk_tui::ui::capture::CaptureField::Notes,
+            ctrl_alt(KeyCode::Enter)
+        ),
+        None,
+        "Ctrl+Alt+Enter must not be a hidden capture save chord"
+    );
+}
+
+#[test]
+fn ctrl_g_maps_to_home_group_toggle_and_the_palette_hides_it_elsewhere() {
+    let (mut domain, mut model, _) = board_with_task("Grouped task", HumanStatus::Ready);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::SelectHomeTab(BoardTab::Projects),
+        None,
+    )
+    .expect("projects tab");
+    assert!(
+        model
+            .visible_commands()
+            .iter()
+            .any(|command| command.label == "toggle groups"),
+        "the active grouped lens exposes the palette command"
+    );
+    let toggle = map_key(BoardInputMode::Normal, ctrl(KeyCode::Char('g'))).expect("Ctrl+G maps");
+    assert_eq!(toggle, BoardIntent::ToggleAllGroups);
+    apply_intent(&mut domain, &mut model, toggle.clone(), None).expect("collapse groups");
+    assert!(model.visible_ids().is_empty());
+    apply_intent(&mut domain, &mut model, toggle, None).expect("expand groups");
+    assert_eq!(model.visible_ids().len(), 1);
+
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::SelectHomeTab(BoardTab::Desk),
+        None,
+    )
+    .expect("desk tab");
+    assert!(
+        !model
+            .visible_commands()
+            .iter()
+            .any(|command| command.label == "toggle groups"),
+        "the palette must not advertise a no-op on Desk"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // T-3: page step cursor and modifier-protected steps verbs. Bare arrows own
 // the cursor lifecycle (first Down activates, Up from the first step
@@ -1500,6 +1568,108 @@ fn board_with_steps(
         }
     }
     (domain, model, id)
+}
+
+#[test]
+fn view_mode_rejects_step_clicks_and_add_until_a_task_edit_session_starts() {
+    let mut domain = DomainState::new();
+    let id = domain
+        .create(
+            "View-only steps",
+            None,
+            project(THIS_REPO),
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("create");
+    domain.add_step(id, "first step").expect("step");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open");
+    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginAddStep, None).expect("view add");
+    assert_eq!(
+        model.input_mode(),
+        BoardInputMode::TaskPage,
+        "Ctrl+A does nothing before the page edit session starts"
+    );
+
+    let frame = rendered_board(&model, 80, 24);
+    let step_y = frame
+        .lines()
+        .position(|line| line.contains("first step"))
+        .expect("painted step") as u16;
+    let hits = board_hit_map(Rect::new(0, 0, 80, 24), &model);
+    assert_eq!(
+        tsk_tui::ui::mouse::map_board_mouse(
+            &model,
+            &hits,
+            tsk_tui::ui::mouse::left_click(5, step_y)
+        ),
+        None,
+        "a view-mode step click cannot select a step"
+    );
+
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+        .expect("start edit session");
+    apply_intent(&mut domain, &mut model, BoardIntent::CancelEdit, None).expect("return page");
+    let hits = board_hit_map(Rect::new(0, 0, 80, 24), &model);
+    assert_eq!(
+        tsk_tui::ui::mouse::map_board_mouse(
+            &model,
+            &hits,
+            tsk_tui::ui::mouse::left_click(5, step_y)
+        ),
+        Some(BoardIntent::SelectStep(0)),
+        "the same row becomes selectable once editing has started"
+    );
+}
+
+#[test]
+fn tab_walks_every_step_then_returns_to_the_adjacent_form_field() {
+    let (mut domain, mut model, _) = board_with_steps("Tab ring", None, &["first", "second"]);
+    assert!(rendered_board(&model, 80, 24).contains("▸ ▪ first"));
+
+    apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
+        .expect("Tab to second step");
+    assert!(rendered_board(&model, 80, 24).contains("▸ ▪ second"));
+
+    apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
+        .expect("Tab after last step");
+    assert_eq!(model.input_mode(), BoardInputMode::EditTitle);
+
+    apply_intent(&mut domain, &mut model, BoardIntent::FormFocusPrev, None)
+        .expect("Shift+Tab from title");
+    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+    assert!(rendered_board(&model, 80, 24).contains("▸ ▪ second"));
+
+    apply_intent(&mut domain, &mut model, BoardIntent::FormFocusPrev, None)
+        .expect("Shift+Tab to first step");
+    assert!(rendered_board(&model, 80, 24).contains("▸ ▪ first"));
+
+    apply_intent(&mut domain, &mut model, BoardIntent::FormFocusPrev, None)
+        .expect("Shift+Tab before first step");
+    assert_eq!(model.input_mode(), BoardInputMode::EditScope);
+}
+
+#[test]
+fn long_step_text_wraps_and_cursor_navigation_uses_its_painted_rows() {
+    let long = format!("{} step-tail", "wrap ".repeat(48));
+    let (mut domain, mut model, _) = board_with_steps("Wrapped steps", None, &[&long, "next step"]);
+    let first = rendered_board(&model, 80, 24);
+    assert!(
+        first.contains("step-tail"),
+        "the tail of a wrapped step is painted rather than truncated:\n{first}"
+    );
+
+    apply_intent(&mut domain, &mut model, BoardIntent::PageScrollDown, None)
+        .expect("move to second step");
+    let second = rendered_board(&model, 80, 24);
+    assert!(
+        second.contains("▸ ▪ next step"),
+        "cursor navigation reaches the next step after the wrapped rows:\n{second}"
+    );
 }
 
 /// Ten note lines that each wrap ~5x at the 80-column page width (~50 wrapped

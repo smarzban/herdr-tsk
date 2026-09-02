@@ -14,7 +14,7 @@ thread, scope; save or cancel; process exits. Reached from herdr **Quick capture
 `CaptureModel::from_snapshot` seeds title from `title_prefill` when present, scope
 from `default_scope`, empty notes/thread. Fields: Title, Notes, Thread, Scope
 (`CaptureField`). Tab / Shift-Tab cycle. Enter in Title saves; Enter in Notes is
-a newline; Ctrl+Enter / Alt+Enter save from any field. Esc cancels the process.
+a newline; Ctrl+Enter saves from any field. Esc cancels the process.
 
 Scope controls include desk and this-project (disabled with
 `CAPTURE_THIS_PROJECT_UNAVAILABLE` when `this_repo` is none). Thread uses

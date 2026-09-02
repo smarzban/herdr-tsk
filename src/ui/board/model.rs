@@ -1362,7 +1362,7 @@ impl BoardModel {
         if self.hold_task_edit_save {
             return;
         }
-        let Some(pending) = self.task_edit_save.as_ref() else {
+        let Some(pending) = self.task_edit_save.take() else {
             return;
         };
         let landed = self.tasks.iter().any(|task| {
@@ -1373,12 +1373,23 @@ impl BoardModel {
                 && task.thread == pending.thread
         });
         if !landed {
+            self.task_edit_save = Some(pending);
             return;
         }
-        self.task_edit_save = None;
-        // A confirmed page edit returns to the same task in view mode. Keep the form and
-        // its immutable task binding so the next edit, step selection, or close acts on the
-        // task the user just saved rather than dropping them back on the board.
+        if let Some(form) = self.form.as_mut().filter(|form| form.is_task()) {
+            // Domain normalization (notably title trimming) is now durable. Refresh the
+            // retained drafts so the page never paints a value that was not saved.
+            form.title = seeded_draft(&pending.title);
+            form.notes = seeded_draft(pending.notes.as_deref().unwrap_or_default());
+            form.scope = pending.scope;
+            form.scope_selected = form
+                .scope_options
+                .iter()
+                .position(|option| option == &form.scope)
+                .unwrap_or(0);
+            form.thread = seeded_draft(pending.thread.as_deref().unwrap_or_default());
+            form.thread_refusal = None;
+        }
         self.input_mode = BoardInputMode::TaskPage;
         self.clear_message();
     }

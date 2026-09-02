@@ -1629,11 +1629,12 @@ fn ctrl_enter_refuses_in_place_when_the_bound_task_was_concurrently_soft_deleted
 }
 
 #[test]
-fn successful_title_save_with_boundary_whitespace_releases_the_task_form_once() {
+fn successful_task_page_save_refreshes_the_retained_form_once() {
     let (mut domain, mut model, id) = board_with_two_tasks();
     let baseline = snapshot_of(&domain);
     let history_before = domain.get(id).expect("task").history.len();
     let mut recovery = SaveRecovery::new();
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
     apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None).expect("open title");
     apply_intent(&mut domain, &mut model, BoardIntent::EditInsert(' '), None)
         .expect("append boundary whitespace");
@@ -1659,6 +1660,13 @@ fn successful_title_save_with_boundary_whitespace_releases_the_task_form_once() 
     );
     assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
     assert_eq!(domain.get(id).expect("task").title, "Delete me");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None).expect("reopen title");
+    assert_eq!(
+        model.edit_buffer(),
+        "Delete me",
+        "the retained draft reflects domain normalization, not the pre-save whitespace"
+    );
+    apply_intent(&mut domain, &mut model, BoardIntent::CancelEdit, None).expect("return page");
     assert_eq!(
         domain.get(id).expect("task").history.len(),
         history_before + 1,
@@ -1677,6 +1685,36 @@ fn successful_title_save_with_boundary_whitespace_releases_the_task_form_once() 
         history_before + 1,
         "page view cannot repeat the edit event"
     );
+}
+
+#[test]
+fn successful_board_row_edit_keeps_its_task_edit_session_on_the_page() {
+    let (mut domain, mut model, _) = board_with_two_tasks();
+    let baseline = snapshot_of(&domain);
+    let mut recovery = SaveRecovery::new();
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None).expect("open title");
+    apply_intent(&mut domain, &mut model, BoardIntent::EditInsert('!'), None).expect("edit");
+
+    assert_eq!(
+        apply_board_intent_with_save_recovery(
+            &mut domain,
+            &mut model,
+            &mut recovery,
+            BoardSaveContext {
+                baseline,
+                intent: BoardIntent::ConfirmEdit,
+                snapshot: None,
+            },
+            |_| Ok(()),
+        )
+        .expect("save"),
+        IntentOutcome::Persisted
+    );
+    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+    assert!(model.board_form_open());
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginAddStep, None)
+        .expect("start a step from the saved page");
+    assert_eq!(model.input_mode(), BoardInputMode::EditStep);
 }
 
 #[test]
@@ -1901,6 +1939,7 @@ fn failed_save_during_thread_edit_holds_form_until_retry_or_cancel() {
     let (mut domain, mut model, id) = board_with_two_tasks();
     let baseline = snapshot_of(&domain);
     let mut recovery = SaveRecovery::new();
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
     apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None).expect("open form");
     for _ in 0..2 {
         apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
