@@ -118,6 +118,8 @@ pub enum BoardIntent {
     SelectPrev,
     /// Select visible list row by index (mouse row click).
     SelectIndex(usize),
+    /// Select a wide-split board row and return board focus without peek or double-click.
+    FocusBoardAndSelectIndex(usize),
     /// Copy the presentation-only `T<number>` identifier for one persisted task.
     CopyTaskNumber(uuid::Uuid),
     /// Jump the list viewport to a content offset without changing selection or peek
@@ -880,9 +882,10 @@ pub fn map_edit_paste(mode: BoardInputMode, text: &str) -> Option<BoardIntent> {
 /// Which primary board action an intent advances, if any.
 pub fn intent_primary_action(intent: &BoardIntent) -> Option<PrimaryBoardAction> {
     match intent {
-        BoardIntent::SelectNext | BoardIntent::SelectPrev | BoardIntent::SelectIndex(_) => {
-            Some(PrimaryBoardAction::SelectTask)
-        }
+        BoardIntent::SelectNext
+        | BoardIntent::SelectPrev
+        | BoardIntent::SelectIndex(_)
+        | BoardIntent::FocusBoardAndSelectIndex(_) => Some(PrimaryBoardAction::SelectTask),
         BoardIntent::Complete => Some(PrimaryBoardAction::Complete),
         BoardIntent::Reopen => Some(PrimaryBoardAction::Reopen),
         BoardIntent::SoftDelete => Some(PrimaryBoardAction::SoftDelete),

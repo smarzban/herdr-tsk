@@ -38,10 +38,10 @@ number of live done tasks (the `drawer_open` branches currently agree).
 
 ### Model
 
-`BoardModel` is session-only: location (home tab vs project path), selection id,
-scroll, peek, collapse sets, input mode, optional `BoardForm` / `QuickAddState`,
-palette, help, save-recovery presentation, text selection,
-ephemeral message + delete-recovery notice.
+`BoardModel` is session-only: location (home tab vs project path), selected id,
+focused surface, board and page scroll, peek, collapse sets, input mode, optional
+`BoardForm` / `QuickAddState`, palette, help, save-recovery presentation, text
+selection, ephemeral message + delete-recovery notice. Focus is not persisted.
 
 `BoardFormBinding` is `Task(id)` XOR `Capture(snapshot)` for the form's lifetime.
 Quick-add expansion (`Tab`) stashes title·notes·scope so Esc returns to the line
@@ -65,7 +65,11 @@ open without deleting it.
 
 ### Keys
 
-`map_key(mode, key)`. Mutating letters require the fixed Ctrl modifier.
+`map_key(mode, key)` remains the source for every surface key table.
+`map_responsive_key` adds only focus transfer: at 110 usable columns or wider,
+board `Enter` or `→` focuses the selected task, and task-view `Esc` or `←` returns
+board focus. Active editors continue through their existing maps. Mutating letters
+require the fixed Ctrl modifier.
 `1`/`2`/`3` select home tabs only in `Normal` at home without ctrl/alt/super.
 `map_board_form_key` shares `map_form_edit_key` with capture. Task-page view mode
 (`TaskPage`) keeps the board keymap so bare `e` enters edit rather than inserting
@@ -73,17 +77,24 @@ into a hidden draft.
 
 ### Mouse
 
-Row click peeks; same row again closes peek; fast double-click opens the page.
-Scrollbar track/thumb: `ListScrollTo` / `PageScrollTo` without changing
-selection. Thread headers are not in the hit map. Form fields ignore clicks until
-an edit has started. Text drag uses `text_select` + autoscroll
+Below 110 columns, row click peeks; the same row again closes peek; fast
+double-click opens the page. In wide split, a board-row click selects once and
+returns board focus without peek or takeover. A task-side control focuses the task
+before its existing task-page intent dispatches. `map_responsive_board_mouse`
+routes only translated renderer-owned hits inside the live surface. Scrollbar
+track/thumb: `ListScrollTo` / `PageScrollTo` without changing selection. Thread
+headers are not in the hit map. Form fields ignore clicks until an edit has
+started. Text drag uses `text_select` + autoscroll
 (`DEFAULT_BASE_TICK` vs short tick). Copy is OSC 52, capped at 100_000 chars.
 
 ### Paint
 
 `ui::tier::resolve`: **standard** when width ≥ 78 **and** height ≥ 24; else
-**compact**. Geometry is defined down to 1×1 without panic; product floor is
-40×10. Standard reserves 28 cells of trailing meta; compact is glyph + title.
+**compact**. `resolve_responsive` adds an inclusive 110-column split: one divider
+column, then equal board and task rectangles whose widths differ by at most one.
+Both halves use density from the narrower half. Below 110, the focused surface
+uses the full frame. Geometry is defined down to 1×1 without panic; product floor
+is 40×10. Standard reserves 28 cells of trailing meta; compact is glyph + title.
 Verb-bar budgets: 7 standard, 5 compact. Project chip max 24 cells.
 
 `draw_queue_frame` paints selector, list, rule, status, verb bar, overlays

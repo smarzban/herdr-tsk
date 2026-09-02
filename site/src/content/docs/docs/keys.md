@@ -13,6 +13,13 @@ The web demo on the landing page uses bare verb letters on purpose. Browsers
 steal control chords. On its projects and threads tabs, bare `g` toggles groups
 and the palette offers the same command.
 
+## Wide split focus
+
+At 110 usable columns or wider, the board and selected task page share the frame.
+With board focus, `Enter` or `→` moves to task focus. From task view, `Esc` or `←`
+returns to board focus. Active task editors keep the field, step, and save keys
+listed below. Mouse clicks follow the same focus owner.
+
 ## Board
 
 | Key | Does |
@@ -23,8 +30,8 @@ and the palette offers the same command.
 | `ctrl+d` | done |
 | `ctrl+o` | reopen |
 | `ctrl+b` | toggle blocked |
-| `Enter` | open the [task page](/docs/task-page/) |
-| `→` `←` | peek notes under the row (up to five lines) |
+| `Enter` | open the [task page](/docs/task-page/), or focus it in wide split |
+| `→` `←` | peek notes below 110 columns; in wide split, `→` focuses the task |
 | `+` | [capture](/docs/capture/) |
 | `ctrl+e` | edit title |
 | `ctrl+x` or `ctrl+Delete` | delete (`ctrl+u` undoes) |

@@ -134,6 +134,7 @@ fn task_page_verb_items(model: &BoardModel, task: &crate::domain::Task) -> Vec<V
     let selected_step_done = model
         .form
         .as_ref()
+        .filter(|form| form.task_id() == Some(task.id))
         .and_then(|form| form.steps.cursor)
         .and_then(|index| task.steps.get(index))
         .map(|step| step.done);
@@ -760,13 +761,18 @@ fn draw_board_impl(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap
     let selected_task = selection_id.and_then(|id| model.tasks.iter().find(|task| task.id == id));
     let preview_form = (wide && model.focused_surface() == tier::FocusedSurface::Board)
         .then(|| {
-            selected_task.map(|task| {
-                BoardForm::task(
-                    task,
-                    model.this_repo.as_deref(),
-                    &model.tasks,
-                    CaptureField::Title,
-                )
+            let retained = model.form.as_ref().filter(|form| {
+                model.input_mode == BoardInputMode::TaskPage && form.task_id() == selection_id
+            });
+            retained.cloned().or_else(|| {
+                selected_task.map(|task| {
+                    BoardForm::task(
+                        task,
+                        model.this_repo.as_deref(),
+                        &model.tasks,
+                        CaptureField::Title,
+                    )
+                })
             })
         })
         .flatten();
@@ -809,8 +815,16 @@ fn draw_board_impl(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap
             collapsed_projects: &model.collapsed_projects,
             collapsed_threads: &model.collapsed_threads,
             collapsed_thread_projects: &model.collapsed_thread_projects,
-            status_message: status_owned.as_deref(),
-            status_undo_offset,
+            status_message: if wide && model.focused_surface() == tier::FocusedSurface::Task {
+                None
+            } else {
+                status_owned.as_deref()
+            },
+            status_undo_offset: if wide && model.focused_surface() == tier::FocusedSurface::Task {
+                None
+            } else {
+                status_undo_offset
+            },
             verb_items: &verbs,
             now: SystemTime::now(),
             overlay: board_overlay,
@@ -831,8 +845,16 @@ fn draw_board_impl(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap
             collapsed_projects: &model.collapsed_projects,
             collapsed_threads: &model.collapsed_threads,
             collapsed_thread_projects: &model.collapsed_thread_projects,
-            status_message: if wide { None } else { status_owned.as_deref() },
-            status_undo_offset: if wide { None } else { status_undo_offset },
+            status_message: if wide && model.focused_surface() == tier::FocusedSurface::Board {
+                None
+            } else {
+                status_owned.as_deref()
+            },
+            status_undo_offset: if wide && model.focused_surface() == tier::FocusedSurface::Board {
+                None
+            } else {
+                status_undo_offset
+            },
             verb_items: &task_verbs,
             now: SystemTime::now(),
             overlay: task_overlay,
@@ -844,11 +866,6 @@ fn draw_board_impl(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap
             render::draw_queue_frame(frame, &board_frame, &geo, board_area);
         let (mut task_hits, _) =
             render::draw_queue_frame(frame, &task_frame, &task_geo, responsive.task);
-        if model.focused_surface() == tier::FocusedSurface::Board {
-            task_hits
-                .regions
-                .retain(|hit| matches!(hit.target, render::QueueHitTarget::TaskNumber(_)));
-        }
         board_hits.regions.append(&mut task_hits.regions);
         board_hits.copyable.append(&mut task_hits.copyable);
         if let Some(divider) = responsive.divider {

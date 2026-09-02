@@ -5,6 +5,8 @@ import { parseCapture } from "./capture.js";
   const frame = document.getElementById("board-demo");
   if (!root || !frame) return;
 
+  const WIDE_SPLIT_MIN_COLUMNS = 110;
+
   const GLYPH = {
     ready: "○",
     started: "▸",
@@ -134,6 +136,7 @@ import { parseCapture } from "./capture.js";
     refuse: "",
     nextId: 20,
     nextNumber: 22,
+    surfaceFocus: "board",
   };
 
   const esc = (s) =>
@@ -161,6 +164,15 @@ import { parseCapture } from "./capture.js";
 
   function selectedTask() {
     return taskById(state.selectedId) || null;
+  }
+
+  function terminalColumns() {
+    const fontSize = Number.parseFloat(getComputedStyle(root).fontSize) || 14;
+    return Math.floor(root.getBoundingClientRect().width / (fontSize * 0.6));
+  }
+
+  function isWideSplit() {
+    return terminalColumns() >= WIDE_SPLIT_MIN_COLUMNS;
   }
 
   function fallbackProject() {
@@ -393,7 +405,10 @@ import { parseCapture } from "./capture.js";
   }
 
   function runVerb(id) {
-    if (id === "open" && state.selectedId) state.overlay = "page";
+    if (id === "open" && state.selectedId) {
+      state.surfaceFocus = "task";
+      if (!isWideSplit()) state.overlay = "page";
+    }
     if (id === "capture") openQuickAdd();
     if (id === "help") state.overlay = "help";
     if (id === "palette") {
@@ -458,6 +473,7 @@ import { parseCapture } from "./capture.js";
     state.focusProject = null;
     state.peekId = null;
     state.overlay = null;
+    state.surfaceFocus = "board";
   }
 
   function toggleAllGroups() {
@@ -483,6 +499,7 @@ import { parseCapture } from "./capture.js";
     state.refuse = "";
     state.copyNotice = "";
     state.undo = null;
+    state.surfaceFocus = "board";
   }
 
   function openQuickAdd() {
@@ -610,9 +627,25 @@ import { parseCapture } from "./capture.js";
       <div class="foot dim">enter choose · esc close · j/k move</div>`;
   }
 
-  function renderPage() {
+  function runPageVerb(id) {
+    state.surfaceFocus = "task";
     const task = selectedTask();
-    if (!task) return `<div class="tsk-overlay"><div class="dim">no task</div></div>`;
+    if (!task) return;
+    if (id === "edit") {
+      state.editField = "title";
+      state.editDraft = task.title;
+    }
+    if (id === "notes") {
+      state.editField = "notes";
+      state.editDraft = task.notes || "";
+    }
+    if (id === "done") setStatus("done");
+    if (id === "block") toggleBlock();
+  }
+
+  function renderPage(embedded = false) {
+    const task = selectedTask();
+    if (!task) return `<div class="${embedded ? "tsk-task-surface tsk-surface" : "tsk-overlay"}"><div class="dim">no task</div></div>`;
     const editing = state.editField;
     const title =
       editing === "title"
@@ -623,11 +656,17 @@ import { parseCapture } from "./capture.js";
         ? `<textarea class="tsk-field tsk-notes" id="tsk-edit">${esc(state.editDraft)}</textarea>`
         : `<div class="tsk-page-notes">${esc(task.notes || "no notes yet")}</div>`;
     return `
-      <div class="tsk-overlay tsk-page">
+      <div class="${embedded ? "tsk-task-surface tsk-surface" : "tsk-overlay"} tsk-page ${state.surfaceFocus === "task" ? "is-focused-surface" : ""}">
         ${title}
         <div class="dim">${esc(task.status)} · ${esc(projectName(task))}${task.thread ? ` · #${esc(task.thread)}` : ""}</div>
         ${notes}
-        <div class="foot dim">esc close · e title · n notes · d done · b block</div>
+        <div class="foot dim tsk-verbs">
+          <button type="button" class="tsk-verb" data-page-verb="edit">e title</button><span> · </span>
+          <button type="button" class="tsk-verb" data-page-verb="notes">n notes</button><span> · </span>
+          <button type="button" class="tsk-verb" data-page-verb="done">d done</button><span> · </span>
+          <button type="button" class="tsk-verb" data-page-verb="block">b block</button><span> · </span>
+          <span>esc board</span>
+        </div>
       </div>`;
   }
 
@@ -695,11 +734,19 @@ import { parseCapture } from "./capture.js";
   function render() {
     const rows = buildRows();
     ensureSelection(rows);
-    let html = renderBoard(rows);
+    const wide = isWideSplit();
+    if (wide && state.overlay === "page") state.overlay = null;
+    let html = wide
+      ? `<div class="tsk-wide-split">
+           <div class="tsk-board-surface tsk-surface ${state.surfaceFocus === "board" ? "is-focused-surface" : ""}">${renderBoard(rows)}</div>
+           <div class="tsk-wide-divider" aria-hidden="true"></div>
+           ${renderPage(true)}
+         </div>`
+      : renderBoard(rows);
+    if (!wide && (state.overlay === "page" || state.surfaceFocus === "task")) html += renderPage();
     if (state.overlay === "help") html += renderHelp();
     if (state.overlay === "palette") html += renderPalette();
     if (state.overlay === "picker") html += renderPicker();
-    if (state.overlay === "page") html += renderPage();
     const keepKeys =
       document.activeElement === frame || frame.contains(document.activeElement);
     root.innerHTML = html;
@@ -751,6 +798,8 @@ import { parseCapture } from "./capture.js";
   }
 
   function onKey(e) {
+    const wide = isWideSplit();
+    const taskPageActive = state.overlay === "page" || state.surfaceFocus === "task";
     if (state.overlay === "quick") {
       if (e.key === "Escape") {
         e.preventDefault();
@@ -770,7 +819,8 @@ import { parseCapture } from "./capture.js";
       if (e.key === "Tab") {
         e.preventDefault();
         if (saveDraft(false)) {
-          state.overlay = "page";
+          state.surfaceFocus = "task";
+          if (!wide) state.overlay = "page";
           state.editField = "notes";
           state.editDraft = "";
         }
@@ -779,7 +829,7 @@ import { parseCapture } from "./capture.js";
       return;
     }
 
-    if (state.overlay === "page" && state.editField) {
+    if (taskPageActive && state.editField) {
       if (e.key === "Escape") {
         e.preventDefault();
         state.editField = null;
@@ -883,14 +933,16 @@ import { parseCapture } from "./capture.js";
     }
 
     const alt = e.altKey || e.ctrlKey || e.metaKey;
-    if (state.overlay === "page" && !e.altKey && !e.ctrlKey && ["j", "k", "ArrowDown", "ArrowUp", "1", "2", "3", "+", "z", ":"].includes(e.key)) {
+    if (taskPageActive && !e.altKey && !e.ctrlKey && ["j", "k", "ArrowDown", "ArrowUp", "1", "2", "3", "+", "z", ":"].includes(e.key)) {
       e.preventDefault();
       return;
     }
     if (e.key === "Escape") {
       e.preventDefault();
-      if (state.overlay === "page") state.overlay = null;
-      else if (state.peekId) state.peekId = null;
+      if (taskPageActive) {
+        state.overlay = null;
+        state.surfaceFocus = "board";
+      } else if (state.peekId) state.peekId = null;
       else if (state.focusProject) state.focusProject = null;
       else frame.blur();
       render();
@@ -955,19 +1007,32 @@ import { parseCapture } from "./capture.js";
     }
     if (e.key === "ArrowRight") {
       e.preventDefault();
-      state.peekId = state.selectedId;
+      if (wide && state.surfaceFocus === "board") {
+        state.surfaceFocus = "task";
+        state.peekId = null;
+      } else if (!wide) {
+        state.peekId = state.selectedId;
+      }
       render();
       return;
     }
     if (e.key === "ArrowLeft") {
       e.preventDefault();
-      state.peekId = null;
+      if (taskPageActive) {
+        state.surfaceFocus = "board";
+        state.overlay = null;
+      } else {
+        state.peekId = null;
+      }
       render();
       return;
     }
     if (e.key === "Enter") {
       e.preventDefault();
-      if (state.selectedId) state.overlay = "page";
+      if (state.selectedId && state.surfaceFocus === "board") {
+        state.surfaceFocus = "task";
+        if (!wide) state.overlay = "page";
+      }
       render();
       return;
     }
@@ -1012,7 +1077,8 @@ import { parseCapture } from "./capture.js";
       e.preventDefault();
       const task = selectedTask();
       if (task) {
-        state.overlay = "page";
+        state.surfaceFocus = "task";
+        if (!wide) state.overlay = "page";
         state.editField = "title";
         state.editDraft = task.title;
       }
@@ -1023,7 +1089,8 @@ import { parseCapture } from "./capture.js";
       e.preventDefault();
       const task = selectedTask();
       if (task) {
-        state.overlay = "page";
+        state.surfaceFocus = "task";
+        if (!wide) state.overlay = "page";
         state.editField = "notes";
         state.editDraft = task.notes || "";
       }
@@ -1040,6 +1107,8 @@ import { parseCapture } from "./capture.js";
   let lastClick = { id: null, at: 0 };
 
   root.addEventListener("click", (e) => {
+    const taskSurface = e.target.closest(".tsk-task-surface");
+    if (taskSurface) state.surfaceFocus = "task";
     const copy = e.target.closest("[data-copy-task]");
     if (copy) {
       const task = state.tasks.find((item) => item.id === copy.getAttribute("data-copy-task"));
@@ -1078,8 +1147,14 @@ import { parseCapture } from "./capture.js";
     if (row) {
       const id = row.getAttribute("data-task");
       const now = Date.now();
-      if (lastClick.id === id && now - lastClick.at < 350) {
+      if (isWideSplit()) {
         state.selectedId = id;
+        state.surfaceFocus = "board";
+        state.peekId = null;
+        state.overlay = null;
+      } else if (lastClick.id === id && now - lastClick.at < 350) {
+        state.selectedId = id;
+        state.surfaceFocus = "task";
         state.overlay = "page";
       } else {
         state.selectedId = id;
@@ -1103,6 +1178,12 @@ import { parseCapture } from "./capture.js";
       render();
       return;
     }
+    const pageVerb = e.target.closest("[data-page-verb]");
+    if (pageVerb) {
+      runPageVerb(pageVerb.getAttribute("data-page-verb"));
+      render();
+      return;
+    }
     const verb = e.target.closest("[data-verb]");
     if (verb) {
       runVerb(verb.getAttribute("data-verb"));
@@ -1120,6 +1201,7 @@ import { parseCapture } from "./capture.js";
   });
 
   frame.addEventListener("keydown", onKey);
+  new ResizeObserver(() => render()).observe(root);
   frame.addEventListener("focusin", () => frame.classList.add("is-focused"));
   frame.addEventListener("focusout", (e) => {
     if (!frame.contains(e.relatedTarget)) frame.classList.remove("is-focused");

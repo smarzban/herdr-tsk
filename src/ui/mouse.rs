@@ -21,6 +21,7 @@ use super::input::{BoardIntent, CaptureIntent, PrimaryCaptureAction, PRIMARY_CAP
 use super::render::{
     form_verb_items, QueueHitMap, QueueHitTarget, PALETTE_VERBS, QUICK_ADD_VERBS, SCOPE_VERBS,
 };
+use super::tier::{resolve_responsive, FocusedSurface, ResponsivePresentation};
 
 /// Transient presentation that still exists on the V1 queue board.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -371,6 +372,110 @@ fn hit_at(hits: &QueueHitMap, pos: Position) -> Option<QueueHitTarget> {
         .map(|hit| hit.target)
 }
 
+/// Rectangle that currently owns pointer input for this presentation.
+pub fn focused_mouse_area(model: &BoardModel, area: Rect) -> Rect {
+    let responsive = resolve_responsive(area.width, area.height, model.focused_surface());
+    if model.focused_surface() == FocusedSurface::Task {
+        responsive.task
+    } else {
+        responsive.board
+    }
+}
+
+fn task_target_is_interactive(model: &BoardModel, target: QueueHitTarget) -> bool {
+    matches!(
+        target,
+        QueueHitTarget::TaskNumber(_)
+            | QueueHitTarget::Step(_)
+            | QueueHitTarget::StepAdd
+            | QueueHitTarget::PageScroll(_)
+            | QueueHitTarget::Verb(_)
+    ) || (model.task_editing()
+        && matches!(
+            target,
+            QueueHitTarget::FormTitle
+                | QueueHitTarget::FormNotes(_)
+                | QueueHitTarget::FormThread
+                | QueueHitTarget::FormScope
+                | QueueHitTarget::FormScopeOption(_)
+        ))
+}
+
+/// Focus request that must run before dispatching a board-focused task-side control click.
+pub fn wide_mouse_focus_intent(
+    model: &BoardModel,
+    hits: &QueueHitMap,
+    area: Rect,
+    mouse: MouseEvent,
+) -> Option<BoardIntent> {
+    if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
+        || model.focused_surface() != FocusedSurface::Board
+        || model.input_mode() != BoardInputMode::Normal
+    {
+        return None;
+    }
+    let responsive = resolve_responsive(area.width, area.height, model.focused_surface());
+    if responsive.presentation != ResponsivePresentation::WideSplit {
+        return None;
+    }
+    let pos = point(mouse.column, mouse.row);
+    let target = responsive.task.contains(pos).then(|| hit_at(hits, pos))??;
+    task_target_is_interactive(model, target).then_some(BoardIntent::FocusTaskSurface)
+}
+
+/// Map pointer input only through the live responsive surface and translated renderer hits.
+pub fn map_responsive_board_mouse(
+    model: &BoardModel,
+    hits: &QueueHitMap,
+    area: Rect,
+    mouse: MouseEvent,
+) -> Option<BoardIntent> {
+    let responsive = resolve_responsive(area.width, area.height, model.focused_surface());
+    if responsive.presentation != ResponsivePresentation::WideSplit {
+        return map_board_mouse(model, hits, mouse);
+    }
+    let pos = point(mouse.column, mouse.row);
+    match mouse.kind {
+        MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
+            return focused_mouse_area(model, area)
+                .contains(pos)
+                .then(|| map_board_mouse(model, hits, mouse))?;
+        }
+        MouseEventKind::Down(MouseButton::Left) => {}
+        _ => return None,
+    }
+
+    if !matches!(
+        model.input_mode(),
+        BoardInputMode::Normal | BoardInputMode::TaskPage
+    ) {
+        if focused_mouse_area(model, area).contains(pos) {
+            return map_board_mouse(model, hits, mouse);
+        }
+        return match model.input_mode() {
+            BoardInputMode::Help => Some(BoardIntent::CloseLayer),
+            BoardInputMode::Palette => Some(BoardIntent::CloseCommandSurface),
+            _ => None,
+        };
+    }
+
+    if responsive.board.contains(pos) {
+        if let Some(QueueHitTarget::Task(id)) = hit_at(hits, pos) {
+            return model
+                .visible_ids()
+                .iter()
+                .position(|&visible| visible == id)
+                .map(BoardIntent::FocusBoardAndSelectIndex);
+        }
+        return (model.focused_surface() == FocusedSurface::Board)
+            .then(|| map_board_mouse(model, hits, mouse))?;
+    }
+    if responsive.task.contains(pos) && model.focused_surface() == FocusedSurface::Task {
+        return map_board_mouse(model, hits, mouse);
+    }
+    None
+}
+
 fn scrollbar_target_intent(target: QueueHitTarget) -> Option<BoardIntent> {
     match target {
         QueueHitTarget::ListScroll(offset) => Some(BoardIntent::ListScrollTo(offset)),
@@ -445,7 +550,9 @@ pub fn map_scrollbar_mouse(
     match mouse.kind {
         MouseEventKind::Down(MouseButton::Left) => {
             let pos = Position::new(mouse.column, mouse.row);
-            if let Some(intent) = scrollbar_hit_at(hits, pos) {
+            if let Some(intent) = scrollbar_hit_at(hits, pos)
+                .filter(|intent| matches!(intent, BoardIntent::PageScrollTo(_)) == page)
+            {
                 *dragging = true;
                 ScrollbarMouse::Intent(intent)
             } else {

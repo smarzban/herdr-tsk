@@ -173,6 +173,15 @@ fn apply_board_intent(
     // the pin still named the hidden task, and the next `space` or `d` mutated something the
     // user could not see. Excluding them lets `reanchor_selection` move the pin to a visible
     // row, which is what it already does for every other way a task leaves the deck.
+    if model.focused_surface == FocusedSurface::Task
+        && model.input_mode == BoardInputMode::TaskPage
+        && matches!(
+            intent,
+            BoardIntent::SelectNext | BoardIntent::SelectPrev | BoardIntent::SelectIndex(_)
+        )
+    {
+        return Ok(IntentOutcome::None);
+    }
     let closes_the_page = matches!(
         intent,
         BoardIntent::CloseLayer | BoardIntent::OpenTaskPage | BoardIntent::FocusBoardSurface
@@ -580,6 +589,13 @@ fn apply_board_intent(
                     }
                 }
             }
+            return Ok(IntentOutcome::None);
+        }
+        BoardIntent::FocusBoardAndSelectIndex(idx) => {
+            model.focused_surface = FocusedSurface::Board;
+            model.select_index(idx);
+            model.detail_open = None;
+            model.last_row_click = None;
             return Ok(IntentOutcome::None);
         }
         BoardIntent::ListScrollTo(offset) => {
@@ -1115,13 +1131,7 @@ fn apply_board_intent(
             if model.focused_surface != FocusedSurface::Board {
                 return Ok(IntentOutcome::None);
             }
-            let Some(id) = model.selected_id() else {
-                return Ok(IntentOutcome::None);
-            };
-            if model.edit_target() != Some(id) || model.input_mode != BoardInputMode::TaskPage {
-                open_task_page_on(domain, model, id);
-            }
-            model.focused_surface = FocusedSurface::Task;
+            focus_selected_task_surface(domain, model);
             return Ok(IntentOutcome::None);
         }
         BoardIntent::FocusBoardSurface => {
@@ -1148,13 +1158,7 @@ fn apply_board_intent(
             }
             if model.form.as_ref().is_some_and(BoardForm::is_task) {
                 if model.focused_surface == FocusedSurface::Board {
-                    let Some(id) = model.selected_id() else {
-                        return Ok(IntentOutcome::None);
-                    };
-                    if model.edit_target() != Some(id) {
-                        open_task_page_on(domain, model, id);
-                    }
-                    model.focused_surface = FocusedSurface::Task;
+                    focus_selected_task_surface(domain, model);
                 } else {
                     model.form = None;
                     model.input_mode = BoardInputMode::Normal;
@@ -1568,6 +1572,18 @@ fn edit_draft(model: &mut BoardModel, operation: impl FnOnce(&mut EditBuffer)) {
 
 /// Open the task page in view mode on `id`, replacing whatever surface held input. Shared
 /// by the keyboard route (`Enter`) and the mouse route (a row double-click).
+fn focus_selected_task_surface(domain: &DomainState, model: &mut BoardModel) {
+    // `BoardModel::input_mode()` reports Normal while a task form is parked, so every
+    // refocus route must restore the raw TaskPage mode before task input can dispatch.
+    let Some(id) = model.selected_id() else {
+        return;
+    };
+    if model.edit_target() != Some(id) || model.input_mode != BoardInputMode::TaskPage {
+        open_task_page_on(domain, model, id);
+    }
+    model.focused_surface = FocusedSurface::Task;
+}
+
 fn open_task_page_on(domain: &DomainState, model: &mut BoardModel, id: Uuid) {
     let Some(task) = domain.get(id) else {
         return;

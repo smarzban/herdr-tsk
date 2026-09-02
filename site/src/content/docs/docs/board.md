@@ -49,9 +49,23 @@ task. Agents do not auto-complete work.
 `ctrl+o` reopens. `ctrl+b` toggles blocked. **review** is set from the command
 palette (`:` → `set status: review`), not from a dedicated letter.
 
+## Wide split and focus
+
+At 110 usable columns or wider, the board stays on the left and the selected
+complete task page stays on the right. The split reserves one divider column and
+shares the rest equally. Board focus starts the session. `Enter` or `→` moves to
+task focus; from task view, `Esc` or `←` returns to board focus. Active editors
+keep their normal key handling.
+
+Changing board selection updates the task side without a wide peek. Click a board
+row to select it and return board focus. Click an interactive task-side control to
+focus the task before running that control. Below 110 columns, only the focused
+surface fills the pane, and resizing preserves focus and scroll positions.
+
 ## Peek and mouse
 
-`→` peeks notes under the selected row (up to five wrapped lines). `←` closes
+Below 110 columns, `→` peeks notes under the selected row (up to five wrapped
+lines). `←` closes
 the peek.
 
 Click a dim task identifier to copy it. Click elsewhere on a row to peek.
@@ -62,7 +76,8 @@ Click the same row again to close. A fast double-click opens the
 
 | Pane | What you get |
 | --- | --- |
-| at least 78×24 | standard board: section headers, row meta, full verb legend |
+| at least 110 columns | wide split: board and complete selected-task page |
+| at least 78×24 and below 110 columns | standard single-pane board: section headers, row meta, full verb legend |
 | smaller | compact: glyph, `T` identifier, and title; help, palette, and the task page take the full pane |
 | down to 40×10 | still operable |
 

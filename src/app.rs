@@ -28,8 +28,9 @@ use crate::ui::input::{
     map_responsive_key, map_task_form_key, BoardIntent, CaptureIntent,
 };
 use crate::ui::mouse::{
-    capture_layout_for_model, enable_terminal_input, keyboard_enhancement_supported,
-    map_capture_mouse, map_scrollbar_mouse, ScrollbarMouse,
+    capture_layout_for_model, enable_terminal_input, focused_mouse_area,
+    keyboard_enhancement_supported, map_capture_mouse, map_responsive_board_mouse,
+    map_scrollbar_mouse, scrollbar_hit_at, wide_mouse_focus_intent, ScrollbarMouse,
 };
 use crate::ui::queue::BoardTab;
 use crate::ui::scheduler;
@@ -421,6 +422,30 @@ fn run_board() -> Result<(), Box<dyn Error>> {
                     use crate::ui::text_select::{DragSelectOutcome, DragSelectPhase};
                     use crossterm::event::{MouseButton, MouseEventKind};
                     let area = terminal_area(terminal)?;
+                    let task_focus_candidate =
+                        wide_mouse_focus_intent(&model, &frame_hits, area, mouse);
+                    let task_scrollbar_press =
+                        matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
+                            && matches!(
+                                scrollbar_hit_at(
+                                    &frame_hits,
+                                    Position::new(mouse.column, mouse.row)
+                                ),
+                                Some(BoardIntent::PageScrollTo(_))
+                            );
+                    if task_scrollbar_press {
+                        if let Some(focus) = task_focus_candidate.clone() {
+                            if handle_board_intent(
+                                &store,
+                                &mut domain,
+                                &mut model,
+                                focus,
+                                &mut save_recovery,
+                            )? {
+                                break;
+                            }
+                        }
+                    }
                     let mode = resolve_board_surface(area, &mut model);
                     match map_scrollbar_mouse(mode, &frame_hits, mouse, &mut scrollbar_drag) {
                         ScrollbarMouse::Miss => {}
@@ -445,8 +470,15 @@ fn run_board() -> Result<(), Box<dyn Error>> {
                     let mut click = mouse;
                     match mouse.kind {
                         MouseEventKind::Drag(MouseButton::Left) => {
-                            let pos = Position::new(mouse.column, mouse.row);
+                            let pos = clamp_position_to_area(
+                                Position::new(mouse.column, mouse.row),
+                                focused_mouse_area(&model, area),
+                            );
                             model.drag_text_selection(pos);
+                            if model.text_selection().is_none() {
+                                drag_gesture.clear();
+                                continue;
+                            }
                             if let Some(sel) = model.text_selection() {
                                 if let Some(text) =
                                     selection_text(&frame_rows, &frame_copyable, &sel)
@@ -470,7 +502,14 @@ fn run_board() -> Result<(), Box<dyn Error>> {
                             continue;
                         }
                         MouseEventKind::Up(MouseButton::Left) => {
-                            let pos = Position::new(mouse.column, mouse.row);
+                            let pos = if model.text_selection().is_some() {
+                                clamp_position_to_area(
+                                    Position::new(mouse.column, mouse.row),
+                                    focused_mouse_area(&model, area),
+                                )
+                            } else {
+                                Position::new(mouse.column, mouse.row)
+                            };
                             // Some hosts omit Drag and only move between Down and Up.
                             // Grow the selection from the press cell before clearing it
                             // so copy still works there (and peek is not fired instead).
@@ -508,9 +547,38 @@ fn run_board() -> Result<(), Box<dyn Error>> {
                         }
                         MouseEventKind::Down(MouseButton::Left) => {
                             // Anchor a would-be selection and stash the Down for Up;
-                            // do not map the click yet.
+                            // do not map the click yet. A wide board-row click remains live
+                            // while task-focused, every other press belongs to the focused side.
                             let pos = Position::new(mouse.column, mouse.row);
-                            model.begin_mouse_press(pos);
+                            let responsive_intent =
+                                map_responsive_board_mouse(&model, &frame_hits, area, mouse);
+                            let row_focus = matches!(
+                                responsive_intent.as_ref(),
+                                Some(BoardIntent::FocusBoardAndSelectIndex(_))
+                            );
+                            let existing_mode_route = matches!(
+                                (mode, responsive_intent.as_ref()),
+                                (BoardInputMode::Help, Some(BoardIntent::CloseLayer))
+                                    | (
+                                        BoardInputMode::Palette,
+                                        Some(BoardIntent::CloseCommandSurface)
+                                    )
+                            );
+                            let focused = focused_mouse_area(&model, area).contains(pos);
+                            if !focused
+                                && !row_focus
+                                && !existing_mode_route
+                                && task_focus_candidate.is_none()
+                            {
+                                model.end_mouse_press();
+                                drag_gesture.clear();
+                                continue;
+                            }
+                            if focused {
+                                model.begin_mouse_press(pos);
+                            } else {
+                                model.end_mouse_press();
+                            }
                             let _ = drag_gesture.handle(DragSelectPhase::Press, pos, None);
                             if let Some(line) =
                                 copyable_line_at(&frame_rows, &frame_copyable, pos.y)
@@ -522,6 +590,17 @@ fn run_board() -> Result<(), Box<dyn Error>> {
                         _ => {}
                     }
                     let area = terminal_area(terminal)?;
+                    if let Some(focus) = wide_mouse_focus_intent(&model, &frame_hits, area, click) {
+                        if handle_board_intent(
+                            &store,
+                            &mut domain,
+                            &mut model,
+                            focus,
+                            &mut save_recovery,
+                        )? {
+                            break;
+                        }
+                    }
                     let Some(intent) = board_mouse_intent(area, &mut model, click) else {
                         continue;
                     };
@@ -599,6 +678,20 @@ fn copy_drag_selection(
         model.set_ephemeral_message("copy failed", Duration::from_secs(2));
     }
     model.clear_text_selection();
+}
+
+fn clamp_position_to_area(position: Position, area: Rect) -> Position {
+    if area.is_empty() {
+        return position;
+    }
+    Position::new(
+        position
+            .x
+            .clamp(area.x, area.x.saturating_add(area.width).saturating_sub(1)),
+        position
+            .y
+            .clamp(area.y, area.y.saturating_add(area.height).saturating_sub(1)),
+    )
 }
 
 /// Content rect that edge auto-scroll watches during a text drag.
@@ -950,6 +1043,7 @@ pub fn apply_board_intent_with_save_recovery(
             BoardIntent::SelectNext
             | BoardIntent::SelectPrev
             | BoardIntent::SelectIndex(_)
+            | BoardIntent::FocusBoardAndSelectIndex(_)
             | BoardIntent::ListScrollTo(_)
             | BoardIntent::PageScrollTo(_)
             | BoardIntent::OpenCommandPalette
@@ -1120,7 +1214,7 @@ fn board_mouse_intent(
     } else {
         crate::ui::render::QueueHitMap::default()
     };
-    let intent = crate::ui::mouse::map_board_mouse(model, &hits, mouse);
+    let intent = map_responsive_board_mouse(model, &hits, area, mouse);
     if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
         && !matches!(
             intent,
