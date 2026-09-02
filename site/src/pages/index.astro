@@ -1,6 +1,9 @@
 ---
-import Wordmark from '../components/Wordmark.astro';
 import '../styles/landing.css';
+
+const VERSION = '0.4.0';
+const SITE = 'https://tsk-gules.vercel.app';
+const REPO = 'https://github.com/smarzban/herdr-tsk';
 ---
 
 <!DOCTYPE html>
@@ -9,11 +12,30 @@ import '../styles/landing.css';
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="dark light" />
-    <title>tsk — a task board for your terminal</title>
+    <title>tsk · a task board for your terminal</title>
     <meta
       name="description"
-      content="tsk captures work and moves it through human status: ready, started, blocked, review, done. A queue board for your terminal."
+      content="tsk is a task board for your terminal. Capture work in one line and move it through ready, started, blocked, review, done. Human status is the source of truth. Ships as a herdr plugin, runs standalone."
     />
+    <link rel="canonical" href={`${SITE}/`} />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="tsk" />
+    <meta property="og:title" content="tsk · a task board for your terminal" />
+    <meta
+      property="og:description"
+      content="Capture work in one line. Move it through ready, started, blocked, review, done. Nothing completes itself."
+    />
+    <meta property="og:url" content={`${SITE}/`} />
+    <meta property="og:image" content={`${SITE}/og.png`} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="tsk · a task board for your terminal" />
+    <meta
+      name="twitter:description"
+      content="Capture work in one line. Move it through ready, started, blocked, review, done. Nothing completes itself."
+    />
+    <meta name="twitter:image" content={`${SITE}/og.png`} />
     <script is:inline>
       (function () {
         var k = 'tsk-theme';
@@ -33,7 +55,7 @@ import '../styles/landing.css';
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Syne:wght@600;700;800&display=swap"
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,700;0,800;1,400&display=swap"
       rel="stylesheet"
     />
     <link rel="icon" href="/icon-dark.svg" type="image/svg+xml" />
@@ -62,157 +84,471 @@ import '../styles/landing.css';
     />
   </head>
   <body class="landing">
-    <div class="grain" aria-hidden="true"></div>
+    <a class="skip" href="#main">skip to content</a>
 
     <header class="top">
-      <a class="mark" href="/" aria-label="tsk"><Wordmark /></a>
-      <nav class="top-nav" aria-label="Primary">
-        <a href="#board">Board</a>
-        <a href="/docs/">Docs</a>
-        <a href="#install">Install</a>
-        <a
-          class="top-github"
-          href="https://github.com/smarzban/herdr-tsk"
-          rel="noopener noreferrer"
-          >GitHub</a
-        >
-        <button
-          type="button"
-          class="theme-toggle"
-          data-theme-toggle
-          aria-label="Switch to light mode"
-          aria-pressed="true"
-        >
-          <svg class="icon-moon" viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M21 14.5A8.5 8.5 0 0 1 9.5 3 7 7 0 1 0 21 14.5z"></path>
-          </svg>
-          <svg class="icon-sun" viewBox="0 0 24 24" aria-hidden="true">
-            <circle cx="12" cy="12" r="4"></circle>
-            <path
-              d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"
-            ></path>
-          </svg>
-        </button>
-      </nav>
+      <div class="top-inner">
+        <a class="wordmark" href="/" aria-label="tsk home">
+          <span class="wordmark-text">tsk</span><span class="wordmark-caret" aria-hidden="true"></span>
+        </a>
+        <span class="ver" title="crate and plugin version">v{VERSION}</span>
+        <nav class="top-nav" aria-label="Primary">
+          <a href="#demo">demo</a>
+          <a href="#board">board</a>
+          <a href="#keys">keys</a>
+          <a href="#cli">cli</a>
+          <a href="#install">install</a>
+          <a href="/docs/">docs</a>
+          <a href={REPO} rel="noopener noreferrer">github</a>
+          <button
+            type="button"
+            class="theme-toggle"
+            data-theme-toggle
+            aria-label="Switch to light mode"
+            aria-pressed="true"
+          >
+            <svg class="icon-moon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M21 14.5A8.5 8.5 0 0 1 9.5 3 7 7 0 1 0 21 14.5z"></path>
+            </svg>
+            <svg class="icon-sun" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="4"></circle>
+              <path
+                d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"
+              ></path>
+            </svg>
+          </button>
+        </nav>
+      </div>
     </header>
 
-    <main id="top">
-      <section class="hero" aria-labelledby="brand">
-        <div class="hero-copy">
-          <p class="brand" id="brand">tsk</p>
-          <div class="hero-text">
-            <h1 class="headline">A task board for your terminal.</h1>
+    <main id="main">
+      <!-- ───────────────────────────── hero ───────────────────────────── -->
+      <section class="hero" aria-labelledby="headline">
+        <div class="hero-inner">
+          <div class="hero-copy">
+            <p class="eyebrow">
+              <span class="prompt">$</span> tsk
+              <span class="dim">· a herdr plugin that also runs standalone</span>
+            </p>
+            <h1 class="headline" id="headline">
+              A task board<br />for your terminal<span class="block-cursor" aria-hidden="true"></span>
+            </h1>
             <p class="lede">
-              Capture work. Move it through ready, started, blocked, review, and
-              done. The board below is a live demo — same keys as the app.
+              Capture work in one line. Move it through
+              <b>ready</b>, <b>started</b>, <b>blocked</b>, <b>review</b>, <b>done</b>.
+              Human status is the source of truth, so nothing completes itself.
             </p>
             <div class="cta">
               <a class="btn btn-primary" href="#install">Install</a>
-              <a class="btn btn-ghost" href="/docs/">Read the docs</a>
+              <a class="btn btn-ghost" href="#demo">Try the board <span aria-hidden="true">↓</span></a>
+              <a class="link-plain" href="/docs/">Read the docs <span aria-hidden="true">→</span></a>
             </div>
           </div>
-        </div>
 
-        <div class="hero-stage" id="board" aria-label="tsk board demo">
-          <div class="terminal-motion">
-            <div
-              class="terminal"
-              id="board-demo"
-              tabindex="0"
-              role="application"
-              aria-label="tsk board demo"
-            >
-              <div class="terminal-chrome">
-                <span class="terminal-dots" aria-hidden="true"></span>
-                <span class="terminal-title">tsk · demo</span>
-                <span class="demo-hint dim">click to focus · + capture · ? help</span>
-              </div>
-              <div class="board tsk-demo" id="tsk-demo"></div>
-            </div>
-          </div>
+          <dl class="spec" aria-label="At a glance">
+            <div><dt>binary</dt><dd>tsk</dd></div>
+            <div><dt>store</dt><dd>~/.tsk/tsk.json</dd></div>
+            <div><dt>pane</dt><dd>78×24 · operable to 40×10</dd></div>
+            <div><dt>built with</dt><dd>Rust 1.96</dd></div>
+            <div><dt>runs on</dt><dd>Linux · macOS</dd></div>
+            <div><dt>license</dt><dd>MIT</dd></div>
+          </dl>
         </div>
       </section>
 
-      <section class="band status-band" id="status" aria-labelledby="status-heading">
-        <div class="band-inner">
-          <h2 id="status-heading">Human status is the source of truth.</h2>
-          <p class="band-lede">
-            Agents do not auto-complete your work. You move tasks with verbs.
-            Mutating keys need Alt, so typing into a focused board cannot finish
-            or delete anything by accident.
+      <!-- ─────────────────────────── live demo ────────────────────────── -->
+      <section class="stage" id="demo" aria-labelledby="demo-heading">
+        <h2 class="sr-only" id="demo-heading">Live demo</h2>
+        <div class="stage-inner">
+          <div
+            class="pane"
+            id="board-demo"
+            tabindex="0"
+            role="application"
+            aria-label="tsk board live demo"
+          >
+            <div class="pane-bar">
+              <span class="pane-tab"><span class="pane-dot" aria-hidden="true"></span>tsk</span>
+              <span class="pane-title">live demo · a real board, in your browser</span>
+              <span class="pane-hint">
+                click to focus · <kbd>j</kbd><kbd>k</kbd> move · <kbd>+</kbd> capture ·
+                <kbd>:</kbd> palette · <kbd>?</kbd> help
+              </span>
+            </div>
+            <div class="board tsk-demo" id="tsk-demo"></div>
+          </div>
+          <p class="stage-note">
+            The demo takes bare <kbd>s</kbd> <kbd>d</kbd> <kbd>b</kbd> <kbd>o</kbd> because
+            browsers keep the control chords for themselves. In the app, every mutating verb
+            needs <kbd>Ctrl</kbd>.
           </p>
-          <ol class="status-rail" aria-label="Task statuses">
-            <li><span class="status-name">ready</span><span class="status-hint">on deck</span></li>
-            <li><span class="status-name">started</span><span class="status-hint">in motion</span></li>
-            <li><span class="status-name">blocked</span><span class="status-hint">waiting</span></li>
-            <li><span class="status-name">review</span><span class="status-hint">check it</span></li>
-            <li><span class="status-name">done</span><span class="status-hint">drawer</span></li>
-          </ol>
         </div>
       </section>
 
-      <section class="band capture-band" aria-labelledby="capture-heading">
-        <div class="band-inner capture-grid">
-          <div>
-            <h2 id="capture-heading">Capture stays on the board.</h2>
+      <!-- ──────────────────────────── status ──────────────────────────── -->
+      <section class="band" id="status" aria-labelledby="status-heading">
+        <div class="band-inner" data-reveal>
+          <header class="band-head">
+            <span class="index">01 <span class="index-label">status</span></span>
+            <h2 id="status-heading">Human status is the source of truth.</h2>
             <p class="band-lede">
-              Press <kbd>+</kbd> for a one-line title. Enter saves. Tab expands
-              onto the task page for notes and scope. Tokens in the title set
-              project and thread without leaving the line.
+              Five states, five verbs. Check every step and the task stays open until you say
+              otherwise. Agents can add work to the board. They cannot finish it.
             </p>
+          </header>
+
+          <ol class="rail" aria-label="Task statuses">
+            <li>
+              <span class="rail-glyph" aria-hidden="true">○</span>
+              <span class="rail-name">ready</span>
+              <span class="rail-how">on deck</span>
+              <kbd>ctrl+o</kbd>
+            </li>
+            <li>
+              <span class="rail-glyph" aria-hidden="true">▸</span>
+              <span class="rail-name">started</span>
+              <span class="rail-how">in motion</span>
+              <kbd>ctrl+s</kbd>
+            </li>
+            <li>
+              <span class="rail-glyph" aria-hidden="true">■</span>
+              <span class="rail-name">blocked</span>
+              <span class="rail-how">waiting</span>
+              <kbd>ctrl+b</kbd>
+            </li>
+            <li>
+              <span class="rail-glyph" aria-hidden="true">▲</span>
+              <span class="rail-name">review</span>
+              <span class="rail-how">check it</span>
+              <kbd>:</kbd>
+            </li>
+            <li>
+              <span class="rail-glyph" aria-hidden="true">✓</span>
+              <span class="rail-name">done</span>
+              <span class="rail-how">in the drawer</span>
+              <kbd>ctrl+d</kbd>
+            </li>
+          </ol>
+
+          <div class="cycle" data-cycle aria-live="off">
+            <div class="cycle-row">
+              <span class="cycle-sec" data-cycle-sec>ON DECK</span>
+              <span class="cycle-glyph" data-cycle-glyph aria-hidden="true">○</span>
+              <span class="tid">T14</span>
+              <span class="cycle-title">Ship the landing page</span>
+              <span class="cycle-meta">tsk · 2m</span>
+            </div>
+            <div class="cycle-foot">
+              <span class="dim">you press</span>
+              <kbd data-cycle-key>ctrl+s</kbd>
+              <span class="dim">→</span>
+              <span data-cycle-next>started</span>
+            </div>
           </div>
-          <ul class="token-list">
-            <li>
-              <code>!p</code>
-              <span>desk</span>
-            </li>
-            <li>
-              <code>!p name</code>
-              <span>project by basename</span>
-            </li>
-            <li>
-              <code>!t name</code>
-              <span>thread, normalized</span>
-            </li>
-            <li>
-              <code>!t</code>
-              <span>unthread</span>
-            </li>
-          </ul>
         </div>
       </section>
 
-      <section class="band install-band" id="install" aria-labelledby="install-heading">
-        <div class="band-inner">
-          <h2 id="install-heading">Build it, then open the board.</h2>
-          <div class="install-block">
-            <pre class="shell"><span class="shell-prompt">$</span> git clone git@github.com:smarzban/herdr-tsk.git
-<span class="shell-prompt">$</span> cd herdr-tsk
-<span class="shell-prompt">$</span> cargo build --release
-<span class="shell-prompt">$</span> ./target/release/tsk</pre>
-            <p class="install-note">
-              Plugin mode: <code>herdr plugin link "$PWD"</code>, then Open tsk
-              board. State lives in <code>~/.tsk</code> either way. Full steps in
-              the <a href="/docs/install/">install guide</a>.
+      <!-- ───────────────────────────── why ────────────────────────────── -->
+      <section class="band band-alt" id="why" aria-labelledby="why-heading">
+        <div class="band-inner" data-reveal>
+          <header class="band-head">
+            <span class="index">02 <span class="index-label">why</span></span>
+            <h2 id="why-heading">Built for the gap between two commands.</h2>
+            <p class="band-lede">
+              A queue you can reach from the pane you already have open. No browser tab, no
+              sync, no form takeover.
             </p>
+          </header>
+
+          <div class="pillars">
+            <article class="pillar">
+              <h3>Capture never leaves the list.</h3>
+              <p>
+                <kbd>+</kbd> opens one line on the status row. <kbd>Enter</kbd> saves,
+                <kbd>Shift+Enter</kbd> keeps the line open, <kbd>Tab</kbd> expands onto the task
+                page. Two tokens set project and thread from inside the title.
+              </p>
+              <pre class="mini" aria-label="Quick-add example"><span class="prompt">+</span> Fix the flaky bench <span class="tok">!p</span> tsk <span class="tok">!t</span> ci<span class="cursor" aria-hidden="true">█</span>
+<span class="dim">enter save · shift+enter stay · tab page · esc close</span></pre>
+            </article>
+
+            <article class="pillar">
+              <h3>Nothing completes itself.</h3>
+              <p>
+                Every mutating verb needs <kbd>Ctrl</kbd>. Bare letters do nothing, so a stray
+                keystroke in a focused board cannot finish or delete work. Undo is one chord
+                away.
+              </p>
+              <pre class="mini" aria-label="Verb bar"><span class="dim">enter</span> open · <span class="dim">ctrl+d</span> done · <span class="dim">ctrl+b</span> block · <span class="dim">:</span> palette
+<span class="dim">ctrl+x</span> delete · <span class="dim">ctrl+u</span> undo · <span class="dim">?</span> help · <span class="dim">+</span> capture</pre>
+            </article>
+
+            <article class="pillar">
+              <h3>One store. Three doors.</h3>
+              <p>
+                The board pane, herdr's quick-capture overlay, and the CLI all edit the same
+                <code>~/.tsk</code>. An idle board notices a new task on the next tick.
+              </p>
+              <pre class="mini" aria-label="Three ways in"><span class="prompt">$</span> tsk add -t "Draft release notes"
+<span class="dim">added Draft release notes</span>
+<span class="prompt">$</span> herdr plugin action invoke quick-capture --plugin herdr-tsk</pre>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <!-- ──────────────────────────── board ───────────────────────────── -->
+      <section class="band" id="board" aria-labelledby="board-heading">
+        <div class="band-inner" data-reveal>
+          <header class="band-head">
+            <span class="index">03 <span class="index-label">board</span></span>
+            <h2 id="board-heading">One list, ordered by urgency.</h2>
+            <p class="band-lede">
+              Sections are computed, never navigated. Home is three tabs: <b>desk</b>,
+              <b>projects</b>, <b>threads</b>. Focus a project and the tabs give way to its
+              name.
+            </p>
+          </header>
+
+          <div class="anatomy">
+            <div class="screen" role="img" aria-label="A tsk board at 78 columns, annotated with seven callouts">
+              <div class="s-row s-tabs">
+                <span class="l"><span class="on">desk</span><span class="dim">  ·  </span>projects<span class="dim">  ·  </span>threads</span>
+                <span class="pin">1</span>
+              </div>
+              <div class="s-gap"></div>
+              <div class="s-row s-sec">
+                <span class="sec">IN MOTION</span><span class="rule"></span><span class="count">2</span>
+                <span class="pin">2</span>
+              </div>
+              <div class="s-gap"></div>
+              <div class="s-row s-task is-sel">
+                <span class="l"><span class="sel">▸</span> <span class="tid">T31</span> <span class="sel-text">Wire the release checklist</span></span>
+                <span class="r meta">tsk · 3m</span>
+                <span class="pin">3</span>
+              </div>
+              <div class="s-row s-peek"><span class="l dim">  │ Steps live on the task page. Notes wrap, never truncate.</span></div>
+              <div class="s-row s-peek"><span class="l dim">  └</span><span class="pin">4</span></div>
+              <div class="s-row s-task">
+                <span class="l"><span class="glyph">▸</span> <span class="tid">T29</span> Pin the edit target on save</span>
+                <span class="r meta">herdr · 12m</span>
+              </div>
+              <div class="s-gap"></div>
+              <div class="s-row s-sec">
+                <span class="sec">desk</span><span class="rule"></span><span class="count">3</span>
+              </div>
+              <div class="s-gap"></div>
+              <div class="s-row s-thread">
+                <span class="l dim">#site 2</span>
+                <span class="pin">5</span>
+              </div>
+              <div class="s-row s-task">
+                <span class="l"><span class="glyph">▲</span> <span class="tid">T27</span> Proof the landing copy once more</span>
+                <span class="r meta">20m</span>
+              </div>
+              <div class="s-row s-task">
+                <span class="l"><span class="glyph">■</span> <span class="tid">T25</span> Waiting on the pane label</span>
+                <span class="r meta">50m</span>
+              </div>
+              <div class="s-row s-task">
+                <span class="l"><span class="glyph">○</span> <span class="tid">T18</span> Global backlog note</span>
+                <span class="r meta">2d</span>
+              </div>
+              <div class="s-fill"></div>
+              <div class="s-row s-footrule"><span class="rule"></span></div>
+              <div class="s-row s-foot">
+                <span class="l meta">2 done</span>
+                <span class="pin">6</span>
+              </div>
+              <div class="s-row s-foot">
+                <span class="l meta">enter open · ctrl+d done · ctrl+b block · : palette · ? help · + capture</span>
+                <span class="pin">7</span>
+              </div>
+            </div>
+
+            <ol class="legend">
+              <li>
+                <span class="legend-n">1</span>
+                <div><b>Home tabs.</b> <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> switch desk, projects, threads. <kbd>P</kbd> focuses one project and hides them.</div>
+              </li>
+              <li>
+                <span class="legend-n">2</span>
+                <div><b>IN MOTION.</b> Everything you have started, from any project, always on top.</div>
+              </li>
+              <li>
+                <span class="legend-n">3</span>
+                <div><b>A row.</b> Status glyph, a dim <code>T</code>-number you can click to copy, the title, then project and age.</div>
+              </li>
+              <li>
+                <span class="legend-n">4</span>
+                <div><b>Peek.</b> <kbd>→</kbd> or a click shows up to five wrapped note lines under the row. <kbd>Enter</kbd> opens the full page.</div>
+              </li>
+              <li>
+                <span class="legend-n">5</span>
+                <div><b>Thread headers.</b> Open desk work groups under dim <code>#name</code> headers with a count. Unthreaded rows follow.</div>
+              </li>
+              <li>
+                <span class="legend-n">6</span>
+                <div><b>Done drawer.</b> Finished work stays out of the way. <kbd>z</kbd> pulls the drawer open.</div>
+              </li>
+              <li>
+                <span class="legend-n">7</span>
+                <div><b>Verb bar.</b> The chords that apply right now. Below 78 columns it folds into a compact board that still works at 40×10.</div>
+              </li>
+            </ol>
+          </div>
+        </div>
+      </section>
+
+      <!-- ───────────────────────────── keys ───────────────────────────── -->
+      <section class="band band-alt" id="keys" aria-labelledby="keys-heading">
+        <div class="band-inner" data-reveal>
+          <header class="band-head">
+            <span class="index">04 <span class="index-label">keys</span></span>
+            <h2 id="keys-heading">Learn it in a minute. Keep it in your hands.</h2>
+            <p class="band-lede">
+              Navigation is bare. Anything that changes a task takes <kbd>Ctrl</kbd>.
+              <kbd>Esc</kbd> always closes one layer.
+            </p>
+          </header>
+
+          <div class="keygrid" role="list">
+            <div class="key" role="listitem"><span class="caps"><kbd>j</kbd><kbd>k</kbd></span><span>move</span></div>
+            <div class="key" role="listitem"><span class="caps"><kbd>Enter</kbd></span><span>open the task page</span></div>
+            <div class="key" role="listitem"><span class="caps"><kbd>→</kbd><kbd>←</kbd></span><span>peek notes · close peek</span></div>
+            <div class="key" role="listitem"><span class="caps"><kbd>+</kbd></span><span>capture</span></div>
+            <div class="key key-verb" role="listitem"><span class="caps"><kbd>ctrl+s</kbd></span><span>start · reopen if done</span></div>
+            <div class="key key-verb" role="listitem"><span class="caps"><kbd>ctrl+d</kbd></span><span>done</span></div>
+            <div class="key key-verb" role="listitem"><span class="caps"><kbd>ctrl+b</kbd></span><span>toggle blocked</span></div>
+            <div class="key key-verb" role="listitem"><span class="caps"><kbd>ctrl+o</kbd></span><span>reopen</span></div>
+            <div class="key key-verb" role="listitem"><span class="caps"><kbd>ctrl+e</kbd></span><span>edit title</span></div>
+            <div class="key key-verb" role="listitem"><span class="caps"><kbd>ctrl+x</kbd><kbd>ctrl+u</kbd></span><span>delete · undo</span></div>
+            <div class="key" role="listitem"><span class="caps"><kbd>:</kbd></span><span>command palette</span></div>
+            <div class="key" role="listitem"><span class="caps"><kbd>?</kbd></span><span>help card</span></div>
+            <div class="key" role="listitem"><span class="caps"><kbd>z</kbd></span><span>done drawer</span></div>
+            <div class="key" role="listitem"><span class="caps"><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd></span><span>desk · projects · threads</span></div>
+            <div class="key" role="listitem"><span class="caps"><kbd>P</kbd></span><span>project picker</span></div>
+            <div class="key" role="listitem"><span class="caps"><kbd>Esc</kbd></span><span>close one layer</span></div>
+          </div>
+          <p class="keynote">
+            Full chord tables for the board, task page, and capture form live in the
+            <a href="/docs/keys/">keys reference</a>.
+          </p>
+        </div>
+      </section>
+
+      <!-- ────────────────────────────── cli ───────────────────────────── -->
+      <section class="band" id="cli" aria-labelledby="cli-heading">
+        <div class="band-inner" data-reveal>
+          <header class="band-head">
+            <span class="index">05 <span class="index-label">cli</span></span>
+            <h2 id="cli-heading">Scriptable by design.</h2>
+            <p class="band-lede">
+              Headless <code>add</code>, <code>list</code>, and <code>steps</code> against the
+              same store. Plans from agents go in as JSON. They come out as <b>ready</b> tasks,
+              never as done ones.
+            </p>
+          </header>
+
+          <div class="cli-grid">
+            <pre class="shell" aria-label="CLI session"><span class="prompt">$</span> tsk add -t "Draft release notes" -p tsk --thread release --json
+<span class="dim">&#123;"outcome":"created","id":"5c1e…","number":32,"title":"Draft release notes","project":"tsk"&#125;</span>
+<span class="prompt">$</span> tsk steps T32 add "Write the failing test"
+<span class="dim">added 9f Write the failing test</span>
+<span class="prompt">$</span> tsk list T32
+<span class="dim">READY
+ - 32 Draft release notes #release
+   [ ] 9f Write the failing test</span>
+<span class="prompt">$</span> cat plan.json | tsk add
+<span class="dim">&#123; "created": [...], "existing": [...], "failed": [] &#125;</span></pre>
+
+            <div class="cli-side">
+              <h3 class="side-title">Exit contract</h3>
+              <table class="exits">
+                <tbody>
+                  <tr><th scope="row">0</th><td>listed, created, existed, or applied</td></tr>
+                  <tr><th scope="row">1</th><td>one or more item refusals. Retry the failed subset.</td></tr>
+                  <tr><th scope="row">2</th><td>usage or parse error. Nothing persisted.</td></tr>
+                  <tr><th scope="row">3</th><td>store I/O. Indeterminate. <code>tsk list</code> before retrying.</td></tr>
+                </tbody>
+              </table>
+              <p class="side-note">
+                Adds are idempotent on title, project, and thread. <code>--json</code> is flat
+                and stable. <a href="/docs/cli/">CLI reference →</a>
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ──────────────────────────── install ─────────────────────────── -->
+      <section class="band band-alt" id="install" aria-labelledby="install-heading">
+        <div class="band-inner" data-reveal>
+          <header class="band-head">
+            <span class="index">06 <span class="index-label">install</span></span>
+            <h2 id="install-heading">Build it. Open the board.</h2>
+            <p class="band-lede">
+              One binary, built from source. State lives in <code>~/.tsk</code> whether you run it
+              bare or inside herdr.
+            </p>
+          </header>
+
+          <div class="install" data-install>
+            <div class="tabs" role="tablist" aria-label="Install mode">
+              <button type="button" role="tab" id="tab-standalone" aria-selected="true" aria-controls="panel-standalone" data-install-tab="standalone">standalone</button>
+              <button type="button" role="tab" id="tab-plugin" aria-selected="false" aria-controls="panel-plugin" data-install-tab="plugin" tabindex="-1">herdr plugin</button>
+            </div>
+
+            <div class="tabpanel" role="tabpanel" id="panel-standalone" aria-labelledby="tab-standalone" data-install-panel="standalone">
+              <div class="shell-wrap">
+                <pre class="shell" data-copy-source><span class="prompt">$</span> git clone git@github.com:smarzban/herdr-tsk.git
+<span class="prompt">$</span> cd herdr-tsk
+<span class="prompt">$</span> cargo build --release
+<span class="prompt">$</span> ./target/release/tsk</pre>
+                <button type="button" class="copy" data-copy aria-label="Copy commands">copy</button>
+              </div>
+              <p class="install-note">
+                Add <code>target/release</code> to your <code>PATH</code> and <code>tsk add -t "First task"</code>
+                from anywhere. The board reads it on the next tick.
+              </p>
+            </div>
+
+            <div class="tabpanel" role="tabpanel" id="panel-plugin" aria-labelledby="tab-plugin" data-install-panel="plugin" hidden>
+              <div class="shell-wrap">
+                <pre class="shell" data-copy-source><span class="prompt">$</span> cargo build --release
+<span class="prompt">$</span> herdr plugin link "$PWD"
+<span class="prompt">$</span> herdr plugin action invoke open-board --plugin herdr-tsk</pre>
+                <button type="button" class="copy" data-copy aria-label="Copy commands">copy</button>
+              </div>
+              <p class="install-note">
+                The pane runs <code>./target/release/tsk</code>, so build before you link. A running
+                board keeps the old binary until you quit it.
+              </p>
+            </div>
+
+            <ul class="reqs" aria-label="Requirements">
+              <li><span class="dim">needs</span> Rust 1.96.0</li>
+              <li><span class="dim">on</span> Linux · macOS</li>
+              <li><span class="dim">plugin mode</span> herdr 0.7.5+</li>
+              <li><a href="/docs/install/">Full install guide →</a></li>
+            </ul>
           </div>
         </div>
       </section>
     </main>
 
     <footer class="site-foot">
-      <p>
-        <span class="mark">tsk</span>
-        <span class="foot-sep">·</span>
-        a task board for your terminal
-      </p>
-      <p>
-        <a href="/docs/">docs</a>
-        <span class="foot-sep">·</span>
-        <a href="https://github.com/smarzban/herdr-tsk" rel="noopener noreferrer"
-          >github.com/smarzban/herdr-tsk</a
-        >
-      </p>
+      <div class="foot-inner">
+        <p>
+          <span class="wordmark-text">tsk</span>
+          <span class="dim">· a task board for your terminal · v{VERSION} · MIT</span>
+        </p>
+        <p class="foot-links">
+          <a href="/docs/">docs</a>
+          <a href={REPO} rel="noopener noreferrer">github</a>
+          <a href="https://herdr.dev" rel="noopener noreferrer">herdr</a>
+        </p>
+      </div>
     </footer>
 
     <script is:inline src="/theme.js"></script>

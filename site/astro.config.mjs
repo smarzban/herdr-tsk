@@ -5,6 +5,8 @@ import starlight from '@astrojs/starlight';
 
 export default defineConfig({
   site: 'https://tsk-gules.vercel.app',
+  // Keep inter-tag whitespace: the landing copy relies on spaces between text and inline tags.
+  compressHTML: false,
   integrations: [
     sitemap(),
     starlight({
@@ -73,7 +75,7 @@ export default defineConfig({
           tag: 'link',
           attrs: {
             rel: 'stylesheet',
-            href: 'https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Syne:wght@600;700;800&display=swap',
+            href: 'https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,700;0,800;1,400&display=swap',
           },
         },
         {
