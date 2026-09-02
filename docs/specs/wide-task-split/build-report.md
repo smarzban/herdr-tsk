@@ -153,9 +153,13 @@ site build: 10 pages built
 
 Final two-seat Review panel verification reported no regressions. Terra marked every kept finding resolved. Claude marked six resolved and returned F-8 as still present without evidence; the harness judged F-8 resolved from the concrete app-level helper and test evidence.
 
+## Main integration
+
+Merged `origin/main` at `v0.4.0` as `6ed7d8f`, resolved the `AGENTS.md` guidance conflict, and adapted four feature test fixtures to the stabilized domain creation signature. The complete Rust bar passed with 711 passed, 0 failed, and 5 ignored across 26 result blocks. Site tests passed 6 of 6 and built 10 pages. A fresh isolated smoke of the rebuilt release binary passed at 110 and 109 columns, including active editor preservation and same-bound row click safety.
+
 ## Final build corroboration
 
-`sdlc-check 0.20.1 --require ledger --require verification-report`: 0 findings, 0 notes after report refresh. `git diff --check main...HEAD`: clean at product head `4586803`.
+`sdlc-check 0.20.1 --require ledger --require verification-report`: 0 findings, 0 notes after final report refresh. `git diff --check origin/main...HEAD`: clean at integrated product head `6ed7d8f`.
 
 ## Deviations
 
