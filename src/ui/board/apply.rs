@@ -411,7 +411,11 @@ fn apply_board_intent(
             );
         }
         BoardIntent::FormFocusNext => {
-            if model.input_mode == BoardInputMode::TaskPage {
+            if model.input_mode == BoardInputMode::EditStep {
+                // The inline row remains drafted, but Tab moves terminal focus through the
+                // task's ordinary edit fields.
+                model.focus_form_field(CaptureField::Title);
+            } else if model.input_mode == BoardInputMode::TaskPage {
                 if model.task_editing() {
                     // In an active task session, Tab leaves selected steps for the form fields.
                     // The form's normal Title → Notes → Thread → Scope cycle later returns to
@@ -430,7 +434,9 @@ fn apply_board_intent(
             return Ok(IntentOutcome::None);
         }
         BoardIntent::FormFocusPrev => {
-            if model.input_mode == BoardInputMode::TaskPage {
+            if model.input_mode == BoardInputMode::EditStep {
+                model.focus_form_field(CaptureField::Scope);
+            } else if model.input_mode == BoardInputMode::TaskPage {
                 if model.task_editing() {
                     // Reverse cycling from steps reaches Scope, the field immediately before
                     // the step group in the task-edit traversal.
@@ -542,6 +548,12 @@ fn apply_board_intent(
         }
         BoardIntent::BeginEditTitle | BoardIntent::BeginEditNotes | BoardIntent::BeginEditScope => {
             model.close_popup();
+            // Ctrl+E on an already-open inline row keeps that row focused. Field traversal is
+            // explicit through Tab or clicks, so this never discards or redirects its draft.
+            if intent == BoardIntent::BeginEditTitle && model.input_mode == BoardInputMode::EditStep
+            {
+                return Ok(IntentOutcome::None);
+            }
             let focus = match intent {
                 BoardIntent::BeginEditTitle => CaptureField::Title,
                 BoardIntent::BeginEditNotes => CaptureField::Notes,
@@ -1067,10 +1079,40 @@ fn apply_board_intent(
                     domain.get(task_id).and_then(|task| {
                         task.steps
                             .get(index)
-                            .map(|step| (step.id, step.text.clone()))
+                            .map(|step| (task_id, step.id, step.text.clone()))
                     })
                 });
-            if let Some((step_id, text)) = selected {
+            if let Some((task_id, step_id, text)) = selected {
+                if editing {
+                    let active_editor = model
+                        .form
+                        .as_ref()
+                        .and_then(|form| form.steps.editor.as_ref())
+                        .cloned();
+                    if let Some(editor) = active_editor {
+                        let same_step = editor.rename == Some(step_id);
+                        let dirty = match editor.rename {
+                            Some(current) => domain
+                                .get(task_id)
+                                .and_then(|task| task.steps.iter().find(|step| step.id == current))
+                                .is_some_and(|step| step.text != editor.buffer.value()),
+                            None => !editor.buffer.value().trim().is_empty(),
+                        };
+                        if same_step {
+                            if let Some(form) = model.form.as_mut() {
+                                form.steps.cursor = Some(index);
+                                steps_scroll_to_cursor(form, index);
+                            }
+                            model.input_mode = BoardInputMode::EditStep;
+                            model.clear_message();
+                            return Ok(IntentOutcome::None);
+                        }
+                        if dirty {
+                            model.set_message("save or cancel this step before switching");
+                            return Ok(IntentOutcome::None);
+                        }
+                    }
+                }
                 if let Some(form) = model.form.as_mut() {
                     form.steps.cursor = Some(index);
                     steps_scroll_to_cursor(form, index);
@@ -1747,6 +1789,16 @@ fn page_step_delete(
 /// a transient row when `None`.
 fn open_step_editor(model: &mut BoardModel, text: &str, rename: Option<Uuid>) {
     if let Some(form) = model.form.as_mut().filter(|form| form.is_task()) {
+        if form
+            .steps
+            .editor
+            .as_ref()
+            .is_some_and(|editor| editor.rename == rename)
+        {
+            model.input_mode = BoardInputMode::EditStep;
+            model.clear_message();
+            return;
+        }
         form.steps.editor = Some(StepEditor {
             buffer: crate::ui::edit::seeded_draft(text),
             rename,

@@ -1735,10 +1735,12 @@ fn view_tab_selection_wraps_without_starting_task_edit_and_ctrl_e_opens_inline_s
         rendered_board(&model, 80, 24).contains("▸ ✓ first step"),
         "the selected step is the inline editor"
     );
-    apply_intent(&mut domain, &mut model, BoardIntent::CancelEdit, None)
-        .expect("leave inline step edit");
-    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditNotes, None)
-        .expect("the active task session can edit notes too");
+    let tab = map_key(BoardInputMode::EditStep, press(KeyCode::Tab))
+        .expect("Tab leaves inline editing for Title");
+    apply_intent(&mut domain, &mut model, tab, None).expect("focus Title");
+    assert_eq!(model.input_mode(), BoardInputMode::EditTitle);
+    apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
+        .expect("Tab reaches Notes");
     assert_eq!(model.input_mode(), BoardInputMode::EditNotes);
 }
 

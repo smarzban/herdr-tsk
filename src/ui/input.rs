@@ -569,8 +569,21 @@ pub fn map_key_with(
         BoardInputMode::FormScopeDropdown => map_board_form_key(CaptureField::Scope, true, key),
         BoardInputMode::EditScope => map_board_form_key(CaptureField::Scope, false, key),
         BoardInputMode::EditThread => map_board_form_key(CaptureField::Thread, false, key),
-        BoardInputMode::EditTitle | BoardInputMode::EditNotes | BoardInputMode::EditStep => {
-            map_edit(mode, key)
+        BoardInputMode::EditTitle | BoardInputMode::EditNotes => map_edit(mode, key),
+        // A step edit belongs to the retained task form, not a modal editor. Tab therefore
+        // enters the task field traversal while its inline draft remains intact, while
+        // Shift+Enter keeps its add-mode save-and-next behavior.
+        BoardInputMode::EditStep => {
+            if key.code == KeyCode::Enter
+                && key.modifiers.contains(KeyModifiers::SHIFT)
+                && !key
+                    .modifiers
+                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+            {
+                Some(BoardIntent::ConfirmEditNext)
+            } else {
+                map_form_edit_key(CaptureField::Title, FormEditNavigation::Form, key)
+            }
         }
     }
 }

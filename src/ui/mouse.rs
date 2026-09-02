@@ -601,9 +601,18 @@ pub fn map_board_mouse(
             _ => None,
         },
         BoardInputMode::EditStep => match hit_at(hits, pos) {
+            Some(QueueHitTarget::FormTitle) => {
+                Some(BoardIntent::FocusFormField(CaptureField::Title))
+            }
+            Some(QueueHitTarget::FormNotes(_)) => {
+                Some(BoardIntent::FocusFormField(CaptureField::Notes))
+            }
+            Some(QueueHitTarget::FormThread) => {
+                Some(BoardIntent::FocusFormField(CaptureField::Thread))
+            }
+            Some(QueueHitTarget::FormScope) => Some(BoardIntent::OpenFormScopeDropdown),
+            Some(QueueHitTarget::Step(index)) => Some(BoardIntent::SelectStep(index)),
             Some(QueueHitTarget::Verb(index)) => verb_intent(model, index),
-            // The text line keeps terminal focus, and every other hit remains inert rather
-            // than reaching the task page behind the editor.
             _ => None,
         },
         BoardInputMode::SaveRecovery => None,

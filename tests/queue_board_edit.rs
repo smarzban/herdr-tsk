@@ -856,7 +856,7 @@ fn editing_an_unthreaded_task_paints_a_labeled_thread_footer_slot() {
 }
 
 #[test]
-fn thread_field_is_inert_while_the_inline_step_editor_owns_input() {
+fn thread_field_is_reachable_while_the_inline_step_editor_keeps_its_draft() {
     let mut domain = DomainState::new();
     domain
         .create_with_thread(
@@ -889,14 +889,21 @@ fn thread_field_is_inert_while_the_inline_step_editor_owns_input() {
         BoardIntent::FocusFormField(CaptureField::Thread),
         None,
     )
-    .expect("inert focus");
-    assert_eq!(model.input_mode(), BoardInputMode::EditStep);
+    .expect("focus Thread");
+    assert_eq!(model.input_mode(), BoardInputMode::EditThread);
+    let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("test terminal");
+    terminal
+        .draw(|frame| {
+            let _ = draw_board(frame, &model);
+        })
+        .expect("draw Thread with inline draft");
+    let buffer = terminal.backend().buffer();
+    let painted = (0..24)
+        .flat_map(|y| (0..80).map(move |x| buffer[(x, y)].symbol()))
+        .collect::<String>();
     assert!(
-        board_hit_map(Rect::new(0, 0, 80, 24), &model)
-            .regions
-            .iter()
-            .any(|hit| hit.target == QueueHitTarget::FormThread),
-        "the meta footer stays painted, but the inline editor keeps focus"
+        painted.contains("step…"),
+        "moving to Thread keeps the inline step draft visible: {painted}"
     );
 }
 

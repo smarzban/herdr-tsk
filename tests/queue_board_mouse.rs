@@ -1853,11 +1853,45 @@ fn clicking_a_step_row_opens_its_inline_editor() {
         selected.join("\n")
     );
 
-    // While the inline editor owns focus, its row remains the only editable page surface.
+    // Inline step editing is part of the task form, not a modal: page field clicks move focus
+    // without discarding the displayed row draft.
+    let title_hit = hits
+        .regions
+        .iter()
+        .find(|hit| hit.target == QueueHitTarget::FormTitle)
+        .expect("task page paints a title hit");
     assert_eq!(
-        map_board_mouse(&model, &hits, left_click(3, step_y as u16)),
+        click(title_hit, &model, &hits),
+        Some(BoardIntent::FocusFormField(CaptureField::Title))
+    );
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::FocusFormField(CaptureField::Title),
         None,
-        "a second click cannot reach through the active inline editor"
+    )
+    .expect("focus title from inline step editor");
+    assert_eq!(model.input_mode(), BoardInputMode::EditTitle);
+
+    // A clean inline draft also permits switching straight to another step editor.
+    let hits = board_hit_map(STANDARD, &model);
+    let bravo_hit = hits
+        .regions
+        .iter()
+        .find(|hit| hit.target == QueueHitTarget::Step(1))
+        .expect("second step hit");
+    assert_eq!(
+        click(bravo_hit, &model, &hits),
+        Some(BoardIntent::SelectStep(1))
+    );
+    apply_intent(&mut domain, &mut model, BoardIntent::SelectStep(1), None)
+        .expect("switch inline editor to second step");
+    assert_eq!(model.input_mode(), BoardInputMode::EditStep);
+    assert!(
+        page_rows(&model)
+            .iter()
+            .any(|row| row.contains("▸ ▪ bravo step")),
+        "the second click switches the inline editor"
     );
 }
 

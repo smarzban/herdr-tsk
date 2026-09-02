@@ -19,8 +19,9 @@ selects it, and `Enter` keeps that selection read-only.
 
 - `ctrl+space` toggles a selected step in either view or an edit session
 - `ctrl+e` on a selected step starts the task edit session and opens its inline editor
-- In an edit session, `Tab` cycles Title, Notes, Thread, Scope, then returns to steps
-- In an edit session, clicking a step opens its inline editor
+- From an inline editor, `Tab` cycles Title, Notes, Thread, Scope, then returns to steps
+- From an inline editor, clicking any task field moves focus there and keeps the step draft
+- In an edit session, clicking a clean step opens its inline editor; save or cancel a changed draft before switching steps
 - `↑` / `↓` move a selected step; `↑` from the first step returns to page reading
 
 With the cursor selected, the usual verbs act on that step:

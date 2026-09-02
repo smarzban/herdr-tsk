@@ -1515,10 +1515,7 @@ impl BoardModel {
         let Some(form) = self.form.as_mut() else {
             return;
         };
-        if matches!(
-            self.input_mode,
-            BoardInputMode::FormScopeDropdown | BoardInputMode::EditStep
-        ) {
+        if self.input_mode == BoardInputMode::FormScopeDropdown {
             return;
         }
         if form.is_task() {
