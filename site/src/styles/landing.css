@@ -191,22 +191,12 @@ kbd + kbd {
   width: auto;
 }
 
-.wordmark .wm-block,
-.ic-block {
+.wordmark .wm-block {
   fill: var(--accent);
-}
-
-.wordmark-foot {
-  gap: 0.55rem;
 }
 
 .wordmark-foot .wm {
   height: 1.1rem;
-}
-
-.wordmark-foot .ic {
-  height: 1.1rem;
-  width: auto;
 }
 
 .ver {
@@ -345,9 +335,9 @@ html[data-theme="light"] .theme-toggle .icon-moon {
 
 .block-cursor {
   display: inline-block;
-  width: 0.48em;
+  width: 0.16em;
   height: 0.82em;
-  margin-left: 0.08em;
+  margin-left: 0.1em;
   background: var(--accent);
   vertical-align: -0.06em;
   animation: blink 1.1s steps(1) infinite;
@@ -515,13 +505,16 @@ html[data-theme="light"] .pane {
   background: var(--bg);
 }
 
-.pane-tab .ic {
-  height: 0.85rem;
-  width: auto;
+.pane-dot {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 10px var(--accent-glow);
 }
 
-.pane.is-focused .pane-tab .ic-block {
-  filter: drop-shadow(0 0 4px var(--accent-glow));
+.pane.is-focused .pane-dot {
+  animation: pulse 1.6s ease-in-out infinite;
 }
 
 .pane-title {
