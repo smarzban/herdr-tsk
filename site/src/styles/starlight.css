@@ -12,15 +12,15 @@
   --sl-color-gray-2: #aca89e;
   --sl-color-gray-3: #7d7a72;
   --sl-color-gray-4: #4a4843;
-  --sl-color-gray-5: #2e2e33;
-  --sl-color-gray-6: #151517;
-  --sl-color-black: #0a0a0b;
-  --sl-color-bg: #0a0a0b;
-  --sl-color-bg-nav: #0f0f11;
-  --sl-color-bg-sidebar: #0f0f11;
-  --sl-color-hairline: #222226;
-  --sl-color-hairline-light: #222226;
-  --sl-color-hairline-shade: #151517;
+  --sl-color-gray-5: #36363b;
+  --sl-color-gray-6: #1d1d20;
+  --sl-color-black: #121214;
+  --sl-color-bg: #121214;
+  --sl-color-bg-nav: #171719;
+  --sl-color-bg-sidebar: #171719;
+  --sl-color-hairline: #2a2a2e;
+  --sl-color-hairline-light: #2a2a2e;
+  --sl-color-hairline-shade: #1d1d20;
   --sl-color-text-accent: #f2a93b;
 }
 
