@@ -1536,9 +1536,6 @@ impl BoardModel {
         let Some(form) = self.form.as_ref().filter(|form| form.is_task()) else {
             return false;
         };
-        if !form.editing {
-            return false;
-        }
         let Some(index) = form.steps.cursor else {
             return false;
         };

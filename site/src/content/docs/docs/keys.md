@@ -47,7 +47,7 @@ The page is view-first. Verbs still need the modifier, except Tab and arrows.
 
 | Key | Does |
 | --- | --- |
-| `ctrl+e` | edit title (or rename the highlighted step) |
+| `ctrl+e` | edit title, or start task editing with the highlighted step inline |
 | `ctrl+n` | edit notes |
 | `Tab` / `Shift+Tab` | select and cycle steps, wrapping at either end; without steps, move through task fields |
 | `ctrl+a` | add an inline [step](/docs/steps/) after editing has started |

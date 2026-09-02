@@ -543,10 +543,10 @@ fn apply_board_intent(
                 BoardIntent::BeginEditScope => CaptureField::Scope,
                 _ => unreachable!("matched task-form entry intent"),
             };
-            // Contextual rename: on the page with the step cursor active, `e` opens the
-            // highlighted step's in-place editor instead of the title field.
+            // Ctrl+E on a selected step begins the whole task edit session and opens that
+            // row's in-place editor, including when the selection was made in task view.
             if intent == BoardIntent::BeginEditTitle {
-                if let Some((task_id, step_id)) = cursor_step(domain, model) {
+                if let Some((task_id, step_id)) = selected_step(domain, model) {
                     let text = domain.get(task_id).and_then(|task| {
                         task.steps
                             .iter()
@@ -554,6 +554,9 @@ fn apply_board_intent(
                             .map(|step| step.text.clone())
                     });
                     if let Some(text) = text {
+                        if let Some(form) = model.form.as_mut().filter(|form| form.is_task()) {
+                            form.editing = true;
+                        }
                         open_step_editor(model, &text, Some(step_id));
                         return Ok(IntentOutcome::None);
                     }
@@ -979,10 +982,9 @@ fn apply_board_intent(
         BoardIntent::RetrySave | BoardIntent::CancelSave => return Ok(IntentOutcome::None),
         BoardIntent::PrimaryVerb => {
             model.close_popup();
-            // With the page's step cursor active, `space` toggles the highlighted
-            // steps step (never the task's status); every other context keeps the
-            // state-mapped status verb.
-            if let Some((task_id, step_id)) = cursor_step(domain, model) {
+            // A selected page step toggles with Ctrl+Space in either task view or its edit
+            // session. Every other context keeps the state-mapped status verb.
+            if let Some((task_id, step_id)) = selected_step(domain, model) {
                 domain.toggle_step(task_id, step_id)?;
             } else {
                 let Some(id) = model.selected_id() else {
@@ -1030,8 +1032,8 @@ fn apply_board_intent(
             }
         }
         BoardIntent::OpenTaskPage => {
-            // Enter on a selected step starts that row's in-place rename. Otherwise it keeps
-            // the ordinary page toggle: close on page, open from the board.
+            // Enter starts in-place rename only in an active task edit session. A selected step
+            // in task view remains selected and keeps the page open until Ctrl+E starts editing.
             if let Some((task_id, step_id)) = cursor_step(domain, model) {
                 if let Some(text) = domain.get(task_id).and_then(|task| {
                     task.steps
@@ -1042,6 +1044,9 @@ fn apply_board_intent(
                     open_step_editor(model, &text, Some(step_id));
                     return Ok(IntentOutcome::None);
                 }
+            }
+            if selected_step(domain, model).is_some() {
+                return Ok(IntentOutcome::None);
             }
             if model.form.as_ref().is_some_and(BoardForm::is_task) {
                 model.form = None;
@@ -1576,8 +1581,8 @@ fn select_step_from_tab(model: &mut BoardModel, forward: bool) -> bool {
     true
 }
 
-/// Start a task-page Tab cycle on its first step. This is the intentional bridge from
-/// view-first reading into a task edit session when the task actually has a checklist.
+/// Start a task-page Tab cycle on its first step without leaving view mode. Ctrl+E later
+/// promotes that selection into the task edit session and opens its inline editor.
 fn select_first_step_from_page(model: &mut BoardModel) -> bool {
     let has_steps = model.form.as_ref().and_then(|form| {
         let task_id = form.task_id()?;
@@ -1595,7 +1600,6 @@ fn select_first_step_from_page(model: &mut BoardModel) -> bool {
         .as_mut()
         .filter(|form| form.is_task())
         .expect("the checked task form stays open");
-    form.editing = true;
     form.steps.cursor = Some(0);
     steps_scroll_to_cursor(form, 0);
     true
@@ -1605,7 +1609,7 @@ fn select_first_step_from_page(model: &mut BoardModel) -> bool {
 /// Tab never unexpectedly changes into a task-field editor after the final step.
 fn move_step_with_tab(model: &mut BoardModel, forward: bool) -> bool {
     let target = model.form.as_ref().and_then(|form| {
-        if !form.is_task() || !form.editing {
+        if !form.is_task() {
             return None;
         }
         let index = form.steps.cursor?;
@@ -1631,23 +1635,24 @@ fn move_step_with_tab(model: &mut BoardModel, forward: bool) -> bool {
     true
 }
 
-/// The step the page's cursor highlights, as (task id, step id), when the page is in
-/// view mode with a task form open, the step cursor active, and the highlighted index
-/// still naming a live step. `None` in every other case — including a cursor left past
-/// the end of a steps another actor shrank — so verbs degrade to their inactive
-/// behavior instead of acting on a stale index.
-fn cursor_step(domain: &DomainState, model: &BoardModel) -> Option<(Uuid, Uuid)> {
+/// Resolve the page's selected step to live task and step ids, declining a stale index after
+/// a domain change. Task view and task edit sessions share this selection.
+fn selected_step(domain: &DomainState, model: &BoardModel) -> Option<(Uuid, Uuid)> {
     if model.input_mode != BoardInputMode::TaskPage {
         return None;
     }
-    let form = model
-        .form
-        .as_ref()
-        .filter(|form| form.is_task() && form.editing)?;
+    let form = model.form.as_ref().filter(|form| form.is_task())?;
     let task_id = form.task_id()?;
     let index = form.steps.cursor?;
     let step_id = domain.get(task_id)?.steps.get(index).map(|step| step.id)?;
     Some((task_id, step_id))
+}
+
+/// Resolve a selected step only while the task's edit session is active. This gates inline
+/// editing and destructive step verbs, while Ctrl+Space may toggle a view-mode selection.
+fn cursor_step(domain: &DomainState, model: &BoardModel) -> Option<(Uuid, Uuid)> {
+    model.task_editing().then_some(())?;
+    selected_step(domain, model)
 }
 
 /// Keep the selected step in the renderer-recorded shared content viewport.

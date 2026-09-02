@@ -1573,9 +1573,25 @@ fn board_with_steps(
     // to bring the first selected step into view.
     let _ = rendered_board(&model, 80, 24);
     if !steps.is_empty() {
-        // From view mode, Tab begins an edit session on the first available step.
+        // Tab first selects in view mode. Open and cancel Notes to establish the active task
+        // edit session used by these step-editor fixtures while preserving that selection.
         apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
             .expect("tab into first step");
+        apply_intent(&mut domain, &mut model, BoardIntent::BeginEditNotes, None)
+            .expect("start task edit session");
+        apply_intent(&mut domain, &mut model, BoardIntent::CancelEdit, None)
+            .expect("return to task page");
+        // Notes entry resets the shared stream origin. Restore the first selected step's
+        // anchor, whether its ring wraps onto itself or has a second row to visit.
+        if steps.len() == 1 {
+            apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
+                .expect("reselect the only step");
+        } else {
+            apply_intent(&mut domain, &mut model, BoardIntent::PageScrollDown, None)
+                .expect("advance selected step");
+            apply_intent(&mut domain, &mut model, BoardIntent::PageScrollUp, None)
+                .expect("return to first selected step");
+        }
     }
     (domain, model, id)
 }
@@ -1634,6 +1650,69 @@ fn view_mode_rejects_step_clicks_and_add_until_a_task_edit_session_starts() {
         Some(BoardIntent::SelectStep(0)),
         "the same row becomes selectable once editing has started"
     );
+}
+
+#[test]
+fn view_tab_selection_wraps_without_starting_task_edit_and_ctrl_e_opens_inline_step_edit() {
+    let mut domain = DomainState::new();
+    let id = domain
+        .create(
+            "View tab selection",
+            None,
+            project(THIS_REPO),
+            None,
+            None,
+            ProvenanceOrigin::Manual,
+        )
+        .expect("create");
+    domain.add_step(id, "first step").expect("first");
+    domain.add_step(id, "second step").expect("second");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open");
+    let _ = rendered_board(&model, 80, 24);
+
+    apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
+        .expect("Tab selects first");
+    assert!(rendered_board(&model, 80, 24).contains("▸ ▪ first step"));
+    assert!(!model.task_editing(), "Tab must not start task editing");
+    apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
+        .expect("Tab selects second");
+    apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
+        .expect("Tab wraps to first");
+    assert!(rendered_board(&model, 80, 24).contains("▸ ▪ first step"));
+    assert!(!model.task_editing(), "wrapping remains task view mode");
+
+    let toggle =
+        map_key(BoardInputMode::TaskPage, press(KeyCode::Null)).expect("terminal Ctrl+Space NUL");
+    apply_intent(&mut domain, &mut model, toggle, None).expect("toggle selected step");
+    assert!(domain.get(id).expect("task").steps[0].done);
+    assert_eq!(
+        model.input_mode(),
+        BoardInputMode::TaskPage,
+        "toggle keeps task view open"
+    );
+
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None)
+        .expect("Enter on view selection is inert");
+    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+    assert!(!model.task_editing());
+
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+        .expect("Ctrl+E starts editing the selected step");
+    assert_eq!(model.input_mode(), BoardInputMode::EditStep);
+    assert!(
+        model.task_editing(),
+        "Ctrl+E starts the whole task edit session"
+    );
+    assert!(
+        rendered_board(&model, 80, 24).contains("▸ ✓ first step"),
+        "the selected step is the inline editor"
+    );
+    apply_intent(&mut domain, &mut model, BoardIntent::CancelEdit, None)
+        .expect("leave inline step edit");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditNotes, None)
+        .expect("the active task session can edit notes too");
+    assert_eq!(model.input_mode(), BoardInputMode::EditNotes);
 }
 
 #[test]
@@ -1719,7 +1798,7 @@ fn arrow_keys_move_the_cursor_through_shared_steps() {
     );
 }
 
-/// Terminal-encoded Ctrl+Space (NUL) with the cursor active toggles exactly the highlighted
+/// Terminal-encoded Ctrl+Space (bare NUL) with the cursor active toggles exactly the highlighted
 /// step through the real apply/save path: domain command, revision bump, journaled
 /// event, Persist outcome -- and the task's human status never changes.
 #[test]
@@ -1731,11 +1810,11 @@ fn modifier_toggle_flips_step_under_cursor() {
     );
     let revision_before = domain.get(id).expect("task").revision;
 
-    // Tab selected the first step in the edit session, then Down moves to "bravo step".
+    // The active task-edit fixture starts on the first step, then Down moves to "bravo step".
     apply_intent(&mut domain, &mut model, BoardIntent::PageScrollDown, None).expect("cursor down");
 
-    let toggle =
-        map_key(BoardInputMode::TaskPage, ctrl(KeyCode::Null)).expect("terminal Ctrl+Space NUL");
+    let toggle = map_key(BoardInputMode::TaskPage, press(KeyCode::Null))
+        .expect("terminal Ctrl+Space NUL without a modifier bit");
     assert_eq!(toggle, BoardIntent::PrimaryVerb);
     let outcome = apply_intent(&mut domain, &mut model, toggle, None).expect("toggle");
     assert_eq!(

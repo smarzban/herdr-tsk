@@ -8,8 +8,9 @@ header copies that task identifier when clicked.
 
 It is view-first. Nothing is in edit mode until you ask. `ctrl+e` edits the title,
 `ctrl+n` edits notes, and `Tab` selects the first step when steps exist. Tab and
-Shift+Tab cycle selected steps, wrapping at either end. The scope footer does
-nothing until an edit has started.
+Shift+Tab cycle selected steps, wrapping at either end, without leaving task view.
+`ctrl+e` on that selection starts task editing with the step inline. The scope
+footer does nothing until an edit has started.
 
 `Shift+Enter` saves from any task field. Field `Esc` cancels that field. Page
 `Esc` closes the page.

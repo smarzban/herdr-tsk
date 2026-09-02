@@ -905,8 +905,8 @@ fn map_normal(key: KeyEvent, verbs: VerbModifier) -> Option<BoardIntent> {
 }
 
 /// Task page view mode: the page is a focused single-task surface. Ctrl verbs act on the
-/// page's task, Ctrl+E/Ctrl+N or Tab enter its field editing session, and bare arrows scroll
-/// unless a step has been selected. Esc closes.
+/// page's task. Ctrl+E/Ctrl+N enter its edit session, while Tab selects and cycles steps in
+/// task view. Bare arrows scroll unless a step has been selected. Esc closes.
 ///
 /// The step verbs reuse this map's existing intents: Ctrl+Space, Ctrl+E, and Ctrl+X act on a
 /// selected step, otherwise on the task. The reducer disambiguates using the model cursor.
@@ -921,8 +921,15 @@ fn map_task_page(key: KeyEvent, verbs: VerbModifier) -> Option<BoardIntent> {
         KeyCode::Esc if !extra => Some(BoardIntent::CloseLayer),
         KeyCode::Char('q') if verb => Some(BoardIntent::CloseLayer),
         KeyCode::Enter if !extra => Some(BoardIntent::OpenTaskPage),
-        // Most terminals encode Ctrl+Space as NUL rather than Ctrl plus a printable space.
-        KeyCode::Char(' ') | KeyCode::Null if verb => Some(BoardIntent::PrimaryVerb),
+        // Conventional terminal input encodes Ctrl+Space as a bare NUL, losing the Ctrl
+        // modifier. Enhanced terminals retain Ctrl and may use either Null or a printable
+        // space. All three representations are the task page's primary verb.
+        KeyCode::Null | KeyCode::Char('\0')
+            if !mods.intersects(KeyModifiers::ALT | KeyModifiers::SUPER) =>
+        {
+            Some(BoardIntent::PrimaryVerb)
+        }
+        KeyCode::Char(' ') if verb => Some(BoardIntent::PrimaryVerb),
         KeyCode::Char('a') if verb => Some(BoardIntent::BeginAddStep),
         KeyCode::Char('d') if verb => Some(BoardIntent::Complete),
         KeyCode::Char('o') if verb => Some(BoardIntent::Reopen),

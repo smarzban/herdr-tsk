@@ -14,10 +14,12 @@ Markdown `- [ ]` in notes is ordinary text. Use steps for checklists.
 ## On the task page
 
 Open the task with `Enter`. The step cursor begins inactive. `Tab` selects the
-first step when one exists, which starts the task edit session. `Tab` and
-`Shift+Tab` then cycle steps and wrap at either end.
+first step when one exists. `Tab` and `Shift+Tab` then cycle steps and wrap at
+either end without leaving task view.
 
-- In view mode, clicks leave steps alone
+- In view mode, clicks leave steps alone and `Enter` keeps a selected step selected
+- `ctrl+space` toggles a selected step in either view or an edit session
+- `ctrl+e` on a selected step starts the task edit session and opens its inline editor
 - In an edit session, click a step or press `Enter` on its selected row to edit it inline
 - `↑` / `↓` move a selected step; `↑` from the first step returns to page reading
 
