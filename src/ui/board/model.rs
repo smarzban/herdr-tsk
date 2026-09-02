@@ -30,6 +30,14 @@ use super::commands::CommandSurface;
 /// Visible board title. Also the herdr pane title.
 pub const BOARD_TITLE: &str = "Tasks";
 
+const DIRTY_TASK_SWITCH_REFUSAL: &str = "save or cancel edits before switching tasks";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SelectionRetarget {
+    Explicit,
+    Reanchor,
+}
+
 /// Board chrome input mode (normal list vs field edit).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum BoardInputMode {
@@ -210,6 +218,10 @@ pub(super) struct BoardForm {
     pub(super) scope_options: Vec<TaskScope>,
     pub(super) scope_selected: usize,
     pub(super) binding: BoardFormBinding,
+    /// Editable values as they stood when this task session bound or last saved successfully.
+    /// Dirty checks use this immutable baseline rather than the live domain snapshot, which can
+    /// advance independently while the user is editing.
+    pub(super) task_snapshot: Option<Box<Task>>,
     /// View-mode scroll of the task page's shared notes-and-steps body, never used by capture.
     pub(super) notes_scroll: usize,
     /// Page-session steps state (step cursor, window scroll, delete mark, step
@@ -248,6 +260,7 @@ impl BoardForm {
             tasks,
         );
         form.thread = seeded_draft(task.thread.as_deref().unwrap_or_default());
+        form.task_snapshot = Some(Box::new(task.clone()));
         form
     }
 
@@ -301,6 +314,7 @@ impl BoardForm {
             scope_options,
             scope_selected,
             binding,
+            task_snapshot: None,
             notes_scroll: 0,
             steps: StepsPageState::default(),
             notes_max_scroll: std::cell::Cell::new(0),
@@ -352,6 +366,14 @@ impl BoardForm {
             CaptureField::Scope => {
                 self.scope = task.scope.clone();
                 self.select_current_scope();
+            }
+        }
+        if let Some(snapshot) = self.task_snapshot.as_mut() {
+            match field {
+                CaptureField::Title => snapshot.title = task.title.clone(),
+                CaptureField::Notes => snapshot.notes = task.notes.clone(),
+                CaptureField::Thread => snapshot.thread = task.thread.clone(),
+                CaptureField::Scope => snapshot.scope = task.scope.clone(),
             }
         }
     }
@@ -791,6 +813,7 @@ impl BoardModel {
                     form.steps.removals.clear();
                     form.steps.add_selected = false;
                     form.steps.delete_mark = None;
+                    form.task_snapshot = Some(Box::new(task));
                 }
                 self.hold_task_edit_save = false;
                 self.input_mode = BoardInputMode::TaskPage;
@@ -877,7 +900,7 @@ impl BoardModel {
             // lens actually renders it (project focus never reveals across scopes).
             self.reveal_task_on_home(id);
             if self.visible_ids().contains(&id) {
-                self.selection_id = Some(id);
+                self.retarget_selection(Some(id), SelectionRetarget::Reanchor);
                 self.follow_list.set(true);
             } else {
                 // Anchor on the saved id's old position when it had one (an edit that
@@ -1373,7 +1396,7 @@ impl BoardModel {
         }
         let pending = self.quick_add_save.take().expect("checked quick-add save");
         self.saved_task = Some(pending.id);
-        self.selection_id = Some(pending.id);
+        self.retarget_selection(Some(pending.id), SelectionRetarget::Reanchor);
         self.reveal_task_on_home(pending.id);
         // The pending create is now durable. This is the only point an expanded quick-add
         // may release its complete form, so a failed save can still return to that stash.
@@ -1417,10 +1440,14 @@ impl BoardModel {
             self.task_edit_save = Some(pending);
             return;
         }
+        let saved_snapshot = self
+            .tasks
+            .iter()
+            .find(|task| task.id == pending.id)
+            .cloned();
         let selected_step_cursor = pending.selected_step.and_then(|selected_step| {
-            self.tasks
-                .iter()
-                .find(|task| task.id == pending.id)
+            saved_snapshot
+                .as_ref()
                 .and_then(|task| task.steps.iter().position(|step| step.id == selected_step))
         });
         if let Some(form) = self.form.as_mut().filter(|form| form.is_task()) {
@@ -1442,6 +1469,7 @@ impl BoardModel {
             form.steps.removals.clear();
             form.steps.cursor = selected_step_cursor;
             form.steps.add_selected = false;
+            form.task_snapshot = saved_snapshot.map(Box::new);
         }
         self.input_mode = BoardInputMode::TaskPage;
         self.clear_message();
@@ -1486,8 +1514,10 @@ impl BoardModel {
         if !landed {
             return;
         }
+        let saved_snapshot = self.tasks.iter().find(|task| task.id == task_id).cloned();
         let form = self.form.as_mut().expect("task form checked above");
         form.steps.pending_save = None;
+        form.task_snapshot = saved_snapshot.map(Box::new);
         if pending.reopen {
             // The rapid-capture loop: the in-place row reopens empty for the next step, its
             // mode never having left it.
@@ -1658,6 +1688,49 @@ impl BoardModel {
             .as_ref()
             .filter(|form| form.is_task())
             .is_some_and(|form| form.editing)
+    }
+
+    /// Whether the bound task session contains an unsaved user change.
+    ///
+    /// Geometry and editor presence are deliberately absent: opening an editor is clean. Only
+    /// field values that differ from the bound snapshot, staged existing-step changes or removals,
+    /// and a non-empty new-step draft make the session dirty.
+    pub fn task_session_dirty(&self) -> bool {
+        let Some(form) = self.form.as_ref().filter(|form| form.is_task()) else {
+            return false;
+        };
+        let Some(snapshot) = form.task_snapshot.as_deref() else {
+            return false;
+        };
+        if form.title.value() != snapshot.title
+            || form.notes.value() != snapshot.notes.as_deref().unwrap_or_default()
+            || form.thread.value() != snapshot.thread.as_deref().unwrap_or_default()
+            || form.scope != snapshot.scope
+            || !form.steps.removals.is_empty()
+        {
+            return true;
+        }
+        let changed_existing_step = |id: Uuid, value: &str| {
+            snapshot
+                .steps
+                .iter()
+                .find(|step| step.id == id)
+                .is_none_or(|step| step.text != value)
+        };
+        if form
+            .steps
+            .drafts
+            .iter()
+            .any(|(id, draft)| changed_existing_step(*id, draft.value()))
+        {
+            return true;
+        }
+        form.steps.editor.as_ref().is_some_and(|editor| {
+            editor.rename.map_or_else(
+                || !editor.buffer.value().is_empty(),
+                |id| changed_existing_step(id, editor.buffer.value()),
+            )
+        })
     }
 
     pub(super) fn cycle_form_scope(&mut self) {
@@ -1860,16 +1933,55 @@ impl BoardModel {
                 .flat_map(|section| section.task_ids.iter().copied())
                 .find(|id| visible.contains(id))
             {
-                self.selection_id = Some(id);
+                self.retarget_selection(Some(id), SelectionRetarget::Reanchor);
                 self.follow_list.set(true);
                 return;
             }
         }
-        self.selection_id = None;
+        self.retarget_selection(None, SelectionRetarget::Reanchor);
         self.follow_list.set(true);
     }
 
-    /// Re-pin selection after the visible set changes (edit bind wins while still visible).
+    /// The only boundary that may replace the selected task while a task form is retained.
+    /// A dirty form keeps both its selection and immutable binding on the same task.
+    fn retarget_selection(&mut self, requested: Option<Uuid>, source: SelectionRetarget) -> bool {
+        let bound = self.edit_target();
+        let bound_is_visible = bound.is_some_and(|id| self.visible_ids().contains(&id));
+        let must_keep_dirty_binding = source == SelectionRetarget::Explicit || bound_is_visible;
+        if self.task_session_dirty() && must_keep_dirty_binding && requested != bound {
+            if bound_is_visible {
+                self.selection_id = bound;
+            }
+            if self.popup != BoardPopup::SaveRecovery {
+                self.set_message(DIRTY_TASK_SWITCH_REFUSAL);
+            }
+            return false;
+        }
+        if source == SelectionRetarget::Explicit
+            && requested != bound
+            && self.form.as_ref().is_some_and(BoardForm::is_task)
+        {
+            self.form = requested.and_then(|id| {
+                self.tasks.iter().find(|task| task.id == id).map(|task| {
+                    BoardForm::task(
+                        task,
+                        self.this_repo.as_deref(),
+                        &self.tasks,
+                        CaptureField::Title,
+                    )
+                })
+            });
+            self.input_mode = if self.form.is_some() {
+                BoardInputMode::TaskPage
+            } else {
+                BoardInputMode::Normal
+            };
+        }
+        self.selection_id = requested;
+        true
+    }
+
+    /// Re-pin selection after the visible set changes through the shared retarget boundary.
     pub(super) fn reanchor_selection(&mut self, previous: Option<Uuid>, previous_visible: &[Uuid]) {
         let new_visible = self.visible_ids();
         if self
@@ -1878,14 +1990,11 @@ impl BoardModel {
         {
             self.close_detail();
         }
-        if let Some(bound) = self.edit_target() {
-            if new_visible.contains(&bound) {
-                self.selection_id = Some(bound);
-                return;
-            }
+        let requested = selection::reanchor(previous, previous_visible, &new_visible);
+        if !self.retarget_selection(requested, SelectionRetarget::Reanchor) {
+            return;
         }
         self.follow_list.set(true);
-        self.selection_id = selection::reanchor(previous, previous_visible, &new_visible);
         // `reanchor` defers when `previous` was `None`; if rows exist again (e.g. CancelSave
         // restored a completed task into the deck), seed rather than leave the pin empty.
         if self.selection_id.is_none() && !new_visible.is_empty() {
@@ -1908,54 +2017,63 @@ impl BoardModel {
         };
     }
 
-    pub(super) fn select_next(&mut self) {
-        self.close_popup();
+    pub(super) fn select_next(&mut self) -> bool {
         let ids = self.visible_ids();
-        if ids.is_empty() {
-            self.selection_id = None;
-            return;
-        }
-        let next = match self
-            .selection_id
-            .and_then(|id| ids.iter().position(|&row| row == id))
-        {
-            Some(i) => ids[(i + 1) % ids.len()],
-            None => ids[0],
+        let requested = if ids.is_empty() {
+            None
+        } else {
+            Some(
+                match self
+                    .selection_id
+                    .and_then(|id| ids.iter().position(|&row| row == id))
+                {
+                    Some(i) => ids[(i + 1) % ids.len()],
+                    None => ids[0],
+                },
+            )
         };
-        self.selection_id = Some(next);
+        if !self.retarget_selection(requested, SelectionRetarget::Explicit) {
+            return false;
+        }
+        self.close_popup();
         self.follow_list.set(true);
+        true
     }
 
-    pub(super) fn select_prev(&mut self) {
-        self.close_popup();
+    pub(super) fn select_prev(&mut self) -> bool {
         let ids = self.visible_ids();
-        if ids.is_empty() {
-            self.selection_id = None;
-            return;
-        }
-        let prev = match self
-            .selection_id
-            .and_then(|id| ids.iter().position(|&row| row == id))
-        {
-            Some(0) | None => ids[ids.len() - 1],
-            Some(i) => ids[i - 1],
+        let requested = if ids.is_empty() {
+            None
+        } else {
+            Some(
+                match self
+                    .selection_id
+                    .and_then(|id| ids.iter().position(|&row| row == id))
+                {
+                    Some(0) | None => ids[ids.len() - 1],
+                    Some(i) => ids[i - 1],
+                },
+            )
         };
-        self.selection_id = Some(prev);
+        if !self.retarget_selection(requested, SelectionRetarget::Explicit) {
+            return false;
+        }
+        self.close_popup();
         self.follow_list.set(true);
+        true
     }
 
-    pub(super) fn select_index(&mut self, idx: usize) {
+    pub(super) fn select_index(&mut self, idx: usize) -> bool {
+        let Some(&requested) = self.visible_ids().get(idx) else {
+            return false;
+        };
+        if !self.retarget_selection(Some(requested), SelectionRetarget::Explicit) {
+            return false;
+        }
         self.close_popup();
-        let ids = self.visible_ids();
-        if ids.is_empty() {
-            self.selection_id = None;
-            return;
-        }
-        if let Some(&id) = ids.get(idx) {
-            self.selection_id = Some(id);
-            // Nudge only if this row is off-screen; a click on a visible row stays put.
-            self.follow_list.set(true);
-        }
+        // Nudge only if this row is off-screen; a click on a visible row stays put.
+        self.follow_list.set(true);
+        true
     }
 
     pub(super) fn set_list_scroll(&mut self, offset: usize) {

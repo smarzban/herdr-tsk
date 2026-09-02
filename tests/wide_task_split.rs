@@ -1366,3 +1366,331 @@ fn parked_help_round_trip_reopens_task_page_mode() {
         .expect("task page selection stays pinned");
     assert_eq!(model.selected_id(), bound);
 }
+
+#[test]
+fn shrinking_during_task_edit_preserves_mode_draft_cursor_and_binding() {
+    let mut domain = domain_with_tasks(&[("resize edit", "notes"), ("other task", "notes")]);
+    let mut model = board_model(&domain);
+    focus_task(&mut domain, &mut model);
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None).expect("edit title");
+    apply_intent(&mut domain, &mut model, BoardIntent::EditInsert('!'), None)
+        .expect("change title");
+    apply_intent(&mut domain, &mut model, BoardIntent::EditMoveLeft, None)
+        .expect("move draft cursor");
+    let before = (
+        model.focused_surface(),
+        model.input_mode(),
+        model.edit_target(),
+        model.edit_buffer().to_string(),
+        model.edit_cursor(),
+        model.page_scroll(),
+        model.step_cursor(),
+    );
+    assert!(model.task_session_dirty());
+
+    let (single_rows, _) = render_board(&model, 109, 24);
+    let _ = render_board(&model, 110, 24);
+
+    assert!(single_rows.join("\n").contains(&before.3));
+    assert_eq!(
+        (
+            model.focused_surface(),
+            model.input_mode(),
+            model.edit_target(),
+            model.edit_buffer().to_string(),
+            model.edit_cursor(),
+            model.page_scroll(),
+            model.step_cursor(),
+        ),
+        before
+    );
+}
+
+#[test]
+fn dirty_wide_task_session_refuses_keyboard_task_switch() {
+    let mut domain = domain_with_tasks(&[("keyboard bound", "notes"), ("keyboard other", "notes")]);
+    let mut model = board_model(&domain);
+    focus_task(&mut domain, &mut model);
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None).expect("edit title");
+    apply_intent(&mut domain, &mut model, BoardIntent::EditInsert('!'), None).expect("dirty title");
+    let bound = model.edit_target().expect("bound task");
+    let target_index = model
+        .visible_ids()
+        .iter()
+        .position(|&id| id != bound)
+        .expect("other row");
+    let before = (
+        model.selected_id(),
+        model.edit_target(),
+        model.input_mode(),
+        model.edit_buffer().to_string(),
+        model.edit_cursor(),
+    );
+
+    for intent in [
+        BoardIntent::SelectNext,
+        BoardIntent::SelectPrev,
+        BoardIntent::SelectIndex(target_index),
+    ] {
+        let mut attempted_domain = domain.clone();
+        let mut attempted_model = model.clone();
+        apply_intent(&mut attempted_domain, &mut attempted_model, intent, None)
+            .expect("attempt keyboard retarget");
+        assert_eq!(
+            (
+                attempted_model.selected_id(),
+                attempted_model.edit_target(),
+                attempted_model.input_mode(),
+                attempted_model.edit_buffer().to_string(),
+                attempted_model.edit_cursor(),
+            ),
+            before
+        );
+        assert!(attempted_model
+            .message()
+            .is_some_and(|message| message.contains("save or cancel")));
+    }
+
+    let current_index = model
+        .visible_ids()
+        .iter()
+        .position(|&id| id == bound)
+        .expect("bound row");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::SelectIndex(current_index),
+        None,
+    )
+    .expect("select same task");
+    assert_eq!(model.selected_id(), Some(bound));
+    assert!(model.message().is_none());
+
+    let mut clean_domain = domain_with_tasks(&[("clean bound", "notes"), ("clean other", "notes")]);
+    let mut clean_model = board_model(&clean_domain);
+    focus_task(&mut clean_domain, &mut clean_model);
+    apply_intent(
+        &mut clean_domain,
+        &mut clean_model,
+        BoardIntent::BeginEditTitle,
+        None,
+    )
+    .expect("enter clean editor");
+    let clean_bound = clean_model.edit_target();
+    assert!(!clean_model.task_session_dirty());
+    apply_intent(
+        &mut clean_domain,
+        &mut clean_model,
+        BoardIntent::SelectNext,
+        None,
+    )
+    .expect("switch clean editor");
+    assert_ne!(clean_model.selected_id(), clean_bound);
+    assert_eq!(clean_model.edit_target(), clean_model.selected_id());
+    assert_eq!(clean_model.input_mode(), BoardInputMode::TaskPage);
+    assert!(clean_model.message().is_none());
+}
+
+#[test]
+fn dirty_wide_task_session_refuses_mouse_task_switch_and_keeps_binding() {
+    let mut domain = domain_with_tasks(&[
+        ("mouse bound", &"long notes ".repeat(80)),
+        ("mouse other", "notes"),
+    ]);
+    let mut model = board_model(&domain);
+    focus_task(&mut domain, &mut model);
+    let _ = render_board(&model, 110, 24);
+    apply_intent(&mut domain, &mut model, BoardIntent::PageScrollTo(2), None).expect("scroll page");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditNotes, None).expect("edit notes");
+    apply_intent(&mut domain, &mut model, BoardIntent::EditInsert('!'), None).expect("dirty notes");
+    let bound = model.edit_target().expect("bound task");
+    let target_index = model
+        .visible_ids()
+        .iter()
+        .position(|&id| id != bound)
+        .expect("other row");
+    let before = (
+        model.focused_surface(),
+        model.selected_id(),
+        model.edit_target(),
+        model.page_scroll(),
+        model.step_cursor(),
+        model.input_mode(),
+        model.edit_buffer().to_string(),
+        model.edit_cursor(),
+    );
+
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::FocusBoardAndSelectIndex(target_index),
+        None,
+    )
+    .expect("attempt mouse retarget");
+
+    assert_eq!(
+        (
+            model.focused_surface(),
+            model.selected_id(),
+            model.edit_target(),
+            model.page_scroll(),
+            model.step_cursor(),
+            model.input_mode(),
+            model.edit_buffer().to_string(),
+            model.edit_cursor(),
+        ),
+        before
+    );
+    assert!(model
+        .message()
+        .is_some_and(|message| message.contains("save or cancel")));
+}
+
+#[test]
+fn dirty_switch_refusal_preserves_draft_and_clears_after_save() {
+    let mut domain = domain_with_tasks(&[("save bound", "notes"), ("save other", "notes")]);
+    let mut model = board_model(&domain);
+    focus_task(&mut domain, &mut model);
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None).expect("edit title");
+    apply_intent(&mut domain, &mut model, BoardIntent::EditInsert('!'), None).expect("dirty title");
+    let bound = model.edit_target().expect("bound task");
+    let draft = model.edit_buffer().to_string();
+
+    apply_intent(&mut domain, &mut model, BoardIntent::SelectNext, None).expect("refuse switch");
+    assert_eq!(model.edit_buffer(), draft);
+    assert!(model.message().is_some());
+    assert!(render_board(&model, 110, 24)
+        .0
+        .join("\n")
+        .contains("save or cancel"));
+
+    apply_intent(&mut domain, &mut model, BoardIntent::ConfirmEdit, None).expect("save edit");
+    assert!(model.message().is_none());
+    assert!(!model.task_session_dirty());
+    assert_eq!(domain.get(bound).expect("saved task").title, draft);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::FocusBoardSurface,
+        None,
+    )
+    .expect("return to board after save");
+    apply_intent(&mut domain, &mut model, BoardIntent::SelectNext, None)
+        .expect("switch after save");
+    assert_ne!(model.selected_id(), Some(bound));
+}
+
+#[test]
+fn dirty_switch_refusal_clears_after_cancel() {
+    let mut domain = domain_with_tasks(&[("cancel bound", "notes"), ("cancel other", "notes")]);
+    let mut model = board_model(&domain);
+    focus_task(&mut domain, &mut model);
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None).expect("edit title");
+    apply_intent(&mut domain, &mut model, BoardIntent::EditInsert('!'), None).expect("dirty title");
+    let bound = model.edit_target().expect("bound task");
+    let saved_title = domain.get(bound).expect("bound task").title.clone();
+
+    apply_intent(&mut domain, &mut model, BoardIntent::SelectNext, None).expect("refuse switch");
+    assert!(model.message().is_some());
+    apply_intent(&mut domain, &mut model, BoardIntent::CancelEdit, None).expect("cancel edit");
+
+    assert!(model.message().is_none());
+    assert!(!model.task_session_dirty());
+    assert_eq!(model.edit_buffer(), saved_title);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::FocusBoardSurface,
+        None,
+    )
+    .expect("return to board after cancel");
+    apply_intent(&mut domain, &mut model, BoardIntent::SelectNext, None)
+        .expect("switch after cancel");
+    assert_ne!(model.selected_id(), Some(bound));
+}
+
+#[test]
+fn task_session_dirty_uses_only_approved_step_changes() {
+    let mut domain = domain_with_tasks(&[("step task", "notes")]);
+    let id = domain.tasks()[0].id;
+    domain.add_step(id, "saved step").expect("add step");
+
+    let mut rename_model = board_model(&domain);
+    focus_task(&mut domain, &mut rename_model);
+    apply_intent(
+        &mut domain,
+        &mut rename_model,
+        BoardIntent::BeginEditTitle,
+        None,
+    )
+    .expect("enter edit session");
+    apply_intent(
+        &mut domain,
+        &mut rename_model,
+        BoardIntent::SelectStep(0),
+        None,
+    )
+    .expect("open existing step");
+    assert!(!rename_model.task_session_dirty());
+    apply_intent(
+        &mut domain,
+        &mut rename_model,
+        BoardIntent::EditInsert('!'),
+        None,
+    )
+    .expect("change existing step");
+    assert!(rename_model.task_session_dirty());
+
+    let mut add_model = board_model(&domain);
+    focus_task(&mut domain, &mut add_model);
+    apply_intent(&mut domain, &mut add_model, BoardIntent::BeginAddStep, None)
+        .expect("open new step");
+    assert!(!add_model.task_session_dirty());
+    apply_intent(
+        &mut domain,
+        &mut add_model,
+        BoardIntent::EditInsert('!'),
+        None,
+    )
+    .expect("type new step");
+    assert!(add_model.task_session_dirty());
+
+    let mut removal_model = board_model(&domain);
+    focus_task(&mut domain, &mut removal_model);
+    apply_intent(
+        &mut domain,
+        &mut removal_model,
+        BoardIntent::BeginEditTitle,
+        None,
+    )
+    .expect("enter edit session");
+    apply_intent(
+        &mut domain,
+        &mut removal_model,
+        BoardIntent::CancelEdit,
+        None,
+    )
+    .expect("return to task view");
+    apply_intent(
+        &mut domain,
+        &mut removal_model,
+        BoardIntent::SelectStep(0),
+        None,
+    )
+    .expect("open saved step");
+    apply_intent(
+        &mut domain,
+        &mut removal_model,
+        BoardIntent::CancelEdit,
+        None,
+    )
+    .expect("return to selected step");
+    apply_intent(
+        &mut domain,
+        &mut removal_model,
+        BoardIntent::SoftDelete,
+        None,
+    )
+    .expect("stage removal");
+    assert!(removal_model.task_session_dirty());
+}

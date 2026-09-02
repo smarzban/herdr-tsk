@@ -569,7 +569,9 @@ fn apply_board_intent(
             return Ok(IntentOutcome::None);
         }
         BoardIntent::SelectIndex(idx) => {
-            model.select_index(idx);
+            if !model.select_index(idx) {
+                return Ok(IntentOutcome::None);
+            }
             // A row click also expands that row's peek; a second click on the same row
             // inside the double-click window opens the task page instead.
             if let Some(id) = model.selected_id() {
@@ -592,8 +594,10 @@ fn apply_board_intent(
             return Ok(IntentOutcome::None);
         }
         BoardIntent::FocusBoardAndSelectIndex(idx) => {
+            if !model.select_index(idx) {
+                return Ok(IntentOutcome::None);
+            }
             model.focused_surface = FocusedSurface::Board;
-            model.select_index(idx);
             model.detail_open = None;
             model.last_row_click = None;
             return Ok(IntentOutcome::None);
