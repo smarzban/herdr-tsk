@@ -21,7 +21,7 @@ use super::input::{BoardIntent, CaptureIntent, PrimaryCaptureAction, PRIMARY_CAP
 use super::render::{
     form_verb_items, QueueHitMap, QueueHitTarget, PALETTE_VERBS, QUICK_ADD_VERBS, SCOPE_VERBS,
 };
-use super::tier::{resolve_responsive, FocusedSurface, ResponsivePresentation};
+use super::tier::{resolve, resolve_responsive, FocusedSurface, ResponsivePresentation, WideStage};
 
 /// Transient presentation that still exists on the V1 queue board.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -382,34 +382,25 @@ pub fn focused_mouse_area(model: &BoardModel, area: Rect) -> Rect {
     }
 }
 
-fn task_target_is_interactive(model: &BoardModel, target: QueueHitTarget) -> bool {
-    matches!(
-        target,
-        QueueHitTarget::TaskNumber(_)
-            | QueueHitTarget::Step(_)
-            | QueueHitTarget::StepAdd
-            | QueueHitTarget::PageScroll(_)
-            | QueueHitTarget::Verb(_)
-    ) || (model.task_editing()
-        && matches!(
-            target,
-            QueueHitTarget::FormTitle
-                | QueueHitTarget::FormNotes(_)
-                | QueueHitTarget::FormThread
-                | QueueHitTarget::FormScope
-                | QueueHitTarget::FormScopeOption(_)
-        ))
+/// First row of the shared wide footer (its rule). Column clicks stop above it.
+fn wide_footer_top(area: Rect) -> u16 {
+    resolve(area.width, area.height)
+        .rule_row
+        .unwrap_or(area.height)
 }
 
-/// Focus request that must run before dispatching a board-focused task-side control click.
+/// Stage move that must run before dispatching a stage A click on the task column.
+///
+/// Any press inside the preview column (above the shared footer) slides to G first; the
+/// caller then dispatches the same click against the frame the user saw (AC-11).
 pub fn wide_mouse_focus_intent(
     model: &BoardModel,
-    hits: &QueueHitMap,
+    _hits: &QueueHitMap,
     area: Rect,
     mouse: MouseEvent,
 ) -> Option<BoardIntent> {
     if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
-        || model.focused_surface() != FocusedSurface::Board
+        || model.wide_stage() != WideStage::Split
         || model.input_mode() != BoardInputMode::Normal
     {
         return None;
@@ -419,8 +410,10 @@ pub fn wide_mouse_focus_intent(
         return None;
     }
     let pos = point(mouse.column, mouse.row);
-    let target = responsive.task.contains(pos).then(|| hit_at(hits, pos))??;
-    task_target_is_interactive(model, target).then_some(BoardIntent::StageRight)
+    (responsive.task.contains(pos)
+        && pos.y < wide_footer_top(area)
+        && model.selected_id().is_some())
+    .then_some(BoardIntent::StageRight)
 }
 
 /// Map pointer input only through the live responsive surface and translated renderer hits.
@@ -445,6 +438,12 @@ pub fn map_responsive_board_mouse(
         _ => return None,
     }
 
+    // The shared footer belongs to whichever surface owns input: its verbs, status controls
+    // and inputs route exactly as the single-pane frame's own bottom rows do.
+    if pos.y >= wide_footer_top(area) {
+        return map_board_mouse(model, hits, mouse);
+    }
+
     let view_mode = matches!(
         model.input_mode(),
         BoardInputMode::Normal | BoardInputMode::TaskPage
@@ -458,6 +457,8 @@ pub fn map_responsive_board_mouse(
                 | BoardInputMode::EditScope
                 | BoardInputMode::FormScopeDropdown
         );
+    // A board or rail row click selects in place (stage unchanged); the reducer retargets
+    // the pane or page and refuses while a dirty draft is bound elsewhere.
     if responsive.board.contains(pos) && (view_mode || clean_or_dirty_task_editor) {
         if let Some(QueueHitTarget::Task(id)) = hit_at(hits, pos) {
             if clean_or_dirty_task_editor && model.edit_target() == Some(id) {

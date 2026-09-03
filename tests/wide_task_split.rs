@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -12,7 +12,11 @@ use tsk_tui::domain::{DomainState, HumanStatus, ProvenanceOrigin, TaskScope};
 use tsk_tui::ui::board::{
     resolve_responsive, FocusedSurface, ResponsivePresentation, WideStage, WIDE_SPLIT_MIN_WIDTH,
 };
-use tsk_tui::ui::input::map_responsive_key;
+use tsk_tui::ui::capture::CaptureField;
+use tsk_tui::ui::input::{map_key, map_responsive_key};
+use tsk_tui::ui::mouse::{
+    left_click, map_board_mouse, map_responsive_board_mouse, wide_mouse_focus_intent,
+};
 use tsk_tui::ui::render::{assert_buffer_mono, QueueHitMap, QueueHitTarget};
 use tsk_tui::ui::tier::{Tier, STANDARD_VERB_BAR_ENTRY_BUDGET};
 use tsk_tui::ui::{
@@ -1113,4 +1117,531 @@ fn stage_changes_never_mutate_the_domain() {
         let _ = render(&model, width, 24);
     }
     assert_eq!(domain.tasks(), before.tasks());
+}
+
+// ---------------------------------------------------------------------------
+// T4 mouse
+// ---------------------------------------------------------------------------
+
+const AREA_130: Rect = Rect {
+    x: 0,
+    y: 0,
+    width: 130,
+    height: 24,
+};
+
+fn row_hit(hits: &QueueHitMap, column: Rect, predicate: impl Fn(uuid::Uuid) -> bool) -> Rect {
+    hits.regions
+        .iter()
+        .find(|hit| {
+            inside(column_text_area(column, 24), hit.area)
+                && matches!(hit.target, QueueHitTarget::Task(id) if predicate(id))
+        })
+        .map(|hit| hit.area)
+        .expect("row hit")
+}
+
+fn click_map(model: &BoardModel, hits: &QueueHitMap, x: u16, y: u16) -> Option<BoardIntent> {
+    map_responsive_board_mouse(model, hits, AREA_130, left_click(x, y))
+}
+
+#[test]
+fn board_row_click_selects_without_changing_stage_or_peeking() {
+    for stage in [WideStage::FullBoard, WideStage::Split] {
+        let (mut domain, mut model) = fixture();
+        to_stage(&mut domain, &mut model, stage);
+        let selected = model.selected_id();
+        let geometry = resolve_responsive(130, 24, stage);
+        let (rows, hits) = render(&model, 130, 24);
+        let other = row_hit(&hits, geometry.board, |id| Some(id) != selected);
+        assert_eq!(
+            wide_mouse_focus_intent(&model, &hits, AREA_130, left_click(other.x, other.y)),
+            None,
+            "{stage:?}: a board row is not a task-column click"
+        );
+        let intent = click_map(&model, &hits, other.x, other.y).expect("row click maps");
+        assert!(matches!(intent, BoardIntent::FocusBoardAndSelectIndex(_)));
+        go(&mut domain, &mut model, intent);
+        assert_ne!(model.selected_id(), selected);
+        assert_eq!(model.wide_stage(), stage, "{stage:?}: stage unchanged");
+        assert_eq!(model.detail_open(), None, "no peek at wide widths");
+        let (after, _) = render(&model, 130, 24);
+        assert_ne!(rows, after);
+        if stage == WideStage::Split {
+            let header = column_text(&after, geometry.task_content(), 1);
+            assert!(
+                header.contains("T15 Renew domain"),
+                "pane retargets: {header}"
+            );
+        }
+    }
+}
+
+#[test]
+fn stage_a_task_column_click_moves_to_g_then_dispatches_against_the_painted_frame() {
+    let (mut domain, mut model) = fixture();
+    to_stage(&mut domain, &mut model, WideStage::Split);
+    let geometry = resolve_responsive(130, 24, WideStage::Split);
+    let (_, hits) = render(&model, 130, 24);
+    let add = hits
+        .regions
+        .iter()
+        .find(|hit| {
+            inside(column_text_area(geometry.task_content(), 24), hit.area)
+                && matches!(hit.target, QueueHitTarget::StepAdd)
+        })
+        .expect("preview add-step control")
+        .area;
+    let click = left_click(add.x, add.y);
+    assert_eq!(
+        click_map(&model, &hits, add.x, add.y),
+        None,
+        "board focus: inert"
+    );
+    assert_eq!(
+        wide_mouse_focus_intent(&model, &hits, AREA_130, click),
+        Some(BoardIntent::StageRight)
+    );
+    // Blank pane space slides too; the footer never does.
+    let blank = left_click(geometry.task_content().x + 10, 18);
+    assert_eq!(
+        wide_mouse_focus_intent(&model, &hits, AREA_130, blank),
+        Some(BoardIntent::StageRight)
+    );
+    let footer = left_click(geometry.task_content().x + 10, 23);
+    assert_eq!(
+        wide_mouse_focus_intent(&model, &hits, AREA_130, footer),
+        None
+    );
+
+    go(&mut domain, &mut model, BoardIntent::StageRight);
+    assert_eq!(model.wide_stage(), WideStage::Rail);
+    assert_eq!(
+        click_map(&model, &hits, add.x, add.y),
+        Some(BoardIntent::BeginAddStep),
+        "the painted frame's control dispatches after the stage move"
+    );
+}
+
+#[test]
+fn stage_a_task_column_click_without_selection_is_inert() {
+    let (mut domain, mut model) = fixture();
+    to_stage(&mut domain, &mut model, WideStage::Split);
+    model.sync_from_domain(&DomainState::new());
+    let geometry = resolve_responsive(130, 24, WideStage::Split);
+    let (_, hits) = render(&model, 130, 24);
+    let click = left_click(geometry.task_content().x + 4, 4);
+    assert_eq!(
+        wide_mouse_focus_intent(&model, &hits, AREA_130, click),
+        None
+    );
+    assert_eq!(click_map(&model, &hits, click.column, click.row), None);
+}
+
+#[test]
+fn rail_row_click_retargets_the_page_in_place() {
+    let (mut domain, mut model) = fixture();
+    to_stage(&mut domain, &mut model, WideStage::Rail);
+    let bound = model.edit_target().expect("bound page");
+    let geometry = resolve_responsive(130, 24, WideStage::Rail);
+    let (_, hits) = render(&model, 130, 24);
+    let other = row_hit(&hits, geometry.board, |id| id != bound);
+    let intent = click_map(&model, &hits, other.x, other.y).expect("rail row maps");
+    go(&mut domain, &mut model, intent);
+    assert_eq!(model.wide_stage(), WideStage::Rail);
+    assert_eq!(model.focused_surface(), FocusedSurface::Task);
+    assert_ne!(model.edit_target(), Some(bound));
+    assert_eq!(model.edit_target(), model.selected_id());
+    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+    let (rows, _) = render(&model, 130, 24);
+    let header = column_text(&rows, geometry.task_content(), 1);
+    assert!(header.contains("T15 Renew domain"), "{header}");
+    // Rail furniture (tabs, headers) is not a control while the task owns input.
+    assert_eq!(click_map(&model, &hits, 2, 1), None, "rail tab");
+    assert_eq!(
+        click_map(&model, &hits, geometry.rule.x, 5),
+        None,
+        "rule column"
+    );
+}
+
+#[test]
+fn row_double_click_opens_the_full_page_and_records_the_origin() {
+    for stage in [WideStage::FullBoard, WideStage::Split, WideStage::Rail] {
+        let (mut domain, mut model) = fixture();
+        to_stage(&mut domain, &mut model, stage);
+        let geometry = resolve_responsive(130, 24, stage);
+        let (_, hits) = render(&model, 130, 24);
+        let selected = model.selected_id();
+        let row = row_hit(&hits, geometry.board, |id| Some(id) != selected);
+        let intent = click_map(&model, &hits, row.x, row.y).expect("row click");
+        go(&mut domain, &mut model, intent.clone());
+        assert_eq!(model.wide_stage(), stage, "{stage:?}: first click selects");
+        go(&mut domain, &mut model, intent);
+        assert_eq!(
+            model.wide_stage(),
+            WideStage::FullTask,
+            "{stage:?}: double-click opens F"
+        );
+        assert_eq!(model.stage_origin(), Some(stage));
+        assert_eq!(model.edit_target(), model.selected_id());
+        assert_ne!(model.selected_id(), selected);
+    }
+}
+
+#[test]
+fn footer_verbs_dispatch_for_the_focused_surface_in_every_stage() {
+    for stage in STAGES {
+        let (mut domain, mut model) = fixture();
+        to_stage(&mut domain, &mut model, stage);
+        let (rows, hits) = render(&model, 130, 24);
+        let verb_row = &rows[23];
+        let done_x = u16::try_from(verb_row.find("ctrl+d done").expect("done verb")).expect("x");
+        let intent = click_map(&model, &hits, done_x, 23);
+        assert_eq!(intent, Some(BoardIntent::Complete), "{stage:?}: {verb_row}");
+        let right_half =
+            u16::try_from(verb_row.rfind("+ capture").unwrap_or(done_x as usize)).expect("x");
+        if stage.focused_surface() == FocusedSurface::Board {
+            assert_eq!(
+                click_map(&model, &hits, right_half, 23),
+                Some(BoardIntent::OpenCapture),
+                "{stage:?}: footer verbs on the task side of the frame still route"
+            );
+        }
+        let id = model.selected_id().expect("selection");
+        go(&mut domain, &mut model, intent.expect("verb"));
+        assert_eq!(
+            domain.get(id).expect("task").status,
+            HumanStatus::Done,
+            "{stage:?}"
+        );
+    }
+}
+
+#[test]
+fn wheel_scrolls_only_the_focused_column() {
+    let (mut domain, mut model) = fixture();
+    to_stage(&mut domain, &mut model, WideStage::Rail);
+    let geometry = resolve_responsive(130, 24, WideStage::Rail);
+    let (_, hits) = render(&model, 130, 24);
+    let wheel = |x, y| MouseEvent {
+        kind: MouseEventKind::ScrollDown,
+        column: x,
+        row: y,
+        modifiers: KeyModifiers::NONE,
+    };
+    assert_eq!(
+        map_responsive_board_mouse(
+            &model,
+            &hits,
+            AREA_130,
+            wheel(geometry.task_content().x + 5, 6)
+        ),
+        Some(BoardIntent::PageWheelScrollDown)
+    );
+    assert_eq!(
+        map_responsive_board_mouse(&model, &hits, AREA_130, wheel(4, 6)),
+        None,
+        "the rail is not the focused column"
+    );
+    go(&mut domain, &mut model, BoardIntent::StageLeft);
+    let geometry = resolve_responsive(130, 24, WideStage::Split);
+    let (_, hits) = render(&model, 130, 24);
+    assert!(matches!(
+        map_responsive_board_mouse(&model, &hits, AREA_130, wheel(4, 6)),
+        Some(BoardIntent::ListScrollTo(_))
+    ));
+    assert_eq!(
+        map_responsive_board_mouse(
+            &model,
+            &hits,
+            AREA_130,
+            wheel(geometry.task_content().x + 5, 6)
+        ),
+        None,
+        "the preview is not the focused column"
+    );
+}
+
+#[test]
+fn help_and_palette_close_on_task_column_clicks_without_dispatching() {
+    for (open, expected, mode) in [
+        (
+            BoardIntent::OpenHelp,
+            BoardIntent::CloseLayer,
+            BoardInputMode::Help,
+        ),
+        (
+            BoardIntent::OpenCommandPalette,
+            BoardIntent::CloseCommandSurface,
+            BoardInputMode::Palette,
+        ),
+    ] {
+        let (mut domain, mut model) = fixture();
+        to_stage(&mut domain, &mut model, WideStage::Split);
+        go(&mut domain, &mut model, open);
+        assert_eq!(model.input_mode(), mode);
+        let geometry = resolve_responsive(130, 24, WideStage::Split);
+        let (_, hits) = render(&model, 130, 24);
+        let click = left_click(geometry.task_content().x + 6, 6);
+        assert_eq!(
+            wide_mouse_focus_intent(&model, &hits, AREA_130, click),
+            None
+        );
+        assert_eq!(
+            click_map(&model, &hits, click.column, click.row),
+            Some(expected)
+        );
+    }
+}
+
+#[test]
+fn quick_add_ignores_task_column_clicks_and_keeps_its_draft() {
+    let (mut domain, mut model) = fixture();
+    let original = domain.tasks().len();
+    to_stage(&mut domain, &mut model, WideStage::Split);
+    go(&mut domain, &mut model, BoardIntent::OpenCapture);
+    go(
+        &mut domain,
+        &mut model,
+        BoardIntent::QuickAddInsertText("draft task".to_string()),
+    );
+    let draft = model.quick_add_title_value().to_string();
+    let geometry = resolve_responsive(130, 24, WideStage::Split);
+    let (rows, hits) = render(&model, 130, 24);
+    assert!(
+        rows.join("\n").contains("draft task"),
+        "the footer paints the input"
+    );
+    let click = left_click(geometry.task_content().x + 6, 6);
+    assert_eq!(
+        wide_mouse_focus_intent(&model, &hits, AREA_130, click),
+        None
+    );
+    let mapped = click_map(&model, &hits, click.column, click.row);
+    if let Some(intent) = mapped.clone() {
+        go(&mut domain, &mut model, intent);
+    }
+    assert_eq!(mapped, None);
+    assert_eq!(model.input_mode(), BoardInputMode::QuickAdd);
+    assert_eq!(model.quick_add_title_value(), draft);
+    assert_eq!(domain.tasks().len(), original);
+}
+
+fn hit_signature(hits: &QueueHitMap, column: Rect) -> Vec<String> {
+    let mut targets: Vec<String> = hits
+        .regions
+        .iter()
+        .filter(|hit| inside(column, hit.area))
+        .filter_map(|hit| match hit.target {
+            QueueHitTarget::Step(index) => Some(format!("Step({index})")),
+            QueueHitTarget::StepAdd => Some("StepAdd".to_string()),
+            QueueHitTarget::FormNotes(_) => Some("FormNotes".to_string()),
+            QueueHitTarget::FormThread => Some("FormThread".to_string()),
+            QueueHitTarget::FormScopeOption(index) => Some(format!("FormScopeOption({index})")),
+            QueueHitTarget::Verb(index) => Some(format!("Verb({index})")),
+            _ => None,
+        })
+        .collect();
+    targets.sort();
+    targets.dedup();
+    targets
+}
+
+fn first_hit(hits: &QueueHitMap, column: Rect, name: &str) -> Rect {
+    hits.regions
+        .iter()
+        .find(|hit| {
+            inside(column, hit.area)
+                && match hit.target {
+                    QueueHitTarget::Step(index) => format!("Step({index})") == name,
+                    QueueHitTarget::StepAdd => name == "StepAdd",
+                    QueueHitTarget::FormNotes(_) => name == "FormNotes",
+                    QueueHitTarget::FormThread => name == "FormThread",
+                    QueueHitTarget::FormScopeOption(index) => {
+                        format!("FormScopeOption({index})") == name
+                    }
+                    QueueHitTarget::Verb(index) => format!("Verb({index})") == name,
+                    _ => false,
+                }
+        })
+        .map(|hit| hit.area)
+        .expect("named hit")
+}
+
+fn session_signature(model: &BoardModel) -> impl PartialEq + std::fmt::Debug {
+    (
+        model.input_mode(),
+        model.selected_id(),
+        model.edit_target(),
+        model.page_scroll(),
+        model.step_cursor(),
+        model.form_focus(),
+        model.edit_buffer().to_string(),
+        model.edit_cursor(),
+        model.task_editing(),
+    )
+}
+
+fn assert_same_outcome(
+    domain: &DomainState,
+    single: &BoardModel,
+    wide: &BoardModel,
+    intent: BoardIntent,
+    label: &str,
+) {
+    let mut single_domain = domain.clone();
+    let mut wide_domain = domain.clone();
+    let mut single_model = single.clone();
+    let mut wide_model = wide.clone();
+    let single_outcome = apply_intent(&mut single_domain, &mut single_model, intent.clone(), None)
+        .expect("single-pane action");
+    let wide_outcome =
+        apply_intent(&mut wide_domain, &mut wide_model, intent, None).expect("wide action");
+    assert_eq!(single_outcome, wide_outcome, "{label}: outcome");
+    assert_eq!(
+        single_domain.tasks(),
+        wide_domain.tasks(),
+        "{label}: domain"
+    );
+    assert_eq!(
+        session_signature(&single_model),
+        session_signature(&wide_model),
+        "{label}: session"
+    );
+}
+
+/// The G and F task surfaces expose the same controls as the single-pane page, and every
+/// shared control maps to the same intent with the same domain and session outcome.
+#[test]
+fn task_surface_controls_in_g_and_f_match_the_single_pane_page() {
+    let (mut domain, mut base) = fixture();
+    let id = base.selected_id().expect("selection");
+    domain.add_step(id, "first parity step").expect("step");
+    domain.add_step(id, "second parity step").expect("step");
+    base.sync_from_domain(&domain);
+
+    // The single-pane reference: the same task open as the full page below the threshold.
+    let mut single = base.clone();
+    go(&mut domain.clone(), &mut single, BoardIntent::OpenTaskPage);
+    let single_area = Rect::new(0, 0, 100, 24);
+    let single_column = Rect::new(0, 0, 100, 21);
+
+    let edits: Vec<(&str, Vec<BoardIntent>)> = vec![
+        ("task view", vec![]),
+        ("title edit", vec![BoardIntent::BeginEditTitle]),
+        ("notes edit", vec![BoardIntent::BeginEditNotes]),
+        (
+            "thread selection",
+            vec![
+                BoardIntent::BeginEditTitle,
+                BoardIntent::FocusFormField(CaptureField::Thread),
+            ],
+        ),
+        (
+            "step edit",
+            vec![BoardIntent::BeginEditTitle, BoardIntent::SelectStep(0)],
+        ),
+    ];
+    for stage in [WideStage::Rail, WideStage::FullTask] {
+        for (label, steps) in &edits {
+            let label = format!("{stage:?} {label}");
+            let mut single_model = single.clone();
+            let mut wide_model = base.clone();
+            let mut wide_domain = domain.clone();
+            to_stage(&mut wide_domain, &mut wide_model, stage);
+            for intent in steps {
+                go(&mut domain.clone(), &mut single_model, intent.clone());
+                go(&mut wide_domain, &mut wide_model, intent.clone());
+            }
+            assert_eq!(
+                single_model.input_mode(),
+                wide_model.input_mode(),
+                "{label}"
+            );
+            let (_, single_hits) = render(&single_model, single_area.width, single_area.height);
+            let (_, wide_hits) = render(&wide_model, 130, 24);
+            let geometry = resolve_responsive(130, 24, stage);
+            let wide_column = Rect::new(
+                geometry.task_content().x,
+                0,
+                geometry.task_content().width,
+                21,
+            );
+            let single_targets = hit_signature(&single_hits, single_column);
+            let wide_targets = hit_signature(&wide_hits, wide_column);
+            assert_eq!(
+                single_targets, wide_targets,
+                "{label}: task-surface controls"
+            );
+            assert!(
+                single_targets.iter().any(|t| t.starts_with("Step(")),
+                "{label}: steps painted"
+            );
+            for name in &single_targets {
+                let single_rect = first_hit(&single_hits, single_column, name);
+                let wide_rect = first_hit(&wide_hits, wide_column, name);
+                let single_intent = map_board_mouse(
+                    &single_model,
+                    &single_hits,
+                    left_click(single_rect.x, single_rect.y),
+                );
+                let wide_intent = map_responsive_board_mouse(
+                    &wide_model,
+                    &wide_hits,
+                    AREA_130,
+                    left_click(wide_rect.x, wide_rect.y),
+                );
+                assert_eq!(single_intent, wide_intent, "{label}: {name}");
+                if let Some(intent) = single_intent {
+                    assert_same_outcome(
+                        &domain,
+                        &single_model,
+                        &wide_model,
+                        intent,
+                        &format!("{label}: {name}"),
+                    );
+                }
+            }
+            // Footer verbs paint the same legend and map the same way.
+            let (single_rows, _) = render(&single_model, single_area.width, single_area.height);
+            let (wide_rows, _) = render(&wide_model, 130, 24);
+            assert_eq!(
+                single_rows[23].trim_end(),
+                wide_rows[23].trim_end(),
+                "{label}: verb bar"
+            );
+            // Keyboard parity: the page's own keys map identically through the wide router.
+            for code in [
+                KeyCode::Char('x'),
+                KeyCode::Enter,
+                KeyCode::Down,
+                KeyCode::Tab,
+            ] {
+                let single_intent = map_key(single_model.input_mode(), key(code));
+                let wide_intent = map_responsive_key(
+                    wide_model.input_mode(),
+                    stage,
+                    ResponsivePresentation::WideSplit,
+                    wide_model.task_editing(),
+                    key(code),
+                );
+                assert_eq!(single_intent, wide_intent, "{label}: {code:?}");
+            }
+            for code in [KeyCode::Char('e'), KeyCode::Char('d')] {
+                let ctrl = KeyEvent::new(code, KeyModifiers::CONTROL);
+                assert_eq!(
+                    map_key(single_model.input_mode(), ctrl),
+                    map_responsive_key(
+                        wide_model.input_mode(),
+                        stage,
+                        ResponsivePresentation::WideSplit,
+                        wide_model.task_editing(),
+                        ctrl,
+                    ),
+                    "{label}: ctrl+{code:?}"
+                );
+            }
+        }
+    }
 }
