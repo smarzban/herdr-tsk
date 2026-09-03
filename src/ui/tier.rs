@@ -16,6 +16,34 @@ pub enum FocusedSurface {
     Task,
 }
 
+/// Session-only wide-slider position. Its focus owner is derived from the stage.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum WideStage {
+    #[default]
+    FullBoard,
+    Split,
+    Rail,
+    FullTask,
+}
+
+impl WideStage {
+    pub const fn focused_surface(self) -> FocusedSurface {
+        match self {
+            Self::FullBoard | Self::Split => FocusedSurface::Board,
+            Self::Rail | Self::FullTask => FocusedSurface::Task,
+        }
+    }
+}
+
+impl From<FocusedSurface> for WideStage {
+    fn from(surface: FocusedSurface) -> Self {
+        match surface {
+            FocusedSurface::Board => Self::Split,
+            FocusedSurface::Task => Self::Rail,
+        }
+    }
+}
+
 /// Responsive presentation selected for the usable frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResponsivePresentation {
@@ -29,6 +57,8 @@ pub enum ResponsivePresentation {
 pub struct ResponsiveGeometry {
     pub presentation: ResponsivePresentation,
     pub board: Rect,
+    /// The one-column separator between board/rail and task, empty outside split stages.
+    pub rule: Rect,
     pub task: Rect,
     pub density: Tier,
 }
@@ -39,23 +69,19 @@ impl ResponsiveGeometry {
         self.board
     }
 
-    /// Task renderer area, inset only when the wide task panel chrome is present.
+    /// Task renderer area, with the one-column split pad removed on its left.
     pub fn task_content(self) -> Rect {
-        if self.presentation == ResponsivePresentation::WideSplit {
-            inset_panel(self.task)
+        if self.rule.width > 0 {
+            Rect::new(
+                self.task.x.saturating_add(u16::from(self.task.width > 0)),
+                self.task.y,
+                self.task.width.saturating_sub(1),
+                self.task.height,
+            )
         } else {
             self.task
         }
     }
-}
-
-fn inset_panel(panel: Rect) -> Rect {
-    Rect::new(
-        panel.x.saturating_add(u16::from(panel.width > 0)),
-        panel.y.saturating_add(u16::from(panel.height > 0)),
-        panel.width.saturating_sub(2),
-        panel.height.saturating_sub(2),
-    )
 }
 
 /// Minimum usable width for the wide split view.
@@ -185,40 +211,77 @@ pub(crate) fn resolve_density(width: u16, height: u16, tier: Tier) -> TierGeomet
 /// Wide split divides the frame into touching balanced allocations. The board uses
 /// its full allocation, the task renderer paints inside its border, and both use the
 /// density selected by the narrower content rectangle.
-pub fn resolve_responsive(width: u16, height: u16, focused: FocusedSurface) -> ResponsiveGeometry {
+pub fn resolve_responsive(
+    width: u16,
+    height: u16,
+    stage: impl Into<WideStage>,
+) -> ResponsiveGeometry {
+    let stage = stage.into();
+    let frame = Rect::new(0, 0, width, height);
     if width < WIDE_SPLIT_MIN_WIDTH {
-        let frame = Rect::new(0, 0, width, height);
-        return match focused {
+        return match stage.focused_surface() {
             FocusedSurface::Board => ResponsiveGeometry {
                 presentation: ResponsivePresentation::SingleBoard,
                 board: frame,
+                rule: Rect::default(),
                 task: Rect::default(),
                 density: resolve(width, height).tier,
             },
             FocusedSurface::Task => ResponsiveGeometry {
                 presentation: ResponsivePresentation::SingleTask,
                 board: Rect::default(),
+                rule: Rect::default(),
                 task: frame,
                 density: resolve(width, height).tier,
             },
         };
     }
 
-    let board_width = width / 2;
-    let task_width = width - board_width;
-    let board = Rect::new(0, 0, board_width, height);
-    let task = Rect::new(board_width, 0, task_width, height);
-    let board_content = board;
-    let task_content = inset_panel(task);
+    let (board, rule, task) = match stage {
+        WideStage::FullBoard => (frame, Rect::default(), Rect::default()),
+        WideStage::FullTask => (Rect::default(), Rect::default(), frame),
+        WideStage::Split => {
+            let board_width = width.saturating_mul(2) / 5;
+            let rule = Rect::new(board_width, 0, 1, height);
+            let task_x = board_width.saturating_add(rule.width);
+            (
+                Rect::new(0, 0, board_width, height),
+                rule,
+                Rect::new(task_x, 0, width.saturating_sub(task_x), height),
+            )
+        }
+        WideStage::Rail => {
+            let board_width = 32.min(width.saturating_sub(1));
+            let rule = Rect::new(board_width, 0, u16::from(board_width < width), height);
+            let task_x = board_width.saturating_add(rule.width);
+            (
+                Rect::new(0, 0, board_width, height),
+                rule,
+                Rect::new(task_x, 0, width.saturating_sub(task_x), height),
+            )
+        }
+    };
+    let task_content = if rule.width > 0 {
+        Rect::new(
+            task.x.saturating_add(u16::from(task.width > 0)),
+            task.y,
+            task.width.saturating_sub(1),
+            task.height,
+        )
+    } else {
+        task
+    };
+    let narrower_width = match (board.width, task_content.width) {
+        (0, task) => task,
+        (board, 0) => board,
+        (board, task) => board.min(task),
+    };
     ResponsiveGeometry {
         presentation: ResponsivePresentation::WideSplit,
         board,
+        rule,
         task,
-        density: resolve(
-            board_content.width.min(task_content.width),
-            board_content.height.min(task_content.height),
-        )
-        .tier,
+        density: resolve(narrower_width, board.height.max(task_content.height)).tier,
     }
 }
 
@@ -252,6 +315,65 @@ fn chrome_rows(height: u16) -> (Option<u16>, u16, u16, Option<u16>, Option<u16>,
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wide_stage_geometry_has_exact_allocations_and_preserves_narrow_mapping() {
+        for (width, split_board, split_task, rail_task) in [(110, 44, 65, 77), (130, 52, 77, 97)] {
+            let split = resolve_responsive(width, 24, WideStage::Split);
+            assert_eq!(split.board, Rect::new(0, 0, split_board, 24));
+            assert_eq!(split.rule, Rect::new(split_board, 0, 1, 24));
+            assert_eq!(split.task, Rect::new(split_board + 1, 0, split_task, 24));
+            let rail = resolve_responsive(width, 24, WideStage::Rail);
+            assert_eq!(rail.board, Rect::new(0, 0, 32, 24));
+            assert_eq!(rail.rule, Rect::new(32, 0, 1, 24));
+            assert_eq!(rail.task, Rect::new(33, 0, rail_task, 24));
+            assert_eq!(
+                resolve_responsive(width, 24, WideStage::FullBoard).board,
+                Rect::new(0, 0, width, 24)
+            );
+            assert_eq!(
+                resolve_responsive(width, 24, WideStage::FullTask).task,
+                Rect::new(0, 0, width, 24)
+            );
+        }
+        assert_eq!(
+            resolve_responsive(109, 24, WideStage::Split).presentation,
+            ResponsivePresentation::SingleBoard
+        );
+        assert_eq!(
+            resolve_responsive(109, 24, WideStage::Rail).presentation,
+            ResponsivePresentation::SingleTask
+        );
+    }
+
+    #[test]
+    fn wide_stage_geometry_is_bounded_and_exhausts_every_column() {
+        for width in WIDE_SPLIT_MIN_WIDTH..=250 {
+            for height in 10..=60 {
+                for stage in [
+                    WideStage::FullBoard,
+                    WideStage::Split,
+                    WideStage::Rail,
+                    WideStage::FullTask,
+                ] {
+                    let geometry = resolve_responsive(width, height, stage);
+                    assert_eq!(
+                        geometry.board.width + geometry.rule.width + geometry.task.width,
+                        width
+                    );
+                    for rect in [
+                        geometry.board,
+                        geometry.rule,
+                        geometry.task,
+                        geometry.task_content(),
+                    ] {
+                        assert!(u32::from(rect.x) + u32::from(rect.width) <= u32::from(width));
+                        assert!(u32::from(rect.y) + u32::from(rect.height) <= u32::from(height));
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn at_78x24_and_above_until_120_cols_tier_is_standard_with_selector_viewport_rule_status_verb_rows(
