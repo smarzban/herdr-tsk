@@ -122,10 +122,9 @@ impl TierGeometry {
     /// Only shrinking `row_width` left title+meta summing past the row and clipped
     /// every task into `…`.
     pub fn with_row_width(self, row_width: u16) -> Self {
-        let meta_column_width = match self.tier {
-            Tier::Standard => STANDARD_META_COLUMN_WIDTH.min(row_width),
-            Tier::Compact => 0,
-        };
+        // Preserve the resolved meta budget (the wide board column sizes it to its content)
+        // and clamp it to the narrower row, so title+meta never overrun the row.
+        let meta_column_width = self.meta_column_width.min(row_width);
         let title_width = row_width.saturating_sub(meta_column_width);
         Self {
             row_width,

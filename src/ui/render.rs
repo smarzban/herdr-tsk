@@ -3999,6 +3999,23 @@ fn paint_verb_bar(
     (line, hits)
 }
 
+/// Widest row-meta display width across the tasks the view paints. The wide split's board
+/// column uses it to size its meta column to the content actually shown, instead of the
+/// narrow board's fixed reserve.
+pub fn widest_row_meta_width(tasks: &[Task], view: &QueueView, now: SystemTime) -> usize {
+    let mut widest = 0usize;
+    for section in &view.sections {
+        let in_project_section =
+            section.kind == SectionKind::OnDeck && section.project_label.is_some();
+        for id in &section.task_ids {
+            if let Some(task) = tasks.iter().find(|task| task.id == *id) {
+                widest = widest.max(display_width(&row_meta(task, now, in_project_section)));
+            }
+        }
+    }
+    widest
+}
+
 fn row_meta(task: &Task, now: SystemTime, in_project_section: bool) -> String {
     let age = format_age(now, task.updated_at);
     let project = if !in_project_section {

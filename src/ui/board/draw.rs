@@ -833,9 +833,11 @@ fn task_header_state(model: &BoardModel, form: &BoardForm, task: &crate::domain:
 
 /// The dim stage crumb and key hints for the wide status row.
 fn wide_status_hint(model: &BoardModel) -> (Option<&'static str>, &'static str) {
-    let editing = model.open_field_edit().is_some()
-        || model.input_mode() == BoardInputMode::FormScopeDropdown
-        || model.task_editing();
+    // Save/cancel keys apply only while a field editor is actually open or the parked draft
+    // is dirty; a clean parked session shows the stage's normal keys again.
+    let field_editor = model.open_field_edit().is_some()
+        || model.input_mode() == BoardInputMode::FormScopeDropdown;
+    let editing = field_editor || model.task_session_dirty();
     match model.wide_stage() {
         tier::WideStage::FullBoard => (None, "→ pane · enter open"),
         tier::WideStage::Split => (Some("board ▸ task"), "→ task · ← close · enter open"),
@@ -1083,7 +1085,19 @@ fn draw_wide_board(
     let mut hits = render::QueueHitMap::default();
     let board_area = responsive.board;
     if board_area.width > 0 {
-        let board_geo = column_geo(board_area.width);
+        let mut board_geo = column_geo(board_area.width);
+        // Stage A only: size the board column's meta column to the widest meta actually
+        // painted (plus a small gap, floored), so long titles keep their room instead of
+        // yielding to the narrow board's fixed reserve. Narrow and the other stages are
+        // untouched.
+        if stage == tier::WideStage::Split {
+            let widest =
+                render::widest_row_meta_width(&model.tasks, &queue_view, SystemTime::now());
+            let budget = u16::try_from(widest.saturating_add(3).max(8)).unwrap_or(u16::MAX);
+            let budget = budget.min(board_geo.row_width);
+            board_geo.meta_column_width = budget;
+            board_geo.title_width = board_geo.row_width.saturating_sub(budget);
+        }
         if stage == tier::WideStage::Rail {
             let rail_frame = QueueFrameModel {
                 follow_list: true,

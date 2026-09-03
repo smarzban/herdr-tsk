@@ -497,6 +497,116 @@ fn status_row_refusal_wins_over_the_crumb_then_the_keys() {
 }
 
 #[test]
+fn stage_a_board_meta_column_sizes_to_the_widest_meta() {
+    // A long title must fit on one row once the meta budget shrinks to the widest meta
+    // actually painted (plus a small gap) instead of the narrow board's fixed reserve.
+    let mut domain = DomainState::new();
+    let id = domain
+        .create(
+            "wide board meta column sizing",
+            Some("notes".to_string()),
+            TaskScope::Project {
+                path: REPO.to_string(),
+            },
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create long-title task");
+    // Started puts the task in IN MOTION, where its meta paints `tsk · 0s`.
+    domain
+        .set_status(id, HumanStatus::Started)
+        .expect("start task");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(REPO)));
+    to_stage(&mut domain, &mut model, WideStage::Split);
+    let geometry = resolve_responsive(130, 24, WideStage::Split);
+    let (rows, _) = render(&model, 130, 24);
+    let board = region_text(&rows, geometry.board);
+    assert!(
+        board
+            .lines()
+            .any(|line| line.contains("wide board meta column sizing")),
+        "the 29-cell title must paint on a single row when the meta is `tsk · 0s`:\n{board}"
+    );
+
+    // A 60-cell title needs a wider column to fit; at 200 cols the sized-down meta gives it
+    // the room, whereas the fixed 28-cell reserve would still wrap it.
+    let base = "a sixty character title that needs the resized meta column to fit";
+    let long: String = base.chars().take(60).collect();
+    assert_eq!(long.chars().count(), 60, "fixture title must be 60 cells");
+    let mut domain = DomainState::new();
+    let id = domain
+        .create(
+            long.clone(),
+            Some("notes".to_string()),
+            TaskScope::Project {
+                path: REPO.to_string(),
+            },
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create 60-char title task");
+    domain
+        .set_status(id, HumanStatus::Started)
+        .expect("start task");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(REPO)));
+    to_stage(&mut domain, &mut model, WideStage::Split);
+    let geometry = resolve_responsive(200, 24, WideStage::Split);
+    let (rows, _) = render(&model, 200, 24);
+    let board = region_text(&rows, geometry.board);
+    assert!(
+        board.lines().any(|line| line.contains(long.as_str())),
+        "the 60-cell title must paint on a single row at 200 cols:\n{board}"
+    );
+}
+
+#[test]
+fn footer_crumb_returns_to_stage_keys_when_the_session_is_clean_and_parked() {
+    let (mut domain, mut model) = fixture();
+    to_stage(&mut domain, &mut model, WideStage::Rail);
+    go(&mut domain, &mut model, BoardIntent::BeginEditTitle);
+    for _ in 0..8 {
+        if model.input_mode() == BoardInputMode::TaskPage {
+            break;
+        }
+        go(&mut domain, &mut model, BoardIntent::FormFocusNext);
+    }
+    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+    assert!(model.task_editing(), "the edit session stays open");
+    assert!(!model.task_session_dirty(), "the draft is clean");
+    assert!(
+        model.open_field_edit().is_none(),
+        "no field editor is active"
+    );
+    let (rows, _) = render(&model, 130, 24);
+    let (_, status_y, _) = footer_rows(24);
+    let status = &rows[status_y as usize];
+    assert!(
+        status.contains("← board · → full page"),
+        "a clean parked session shows the stage keys: {status}"
+    );
+    assert!(!status.contains("shift+enter save"), "{status}");
+
+    // A dirty parked draft keeps the save/cancel keys even without an active editor.
+    go(&mut domain, &mut model, BoardIntent::BeginEditTitle);
+    go(&mut domain, &mut model, BoardIntent::EditInsert('!'));
+    for _ in 0..8 {
+        if model.input_mode() == BoardInputMode::TaskPage {
+            break;
+        }
+        go(&mut domain, &mut model, BoardIntent::FormFocusNext);
+    }
+    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+    assert!(model.task_session_dirty(), "the draft is now dirty");
+    assert!(model.open_field_edit().is_none());
+    let (rows, _) = render(&model, 130, 24);
+    let status = &rows[status_y as usize];
+    assert!(
+        status.contains("shift+enter save · esc cancel"),
+        "a dirty parked draft keeps the save keys: {status}"
+    );
+}
+
+#[test]
 fn status_row_shows_editor_keys_while_an_editor_is_active() {
     let (mut domain, mut model) = fixture();
     to_stage(&mut domain, &mut model, WideStage::Rail);
