@@ -786,7 +786,7 @@ import { parseCapture } from "./capture.js";
         const peek =
           state.peekId === task.id
             ? [
-                ...wrapPeek(peekLines(task), Math.max(20, terminalColumns() - indent.length - 8)).map(
+                ...wrapPeek(peekLines(task), Math.max(20, terminalColumns() - indent.length - 12)).map(
                   (line) => `<div class="tsk-peek dim">${indent}    │ ${esc(line)}</div>`,
                 ),
                 `<div class="tsk-peek dim">${indent}    └</div>`,
