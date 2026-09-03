@@ -614,11 +614,26 @@ fn stage_a_preview_paints_controls_for_the_focus_router_only() {
         number.area,
         Rect::new(geometry.task_content().x + 3, 1, 3, 1)
     );
-    assert!(
-        hits.regions
-            .iter()
-            .any(|hit| inside(column, hit.area) && matches!(hit.target, QueueHitTarget::StepAdd)),
-        "preview controls exist for the focus router"
+    let control = hits
+        .regions
+        .iter()
+        .find(|hit| inside(column, hit.area) && matches!(hit.target, QueueHitTarget::StepAdd))
+        .expect("preview controls exist for the focus router");
+    // The board-focused mouse map never dispatches them...
+    assert_eq!(
+        click_map(&model, &hits, control.area.x, control.area.y),
+        None,
+        "preview controls are inert to the board-focused router"
+    );
+    // ...only the focus router reads them, sliding the stage first.
+    assert_eq!(
+        wide_mouse_focus_intent(
+            &model,
+            &hits,
+            AREA_130,
+            left_click(control.area.x, control.area.y)
+        ),
+        Some(BoardIntent::StageRight)
     );
 }
 

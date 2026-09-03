@@ -78,8 +78,10 @@ For scriptable board work, use `tsk add` and `tsk list`; read
 - There is no inline board capture form. Creation detail lives on the task page;
   the standalone Capture UI (`AppMode::Capture`, `src/ui/capture.rs`) is a
   separate surface reached through the host launcher.
-- Row click peeks. Click the same row again closes peek. Fast double-click opens
-  the page.
+- Below 110 columns, row click peeks, clicking the same row again closes peek, and
+  a fast double-click opens the page. At wide widths there is no peek: a board or rail
+  row click selects it in place (a rail click lands the board in stage A), and a fast
+  double-click opens the full task page.
 - Task page is view-first. Only `ctrl+e`, `ctrl+n`, or bare Tab enter edit mode,
   the one exception being a quick-add draft expanded with `Tab`, which opens
   straight into Notes edit mode because a draft has nothing to view. `ctrl+s`

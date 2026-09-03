@@ -264,8 +264,23 @@ fn run_board_resize_arm_drains_through_coalesce_then_paints() {
 
 #[test]
 fn repeated_threshold_resizes_keep_board_loop_live() {
-    let domain = DomainState::new();
+    let mut domain = DomainState::new();
+    domain
+        .create(
+            "resize survivor",
+            Some("notes".to_string()),
+            TaskScope::Global,
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create task");
     let mut model = BoardModel::from_domain(&domain, None);
+    // A two-column stage exercises the split compositor across the crossings.
+    assert_eq!(
+        apply_intent(&mut domain, &mut model, BoardIntent::StageRight, None)
+            .expect("slide to the split stage"),
+        IntentOutcome::None
+    );
 
     for width in [109, 110].into_iter().cycle().take(40) {
         let mut terminal = Terminal::new(TestBackend::new(width, 24)).expect("test terminal");
@@ -303,9 +318,16 @@ fn threshold_crossings_without_task_verbs_leave_domain_unchanged() {
     let before = domain.get(id).expect("task").clone();
     let mut model = BoardModel::from_domain(&domain, None);
 
+    // Slide to the rail stage: two-column geometry with the task owning focus, reached
+    // without invoking any task verb.
     assert_eq!(
-        apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None)
-            .expect("open the full task page"),
+        apply_intent(&mut domain, &mut model, BoardIntent::StageRight, None)
+            .expect("slide to the split stage"),
+        IntentOutcome::None
+    );
+    assert_eq!(
+        apply_intent(&mut domain, &mut model, BoardIntent::StageRight, None)
+            .expect("slide to the rail stage"),
         IntentOutcome::None
     );
     for width in [109, 110].into_iter().cycle().take(20) {

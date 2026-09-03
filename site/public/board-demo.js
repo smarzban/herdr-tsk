@@ -692,7 +692,7 @@ import { parseCapture } from "./capture.js";
       if (embedded) {
         return `<div class="tsk-task-column tsk-surface" aria-label="task column"><div class="tsk-task-header dim"><span class="sec">no task</span> <span class="rule">${esc(rule("no task", ""))}</span></div><div class="tsk-task-surface"><div class="dim">  select a task to preview it here</div></div></div>`;
       }
-      return `<div class="tsk-overlay"><div class="dim">no task selected</div></div>`;
+      return `<div class="tsk-overlay"><div class="dim">no task</div><div class="dim">  select a task to preview it here</div></div>`;
     }
     const editing = state.editField;
     const stateSlot = editing ? `editing ${editing}` : `${task.status} · ${projectName(task)}`;

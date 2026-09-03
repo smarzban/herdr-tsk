@@ -579,8 +579,7 @@ html[data-theme="light"] .theme-toggle .icon-moon {
   padding-top: 0.4rem;
 }
 
-.tsk-help-title,
-.tsk-page-title {
+.tsk-help-title {
   margin-bottom: 0.65rem;
   color: var(--terminal-fg);
 }

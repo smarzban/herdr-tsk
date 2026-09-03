@@ -82,8 +82,9 @@ Below 110 columns, `→` peeks notes under the selected row (up to five wrapped
 lines). `←` closes
 the peek.
 
-Click a dim task identifier to copy it. Click elsewhere on a row to peek.
-Click the same row again to close. A fast double-click opens the
+Below 110 columns, click a dim task identifier to copy it, click elsewhere on a row
+to peek, and click the same row again to close. At wide widths a board or rail row
+click selects it in place and a fast double-click opens the
 [task page](/docs/task-page/). The wheel scrolls the list.
 
 ## Pane size

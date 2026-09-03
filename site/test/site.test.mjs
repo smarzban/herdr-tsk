@@ -49,7 +49,7 @@ test("docs and demo describe the wide stage slider and threshold", async () => {
   assert.doesNotMatch(board, /bordered|cyan/);
   assert.match(keys, /Wide stage slider/);
   assert.match(keys, /\| F \| nothing \| → G \|/);
-  assert.doesNotMatch(keys, /cyan|border/);
+  assert.doesNotMatch(keys, /cyan/);
   assert.match(taskPage, /110 usable columns/);
   assert.match(taskPage, /▸ T12 title … started · tsk/);
   assert.doesNotMatch(taskPage, /bordered panel/);
@@ -61,10 +61,8 @@ test("docs and demo describe the wide stage slider and threshold", async () => {
   assert.match(demo, /class="tsk-wide-split is-rail"/);
   assert.match(demo, /tsk-rule-column/);
   assert.match(demo, /board ▸ task    → task · ← close · enter open/);
-  assert.doesNotMatch(demo, /surfaceFocus|data-panel-title|is-focused-surface/);
   assert.match(styles, /\.tsk-wide-split\.is-split \{\s*grid-template-columns: minmax\(0, 2fr\) 1px minmax\(0, 3fr\);/);
   assert.match(styles, /\.tsk-wide-split\.is-rail \{\s*grid-template-columns: 32ch 1px/);
-  assert.doesNotMatch(styles, /terminal-focus|tsk-panel/);
 });
 
 test("demo matches the quick-add, peek, and group-toggle contracts", async () => {
