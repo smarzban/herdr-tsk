@@ -597,10 +597,13 @@ fn apply_board_intent(
             if !model.select_index(idx) {
                 return Ok(IntentOutcome::None);
             }
-            // A wide row click selects in place: the stage never moves, so a stage A click
-            // retargets the pane and a stage G rail click retargets the page. A second click
-            // on the same row inside the double-click window opens the full task page.
+            // A left-side click takes focus left: a rail click in G selects the row and lands
+            // the board in A. In 0 and A the click selects in place. A second click on the
+            // same row inside the double-click window opens the full task page.
             model.detail_open = None;
+            if model.wide_stage == WideStage::Rail {
+                model.wide_stage = WideStage::Split;
+            }
             if let Some(id) = model.selected_id() {
                 let now = Instant::now();
                 let is_double = model.last_row_click.is_some_and(|(at, last)| {

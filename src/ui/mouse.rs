@@ -484,8 +484,14 @@ pub fn map_responsive_board_mouse(
     }
 
     if responsive.board.contains(pos) {
-        return (model.focused_surface() == FocusedSurface::Board)
-            .then(|| map_board_mouse(model, hits, mouse))?;
+        if model.focused_surface() == FocusedSurface::Task {
+            // The task owns input, so a press on the rail takes focus left.
+            if model.wide_stage() == WideStage::Rail {
+                return Some(BoardIntent::StageLeft);
+            }
+            return None;
+        }
+        return map_board_mouse(model, hits, mouse);
     }
     if responsive.task.contains(pos) && model.focused_surface() == FocusedSurface::Task {
         return map_board_mouse(model, hits, mouse);

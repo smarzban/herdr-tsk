@@ -70,14 +70,21 @@ fn go(domain: &mut DomainState, model: &mut BoardModel, intent: BoardIntent) {
 }
 
 fn to_stage(domain: &mut DomainState, model: &mut BoardModel, stage: WideStage) {
-    let steps = match stage {
-        WideStage::FullBoard => 0,
-        WideStage::Split => 1,
-        WideStage::Rail => 2,
-        WideStage::FullTask => 3,
-    };
-    for _ in 0..steps {
+    let order = [
+        WideStage::FullBoard,
+        WideStage::Split,
+        WideStage::Rail,
+        WideStage::FullTask,
+    ];
+    let index = |stage: WideStage| order.iter().position(|&s| s == stage).unwrap();
+    let (mut cur, want) = (index(model.wide_stage()), index(stage));
+    while cur < want {
         go(domain, model, BoardIntent::StageRight);
+        cur += 1;
+    }
+    while cur > want {
+        go(domain, model, BoardIntent::StageLeft);
+        cur -= 1;
     }
     assert_eq!(model.wide_stage(), stage);
 }
@@ -1243,25 +1250,39 @@ fn stage_a_task_column_click_without_selection_is_inert() {
 }
 
 #[test]
-fn rail_row_click_retargets_the_page_in_place() {
+fn left_side_click_moves_focus_left_from_the_rail() {
     let (mut domain, mut model) = fixture();
     to_stage(&mut domain, &mut model, WideStage::Rail);
     let bound = model.edit_target().expect("bound page");
     let geometry = resolve_responsive(130, 24, WideStage::Rail);
     let (_, hits) = render(&model, 130, 24);
+
+    // A rail row click retargets the pane and lands the board beside it.
     let other = row_hit(&hits, geometry.board, |id| id != bound);
     let intent = click_map(&model, &hits, other.x, other.y).expect("rail row maps");
     go(&mut domain, &mut model, intent);
-    assert_eq!(model.wide_stage(), WideStage::Rail);
-    assert_eq!(model.focused_surface(), FocusedSurface::Task);
+    assert_eq!(model.wide_stage(), WideStage::Split);
+    assert_eq!(model.focused_surface(), FocusedSurface::Board);
     assert_ne!(model.edit_target(), Some(bound));
     assert_eq!(model.edit_target(), model.selected_id());
-    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+    assert_eq!(model.input_mode(), BoardInputMode::Normal);
+    let split = resolve_responsive(130, 24, WideStage::Split);
     let (rows, _) = render(&model, 130, 24);
-    let header = column_text(&rows, geometry.task_content(), 1);
-    assert!(header.contains("T15 Renew domain"), "{header}");
-    // Rail furniture (tabs, headers) is not a control while the task owns input.
-    assert_eq!(click_map(&model, &hits, 2, 1), None, "rail tab");
+    assert!(column_text(&rows, split.task_content(), 1).contains("T15 Renew domain"));
+
+    // Back to G: blank rail space slides left too.
+    to_stage(&mut domain, &mut model, WideStage::Rail);
+    assert_eq!(
+        click_map(&model, &hits, 2, 9),
+        Some(BoardIntent::StageLeft),
+        "blank rail space moves focus left"
+    );
+    // Rail furniture (tabs, headers) is part of the left side; the rule itself is inert.
+    assert_eq!(
+        click_map(&model, &hits, 2, 1),
+        Some(BoardIntent::StageLeft),
+        "rail tab"
+    );
     assert_eq!(
         click_map(&model, &hits, geometry.rule.x, 5),
         None,
@@ -1280,14 +1301,19 @@ fn row_double_click_opens_the_full_page_and_records_the_origin() {
         let row = row_hit(&hits, geometry.board, |id| Some(id) != selected);
         let intent = click_map(&model, &hits, row.x, row.y).expect("row click");
         go(&mut domain, &mut model, intent.clone());
-        assert_eq!(model.wide_stage(), stage, "{stage:?}: first click selects");
+        let after_first = if stage == WideStage::Rail {
+            WideStage::Split
+        } else {
+            stage
+        };
+        assert_eq!(model.wide_stage(), after_first, "{stage:?}: first click");
         go(&mut domain, &mut model, intent);
         assert_eq!(
             model.wide_stage(),
             WideStage::FullTask,
             "{stage:?}: double-click opens F"
         );
-        assert_eq!(model.stage_origin(), Some(stage));
+        assert_eq!(model.stage_origin(), Some(after_first), "{stage:?}");
         assert_eq!(model.edit_target(), model.selected_id());
         assert_ne!(model.selected_id(), selected);
     }
@@ -1830,7 +1856,7 @@ fn dirty_refusal_clears_after_cancel() {
 }
 
 #[test]
-fn clean_editor_rail_row_click_retargets_in_place() {
+fn clean_editor_rail_row_click_retargets_and_moves_focus_left() {
     let (mut domain, mut model) = fixture();
     to_stage(&mut domain, &mut model, WideStage::Rail);
     go(&mut domain, &mut model, BoardIntent::BeginEditTitle);
@@ -1841,10 +1867,10 @@ fn clean_editor_rail_row_click_retargets_in_place() {
     let other = row_hit(&hits, geometry.board, |id| id != bound);
     let intent = click_map(&model, &hits, other.x, other.y).expect("clean retarget");
     go(&mut domain, &mut model, intent);
-    assert_eq!(model.wide_stage(), WideStage::Rail);
+    assert_eq!(model.wide_stage(), WideStage::Split, "focus moves left");
     assert_ne!(model.edit_target(), Some(bound));
     assert_eq!(model.edit_target(), model.selected_id());
-    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+    assert_eq!(model.input_mode(), BoardInputMode::Normal, "the page parks");
     assert!(model.message().is_none());
 }
 
