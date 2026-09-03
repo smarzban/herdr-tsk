@@ -530,6 +530,8 @@ fn stage_a_board_meta_column_sizes_to_the_widest_meta() {
 
     // A 60-cell title needs a wider column to fit; at 200 cols the sized-down meta gives it
     // the room, whereas the fixed 28-cell reserve would still wrap it.
+    // Arithmetic at 200 cols: board column floor(200*2/5)=80, meta budget max(8+3,8)=11,
+    // title width 80-11=69, row lead (no identifier) 4, so title room = 69-4 = 65 >= 60.
     let base = "a sixty character title that needs the resized meta column to fit";
     let long: String = base.chars().take(60).collect();
     assert_eq!(long.chars().count(), 60, "fixture title must be 60 cells");

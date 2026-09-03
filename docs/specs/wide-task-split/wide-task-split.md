@@ -141,7 +141,7 @@ None.
 
 ### Glossary terms touched
 
-Wide split view, single-pane view, focused surface (mirrored into `CONTEXT.md`).
+Wide stage, rail, focused surface (derived from stage) — mirrored into `CONTEXT.md`.
 
 ## Design
 
@@ -173,7 +173,7 @@ flowchart LR
 2. **Stage slider** *(rewritten from the surface focus controller)*: session state on `BoardModel` (`wide_stage` + `stage_origin`); the focused surface derives from the stage. `StageRight`/`StageLeft` slide one step with a no-selection guard; `OpenTaskPage` records the origin and `CloseLayer` restores it; a left-side click lands the board in A. Shrinking changes presentation but not the stage; growing restores the stage's layout. Editors keep their existing key semantics. It never creates, saves, cancels, or discards task state.
 3. **Task-page session**: owns the task-side binding and all existing page-session state: task id, page scroll, step cursor, form, draft, cursor, input mode, and dirty state. Contract: input is board selection, the current task snapshot, and existing task-page actions; output is a task-page payload, an inert empty payload, or a task-switch refusal. A clean board selection rebinds the session; a dirty session preserves its binding and draft and refuses retargeting. A missing or no-longer-visible selected task yields the empty payload or follows the existing selection-reanchor rule, never a stale actionable task.
 4. **Focused input router**: owns dispatch of keyboard and mouse input to the focused surface. Contract: input is an event, resolved rectangles and hit regions, focused surface, and task-page input mode; output is an existing board/task intent, a focus-transfer request, or no action. Board-view `Enter`/`→` requests task focus; task-view `Esc`/`←` requests board focus; active editors route those keys through their existing editor map. Coordinates outside a live hit region are ignored. The router introduces no mutating intent and does not persist.
-5. **Split frame compositor**: owns presentation composition only. Contract: input is resolved geometry, existing board paint input, the task-page or empty payload, and focused surface; output is clipped terminal cells plus one offset hit map. In wide split it paints the existing board across the full left allocation, paints one bordered task panel in the right allocation, then paints the existing task-page surface inside that panel. The task border and title are cyan plus bold with task focus and dark gray plus dim with board focus, and content stays monochrome. In single-pane presentation it paints only the focused surface without panel chrome. It suppresses inline peek only in wide split, records no hits for the empty payload, and delegates task wrapping, controls, markdown, steps, metadata, and edit rendering to the existing task-page surface.
+5. **Stage compositor** *(rewritten from the split frame compositor)*: owns presentation composition only. Contract: input is resolved geometry, existing board paint input, the task-page payload or the absence of a task, and the stage; output is clipped terminal cells plus one combined hit map. In stages A and G it paints the board or rail column, one dim `│` rule column, the task column with its two-row header (status glyph, `T<n> title`, and the state slot, DIM in A and BOLD in G and F, with a dash rule on the row under it), the page body, and exactly one shared footer (rule, status row with the dim stage crumb, verb bar following focus); there is no border ring and no colour anywhere. In stages 0 and F it paints the single surface across the whole frame. It suppresses inline peek only at wide widths, records no hits for the empty pane, and delegates task wrapping, controls, markdown, steps, metadata, and edit rendering to the existing task-page renderer.
 
 ### Data flow and key state
 
@@ -225,7 +225,7 @@ None. The responsive presentation is additive and reversible, introduces no pers
 
 ### Glossary terms touched
 
-Wide split view, single-pane view, focused surface (already mirrored into `CONTEXT.md`).
+Wide stage, rail, focused surface (derived from stage) — mirrored into `CONTEXT.md`.
 
 ## Tech Stack
 
@@ -261,7 +261,7 @@ None.
 
 - Files: `src/ui/tier.rs`, `src/ui/board/mod.rs`, `tests/wide_task_split.rs` (new), `CONTEXT.md`.
 - Test first: add `wide_geometry_activates_at_110_and_109_stays_single`, `wide_geometry_balances_touching_allocations_without_a_gap`, `wide_geometry_uses_narrower_content_for_shared_density`, and `wide_geometry_is_bounded_across_supported_sizes`; run them against the pre-change resolver and observe the missing geometry contract fail before implementation.
-- Compile fallout: expose only the geometry types needed by the board compositor and integration tests; preserve every existing `resolve` result and standard/compact breakpoint below this new composition layer. Mirror the approved wide split view, single-pane view, and focused surface terms into `CONTEXT.md` without implementation detail.
+- Compile fallout: expose only the geometry types needed by the board compositor and integration tests; preserve every existing `resolve` result and standard/compact breakpoint below this new composition layer. Mirror the approved wide stage, rail, and focused surface (derived from stage) terms into `CONTEXT.md` without implementation detail.
 - Review boundary: the deterministic geometry policy is a complete, independently testable artifact. It introduces no paint, input, or state transition.
 
 *Advances:* AC-3. *Component:* Responsive layout resolver. *Deps:* none.

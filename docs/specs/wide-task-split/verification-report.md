@@ -11,8 +11,8 @@ smoked it live. `git diff --check main...HEAD` was clean before this report was 
 ```text
 $ cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && cargo build --release
 exit 0
-cargo test aggregate: 718 passed, 0 failed, 5 ignored across 26 result blocks
-tests/wide_task_split.rs: 44 passed
+cargo test aggregate at commit 02dcc8f: 721 passed, 0 failed, 5 ignored across 26 result blocks
+tests/wide_task_split.rs at commit 02dcc8f: 47 passed
 site npm test: 6 passed, 0 failed
 ```
 
@@ -60,7 +60,7 @@ The boxed 50/50 design was replaced by the four-stage slider (commits `feat: pai
 stage slider chrome` through `docs: describe the wide stage slider`, then the owner-smoke
 tweaks `fix: move focus left when the rail is clicked`, `fix: give the task header its glyph
 and an underline rule`, and `fix: let every left-side press reach dispatch`).
-`tests/wide_task_split.rs` was rewritten (44 tests), the three `src/app.rs` focus tests were
+`tests/wide_task_split.rs` was rewritten (47 tests as of `02dcc8f`), the three `src/app.rs` focus tests were
 rewritten for stages, and `tests/queue_board_loop.rs` / `tests/queue_board_mouse.rs` wide
 fixtures were adapted. Narrow goldens were not regenerated.
 

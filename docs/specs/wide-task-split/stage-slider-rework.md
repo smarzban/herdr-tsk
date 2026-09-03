@@ -160,12 +160,12 @@ Stage A, board focus:
                                                     │ ────────────────────────────────────────────────────────────────────────────
  IN MOTION ───────────────────────────────────────1 │   Rework the wide split so the task page reads as a detail pane,
                                                     │   not a boxed clone.
-  ▸ T12 Frame the wide                     tsk · 0s │
-        task view                                   │   - keep board unboxed
-                                                    │   - decide separator
- desk ────────────────────────────────────────────1 │   - verb bar ownership
-                                                    │
-  ○ T15 Renew domain                             0s │   ```
+  ▸ T12 Frame the wide task view           tsk · 0s │
+                                                    │   - keep board unboxed
+ desk ────────────────────────────────────────────1 │   - decide separator
+                                                    │   - verb bar ownership
+  ○ T15 Renew domain                             0s │
+                                                    │   ```
                                                     │   resolve_responsive(w, h, focus)
                                                     │   ```
                                                     │

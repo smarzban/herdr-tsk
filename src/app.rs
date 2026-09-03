@@ -1167,7 +1167,6 @@ fn board_paste_intent(area: Rect, model: &mut BoardModel, text: &str) -> Option<
 /// Whether a press outside the focused column still reaches dispatch: an explicit row
 /// select, a stage slide (`←` from the rail, `→` into the task column), a modal close
 /// route, or a focus transfer.
-/// Whether a press outside the focused column still reaches dispatch.
 ///
 /// This is the Down-time half of the press gate; the Up-time half re-maps the same press in
 /// `board_mouse_intent`. Both call `map_responsive_board_mouse` over the same model and hit
