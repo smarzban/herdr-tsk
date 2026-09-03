@@ -732,13 +732,7 @@ import { parseCapture } from "./capture.js";
         ${header}
         ${notes}
         ${meta}
-        <div class="foot dim tsk-verbs">
-          <button type="button" class="tsk-verb" data-page-verb="edit">e title</button><span> · </span>
-          <button type="button" class="tsk-verb" data-page-verb="notes">n notes</button><span> · </span>
-          <button type="button" class="tsk-verb" data-page-verb="done">d done</button><span> · </span>
-          <button type="button" class="tsk-verb" data-page-verb="block">b block</button><span> · </span>
-          <span>esc back</span>
-        </div>
+        <div class="foot dim tsk-verbs">${pageVerbBar()}</div>
       </div>`;
   }
 
@@ -799,20 +793,11 @@ import { parseCapture } from "./capture.js";
       })
       .join("");
 
-    if (rail) {
-      return `
+    const column = `
       <div class="tsk-tabs">${state.focusProject ? chip : tabs}</div>
       <div class="tsk-list">${body || `<div class="dim">  nothing here</div>`}</div>`;
-    }
-    if (bare) {
-      return `
-      <div class="tsk-tabs">${state.focusProject ? chip : tabs}</div>
-      <div class="tsk-list">${body || `<div class="dim">  nothing here</div>`}</div>`;
-    }
-    return `
-      <div class="tsk-tabs">${state.focusProject ? chip : tabs}</div>
-      <div class="tsk-list">${body || `<div class="dim">  nothing here</div>`}</div>
-      ${renderFooter()}`;
+    // Wide stages paint one shared footer under both columns, so a column omits its own.
+    return rail || bare ? column : column + renderFooter();
   }
 
   const PAGE_VERBS = [
@@ -822,14 +807,21 @@ import { parseCapture } from "./capture.js";
     { id: "block", label: "b block" },
   ];
 
+  function pageVerbBar() {
+    return (
+      PAGE_VERBS.map((v) => `<button type="button" class="tsk-verb" data-page-verb="${v.id}">${v.label}</button>`).join(
+        "<span> · </span>",
+      ) + "<span> · </span><span>esc back</span>"
+    );
+  }
+
   // One footer for the frame: a rule, the status row (done count · stage crumb), and the verb
   // bar for whichever side owns focus. Wide stages paint it under both columns, as the app does.
   function renderFooter() {
     const doneN = state.tasks.filter((t) => t.status === "done").length;
     const task = selectedTask();
     const verbs = taskFocus()
-      ? PAGE_VERBS.map((v) => `<button type="button" class="tsk-verb" data-page-verb="${v.id}">${v.label}</button>`).join("<span> · </span>") +
-        "<span> · </span><span>esc back</span>"
+      ? pageVerbBar()
       : verbItems(task)
           .map((v) => `<button type="button" class="tsk-verb" data-verb="${esc(v.id)}">${esc(v.label)}</button>`)
           .join("<span> · </span>");

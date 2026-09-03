@@ -527,10 +527,6 @@ html[data-theme="light"] .pane {
   animation: pulse 1.6s ease-in-out infinite;
 }
 
-.pane-title {
-  color: var(--ink-2);
-}
-
 .pane-hint {
   margin-left: auto;
   white-space: nowrap;
@@ -1129,6 +1125,8 @@ html[data-theme="light"] .pane {
 
 .agent {
   position: relative;
+  display: flex;
+  flex-direction: column;
   min-width: 0;
   overflow: hidden;
   padding: 1rem clamp(0.9rem, 2.5vw, 1.5rem) 1.1rem;
@@ -1152,11 +1150,6 @@ html[data-theme="light"] .pane {
 .agent-bar b {
   color: var(--ink-2);
   font-weight: 500;
-}
-
-.agent {
-  display: flex;
-  flex-direction: column;
 }
 
 .agent-body {
