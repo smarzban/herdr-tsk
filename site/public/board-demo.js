@@ -459,6 +459,28 @@ import { parseCapture } from "./capture.js";
     if (id === "block") toggleBlock();
   }
 
+  // Word-wrap note lines to the board width so each visual line carries its own │ gutter,
+  // as the app paints peek. At most five rows, like peekLines.
+  function wrapPeek(lines, width) {
+    const out = [];
+    for (const line of lines) {
+      const words = line.split(/\s+/).filter(Boolean);
+      let current = "";
+      for (const word of words) {
+        if (!current) current = word;
+        else if (current.length + 1 + word.length <= width) current += ` ${word}`;
+        else {
+          out.push(current);
+          current = word;
+        }
+        if (out.length >= 5) return out.slice(0, 5);
+      }
+      if (current || !words.length) out.push(current);
+      if (out.length >= 5) return out.slice(0, 5);
+    }
+    return out;
+  }
+
   function peekLines(task) {
     const notes = (task.notes || "").trim();
     if (!notes) return ["no notes yet"];
@@ -764,7 +786,9 @@ import { parseCapture } from "./capture.js";
         const peek =
           state.peekId === task.id
             ? [
-                ...peekLines(task).map((line) => `<div class="tsk-peek dim"><span class="tsk-peek-gutter">${indent}    │ </span><span class="tsk-peek-text">${esc(line)}</span></div>`),
+                ...wrapPeek(peekLines(task), Math.max(20, terminalColumns() - indent.length - 8)).map(
+                  (line) => `<div class="tsk-peek dim">${indent}    │ ${esc(line)}</div>`,
+                ),
                 `<div class="tsk-peek dim">${indent}    └</div>`,
               ].join("")
             : "";

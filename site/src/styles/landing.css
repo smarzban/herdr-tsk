@@ -732,18 +732,8 @@ html[data-theme="light"] .pane {
 }
 
 .tsk-peek {
-  display: flex;
   padding-left: 0.15rem;
-}
-
-.tsk-peek-gutter {
-  flex: 0 0 auto;
   white-space: pre;
-}
-
-.tsk-peek-text {
-  min-width: 0;
-  white-space: pre-wrap;
 }
 
 .tsk-foot {
@@ -1508,7 +1498,7 @@ html[data-theme="light"] .pane {
   line-height: 1.12;
   letter-spacing: -0.035em;
   text-wrap: balance;
-  max-width: 28ch;
+  max-width: 44ch;
 }
 
 .band-lede {
@@ -2219,11 +2209,31 @@ html[data-theme="light"] .pane {
 
 .foot-links {
   display: flex;
-  gap: 1.25rem;
+  align-items: center;
+  gap: 1.1rem;
+}
+
+.foot-links a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  color: var(--ink-2);
+  transition: color 160ms var(--ease), border-color 160ms var(--ease);
 }
 
 .foot-links a:hover {
   color: var(--ink);
+  border-color: var(--accent);
+}
+
+.foot-links svg {
+  width: 1rem;
+  height: 1rem;
+  fill: currentColor;
 }
 
 /* ── motion ──────────────────────────────────────────────────────────────── */
