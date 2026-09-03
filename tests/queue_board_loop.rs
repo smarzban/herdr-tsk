@@ -304,8 +304,8 @@ fn threshold_crossings_without_task_verbs_leave_domain_unchanged() {
     let mut model = BoardModel::from_domain(&domain, None);
 
     assert_eq!(
-        apply_intent(&mut domain, &mut model, BoardIntent::FocusTaskSurface, None)
-            .expect("focus task"),
+        apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None)
+            .expect("open the full task page"),
         IntentOutcome::None
     );
     for width in [109, 110].into_iter().cycle().take(20) {

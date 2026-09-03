@@ -7,7 +7,7 @@ mod draw;
 mod model;
 
 pub use crate::ui::tier::{
-    resolve_responsive, FocusedSurface, ResponsiveGeometry, ResponsivePresentation,
+    resolve_responsive, FocusedSurface, ResponsiveGeometry, ResponsivePresentation, WideStage,
     WIDE_SPLIT_MIN_WIDTH,
 };
 pub use apply::{apply_intent, board_intent_may_persist};

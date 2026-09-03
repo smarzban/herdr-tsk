@@ -1,46 +1,85 @@
+//! Wide stage slider: chrome (T2), stage routing (T3), mouse (T4), dirty drafts (T5).
+
 use std::path::PathBuf;
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
-use ratatui::layout::{Position, Rect};
-use ratatui::style::{Color, Modifier};
+use ratatui::layout::Rect;
+use ratatui::style::Modifier;
 use ratatui::Terminal;
 use tsk_tui::domain::{DomainState, HumanStatus, ProvenanceOrigin, TaskScope};
-use tsk_tui::ui::board::{
-    resolve_responsive, FocusedSurface, ResponsivePresentation, WIDE_SPLIT_MIN_WIDTH,
-};
-use tsk_tui::ui::capture::CaptureField;
-use tsk_tui::ui::input::{map_key, map_responsive_key};
-use tsk_tui::ui::mouse::{
-    left_click, map_board_mouse, map_responsive_board_mouse, map_scrollbar_mouse,
-    wide_mouse_focus_intent, ScrollbarMouse,
-};
-use tsk_tui::ui::render::{assert_buffer_mono, QueueHitMap, QueueHitTarget, MONO_MODIFIERS};
-use tsk_tui::ui::tier::{Tier, COMPACT_VERB_BAR_ENTRY_BUDGET};
+use tsk_tui::ui::board::{resolve_responsive, WideStage, WIDE_SPLIT_MIN_WIDTH};
+use tsk_tui::ui::render::{assert_buffer_mono, QueueHitMap, QueueHitTarget};
+use tsk_tui::ui::tier::{Tier, STANDARD_VERB_BAR_ENTRY_BUDGET};
 use tsk_tui::ui::{apply_intent, draw_board, BoardInputMode, BoardIntent, BoardModel};
 
-fn domain_with_tasks(tasks: &[(&str, &str)]) -> DomainState {
+const REPO: &str = "/repos/tsk";
+
+const T12_NOTES: &str = "Rework the wide split so the task page reads as a **detail pane**, not a boxed clone.\n\n- keep board unboxed\n- decide separator\n- verb bar ownership\n\n```\nresolve_responsive(w, h, focus)\n```";
+
+/// The brief's reference fixture: T12 started with markdown notes in this repo, T15 ready on
+/// the desk. The model carries the numbers; the domain shares the ids.
+fn fixture() -> (DomainState, BoardModel) {
+    fixture_with_titles("Frame the wide task view", "Renew domain")
+}
+
+fn fixture_with_titles(first: &str, second: &str) -> (DomainState, BoardModel) {
     let mut domain = DomainState::new();
-    for &(title, notes) in tasks {
-        domain
-            .create(
-                title,
-                Some(notes.to_string()),
-                TaskScope::Global,
-                ProvenanceOrigin::Manual,
-                None,
-            )
-            .expect("create fixture task");
-    }
+    let started = domain
+        .create(
+            first,
+            Some(T12_NOTES.to_string()),
+            TaskScope::Project {
+                path: REPO.to_string(),
+            },
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create T12");
     domain
+        .set_status(started, HumanStatus::Started)
+        .expect("start T12");
+    domain
+        .create(
+            second,
+            Some("renewal notes".to_string()),
+            TaskScope::Global,
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create T15");
+    let mut tasks = domain.tasks().to_vec();
+    tasks[0].number = Some(12);
+    tasks[1].number = Some(15);
+    let model = BoardModel::from_tasks(tasks, Some(PathBuf::from(REPO)));
+    (domain, model)
 }
 
-fn board_model(domain: &DomainState) -> BoardModel {
-    BoardModel::from_domain(domain, Some(PathBuf::from("/repos/tsk")))
+fn go(domain: &mut DomainState, model: &mut BoardModel, intent: BoardIntent) {
+    apply_intent(domain, model, intent, None).expect("apply intent");
 }
 
-fn render_board_buffer(model: &BoardModel, width: u16, height: u16) -> (Buffer, QueueHitMap) {
+fn to_stage(domain: &mut DomainState, model: &mut BoardModel, stage: WideStage) {
+    let steps = match stage {
+        WideStage::FullBoard => 0,
+        WideStage::Split => 1,
+        WideStage::Rail => 2,
+        WideStage::FullTask => 3,
+    };
+    for _ in 0..steps {
+        go(domain, model, BoardIntent::StageRight);
+    }
+    assert_eq!(model.wide_stage(), stage);
+}
+
+const STAGES: [WideStage; 4] = [
+    WideStage::FullBoard,
+    WideStage::Split,
+    WideStage::Rail,
+    WideStage::FullTask,
+];
+
+fn render_buffer(model: &BoardModel, width: u16, height: u16) -> (Buffer, QueueHitMap) {
     let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("test terminal");
     let mut hits = QueueHitMap::default();
     terminal
@@ -49,74 +88,22 @@ fn render_board_buffer(model: &BoardModel, width: u16, height: u16) -> (Buffer, 
     (terminal.backend().buffer().clone(), hits)
 }
 
-fn render_board(model: &BoardModel, width: u16, height: u16) -> (Vec<String>, QueueHitMap) {
-    let (buffer, hits) = render_board_buffer(model, width, height);
-    if width < WIDE_SPLIT_MIN_WIDTH {
-        assert_buffer_mono(&buffer);
-    } else {
-        let geometry = resolve_responsive(width, height, model.focused_surface());
-        let (foreground, modifier) = match model.focused_surface() {
-            FocusedSurface::Board => (Color::DarkGray, Modifier::DIM),
-            FocusedSurface::Task => (Color::Cyan, Modifier::BOLD),
-        };
-        assert_full_border_style(&buffer, geometry.task, foreground, modifier);
-        for y in 0..height {
-            for x in 0..width {
-                let on_border = [geometry.task].into_iter().any(|panel| {
-                    x >= panel.x
-                        && x < panel.x.saturating_add(panel.width)
-                        && y >= panel.y
-                        && y < panel.y.saturating_add(panel.height)
-                        && (x == panel.x
-                            || x + 1 == panel.x.saturating_add(panel.width)
-                            || y == panel.y
-                            || y + 1 == panel.y.saturating_add(panel.height))
-                });
-                let cell = &buffer[(x, y)];
-                assert_eq!(cell.bg, Color::Reset, "wide cell ({x},{y}) background");
-                if !on_border {
-                    assert_eq!(cell.fg, Color::Reset, "wide content cell ({x},{y}) color");
-                    assert!(
-                        cell.modifier.difference(MONO_MODIFIERS).is_empty(),
-                        "wide content cell ({x},{y}) modifier"
-                    );
-                }
-            }
-        }
-    }
-    let rows = (0..height)
+fn rows_of(buffer: &Buffer) -> Vec<String> {
+    let area = buffer.area;
+    (0..area.height)
         .map(|y| {
-            (0..width)
+            (0..area.width)
                 .map(|x| buffer[(x, y)].symbol())
                 .collect::<String>()
         })
-        .collect();
-    (rows, hits)
+        .collect()
 }
 
-fn assert_full_border_style(buffer: &Buffer, panel: Rect, foreground: Color, modifier: Modifier) {
-    for y in panel.y..panel.y.saturating_add(panel.height) {
-        for x in panel.x..panel.x.saturating_add(panel.width) {
-            let on_ring = x == panel.x
-                || x + 1 == panel.x.saturating_add(panel.width)
-                || y == panel.y
-                || y + 1 == panel.y.saturating_add(panel.height);
-            if !on_ring {
-                continue;
-            }
-            let cell = &buffer[(x, y)];
-            assert_eq!(cell.fg, foreground, "task border cell ({x},{y}) color");
-            assert_eq!(
-                cell.bg,
-                Color::Reset,
-                "task border cell ({x},{y}) background"
-            );
-            assert_eq!(
-                cell.modifier, modifier,
-                "task border cell ({x},{y}) modifier"
-            );
-        }
-    }
+/// Render and assert the frame is mono at every width, wide or not.
+fn render(model: &BoardModel, width: u16, height: u16) -> (Vec<String>, QueueHitMap) {
+    let (buffer, hits) = render_buffer(model, width, height);
+    assert_buffer_mono(&buffer);
+    (rows_of(&buffer), hits)
 }
 
 fn region_text(rows: &[String], area: Rect) -> String {
@@ -133,2091 +120,472 @@ fn region_text(rows: &[String], area: Rect) -> String {
         .join("\n")
 }
 
-#[test]
-fn wide_geometry_activates_at_110_and_109_stays_single() {
-    let wide = resolve_responsive(WIDE_SPLIT_MIN_WIDTH, 24, FocusedSurface::Board);
-    assert_eq!(wide.presentation, ResponsivePresentation::WideSplit);
+fn column_text(rows: &[String], column: Rect, y: u16) -> String {
+    rows[y as usize]
+        .chars()
+        .skip(column.x as usize)
+        .take(column.width as usize)
+        .collect()
+}
 
-    let single_board = resolve_responsive(WIDE_SPLIT_MIN_WIDTH - 1, 24, FocusedSurface::Board);
-    assert_eq!(
-        single_board.presentation,
-        ResponsivePresentation::SingleBoard
+fn footer_rows(height: u16) -> (u16, u16, u16) {
+    (height - 3, height - 2, height - 1)
+}
+
+fn inside(area: Rect, hit: Rect) -> bool {
+    hit.x >= area.x
+        && hit.y >= area.y
+        && hit.x.saturating_add(hit.width) <= area.x.saturating_add(area.width)
+        && hit.y.saturating_add(hit.height) <= area.y.saturating_add(area.height)
+}
+
+// ---------------------------------------------------------------------------
+// T2 chrome
+// ---------------------------------------------------------------------------
+
+#[test]
+fn wide_frames_are_mono_at_every_stage_width_and_height() {
+    for stage in STAGES {
+        let (mut domain, mut model) = fixture();
+        to_stage(&mut domain, &mut model, stage);
+        for (width, height) in [
+            (WIDE_SPLIT_MIN_WIDTH, 24),
+            (111, 24),
+            (130, 24),
+            (130, 10),
+            (157, 26),
+            (200, 40),
+        ] {
+            let (buffer, _) = render_buffer(&model, width, height);
+            assert_buffer_mono(&buffer);
+        }
+    }
+}
+
+#[test]
+fn wide_paints_exactly_one_footer_at_every_stage() {
+    for stage in STAGES {
+        let (mut domain, mut model) = fixture();
+        to_stage(&mut domain, &mut model, stage);
+        let (rows, hits) = render(&model, 130, 24);
+        let (rule_y, status_y, verb_y) = footer_rows(24);
+        let rule_rows: Vec<usize> = rows
+            .iter()
+            .enumerate()
+            .filter(|(_, row)| row.chars().all(|c| c == '─'))
+            .map(|(y, _)| y)
+            .collect();
+        assert_eq!(
+            rule_rows,
+            vec![rule_y as usize],
+            "{stage:?}: one full-width rule"
+        );
+        let done_rows: Vec<usize> = rows
+            .iter()
+            .enumerate()
+            .filter(|(_, row)| row.starts_with(" 0 done"))
+            .map(|(y, _)| y)
+            .collect();
+        assert_eq!(
+            done_rows,
+            vec![status_y as usize],
+            "{stage:?}: one status row"
+        );
+        assert!(rows[status_y as usize].starts_with(" 0 done"), "{stage:?}");
+        let verb_row = &rows[verb_y as usize];
+        assert!(
+            verb_row.starts_with(' '),
+            "{stage:?}: verb bar keeps its leading space"
+        );
+        assert!(verb_row.contains("ctrl+d done"), "{stage:?}: {verb_row}");
+        let ctrl_rows = rows.iter().filter(|row| row.contains("ctrl+")).count();
+        assert_eq!(ctrl_rows, 1, "{stage:?}: exactly one verb bar");
+        let verb_hits: Vec<&tsk_tui::ui::render::QueueHit> = hits
+            .regions
+            .iter()
+            .filter(|hit| matches!(hit.target, QueueHitTarget::Verb(_)))
+            .collect();
+        assert!(!verb_hits.is_empty(), "{stage:?}: verb hits exist");
+        assert!(
+            verb_hits.iter().all(|hit| hit.area.y == verb_y),
+            "{stage:?}: every verb hit sits on the one verb row"
+        );
+    }
+}
+
+#[test]
+fn stage_zero_and_full_task_render_the_standard_tier_at_130x24() {
+    let (mut domain, mut model) = fixture();
+    let geometry = resolve_responsive(130, 24, WideStage::FullBoard);
+    assert_eq!(geometry.density, Tier::Standard);
+    let (rows, hits) = render(&model, 130, 24);
+    assert!(rows[0].trim().is_empty(), "row 0 blank");
+    assert!(
+        rows[1].contains("desk  ·  projects  ·  threads"),
+        "selector row"
     );
-    assert_eq!(single_board.board, Rect::new(0, 0, 109, 24));
-    assert_eq!(single_board.board_content(), single_board.board);
-    assert_eq!(single_board.task, Rect::default());
+    assert!(rows[2].trim().is_empty(), "blank above IN MOTION");
+    assert!(rows[3].starts_with(" IN MOTION ─"));
+    assert!(rows[4].trim().is_empty(), "blank between header and rows");
+    assert!(rows[5].starts_with("  ▸ T12 Frame the wide task view"));
+    assert!(
+        rows[5].trim_end().ends_with("tsk · 0s"),
+        "meta column: {}",
+        rows[5]
+    );
+    assert!(rows[6].trim().is_empty());
+    assert!(rows[7].starts_with(" desk ─"));
+    assert!(rows[9].starts_with("  ○ T15 Renew domain"));
+    let verbs = hits
+        .regions
+        .iter()
+        .filter(|hit| matches!(hit.target, QueueHitTarget::Verb(_)))
+        .count();
+    assert!(verbs > 5, "standard verb budget, not compact: {verbs}");
+    assert!(verbs <= usize::from(STANDARD_VERB_BAR_ENTRY_BUDGET));
 
-    let single_task = resolve_responsive(WIDE_SPLIT_MIN_WIDTH - 1, 24, FocusedSurface::Task);
-    assert_eq!(single_task.presentation, ResponsivePresentation::SingleTask);
-    assert_eq!(single_task.board, Rect::default());
-    assert_eq!(single_task.task, Rect::new(0, 0, 109, 24));
-    assert_eq!(single_task.task_content(), single_task.task);
+    to_stage(&mut domain, &mut model, WideStage::FullTask);
+    assert_eq!(
+        resolve_responsive(130, 24, WideStage::FullTask).density,
+        Tier::Standard
+    );
+    let (rows, _) = render(&model, 130, 24);
+    assert!(rows[0].trim().is_empty(), "F keeps the blank row");
+    assert!(rows[1].starts_with(" T12 Frame the wide task view ─"));
+    assert!(rows[1].trim_end().ends_with("started · tsk"));
+    assert!(
+        rows[2].contains("Rework the wide split"),
+        "body starts under the header"
+    );
 }
 
 #[test]
-fn wide_geometry_balances_touching_allocations_without_a_gap() {
-    for width in WIDE_SPLIT_MIN_WIDTH..=201 {
-        let geometry = resolve_responsive(width, 30, FocusedSurface::Board);
-        let expected_board_width = width / 2;
-        let expected_task_width = width - expected_board_width;
-
-        assert_eq!(geometry.board, Rect::new(0, 0, expected_board_width, 30));
-        assert_eq!(
-            geometry.task,
-            Rect::new(expected_board_width, 0, expected_task_width, 30)
+fn task_column_header_replaces_the_in_pane_header_with_stage_weight() {
+    for stage in [WideStage::Split, WideStage::Rail, WideStage::FullTask] {
+        let (mut domain, mut model) = fixture();
+        to_stage(&mut domain, &mut model, stage);
+        let geometry = resolve_responsive(130, 24, stage);
+        let column = geometry.task_content();
+        let (buffer, _) = render_buffer(&model, 130, 24);
+        let rows = rows_of(&buffer);
+        let header = column_text(&rows, column, 1);
+        assert!(
+            header.starts_with(" T12 Frame the wide task view ─"),
+            "{stage:?}: {header}"
         );
-        assert_eq!(geometry.board.width + geometry.task.width, width);
-        assert_eq!(geometry.board.x + geometry.board.width, geometry.task.x);
-        assert!(geometry.board.width.abs_diff(geometry.task.width) <= 1);
-        assert_eq!(geometry.board_content(), geometry.board);
-        assert_eq!(
-            geometry.board_content().x + geometry.board_content().width,
-            geometry.task.x
+        assert!(
+            header.trim_end().ends_with("started · tsk"),
+            "{stage:?}: {header}"
         );
-        assert_eq!(geometry.task_content().x, geometry.task.x + 1);
+        let body = region_text(&rows, Rect::new(column.x, 2, column.width, 19));
+        assert!(
+            !body.contains("▸ T12"),
+            "{stage:?}: in-pane header must not paint"
+        );
+        assert!(
+            !body
+                .lines()
+                .any(|line| line.trim().chars().all(|c| c == '─') && !line.trim().is_empty()),
+            "{stage:?}: no in-pane divider"
+        );
+        assert!(column_text(&rows, column, 2).contains("Rework the wide split"));
+        let title_x = column.x + 5;
+        let title_cell = &buffer[(title_x, 1)];
+        if stage == WideStage::Split {
+            assert!(title_cell.modifier.contains(Modifier::DIM), "A header dim");
+            assert!(
+                !title_cell.modifier.contains(Modifier::BOLD),
+                "A header not bold"
+            );
+        } else {
+            assert!(
+                title_cell.modifier.contains(Modifier::BOLD),
+                "{stage:?} header bold"
+            );
+            assert!(!title_cell.modifier.contains(Modifier::DIM));
+        }
     }
 }
 
 #[test]
-fn exact_110_wide_frame_paints_unboxed_board_beside_titled_task_box() {
-    let domain = domain_with_tasks(&[("boxed selected task", "boxed notes")]);
-    let mut task = domain.tasks()[0].clone();
-    task.number = Some(2);
-    let model = BoardModel::from_tasks(vec![task], Some(PathBuf::from("/repos/tsk")));
-    let number = 2;
-    let (buffer, _) = render_board_buffer(&model, 110, 24);
-    let top = (0..110)
-        .map(|x| buffer[(x, 0)].symbol())
-        .collect::<String>();
-    let bottom = (0..110)
-        .map(|x| buffer[(x, 23)].symbol())
-        .collect::<String>();
-
-    assert!(!top.contains("board"));
-    assert_ne!(buffer[(0, 0)].symbol(), "┌");
-    assert_ne!(buffer[(54, 0)].symbol(), "┐");
-    assert_eq!(buffer[(55, 0)].symbol(), "┌");
-    assert!(top.contains(&format!("T{number} · task")));
-    assert_eq!(buffer[(109, 0)].symbol(), "┐");
-    assert!(!bottom.starts_with('└'));
-    assert_ne!(buffer[(54, 23)].symbol(), "┘");
-    assert_eq!(buffer[(55, 23)].symbol(), "└");
-    assert_eq!(buffer[(109, 23)].symbol(), "┘");
+fn stage_a_board_keeps_its_meta_column() {
+    let (mut domain, mut model) = fixture();
+    to_stage(&mut domain, &mut model, WideStage::Split);
+    let geometry = resolve_responsive(130, 24, WideStage::Split);
+    let (rows, _) = render(&model, 130, 24);
+    let row = column_text(&rows, geometry.board, 5);
+    assert!(row.starts_with("  ▸ T12 Frame"), "{row}");
+    assert!(row.trim_end().ends_with("tsk · 0s"), "meta column: {row}");
+    assert_eq!(rows[5].chars().nth(geometry.rule.x as usize), Some('│'));
 }
 
 #[test]
-fn wide_task_border_title_follows_rendered_selection_across_numbered_tasks() {
-    let mut domain = domain_with_tasks(&[
-        ("first numbered task", "first notes"),
-        ("second numbered task", "second notes"),
-    ]);
-    let mut tasks = domain.tasks().to_vec();
-    tasks[0].number = Some(11);
-    tasks[1].number = Some(22);
-    let numbered = tasks
+fn rail_wraps_titles_with_indent_four_and_dims_every_cell() {
+    let long = "A deliberately long rail title that cannot fit thirty two columns";
+    let (mut domain, mut model) = fixture_with_titles(long, "Renew domain");
+    go(&mut domain, &mut model, BoardIntent::ToggleDoneDrawer);
+    assert!(model.drawer_open());
+    to_stage(&mut domain, &mut model, WideStage::Rail);
+    let geometry = resolve_responsive(130, 24, WideStage::Rail);
+    let (buffer, _) = render_buffer(&model, 130, 24);
+    let rows = rows_of(&buffer);
+    let rail = geometry.board;
+    let (rule_y, _, _) = footer_rows(24);
+    let rail_rows: Vec<String> = (0..rule_y).map(|y| column_text(&rows, rail, y)).collect();
+    let first = rail_rows
         .iter()
-        .map(|task| (task.id, task.number.expect("number"), task.title.clone()))
-        .collect::<Vec<_>>();
-    let mut model = BoardModel::from_tasks(tasks, Some(PathBuf::from("/repos/tsk")));
-    let task_area = resolve_responsive(110, 24, FocusedSurface::Board).task_content();
-
-    let initial = model.selected_id().expect("initial selection");
-    let (_, initial_number, initial_title) = numbered
+        .position(|row| row.starts_with("  ▹ T12 "))
+        .expect("selected rail row with hollow marker");
+    let continuations: Vec<&String> = rail_rows[first + 1..]
         .iter()
-        .find(|(id, _, _)| *id == initial)
-        .expect("initial numbered task");
-    let (initial_rows, _) = render_board(&model, 110, 24);
-    assert!(initial_rows[0].contains(&format!("T{initial_number} · task")));
-    assert!(region_text(&initial_rows, task_area).contains(initial_title));
-
-    apply_intent(&mut domain, &mut model, BoardIntent::SelectNext, None)
-        .expect("select next numbered task");
-    let selected = model.selected_id().expect("changed selection");
-    assert_ne!(selected, initial);
-    let (_, selected_number, selected_title) = numbered
-        .iter()
-        .find(|(id, _, _)| *id == selected)
-        .expect("selected numbered task");
-    let (selected_rows, _) = render_board(&model, 110, 24);
-    assert!(selected_rows[0].contains(&format!("T{selected_number} · task")));
-    assert!(region_text(&selected_rows, task_area).contains(selected_title));
-    assert!(!selected_rows[0].contains(&format!("T{initial_number} · task")));
+        .take_while(|row| !row.trim().is_empty())
+        .collect();
+    assert!(
+        continuations.len() >= 2,
+        "long title wraps over several rows"
+    );
+    for row in &continuations {
+        assert!(row.starts_with("    "), "continuation indent 4: {row:?}");
+        assert!(!row.starts_with("     "), "exactly four cells: {row:?}");
+    }
+    let painted: String = std::iter::once(&rail_rows[first])
+        .chain(continuations.iter().copied())
+        .map(|row| row.trim().to_string())
+        .collect::<Vec<_>>()
+        .join(" ");
+    for word in long.split(' ') {
+        assert!(painted.contains(word), "never truncated: {painted}");
+    }
+    assert!(!painted.contains('…'));
+    for y in 0..rule_y {
+        assert_eq!(
+            buffer[(rail.width, y)].symbol(),
+            "│",
+            "rule column at row {y}"
+        );
+        assert_eq!(
+            buffer[(rail.width - 1, y)].symbol(),
+            " ",
+            "no glyph touches the rule at row {y}"
+        );
+        for x in 0..rail.width {
+            assert!(
+                buffer[(x, y)].modifier.contains(Modifier::DIM),
+                "rail cell ({x},{y}) must be dim"
+            );
+        }
+    }
+    let rail_text = rail_rows.join("\n");
+    assert!(!rail_text.contains("0s"), "rail drops the meta column");
+    assert!(!rail_text.contains("DONE"), "rail drops the done drawer");
+    assert!(rail_text.contains(" IN MOTION ─"));
+    assert!(rail_text.contains(" desk ─"));
+    assert!(rail_text.contains("desk  ·  projects  ·  threads"));
 }
 
 #[test]
-fn wide_task_border_style_tracks_focus_without_coloring_board() {
-    for (width, height) in [(110, 24), (111, 24), (157, 26), (160, 24)] {
-        let mut domain = domain_with_tasks(&[("style task", "style notes")]);
-        let mut model = board_model(&domain);
-        let task_panel = resolve_responsive(width, height, FocusedSurface::Board).task;
-        let (board_buffer, _) = render_board_buffer(&model, width, height);
-        assert_full_border_style(&board_buffer, task_panel, Color::DarkGray, Modifier::DIM);
-        let _ = render_board(&model, width, height);
-
-        focus_task(&mut domain, &mut model);
-        let (task_buffer, _) = render_board_buffer(&model, width, height);
-        assert_full_border_style(&task_buffer, task_panel, Color::Cyan, Modifier::BOLD);
-        let _ = render_board(&model, width, height);
+fn status_row_crumb_and_keys_follow_the_stage() {
+    let expectations = [
+        (WideStage::FullBoard, None, "→ pane · enter open"),
+        (
+            WideStage::Split,
+            Some("board ▸ task"),
+            "→ task · ← close · enter open",
+        ),
+        (
+            WideStage::Rail,
+            Some("board ◂ task"),
+            "← board · → full page",
+        ),
+        (WideStage::FullTask, None, "← rail · esc back"),
+    ];
+    for (stage, crumb, keys) in expectations {
+        let (mut domain, mut model) = fixture();
+        to_stage(&mut domain, &mut model, stage);
+        let (rows, _) = render(&model, 130, 24);
+        let (_, status_y, _) = footer_rows(24);
+        let status = &rows[status_y as usize];
+        assert!(status.trim_end().ends_with(keys), "{stage:?}: {status}");
+        match crumb {
+            Some(crumb) => assert!(
+                status.contains(&format!("{crumb}    {keys}")),
+                "{stage:?}: {status}"
+            ),
+            None => assert!(!status.contains('▸') && !status.contains('◂'), "{stage:?}"),
+        }
+        for other in ["board ▸ task", "board ◂ task"] {
+            if crumb != Some(other) {
+                assert!(!status.contains(other), "{stage:?}: {status}");
+            }
+        }
     }
 }
 
 #[test]
-fn wide_no_selection_task_box_uses_plain_title_and_inert_interior() {
-    let model = board_model(&DomainState::new());
-    let (buffer, hits) = render_board_buffer(&model, 110, 24);
-    let top = (0..110)
-        .map(|x| buffer[(x, 0)].symbol())
-        .collect::<String>();
-    let right = Rect::new(55, 0, 55, 24);
-    let interior = Rect::new(56, 1, 53, 22);
+fn status_row_refusal_wins_over_the_crumb_then_the_keys() {
+    let (mut domain, mut model) = fixture();
+    to_stage(&mut domain, &mut model, WideStage::Split);
+    let (_, status_y, _) = footer_rows(24);
+    let (rows, _) = render(&model, 130, 24);
+    assert!(rows[status_y as usize].contains("board ▸ task"));
 
-    assert!(!top.contains("board"));
-    assert_ne!(buffer[(0, 0)].symbol(), "┌");
-    let right_top = (55..110)
-        .map(|x| buffer[(x, 0)].symbol())
-        .collect::<String>();
-    assert!(right_top.starts_with("┌ task "));
-    assert_full_border_style(&buffer, right, Color::DarkGray, Modifier::DIM);
-    assert!(region_text(
-        &(0..24)
-            .map(|y| (0..110).map(|x| buffer[(x, y)].symbol()).collect())
-            .collect::<Vec<String>>(),
-        interior,
-    )
-    .contains("no task selected"));
-    assert!(hits.regions.iter().all(|hit| hit.area.x < right.x));
+    model.set_message("x".repeat(90));
+    let (rows, _) = render(&model, 130, 24);
+    let status = &rows[status_y as usize];
+    assert!(status.contains(&"x".repeat(90)));
+    assert!(
+        !status.contains("board ▸ task"),
+        "crumb drops first: {status}"
+    );
+    assert!(status.contains("enter open"), "keys survive: {status}");
+
+    model.set_message("y".repeat(120));
+    let (rows, _) = render(&model, 130, 24);
+    let status = &rows[status_y as usize];
+    assert!(status.contains(&"y".repeat(120)));
+    assert!(
+        !status.contains("enter open"),
+        "keys drop after the crumb: {status}"
+    );
 }
 
 #[test]
-fn wide_hits_and_copy_regions_stay_inside_board_allocation_or_task_interior() {
-    let mut domain = domain_with_tasks(&[("boxed hit task", "boxed hit notes")]);
-    let mut model = board_model(&domain);
-    focus_task(&mut domain, &mut model);
-    let (_, hits) = render_board_buffer(&model, 111, 24);
-    let board_inner = Rect::new(0, 0, 55, 24);
-    let task_inner = Rect::new(56, 1, 54, 22);
+fn status_row_shows_editor_keys_while_an_editor_is_active() {
+    let (mut domain, mut model) = fixture();
+    to_stage(&mut domain, &mut model, WideStage::Rail);
+    go(&mut domain, &mut model, BoardIntent::BeginEditTitle);
+    let (rows, _) = render(&model, 130, 24);
+    let (_, status_y, _) = footer_rows(24);
+    assert!(rows[status_y as usize].contains("shift+enter save · esc cancel"));
+    assert!(!rows[status_y as usize].contains("← board"));
+    let geometry = resolve_responsive(130, 24, WideStage::Rail);
+    let header = column_text(&rows, geometry.task_content(), 1);
+    assert!(header.trim_end().ends_with("editing title"), "{header}");
+}
 
+#[test]
+fn empty_pane_paints_no_task_header_and_is_inert() {
+    let mut model = BoardModel::from_tasks(Vec::new(), Some(PathBuf::from(REPO)));
+    let mut domain = DomainState::new();
+    assert_eq!(model.selected_id(), None);
+    go(&mut domain, &mut model, BoardIntent::StageRight);
+    assert_eq!(
+        model.wide_stage(),
+        WideStage::FullBoard,
+        "stage A needs a selection"
+    );
+    go(&mut domain, &mut model, BoardIntent::OpenTaskPage);
+    assert_eq!(model.wide_stage(), WideStage::FullBoard);
+
+    // Stage A reached with a task, which then disappears: stay in A, paint the empty pane.
+    let (mut domain, mut model) = fixture();
+    to_stage(&mut domain, &mut model, WideStage::Split);
+    model.sync_from_domain(&DomainState::new());
+    assert_eq!(model.selected_id(), None);
+    assert_eq!(model.wide_stage(), WideStage::Split);
+    let geometry = resolve_responsive(130, 24, WideStage::Split);
+    let (rows, hits) = render(&model, 130, 24);
+    let column = geometry.task_content();
+    let header = column_text(&rows, column, 1);
+    assert!(header.starts_with(" no task ─"), "{header}");
+    assert!(column_text(&rows, column, 2).contains("select a task to preview it here"));
     assert!(
         hits.regions
             .iter()
-            .any(|hit| hit.area.x == board_inner.x && hit.area.y == board_inner.y + 1),
-        "board controls must retain the full allocation origin and row budget"
+            .all(|hit| !inside(column_text_area(column, 24), hit.area)),
+        "empty pane exposes no hits"
     );
-    for area in hits
-        .regions
-        .iter()
-        .map(|hit| hit.area)
-        .chain(hits.copyable.iter().copied())
-    {
-        let bounded_by = if area.x < 55 { board_inner } else { task_inner };
-        assert!(
-            area.x >= bounded_by.x
-                && area.y >= bounded_by.y
-                && area.x.saturating_add(area.width)
-                    <= bounded_by.x.saturating_add(bounded_by.width)
-                && area.y.saturating_add(area.height)
-                    <= bounded_by.y.saturating_add(bounded_by.height),
-            "hit or copy region escapes panel interior: {area:?}"
-        );
-    }
+    go(&mut domain, &mut model, BoardIntent::StageRight);
+    assert_eq!(model.wide_stage(), WideStage::Split, "G needs a selection");
+}
+
+fn column_text_area(column: Rect, height: u16) -> Rect {
+    Rect::new(column.x, 0, column.width, height - 3)
 }
 
 #[test]
-fn wide_renderer_consumes_shared_compact_density_at_width_and_height_boundaries() {
-    let domain = domain_with_tasks(&[("shared density", "density notes")]);
-    let model = board_model(&domain);
-
-    for (width, height) in [(157, 26), (160, 24)] {
-        let geometry = resolve_responsive(width, height, FocusedSurface::Board);
-        assert_eq!(geometry.density, Tier::Compact);
-        let (_, hits) = render_board_buffer(&model, width, height);
-        let board_verbs = hits
-            .regions
-            .iter()
-            .filter(|hit| {
-                geometry
-                    .board_content()
-                    .contains(Position::new(hit.area.x, hit.area.y))
-                    && matches!(hit.target, QueueHitTarget::Verb(_))
-            })
-            .count();
-        let task_verbs = hits
-            .regions
-            .iter()
-            .filter(|hit| {
-                geometry
-                    .task_content()
-                    .contains(Position::new(hit.area.x, hit.area.y))
-                    && matches!(hit.target, QueueHitTarget::Verb(_))
-            })
-            .count();
-        assert_eq!(
-            board_verbs,
-            usize::from(COMPACT_VERB_BAR_ENTRY_BUDGET),
-            "board must consume shared compact density at {width}x{height}"
-        );
-        assert_eq!(
-            task_verbs,
-            usize::from(COMPACT_VERB_BAR_ENTRY_BUDGET),
-            "task must consume shared compact density at {width}x{height}"
-        );
-    }
-}
-
-#[test]
-fn wide_geometry_uses_narrower_content_for_shared_density() {
-    let uneven = resolve_responsive(157, 26, FocusedSurface::Task);
-    assert_eq!(uneven.board_content().width, 78);
-    assert_eq!(uneven.task_content().width, 77);
-    assert_eq!(uneven.density, Tier::Compact);
-
-    let both_standard = resolve_responsive(160, 26, FocusedSurface::Board);
-    assert_eq!(both_standard.board_content().width, 80);
-    assert_eq!(both_standard.task_content().width, 78);
-    assert_eq!(both_standard.density, Tier::Standard);
-
-    let short = resolve_responsive(200, 25, FocusedSurface::Board);
-    assert_eq!(short.task_content().height, 23);
-    assert_eq!(short.density, Tier::Compact);
-}
-
-#[test]
-fn wide_geometry_is_bounded_across_supported_sizes() {
-    for height in (10..=80).chain([u16::MAX]) {
-        for width in 40..=u16::MAX {
-            let frame = Rect::new(0, 0, width, height);
-            for focus in [FocusedSurface::Board, FocusedSurface::Task] {
-                let geometry = resolve_responsive(width, height, focus);
-                for area in [
-                    geometry.board,
-                    geometry.task,
-                    geometry.board_content(),
-                    geometry.task_content(),
-                ] {
-                    assert!(area.x <= frame.width, "{width}x{height}: x {}", area.x);
-                    assert!(area.y <= frame.height, "{width}x{height}: y {}", area.y);
-                    assert!(
-                        u32::from(area.x) + u32::from(area.width) <= u32::from(frame.width),
-                        "{width}x{height}: horizontal overflow for {area:?}"
-                    );
-                    assert!(
-                        u32::from(area.y) + u32::from(area.height) <= u32::from(frame.height),
-                        "{width}x{height}: vertical overflow for {area:?}"
-                    );
-                }
-            }
-        }
-    }
-}
-
-#[test]
-fn wide_layout_activates_at_110_and_109_stays_single_pane() {
-    let domain = domain_with_tasks(&[("selected wide task", "wide task notes")]);
-    let model = board_model(&domain);
-
-    let (wide_rows, _) = render_board(&model, 110, 24);
-    let wide = resolve_responsive(110, 24, FocusedSurface::Board);
-    assert!(region_text(&wide_rows, wide.board_content()).contains("selected wide task"));
-    assert!(region_text(&wide_rows, wide.task_content()).contains("selected wide task"));
-    assert_ne!(wide_rows[0].chars().nth(54), Some('┐'));
-    assert_eq!(wide_rows[0].chars().nth(55), Some('┌'));
-    assert_ne!(wide_rows[23].chars().nth(54), Some('┘'));
-    assert_eq!(wide_rows[23].chars().nth(55), Some('└'));
-
-    let (single_rows, _) = render_board(&model, 109, 24);
-    assert_eq!(
-        single_rows.join("\n").matches("selected wide task").count(),
-        1
-    );
-}
-
-#[test]
-fn wide_split_never_paints_or_hits_outside_supported_frames() {
-    let long_notes = "bounded notes ".repeat(80);
-    let mut domain = domain_with_tasks(&[("first bounded task", &long_notes)]);
-    for index in 0..20 {
-        domain
-            .create(
-                format!("bounded list task {index}"),
-                Some("more bounded notes".to_string()),
-                TaskScope::Global,
-                ProvenanceOrigin::Manual,
-                None,
-            )
-            .expect("create overflowing fixture task");
-    }
-    let model = board_model(&domain);
-
-    for (width, height) in [(110, 10), (111, 24), (156, 23), (157, 24), (240, 80)] {
-        let (rows, hits) = render_board(&model, width, height);
-        let geometry = resolve_responsive(width, height, FocusedSurface::Board);
-        assert_ne!(rows[0].chars().next(), Some('┌'));
-        assert_ne!(
-            rows[0].chars().nth(geometry.board.width as usize - 1),
-            Some('┐')
-        );
-        assert_eq!(rows[0].chars().nth(geometry.task.x as usize), Some('┌'));
-        assert_ne!(rows[height as usize - 1].chars().next(), Some('└'));
-        assert!(
-            hits.copyable
+fn wide_hits_stay_inside_their_column_or_the_footer() {
+    for stage in STAGES {
+        for (width, height) in [(110, 24), (130, 24), (157, 26), (240, 60)] {
+            let (mut domain, mut model) = fixture();
+            to_stage(&mut domain, &mut model, stage);
+            let geometry = resolve_responsive(width, height, stage);
+            let (_, hits) = render(&model, width, height);
+            let footer = Rect::new(0, height - 3, width, 3);
+            let board = Rect::new(0, 0, geometry.board.width, height - 3);
+            let task = Rect::new(
+                geometry.task_content().x,
+                0,
+                geometry.task_content().width,
+                height - 3,
+            );
+            for area in hits
+                .regions
                 .iter()
-                .any(|area| area.x >= geometry.task_content().x),
-            "{width}x{height}: selected task side must declare bounded copy regions"
-        );
-        for area in hits
-            .regions
-            .iter()
-            .map(|hit| hit.area)
-            .chain(hits.copyable.iter().copied())
-        {
-            assert!(
-                u32::from(area.x) + u32::from(area.width) <= u32::from(width),
-                "{width}x{height}: horizontal hit overflow for {area:?}"
-            );
-            assert!(
-                u32::from(area.y) + u32::from(area.height) <= u32::from(height),
-                "{width}x{height}: vertical hit overflow for {area:?}"
-            );
-            let content = if area.x < geometry.task.x {
-                geometry.board_content()
-            } else {
-                geometry.task_content()
-            };
-            assert!(
-                area.x >= content.x
-                    && area.y >= content.y
-                    && area.x.saturating_add(area.width) <= content.x.saturating_add(content.width)
-                    && area.y.saturating_add(area.height)
-                        <= content.y.saturating_add(content.height),
-                "{width}x{height}: hit or copy region escapes panel interior: {area:?}"
-            );
-        }
-    }
-}
-
-#[test]
-fn wide_board_selection_repaints_task_side_without_inline_peek() {
-    let mut domain = domain_with_tasks(&[
-        ("first selected task", "first unique notes"),
-        ("second selected task", "second unique notes"),
-    ]);
-    let mut model = board_model(&domain);
-    let geometry = resolve_responsive(110, 24, FocusedSurface::Board);
-
-    let (first_rows, _) = render_board(&model, 110, 24);
-    let first_task_side = region_text(&first_rows, geometry.task);
-    let first_was_first = first_task_side.contains("first selected task");
-    assert!(
-        first_was_first || first_task_side.contains("second selected task"),
-        "initial selection must paint on the task side"
-    );
-    let (next_title, next_notes) = if first_was_first {
-        ("second selected task", "second unique notes")
-    } else {
-        ("first selected task", "first unique notes")
-    };
-
-    apply_intent(&mut domain, &mut model, BoardIntent::SelectNext, None).expect("select next task");
-    apply_intent(&mut domain, &mut model, BoardIntent::PeekDetail, None).expect("open peek");
-    let (second_rows, _) = render_board(&model, 110, 24);
-    let frame = second_rows.join("\n");
-    assert!(region_text(&second_rows, geometry.task).contains(next_title));
-    assert_eq!(
-        frame.matches(next_notes).count(),
-        1,
-        "wide mode must show notes only on the task side, never in an inline peek"
-    );
-}
-
-#[test]
-fn wide_split_without_selection_paints_inert_task_empty_state() {
-    let model = board_model(&DomainState::new());
-    let geometry = resolve_responsive(110, 24, FocusedSurface::Board);
-    let (rows, hits) = render_board(&model, 110, 24);
-
-    assert!(region_text(&rows, geometry.task).contains("no task selected"));
-    assert!(hits.regions.iter().all(|hit| hit.area.x < geometry.task.x));
-    assert!(hits.copyable.iter().all(|area| area.x < geometry.task.x));
-}
-
-#[test]
-fn wide_preview_task_side_controls_are_exposed_only_to_the_focus_router() {
-    let domain = domain_with_tasks(&[("read only selected task", "read only notes")]);
-    let model = board_model(&domain);
-    let geometry = resolve_responsive(110, 24, FocusedSurface::Board);
-    let (_, hits) = render_board(&model, 110, 24);
-    let edit = hits
-        .regions
-        .iter()
-        .find(|hit| hit.area.x >= geometry.task.x && matches!(hit.target, QueueHitTarget::Verb(0)))
-        .expect("preview edit verb hit");
-    let click = left_click(edit.area.x, edit.area.y);
-
-    assert_eq!(
-        map_responsive_board_mouse(&model, &hits, Rect::new(0, 0, 110, 24), click),
-        None
-    );
-    assert_eq!(
-        wide_mouse_focus_intent(&model, &hits, Rect::new(0, 0, 110, 24), click),
-        Some(BoardIntent::FocusTaskSurface)
-    );
-}
-
-fn focus_task(domain: &mut DomainState, model: &mut BoardModel) {
-    let outcome = apply_intent(domain, model, BoardIntent::FocusTaskSurface, None)
-        .expect("focus selected task");
-    assert_eq!(outcome, tsk_tui::ui::IntentOutcome::None);
-    assert_eq!(model.focused_surface(), FocusedSurface::Task);
-}
-
-#[test]
-fn wide_board_enter_and_right_focus_the_same_selected_task() {
-    for code in [KeyCode::Enter, KeyCode::Right] {
-        let mut domain = domain_with_tasks(&[("focus target", "focus notes")]);
-        let mut model = board_model(&domain);
-        let selected = model.selected_id();
-        let intent = map_responsive_key(
-            BoardInputMode::Normal,
-            FocusedSurface::Board,
-            ResponsivePresentation::WideSplit,
-            false,
-            KeyEvent::new(code, KeyModifiers::NONE),
-        )
-        .expect("wide board focus key");
-
-        apply_intent(&mut domain, &mut model, intent, None).expect("apply focus transfer");
-        assert_eq!(model.focused_surface(), FocusedSurface::Task);
-        assert_eq!(model.selected_id(), selected);
-        assert_eq!(model.edit_target(), selected);
-        assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
-    }
-
-    assert_eq!(
-        map_responsive_key(
-            BoardInputMode::Normal,
-            FocusedSurface::Board,
-            ResponsivePresentation::SingleBoard,
-            false,
-            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
-        ),
-        Some(BoardIntent::OpenTaskPage),
-        "below-threshold Enter keeps the existing task-page route"
-    );
-}
-
-#[test]
-fn task_view_escape_and_left_return_focus_without_resetting_page_session() {
-    for code in [KeyCode::Esc, KeyCode::Left] {
-        let mut domain = domain_with_tasks(&[("retained task", &"long notes ".repeat(100))]);
-        let id = domain.tasks()[0].id;
-        domain.add_step(id, "retained step").expect("add step");
-        let mut model = board_model(&domain);
-        focus_task(&mut domain, &mut model);
-        let _ = render_board(&model, 110, 24);
-        apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::PageWheelScrollDown,
-            None,
-        )
-        .expect("scroll page");
-        apply_intent(&mut domain, &mut model, BoardIntent::PageScrollDown, None)
-            .expect("select first step");
-        let before = (
-            model.page_scroll(),
-            model.step_cursor(),
-            model.edit_target(),
-        );
-        assert!(before.0 > 0, "fixture must exercise retained page scroll");
-        assert_eq!(
-            before.1,
-            Some(0),
-            "fixture must exercise retained step cursor"
-        );
-        let intent = map_responsive_key(
-            BoardInputMode::TaskPage,
-            FocusedSurface::Task,
-            ResponsivePresentation::WideSplit,
-            false,
-            KeyEvent::new(code, KeyModifiers::NONE),
-        )
-        .expect("task return key");
-
-        apply_intent(&mut domain, &mut model, intent, None).expect("return board focus");
-        assert_eq!(model.focused_surface(), FocusedSurface::Board);
-        assert_eq!(model.input_mode(), BoardInputMode::Normal);
-        assert_eq!(
-            (
-                model.page_scroll(),
-                model.step_cursor(),
-                model.edit_target()
-            ),
-            before
-        );
-    }
-
-    assert_eq!(
-        map_responsive_key(
-            BoardInputMode::EditTitle,
-            FocusedSurface::Task,
-            ResponsivePresentation::WideSplit,
-            true,
-            KeyEvent::new(KeyCode::Left, KeyModifiers::NONE),
-        ),
-        Some(BoardIntent::EditMoveLeft),
-        "an active editor retains its existing left-arrow handling"
-    );
-}
-
-#[test]
-fn shrinking_with_board_focus_preserves_selection_and_list_scroll() {
-    let tasks: Vec<(String, String)> = (0..30)
-        .map(|index| (format!("board task {index}"), "notes".to_string()))
-        .collect();
-    let refs: Vec<(&str, &str)> = tasks
-        .iter()
-        .map(|(title, notes)| (title.as_str(), notes.as_str()))
-        .collect();
-    let mut domain = domain_with_tasks(&refs);
-    let mut model = board_model(&domain);
-    for _ in 0..8 {
-        apply_intent(&mut domain, &mut model, BoardIntent::SelectNext, None)
-            .expect("move selection");
-    }
-    apply_intent(&mut domain, &mut model, BoardIntent::ListScrollTo(3), None)
-        .expect("set list scroll");
-    let before = (model.selected_id(), model.list_scroll());
-    assert_eq!(before.1, 3, "fixture must exercise retained list scroll");
-
-    let _ = render_board(&model, 110, 10);
-    let _ = render_board(&model, 109, 10);
-
-    assert_eq!(model.focused_surface(), FocusedSurface::Board);
-    assert_eq!((model.selected_id(), model.list_scroll()), before);
-}
-
-#[test]
-fn shrinking_with_task_focus_preserves_page_scroll_and_session() {
-    let mut domain = domain_with_tasks(&[
-        ("task survives shrink", &"wide notes ".repeat(100)),
-        ("board-only sibling", "other notes"),
-    ]);
-    let mut model = board_model(&domain);
-    focus_task(&mut domain, &mut model);
-    let bound = model.edit_target().expect("bound task");
-    let sibling_title = domain
-        .tasks()
-        .iter()
-        .find(|task| task.id != bound)
-        .expect("sibling")
-        .title
-        .clone();
-    let _ = render_board(&model, 110, 24);
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::PageWheelScrollDown,
-        None,
-    )
-    .expect("scroll task");
-    let before = (
-        model.page_scroll(),
-        model.step_cursor(),
-        model.edit_target(),
-    );
-
-    let (rows, _) = render_board(&model, 109, 24);
-
-    assert_eq!(model.focused_surface(), FocusedSurface::Task);
-    assert_eq!(
-        (
-            model.page_scroll(),
-            model.step_cursor(),
-            model.edit_target()
-        ),
-        before
-    );
-    let rendered = rows.join("\n");
-    assert!(rendered.contains(&domain.get(bound).expect("bound task").title));
-    assert!(!rendered.contains(&sibling_title));
-}
-
-#[test]
-fn growing_back_to_wide_restores_focus_and_page_session() {
-    let mut domain = domain_with_tasks(&[("task survives growth", &"growth notes ".repeat(100))]);
-    let mut model = board_model(&domain);
-    focus_task(&mut domain, &mut model);
-    let _ = render_board(&model, 109, 24);
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::PageWheelScrollDown,
-        None,
-    )
-    .expect("scroll task");
-    let before = (
-        model.page_scroll(),
-        model.step_cursor(),
-        model.edit_target(),
-    );
-
-    let (rows, _) = render_board(&model, 110, 24);
-    let geometry = resolve_responsive(110, 24, FocusedSurface::Task);
-
-    assert_eq!(model.focused_surface(), FocusedSurface::Task);
-    assert_eq!(
-        (
-            model.page_scroll(),
-            model.step_cursor(),
-            model.edit_target()
-        ),
-        before
-    );
-    assert!(region_text(&rows, geometry.board).contains("task survives growth"));
-    assert!(region_text(&rows, geometry.task).contains("task survives growth"));
-}
-
-#[test]
-fn board_focused_primary_verb_ignores_parked_step_cursor() {
-    let mut domain = domain_with_tasks(&[("parked task", "notes"), ("board target", "notes")]);
-    let parked = board_model(&domain)
-        .selected_id()
-        .expect("initial selection");
-    domain.add_step(parked, "parked step").expect("add step");
-    let mut model = board_model(&domain);
-    focus_task(&mut domain, &mut model);
-    let bound = model.edit_target().expect("parked binding");
-    apply_intent(&mut domain, &mut model, BoardIntent::PageScrollDown, None)
-        .expect("select parked step");
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::FocusBoardSurface,
-        None,
-    )
-    .expect("return board focus");
-    apply_intent(&mut domain, &mut model, BoardIntent::SelectNext, None)
-        .expect("select board target");
-    let selected = model.selected_id().expect("selected board target");
-    assert_ne!(selected, bound);
-
-    apply_intent(&mut domain, &mut model, BoardIntent::PrimaryVerb, None)
-        .expect("apply board primary verb");
-
-    assert_eq!(
-        domain.get(selected).expect("selected task").status,
-        tsk_tui::domain::HumanStatus::Started
-    );
-    assert!(!domain.get(bound).expect("parked task").steps[0].done);
-}
-
-#[test]
-fn board_selection_after_focus_return_repaints_right_side() {
-    let mut domain = domain_with_tasks(&[("parked right side", "old"), ("new right side", "new")]);
-    let mut model = board_model(&domain);
-    focus_task(&mut domain, &mut model);
-    let parked = model.edit_target().expect("parked binding");
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::FocusBoardSurface,
-        None,
-    )
-    .expect("return board focus");
-    apply_intent(&mut domain, &mut model, BoardIntent::SelectNext, None)
-        .expect("change board selection");
-    let selected = model.selected_id().expect("new selection");
-    assert_ne!(selected, parked);
-
-    let (rows, _) = render_board(&model, 110, 24);
-    let task = resolve_responsive(110, 24, FocusedSurface::Board).task_content();
-    let task_text = region_text(&rows, task);
-
-    assert!(task_text.contains(&domain.get(selected).expect("selected task").title));
-    assert!(!task_text.contains(&domain.get(parked).expect("parked task").title));
-}
-
-#[test]
-fn narrow_board_after_focus_return_uses_board_verbs_and_row_clicks() {
-    let mut domain = domain_with_tasks(&[("narrow parked", "notes"), ("narrow row", "notes")]);
-    let mut model = board_model(&domain);
-    focus_task(&mut domain, &mut model);
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::FocusBoardSurface,
-        None,
-    )
-    .expect("return board focus");
-
-    let (rows, hits) = render_board(&model, 109, 24);
-    assert_eq!(model.input_mode(), BoardInputMode::Normal);
-    let verb_row = &rows[23];
-    assert!(verb_row.contains("enter open"), "board verbs: {verb_row}");
-    assert!(!verb_row.contains("esc close"), "board verbs: {verb_row}");
-    let row = hits
-        .regions
-        .iter()
-        .find(|hit| matches!(hit.target, QueueHitTarget::Task(_)))
-        .expect("board row hit");
-    assert!(matches!(
-        map_board_mouse(&model, &hits, left_click(row.area.x, row.area.y)),
-        Some(BoardIntent::SelectIndex(_))
-    ));
-}
-
-#[test]
-fn editing_task_session_escape_and_left_keep_editor_semantics() {
-    for code in [KeyCode::Esc, KeyCode::Left] {
-        let mut domain = domain_with_tasks(&[("editor target", "notes")]);
-        let mut model = board_model(&domain);
-        focus_task(&mut domain, &mut model);
-        apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
-            .expect("begin title edit");
-        apply_intent(&mut domain, &mut model, BoardIntent::EditInsert('!'), None)
-            .expect("change title draft");
-        for _ in 0..8 {
-            if model.input_mode() == BoardInputMode::TaskPage {
-                break;
+                .map(|hit| hit.area)
+                .chain(hits.copyable.iter().copied())
+            {
+                assert!(
+                    inside(footer, area) || inside(board, area) || inside(task, area),
+                    "{stage:?} {width}x{height}: {area:?} escapes board {board:?}, task {task:?}, footer {footer:?}"
+                );
+                assert!(
+                    !(geometry.rule.width > 0
+                        && area.x <= geometry.rule.x
+                        && area.x + area.width > geometry.rule.x
+                        && area.y < height - 3),
+                    "{stage:?} {width}x{height}: {area:?} crosses the rule column"
+                );
             }
-            apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
-                .expect("advance task edit focus");
+            if geometry.task.width > 0 && geometry.board.width > 0 {
+                assert!(
+                    hits.regions.iter().any(|hit| inside(board, hit.area)),
+                    "{stage:?}: board column keeps row hits"
+                );
+            }
         }
-        assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
-        assert!(model.task_editing());
-        let intent = map_responsive_key(
-            BoardInputMode::TaskPage,
-            FocusedSurface::Task,
-            ResponsivePresentation::WideSplit,
-            true,
-            KeyEvent::new(code, KeyModifiers::NONE),
-        );
-
-        if code == KeyCode::Esc {
-            assert_eq!(intent, Some(BoardIntent::CloseLayer));
-            apply_intent(&mut domain, &mut model, intent.expect("Esc intent"), None)
-                .expect("cancel task edit");
-            assert!(!model.task_editing());
-        } else {
-            assert_eq!(intent, None);
-            assert!(model.task_editing());
-        }
-        assert_eq!(model.focused_surface(), FocusedSurface::Task);
     }
 }
 
-fn translated_task_hit_signature(hits: &QueueHitMap, area: Rect) -> Vec<(String, Rect)> {
-    let mut signature: Vec<_> = hits
+#[test]
+fn stage_a_preview_paints_controls_for_the_focus_router_only() {
+    let (mut domain, mut model) = fixture();
+    to_stage(&mut domain, &mut model, WideStage::Split);
+    let geometry = resolve_responsive(130, 24, WideStage::Split);
+    let (_, hits) = render(&model, 130, 24);
+    let column = column_text_area(geometry.task_content(), 24);
+    let number = hits
         .regions
         .iter()
-        .filter(|hit| {
-            hit.area.x >= area.x
-                && hit.area.y >= area.y
-                && hit.area.x.saturating_add(hit.area.width) <= area.x.saturating_add(area.width)
-                && hit.area.y.saturating_add(hit.area.height) <= area.y.saturating_add(area.height)
-        })
-        .map(|hit| {
-            (
-                format!("{:?}", hit.target),
-                Rect::new(
-                    hit.area.x - area.x,
-                    hit.area.y - area.y,
-                    hit.area.width,
-                    hit.area.height,
-                ),
-            )
-        })
-        .collect();
-    signature.sort_by_key(|(target, area)| (area.y, area.x, target.clone()));
-    signature
-}
-
-fn translated_copy_signature(hits: &QueueHitMap, area: Rect) -> Vec<Rect> {
-    let mut signature: Vec<_> = hits
-        .copyable
-        .iter()
-        .filter(|rect| {
-            rect.x >= area.x
-                && rect.y >= area.y
-                && rect.x.saturating_add(rect.width) <= area.x.saturating_add(area.width)
-                && rect.y.saturating_add(rect.height) <= area.y.saturating_add(area.height)
-        })
-        .map(|rect| Rect::new(rect.x - area.x, rect.y - area.y, rect.width, rect.height))
-        .collect();
-    signature.sort_by_key(|area| (area.y, area.x, area.width, area.height));
-    signature
-}
-
-fn assert_model_and_domain_outcome_equal(
-    domain: &DomainState,
-    model: &BoardModel,
-    intent: BoardIntent,
-    label: &str,
-) {
-    let mut single_domain = domain.clone();
-    let mut wide_domain = domain.clone();
-    let mut single_model = model.clone();
-    let mut wide_model = model.clone();
-    let single_outcome = apply_intent(&mut single_domain, &mut single_model, intent.clone(), None)
-        .expect("single-pane action");
-    let wide_outcome =
-        apply_intent(&mut wide_domain, &mut wide_model, intent, None).expect("wide action");
-    assert_eq!(single_outcome, wide_outcome, "{label}: reducer outcome");
-    assert_eq!(single_domain.tasks().len(), wide_domain.tasks().len());
-    for single_task in single_domain.tasks() {
-        let wide_task = wide_domain.get(single_task.id).expect("matching wide task");
-        assert_eq!(single_task.title, wide_task.title, "{label}: title");
-        assert_eq!(single_task.notes, wide_task.notes, "{label}: notes");
-        assert_eq!(single_task.thread, wide_task.thread, "{label}: thread");
-        assert_eq!(single_task.status, wide_task.status, "{label}: status");
-        assert_eq!(single_task.scope, wide_task.scope, "{label}: scope");
-        assert_eq!(single_task.steps, wide_task.steps, "{label}: steps");
-        assert_eq!(
-            single_task.soft_deleted, wide_task.soft_deleted,
-            "{label}: deletion"
-        );
-    }
+        .find(|hit| inside(column, hit.area) && matches!(hit.target, QueueHitTarget::TaskNumber(_)))
+        .expect("the T<number> prefix keeps its copy hit");
     assert_eq!(
-        (
-            single_model.input_mode(),
-            single_model.focused_surface(),
-            single_model.selected_id(),
-            single_model.edit_target(),
-            single_model.page_scroll(),
-            single_model.step_cursor(),
-            single_model.form_focus(),
-            single_model.edit_buffer(),
-            single_model.edit_cursor(),
-            single_model.task_editing(),
-        ),
-        (
-            wide_model.input_mode(),
-            wide_model.focused_surface(),
-            wide_model.selected_id(),
-            wide_model.edit_target(),
-            wide_model.page_scroll(),
-            wide_model.step_cursor(),
-            wide_model.form_focus(),
-            wide_model.edit_buffer(),
-            wide_model.edit_cursor(),
-            wide_model.task_editing(),
-        ),
-        "{label}: page-session transition"
+        number.area,
+        Rect::new(geometry.task_content().x + 1, 1, 3, 1)
     );
-}
-
-fn assert_equal_task_surface_mouse_outcomes(label: &str, domain: &DomainState, model: &BoardModel) {
-    let single_area = Rect::new(0, 0, 55, 22);
-    let wide_area = Rect::new(0, 0, 114, 24);
-    let task_area = resolve_responsive(114, 24, FocusedSurface::Task).task_content();
-    assert_eq!(
-        (task_area.width, task_area.height),
-        (single_area.width, single_area.height)
-    );
-    let (single_rows, single_hits) = render_board(model, single_area.width, single_area.height);
-    let (wide_rows, wide_hits) = render_board(model, wide_area.width, wide_area.height);
-
-    assert_eq!(
-        region_text(&single_rows, single_area),
-        region_text(&wide_rows, task_area),
-        "{label}: task text"
-    );
-    assert_eq!(
-        translated_task_hit_signature(&single_hits, single_area),
-        translated_task_hit_signature(&wide_hits, task_area),
-        "{label}: translated hits"
-    );
-    assert_eq!(
-        translated_copy_signature(&single_hits, single_area),
-        translated_copy_signature(&wide_hits, task_area),
-        "{label}: text-selection copy regions"
-    );
-
-    for wide_hit in wide_hits.regions.iter().filter(|hit| {
-        hit.area.x >= task_area.x
-            && hit.area.x.saturating_add(hit.area.width)
-                <= task_area.x.saturating_add(task_area.width)
-    }) {
-        let local = Rect::new(
-            wide_hit.area.x - task_area.x,
-            wide_hit.area.y - task_area.y,
-            wide_hit.area.width,
-            wide_hit.area.height,
-        );
-        let single_hit = single_hits
-            .regions
-            .iter()
-            .find(|candidate| candidate.target == wide_hit.target && candidate.area == local)
-            .expect("equal-geometry single-pane hit");
-        let single_click = left_click(single_hit.area.x, single_hit.area.y);
-        let wide_click = left_click(wide_hit.area.x, wide_hit.area.y);
-        let single_intent = map_board_mouse(model, &single_hits, single_click);
-        let wide_intent = map_responsive_board_mouse(model, &wide_hits, wide_area, wide_click);
-        assert_eq!(single_intent, wide_intent, "{label}: {:?}", wide_hit.target);
-        if let Some(intent) = single_intent {
-            assert_model_and_domain_outcome_equal(
-                domain,
-                model,
-                intent,
-                &format!("{label}: {:?}", wide_hit.target),
-            );
-        }
-    }
-
-    if let (Some(single_scroll), Some(wide_scroll)) = (
-        single_hits
-            .regions
-            .iter()
-            .find(|hit| matches!(hit.target, QueueHitTarget::PageScroll(_))),
-        wide_hits
-            .regions
-            .iter()
-            .find(|hit| matches!(hit.target, QueueHitTarget::PageScroll(_))),
-    ) {
-        let mut single_drag = false;
-        let mut wide_drag = false;
-        assert_eq!(
-            map_scrollbar_mouse(
-                model.input_mode(),
-                &single_hits,
-                left_click(single_scroll.area.x, single_scroll.area.y),
-                &mut single_drag,
-            ),
-            map_scrollbar_mouse(
-                model.input_mode(),
-                &wide_hits,
-                left_click(wide_scroll.area.x, wide_scroll.area.y),
-                &mut wide_drag,
-            ),
-            "{label}: scrollbar"
-        );
-        if model.input_mode() == BoardInputMode::TaskPage {
-            let mut dragging = false;
-            assert!(matches!(
-                map_scrollbar_mouse(
-                    model.input_mode(),
-                    &wide_hits,
-                    left_click(wide_scroll.area.x, wide_scroll.area.y),
-                    &mut dragging,
-                ),
-                ScrollbarMouse::Intent(BoardIntent::PageScrollTo(_))
-            ));
-        }
-    }
-}
-
-#[test]
-fn focused_wide_task_surface_matches_single_pane_keyboard_and_mouse_outcomes() {
-    let mut domain = domain_with_tasks(&[("parity task", &"parity notes ".repeat(120))]);
-    let id = domain.tasks()[0].id;
-    domain.add_step(id, "first parity step").expect("step");
-    domain.add_step(id, "second parity step").expect("step");
-    let mut view = board_model(&domain);
-    focus_task(&mut domain, &mut view);
-    let _ = render_board(&view, 55, 22);
-
-    let mut scenarios = vec![("task view", view.clone())];
-    for (label, intent) in [
-        ("title edit", BoardIntent::BeginEditTitle),
-        ("notes edit", BoardIntent::BeginEditNotes),
-    ] {
-        let mut state = view.clone();
-        let mut state_domain = domain.clone();
-        apply_intent(&mut state_domain, &mut state, intent, None).expect("enter field edit");
-        scenarios.push((label, state));
-    }
-
-    let mut scope = scenarios[1].1.clone();
-    let mut scope_domain = domain.clone();
-    apply_intent(
-        &mut scope_domain,
-        &mut scope,
-        BoardIntent::FocusFormField(tsk_tui::ui::CaptureField::Scope),
-        None,
-    )
-    .expect("focus scope");
-    scenarios.push(("scope edit", scope.clone()));
-    apply_intent(
-        &mut scope_domain,
-        &mut scope,
-        BoardIntent::OpenFormScopeDropdown,
-        None,
-    )
-    .expect("open scope dropdown");
-    scenarios.push(("scope dropdown", scope));
-
-    let mut thread = scenarios[1].1.clone();
-    let mut thread_domain = domain.clone();
-    apply_intent(
-        &mut thread_domain,
-        &mut thread,
-        BoardIntent::FocusFormField(tsk_tui::ui::CaptureField::Thread),
-        None,
-    )
-    .expect("select thread");
-    scenarios.push(("thread selection", thread.clone()));
-    apply_intent(
-        &mut thread_domain,
-        &mut thread,
-        BoardIntent::ToggleThreadEditing,
-        None,
-    )
-    .expect("edit thread");
-    scenarios.push(("thread edit", thread));
-
-    let mut step = scenarios[1].1.clone();
-    let mut step_domain = domain.clone();
-    apply_intent(
-        &mut step_domain,
-        &mut step,
-        BoardIntent::SelectStep(0),
-        None,
-    )
-    .expect("edit step");
-    scenarios.push(("step edit", step));
-
-    for (label, model) in &scenarios {
-        assert_equal_task_surface_mouse_outcomes(label, &domain, model);
-    }
-
-    let keyboard = [
-        (
-            0,
-            BoardInputMode::TaskPage,
-            KeyEvent::new(KeyCode::Char('e'), KeyModifiers::CONTROL),
-        ),
-        (
-            1,
-            BoardInputMode::EditTitle,
-            KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE),
-        ),
-        (
-            2,
-            BoardInputMode::EditNotes,
-            KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE),
-        ),
-        (
-            3,
-            BoardInputMode::EditScope,
-            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
-        ),
-        (
-            4,
-            BoardInputMode::FormScopeDropdown,
-            KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),
-        ),
-        (
-            5,
-            BoardInputMode::SelectThread,
-            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
-        ),
-        (
-            6,
-            BoardInputMode::EditThread,
-            KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE),
-        ),
-        (
-            7,
-            BoardInputMode::EditStep,
-            KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE),
-        ),
-    ];
-    for (scenario, mode, key) in keyboard {
-        let wide_intent = map_responsive_key(
-            mode,
-            FocusedSurface::Task,
-            ResponsivePresentation::WideSplit,
-            !matches!(mode, BoardInputMode::TaskPage),
-            key,
-        );
-        let single_intent = map_key(mode, key);
-        assert_eq!(wide_intent, single_intent, "{mode:?} keyboard parity");
-        if let Some(intent) = single_intent {
-            assert_model_and_domain_outcome_equal(
-                &domain,
-                &scenarios[scenario].1,
-                intent,
-                &format!("{mode:?} keyboard"),
-            );
-        }
-    }
-}
-
-#[test]
-fn wide_task_control_click_preserves_clicked_status_action_with_foreign_parked_cursor() {
-    let mut domain = domain_with_tasks(&[("parked cursor", "notes"), ("status target", "notes")]);
-    let parked = domain
-        .tasks()
-        .iter()
-        .find(|task| task.title == "parked cursor")
-        .expect("parked task")
-        .id;
-    let target = domain
-        .tasks()
-        .iter()
-        .find(|task| task.title == "status target")
-        .expect("target task")
-        .id;
-    domain.add_step(parked, "parked step").expect("add step");
-    domain.add_step(target, "target step").expect("add step");
-    domain
-        .set_status(target, HumanStatus::Started)
-        .expect("start target");
-    let mut model = board_model(&domain);
-    let parked_index = model
-        .visible_ids()
-        .iter()
-        .position(|&id| id == parked)
-        .expect("parked row");
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::SelectIndex(parked_index),
-        None,
-    )
-    .expect("select parked task");
-    focus_task(&mut domain, &mut model);
-    apply_intent(&mut domain, &mut model, BoardIntent::PageScrollDown, None)
-        .expect("select parked step");
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::FocusBoardSurface,
-        None,
-    )
-    .expect("park page");
-    let target_index = model
-        .visible_ids()
-        .iter()
-        .position(|&id| id == target)
-        .expect("target row");
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::SelectIndex(target_index),
-        None,
-    )
-    .expect("select target");
-
-    let (preview_rows, preview_hits) = render_board(&model, 110, 24);
-    let task_area = resolve_responsive(110, 24, FocusedSurface::Board).task_content();
-    let verb_y = task_area.y + task_area.height.saturating_sub(1);
-    let verb_row = &preview_rows[verb_y as usize];
-    let preview_verbs = verb_row
-        .chars()
-        .skip(task_area.x as usize)
-        .take(task_area.width as usize)
-        .collect::<String>();
     assert!(
-        !preview_verbs.contains("toggle step"),
-        "a foreign parked cursor must not change the selected task's controls"
-    );
-    let done_x = task_area.x
-        + u16::try_from(preview_verbs.find("done").expect("preview done verb"))
-            .expect("done column");
-    let click = left_click(done_x, verb_y);
-    assert_eq!(
-        wide_mouse_focus_intent(&model, &preview_hits, Rect::new(0, 0, 110, 24), click),
-        Some(BoardIntent::FocusTaskSurface)
-    );
-
-    focus_task(&mut domain, &mut model);
-    let (_, focused_hits) = render_board(&model, 110, 24);
-    let dispatched =
-        map_responsive_board_mouse(&model, &focused_hits, Rect::new(0, 0, 110, 24), click);
-    assert_eq!(dispatched, Some(BoardIntent::Complete));
-    apply_intent(
-        &mut domain,
-        &mut model,
-        dispatched.expect("clicked status action"),
-        None,
-    )
-    .expect("dispatch clicked action");
-    assert_eq!(
-        domain.get(target).expect("target task").status,
-        HumanStatus::Done
-    );
-}
-
-#[test]
-fn wide_task_step_click_preserves_scrolled_step_target() {
-    let mut domain = domain_with_tasks(&[("scrolled task", "short notes")]);
-    let id = domain.tasks()[0].id;
-    for index in 0..20 {
-        domain
-            .add_step(id, format!("step {index}"))
-            .expect("add step");
-    }
-    let mut model = board_model(&domain);
-    focus_task(&mut domain, &mut model);
-    let _ = render_board(&model, 110, 24);
-    apply_intent(&mut domain, &mut model, BoardIntent::PageScrollTo(3), None).expect("scroll page");
-    assert_eq!(model.page_scroll(), 3);
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::FocusBoardSurface,
-        None,
-    )
-    .expect("park scrolled page");
-
-    let (_, preview_hits) = render_board(&model, 110, 24);
-    let task_area = resolve_responsive(110, 24, FocusedSurface::Board).task_content();
-    let step_zero = preview_hits
-        .regions
-        .iter()
-        .find(|hit| {
-            task_area.contains(hit.area.as_position())
-                && matches!(hit.target, QueueHitTarget::Step(0))
-        })
-        .expect("preview step zero");
-    let click = left_click(step_zero.area.x, step_zero.area.y);
-    assert_eq!(
-        wide_mouse_focus_intent(&model, &preview_hits, Rect::new(0, 0, 110, 24), click),
-        Some(BoardIntent::FocusTaskSurface)
-    );
-
-    focus_task(&mut domain, &mut model);
-    let (_, focused_hits) = render_board(&model, 110, 24);
-    assert_eq!(
-        map_responsive_board_mouse(&model, &focused_hits, Rect::new(0, 0, 110, 24), click,),
-        Some(BoardIntent::SelectStep(0))
-    );
-}
-
-#[test]
-fn wide_dirty_task_editor_refuses_board_row_click_without_exposing_hidden_controls() {
-    let mut domain = domain_with_tasks(&[("editing task", "notes"), ("other row", "notes")]);
-    let mut model = board_model(&domain);
-    focus_task(&mut domain, &mut model);
-    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None).expect("edit title");
-    apply_intent(&mut domain, &mut model, BoardIntent::EditInsert('!'), None).expect("dirty title");
-    let selected = model.selected_id();
-    let draft = model.edit_buffer().to_string();
-    let (_, hits) = render_board(&model, 110, 24);
-    let other_row = hits
-        .regions
-        .iter()
-        .find(|hit| matches!(hit.target, QueueHitTarget::Task(id) if Some(id) != selected))
-        .expect("other board row");
-    let click = left_click(other_row.area.x, other_row.area.y);
-    let intent = map_responsive_board_mouse(&model, &hits, Rect::new(0, 0, 110, 24), click)
-        .expect("board row remains an explicit retarget attempt");
-
-    apply_intent(&mut domain, &mut model, intent, None).expect("refuse dirty retarget");
-    assert_eq!(model.selected_id(), selected);
-    assert_eq!(model.focused_surface(), FocusedSurface::Task);
-    assert_eq!(model.input_mode(), BoardInputMode::EditTitle);
-    assert_eq!(model.edit_buffer(), draft);
-    assert!(model
-        .message()
-        .is_some_and(|message| message.contains("save or cancel")));
-}
-
-#[test]
-fn task_editor_ignores_unfocused_board_verb_hits() {
-    let mut domain = domain_with_tasks(&[("original title", "notes")]);
-    let id = domain.tasks()[0].id;
-    let mut model = board_model(&domain);
-    focus_task(&mut domain, &mut model);
-    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None).expect("edit title");
-    apply_intent(&mut domain, &mut model, BoardIntent::EditInsert('!'), None)
-        .expect("change title draft");
-    let draft = model.edit_buffer().to_string();
-    let (_, hits) = render_board(&model, 110, 24);
-    let board_area = resolve_responsive(110, 24, FocusedSurface::Task).board;
-    let foreign_verb = hits
-        .regions
-        .iter()
-        .find(|hit| {
-            board_area.contains(hit.area.as_position())
-                && matches!(hit.target, QueueHitTarget::Verb(0))
-        })
-        .expect("board verb");
-    let click = left_click(foreign_verb.area.x, foreign_verb.area.y);
-    let mapped = map_responsive_board_mouse(&model, &hits, Rect::new(0, 0, 110, 24), click);
-    if let Some(intent) = mapped.clone() {
-        apply_intent(&mut domain, &mut model, intent, None).expect("route foreign board verb");
-    }
-
-    assert_eq!(mapped, None);
-    assert_eq!(model.focused_surface(), FocusedSurface::Task);
-    assert_eq!(model.input_mode(), BoardInputMode::EditTitle);
-    assert_eq!(model.edit_buffer(), draft);
-    assert_eq!(domain.get(id).expect("edited task").title, "original title");
-}
-
-#[test]
-fn quick_add_ignores_unfocused_task_preview_verb_hits() {
-    let mut domain = domain_with_tasks(&[("existing task", "notes")]);
-    let original_tasks = domain.tasks().len();
-    let mut model = board_model(&domain);
-    apply_intent(&mut domain, &mut model, BoardIntent::OpenCapture, None).expect("open quick add");
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::QuickAddInsertText("draft task".to_string()),
-        None,
-    )
-    .expect("type quick-add draft");
-    let draft = model.quick_add_title_value().to_string();
-    let (_, hits) = render_board(&model, 110, 24);
-    let task_area = resolve_responsive(110, 24, FocusedSurface::Board).task_content();
-    let foreign_verb = hits
-        .regions
-        .iter()
-        .find(|hit| {
-            task_area.contains(hit.area.as_position())
-                && matches!(hit.target, QueueHitTarget::Verb(0))
-        })
-        .expect("task preview verb");
-    let click = left_click(foreign_verb.area.x, foreign_verb.area.y);
-    let mapped = map_responsive_board_mouse(&model, &hits, Rect::new(0, 0, 110, 24), click);
-    if let Some(intent) = mapped.clone() {
-        apply_intent(&mut domain, &mut model, intent, None).expect("route foreign task verb");
-    }
-
-    assert_eq!(mapped, None);
-    assert_eq!(model.focused_surface(), FocusedSurface::Board);
-    assert_eq!(model.input_mode(), BoardInputMode::QuickAdd);
-    assert_eq!(model.quick_add_title_value(), draft);
-    assert_eq!(domain.tasks().len(), original_tasks);
-}
-
-#[test]
-fn wide_help_and_palette_close_on_foreign_surface_verbs_without_dispatching_them() {
-    for (open, expected, mode) in [
-        (
-            BoardIntent::OpenHelp,
-            BoardIntent::CloseLayer,
-            BoardInputMode::Help,
-        ),
-        (
-            BoardIntent::OpenCommandPalette,
-            BoardIntent::CloseCommandSurface,
-            BoardInputMode::Palette,
-        ),
-    ] {
-        let mut domain = domain_with_tasks(&[("modal task", "notes")]);
-        let mut model = board_model(&domain);
-        apply_intent(&mut domain, &mut model, open, None).expect("open modal");
-        assert_eq!(model.input_mode(), mode);
-        let (_, hits) = render_board(&model, 110, 24);
-        let task_area = resolve_responsive(110, 24, FocusedSurface::Board).task_content();
-        let foreign_verb = hits
-            .regions
+        hits.regions
             .iter()
-            .find(|hit| {
-                task_area.contains(hit.area.as_position())
-                    && matches!(hit.target, QueueHitTarget::Verb(_))
-            })
-            .expect("foreign task verb");
-
-        assert_eq!(
-            map_responsive_board_mouse(
-                &model,
-                &hits,
-                Rect::new(0, 0, 110, 24),
-                left_click(foreign_verb.area.x, foreign_verb.area.y),
-            ),
-            Some(expected)
-        );
-    }
-}
-
-#[test]
-fn wide_board_task_click_selects_and_returns_board_focus() {
-    let mut domain = domain_with_tasks(&[("clicked board row", "notes"), ("bound task", "notes")]);
-    let mut model = board_model(&domain);
-    focus_task(&mut domain, &mut model);
-    let geometry = resolve_responsive(110, 24, FocusedSurface::Task);
-    let (_, hits) = render_board(&model, 110, 24);
-    let row = hits
-        .regions
-        .iter()
-        .find(|hit| {
-            hit.area.x < geometry.task.x
-                && matches!(hit.target, QueueHitTarget::Task(id) if Some(id) != model.selected_id())
-        })
-        .expect("other board row");
-    let intent = map_responsive_board_mouse(
-        &model,
-        &hits,
-        Rect::new(0, 0, 110, 24),
-        left_click(row.area.x, row.area.y),
-    )
-    .expect("wide board row intent");
-
-    apply_intent(&mut domain, &mut model, intent.clone(), None).expect("select board row");
-    let selected_once = model.selected_id();
-    assert_eq!(model.focused_surface(), FocusedSurface::Board);
-    assert_eq!(model.detail_open(), None);
-    apply_intent(&mut domain, &mut model, intent, None).expect("repeat board row click");
-    assert_eq!(model.selected_id(), selected_once);
-    assert_eq!(model.focused_surface(), FocusedSurface::Board);
-    assert_eq!(model.detail_open(), None);
-}
-
-#[test]
-fn wide_task_control_click_focuses_task_before_dispatch() {
-    let mut domain = domain_with_tasks(&[("task control", "notes")]);
-    let mut model = board_model(&domain);
-    let geometry = resolve_responsive(110, 24, FocusedSurface::Board);
-    let (_, hits) = render_board(&model, 110, 24);
-    let verb = hits
-        .regions
-        .iter()
-        .find(|hit| hit.area.x >= geometry.task.x && matches!(hit.target, QueueHitTarget::Verb(0)))
-        .expect("task edit verb");
-    let click = left_click(verb.area.x, verb.area.y);
-    let focus = wide_mouse_focus_intent(&model, &hits, Rect::new(0, 0, 110, 24), click)
-        .expect("task-side control requests focus");
-
-    apply_intent(&mut domain, &mut model, focus, None).expect("focus task first");
-    assert_eq!(model.focused_surface(), FocusedSurface::Task);
-    let action = map_responsive_board_mouse(&model, &hits, Rect::new(0, 0, 110, 24), click);
-    assert_eq!(action, Some(BoardIntent::BeginEditTitle));
-}
-
-#[test]
-fn wide_mouse_coordinates_outside_live_surface_hits_are_inert() {
-    let mut domain = domain_with_tasks(&[("inert coordinates", "notes")]);
-    let mut model = board_model(&domain);
-    focus_task(&mut domain, &mut model);
-    let area = Rect::new(0, 0, 110, 24);
-    let geometry = resolve_responsive(area.width, area.height, FocusedSurface::Task);
-    let (_, hits) = render_board(&model, area.width, area.height);
-    let board_verb = hits
-        .regions
-        .iter()
-        .find(|hit| hit.area.x < geometry.task.x && matches!(hit.target, QueueHitTarget::Verb(_)))
-        .expect("board-side verb");
-
-    assert_eq!(
-        map_responsive_board_mouse(
-            &model,
-            &hits,
-            area,
-            left_click(board_verb.area.x, board_verb.area.y),
-        ),
-        None
-    );
-    assert_eq!(
-        map_responsive_board_mouse(
-            &model,
-            &hits,
-            area,
-            left_click(geometry.task.x, geometry.task.y),
-        ),
-        None
-    );
-    assert_eq!(
-        map_responsive_board_mouse(
-            &model,
-            &hits,
-            area,
-            MouseEvent {
-                kind: MouseEventKind::ScrollDown,
-                column: geometry.task.x,
-                row: 1,
-                modifiers: KeyModifiers::NONE,
-            },
-        ),
-        None
+            .any(|hit| inside(column, hit.area) && matches!(hit.target, QueueHitTarget::StepAdd)),
+        "preview controls exist for the focus router"
     );
 }
 
 #[test]
-fn parked_help_round_trip_reopens_task_page_mode() {
-    let mut domain =
-        domain_with_tasks(&[("parked help task", "notes"), ("hidden sibling", "notes")]);
-    let mut model = board_model(&domain);
-    focus_task(&mut domain, &mut model);
-    let bound = model.edit_target();
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::FocusBoardSurface,
-        None,
-    )
-    .expect("park task page");
-    apply_intent(&mut domain, &mut model, BoardIntent::OpenHelp, None).expect("open help");
-    apply_intent(&mut domain, &mut model, BoardIntent::CloseLayer, None).expect("close help");
-    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None)
-        .expect("refocus task page");
-
-    assert_eq!(model.focused_surface(), FocusedSurface::Task);
-    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
-    apply_intent(&mut domain, &mut model, BoardIntent::SelectNext, None)
-        .expect("task page selection stays pinned");
-    assert_eq!(model.selected_id(), bound);
-}
-
-#[test]
-fn shrinking_during_task_edit_preserves_mode_draft_cursor_and_binding() {
-    let mut domain = domain_with_tasks(&[("resize edit", "notes"), ("other task", "notes")]);
-    let mut model = board_model(&domain);
-    focus_task(&mut domain, &mut model);
-    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None).expect("edit title");
-    apply_intent(&mut domain, &mut model, BoardIntent::EditInsert('!'), None)
-        .expect("change title");
-    apply_intent(&mut domain, &mut model, BoardIntent::EditMoveLeft, None)
-        .expect("move draft cursor");
-    let before = (
-        model.focused_surface(),
-        model.input_mode(),
-        model.edit_target(),
-        model.edit_buffer().to_string(),
-        model.edit_cursor(),
-        model.page_scroll(),
-        model.step_cursor(),
+fn narrow_board_is_unchanged_by_the_stage_model() {
+    let (mut domain, mut model) = fixture();
+    let (rows, _) = render(&model, 109, 24);
+    assert!(rows[1].contains("desk  ·  projects  ·  threads"));
+    assert!(rows[5].starts_with("  ▸ T12 Frame the wide task view"));
+    assert!(
+        !rows[22].contains("→ pane"),
+        "no crumb below the wide threshold"
     );
-    assert!(model.task_session_dirty());
-
-    let (single_rows, _) = render_board(&model, 109, 24);
-    let _ = render_board(&model, 110, 24);
-
-    assert!(single_rows.join("\n").contains(&before.3));
-    assert_eq!(
-        (
-            model.focused_surface(),
-            model.input_mode(),
-            model.edit_target(),
-            model.edit_buffer().to_string(),
-            model.edit_cursor(),
-            model.page_scroll(),
-            model.step_cursor(),
-        ),
-        before
+    go(&mut domain, &mut model, BoardIntent::PeekDetail);
+    let (rows, _) = render(&model, 109, 24);
+    assert!(
+        rows.join("\n").contains("│ Rework the wide split"),
+        "peek still works narrow"
     );
-}
-
-#[test]
-fn dirty_wide_task_session_refuses_keyboard_task_switch() {
-    let mut domain = domain_with_tasks(&[("keyboard bound", "notes"), ("keyboard other", "notes")]);
-    let mut model = board_model(&domain);
-    focus_task(&mut domain, &mut model);
-    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None).expect("edit title");
-    apply_intent(&mut domain, &mut model, BoardIntent::EditInsert('!'), None).expect("dirty title");
-    let bound = model.edit_target().expect("bound task");
-    let target_index = model
-        .visible_ids()
-        .iter()
-        .position(|&id| id != bound)
-        .expect("other row");
-    let before = (
-        model.selected_id(),
-        model.edit_target(),
-        model.input_mode(),
-        model.edit_buffer().to_string(),
-        model.edit_cursor(),
-    );
-
-    for intent in [
-        BoardIntent::SelectNext,
-        BoardIntent::SelectPrev,
-        BoardIntent::SelectIndex(target_index),
-    ] {
-        let mut attempted_domain = domain.clone();
-        let mut attempted_model = model.clone();
-        apply_intent(&mut attempted_domain, &mut attempted_model, intent, None)
-            .expect("attempt keyboard retarget");
-        assert_eq!(
-            (
-                attempted_model.selected_id(),
-                attempted_model.edit_target(),
-                attempted_model.input_mode(),
-                attempted_model.edit_buffer().to_string(),
-                attempted_model.edit_cursor(),
-            ),
-            before
-        );
-        assert!(attempted_model
-            .message()
-            .is_some_and(|message| message.contains("save or cancel")));
-    }
-
-    let current_index = model
-        .visible_ids()
-        .iter()
-        .position(|&id| id == bound)
-        .expect("bound row");
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::SelectIndex(current_index),
-        None,
-    )
-    .expect("select same task");
-    assert_eq!(model.selected_id(), Some(bound));
-    assert!(model.message().is_none());
-
-    let mut clean_domain = domain_with_tasks(&[("clean bound", "notes"), ("clean other", "notes")]);
-    let mut clean_model = board_model(&clean_domain);
-    focus_task(&mut clean_domain, &mut clean_model);
-    apply_intent(
-        &mut clean_domain,
-        &mut clean_model,
-        BoardIntent::BeginEditTitle,
-        None,
-    )
-    .expect("enter clean editor");
-    let clean_bound = clean_model.edit_target();
-    assert!(!clean_model.task_session_dirty());
-    apply_intent(
-        &mut clean_domain,
-        &mut clean_model,
-        BoardIntent::SelectNext,
-        None,
-    )
-    .expect("switch clean editor");
-    assert_ne!(clean_model.selected_id(), clean_bound);
-    assert_eq!(clean_model.edit_target(), clean_model.selected_id());
-    assert_eq!(clean_model.input_mode(), BoardInputMode::TaskPage);
-    assert!(clean_model.message().is_none());
-}
-
-#[test]
-fn dirty_wide_task_session_refuses_mouse_task_switch_and_keeps_binding() {
-    let mut domain = domain_with_tasks(&[
-        ("mouse bound", &"long notes ".repeat(80)),
-        ("mouse other", "notes"),
-    ]);
-    let mut model = board_model(&domain);
-    focus_task(&mut domain, &mut model);
-    let _ = render_board(&model, 110, 24);
-    apply_intent(&mut domain, &mut model, BoardIntent::PageScrollTo(2), None).expect("scroll page");
-    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditNotes, None).expect("edit notes");
-    apply_intent(&mut domain, &mut model, BoardIntent::EditInsert('!'), None).expect("dirty notes");
-    let bound = model.edit_target().expect("bound task");
-    let target_index = model
-        .visible_ids()
-        .iter()
-        .position(|&id| id != bound)
-        .expect("other row");
-    let before = (
-        model.focused_surface(),
-        model.selected_id(),
-        model.edit_target(),
-        model.page_scroll(),
-        model.step_cursor(),
-        model.input_mode(),
-        model.edit_buffer().to_string(),
-        model.edit_cursor(),
-    );
-
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::FocusBoardAndSelectIndex(target_index),
-        None,
-    )
-    .expect("attempt mouse retarget");
-
-    assert_eq!(
-        (
-            model.focused_surface(),
-            model.selected_id(),
-            model.edit_target(),
-            model.page_scroll(),
-            model.step_cursor(),
-            model.input_mode(),
-            model.edit_buffer().to_string(),
-            model.edit_cursor(),
-        ),
-        before
-    );
-    assert!(model
-        .message()
-        .is_some_and(|message| message.contains("save or cancel")));
-}
-
-#[test]
-fn dirty_switch_refusal_preserves_draft_and_clears_after_save() {
-    let mut domain = domain_with_tasks(&[("save bound", "notes"), ("save other", "notes")]);
-    let mut model = board_model(&domain);
-    focus_task(&mut domain, &mut model);
-    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None).expect("edit title");
-    apply_intent(&mut domain, &mut model, BoardIntent::EditInsert('!'), None).expect("dirty title");
-    let bound = model.edit_target().expect("bound task");
-    let draft = model.edit_buffer().to_string();
-
-    apply_intent(&mut domain, &mut model, BoardIntent::SelectNext, None).expect("refuse switch");
-    assert_eq!(model.edit_buffer(), draft);
-    assert!(model.message().is_some());
-    assert!(render_board(&model, 110, 24)
-        .0
-        .join("\n")
-        .contains("save or cancel"));
-
-    apply_intent(&mut domain, &mut model, BoardIntent::ConfirmEdit, None).expect("save edit");
-    assert!(model.message().is_none());
-    assert!(!model.task_session_dirty());
-    assert_eq!(domain.get(bound).expect("saved task").title, draft);
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::FocusBoardSurface,
-        None,
-    )
-    .expect("return to board after save");
-    apply_intent(&mut domain, &mut model, BoardIntent::SelectNext, None)
-        .expect("switch after save");
-    assert_ne!(model.selected_id(), Some(bound));
-}
-
-#[test]
-fn dirty_switch_refusal_clears_after_cancel() {
-    let mut domain = domain_with_tasks(&[("cancel bound", "notes"), ("cancel other", "notes")]);
-    let mut model = board_model(&domain);
-    focus_task(&mut domain, &mut model);
-    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None).expect("edit title");
-    apply_intent(&mut domain, &mut model, BoardIntent::EditInsert('!'), None).expect("dirty title");
-    let bound = model.edit_target().expect("bound task");
-    let saved_title = domain.get(bound).expect("bound task").title.clone();
-
-    apply_intent(&mut domain, &mut model, BoardIntent::SelectNext, None).expect("refuse switch");
-    assert!(model.message().is_some());
-    apply_intent(&mut domain, &mut model, BoardIntent::CancelEdit, None).expect("cancel edit");
-
-    assert!(model.message().is_none());
-    assert!(!model.task_session_dirty());
-    assert_eq!(model.edit_buffer(), saved_title);
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::FocusBoardSurface,
-        None,
-    )
-    .expect("return to board after cancel");
-    apply_intent(&mut domain, &mut model, BoardIntent::SelectNext, None)
-        .expect("switch after cancel");
-    assert_ne!(model.selected_id(), Some(bound));
-}
-
-#[test]
-fn task_session_dirty_uses_only_approved_step_changes() {
-    let mut domain = domain_with_tasks(&[("step task", "notes")]);
-    let id = domain.tasks()[0].id;
-    domain.add_step(id, "saved step").expect("add step");
-
-    let mut rename_model = board_model(&domain);
-    focus_task(&mut domain, &mut rename_model);
-    apply_intent(
-        &mut domain,
-        &mut rename_model,
-        BoardIntent::BeginEditTitle,
-        None,
-    )
-    .expect("enter edit session");
-    apply_intent(
-        &mut domain,
-        &mut rename_model,
-        BoardIntent::SelectStep(0),
-        None,
-    )
-    .expect("open existing step");
-    assert!(!rename_model.task_session_dirty());
-    apply_intent(
-        &mut domain,
-        &mut rename_model,
-        BoardIntent::EditInsert('!'),
-        None,
-    )
-    .expect("change existing step");
-    assert!(rename_model.task_session_dirty());
-
-    let mut add_model = board_model(&domain);
-    focus_task(&mut domain, &mut add_model);
-    apply_intent(&mut domain, &mut add_model, BoardIntent::BeginAddStep, None)
-        .expect("open new step");
-    assert!(!add_model.task_session_dirty());
-    apply_intent(
-        &mut domain,
-        &mut add_model,
-        BoardIntent::EditInsert('!'),
-        None,
-    )
-    .expect("type new step");
-    assert!(add_model.task_session_dirty());
-
-    let mut removal_model = board_model(&domain);
-    focus_task(&mut domain, &mut removal_model);
-    apply_intent(
-        &mut domain,
-        &mut removal_model,
-        BoardIntent::BeginEditTitle,
-        None,
-    )
-    .expect("enter edit session");
-    apply_intent(
-        &mut domain,
-        &mut removal_model,
-        BoardIntent::CancelEdit,
-        None,
-    )
-    .expect("return to task view");
-    apply_intent(
-        &mut domain,
-        &mut removal_model,
-        BoardIntent::SelectStep(0),
-        None,
-    )
-    .expect("open saved step");
-    apply_intent(
-        &mut domain,
-        &mut removal_model,
-        BoardIntent::CancelEdit,
-        None,
-    )
-    .expect("return to selected step");
-    apply_intent(
-        &mut domain,
-        &mut removal_model,
-        BoardIntent::SoftDelete,
-        None,
-    )
-    .expect("stage removal");
-    assert!(removal_model.task_session_dirty());
-}
-
-#[test]
-fn board_focused_task_field_edit_focuses_and_paints_live_editor() {
-    let mut domain = domain_with_tasks(&[("parked editor", "notes")]);
-    let mut model = board_model(&domain);
-    focus_task(&mut domain, &mut model);
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::FocusBoardSurface,
-        None,
-    )
-    .expect("park task session");
-    assert_eq!(model.focused_surface(), FocusedSurface::Board);
-
-    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
-        .expect("enter title editor from board focus");
-    assert_eq!(model.focused_surface(), FocusedSurface::Task);
-    assert_eq!(model.input_mode(), BoardInputMode::EditTitle);
-    apply_intent(&mut domain, &mut model, BoardIntent::EditInsert('!'), None)
-        .expect("edit visible draft");
-
-    let (rows, _) = render_board(&model, 110, 24);
-    let task = resolve_responsive(110, 24, FocusedSurface::Task).task_content();
-    assert!(region_text(&rows, task).contains(model.edit_buffer()));
-}
-
-#[test]
-fn clean_task_editor_board_click_retargets_and_focuses_board() {
-    let mut domain =
-        domain_with_tasks(&[("clean editor", "notes"), ("clicked clean row", "notes")]);
-    let mut model = board_model(&domain);
-    focus_task(&mut domain, &mut model);
-    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
-        .expect("enter unchanged editor");
-    assert!(!model.task_session_dirty());
-    let selected = model.selected_id();
-    let (_, hits) = render_board(&model, 110, 24);
-    let other_row = hits
-        .regions
-        .iter()
-        .find(|hit| matches!(hit.target, QueueHitTarget::Task(id) if Some(id) != selected))
-        .expect("other board row");
-    let target = match other_row.target {
-        QueueHitTarget::Task(id) => id,
-        _ => unreachable!("task hit selected above"),
-    };
-    let intent = map_responsive_board_mouse(
-        &model,
-        &hits,
-        Rect::new(0, 0, 110, 24),
-        left_click(other_row.area.x, other_row.area.y),
-    )
-    .expect("clean editor row click must route");
-
-    apply_intent(&mut domain, &mut model, intent, None).expect("retarget clean editor");
-    assert_eq!(model.focused_surface(), FocusedSurface::Board);
-    assert_eq!(model.selected_id(), Some(target));
-    assert_eq!(model.edit_target(), Some(target));
-}
-
-#[test]
-fn changed_thread_draft_refuses_task_retarget() {
-    let mut domain = domain_with_tasks(&[("thread bound", "notes"), ("thread other", "notes")]);
-    let mut model = board_model(&domain);
-    focus_task(&mut domain, &mut model);
-    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
-        .expect("enter task edit");
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::FocusFormField(CaptureField::Thread),
-        None,
-    )
-    .expect("select thread");
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::ToggleThreadEditing,
-        None,
-    )
-    .expect("edit thread");
-    apply_intent(&mut domain, &mut model, BoardIntent::EditInsert('x'), None)
-        .expect("change thread");
-    let bound = model.edit_target().expect("bound task");
-    let draft = model.edit_buffer().to_string();
-    let other = model
-        .visible_ids()
-        .iter()
-        .position(|&id| id != bound)
-        .expect("other row");
-
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::FocusBoardAndSelectIndex(other),
-        None,
-    )
-    .expect("refuse dirty thread retarget");
-    assert_eq!(model.selected_id(), Some(bound));
-    assert_eq!(model.edit_target(), Some(bound));
-    assert_eq!(model.edit_buffer(), draft);
-    assert!(model
-        .message()
-        .is_some_and(|message| message.contains("save or cancel")));
-}
-
-#[test]
-fn changed_scope_draft_refuses_task_retarget() {
-    let mut domain = domain_with_tasks(&[("scope bound", "notes"), ("scope other", "notes")]);
-    domain
-        .create(
-            "scope option",
-            None,
-            TaskScope::Project {
-                path: "/repos/other".to_string(),
-            },
-            ProvenanceOrigin::Manual,
-            None,
-        )
-        .expect("create project scope option");
-    let mut model = board_model(&domain);
-    focus_task(&mut domain, &mut model);
-    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
-        .expect("enter task edit");
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::FocusFormField(CaptureField::Scope),
-        None,
-    )
-    .expect("focus scope");
-    let original_scope = model.form_scope().cloned();
-    apply_intent(&mut domain, &mut model, BoardIntent::FormCycleScope, None).expect("change scope");
-    assert_ne!(model.form_scope(), original_scope.as_ref());
-    let bound = model.edit_target().expect("bound task");
-    let changed_scope = model.form_scope().cloned();
-    let other = model
-        .visible_ids()
-        .iter()
-        .position(|&id| id != bound)
-        .expect("other row");
-
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::FocusBoardAndSelectIndex(other),
-        None,
-    )
-    .expect("refuse dirty scope retarget");
-    assert_eq!(model.selected_id(), Some(bound));
-    assert_eq!(model.edit_target(), Some(bound));
-    assert_eq!(model.form_scope(), changed_scope.as_ref());
-    assert!(model
-        .message()
-        .is_some_and(|message| message.contains("save or cancel")));
-}
-
-#[test]
-fn clean_task_editor_same_bound_row_click_keeps_task_focus() {
-    let mut domain = domain_with_tasks(&[("same clean row", "notes"), ("other row", "notes")]);
-    let mut model = board_model(&domain);
-    focus_task(&mut domain, &mut model);
-    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
-        .expect("enter clean title editor");
-    assert!(!model.task_session_dirty());
-    let bound = model.edit_target().expect("bound task");
-    let (_, hits) = render_board(&model, 110, 24);
-    let row = hits
-        .regions
-        .iter()
-        .find(|hit| matches!(hit.target, QueueHitTarget::Task(id) if id == bound))
-        .expect("bound board row");
-    let click = left_click(row.area.x, row.area.y);
-    let mapped = map_responsive_board_mouse(&model, &hits, Rect::new(0, 0, 110, 24), click);
-    if let Some(intent) = mapped.clone() {
-        apply_intent(&mut domain, &mut model, intent, None).expect("apply same-row click");
-    }
-
-    assert_eq!(mapped, None);
-    assert_eq!(model.focused_surface(), FocusedSurface::Task);
-    assert_eq!(model.input_mode(), BoardInputMode::EditTitle);
-    assert_eq!(model.edit_target(), Some(bound));
-}
-
-#[test]
-fn dirty_task_scope_dropdown_same_bound_row_click_keeps_visible_editor() {
-    let mut domain = domain_with_tasks(&[("same dirty row", "notes"), ("other row", "notes")]);
-    let mut model = board_model(&domain);
-    focus_task(&mut domain, &mut model);
-    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
-        .expect("enter title editor");
-    apply_intent(&mut domain, &mut model, BoardIntent::EditInsert('!'), None).expect("dirty title");
-    let draft = model.edit_buffer().to_string();
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::FocusFormField(CaptureField::Scope),
-        None,
-    )
-    .expect("focus scope");
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::OpenFormScopeDropdown,
-        None,
-    )
-    .expect("open scope dropdown");
-    let bound = model.edit_target().expect("bound task");
-    let (_, hits) = render_board(&model, 110, 24);
-    let row = hits
-        .regions
-        .iter()
-        .find(|hit| matches!(hit.target, QueueHitTarget::Task(id) if id == bound))
-        .expect("bound board row");
-    let click = left_click(row.area.x, row.area.y);
-    let mapped = map_responsive_board_mouse(&model, &hits, Rect::new(0, 0, 110, 24), click);
-    if let Some(intent) = mapped.clone() {
-        apply_intent(&mut domain, &mut model, intent, None).expect("apply same-row click");
-    }
-
-    assert_eq!(mapped, None);
-    assert_eq!(model.focused_surface(), FocusedSurface::Task);
-    assert_eq!(model.input_mode(), BoardInputMode::FormScopeDropdown);
-    assert_eq!(model.edit_target(), Some(bound));
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::CancelFormScopeDropdown,
-        None,
-    )
-    .expect("close scope dropdown");
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::FocusFormField(CaptureField::Title),
-        None,
-    )
-    .expect("return to dirty title");
-    assert_eq!(model.edit_buffer(), draft);
+    assert_eq!(model.input_mode(), BoardInputMode::Normal);
 }

@@ -2716,7 +2716,7 @@ fn downward_autoscroll_copy_excludes_titles_above_the_press_row() {
 }
 
 #[test]
-fn wide_task_drag_uses_bordered_content_edges_for_autoscroll() {
+fn wide_task_drag_uses_task_column_content_edges_for_autoscroll() {
     let mut domain = DomainState::new();
     domain
         .create(
@@ -2728,19 +2728,21 @@ fn wide_task_drag_uses_bordered_content_edges_for_autoscroll() {
         )
         .expect("create");
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
-    apply_intent(&mut domain, &mut model, BoardIntent::FocusTaskSurface, None)
-        .expect("focus wide task");
+    apply_intent(&mut domain, &mut model, BoardIntent::StageRight, None).expect("stage A");
+    apply_intent(&mut domain, &mut model, BoardIntent::StageRight, None).expect("stage G");
 
+    // Rail 32 + rule 1 + pad 1: the page body runs from the row under the header rule down
+    // to the shared footer's rule.
     let content = drag_content_area(&model, Rect::new(0, 0, 110, 24));
-    assert_eq!(content, Rect::new(56, 4, 53, 16));
+    assert_eq!(content, Rect::new(34, 2, 76, 19));
 
     let mut gesture = DragSelectGesture::new();
-    gesture.update_autoscroll(5, content, true);
+    gesture.update_autoscroll(3, content, true);
     assert_eq!(
         gesture.autoscroll().map(|state| state.direction),
         Some(AutoScrollDirection::Up)
     );
-    gesture.update_autoscroll(18, content, true);
+    gesture.update_autoscroll(20, content, true);
     assert_eq!(
         gesture.autoscroll().map(|state| state.direction),
         Some(AutoScrollDirection::Down)

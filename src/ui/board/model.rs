@@ -23,7 +23,7 @@ use crate::ui::queue::{
 use crate::ui::selection;
 use crate::ui::terminal_text;
 use crate::ui::text_select::TextSelection;
-use crate::ui::tier::FocusedSurface;
+use crate::ui::tier::{FocusedSurface, WideStage};
 
 use super::commands::CommandSurface;
 
@@ -545,8 +545,10 @@ pub struct BoardModel {
     pub(super) this_repo: Option<PathBuf>,
     /// Session board location (home tab or focused project). Not durable.
     pub(super) board_location: BoardLocation,
-    /// Surface that owns input and single-pane presentation. Session-only.
-    pub(super) focused_surface: FocusedSurface,
+    /// Wide-slider stage. Focus and single-pane presentation derive from it. Session-only.
+    pub(super) wide_stage: WideStage,
+    /// Stage `Enter` (or a row double-click) left for the full task page; `Esc` returns there.
+    pub(super) stage_origin: Option<WideStage>,
     /// Project-group headers collapsed on the Projects tab.
     pub(super) collapsed_projects: HashSet<String>,
     /// Thread-group headers collapsed on the Threads tab.
@@ -651,7 +653,8 @@ impl BoardModel {
             board_location: BoardLocation::Home {
                 tab: BoardTab::Desk,
             },
-            focused_surface: FocusedSurface::Board,
+            wide_stage: WideStage::FullBoard,
+            stage_origin: None,
             collapsed_projects: HashSet::new(),
             collapsed_threads: HashSet::new(),
             collapsed_thread_projects: HashSet::new(),
@@ -998,7 +1001,7 @@ impl BoardModel {
     }
 
     fn content_scroll(&self) -> usize {
-        if self.focused_surface == FocusedSurface::Task {
+        if self.focused_surface() == FocusedSurface::Task {
             self.form
                 .as_ref()
                 .filter(|form| form.is_task())
@@ -1273,9 +1276,19 @@ impl BoardModel {
         self.list_scroll.get()
     }
 
-    /// Surface that currently owns keyboard and pointer routing.
+    /// Surface that currently owns keyboard and pointer routing, derived from the stage.
     pub fn focused_surface(&self) -> FocusedSurface {
-        self.focused_surface
+        self.wide_stage.focused_surface()
+    }
+
+    /// Session-only wide-slider stage. The board always opens in `FullBoard`.
+    pub fn wide_stage(&self) -> WideStage {
+        self.wide_stage
+    }
+
+    /// Stage the full task page returns to on `Esc`, while one is remembered.
+    pub fn stage_origin(&self) -> Option<WideStage> {
+        self.stage_origin
     }
 
     /// Retained task-page viewport offset.
@@ -1328,7 +1341,7 @@ impl BoardModel {
         match self.popup {
             BoardPopup::SaveRecovery => BoardInputMode::SaveRecovery,
             _ if self.project_picker.is_some() => BoardInputMode::ProjectPicker,
-            _ if self.focused_surface == FocusedSurface::Board
+            _ if self.focused_surface() == FocusedSurface::Board
                 && self.input_mode == BoardInputMode::TaskPage =>
             {
                 BoardInputMode::Normal

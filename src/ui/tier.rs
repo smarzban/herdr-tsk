@@ -122,6 +122,12 @@ pub struct TierGeometry {
 }
 
 impl TierGeometry {
+    /// Whether this geometry paints its own rule, status and verb rows. A wide column does
+    /// not: the shared footer owns those rows for the whole frame.
+    pub fn owns_footer(&self) -> bool {
+        self.rule_row.is_some() || self.status_row.is_some() || self.verb_row.is_some()
+    }
+
     /// Rebuild title/meta budgets for a narrower content width (scrollbar gap + track).
     ///
     /// Only shrinking `row_width` left title+meta summing past the row and clipped
@@ -206,11 +212,11 @@ pub(crate) fn resolve_density(width: u16, height: u16, tier: Tier) -> TierGeomet
     }
 }
 
-/// Map usable dimensions and retained focus to one or two bounded surfaces.
+/// Map usable dimensions and the slider stage to one or two bounded surfaces.
 ///
-/// Wide split divides the frame into touching balanced allocations. The board uses
-/// its full allocation, the task renderer paints inside its border, and both use the
-/// density selected by the narrower content rectangle.
+/// Wide stages A and G divide the frame into a left column, a one-column rule and a task
+/// column whose first cell is a pad. Stages 0 and F use the whole frame. Both columns share
+/// the frame's density.
 pub fn resolve_responsive(
     width: u16,
     height: u16,
@@ -261,28 +267,30 @@ pub fn resolve_responsive(
             )
         }
     };
-    let task_content = if rule.width > 0 {
-        Rect::new(
-            task.x.saturating_add(u16::from(task.width > 0)),
-            task.y,
-            task.width.saturating_sub(1),
-            task.height,
-        )
-    } else {
-        task
-    };
-    let narrower_width = match (board.width, task_content.width) {
-        (0, task) => task,
-        (board, 0) => board,
-        (board, task) => board.min(task),
-    };
+    // Density follows the frame, not the narrower column: a split at 130×24 keeps the
+    // standard row rhythm and the board's meta column, and a full-width stage is exactly the
+    // standard board. Only a short frame (height < 24) drops to compact.
     ResponsiveGeometry {
         presentation: ResponsivePresentation::WideSplit,
         board,
         rule,
         task,
-        density: resolve(narrower_width, board.height.max(task_content.height)).tier,
+        density: resolve(width, height).tier,
     }
+}
+
+/// Geometry for one wide column that paints no footer of its own.
+///
+/// The shared footer owns the rule, status and verb rows for the whole frame; a column keeps
+/// the frame's row rhythm (blank row, selector row, viewport) and stops at `height`.
+pub fn resolve_column(width: u16, height: u16, frame_height: u16, tier: Tier) -> TierGeometry {
+    let mut geometry = resolve_density(width, frame_height, tier);
+    geometry.height = height;
+    geometry.rule_row = None;
+    geometry.status_row = None;
+    geometry.verb_row = None;
+    geometry.viewport_height = height.saturating_sub(geometry.viewport_top);
+    geometry
 }
 
 /// Place chrome from the outside in so indices never overlap.

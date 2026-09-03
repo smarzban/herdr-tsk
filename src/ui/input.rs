@@ -8,7 +8,7 @@ use crate::domain::HumanStatus;
 
 use super::board::BoardInputMode;
 use super::capture::{CaptureField, CaptureScopeChoice};
-use super::tier::{FocusedSurface, ResponsivePresentation};
+use super::tier::{ResponsivePresentation, WideStage};
 
 /// Board primary actions reachable by keyboard inside the board.
 ///
@@ -267,10 +267,10 @@ pub enum BoardIntent {
     ToggleBlock,
     /// `Enter` opens the selected task as a full-page view in single-pane presentation.
     OpenTaskPage,
-    /// Transfer keyboard ownership to the selected task without persisting.
-    FocusTaskSurface,
-    /// Return keyboard ownership to the board without discarding task-page session state.
-    FocusBoardSurface,
+    /// `→` at wide widths: move the stage slider one step towards the task (0 → A → G → F).
+    StageRight,
+    /// `←` at wide widths: move the stage slider one step towards the board (F → G → A → 0).
+    StageLeft,
     /// `→` — expand the selected row's inline peek (notes preview under the row).
     PeekDetail,
     /// `←` — collapse the inline peek when one is open; a no-op otherwise.
@@ -614,31 +614,67 @@ pub fn map_key(mode: BoardInputMode, key: KeyEvent) -> Option<BoardIntent> {
     }
 }
 
-/// Map focus-transfer keys before delegating every other key to the existing surface map.
+/// How one key routes at the responsive boundary.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ResponsiveKeyRoute {
+    /// A stage-slider intent (or a stage key the current surface already maps).
+    Intent(BoardIntent),
+    /// A stage key that does nothing in this stage (`←` in 0, `→` in F).
+    Inert,
+    /// Not a stage key: the surface's own map owns it.
+    Surface,
+}
+
+/// Route the stage-slider keys of the wide layout.
+///
+/// Only bare `→` / `←` in the Normal and TaskPage view modes are stage keys, and only while
+/// the frame is wide. `Enter` and `Esc` keep their surface meaning (`OpenTaskPage` records the
+/// origin stage; `CloseLayer` restores it), `Tab` is never a stage key, and every editor keeps
+/// its own arrow semantics. Below the wide threshold nothing here fires.
+pub fn route_responsive_key(
+    mode: BoardInputMode,
+    stage: WideStage,
+    presentation: ResponsivePresentation,
+    task_editing: bool,
+    key: KeyEvent,
+) -> ResponsiveKeyRoute {
+    if presentation != ResponsivePresentation::WideSplit
+        || !matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat)
+        || !key.modifiers.is_empty()
+        || task_editing
+    {
+        return ResponsiveKeyRoute::Surface;
+    }
+    let board_owned =
+        mode == BoardInputMode::Normal && matches!(stage, WideStage::FullBoard | WideStage::Split);
+    let task_owned =
+        mode == BoardInputMode::TaskPage && matches!(stage, WideStage::Rail | WideStage::FullTask);
+    if !board_owned && !task_owned {
+        return ResponsiveKeyRoute::Surface;
+    }
+    match (key.code, stage) {
+        (KeyCode::Right, WideStage::FullTask) | (KeyCode::Left, WideStage::FullBoard) => {
+            ResponsiveKeyRoute::Inert
+        }
+        (KeyCode::Right, _) => ResponsiveKeyRoute::Intent(BoardIntent::StageRight),
+        (KeyCode::Left, _) => ResponsiveKeyRoute::Intent(BoardIntent::StageLeft),
+        _ => ResponsiveKeyRoute::Surface,
+    }
+}
+
+/// Map stage-slider keys before delegating every other key to the existing surface map.
 pub fn map_responsive_key(
     mode: BoardInputMode,
-    focus: FocusedSurface,
+    stage: WideStage,
     presentation: ResponsivePresentation,
     task_editing: bool,
     key: KeyEvent,
 ) -> Option<BoardIntent> {
-    if matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) && key.modifiers.is_empty() {
-        if focus == FocusedSurface::Board
-            && presentation == ResponsivePresentation::WideSplit
-            && mode == BoardInputMode::Normal
-            && matches!(key.code, KeyCode::Enter | KeyCode::Right)
-        {
-            return Some(BoardIntent::FocusTaskSurface);
-        }
-        if focus == FocusedSurface::Task
-            && mode == BoardInputMode::TaskPage
-            && !task_editing
-            && matches!(key.code, KeyCode::Esc | KeyCode::Left)
-        {
-            return Some(BoardIntent::FocusBoardSurface);
-        }
+    match route_responsive_key(mode, stage, presentation, task_editing, key) {
+        ResponsiveKeyRoute::Intent(intent) => Some(intent),
+        ResponsiveKeyRoute::Inert => None,
+        ResponsiveKeyRoute::Surface => map_key(mode, key),
     }
-    map_key(mode, key)
 }
 
 /// Map the selected task-page Thread footer. It is a navigation target until Enter or a
@@ -966,8 +1002,8 @@ pub fn intent_primary_action(intent: &BoardIntent) -> Option<PrimaryBoardAction>
         | BoardIntent::PrimaryVerb
         | BoardIntent::ToggleBlock
         | BoardIntent::OpenTaskPage
-        | BoardIntent::FocusTaskSurface
-        | BoardIntent::FocusBoardSurface
+        | BoardIntent::StageRight
+        | BoardIntent::StageLeft
         | BoardIntent::PeekDetail
         | BoardIntent::CollapseDetail
         | BoardIntent::PageScrollUp

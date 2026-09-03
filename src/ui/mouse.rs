@@ -374,7 +374,7 @@ fn hit_at(hits: &QueueHitMap, pos: Position) -> Option<QueueHitTarget> {
 
 /// Rectangle that currently owns pointer input for this presentation.
 pub fn focused_mouse_area(model: &BoardModel, area: Rect) -> Rect {
-    let responsive = resolve_responsive(area.width, area.height, model.focused_surface());
+    let responsive = resolve_responsive(area.width, area.height, model.wide_stage());
     if model.focused_surface() == FocusedSurface::Task {
         responsive.task_content()
     } else {
@@ -414,13 +414,13 @@ pub fn wide_mouse_focus_intent(
     {
         return None;
     }
-    let responsive = resolve_responsive(area.width, area.height, model.focused_surface());
+    let responsive = resolve_responsive(area.width, area.height, model.wide_stage());
     if responsive.presentation != ResponsivePresentation::WideSplit {
         return None;
     }
     let pos = point(mouse.column, mouse.row);
     let target = responsive.task.contains(pos).then(|| hit_at(hits, pos))??;
-    task_target_is_interactive(model, target).then_some(BoardIntent::FocusTaskSurface)
+    task_target_is_interactive(model, target).then_some(BoardIntent::StageRight)
 }
 
 /// Map pointer input only through the live responsive surface and translated renderer hits.
@@ -430,7 +430,7 @@ pub fn map_responsive_board_mouse(
     area: Rect,
     mouse: MouseEvent,
 ) -> Option<BoardIntent> {
-    let responsive = resolve_responsive(area.width, area.height, model.focused_surface());
+    let responsive = resolve_responsive(area.width, area.height, model.wide_stage());
     if responsive.presentation != ResponsivePresentation::WideSplit {
         return map_board_mouse(model, hits, mouse);
     }
