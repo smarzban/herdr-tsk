@@ -52,8 +52,10 @@ For scriptable board work, use `tsk add` and `tsk list`; read
   the selector row — `▸ T12 title … status · tsk` with the status glyph restored, DIM in A
   and BOLD in G/F, the slot reading `editing <field>` or `unsaved` — and a dim dash rule on
   the row under it, instead of the in-page header. A click on the left side takes focus
-  left: a rail row click selects the row and lands the board beside it. Below 110, nothing changes:
-  the focused surface fills the frame.
+  left: a rail row click selects the row and lands the board beside it. Starting a field edit
+  from the board side hands focus to the task: from stage 0 it jumps straight to F (origin
+  recorded), from A it moves to G. Below 110, nothing changes: the focused surface fills the
+  frame.
   Persisted task rows paint a dim `T<number>` prefix before the title, including task page
   and done drawer; clicking that prefix copies it. Peek relies on its parent row's prefix.
   Drafts without a number paint none.

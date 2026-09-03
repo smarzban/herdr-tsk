@@ -545,6 +545,15 @@ fn run_board() -> Result<(), Box<dyn Error>> {
                             // Anchor a would-be selection and stash the Down for Up;
                             // do not map the click yet. A wide board-row click remains live
                             // while task-focused, every other press belongs to the focused side.
+                            //
+                            // INVARIANT: this Down-time gate and the Up-time dispatch
+                            // (`board_mouse_click_intent_after_focus` → `board_mouse_intent` →
+                            // `map_responsive_board_mouse`) are two calls of the same mapper over
+                            // the same model and hit map, and no intent runs between them. They
+                            // must agree: a press survives the gate below if and only if the
+                            // release route maps it to a dispatchable intent. If either the gate
+                            // (`press_survives_off_focus`) or the mapper's wide routing changes,
+                            // both sides must change together.
                             let pos = Position::new(mouse.column, mouse.row);
                             let responsive_intent =
                                 map_responsive_board_mouse(&model, &frame_hits, area, mouse);
@@ -1158,6 +1167,12 @@ fn board_paste_intent(area: Rect, model: &mut BoardModel, text: &str) -> Option<
 /// Whether a press outside the focused column still reaches dispatch: an explicit row
 /// select, a stage slide (`←` from the rail, `→` into the task column), a modal close
 /// route, or a focus transfer.
+/// Whether a press outside the focused column still reaches dispatch.
+///
+/// This is the Down-time half of the press gate; the Up-time half re-maps the same press in
+/// `board_mouse_intent`. Both call `map_responsive_board_mouse` over the same model and hit
+/// map with no intent in between, so they must agree: keep this predicate in lockstep with
+/// the mapper's wide routing (see the invariant at the `Down(MouseButton::Left)` arm).
 fn press_survives_off_focus(
     responsive_intent: Option<&BoardIntent>,
     mode: BoardInputMode,

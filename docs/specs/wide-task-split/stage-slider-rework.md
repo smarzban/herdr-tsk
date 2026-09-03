@@ -45,6 +45,9 @@ opens in stage 0.
 
 - `Enter` from 0, A or G records the origin stage; `Esc` from F returns there. `←` from F always
   goes to G. Origin memory clears when F is left.
+- A board-side field edit (`ctrl+e` / `ctrl+n` while the board owns focus) hands focus to the
+  task: from stage 0 it jumps straight to F (origin recorded as 0, skipping A and G); from A it
+  moves to G. This is `enter_task_stage` in `src/ui/board/apply.rs`.
 - `Tab` is not a stage key. It keeps its single meaning (task-page edit mode, quick-add expand).
 - `→` never peeks at ≥ 110. `PeekDetail` stays suppressed in wide.
 - With no selected task, `→` and `Enter` in stage 0 do nothing, and stages A/G/F cannot be entered
