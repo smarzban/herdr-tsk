@@ -608,19 +608,19 @@ import { parseCapture } from "./capture.js";
 
   function renderHelp() {
     return `
-      <div class="tsk-overlay tsk-help">
-        <div class="tsk-help-title">keys</div>
-        <div class="tsk-help-body">
+      <div class="tsk-box tsk-help" role="dialog" aria-label="help">
+        <div class="tsk-box-top"><span class="tsk-box-title">help</span><button type="button" class="tsk-box-close" data-close="1" aria-label="close">[x]</button></div>
+        <div class="tsk-box-body tsk-help-body">
           <div>esc close | click a verb to run it</div>
           <div>j/k · ↑/↓ move | s primary</div>
           <div>d done | o reopen | b block</div>
-          <div>enter open | →/← peek | + capture</div>
+          <div>enter open | →/← peek or slide | + capture</div>
           <div>e title | n notes | x delete | u undo</div>
           <div>z drawer | : palette | ? help</div>
           <div>P project | 1 2 3 tabs | g groups (projects/threads)</div>
           <div class="dim">app needs ctrl on verbs · demo also accepts bare keys</div>
-          <div class="dim">any key to close</div>
         </div>
+        <div class="tsk-box-foot">any key close</div>
       </div>`;
   }
 
@@ -635,12 +635,12 @@ import { parseCapture } from "./capture.js";
       })
       .join("");
     return `
-      <div class="tsk-overlay tsk-palette">
-        <div class="tsk-help-title">command</div>
-        ${list || `<div class="dim">no matches</div>`}
+      <div class="tsk-box tsk-palette" role="dialog" aria-label="command">
+        <div class="tsk-box-top"><span class="tsk-box-title">command</span><button type="button" class="tsk-box-close" data-close="1" aria-label="close">[x]</button></div>
+        <div class="tsk-box-body">${list || `<div class="dim">  no matches</div>`}</div>
+        <div class="tsk-box-foot">↑/↓ move · enter run · esc close · type to filter</div>
       </div>
-      <div class="tsk-input-row"><span class="tsk-prompt">:</span><span class="tsk-draft">${esc(state.paletteQ)}</span><span class="cursor">█</span></div>
-      <div class="foot dim">enter run · esc close · type to filter</div>`;
+      <div class="tsk-input-row"><span class="tsk-prompt">:</span><span class="tsk-draft">${esc(state.paletteQ)}</span><span class="cursor">█</span></div>`;
   }
 
   function renderPicker() {
@@ -655,11 +655,11 @@ import { parseCapture } from "./capture.js";
       })
       .join("");
     return `
-      <div class="tsk-overlay tsk-palette">
-        <div class="tsk-help-title">project</div>
-        ${list}
-      </div>
-      <div class="foot dim">enter choose · esc close · j/k move</div>`;
+      <div class="tsk-box tsk-palette" role="dialog" aria-label="project">
+        <div class="tsk-box-top"><span class="tsk-box-title">project</span><button type="button" class="tsk-box-close" data-close="1" aria-label="close">[x]</button></div>
+        <div class="tsk-box-body">${list}</div>
+        <div class="tsk-box-foot">↑/↓ move · enter choose · esc close</div>
+      </div>`;
   }
 
   function runPageVerb(id) {
@@ -1203,6 +1203,14 @@ import { parseCapture } from "./capture.js";
     // A stage A click inside the task column slides to G first, then the control runs.
     const taskColumn = e.target.closest(".tsk-task-column");
     if (taskColumn && isWideSplit() && state.stage === "split") stageRight();
+    const close = e.target.closest("[data-close]");
+    if (close) {
+      state.overlay = null;
+      state.paletteQ = "";
+      frame.focus();
+      render();
+      return;
+    }
     const copy = e.target.closest("[data-copy-task]");
     if (copy) {
       const task = state.tasks.find((item) => item.id === copy.getAttribute("data-copy-task"));
