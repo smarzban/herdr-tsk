@@ -335,13 +335,13 @@ html[data-theme="light"] .theme-toggle .icon-moon {
 
 .block-cursor {
   display: inline-block;
-  width: 0.16em;
-  height: 0.82em;
-  margin-left: 0.1em;
+  width: 0.55em;
+  height: 0.09em;
+  margin-left: 0.12em;
   background: var(--accent);
-  vertical-align: -0.06em;
+  vertical-align: 0;
   animation: blink 1.1s steps(1) infinite;
-  box-shadow: 0 0 22px var(--accent-glow);
+  box-shadow: 0 0 16px var(--accent-glow);
 }
 
 .lede {
