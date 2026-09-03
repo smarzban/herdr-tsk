@@ -3,8 +3,19 @@ title: Task page
 description: "View and edit one task: title, notes, thread, and scope."
 ---
 
-`Enter` opens the selected task full height. The dim `T30` prefix in the
-header copies that task identifier when clicked.
+Below 110 usable columns, `Enter` opens the selected task full height. At 110
+usable columns or wider the page is the right column of the
+[stage slider](/docs/board/#wide-stage-slider): a preview beside the board in stage
+A, the focused page beside a dim rail in G, or the whole frame in F. Its header sits
+on the selector row, `▸ T12 title … started · tsk` with the status glyph restored,
+dim in A and bold in G and F, and a dash rule on the row under it.
+With no selection the column reads `no task` and is inert. `←` from G parks the page
+beside the board without resetting page scroll or the step cursor; `→` brings it back.
+
+The dim `T30` prefix in the header copies that task identifier when clicked. A click
+inside the stage A task column moves to G before running the same action the control
+has in the single-pane page. The footer meta is `created … · updated …`; the project
+lives in the header slot.
 
 It is view-first. Nothing is in edit mode until you ask. `ctrl+e` edits the title,
 `ctrl+n` edits notes. In view, Tab and Shift+Tab loop only through stored steps and
@@ -60,8 +71,8 @@ an L-shaped `└` connector.
 
 ## Peek vs page
 
-On the list, `→` or a row click peeks up to five wrapped note lines. Open the
-page when you want the full notes, thread, scope, and steps.
+Below 110 columns, `→` or a row click peeks up to five wrapped note lines. At wide
+widths, selection updates the task column and no inline peek opens.
 
 Text on the page wraps. It does not truncate.
 

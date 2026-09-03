@@ -8,6 +8,7 @@ use crate::domain::HumanStatus;
 
 use super::board::BoardInputMode;
 use super::capture::{CaptureField, CaptureScopeChoice};
+use super::tier::{ResponsivePresentation, WideStage};
 
 /// Board primary actions reachable by keyboard inside the board.
 ///
@@ -117,6 +118,8 @@ pub enum BoardIntent {
     SelectPrev,
     /// Select visible list row by index (mouse row click).
     SelectIndex(usize),
+    /// Select a wide-split board row and return board focus without peek or double-click.
+    FocusBoardAndSelectIndex(usize),
     /// Copy the presentation-only `T<number>` identifier for one persisted task.
     CopyTaskNumber(uuid::Uuid),
     /// Jump the list viewport to a content offset without changing selection or peek
@@ -262,8 +265,12 @@ pub enum BoardIntent {
     PrimaryVerb,
     /// `b` — toggle blocked ↔ doing. Reducer lands in.
     ToggleBlock,
-    /// `Enter` — open the selected task's full-page view; on the page itself it closes it.
+    /// `Enter` opens the selected task as a full-page view in single-pane presentation.
     OpenTaskPage,
+    /// `→` at wide widths: move the stage slider one step towards the task (0 → A → G → F).
+    StageRight,
+    /// `←` at wide widths: move the stage slider one step towards the board (F → G → A → 0).
+    StageLeft,
     /// `→` — expand the selected row's inline peek (notes preview under the row).
     PeekDetail,
     /// `←` — collapse the inline peek when one is open; a no-op otherwise.
@@ -607,6 +614,56 @@ pub fn map_key(mode: BoardInputMode, key: KeyEvent) -> Option<BoardIntent> {
     }
 }
 
+/// How one key routes at the responsive boundary.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ResponsiveKeyRoute {
+    /// A stage-slider intent (or a stage key the current surface already maps).
+    Intent(BoardIntent),
+    /// A stage key that does nothing in this stage (`←` in 0, `→` in F).
+    Inert,
+    /// Not a stage key: the surface's own map owns it.
+    Surface,
+}
+
+/// Route the stage-slider keys of the wide layout.
+///
+/// Only bare `→` / `←` in the Normal and TaskPage view modes are stage keys, and only while
+/// the frame is wide. The mode check does the scoping: `Normal` slides the board-owned stages
+/// and `TaskPage` the task-owned ones, so every field editor (its own mode, never these two)
+/// keeps its existing arrow semantics without being named here. A task edit session parked in
+/// view mode (a dirty draft with no editor open) still slides: the pane stays bound, so
+/// nothing is lost. `Enter` and `Esc` keep their surface meaning (`OpenTaskPage` records the
+/// origin stage; `CloseLayer` restores it), and `Tab` is never a stage key. Below the wide
+/// threshold nothing here fires.
+pub fn route_responsive_key(
+    mode: BoardInputMode,
+    stage: WideStage,
+    presentation: ResponsivePresentation,
+    key: KeyEvent,
+) -> ResponsiveKeyRoute {
+    if presentation != ResponsivePresentation::WideSplit
+        || !matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat)
+        || !key.modifiers.is_empty()
+    {
+        return ResponsiveKeyRoute::Surface;
+    }
+    let board_owned =
+        mode == BoardInputMode::Normal && matches!(stage, WideStage::FullBoard | WideStage::Split);
+    let task_owned =
+        mode == BoardInputMode::TaskPage && matches!(stage, WideStage::Rail | WideStage::FullTask);
+    if !board_owned && !task_owned {
+        return ResponsiveKeyRoute::Surface;
+    }
+    match (key.code, stage) {
+        (KeyCode::Right, WideStage::FullTask) | (KeyCode::Left, WideStage::FullBoard) => {
+            ResponsiveKeyRoute::Inert
+        }
+        (KeyCode::Right, _) => ResponsiveKeyRoute::Intent(BoardIntent::StageRight),
+        (KeyCode::Left, _) => ResponsiveKeyRoute::Intent(BoardIntent::StageLeft),
+        _ => ResponsiveKeyRoute::Surface,
+    }
+}
+
 /// Map the selected task-page Thread footer. It is a navigation target until Enter or a
 /// second click deliberately opens the text cursor.
 fn map_selected_thread_key(key: KeyEvent) -> Option<BoardIntent> {
@@ -848,9 +905,10 @@ pub fn map_edit_paste(mode: BoardInputMode, text: &str) -> Option<BoardIntent> {
 /// Which primary board action an intent advances, if any.
 pub fn intent_primary_action(intent: &BoardIntent) -> Option<PrimaryBoardAction> {
     match intent {
-        BoardIntent::SelectNext | BoardIntent::SelectPrev | BoardIntent::SelectIndex(_) => {
-            Some(PrimaryBoardAction::SelectTask)
-        }
+        BoardIntent::SelectNext
+        | BoardIntent::SelectPrev
+        | BoardIntent::SelectIndex(_)
+        | BoardIntent::FocusBoardAndSelectIndex(_) => Some(PrimaryBoardAction::SelectTask),
         BoardIntent::Complete => Some(PrimaryBoardAction::Complete),
         BoardIntent::Reopen => Some(PrimaryBoardAction::Reopen),
         BoardIntent::SoftDelete => Some(PrimaryBoardAction::SoftDelete),
@@ -931,6 +989,8 @@ pub fn intent_primary_action(intent: &BoardIntent) -> Option<PrimaryBoardAction>
         | BoardIntent::PrimaryVerb
         | BoardIntent::ToggleBlock
         | BoardIntent::OpenTaskPage
+        | BoardIntent::StageRight
+        | BoardIntent::StageLeft
         | BoardIntent::PeekDetail
         | BoardIntent::CollapseDetail
         | BoardIntent::PageScrollUp

@@ -13,6 +13,25 @@ The web demo on the landing page uses bare verb letters on purpose. Browsers
 steal control chords. On its projects and threads tabs, bare `g` toggles groups
 and the palette offers the same command.
 
+## Wide stage slider
+
+At 110 usable columns or wider the board is a four-stage slider, and focus is the
+stage: **0** the board alone · **A** board beside the task page (board focus) ·
+**G** a dim rail beside the page (task focus) · **F** the page alone.
+
+| Stage | `→` | `←` | `Enter` | `Esc` | `j` `k` |
+| --- | --- | --- | --- | --- | --- |
+| 0 | → A | nothing | → F | nothing | select |
+| A | → G | → 0 | → F | nothing | select, retarget pane |
+| G | → F | → A | task-page verb | → A | task-page nav |
+| F | nothing | → G | task-page verb | → back where `Enter` left | task-page nav |
+
+`Enter` remembers the stage it left; `Esc` from F returns there. `Tab` is never a
+stage key. `→` never peeks at wide widths. Active task editors keep the field, step,
+and save keys listed below; the status row's right side names the keys that apply
+right now. Mouse clicks follow the same stage: a click in the stage A task column
+moves to G, then runs the control you clicked.
+
 ## Board
 
 | Key | Does |
@@ -23,8 +42,8 @@ and the palette offers the same command.
 | `ctrl+d` | done |
 | `ctrl+o` | reopen |
 | `ctrl+b` | toggle blocked |
-| `Enter` | open the [task page](/docs/task-page/) |
-| `→` `←` | peek notes under the row (up to five lines) |
+| `Enter` | open the [task page](/docs/task-page/) full width (stage F at wide widths) |
+| `→` `←` | peek notes below 110 columns; at wide widths, slide the stage |
 | `+` | [capture](/docs/capture/) |
 | `ctrl+e` | edit title |
 | `ctrl+x` or `ctrl+Delete` | delete (`ctrl+u` undoes) |

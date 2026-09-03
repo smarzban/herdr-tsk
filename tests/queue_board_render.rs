@@ -7,6 +7,7 @@ use std::time::{Duration, SystemTime};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::backend::TestBackend;
+use ratatui::layout::Rect;
 use ratatui::style::Modifier;
 use ratatui::{Frame, Terminal};
 use tsk_tui::domain::{
@@ -349,7 +350,7 @@ fn paint(width: u16, height: u16, model: &QueueFrameModel<'_>) -> (Vec<String>, 
     let mut terminal = Terminal::new(backend).expect("test terminal");
     terminal
         .draw(|frame: &mut Frame| {
-            let _ = draw_queue_frame(frame, model, &geo);
+            let _ = draw_queue_frame(frame, model, &geo, Rect::new(0, 0, width, height));
         })
         .expect("draw");
     let backend = terminal.backend();

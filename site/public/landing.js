@@ -107,6 +107,99 @@
     });
   }
 
+  // ── demo layouts: beside an agent (78 columns) or the full terminal ───────
+  const split = document.querySelector("[data-split]");
+  const board = document.getElementById("tsk-demo");
+  if (split && board) {
+    const divider = split.querySelector("[data-divider]");
+    const cols = document.querySelector("[data-cols]");
+    const toggles = [...document.querySelectorAll("[data-layout]")];
+    const DIVIDER = 9;
+    const BESIDE_COLUMNS = 78;
+
+    const charWidth = () => (Number.parseFloat(getComputedStyle(board).fontSize) || 14) * 0.6;
+    const boardPadding = () => {
+      const cs = getComputedStyle(board);
+      return (Number.parseFloat(cs.paddingLeft) || 0) + (Number.parseFloat(cs.paddingRight) || 0);
+    };
+    // Same measure the demo uses to pick peek vs slider: frame width over a 0.6em cell.
+    const columns = () => Math.floor(board.getBoundingClientRect().width / charWidth());
+    const minAgent = 180;
+    const maxAgent = () => split.clientWidth - DIVIDER - (40 * charWidth() + boardPadding());
+
+    const setAgent = (px) => {
+      const w = Math.max(minAgent, Math.min(maxAgent(), Math.round(px)));
+      split.style.setProperty("--agent-w", `${w}px`);
+      if (divider) divider.setAttribute("aria-valuenow", String(w));
+    };
+    const agentForBoardColumns = (n) => split.clientWidth - DIVIDER - n * charWidth();
+
+    const setLayout = (name) => {
+      const beside = name === "beside";
+      split.classList.toggle("is-beside", beside);
+      split.classList.toggle("is-full", !beside);
+      toggles.forEach((t) => t.setAttribute("aria-pressed", t.dataset.layout === name ? "true" : "false"));
+      if (beside) setAgent(agentForBoardColumns(BESIDE_COLUMNS));
+      readout();
+    };
+
+    const readout = () => {
+      if (!cols) return;
+      const n = columns();
+      const wide = n >= 110;
+      cols.innerHTML = `<b>${n}</b> cols · ${wide ? "stage slider" : "peek"}`;
+    };
+
+    toggles.forEach((t) => t.addEventListener("click", () => setLayout(t.dataset.layout)));
+
+    if (divider) {
+      let dragging = false;
+      divider.addEventListener("pointerdown", (e) => {
+        dragging = true;
+        divider.classList.add("is-dragging");
+        divider.setPointerCapture(e.pointerId);
+        e.preventDefault();
+      });
+      divider.addEventListener("pointermove", (e) => {
+        if (!dragging) return;
+        const left = split.getBoundingClientRect().left;
+        setAgent(e.clientX - left - DIVIDER / 2);
+      });
+      const stop = (e) => {
+        if (!dragging) return;
+        dragging = false;
+        divider.classList.remove("is-dragging");
+        try {
+          divider.releasePointerCapture(e.pointerId);
+        } catch (_) {}
+      };
+      divider.addEventListener("pointerup", stop);
+      divider.addEventListener("pointercancel", stop);
+      divider.addEventListener("keydown", (e) => {
+        if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+        e.preventDefault();
+        e.stopPropagation();
+        const step = 4 * charWidth();
+        const current = Number.parseFloat(getComputedStyle(split).getPropertyValue("--agent-w")) || 0;
+        setAgent(current + (e.key === "ArrowLeft" ? -step : step));
+      });
+    }
+
+    if ("ResizeObserver" in window) {
+      new ResizeObserver(() => {
+        if (split.classList.contains("is-beside")) {
+          // Keep the board at 78 columns until the user drags the divider.
+          if (!split.dataset.userSized) setAgent(agentForBoardColumns(BESIDE_COLUMNS));
+        }
+        readout();
+      }).observe(split);
+      new ResizeObserver(readout).observe(board);
+      if (divider) divider.addEventListener("pointerdown", () => { split.dataset.userSized = "1"; });
+    }
+
+    setLayout("beside");
+  }
+
   // ── copy buttons ─────────────────────────────────────────────────────────
   document.querySelectorAll("[data-copy]").forEach((btn) => {
     btn.addEventListener("click", async () => {

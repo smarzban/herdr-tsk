@@ -169,18 +169,47 @@ const REPO = 'https://github.com/smarzban/herdr-tsk';
           >
             <div class="pane-bar">
               <span class="pane-tab"><span class="pane-dot" aria-hidden="true"></span>tsk</span>
-              <span class="pane-title">live demo · a real board, in your browser</span>
+              <div class="layout-toggle" role="group" aria-label="Terminal layout">
+                <button type="button" data-layout="beside" aria-pressed="true">beside your agent</button>
+                <button type="button" data-layout="full" aria-pressed="false">full terminal</button>
+              </div>
+              <span class="pane-cols" data-cols aria-live="polite"></span>
               <span class="pane-hint">
-                click to focus · <kbd>j</kbd><kbd>k</kbd> move · <kbd>+</kbd> capture ·
-                <kbd>:</kbd> palette · <kbd>?</kbd> help
+                drag the divider · <kbd>j</kbd><kbd>k</kbd> move · <kbd>→</kbd> peek or slide ·
+                <kbd>+</kbd> capture · <kbd>?</kbd> help
               </span>
             </div>
-            <div class="board tsk-demo" id="tsk-demo"></div>
+            <div class="split is-beside" data-split>
+              <aside class="agent" aria-label="A coding agent session beside the board, static example">
+                <div class="agent-bar"><span><b>agent</b> · ~/work/herdr</span><span>static example</span></div>
+                <span class="agent-line you">why does the edit target pin drift after a save?</span>
+                <span class="agent-line act">reading src/ui/board/model.rs</span>
+                <span class="agent-line act">cargo test --test queue_board_edit</span>
+                <span class="agent-line out">running 14 tests … 13 passed, 1 failed</span>
+                <span class="agent-line act">the pin follows the saved id only when the current lens still paints it, otherwise it should reanchor to the old row</span>
+                <span class="agent-line act">tsk add -t "Edit target binding pin" -p herdr</span>
+                <span class="agent-line out">added Edit target binding pin</span>
+                <span class="agent-line act">it is on your board as T13. I will start on the fix once you have looked at it.</span>
+                <span class="agent-line you"><span class="cursor" aria-hidden="true"></span></span>
+              </aside>
+              <div
+                class="divider"
+                role="separator"
+                aria-orientation="vertical"
+                aria-label="Resize the board. Arrow keys move it."
+                tabindex="0"
+                data-divider
+              ></div>
+              <div class="board tsk-demo" id="tsk-demo"></div>
+            </div>
           </div>
           <p class="stage-note">
-            The demo takes bare <kbd>s</kbd> <kbd>d</kbd> <kbd>b</kbd> <kbd>o</kbd> because
-            browsers keep the control chords for themselves. In the app, every mutating verb
-            needs <kbd>Ctrl</kbd>.
+            Two real layouts. Beside an agent, tsk is the 78-column board herdr opens by default,
+            and <kbd>→</kbd> peeks. Give it the whole terminal, or drag the divider past 110
+            columns, and the same board becomes the four-stage slider: <kbd>→</kbd> slides the
+            task page in. The demo takes bare <kbd>s</kbd> <kbd>d</kbd> <kbd>b</kbd> <kbd>o</kbd>
+            because browsers keep the control chords. In the app, every mutating verb needs
+            <kbd>Ctrl</kbd>.
           </p>
         </div>
       </section>
@@ -318,6 +347,7 @@ const REPO = 'https://github.com/smarzban/herdr-tsk';
               Sections are computed, never navigated. Home is three tabs. <b>desk</b> is your
               own space for planning, loose ends, and future projects. <b>projects</b> holds the
               repos you and your agents work in. <b>threads</b> follows work that crosses them.
+              Give the board 110 columns and it becomes a slider.
             </p>
           </header>
 
@@ -392,7 +422,7 @@ const REPO = 'https://github.com/smarzban/herdr-tsk';
               </li>
               <li>
                 <span class="legend-n">4</span>
-                <div><b>Peek.</b> <kbd>→</kbd> or a click shows up to five wrapped note lines under the row. <kbd>Enter</kbd> opens the full page.</div>
+                <div><b>Peek.</b> Below 110 columns, <kbd>→</kbd> or a click shows up to five wrapped note lines under the row. Wide, <kbd>→</kbd> slides the task page in instead. <kbd>Enter</kbd> opens the full page either way.</div>
               </li>
               <li>
                 <span class="legend-n">5</span>
@@ -407,6 +437,41 @@ const REPO = 'https://github.com/smarzban/herdr-tsk';
                 <div><b>Verb bar.</b> The chords that apply right now. Below 78 columns it folds into a compact board that still works at 40×10.</div>
               </li>
             </ol>
+          </div>
+
+          <div class="stages">
+            <div class="stages-head">
+              <h3>Wide: the four-stage slider.</h3>
+              <p>At 110 columns and up, focus and geometry are the same thing. One rule, one footer, no colour.</p>
+            </div>
+            <ol class="stage-strip" aria-label="Stages 0, A, G, F">
+              <li>
+                <div class="frame f-0" aria-hidden="true"><i class="b is-focus"></i></div>
+                <div class="stage-name"><b>0</b><span>board</span></div>
+                <div class="stage-focus">full width · board has focus</div>
+              </li>
+              <li>
+                <div class="frame f-a" aria-hidden="true"><i class="b is-focus"></i><i class="r"></i><i class="t"></i></div>
+                <div class="stage-name"><b>A</b><span>board · page</span></div>
+                <div class="stage-focus">board 40%, task page beside it · board has focus</div>
+              </li>
+              <li>
+                <div class="frame f-g" aria-hidden="true"><i class="b is-dim"></i><i class="r"></i><i class="t is-focus"></i></div>
+                <div class="stage-name"><b>G</b><span>rail · page</span></div>
+                <div class="stage-focus">dim 32-column rail, task page · task has focus</div>
+              </li>
+              <li>
+                <div class="frame f-f" aria-hidden="true"><i class="t is-focus"></i></div>
+                <div class="stage-name"><b>F</b><span>page</span></div>
+                <div class="stage-focus">full width · task has focus</div>
+              </li>
+            </ol>
+            <p class="stages-keys">
+              <span><kbd>→</kbd> one stage right</span>
+              <span><kbd>←</kbd> one stage left</span>
+              <span><kbd>Enter</kbd> jump to F and remember where you were</span>
+              <span><kbd>Esc</kbd> go back there</span>
+            </p>
           </div>
         </div>
       </section>
@@ -426,7 +491,7 @@ const REPO = 'https://github.com/smarzban/herdr-tsk';
           <div class="keygrid" role="list">
             <div class="key" role="listitem"><span class="caps"><kbd>j</kbd><kbd>k</kbd></span><span>move</span></div>
             <div class="key" role="listitem"><span class="caps"><kbd>Enter</kbd></span><span>open the task page</span></div>
-            <div class="key" role="listitem"><span class="caps"><kbd>→</kbd><kbd>←</kbd></span><span>peek notes · close peek</span></div>
+            <div class="key" role="listitem"><span class="caps"><kbd>→</kbd><kbd>←</kbd></span><span>peek · slide the stage when wide</span></div>
             <div class="key" role="listitem"><span class="caps"><kbd>+</kbd></span><span>capture</span></div>
             <div class="key key-verb" role="listitem"><span class="caps"><kbd>ctrl+s</kbd></span><span>start · reopen if done</span></div>
             <div class="key key-verb" role="listitem"><span class="caps"><kbd>ctrl+d</kbd></span><span>done</span></div>

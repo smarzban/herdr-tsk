@@ -5,6 +5,8 @@ import { parseCapture } from "./capture.js";
   const frame = document.getElementById("board-demo");
   if (!root || !frame) return;
 
+  const WIDE_SPLIT_MIN_COLUMNS = 110;
+
   const GLYPH = {
     ready: "○",
     started: "▸",
@@ -134,7 +136,49 @@ import { parseCapture } from "./capture.js";
     refuse: "",
     nextId: 20,
     nextNumber: 22,
+    // Wide stage slider: board · split · rail · page. Focus is the stage.
+    stage: "board",
+    stageOrigin: null,
   };
+
+  const TASK_STAGES = ["rail", "page"];
+  function taskFocus() {
+    return TASK_STAGES.includes(state.stage);
+  }
+  function stageRight() {
+    if (!state.selectedId) return;
+    if (state.stage === "board") state.stage = "split";
+    else if (state.stage === "split") state.stage = "rail";
+    else if (state.stage === "rail") {
+      state.stageOrigin = "rail";
+      state.stage = "page";
+    }
+  }
+  function stageLeft() {
+    if (state.stage === "split") state.stage = "board";
+    else if (state.stage === "rail") state.stage = "split";
+    else if (state.stage === "page") {
+      state.stageOrigin = null;
+      state.stage = "rail";
+    }
+  }
+  function openFullPage() {
+    if (!state.selectedId) return;
+    if (state.stage !== "page") state.stageOrigin = state.stage;
+    state.stage = "page";
+  }
+  function leaveTaskPage() {
+    if (state.stage === "page") {
+      state.stage = state.stageOrigin || "board";
+      state.stageOrigin = null;
+    } else if (state.stage === "rail") state.stage = "split";
+  }
+  function enterTaskStage() {
+    if (state.stage === "board") {
+      state.stageOrigin = "board";
+      state.stage = "page";
+    } else if (state.stage === "split") state.stage = "rail";
+  }
 
   const esc = (s) =>
     String(s).replace(/[&<>"']/g, (c) =>
@@ -161,6 +205,15 @@ import { parseCapture } from "./capture.js";
 
   function selectedTask() {
     return taskById(state.selectedId) || null;
+  }
+
+  function terminalColumns() {
+    const fontSize = Number.parseFloat(getComputedStyle(root).fontSize) || 14;
+    return Math.floor(root.getBoundingClientRect().width / (fontSize * 0.6));
+  }
+
+  function isWideSplit() {
+    return terminalColumns() >= WIDE_SPLIT_MIN_COLUMNS;
   }
 
   function fallbackProject() {
@@ -393,7 +446,7 @@ import { parseCapture } from "./capture.js";
   }
 
   function runVerb(id) {
-    if (id === "open" && state.selectedId) state.overlay = "page";
+    if (id === "open" && state.selectedId) openFullPage();
     if (id === "capture") openQuickAdd();
     if (id === "help") state.overlay = "help";
     if (id === "palette") {
@@ -453,6 +506,8 @@ import { parseCapture } from "./capture.js";
     state.focusProject = null;
     state.peekId = null;
     state.overlay = null;
+    state.stage = "board";
+    state.stageOrigin = null;
   }
 
   function toggleAllGroups() {
@@ -478,6 +533,8 @@ import { parseCapture } from "./capture.js";
     state.refuse = "";
     state.copyNotice = "";
     state.undo = null;
+    state.stage = "board";
+    state.stageOrigin = null;
   }
 
   function openQuickAdd() {
@@ -605,28 +662,73 @@ import { parseCapture } from "./capture.js";
       <div class="foot dim">enter choose · esc close · j/k move</div>`;
   }
 
-  function renderPage() {
+  function runPageVerb(id) {
+    enterTaskStage();
     const task = selectedTask();
-    if (!task) return `<div class="tsk-overlay"><div class="dim">no task</div></div>`;
+    if (!task) return;
+    if (id === "edit") {
+      state.editField = "title";
+      state.editDraft = task.title;
+    }
+    if (id === "notes") {
+      state.editField = "notes";
+      state.editDraft = task.notes || "";
+    }
+    if (id === "done") setStatus("done");
+    if (id === "block") toggleBlock();
+  }
+
+  // The wide task column: a header rule on the selector row (dim in split, bold when the task
+  // owns focus) and the page body under it. Narrow: the same page fills the frame.
+  function renderPage(embedded = false) {
+    const task = selectedTask();
+    const focused = taskFocus();
+    if (!task) {
+      if (embedded) {
+        return `<div class="tsk-task-column tsk-surface" aria-label="task column"><div class="tsk-task-header dim"><span class="sec">no task</span><span class="rule" aria-hidden="true"></span></div><div class="tsk-task-surface"><div class="dim">  select a task to preview it here</div></div></div>`;
+      }
+      return `<div class="tsk-overlay"><div class="dim">no task</div><div class="dim">  select a task to preview it here</div></div>`;
+    }
     const editing = state.editField;
-    const title =
+    const stateSlot = editing ? `editing ${editing}` : `${task.status} · ${projectName(task)}`;
+    const headTitle =
       editing === "title"
         ? `<input class="tsk-field" id="tsk-edit" value="${esc(state.editDraft)}" />`
-        : `<div class="tsk-page-title"><span class="tsk-task-id" data-copy-task="${esc(task.id)}" title="copy T${task.number}">T${task.number}</span> ${esc(task.title)}</div>`;
+        : esc(task.title);
+    const header = `<div class="tsk-task-header ${focused ? "is-bold" : "dim"}"><span class="tsk-task-id" data-copy-task="${esc(task.id)}" title="copy T${task.number}">T${task.number}</span> <span class="sec">${headTitle}</span><span class="rule" aria-hidden="true"></span><span class="tsk-state-slot">${esc(stateSlot)}</span></div>`;
     const notes =
       editing === "notes"
         ? `<textarea class="tsk-field tsk-notes" id="tsk-edit">${esc(state.editDraft)}</textarea>`
         : `<div class="tsk-page-notes">${esc(task.notes || "no notes yet")}</div>`;
+    const meta = `<div class="dim">${task.thread ? `#${esc(task.thread)} · ` : ""}created ${esc(age(task.createdAt))} ago · updated ${esc(age(task.updatedAt))} ago</div>`;
+    if (embedded) {
+      return `<div class="tsk-task-column tsk-surface" aria-label="T${task.number} task column">${header}<div class="tsk-task-surface tsk-page">${notes}${meta}</div></div>`;
+    }
     return `
       <div class="tsk-overlay tsk-page">
-        ${title}
-        <div class="dim">${esc(task.status)} · ${esc(projectName(task))}${task.thread ? ` · #${esc(task.thread)}` : ""}</div>
+        ${header}
         ${notes}
-        <div class="foot dim">esc close · e title · n notes · d done · b block</div>
+        ${meta}
+        <div class="foot dim tsk-verbs">
+          <button type="button" class="tsk-verb" data-page-verb="edit">e title</button><span> · </span>
+          <button type="button" class="tsk-verb" data-page-verb="notes">n notes</button><span> · </span>
+          <button type="button" class="tsk-verb" data-page-verb="done">d done</button><span> · </span>
+          <button type="button" class="tsk-verb" data-page-verb="block">b block</button><span> · </span>
+          <span>esc back</span>
+        </div>
       </div>`;
   }
 
-  function renderBoard(rows) {
+  function stageHint() {
+    if (!isWideSplit()) return "";
+    if (state.editField) return "shift+enter save · esc cancel";
+    if (state.stage === "board") return "→ pane · enter open";
+    if (state.stage === "split") return "board ▸ task    → task · ← close · enter open";
+    if (state.stage === "rail") return "board ◂ task    ← board · → full page";
+    return "← rail · esc back";
+  }
+
+  function renderBoard(rows, rail = false) {
     const tabs = TABS.map((tab) => {
       const on = !state.focusProject && state.tab === tab;
       return `<button type="button" class="tsk-tab ${on ? "is-on" : ""}" data-tab="${tab}">${tab}</button>`;
@@ -648,10 +750,16 @@ import { parseCapture } from "./capture.js";
           return `<button type="button" class="tsk-group" data-collapse="${esc(row.collapseKey)}" data-project="${esc(row.project || "")}">${pad}<span class="dim">${mark}</span> <span class="sec">${esc(row.label)}</span> <span class="count">${row.count}</span></button>`;
         }
         const task = row.task;
+        if (rail && task.status === "done") return "";
         const selected = task.id === state.selectedId;
         const flash = task.id === state.flashId;
-        const glyph = GLYPH[task.status] || "○";
+        const glyph = rail && selected ? "▹" : GLYPH[task.status] || "○";
         const indent = "  ".repeat(row.indent || 0);
+        if (rail) {
+          return `<button type="button" class="tsk-row tsk-rail-row" data-task="${task.id}">
+          <span class="tsk-row-main">${indent}  <span class="glyph">${glyph}</span> <span class="tsk-task-id" data-copy-task="${esc(task.id)}" title="copy T${task.number}">T${task.number}</span> <span>${esc(task.title)}</span></span>
+        </button>`;
+        }
         const peek =
           state.peekId === task.id
             ? [
@@ -672,12 +780,17 @@ import { parseCapture } from "./capture.js";
       state.overlay === "quick"
         ? `<div class="tsk-input-row"><span class="tsk-prompt">+</span><input class="tsk-field" id="tsk-add" value="${esc(state.draft)}" placeholder="title  ·  !p project  ·  !t thread" autocomplete="off" /><span class="cursor">█</span></div>
            <div class="foot dim">${state.refuse ? esc(state.refuse) : "enter save · shift+enter stay · tab page · esc close"}</div>`
-        : `<button type="button" class="tsk-done-count foot" data-drawer="1">${doneN} done</button>
+        : `<div class="tsk-status-row"><button type="button" class="tsk-done-count foot" data-drawer="1">${doneN} done</button><span class="foot dim tsk-stage-hint">${esc(stageHint())}</span></div>
            <div class="foot dim tsk-verbs">${verbItems(task)
              .map((v) => `<button type="button" class="tsk-verb" data-verb="${esc(v.id)}">${esc(v.label)}</button>`)
              .join("<span> · </span>")}</div>
            ${state.copyNotice ? `<div class="foot dim">${esc(state.copyNotice)}</div>` : ""}`;
 
+    if (rail) {
+      return `
+      <div class="tsk-tabs">${state.focusProject ? chip : tabs}</div>
+      <div class="tsk-list">${body || `<div class="dim">  nothing here</div>`}</div>`;
+    }
     return `
       <div class="tsk-tabs">${state.focusProject ? chip : tabs}</div>
       <div class="tsk-list">${body || `<div class="dim">  nothing here</div>`}</div>
@@ -690,11 +803,29 @@ import { parseCapture } from "./capture.js";
   function render() {
     const rows = buildRows();
     ensureSelection(rows);
-    let html = renderBoard(rows);
+    const wide = isWideSplit();
+    let html;
+    if (wide && state.stage === "split") {
+      html = `<div class="tsk-wide-split is-split">
+           <div class="tsk-board-surface tsk-surface">${renderBoard(rows)}</div>
+           <div class="tsk-rule-column dim" aria-hidden="true"></div>
+           ${renderPage(true)}
+         </div>`;
+    } else if (wide && state.stage === "rail") {
+      html = `<div class="tsk-wide-split is-rail">
+           <div class="tsk-board-surface tsk-rail tsk-surface dim">${renderBoard(rows, true)}</div>
+           <div class="tsk-rule-column dim" aria-hidden="true"></div>
+           ${renderPage(true)}
+         </div>`;
+    } else if (wide && state.stage === "page") {
+      html = `<div class="tsk-wide-split is-page">${renderPage(true)}</div>`;
+    } else {
+      html = renderBoard(rows);
+    }
+    if (!wide && taskFocus()) html += renderPage();
     if (state.overlay === "help") html += renderHelp();
     if (state.overlay === "palette") html += renderPalette();
     if (state.overlay === "picker") html += renderPicker();
-    if (state.overlay === "page") html += renderPage();
     const keepKeys =
       document.activeElement === frame || frame.contains(document.activeElement);
     root.innerHTML = html;
@@ -746,6 +877,8 @@ import { parseCapture } from "./capture.js";
   }
 
   function onKey(e) {
+    const wide = isWideSplit();
+    const taskPageActive = taskFocus();
     if (state.overlay === "quick") {
       if (e.key === "Escape") {
         e.preventDefault();
@@ -765,7 +898,7 @@ import { parseCapture } from "./capture.js";
       if (e.key === "Tab") {
         e.preventDefault();
         if (saveDraft(false)) {
-          state.overlay = "page";
+          openFullPage();
           state.editField = "notes";
           state.editDraft = "";
         }
@@ -774,7 +907,7 @@ import { parseCapture } from "./capture.js";
       return;
     }
 
-    if (state.overlay === "page" && state.editField) {
+    if (taskPageActive && state.editField) {
       if (e.key === "Escape") {
         e.preventDefault();
         state.editField = null;
@@ -878,14 +1011,16 @@ import { parseCapture } from "./capture.js";
     }
 
     const alt = e.altKey || e.ctrlKey || e.metaKey;
-    if (state.overlay === "page" && !e.altKey && !e.ctrlKey && ["j", "k", "ArrowDown", "ArrowUp", "1", "2", "3", "+", "z", ":"].includes(e.key)) {
+    if (taskPageActive && !e.altKey && !e.ctrlKey && ["j", "k", "ArrowDown", "ArrowUp", "1", "2", "3", "+", "z", ":"].includes(e.key)) {
       e.preventDefault();
       return;
     }
     if (e.key === "Escape") {
       e.preventDefault();
-      if (state.overlay === "page") state.overlay = null;
-      else if (state.peekId) state.peekId = null;
+      if (taskPageActive) {
+        state.overlay = null;
+        leaveTaskPage();
+      } else if (state.peekId) state.peekId = null;
       else if (state.focusProject) state.focusProject = null;
       else frame.blur();
       render();
@@ -950,19 +1085,26 @@ import { parseCapture } from "./capture.js";
     }
     if (e.key === "ArrowRight") {
       e.preventDefault();
-      state.peekId = state.selectedId;
+      if (wide) {
+        stageRight();
+        state.peekId = null;
+      } else if (!taskPageActive) {
+        state.peekId = state.selectedId;
+      }
       render();
       return;
     }
     if (e.key === "ArrowLeft") {
       e.preventDefault();
-      state.peekId = null;
+      if (wide) stageLeft();
+      else state.peekId = null;
       render();
       return;
     }
     if (e.key === "Enter") {
       e.preventDefault();
-      if (state.selectedId) state.overlay = "page";
+      if (taskPageActive && state.stage === "page") leaveTaskPage();
+      else openFullPage();
       render();
       return;
     }
@@ -1007,7 +1149,7 @@ import { parseCapture } from "./capture.js";
       e.preventDefault();
       const task = selectedTask();
       if (task) {
-        state.overlay = "page";
+        enterTaskStage();
         state.editField = "title";
         state.editDraft = task.title;
       }
@@ -1018,7 +1160,7 @@ import { parseCapture } from "./capture.js";
       e.preventDefault();
       const task = selectedTask();
       if (task) {
-        state.overlay = "page";
+        enterTaskStage();
         state.editField = "notes";
         state.editDraft = task.notes || "";
       }
@@ -1035,6 +1177,9 @@ import { parseCapture } from "./capture.js";
   let lastClick = { id: null, at: 0 };
 
   root.addEventListener("click", (e) => {
+    // A stage A click inside the task column slides to G first, then the control runs.
+    const taskColumn = e.target.closest(".tsk-task-column");
+    if (taskColumn && isWideSplit() && state.stage === "split") stageRight();
     const copy = e.target.closest("[data-copy-task]");
     if (copy) {
       const task = state.tasks.find((item) => item.id === copy.getAttribute("data-copy-task"));
@@ -1075,7 +1220,13 @@ import { parseCapture } from "./capture.js";
       const now = Date.now();
       if (lastClick.id === id && now - lastClick.at < 350) {
         state.selectedId = id;
-        state.overlay = "page";
+        state.peekId = null;
+        openFullPage();
+      } else if (isWideSplit()) {
+        // A board or rail row click selects in place: the stage stays put.
+        state.selectedId = id;
+        state.peekId = null;
+        state.overlay = null;
       } else {
         state.selectedId = id;
         state.peekId = state.peekId === id ? null : id;
@@ -1098,6 +1249,12 @@ import { parseCapture } from "./capture.js";
       render();
       return;
     }
+    const pageVerb = e.target.closest("[data-page-verb]");
+    if (pageVerb) {
+      runPageVerb(pageVerb.getAttribute("data-page-verb"));
+      render();
+      return;
+    }
     const verb = e.target.closest("[data-verb]");
     if (verb) {
       runVerb(verb.getAttribute("data-verb"));
@@ -1115,6 +1272,7 @@ import { parseCapture } from "./capture.js";
   });
 
   frame.addEventListener("keydown", onKey);
+  new ResizeObserver(() => render()).observe(root);
   frame.addEventListener("focusin", () => frame.classList.add("is-focused"));
   frame.addEventListener("focusout", (e) => {
     if (!frame.contains(e.relatedTarget)) frame.classList.remove("is-focused");
