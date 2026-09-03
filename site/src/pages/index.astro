@@ -137,13 +137,9 @@ const REPO = 'https://github.com/smarzban/herdr-tsk';
               <b>ready</b>, <b>started</b>, <b>blocked</b>, <b>review</b>, <b>done</b>.
               Agents move tasks. Only a human marks them done.
             </p>
-            <div class="cta">
-              <a class="btn btn-primary" href="#install">Install</a>
-              <a class="btn btn-ghost" href="#demo">Try the board <span aria-hidden="true">↓</span></a>
-              <a class="link-plain" href="/docs/">Read the docs <span aria-hidden="true">→</span></a>
-            </div>
           </div>
 
+          <div class="hero-side">
           <dl class="spec" aria-label="At a glance">
             <div><dt>binary</dt><dd>tsk</dd></div>
             <div><dt>store</dt><dd>~/.tsk/tsk.json</dd></div>
@@ -153,6 +149,12 @@ const REPO = 'https://github.com/smarzban/herdr-tsk';
             <div><dt>runs on</dt><dd>Linux · macOS</dd></div>
             <div><dt>license</dt><dd>MIT</dd></div>
           </dl>
+            <div class="cta">
+              <a class="btn btn-primary" href="#install">Install</a>
+              <a class="btn btn-ghost" href="#demo">Try the board <span aria-hidden="true">↓</span></a>
+              <a class="link-plain" href="/docs/">Read the docs <span aria-hidden="true">→</span></a>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -181,16 +183,19 @@ const REPO = 'https://github.com/smarzban/herdr-tsk';
             </div>
             <div class="split is-beside" data-split>
               <aside class="agent" aria-label="A coding agent session beside the board, static example">
-                <div class="agent-bar"><span><b>agent</b> · ~/work/herdr</span><span>static example</span></div>
-                <span class="agent-line you">why does the edit target pin drift after a save?</span>
-                <span class="agent-line act">reading src/ui/board/model.rs</span>
-                <span class="agent-line act">cargo test --test queue_board_edit</span>
-                <span class="agent-line out">running 14 tests … 13 passed, 1 failed</span>
-                <span class="agent-line act">the pin follows the saved id only when the current lens still paints it, otherwise it should reanchor to the old row</span>
-                <span class="agent-line act">tsk add -t "Edit target binding pin" -p herdr</span>
-                <span class="agent-line out">added Edit target binding pin</span>
-                <span class="agent-line act">it is on your board as T13. I will start on the fix once you have looked at it.</span>
-                <span class="agent-line you"><span class="cursor" aria-hidden="true"></span></span>
+                <div class="agent-bar"><span><b>coding agent</b> · ~/work/herdr</span><span>static example</span></div>
+                <div class="agent-body">
+                  <p class="agent-line you">the edit target pin drifts after a save. find out why and put it on the board.</p>
+                  <p class="agent-line say">I'll look at how the board re-pins selection after a save lands.</p>
+                  <div class="agent-tool"><span class="tool-name">Read</span><span class="tool-arg">src/ui/board/model.rs</span><span class="tool-out">Read 214 lines</span></div>
+                  <div class="agent-tool"><span class="tool-name">Bash</span><span class="tool-arg">cargo test --test queue_board_edit</span><span class="tool-out">14 tests · 13 passed · 1 failed: pin_follows_saved_row</span></div>
+                  <p class="agent-line say">Found it. The pin follows the saved id even when the current lens no longer paints that row, so it lands on a hidden task. It should reanchor to the row's old position instead.</p>
+                  <div class="agent-tool"><span class="tool-name">Bash</span><span class="tool-arg">tsk add -t "Edit target binding pin" -p herdr --json</span><span class="tool-out">&#123;"outcome":"created","number":13,"title":"Edit target binding pin","project":"herdr"&#125;</span></div>
+                  <div class="agent-tool"><span class="tool-name">Bash</span><span class="tool-arg">tsk steps T13 add "Write the failing reanchor test"</span><span class="tool-out">added 3f Write the failing reanchor test</span></div>
+                  <div class="agent-tool"><span class="tool-name">Bash</span><span class="tool-arg">tsk steps T13 add "Pin the saved id only while the lens paints it"</span><span class="tool-out">added 9c Pin the saved id only while the lens paints it</span></div>
+                  <p class="agent-line say">Created <b>T13 Edit target binding pin</b> on your board with two steps. It is ready, not started. Start it when you want me to pick it up.</p>
+                </div>
+                <div class="agent-input"><span class="agent-prompt">›</span><span class="cursor" aria-hidden="true"></span><span class="agent-shortcut">? for shortcuts</span></div>
               </aside>
               <div
                 class="divider"
@@ -444,32 +449,32 @@ const REPO = 'https://github.com/smarzban/herdr-tsk';
               <h3>Wide: the four-stage slider.</h3>
               <p>At 110 columns and up, focus and geometry are the same thing. One rule, one footer, no colour.</p>
             </div>
-            <ol class="stage-strip" aria-label="Stages 0, A, G, F">
+            <ol class="stage-strip" aria-label="The four stages: board, split, rail, page">
               <li>
                 <div class="frame f-0" aria-hidden="true"><i class="b is-focus"></i></div>
-                <div class="stage-name"><b>0</b><span>board</span></div>
+                <div class="stage-name"><b>Board</b></div>
                 <div class="stage-focus">full width · board has focus</div>
               </li>
               <li>
                 <div class="frame f-a" aria-hidden="true"><i class="b is-focus"></i><i class="r"></i><i class="t"></i></div>
-                <div class="stage-name"><b>A</b><span>board · page</span></div>
+                <div class="stage-name"><b>Split</b></div>
                 <div class="stage-focus">board 40%, task page beside it · board has focus</div>
               </li>
               <li>
                 <div class="frame f-g" aria-hidden="true"><i class="b is-dim"></i><i class="r"></i><i class="t is-focus"></i></div>
-                <div class="stage-name"><b>G</b><span>rail · page</span></div>
+                <div class="stage-name"><b>Rail</b></div>
                 <div class="stage-focus">dim 32-column rail, task page · task has focus</div>
               </li>
               <li>
                 <div class="frame f-f" aria-hidden="true"><i class="t is-focus"></i></div>
-                <div class="stage-name"><b>F</b><span>page</span></div>
+                <div class="stage-name"><b>Page</b></div>
                 <div class="stage-focus">full width · task has focus</div>
               </li>
             </ol>
             <p class="stages-keys">
               <span><kbd>→</kbd> one stage right</span>
               <span><kbd>←</kbd> one stage left</span>
-              <span><kbd>Enter</kbd> jump to F and remember where you were</span>
+              <span><kbd>Enter</kbd> jump to the page and remember where you were</span>
               <span><kbd>Esc</kbd> go back there</span>
             </p>
           </div>

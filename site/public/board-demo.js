@@ -685,7 +685,7 @@ import { parseCapture } from "./capture.js";
     const focused = taskFocus();
     if (!task) {
       if (embedded) {
-        return `<div class="tsk-task-column tsk-surface" aria-label="task column"><div class="tsk-task-header dim"><span class="sec">no task</span><span class="rule" aria-hidden="true"></span></div><div class="tsk-task-surface"><div class="dim">  select a task to preview it here</div></div></div>`;
+        return `<div class="tsk-task-column tsk-surface" aria-label="task column"><div class="tsk-task-header dim"><span class="sec">no task</span></div><div class="tsk-task-rule" aria-hidden="true"></div><div class="tsk-task-surface"><div class="dim">  select a task to preview it here</div></div></div>`;
       }
       return `<div class="tsk-overlay"><div class="dim">no task</div><div class="dim">  select a task to preview it here</div></div>`;
     }
@@ -695,7 +695,8 @@ import { parseCapture } from "./capture.js";
       editing === "title"
         ? `<input class="tsk-field" id="tsk-edit" value="${esc(state.editDraft)}" />`
         : esc(task.title);
-    const header = `<div class="tsk-task-header ${focused ? "is-bold" : "dim"}"><span class="tsk-task-id" data-copy-task="${esc(task.id)}" title="copy T${task.number}">T${task.number}</span> <span class="sec">${headTitle}</span><span class="rule" aria-hidden="true"></span><span class="tsk-state-slot">${esc(stateSlot)}</span></div>`;
+    const glyph = GLYPH[task.status] || "○";
+    const header = `<div class="tsk-task-header ${focused ? "is-bold" : "dim"}"><span class="glyph">${glyph}</span> <span class="tsk-task-id" data-copy-task="${esc(task.id)}" title="copy T${task.number}">T${task.number}</span> <span class="sec">${headTitle}</span><span class="tsk-state-slot">${esc(stateSlot)}</span></div><div class="tsk-task-rule" aria-hidden="true"></div>`;
     const notes =
       editing === "notes"
         ? `<textarea class="tsk-field tsk-notes" id="tsk-edit">${esc(state.editDraft)}</textarea>`
@@ -728,7 +729,7 @@ import { parseCapture } from "./capture.js";
     return "← rail · esc back";
   }
 
-  function renderBoard(rows, rail = false) {
+  function renderBoard(rows, rail = false, bare = false) {
     const tabs = TABS.map((tab) => {
       const on = !state.focusProject && state.tab === tab;
       return `<button type="button" class="tsk-tab ${on ? "is-on" : ""}" data-tab="${tab}">${tab}</button>`;
@@ -763,7 +764,7 @@ import { parseCapture } from "./capture.js";
         const peek =
           state.peekId === task.id
             ? [
-                ...peekLines(task).map((line) => `<div class="tsk-peek dim">${indent}    │ ${esc(line)}</div>`),
+                ...peekLines(task).map((line) => `<div class="tsk-peek dim"><span class="tsk-peek-gutter">${indent}    │ </span><span class="tsk-peek-text">${esc(line)}</span></div>`),
                 `<div class="tsk-peek dim">${indent}    └</div>`,
               ].join("")
             : "";
@@ -774,19 +775,12 @@ import { parseCapture } from "./capture.js";
       })
       .join("");
 
-    const doneN = state.tasks.filter((t) => t.status === "done").length;
-    const task = selectedTask();
-    const footer =
-      state.overlay === "quick"
-        ? `<div class="tsk-input-row"><span class="tsk-prompt">+</span><input class="tsk-field" id="tsk-add" value="${esc(state.draft)}" placeholder="title  ·  !p project  ·  !t thread" autocomplete="off" /><span class="cursor">█</span></div>
-           <div class="foot dim">${state.refuse ? esc(state.refuse) : "enter save · shift+enter stay · tab page · esc close"}</div>`
-        : `<div class="tsk-status-row"><button type="button" class="tsk-done-count foot" data-drawer="1">${doneN} done</button><span class="foot dim tsk-stage-hint">${esc(stageHint())}</span></div>
-           <div class="foot dim tsk-verbs">${verbItems(task)
-             .map((v) => `<button type="button" class="tsk-verb" data-verb="${esc(v.id)}">${esc(v.label)}</button>`)
-             .join("<span> · </span>")}</div>
-           ${state.copyNotice ? `<div class="foot dim">${esc(state.copyNotice)}</div>` : ""}`;
-
     if (rail) {
+      return `
+      <div class="tsk-tabs">${state.focusProject ? chip : tabs}</div>
+      <div class="tsk-list">${body || `<div class="dim">  nothing here</div>`}</div>`;
+    }
+    if (bare) {
       return `
       <div class="tsk-tabs">${state.focusProject ? chip : tabs}</div>
       <div class="tsk-list">${body || `<div class="dim">  nothing here</div>`}</div>`;
@@ -794,6 +788,35 @@ import { parseCapture } from "./capture.js";
     return `
       <div class="tsk-tabs">${state.focusProject ? chip : tabs}</div>
       <div class="tsk-list">${body || `<div class="dim">  nothing here</div>`}</div>
+      ${renderFooter()}`;
+  }
+
+  const PAGE_VERBS = [
+    { id: "edit", label: "e title" },
+    { id: "notes", label: "n notes" },
+    { id: "done", label: "d done" },
+    { id: "block", label: "b block" },
+  ];
+
+  // One footer for the frame: a rule, the status row (done count · stage crumb), and the verb
+  // bar for whichever side owns focus. Wide stages paint it under both columns, as the app does.
+  function renderFooter() {
+    const doneN = state.tasks.filter((t) => t.status === "done").length;
+    const task = selectedTask();
+    const verbs = taskFocus()
+      ? PAGE_VERBS.map((v) => `<button type="button" class="tsk-verb" data-page-verb="${v.id}">${v.label}</button>`).join("<span> · </span>") +
+        "<span> · </span><span>esc back</span>"
+      : verbItems(task)
+          .map((v) => `<button type="button" class="tsk-verb" data-verb="${esc(v.id)}">${esc(v.label)}</button>`)
+          .join("<span> · </span>");
+    const footer =
+      state.overlay === "quick"
+        ? `<div class="tsk-input-row"><span class="tsk-prompt">+</span><input class="tsk-field" id="tsk-add" value="${esc(state.draft)}" placeholder="title  ·  !p project  ·  !t thread" autocomplete="off" /><span class="cursor">█</span></div>
+           <div class="foot dim">${state.refuse ? esc(state.refuse) : "enter save · shift+enter stay · tab page · esc close"}</div>`
+        : `<div class="tsk-status-row"><button type="button" class="tsk-done-count foot" data-drawer="1">${doneN} done</button><span class="foot dim tsk-stage-hint">${esc(stageHint())}</span></div>
+           <div class="foot dim tsk-verbs">${verbs}</div>
+           ${state.copyNotice ? `<div class="foot dim">${esc(state.copyNotice)}</div>` : ""}`;
+    return `
       <div class="tsk-foot">
         <div class="foot-rule" aria-hidden="true"></div>
         ${footer}
@@ -807,18 +830,18 @@ import { parseCapture } from "./capture.js";
     let html;
     if (wide && state.stage === "split") {
       html = `<div class="tsk-wide-split is-split">
-           <div class="tsk-board-surface tsk-surface">${renderBoard(rows)}</div>
+           <div class="tsk-board-surface tsk-surface">${renderBoard(rows, false, true)}</div>
            <div class="tsk-rule-column dim" aria-hidden="true"></div>
            ${renderPage(true)}
-         </div>`;
+         </div>${renderFooter()}`;
     } else if (wide && state.stage === "rail") {
       html = `<div class="tsk-wide-split is-rail">
            <div class="tsk-board-surface tsk-rail tsk-surface dim">${renderBoard(rows, true)}</div>
            <div class="tsk-rule-column dim" aria-hidden="true"></div>
            ${renderPage(true)}
-         </div>`;
+         </div>${renderFooter()}`;
     } else if (wide && state.stage === "page") {
-      html = `<div class="tsk-wide-split is-page">${renderPage(true)}</div>`;
+      html = `<div class="tsk-wide-split is-page">${renderPage(true)}</div>${renderFooter()}`;
     } else {
       html = renderBoard(rows);
     }
@@ -1272,6 +1295,17 @@ import { parseCapture } from "./capture.js";
   });
 
   frame.addEventListener("keydown", onKey);
+  // The landing page's layout toggle asks for a stage directly (full terminal opens in split).
+  frame.addEventListener("tsk:set-stage", (e) => {
+    const stage = e.detail;
+    if (!["board", "split", "rail", "page"].includes(stage)) return;
+    if (stage !== "board" && !state.selectedId) return;
+    state.stage = stage;
+    state.stageOrigin = null;
+    state.peekId = null;
+    if (state.overlay !== "quick") state.overlay = null;
+    render();
+  });
   new ResizeObserver(() => render()).observe(root);
   frame.addEventListener("focusin", () => frame.classList.add("is-focused"));
   frame.addEventListener("focusout", (e) => {
