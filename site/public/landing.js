@@ -110,7 +110,8 @@
   // ── demo layouts: beside an agent (78 columns) or the full terminal ───────
   const split = document.querySelector("[data-split]");
   const board = document.getElementById("tsk-demo");
-  if (split && board) {
+  const frame = document.getElementById("board-demo");
+  if (split && board && frame) {
     const divider = split.querySelector("[data-divider]");
     const cols = document.querySelector("[data-cols]");
     const toggles = [...document.querySelectorAll("[data-layout]")];
@@ -142,11 +143,9 @@
       if (beside) setAgent(agentForBoardColumns(BESIDE_COLUMNS));
       readout();
       // Full terminal opens straight into the split (stage A); beside an agent the board is
-      // narrow, so it returns to the plain board.
-      const frame = document.getElementById("board-demo");
-      if (frame && frame.dataset.ready) {
-        frame.dispatchEvent(new CustomEvent("tsk:set-stage", { detail: beside ? "board" : "split" }));
-      }
+      // narrow, so it returns to the plain board. The demo module registers this listener
+      // after the first call here, which is fine: the demo also starts on the plain board.
+      frame.dispatchEvent(new CustomEvent("tsk:set-stage", { detail: beside ? "board" : "split" }));
     };
 
     const readout = () => {
@@ -204,16 +203,6 @@
     }
 
     setLayout("beside");
-    // The demo script is a module and runs after this one; mark the frame once it has rendered.
-    if ("MutationObserver" in window) {
-      const mo = new MutationObserver(() => {
-        if (board.childElementCount) {
-          document.getElementById("board-demo").dataset.ready = "1";
-          mo.disconnect();
-        }
-      });
-      mo.observe(board, { childList: true });
-    }
   }
 
   // ── copy buttons ─────────────────────────────────────────────────────────
