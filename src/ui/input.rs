@@ -628,16 +628,17 @@ pub enum ResponsiveKeyRoute {
 /// Route the stage-slider keys of the wide layout.
 ///
 /// Only bare `→` / `←` in the Normal and TaskPage view modes are stage keys, and only while
-/// the frame is wide. `Enter` and `Esc` keep their surface meaning (`OpenTaskPage` records the
-/// origin stage; `CloseLayer` restores it), `Tab` is never a stage key, and every editor keeps
-/// its own arrow semantics. A task edit session parked in view mode (a dirty draft with no
-/// editor open) still slides: the pane stays bound, so nothing is lost. Below the wide
+/// the frame is wide. The mode check does the scoping: `Normal` slides the board-owned stages
+/// and `TaskPage` the task-owned ones, so every field editor (its own mode, never these two)
+/// keeps its existing arrow semantics without being named here. A task edit session parked in
+/// view mode (a dirty draft with no editor open) still slides: the pane stays bound, so
+/// nothing is lost. `Enter` and `Esc` keep their surface meaning (`OpenTaskPage` records the
+/// origin stage; `CloseLayer` restores it), and `Tab` is never a stage key. Below the wide
 /// threshold nothing here fires.
 pub fn route_responsive_key(
     mode: BoardInputMode,
     stage: WideStage,
     presentation: ResponsivePresentation,
-    _task_editing: bool,
     key: KeyEvent,
 ) -> ResponsiveKeyRoute {
     if presentation != ResponsivePresentation::WideSplit
@@ -660,21 +661,6 @@ pub fn route_responsive_key(
         (KeyCode::Right, _) => ResponsiveKeyRoute::Intent(BoardIntent::StageRight),
         (KeyCode::Left, _) => ResponsiveKeyRoute::Intent(BoardIntent::StageLeft),
         _ => ResponsiveKeyRoute::Surface,
-    }
-}
-
-/// Map stage-slider keys before delegating every other key to the existing surface map.
-pub fn map_responsive_key(
-    mode: BoardInputMode,
-    stage: WideStage,
-    presentation: ResponsivePresentation,
-    task_editing: bool,
-    key: KeyEvent,
-) -> Option<BoardIntent> {
-    match route_responsive_key(mode, stage, presentation, task_editing, key) {
-        ResponsiveKeyRoute::Intent(intent) => Some(intent),
-        ResponsiveKeyRoute::Inert => None,
-        ResponsiveKeyRoute::Surface => map_key(mode, key),
     }
 }
 

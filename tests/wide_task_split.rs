@@ -9,16 +9,17 @@ use ratatui::layout::Rect;
 use ratatui::style::Modifier;
 use ratatui::Terminal;
 use tsk_tui::domain::{DomainState, HumanStatus, ProvenanceOrigin, TaskScope};
-use tsk_tui::ui::board::{
-    resolve_responsive, FocusedSurface, ResponsivePresentation, WideStage, WIDE_SPLIT_MIN_WIDTH,
-};
 use tsk_tui::ui::capture::CaptureField;
-use tsk_tui::ui::input::{map_key, map_responsive_key};
+use tsk_tui::ui::input::{map_key, route_responsive_key, ResponsiveKeyRoute};
 use tsk_tui::ui::mouse::{
     left_click, map_board_mouse, map_responsive_board_mouse, wide_mouse_focus_intent,
 };
 use tsk_tui::ui::render::{assert_buffer_mono, QueueHitMap, QueueHitTarget};
-use tsk_tui::ui::tier::{Tier, STANDARD_VERB_BAR_ENTRY_BUDGET};
+use tsk_tui::ui::tier::{
+    resolve_responsive, FocusedSurface, ResponsivePresentation, Tier, WideStage,
+    STANDARD_VERB_BAR_ENTRY_BUDGET, WIDE_SPLIT_MIN_WIDTH,
+};
+
 use tsk_tui::ui::{
     apply_intent, draw_board, BoardInputMode, BoardIntent, BoardModel, IntentOutcome,
 };
@@ -640,6 +641,39 @@ fn narrow_board_is_unchanged_by_the_stage_model() {
     assert_eq!(model.input_mode(), BoardInputMode::Normal);
 }
 
+#[test]
+fn title_edit_window_matches_the_painted_header_room_with_a_long_identifier() {
+    // A 7-char identifier (T123456): the draft must be windowed to exactly the cells the
+    // painter gives the title, so a long draft never truncates the caret with an ellipsis.
+    let (mut domain, model) = fixture();
+    let mut tasks = domain.tasks().to_vec();
+    let id = model.selected_id().expect("selection");
+    for task in &mut tasks {
+        if task.id == id {
+            task.number = Some(123456);
+        }
+    }
+    let mut model = BoardModel::from_tasks(tasks, Some(PathBuf::from(REPO)));
+    assert_eq!(model.selected_id(), Some(id));
+    to_stage(&mut domain, &mut model, WideStage::Rail);
+    go(&mut domain, &mut model, BoardIntent::BeginEditTitle);
+    go(
+        &mut domain,
+        &mut model,
+        BoardIntent::EditInsertText("x".repeat(200)),
+    );
+    let geometry = resolve_responsive(130, 24, WideStage::Rail);
+    let (rows, _) = render(&model, 130, 24);
+    let header = column_text(&rows, geometry.task_content(), 1);
+    assert!(header.contains("T123456"), "{header}");
+    assert!(header.contains('x'), "the windowed draft paints: {header}");
+    assert!(
+        !header.contains('…'),
+        "the caret window must not overflow the painted title room: {header}"
+    );
+    assert!(header.trim_end().ends_with("editing title"), "{header}");
+}
+
 // ---------------------------------------------------------------------------
 // T3 stage routing
 // ---------------------------------------------------------------------------
@@ -648,14 +682,28 @@ fn key(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)
 }
 
+/// Route one bare key through the stage router, deriving the presentation from the
+/// model's own stage at a wide frame instead of assuming it.
 fn wide_key(model: &BoardModel, code: KeyCode) -> Option<BoardIntent> {
-    map_responsive_key(
+    let presentation = resolve_responsive(130, 24, model.wide_stage()).presentation;
+    route_key(model, presentation, code)
+}
+
+fn route_key(
+    model: &BoardModel,
+    presentation: ResponsivePresentation,
+    code: KeyCode,
+) -> Option<BoardIntent> {
+    match route_responsive_key(
         model.input_mode(),
         model.wide_stage(),
-        ResponsivePresentation::WideSplit,
-        model.task_editing(),
+        presentation,
         key(code),
-    )
+    ) {
+        ResponsiveKeyRoute::Intent(intent) => Some(intent),
+        ResponsiveKeyRoute::Inert => None,
+        ResponsiveKeyRoute::Surface => map_key(model.input_mode(), key(code)),
+    }
 }
 
 /// Press one key at a wide width: map it, apply it when it maps to something.
@@ -943,15 +991,8 @@ fn stage_keys_fall_through_to_editor_semantics_while_editing() {
 #[test]
 fn narrow_routes_are_unchanged_by_the_slider() {
     let (mut domain, mut model) = fixture();
-    let narrow = |model: &BoardModel, code| {
-        map_responsive_key(
-            model.input_mode(),
-            model.wide_stage(),
-            ResponsivePresentation::SingleBoard,
-            model.task_editing(),
-            key(code),
-        )
-    };
+    let narrow =
+        |model: &BoardModel, code| route_key(model, ResponsivePresentation::SingleBoard, code);
     assert_eq!(
         narrow(&model, KeyCode::Right),
         Some(BoardIntent::PeekDetail)
@@ -965,15 +1006,8 @@ fn narrow_routes_are_unchanged_by_the_slider() {
         Some(BoardIntent::OpenTaskPage)
     );
     go(&mut domain, &mut model, BoardIntent::OpenTaskPage);
-    let page = |model: &BoardModel, code| {
-        map_responsive_key(
-            model.input_mode(),
-            model.wide_stage(),
-            ResponsivePresentation::SingleTask,
-            model.task_editing(),
-            key(code),
-        )
-    };
+    let page =
+        |model: &BoardModel, code| route_key(model, ResponsivePresentation::SingleTask, code);
     assert_eq!(page(&model, KeyCode::Left), None);
     assert_eq!(page(&model, KeyCode::Right), None);
     assert_eq!(page(&model, KeyCode::Esc), Some(BoardIntent::CloseLayer));
@@ -1682,26 +1716,25 @@ fn task_surface_controls_in_g_and_f_match_the_single_pane_page() {
                 KeyCode::Tab,
             ] {
                 let single_intent = map_key(single_model.input_mode(), key(code));
-                let wide_intent = map_responsive_key(
-                    wide_model.input_mode(),
-                    stage,
-                    ResponsivePresentation::WideSplit,
-                    wide_model.task_editing(),
-                    key(code),
-                );
+                let wide_intent = route_key(&wide_model, ResponsivePresentation::WideSplit, code);
                 assert_eq!(single_intent, wide_intent, "{label}: {code:?}");
             }
             for code in [KeyCode::Char('e'), KeyCode::Char('d')] {
                 let ctrl = KeyEvent::new(code, KeyModifiers::CONTROL);
                 assert_eq!(
                     map_key(single_model.input_mode(), ctrl),
-                    map_responsive_key(
+                    match route_responsive_key(
                         wide_model.input_mode(),
-                        stage,
+                        wide_model.wide_stage(),
                         ResponsivePresentation::WideSplit,
-                        wide_model.task_editing(),
                         ctrl,
-                    ),
+                    ) {
+                        ResponsiveKeyRoute::Intent(intent) => Some(intent),
+                        ResponsiveKeyRoute::Inert => None,
+                        ResponsiveKeyRoute::Surface => {
+                            map_key(wide_model.input_mode(), ctrl)
+                        }
+                    },
                     "{label}: ctrl+{code:?}"
                 );
             }

@@ -35,15 +35,6 @@ impl WideStage {
     }
 }
 
-impl From<FocusedSurface> for WideStage {
-    fn from(surface: FocusedSurface) -> Self {
-        match surface {
-            FocusedSurface::Board => Self::Split,
-            FocusedSurface::Task => Self::Rail,
-        }
-    }
-}
-
 /// Responsive presentation selected for the usable frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResponsivePresentation {
@@ -64,11 +55,6 @@ pub struct ResponsiveGeometry {
 }
 
 impl ResponsiveGeometry {
-    /// Board renderer area. The wide board uses its complete left allocation.
-    pub fn board_content(self) -> Rect {
-        self.board
-    }
-
     /// Task renderer area, with the one-column split pad removed on its left.
     pub fn task_content(self) -> Rect {
         if self.rule.width > 0 {
@@ -86,6 +72,9 @@ impl ResponsiveGeometry {
 
 /// Minimum usable width for the wide split view.
 pub const WIDE_SPLIT_MIN_WIDTH: u16 = 110;
+
+/// Width of the stage G rail column, including its leading space.
+pub const RAIL_WIDTH: u16 = 32;
 
 /// Pure frame geometry for one terminal size.
 ///
@@ -217,12 +206,7 @@ pub(crate) fn resolve_density(width: u16, height: u16, tier: Tier) -> TierGeomet
 /// Wide stages A and G divide the frame into a left column, a one-column rule and a task
 /// column whose first cell is a pad. Stages 0 and F use the whole frame. Both columns share
 /// the frame's density.
-pub fn resolve_responsive(
-    width: u16,
-    height: u16,
-    stage: impl Into<WideStage>,
-) -> ResponsiveGeometry {
-    let stage = stage.into();
+pub fn resolve_responsive(width: u16, height: u16, stage: WideStage) -> ResponsiveGeometry {
     let frame = Rect::new(0, 0, width, height);
     if width < WIDE_SPLIT_MIN_WIDTH {
         return match stage.focused_surface() {
@@ -257,11 +241,12 @@ pub fn resolve_responsive(
             )
         }
         WideStage::Rail => {
-            let board_width = 32.min(width.saturating_sub(1));
-            let rule = Rect::new(board_width, 0, u16::from(board_width < width), height);
-            let task_x = board_width.saturating_add(rule.width);
+            // Only reached at width >= WIDE_SPLIT_MIN_WIDTH, so the rail, rule and pad
+            // always fit.
+            let rule = Rect::new(RAIL_WIDTH, 0, 1, height);
+            let task_x = RAIL_WIDTH.saturating_add(rule.width);
             (
-                Rect::new(0, 0, board_width, height),
+                Rect::new(0, 0, RAIL_WIDTH, height),
                 rule,
                 Rect::new(task_x, 0, width.saturating_sub(task_x), height),
             )

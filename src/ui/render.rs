@@ -448,8 +448,6 @@ pub enum QueueOverlay<'a> {
         project_scope: bool,
         recovery: bool,
     },
-    /// An inert task surface shown when wide split has no selected task.
-    TaskEmpty,
     /// The task page: a full-height, view-first takeover for one bound task. `focus` is
     /// `None` in view mode; field edits focus the same drafts the board form carries.
     TaskPage {
@@ -795,7 +793,21 @@ pub fn draw_queue_footer(
     hits
 }
 
-/// Header rule of the wide task column: `T12 title ──── started · tsk` on the selector row.
+/// Title cells available in the wide task-column header: the width past the lead (pad,
+/// glyph, pad, identifier, identifier gap), the one-cell gap, and the state slot as painted
+/// (trailing pad included). The builder windows the edited draft to exactly this room and
+/// the painter caps at the same room, so the caret can never be truncated.
+pub fn task_header_title_room(width: usize, glyph_w: usize, id_w: usize, state_w: usize) -> usize {
+    let id_gap = usize::from(id_w > 0);
+    let lead = 1 + glyph_w + 1 + id_w + id_gap;
+    width
+        .saturating_sub(lead)
+        .saturating_sub(1)
+        .saturating_sub(state_w)
+}
+
+/// Two-row header of the wide task column: `▸ T12 title … started · tsk` on the selector
+/// row, then a full-width dash rule on the row under it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TaskColumnHeader<'a> {
     /// Status glyph (`▸`, `○`, …) restored before the identifier.
@@ -814,10 +826,10 @@ pub struct TaskColumnHeader<'a> {
     pub bold: bool,
 }
 
-/// Paint the wide task column: the header rule on the selector row, then the task page
-/// body (or the empty-pane hint), then any modal card the column hosts. The overlay in
-/// `model` is the column's own content ([`QueueOverlay::TaskPage`] or
-/// [`QueueOverlay::TaskEmpty`]); `header` is `None` exactly when there is no task.
+/// Paint the wide task column: the title header on the selector row with a dash rule on the
+/// row under it, then the task page body (or the empty-pane hint), then any modal card the
+/// column hosts. The overlay in `model` is the column's own content ([`QueueOverlay::TaskPage`]
+/// or [`QueueOverlay::None`] when there is no task); `header` is `None` exactly then too.
 pub fn draw_task_column(
     frame: &mut Frame<'_>,
     model: &QueueFrameModel<'_>,
@@ -849,10 +861,8 @@ pub fn draw_task_column(
             let lead_w =
                 1 + glyph_w + 1 + display_width(identifier) + display_width(identifier_gap);
             // Chrome cap, not task text: the title yields to one gap cell and the state.
-            let title_room = (width as usize)
-                .saturating_sub(lead_w)
-                .saturating_sub(1)
-                .saturating_sub(state_w);
+            let title_room =
+                task_header_title_room(width as usize, glyph_w, display_width(identifier), state_w);
             let title = present_line(header.title, title_room);
             let title_w = display_width(&title);
             let pad_w = (width as usize).saturating_sub(lead_w + title_w + state_w);
@@ -1039,10 +1049,7 @@ fn draw_queue_frame_impl(
 
     // The task page owns the whole surface above the bottom chrome: the selector row stays
     // hidden while it is open (list navigation does not apply to a single-task surface).
-    let page_active = matches!(
-        model.overlay,
-        QueueOverlay::TaskPage { .. } | QueueOverlay::TaskEmpty
-    );
+    let page_active = matches!(model.overlay, QueueOverlay::TaskPage { .. });
     if let Some(row) = geo.selector_row {
         if !page_active {
             let (line, regions) = paint_selector_row(model, geo);
@@ -1231,7 +1238,6 @@ fn paint_footer(
             | QueueOverlay::ScopeDropdown { .. } => &[],
             QueueOverlay::QuickAdd { recovery, .. } if *recovery => &[],
             QueueOverlay::QuickAdd { .. } => QUICK_ADD_VERBS,
-            QueueOverlay::TaskEmpty => &[],
             // The page's field edits keep the form legends; its view mode reads the
             // model-computed page verbs (status-dependent, like the board row's own).
             QueueOverlay::TaskPage {
@@ -1508,15 +1514,6 @@ fn paint_overlay(
             paint_edit_notes_overlay(frame, geo, surface, rows, *cursor_row, *cursor_col);
         }
         QueueOverlay::QuickAdd { .. } => {}
-        QueueOverlay::TaskEmpty => {
-            put_line(
-                frame,
-                surface,
-                1.min(geo.height.saturating_sub(1)),
-                geo.row_width,
-                paint_bounded_line("  no task selected", geo.row_width, style_dim()),
-            );
-        }
         QueueOverlay::TaskPage {
             ref header_rows,
             ref header_identifier,
@@ -2411,91 +2408,96 @@ fn paint_task_page(
             Rect::new(0, lay.title_y, width, title_row_count),
         );
     }
-    for (offset, row_text) in header_rows.iter().enumerate().filter(|_| !column) {
-        let y = lay.title_y.saturating_add(offset as u16);
-        // The builder caps `header_rows` to the page body; this clamp holds even
-        // if a future caller forgets, because painting past `bottom` would
-        // overwrite the rule/status/verb chrome the page must keep.
-        if y >= lay.bottom {
-            break;
-        }
-        let line = if offset == 0 {
-            let (glyph, title) = row_text.split_once(' ').unwrap_or((row_text, ""));
-            let prefix = format!("  {glyph} ");
-            let identifier = header_identifier.unwrap_or_default();
-            let identifier_gap = if identifier.is_empty() { "" } else { " " };
-            let used = display_width(&prefix)
-                .saturating_add(display_width(identifier))
-                .saturating_add(display_width(identifier_gap))
-                .saturating_add(display_width(title));
-            let mut spans = vec![Span::styled(prefix, style_bold())];
-            if !identifier.is_empty() {
-                spans.push(Span::styled(identifier.to_string(), style_dim()));
-                spans.push(Span::styled(identifier_gap.to_string(), style_bold()));
-                if let Some(task) = header_identifier_task {
-                    hits.push(
-                        QueueHitTarget::TaskNumber(task),
-                        Rect::new(
-                            4,
-                            y,
-                            u16::try_from(display_width(identifier)).unwrap_or(u16::MAX),
-                            1,
-                        ),
-                    );
+    if !column {
+        for (offset, row_text) in header_rows.iter().enumerate() {
+            let y = lay.title_y.saturating_add(offset as u16);
+            // The builder caps `header_rows` to the page body; this clamp holds even
+            // if a future caller forgets, because painting past `bottom` would
+            // overwrite the rule/status/verb chrome the page must keep.
+            if y >= lay.bottom {
+                break;
+            }
+            let line = if offset == 0 {
+                let (glyph, title) = row_text.split_once(' ').unwrap_or((row_text, ""));
+                let prefix = format!("  {glyph} ");
+                let identifier = header_identifier.unwrap_or_default();
+                let identifier_gap = if identifier.is_empty() { "" } else { " " };
+                let used = display_width(&prefix)
+                    .saturating_add(display_width(identifier))
+                    .saturating_add(display_width(identifier_gap))
+                    .saturating_add(display_width(title));
+                let mut spans = vec![Span::styled(prefix, style_bold())];
+                if !identifier.is_empty() {
+                    spans.push(Span::styled(identifier.to_string(), style_dim()));
+                    spans.push(Span::styled(identifier_gap.to_string(), style_bold()));
+                    if let Some(task) = header_identifier_task {
+                        hits.push(
+                            QueueHitTarget::TaskNumber(task),
+                            Rect::new(
+                                4,
+                                y,
+                                u16::try_from(display_width(identifier)).unwrap_or(u16::MAX),
+                                1,
+                            ),
+                        );
+                    }
                 }
-            }
-            spans.push(Span::styled(title.to_string(), style_bold()));
-            if used + word < header_width as usize {
-                spans.push(Span::raw(" ".repeat(header_width as usize - used - word)));
-                spans.push(Span::styled(status_word.to_string(), style_dim()));
-            }
-            let title_cells = used.saturating_sub(4);
-            if title_cells > 0 {
-                hits.push_copyable(Rect::new(
-                    4,
-                    y,
-                    u16::try_from(title_cells).unwrap_or(u16::MAX),
-                    1,
-                ));
-            }
-            Line::from(spans)
-        } else {
-            let has_identifier = header_identifier.is_some_and(|identifier| !identifier.is_empty());
-            let title_indent = 4usize
-                .saturating_add(header_identifier.map(display_width).unwrap_or(0))
-                .saturating_add(usize::from(has_identifier));
-            let painted = format!("{}{row_text}", " ".repeat(title_indent));
-            let title_cells = display_width(&painted).saturating_sub(title_indent);
-            if title_cells > 0 {
-                hits.push_copyable(Rect::new(
-                    u16::try_from(title_indent).unwrap_or(u16::MAX),
-                    y,
-                    u16::try_from(title_cells).unwrap_or(u16::MAX),
-                    1,
-                ));
-            }
-            Line::from(Span::styled(painted, style_bold()))
-        };
-        put_line(frame, surface, y, header_width, line);
+                spans.push(Span::styled(title.to_string(), style_bold()));
+                if used + word < header_width as usize {
+                    spans.push(Span::raw(" ".repeat(header_width as usize - used - word)));
+                    spans.push(Span::styled(status_word.to_string(), style_dim()));
+                }
+                let title_cells = used.saturating_sub(4);
+                if title_cells > 0 {
+                    hits.push_copyable(Rect::new(
+                        4,
+                        y,
+                        u16::try_from(title_cells).unwrap_or(u16::MAX),
+                        1,
+                    ));
+                }
+                Line::from(spans)
+            } else {
+                let has_identifier =
+                    header_identifier.is_some_and(|identifier| !identifier.is_empty());
+                let title_indent = 4usize
+                    .saturating_add(header_identifier.map(display_width).unwrap_or(0))
+                    .saturating_add(usize::from(has_identifier));
+                let painted = format!("{}{row_text}", " ".repeat(title_indent));
+                let title_cells = display_width(&painted).saturating_sub(title_indent);
+                if title_cells > 0 {
+                    hits.push_copyable(Rect::new(
+                        u16::try_from(title_indent).unwrap_or(u16::MAX),
+                        y,
+                        u16::try_from(title_cells).unwrap_or(u16::MAX),
+                        1,
+                    ));
+                }
+                Line::from(Span::styled(painted, style_bold()))
+            };
+            put_line(frame, surface, y, header_width, line);
+        }
     }
-    if let Some((cursor_row, cursor_col)) = title_cursor.filter(|_| !column) {
-        // Every title row shares the four-cell gutter (two leading blanks plus
-        // glyph and space), so the wrapped field starts at column 4 on all of them.
-        let field_x = 4u16.min(width.saturating_sub(1));
-        place_edit_cursor_at(
-            frame,
-            local_rect(
-                surface,
-                Rect::new(
-                    field_x,
-                    lay.title_y,
-                    width.saturating_sub(field_x),
-                    title_row_count,
+    if !column {
+        if let Some((cursor_row, cursor_col)) = title_cursor {
+            // Every title row shares the four-cell gutter (two leading blanks plus
+            // glyph and space), so the wrapped field starts at column 4 on all of them.
+            let field_x = 4u16.min(width.saturating_sub(1));
+            place_edit_cursor_at(
+                frame,
+                local_rect(
+                    surface,
+                    Rect::new(
+                        field_x,
+                        lay.title_y,
+                        width.saturating_sub(field_x),
+                        title_row_count,
+                    ),
                 ),
-            ),
-            cursor_row.min(title_row_count.saturating_sub(1)),
-            cursor_col.min(width.saturating_sub(field_x).saturating_sub(1)),
-        );
+                cursor_row.min(title_row_count.saturating_sub(1)),
+                cursor_col.min(width.saturating_sub(field_x).saturating_sub(1)),
+            );
+        }
     }
 
     // Divider, its right end naming wrapped note rows the window does not show.

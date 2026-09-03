@@ -378,7 +378,7 @@ pub fn focused_mouse_area(model: &BoardModel, area: Rect) -> Rect {
     if model.focused_surface() == FocusedSurface::Task {
         responsive.task_content()
     } else {
-        responsive.board_content()
+        responsive.board
     }
 }
 

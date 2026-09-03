@@ -333,7 +333,6 @@ fn build_task_page_overlay<'a>(
     // on row 0. A long title wraps onto further bold rows indented under the
     // glyph instead of truncating; edit mode wraps the draft with its cursor.
     // The uniform budget keeps every row's wrap identical.
-    let word_cells = status_word.chars().count() + 1;
     let editing_title = model.input_mode() == BoardInputMode::EditTitle;
     let header_identifier = (!editing_title)
         .then(|| {
@@ -342,71 +341,76 @@ fn build_task_page_overlay<'a>(
                 .map(|number| format!("T{number}"))
         })
         .flatten();
-    let identifier_cells = header_identifier
-        .as_deref()
-        .map(render::display_width)
-        .unwrap_or(0);
-    let title_avail =
-        width.saturating_sub(4 + word_cells + identifier_cells + usize::from(identifier_cells > 0));
-    // The header may grow only inside the page body: it must stop one row short
-    // of the lowest chrome row with one note row still living under it, or a
-    // pathological title would eat the page (and the painter's chrome).
-    let page_bottom = [page_geo.rule_row, page_geo.status_row, page_geo.verb_row]
-        .into_iter()
-        .flatten()
-        .min()
-        .unwrap_or(page_geo.height);
-    let header_cap = page_bottom.saturating_sub(3).max(1) as usize;
     let mut header_rows: Vec<String> = Vec::new();
     let mut title_cursor = None;
-    if editing_title {
-        let (mut rows, cursor_row, cursor_col) = wrapped_edit_rows(&form.title, title_avail);
-        let overflowed = rows.len() > header_cap;
-        rows.truncate(header_cap);
-        if overflowed {
-            if let Some(last) = rows.last_mut() {
-                *last = present_line(last, title_avail.saturating_sub(1));
+    // The wide column paints its own two-row header (`draw_task_column`), so the in-page
+    // header rows are only built for the single-pane page that actually consumes them.
+    if !column {
+        let word_cells = status_word.chars().count() + 1;
+        let identifier_cells = header_identifier
+            .as_deref()
+            .map(render::display_width)
+            .unwrap_or(0);
+        let title_avail = width
+            .saturating_sub(4 + word_cells + identifier_cells + usize::from(identifier_cells > 0));
+        // The header may grow only inside the page body: it must stop one row short
+        // of the lowest chrome row with one note row still living under it, or a
+        // pathological title would eat the page (and the painter's chrome).
+        let page_bottom = [page_geo.rule_row, page_geo.status_row, page_geo.verb_row]
+            .into_iter()
+            .flatten()
+            .min()
+            .unwrap_or(page_geo.height);
+        let header_cap = page_bottom.saturating_sub(3).max(1) as usize;
+        if editing_title {
+            let (mut rows, cursor_row, cursor_col) = wrapped_edit_rows(&form.title, title_avail);
+            let overflowed = rows.len() > header_cap;
+            rows.truncate(header_cap);
+            if overflowed {
+                if let Some(last) = rows.last_mut() {
+                    *last = present_line(last, title_avail.saturating_sub(1));
+                }
             }
-        }
-        for (offset, segment) in rows.iter().enumerate() {
-            if offset == 0 {
-                header_rows.push(format!("{glyph} {segment}"));
+            for (offset, segment) in rows.iter().enumerate() {
+                if offset == 0 {
+                    header_rows.push(format!("{glyph} {segment}"));
+                } else {
+                    header_rows.push(segment.clone());
+                }
+            }
+            // A caret hidden below the cap parks at the END of the last shown row:
+            // its own hidden column would otherwise paint an unrelated position on
+            // the ellipsis row.
+            let shown_cursor_row = cursor_row.min(rows.len().saturating_sub(1));
+            let shown_cursor_col = if cursor_row > shown_cursor_row {
+                rows.last()
+                    .map(|last| render::display_width(last))
+                    .unwrap_or(0)
             } else {
-                header_rows.push(segment.clone());
-            }
-        }
-        // A caret hidden below the cap parks at the END of the last shown row:
-        // its own hidden column would otherwise paint an unrelated position on
-        // the ellipsis row.
-        let shown_cursor_row = cursor_row.min(rows.len().saturating_sub(1));
-        let shown_cursor_col = if cursor_row > shown_cursor_row {
-            rows.last()
-                .map(|last| render::display_width(last))
-                .unwrap_or(0)
+                cursor_col
+            };
+            title_cursor = Some((
+                u16::try_from(shown_cursor_row).unwrap_or(u16::MAX),
+                u16::try_from(shown_cursor_col).unwrap_or(u16::MAX),
+            ));
         } else {
-            cursor_col
-        };
-        title_cursor = Some((
-            u16::try_from(shown_cursor_row).unwrap_or(u16::MAX),
-            u16::try_from(shown_cursor_col).unwrap_or(u16::MAX),
-        ));
-    } else {
-        let mut rows: Vec<String> = wrap_text(form.title.value(), title_avail)
-            .iter()
-            .map(|row| row.text.clone())
-            .collect();
-        let overflowed = rows.len() > header_cap;
-        rows.truncate(header_cap);
-        if overflowed {
-            if let Some(last) = rows.last_mut() {
-                *last = present_line(last, title_avail.saturating_sub(1));
+            let mut rows: Vec<String> = wrap_text(form.title.value(), title_avail)
+                .iter()
+                .map(|row| row.text.clone())
+                .collect();
+            let overflowed = rows.len() > header_cap;
+            rows.truncate(header_cap);
+            if overflowed {
+                if let Some(last) = rows.last_mut() {
+                    *last = present_line(last, title_avail.saturating_sub(1));
+                }
             }
-        }
-        for (offset, row) in rows.iter().enumerate() {
-            if offset == 0 {
-                header_rows.push(format!("{glyph} {row}"));
-            } else {
-                header_rows.push(row.clone());
+            for (offset, row) in rows.iter().enumerate() {
+                if offset == 0 {
+                    header_rows.push(format!("{glyph} {row}"));
+                } else {
+                    header_rows.push(row.clone());
+                }
             }
         }
     }
@@ -988,7 +992,7 @@ fn draw_wide_board(
     let task_geo = (task_area.width > 0).then(|| column_geo(task_area.width));
     let task_overlay = match (task_geo.as_ref(), task_form) {
         (Some(geo), Some(form)) => payloads.task_page(model, form, geo, true),
-        (Some(_), None) => QueueOverlay::TaskEmpty,
+        (Some(_), None) => QueueOverlay::None,
         (None, _) => QueueOverlay::None,
     };
     let header_task = task_form.and_then(|form| {
@@ -1001,18 +1005,22 @@ fn draw_wide_board(
         .map(|number| format!("T{number}"));
     let header_state = header_task.map(|(form, task)| task_header_state(model, form, task));
     let editing_title = task_focus && model.input_mode() == BoardInputMode::EditTitle;
-    let header_title: Option<(String, Option<u16>)> = header_task.map(|(form, _)| {
+    let header_title: Option<(String, Option<u16>)> = header_task.map(|(form, task)| {
         if editing_title {
-            let avail = task_geo
-                .map(|geo| geo.row_width as usize)
+            let width = task_geo.map(|geo| geo.row_width as usize).unwrap_or(0);
+            let glyph_w = render::display_width(render::status_glyph(task.status));
+            let id_w = header_identifier
+                .as_deref()
+                .map(render::display_width)
+                .unwrap_or(0);
+            // The painted state slot keeps one trailing pad cell.
+            let state_w = header_state
+                .as_deref()
+                .map(render::display_width)
                 .unwrap_or(0)
-                .saturating_sub(
-                    11 + header_state
-                        .as_deref()
-                        .map(render::display_width)
-                        .unwrap_or(0),
-                );
-            let (text, cursor) = escaped_line_window(&form.title, avail.max(1));
+                + 1;
+            let room = render::task_header_title_room(width, glyph_w, id_w, state_w);
+            let (text, cursor) = escaped_line_window(&form.title, room.max(1));
             (text, Some(cursor))
         } else {
             (form.title.value().to_string(), None)
@@ -1073,7 +1081,7 @@ fn draw_wide_board(
     };
 
     let mut hits = render::QueueHitMap::default();
-    let board_area = responsive.board_content();
+    let board_area = responsive.board;
     if board_area.width > 0 {
         let board_geo = column_geo(board_area.width);
         if stage == tier::WideStage::Rail {

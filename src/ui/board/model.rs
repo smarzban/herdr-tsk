@@ -1291,7 +1291,7 @@ impl BoardModel {
         self.stage_origin
     }
 
-    /// Retained task-page viewport offset.
+    /// Test surface. Retained task-page viewport offset.
     pub fn page_scroll(&self) -> usize {
         self.form
             .as_ref()
@@ -1316,7 +1316,7 @@ impl BoardModel {
         }
     }
 
-    /// Retained stored-step cursor, if active.
+    /// Test surface. Retained stored-step cursor, if active.
     pub fn step_cursor(&self) -> Option<usize> {
         self.form
             .as_ref()

@@ -694,7 +694,7 @@ pub fn drag_content_area(model: &BoardModel, area: Rect) -> Rect {
     let surface = if model.focused_surface() == crate::ui::tier::FocusedSurface::Task {
         responsive.task_content()
     } else {
-        responsive.board_content()
+        responsive.board
     };
     // Only chrome row positions shape this drag viewport; they depend on the live
     // content height, not the renderer's standard/compact density decision.
@@ -899,13 +899,7 @@ fn board_keyboard_intent_for_area(
     let presentation =
         crate::ui::tier::resolve_responsive(area.width, area.height, model.wide_stage())
             .presentation;
-    match route_responsive_key(
-        mode,
-        model.wide_stage(),
-        presentation,
-        model.task_editing(),
-        key,
-    ) {
+    match route_responsive_key(mode, model.wide_stage(), presentation, key) {
         ResponsiveKeyRoute::Intent(intent) => Some(intent),
         ResponsiveKeyRoute::Inert => None,
         ResponsiveKeyRoute::Surface => board_keyboard_intent(model, mode, key),
