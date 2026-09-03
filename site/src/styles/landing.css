@@ -1503,7 +1503,7 @@ html[data-theme="light"] .pane {
 
 .band-lede {
   margin: 0;
-  max-width: 62ch;
+  max-width: none;
   font-size: 0.98rem;
   color: var(--ink-2);
 }
