@@ -761,11 +761,12 @@ pub fn draw_rail_frame(
     for y in surface.top()..surface.bottom() {
         for x in surface.left()..surface.right() {
             let cell = &mut buffer[(x, y)];
-            let modifier = cell
+            // `set_style` can only add bits, so assign the modifier set directly: the rail
+            // is dim everywhere and never bold.
+            cell.modifier = cell
                 .modifier
                 .difference(Modifier::BOLD)
                 .union(Modifier::DIM);
-            cell.set_style(Style::default().add_modifier(modifier));
         }
     }
     hits
@@ -886,6 +887,13 @@ pub fn draw_task_column(
             if rule_y < lay.bottom {
                 put_line(frame, surface, rule_y, width, paint_rule_row(width));
             }
+            // Same order as the single-pane page: the full-row title hit first, then the
+            // `T<n>` copy hit and the copyable title cells over it. `hit_at` resolves newest
+            // first, so the narrower hits must be pushed last or the title row shadows them.
+            hits.push(
+                QueueHitTarget::FormTitle,
+                Rect::new(0, header_row, width, 1),
+            );
             if let (Some(task), false) = (header.identifier_task, identifier.is_empty()) {
                 hits.push(
                     QueueHitTarget::TaskNumber(task),
@@ -906,10 +914,6 @@ pub fn draw_task_column(
                     1,
                 ));
             }
-            hits.push(
-                QueueHitTarget::FormTitle,
-                Rect::new(0, header_row, width, 1),
-            );
             if let Some(col) = header.title_cursor_col {
                 place_edit_cursor_at(
                     frame,

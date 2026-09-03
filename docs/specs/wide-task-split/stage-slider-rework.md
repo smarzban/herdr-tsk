@@ -128,7 +128,7 @@ becomes `created … · updated …` (project moves up to the header slot).
 - Keeps blank row, tab selector, section rules with counts, thread headers, collapse state.
 - Drops the meta column (project · age) and the done drawer.
 - Rows are `  <mark> T<n> <title>` wrapped with `edit::wrap_text` to the rail width, continuation
-  indent 4. Never truncated.
+  indent 4 past the row's own lead (threaded rows keep the board's thread indent). Never truncated.
 - Selected row marker is `▹` (hollow). Other rows keep their status glyph.
 
 ### Board (stage A)

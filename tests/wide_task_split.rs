@@ -2199,3 +2199,111 @@ fn board_focused_field_edit_enters_the_task_stage() {
     assert_eq!(model.wide_stage(), WideStage::FullBoard);
     assert_eq!(model.edit_target(), None);
 }
+
+// Review-panel fixes on `main..b625955`.
+
+#[test]
+fn task_column_header_number_click_copies_in_g_and_f() {
+    // F-1/F-2: the column pushed `FormTitle` after `TaskNumber`, so the full-row title hit
+    // shadowed the copy hit (`hit_at` searches newest first). The single-pane page pushes the
+    // other way round; the column must match it.
+    for stage in [WideStage::Rail, WideStage::FullTask] {
+        let (mut domain, mut model) = fixture();
+        to_stage(&mut domain, &mut model, stage);
+        let area = Rect::new(0, 0, 130, 24);
+        let (_, hits) = render_buffer(&model, 130, 24);
+        let column = resolve_responsive(130, 24, stage).task;
+        let number = hits
+            .regions
+            .iter()
+            .find(|hit| {
+                matches!(hit.target, QueueHitTarget::TaskNumber(_))
+                    && column.contains(hit.area.as_position())
+            })
+            .expect("header number hit")
+            .area;
+        let intent =
+            map_responsive_board_mouse(&model, &hits, area, left_click(number.x, number.y));
+        assert_eq!(
+            intent,
+            Some(BoardIntent::CopyTaskNumber(model.selected_id().unwrap())),
+            "{stage:?}: clicking T<n> in the column header copies it"
+        );
+    }
+}
+
+#[test]
+fn rail_without_a_selection_cannot_slide_into_full_task() {
+    // F-5/F-7: a disk merge can remove the task shown in G. `→` must then stay in G (AC-21:
+    // A, G and F need a selected task), not open an empty F.
+    let (mut domain, mut model) = fixture();
+    to_stage(&mut domain, &mut model, WideStage::Rail);
+    let mut empty = DomainState::new();
+    model.sync_from_domain(&empty);
+    assert_eq!(model.selected_id(), None);
+    assert_eq!(model.wide_stage(), WideStage::Rail);
+
+    go(&mut empty, &mut model, BoardIntent::StageRight);
+    assert_eq!(model.wide_stage(), WideStage::Rail);
+    assert_eq!(model.stage_origin(), None);
+}
+
+#[test]
+fn soft_delete_from_a_task_stage_returns_the_board_to_a_board_stage() {
+    // F-9: deleting the page's own task cleared the form and dropped to Normal mode while the
+    // stage stayed task-owned, which left `←`/`→` inert on an empty pane.
+    for (stage, expected) in [
+        (WideStage::Rail, WideStage::Split),
+        (WideStage::FullTask, WideStage::Split),
+    ] {
+        let (mut domain, mut model) = fixture();
+        to_stage(&mut domain, &mut model, stage);
+        let deleted = model.selected_id().unwrap();
+        go(&mut domain, &mut model, BoardIntent::SoftDelete);
+        assert!(!model.visible_ids().contains(&deleted));
+        assert_eq!(
+            model.wide_stage(),
+            expected,
+            "{stage:?} lands on a board stage"
+        );
+        assert_eq!(model.focused_surface(), FocusedSurface::Board);
+        assert_eq!(model.input_mode(), BoardInputMode::Normal);
+        // The slider still answers.
+        let route = route_responsive_key(
+            model.input_mode(),
+            model.wide_stage(),
+            ResponsivePresentation::WideSplit,
+            KeyEvent::new(KeyCode::Left, KeyModifiers::NONE),
+        );
+        assert_eq!(route, ResponsiveKeyRoute::Intent(BoardIntent::StageLeft));
+    }
+
+    // From F entered off the full board, deletion returns to the full board.
+    let (mut domain, mut model) = fixture();
+    go(&mut domain, &mut model, BoardIntent::OpenTaskPage);
+    assert_eq!(model.wide_stage(), WideStage::FullTask);
+    go(&mut domain, &mut model, BoardIntent::SoftDelete);
+    assert_eq!(model.wide_stage(), WideStage::FullBoard);
+}
+
+#[test]
+fn rail_cells_carry_no_bold() {
+    // F-3: the rail's BOLD strip used `set_style(add_modifier)`, which cannot remove a bit.
+    let (mut domain, mut model) = fixture();
+    to_stage(&mut domain, &mut model, WideStage::Rail);
+    let (buffer, _) = render_buffer(&model, 130, 24);
+    let rail = resolve_responsive(130, 24, WideStage::Rail).board;
+    let footer_top = tsk_tui::ui::tier::resolve(130, 24)
+        .rule_row
+        .expect("footer rule");
+    for y in rail.top()..footer_top {
+        for x in rail.left()..rail.right() {
+            let cell = &buffer[(x, y)];
+            assert!(
+                !cell.modifier.contains(Modifier::BOLD),
+                "rail cell ({x},{y}) {:?} is bold",
+                cell.symbol()
+            );
+        }
+    }
+}

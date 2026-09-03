@@ -30,7 +30,8 @@ use crate::ui::input::{
 use crate::ui::mouse::{
     capture_layout_for_model, enable_terminal_input, focused_mouse_area,
     keyboard_enhancement_supported, map_capture_mouse, map_responsive_board_mouse,
-    map_scrollbar_mouse, scrollbar_hit_at, wide_mouse_focus_intent, ScrollbarMouse,
+    map_scrollbar_mouse, press_on_focused_surface, scrollbar_hit_at, wide_mouse_focus_intent,
+    ScrollbarMouse,
 };
 use crate::ui::queue::BoardTab;
 use crate::ui::scheduler;
@@ -557,7 +558,7 @@ fn run_board() -> Result<(), Box<dyn Error>> {
                             let pos = Position::new(mouse.column, mouse.row);
                             let responsive_intent =
                                 map_responsive_board_mouse(&model, &frame_hits, area, mouse);
-                            let focused = focused_mouse_area(&model, area).contains(pos);
+                            let focused = press_on_focused_surface(&model, area, pos);
                             if !focused
                                 && !press_survives_off_focus(
                                     responsive_intent.as_ref(),
@@ -2102,7 +2103,10 @@ mod tests {
     use crate::ui::board::CommandSurface;
     use crate::ui::capture::CaptureField;
     use crate::ui::input::{map_key, CaptureIntent};
-    use crate::ui::mouse::{left_click, map_board_mouse, map_responsive_board_mouse};
+    use crate::ui::mouse::{
+        focused_mouse_area, left_click, map_board_mouse, map_responsive_board_mouse,
+        press_on_focused_surface,
+    };
     use crate::ui::queue::BoardTab;
 
     static TEMP_DIR_SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
@@ -2252,6 +2256,42 @@ mod tests {
         apply_intent(&mut domain, &mut model, intent, None).expect("apply task control");
         assert_eq!(model.input_mode(), BoardInputMode::EditStep);
         assert_eq!(model.wide_stage(), crate::ui::tier::WideStage::Rail);
+    }
+
+    #[test]
+    fn app_press_gate_keeps_shared_footer_verbs_outside_the_focused_column() {
+        // F-8: the shared footer spans the frame, but the Down gate only accepted presses
+        // inside the focused column, so a footer verb painted under the other column died
+        // before Up could dispatch it. Stage G: the left 33 cells of the verb bar sit under
+        // the rail; stage A: the right cells sit under the preview.
+        for (times, stage) in [
+            (1, crate::ui::tier::WideStage::Split),
+            (2, crate::ui::tier::WideStage::Rail),
+        ] {
+            let (mut domain, mut model) = board_fixture("footer gate", None);
+            stage_right(&mut domain, &mut model, times);
+            assert_eq!(model.wide_stage(), stage);
+            let area = Rect::new(0, 0, 130, 24);
+            let hits = crate::ui::board::board_hit_map(area, &model);
+            let focused = focused_mouse_area(&model, area);
+            let verb = hits
+                .regions
+                .iter()
+                .find(|hit| {
+                    matches!(hit.target, crate::ui::render::QueueHitTarget::Verb(_))
+                        && !focused.contains(hit.area.as_position())
+                })
+                .unwrap_or_else(|| panic!("{stage:?}: a footer verb outside the focused column"))
+                .area;
+            let pos = Position::new(verb.x, verb.y);
+            let intent =
+                map_responsive_board_mouse(&model, &hits, area, left_click(verb.x, verb.y));
+            assert!(intent.is_some(), "{stage:?}: footer verb maps an intent");
+            assert!(
+                press_on_focused_surface(&model, area, pos),
+                "{stage:?}: the Down gate keeps a shared-footer press"
+            );
+        }
     }
 
     #[test]

@@ -1526,6 +1526,8 @@ fn apply_board_intent(
                     }
                     // Deleting from the page deletes the page's own task: the surface closes and
                     // the undo route back to it lives on the board row, same as the notice says.
+                    // A task-owned stage (G or F) hands the slider back to the board the same
+                    // way `Esc` would, so the arrows keep answering on the row with the undo.
                     if model
                         .form
                         .as_ref()
@@ -1535,6 +1537,14 @@ fn apply_board_intent(
                     {
                         model.form = None;
                         model.input_mode = BoardInputMode::Normal;
+                        if matches!(model.wide_stage, WideStage::Rail | WideStage::FullTask) {
+                            // Normal mode is board-owned, so the stage must be too: back to
+                            // the full board when F was entered from it, otherwise to A.
+                            model.wide_stage = match model.stage_origin.take() {
+                                Some(WideStage::FullBoard) => WideStage::FullBoard,
+                                _ => WideStage::Split,
+                            };
+                        }
                     }
                 }
             }
@@ -1614,8 +1624,15 @@ fn stage_right(domain: &DomainState, model: &mut BoardModel) {
             }
         }
         WideStage::Rail => {
-            model.stage_origin = Some(WideStage::Rail);
-            model.wide_stage = WideStage::FullTask;
+            // A disk merge can remove the task G is showing; the parked form still pins it
+            // as the selection, so ask the domain, not the pin. F needs a live task.
+            if model
+                .selected_id()
+                .is_some_and(|id| domain.get(id).is_some())
+            {
+                model.stage_origin = Some(WideStage::Rail);
+                model.wide_stage = WideStage::FullTask;
+            }
         }
         WideStage::FullTask => {}
     }

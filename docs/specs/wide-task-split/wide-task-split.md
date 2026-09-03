@@ -95,7 +95,7 @@ For AC-9, **the same outcome** means that, from the same task, task-page session
 
 **AC-23** Every frame is monochrome at every width and stage: `assert_buffer_mono` holds, and there is no colour exception for wide chrome. *(Verification type: **test-backed**: property)*
 
-**AC-24** Rail rows are `  <mark> T<n> <title>` wrapped with `edit::wrap_text` at the rail width with a four-cell continuation indent; a title longer than the rail occupies several rows, is never truncated, and no glyph touches the rule column. The selected rail row paints `▹`; the rail has no meta column and no done drawer; every rail cell carries DIM. *(Verification type: **test-backed**: unit)*
+**AC-24** Rail rows are `  <mark> T<n> <title>` wrapped with `edit::wrap_text` at the rail width with a continuation indent four cells past the row's own lead (a threaded row keeps the board's thread indent, so its continuation is lead + 4); a title longer than the rail occupies several rows, is never truncated, and no glyph touches the rule column. The selected rail row paints `▹`; the rail has no meta column and no done drawer; every rail cell carries DIM. *(Verification type: **test-backed**: unit)*
 
 ### Negative criteria
 

@@ -382,6 +382,19 @@ pub fn focused_mouse_area(model: &BoardModel, area: Rect) -> Rect {
     }
 }
 
+/// Whether a press lands on the surface that owns pointer input. The focused column always
+/// does; so does the shared wide footer, which spans the frame and routes to the focused
+/// surface regardless of which column it is painted under (verbs, status controls, inputs).
+pub fn press_on_focused_surface(model: &BoardModel, area: Rect, pos: Position) -> bool {
+    if focused_mouse_area(model, area).contains(pos) {
+        return true;
+    }
+    let responsive = resolve_responsive(area.width, area.height, model.wide_stage());
+    responsive.presentation == ResponsivePresentation::WideSplit
+        && area.contains(pos)
+        && pos.y >= wide_footer_top(area)
+}
+
 /// First row of the shared wide footer (its rule). Column clicks stop above it.
 fn wide_footer_top(area: Rect) -> u16 {
     resolve(area.width, area.height)
