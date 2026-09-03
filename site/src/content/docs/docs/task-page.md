@@ -6,8 +6,9 @@ description: "View and edit one task: title, notes, thread, and scope."
 Below 110 usable columns, `Enter` opens the selected task full height. At 110
 usable columns or wider the page is the right column of the
 [stage slider](/docs/board/#wide-stage-slider): a preview beside the board in stage
-A, the focused page beside a dim rail in G, or the whole frame in F. Its header is a
-rule on the selector row, `T12 title ──── started · tsk`, dim in A and bold in G and F.
+A, the focused page beside a dim rail in G, or the whole frame in F. Its header sits
+on the selector row, `▸ T12 title … started · tsk` with the status glyph restored,
+dim in A and bold in G and F, and a dash rule on the row under it.
 With no selection the column reads `no task` and is inert. `←` from G parks the page
 beside the board without resetting page scroll or the step cursor; `→` brings it back.
 

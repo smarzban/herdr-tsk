@@ -710,15 +710,9 @@ pub fn drag_content_area(model: &BoardModel, area: Rect) -> Rect {
     // content height, not the renderer's standard/compact density decision.
     let geo = crate::ui::tier::resolve(surface.width, surface.height);
     if model.focused_surface() == crate::ui::tier::FocusedSurface::Task {
-        // Approximate the shared notes/steps viewport: below the header, above the rule.
-        // The wide column's header rule sits on the selector row, so its body starts one
-        // row higher than the single-pane page's title block. Exact step halving is
-        // unnecessary for edge detection.
-        let wide = responsive.presentation == crate::ui::tier::ResponsivePresentation::WideSplit;
-        let top = surface
-            .y
-            .saturating_add(geo.viewport_top)
-            .saturating_add(u16::from(!wide));
+        // Approximate the shared notes/steps viewport: below the two-row header, above
+        // the rule. Exact step halving is unnecessary for edge detection.
+        let top = surface.y.saturating_add(geo.viewport_top).saturating_add(1);
         let bottom = surface
             .y
             .saturating_add(geo.rule_row.unwrap_or(geo.height.saturating_sub(2)));

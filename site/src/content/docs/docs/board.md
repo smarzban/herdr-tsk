@@ -70,8 +70,9 @@ saved.
 
 `→` and `←` slide the stage. `Enter` opens F and remembers where it came from; `Esc`
 returns there. Changing the selection in A retargets the pane, with no peek. Click a
-board or rail row to select it in place; double-click to open F. Click inside the
-stage A task column to move to G and run the control you clicked. Below 110 columns
+board row to select it in place; click a rail row to select it and move focus back to
+the board; double-click to open F. Click inside the stage A task column to move to G
+and run the control you clicked. Below 110 columns
 the stage is kept: 0 and A show the board, G and F show the page, and growing back
 restores the same view.
 

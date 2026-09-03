@@ -23,7 +23,7 @@ Refreshed for the stage-slider rework (`stage-slider-rework.md`). Unless noted, 
 | AC-7 | test-backed | stage_zero_keys_slide_open_select_and_stay_put, stage_a_keys_slide_both_ways_open_and_retarget_the_pane, app_keyboard_route_owns_stage_slider_keys (src/app.rs) |
 | AC-8 | test-backed | stage_g_keys_slide_open_close_and_navigate_the_page, stage_f_keys_return_to_the_rail_or_the_origin, stage_keys_fall_through_to_editor_semantics_while_editing |
 | AC-9 | test-backed | task_surface_controls_in_g_and_f_match_the_single_pane_page, enter_in_stage_f_closes_the_page_like_the_single_pane_page |
-| AC-10 | test-backed | board_row_click_selects_without_changing_stage_or_peeking, rail_row_click_retargets_the_page_in_place, row_double_click_opens_the_full_page_and_records_the_origin |
+| AC-10 | test-backed | board_row_click_selects_without_changing_stage_or_peeking, left_side_click_moves_focus_left_from_the_rail, row_double_click_opens_the_full_page_and_records_the_origin |
 | AC-11 | test-backed | stage_a_task_column_click_moves_to_g_then_dispatches_against_the_painted_frame, app_mouse_click_moves_stage_a_to_g_before_dispatching_same_control, app_task_scrollbar_moves_stage_refreshes_bound_and_routes_page_scroll (src/app.rs) |
 | AC-12 | test-backed | shrinking_and_growing_keeps_every_stage_and_its_session |
 | AC-13 | test-backed | shrinking_and_growing_keeps_every_stage_and_its_session |

@@ -192,11 +192,14 @@ fn wide_paints_exactly_one_footer_at_every_stage() {
             .filter(|(_, row)| row.chars().all(|c| c == '─'))
             .map(|(y, _)| y)
             .collect();
-        assert_eq!(
-            rule_rows,
-            vec![rule_y as usize],
-            "{stage:?}: one full-width rule"
-        );
+        // Stage F's header rule spans the whole frame too; every other stage keeps
+        // exactly one full-width rule row.
+        let expected = if stage == WideStage::FullTask {
+            vec![2usize, rule_y as usize]
+        } else {
+            vec![rule_y as usize]
+        };
+        assert_eq!(rule_rows, expected, "{stage:?}: one footer rule");
         let done_rows: Vec<usize> = rows
             .iter()
             .enumerate()
@@ -268,11 +271,15 @@ fn stage_zero_and_full_task_render_the_standard_tier_at_130x24() {
     );
     let (rows, _) = render(&model, 130, 24);
     assert!(rows[0].trim().is_empty(), "F keeps the blank row");
-    assert!(rows[1].starts_with(" T12 Frame the wide task view ─"));
+    assert!(rows[1].starts_with(" ▸ T12 Frame the wide task view"));
     assert!(rows[1].trim_end().ends_with("started · tsk"));
     assert!(
-        rows[2].contains("Rework the wide split"),
-        "body starts under the header"
+        rows[2].chars().all(|c| c == '─'),
+        "the rule sits under the title"
+    );
+    assert!(
+        rows[3].contains("Rework the wide split"),
+        "body starts under the rule"
     );
 }
 
@@ -287,14 +294,18 @@ fn task_column_header_replaces_the_in_pane_header_with_stage_weight() {
         let rows = rows_of(&buffer);
         let header = column_text(&rows, column, 1);
         assert!(
-            header.starts_with(" T12 Frame the wide task view ─"),
+            header.starts_with(" ▸ T12 Frame the wide task view"),
             "{stage:?}: {header}"
         );
         assert!(
             header.trim_end().ends_with("started · tsk"),
             "{stage:?}: {header}"
         );
-        let body = region_text(&rows, Rect::new(column.x, 2, column.width, 19));
+        assert!(
+            column_text(&rows, column, 2).chars().all(|c| c == '─'),
+            "{stage:?}: the dash rule sits under the title"
+        );
+        let body = region_text(&rows, Rect::new(column.x, 3, column.width, 18));
         assert!(
             !body.contains("▸ T12"),
             "{stage:?}: in-pane header must not paint"
@@ -305,8 +316,8 @@ fn task_column_header_replaces_the_in_pane_header_with_stage_weight() {
                 .any(|line| line.trim().chars().all(|c| c == '─') && !line.trim().is_empty()),
             "{stage:?}: no in-pane divider"
         );
-        assert!(column_text(&rows, column, 2).contains("Rework the wide split"));
-        let title_x = column.x + 5;
+        assert!(column_text(&rows, column, 3).contains("Rework the wide split"));
+        let title_x = column.x + 7;
         let title_cell = &buffer[(title_x, 1)];
         if stage == WideStage::Split {
             assert!(title_cell.modifier.contains(Modifier::DIM), "A header dim");
@@ -504,8 +515,12 @@ fn empty_pane_paints_no_task_header_and_is_inert() {
     let (rows, hits) = render(&model, 130, 24);
     let column = geometry.task_content();
     let header = column_text(&rows, column, 1);
-    assert!(header.starts_with(" no task ─"), "{header}");
-    assert!(column_text(&rows, column, 2).contains("select a task to preview it here"));
+    assert!(header.starts_with(" no task"), "{header}");
+    assert!(
+        column_text(&rows, column, 2).trim().starts_with('─'),
+        "{header}"
+    );
+    assert!(column_text(&rows, column, 3).contains("select a task to preview it here"));
     assert!(
         hits.regions
             .iter()
@@ -578,7 +593,7 @@ fn stage_a_preview_paints_controls_for_the_focus_router_only() {
         .expect("the T<number> prefix keeps its copy hit");
     assert_eq!(
         number.area,
-        Rect::new(geometry.task_content().x + 1, 1, 3, 1)
+        Rect::new(geometry.task_content().x + 3, 1, 3, 1)
     );
     assert!(
         hits.regions
@@ -1709,15 +1724,12 @@ fn dirty_editor_in_g() -> (DomainState, BoardModel) {
     (domain, model)
 }
 
-fn header_state(model: &BoardModel, stage: WideStage) -> String {
+/// The title row of the task column header; the state slot is its right end.
+fn header_title_row(model: &BoardModel, stage: WideStage) -> String {
     let geometry = resolve_responsive(130, 24, stage);
     let (rows, _) = render(model, 130, 24);
-    let header = column_text(&rows, geometry.task_content(), 1);
-    header
+    column_text(&rows, geometry.task_content(), 1)
         .trim_end()
-        .rsplit("─ ")
-        .next()
-        .unwrap_or_default()
         .to_string()
 }
 
@@ -1726,7 +1738,7 @@ fn dirty_draft_slides_left_to_a_and_right_back_to_g_untouched() {
     let (mut domain, mut model) = dirty_session_in_g();
     let bound = model.edit_target().expect("bound");
     let draft = model.edit_buffer().to_string();
-    assert_eq!(header_state(&model, WideStage::Rail), "unsaved");
+    assert!(header_title_row(&model, WideStage::Rail).ends_with("unsaved"));
 
     assert_eq!(
         press(&mut domain, &mut model, KeyCode::Left),
@@ -1737,7 +1749,7 @@ fn dirty_draft_slides_left_to_a_and_right_back_to_g_untouched() {
     assert_eq!(model.input_mode(), BoardInputMode::Normal);
     assert_eq!(model.edit_target(), Some(bound), "the pane stays bound");
     assert_eq!(model.selected_id(), Some(bound));
-    assert_eq!(header_state(&model, WideStage::Split), "unsaved");
+    assert!(header_title_row(&model, WideStage::Split).ends_with("unsaved"));
     assert!(model.message().is_none(), "no refusal for a stage move");
 
     assert_eq!(
@@ -1819,13 +1831,13 @@ fn dirty_refusal_clears_after_save_and_the_pane_retargets_again() {
         model.message().is_some(),
         "SelectNext in an editor is a refused retarget"
     );
-    assert_eq!(header_state(&model, WideStage::Rail), "editing title");
+    assert!(header_title_row(&model, WideStage::Rail).ends_with("editing title"));
 
     go(&mut domain, &mut model, BoardIntent::ConfirmEdit);
     assert!(model.message().is_none());
     assert!(!model.task_session_dirty());
     assert_eq!(domain.get(bound).expect("saved").title, draft);
-    assert_eq!(header_state(&model, WideStage::Rail), "started · tsk");
+    assert!(header_title_row(&model, WideStage::Rail).ends_with("started · tsk"));
 
     press(&mut domain, &mut model, KeyCode::Left);
     assert_eq!(model.wide_stage(), WideStage::Split);
@@ -1849,7 +1861,7 @@ fn dirty_refusal_clears_after_cancel() {
     assert!(model.message().is_none());
     assert!(!model.task_session_dirty());
     assert_eq!(model.edit_buffer(), saved);
-    assert_eq!(header_state(&model, WideStage::Rail), "started · tsk");
+    assert!(header_title_row(&model, WideStage::Rail).ends_with("started · tsk"));
     press(&mut domain, &mut model, KeyCode::Left);
     press(&mut domain, &mut model, KeyCode::Char('j'));
     assert_ne!(model.selected_id(), Some(bound));
@@ -1887,7 +1899,7 @@ fn changed_thread_and_scope_drafts_refuse_retarget_and_paint_unsaved() {
     );
     go(&mut domain, &mut model, BoardIntent::ToggleThreadEditing);
     go(&mut domain, &mut model, BoardIntent::EditInsert('x'));
-    assert_eq!(header_state(&model, WideStage::Rail), "editing thread");
+    assert!(header_title_row(&model, WideStage::Rail).ends_with("editing thread"));
     let bound = model.edit_target().expect("bound");
     let other = model
         .visible_ids()
@@ -1917,7 +1929,7 @@ fn changed_thread_and_scope_drafts_refuse_retarget_and_paint_unsaved() {
     let original = model.form_scope().cloned();
     go(&mut domain, &mut model, BoardIntent::FormCycleScope);
     assert_ne!(model.form_scope(), original.as_ref());
-    assert_eq!(header_state(&model, WideStage::Rail), "editing scope");
+    assert!(header_title_row(&model, WideStage::Rail).ends_with("editing scope"));
     let bound = model.edit_target().expect("bound");
     let other = model
         .visible_ids()
@@ -1939,7 +1951,7 @@ fn changed_thread_and_scope_drafts_refuse_retarget_and_paint_unsaved() {
     }
     assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
     assert!(model.task_session_dirty());
-    assert_eq!(header_state(&model, WideStage::Rail), "unsaved");
+    assert!(header_title_row(&model, WideStage::Rail).ends_with("unsaved"));
 }
 
 #[test]

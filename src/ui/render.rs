@@ -798,6 +798,8 @@ pub fn draw_queue_footer(
 /// Header rule of the wide task column: `T12 title ──── started · tsk` on the selector row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TaskColumnHeader<'a> {
+    /// Status glyph (`▸`, `○`, …) restored before the identifier.
+    pub glyph: &'a str,
     /// Dim `T<number>` prefix on a persisted task; drafts have none.
     pub identifier: Option<&'a str>,
     /// Task the identifier copies, for its hit region.
@@ -834,32 +836,34 @@ pub fn draw_task_column(
     let lay = task_column_layout(geo);
     let header_row = lay.title_y;
     let weight = |bold: bool| if bold { style_bold() } else { style_dim() };
+    let rule_y = header_row.saturating_add(1);
     match header {
         Some(header) => {
-            let state = format!(" {} ", header.state);
+            // Title row: glyph, identifier, title, and the right state slot. The dash rule
+            // lives on the row under it, and the body starts below that.
+            let state = format!("{} ", header.state);
             let state_w = display_width(&state);
+            let glyph_w = display_width(header.glyph);
             let identifier = header.identifier.unwrap_or_default();
             let identifier_gap = if identifier.is_empty() { "" } else { " " };
-            let lead = format!(" {identifier}{identifier_gap}");
-            let lead_w = display_width(&lead);
-            // Chrome cap, not task text: the title yields to one rule cell and the state.
+            let lead_w =
+                1 + glyph_w + 1 + display_width(identifier) + display_width(identifier_gap);
+            // Chrome cap, not task text: the title yields to one gap cell and the state.
             let title_room = (width as usize)
                 .saturating_sub(lead_w)
-                .saturating_sub(1)
                 .saturating_sub(1)
                 .saturating_sub(state_w);
             let title = present_line(header.title, title_room);
             let title_w = display_width(&title);
-            let rule_w = (width as usize)
-                .saturating_sub(lead_w + title_w + 1)
-                .saturating_sub(state_w);
+            let pad_w = (width as usize).saturating_sub(lead_w + title_w + state_w);
             let spans = vec![
                 Span::styled(" ".to_string(), style_plain()),
+                Span::styled(header.glyph.to_string(), weight(header.bold)),
+                Span::styled(" ".to_string(), weight(header.bold)),
                 Span::styled(identifier.to_string(), style_dim()),
                 Span::styled(identifier_gap.to_string(), weight(header.bold)),
                 Span::styled(title.clone(), weight(header.bold)),
-                Span::styled(" ".to_string(), style_plain()),
-                Span::styled("─".repeat(rule_w), style_dim()),
+                Span::styled(" ".repeat(pad_w), style_plain()),
                 Span::styled(state, style_dim()),
             ];
             put_line(
@@ -869,11 +873,14 @@ pub fn draw_task_column(
                 width,
                 bound_line(Line::from(spans), width as usize),
             );
+            if rule_y < lay.bottom {
+                put_line(frame, surface, rule_y, width, paint_rule_row(width));
+            }
             if let (Some(task), false) = (header.identifier_task, identifier.is_empty()) {
                 hits.push(
                     QueueHitTarget::TaskNumber(task),
                     Rect::new(
-                        1,
+                        u16::try_from(1 + glyph_w + 1).unwrap_or(u16::MAX),
                         header_row,
                         u16::try_from(display_width(identifier)).unwrap_or(u16::MAX),
                         1,
@@ -906,21 +913,19 @@ pub fn draw_task_column(
             }
         }
         None => {
-            let label = " no task ";
-            let rule_w = (width as usize).saturating_sub(display_width(label));
             put_line(
                 frame,
                 surface,
                 header_row,
                 width,
                 bound_line(
-                    Line::from(vec![
-                        Span::styled(label.to_string(), style_dim()),
-                        Span::styled("─".repeat(rule_w), style_dim()),
-                    ]),
+                    Line::from(Span::styled(" no task".to_string(), style_dim())),
                     width as usize,
                 ),
             );
+            if rule_y < lay.bottom {
+                put_line(frame, surface, rule_y, width, paint_rule_row(width));
+            }
             if lay.notes_y < lay.bottom {
                 put_line(
                     frame,
@@ -2317,7 +2322,9 @@ pub fn task_column_layout(geo: &TierGeometry) -> TaskPageLayout {
         .min()
         .unwrap_or(geo.height);
     let title_y = geo.selector_row.unwrap_or(0).min(bottom.saturating_sub(1));
-    let notes_y = title_y.saturating_add(1).min(bottom);
+    // The header is two rows: the title (glyph, identifier, state slot) on the selector
+    // row and its dash rule directly under it. The body starts on the row below the rule.
+    let notes_y = title_y.saturating_add(2).min(bottom);
     let meta_y = (bottom >= notes_y.saturating_add(2)).then(|| bottom - 1);
     let content_end = meta_y.unwrap_or(bottom);
     TaskPageLayout {

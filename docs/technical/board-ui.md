@@ -91,7 +91,8 @@ press inside the task column slides to G first (`wide_mouse_focus_intent`) and t
 dispatches against the painted frame's hits, so the control keeps its identity across
 the column resize. The shared footer routes to the focused surface's verbs in every
 stage. `map_responsive_board_mouse` routes only translated renderer-owned hits inside
-the live surface. Scrollbar
+the live surface; a left-side (board or rail) click owns the left — a rail row click
+selects the row and lands the board in A, blank rail space slides the same way. Scrollbar
 track/thumb: `ListScrollTo` / `PageScrollTo` without changing selection. Thread
 headers are not in the hit map. Form fields ignore clicks until an edit has
 started. Text drag uses `text_select` + autoscroll
@@ -118,10 +119,10 @@ verb bar across the frame. The status row's right side carries a dim stage crumb
 the keys that apply (`→ pane · enter open`, `board ▸ task    → task · ← close · enter
 open`, `board ◂ task    ← board · → full page`, `← rail · esc back`, or `shift+enter
 save · esc cancel` while an editor is active); refusal text on the left wins the row,
-dropping the crumb first. `render::draw_task_column` paints the task header rule on
-the selector row (`T12 title ──── started · tsk`, DIM in A, BOLD in G/F; the state slot
-reads `editing <field>` or `unsaved`) and the page body under it with its in-page
-header, divider and bottom chrome suppressed; the footer meta is `created … · updated
+dropping the crumb first. `render::draw_task_column` paints the task header on the selector row — the status
+glyph, `T12 title`, and the `status · project` state slot (or `editing <field>` /
+`unsaved`), DIM in A, BOLD in G/F — with its dash rule on the row under it; the page
+body starts below that, with the in-page header, divider and bottom chrome suppressed; the footer meta is `created … · updated
 …` (plus the thread, and the scope while an edit session is active). With no selected
 task the column paints `no task ───` and a dim hint and exposes no hits.
 `render::draw_rail_frame` is the stage G rail: the list at 32 columns, no meta column,

@@ -48,9 +48,11 @@ For scriptable board work, use `tsk add` and `tsk list`; read
   the page beside the board. `→` never peeks at wide widths. The session opens in stage 0; the
   stage is never persisted and survives resizes (0/A render the single board below 110, G/F
   the single task page). Exactly one footer spans the frame: rule, status row (with a dim
-  stage crumb on the right), verb bar following focus. The task column paints a header rule
-  on the selector row (`T12 title ──── started · tsk`, DIM in A, BOLD in G/F; the slot reads
-  `editing <field>` or `unsaved`) instead of the in-page header. Below 110, nothing changes:
+  stage crumb on the right), verb bar following focus. The task column paints its header on
+  the selector row — `▸ T12 title … status · tsk` with the status glyph restored, DIM in A
+  and BOLD in G/F, the slot reading `editing <field>` or `unsaved` — and a dim dash rule on
+  the row under it, instead of the in-page header. A click on the left side takes focus
+  left: a rail row click selects the row and lands the board beside it. Below 110, nothing changes:
   the focused surface fills the frame.
   Persisted task rows paint a dim `T<number>` prefix before the title, including task page
   and done drawer; clicking that prefix copies it. Peek relies on its parent row's prefix.

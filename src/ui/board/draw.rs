@@ -1007,7 +1007,7 @@ fn draw_wide_board(
                 .map(|geo| geo.row_width as usize)
                 .unwrap_or(0)
                 .saturating_sub(
-                    8 + header_state
+                    11 + header_state
                         .as_deref()
                         .map(render::display_width)
                         .unwrap_or(0),
@@ -1021,6 +1021,9 @@ fn draw_wide_board(
     let header = header_title
         .as_ref()
         .map(|(title, cursor)| render::TaskColumnHeader {
+            glyph: header_task
+                .map(|(_, task)| render::status_glyph(task.status))
+                .unwrap_or("○"),
             identifier: header_identifier.as_deref(),
             identifier_task: header_task.and_then(|(form, _)| form.task_id()),
             title,

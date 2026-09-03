@@ -2734,7 +2734,7 @@ fn wide_task_drag_uses_task_column_content_edges_for_autoscroll() {
     // Rail 32 + rule 1 + pad 1: the page body runs from the row under the header rule down
     // to the shared footer's rule.
     let content = drag_content_area(&model, Rect::new(0, 0, 110, 24));
-    assert_eq!(content, Rect::new(34, 2, 76, 19));
+    assert_eq!(content, Rect::new(34, 3, 76, 18));
 
     let mut gesture = DragSelectGesture::new();
     gesture.update_autoscroll(3, content, true);
