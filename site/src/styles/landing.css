@@ -2217,22 +2217,19 @@ html[data-theme="light"] .pane {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 2rem;
-  height: 2rem;
-  border: 1px solid var(--line-2);
-  border-radius: var(--radius);
+  width: 1.5rem;
+  height: 1.5rem;
   color: var(--ink-2);
-  transition: color 160ms var(--ease), border-color 160ms var(--ease);
+  transition: color 160ms var(--ease);
 }
 
 .foot-links a:hover {
-  color: var(--ink);
-  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .foot-links svg {
-  width: 1rem;
-  height: 1rem;
+  width: 1.1rem;
+  height: 1.1rem;
   fill: currentColor;
 }
 
