@@ -2716,6 +2716,40 @@ fn downward_autoscroll_copy_excludes_titles_above_the_press_row() {
 }
 
 #[test]
+fn wide_task_drag_uses_task_column_content_edges_for_autoscroll() {
+    let mut domain = DomainState::new();
+    domain
+        .create(
+            "Wide task drag",
+            Some("drag notes ".repeat(80)),
+            project(THIS_REPO),
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
+    apply_intent(&mut domain, &mut model, BoardIntent::StageRight, None).expect("stage A");
+    apply_intent(&mut domain, &mut model, BoardIntent::StageRight, None).expect("stage G");
+
+    // Rail 32 + rule 1 + pad 1: the page body runs from the row under the header rule down
+    // to the shared footer's rule.
+    let content = drag_content_area(&model, Rect::new(0, 0, 110, 24));
+    assert_eq!(content, Rect::new(34, 3, 76, 18));
+
+    let mut gesture = DragSelectGesture::new();
+    gesture.update_autoscroll(3, content, true);
+    assert_eq!(
+        gesture.autoscroll().map(|state| state.direction),
+        Some(AutoScrollDirection::Up)
+    );
+    gesture.update_autoscroll(20, content, true);
+    assert_eq!(
+        gesture.autoscroll().map(|state| state.direction),
+        Some(AutoScrollDirection::Down)
+    );
+}
+
+#[test]
 fn task_page_autoscroll_tick_moves_notes() {
     let notes = (0..30)
         .map(|i| format!("page-scroll line {i}"))

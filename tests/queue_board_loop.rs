@@ -14,9 +14,9 @@ use ratatui::Terminal;
 use tsk_tui::app::{
     board_frame, board_poll_duration, load_board_model, take_pending_after_paint, FramePoll,
 };
-use tsk_tui::domain::DomainState;
+use tsk_tui::domain::{DomainState, ProvenanceOrigin, TaskScope};
 use tsk_tui::ui::scheduler::{next_wait, DEFAULT_BASE_TICK};
-use tsk_tui::ui::{draw_board, BoardModel};
+use tsk_tui::ui::{apply_intent, draw_board, BoardIntent, BoardModel, IntentOutcome};
 
 /// A directory this test owns alone, removed on drop even if the test panics.
 struct TempDirGuard(PathBuf);
@@ -260,4 +260,95 @@ fn run_board_resize_arm_drains_through_coalesce_then_paints() {
         src.contains("take_pending_after_paint(&mut pending_event"),
         "run_board must paint the settled size before a deferred event"
     );
+}
+
+#[test]
+fn repeated_threshold_resizes_keep_board_loop_live() {
+    let mut domain = DomainState::new();
+    domain
+        .create(
+            "resize survivor",
+            Some("notes".to_string()),
+            TaskScope::Global,
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create task");
+    let mut model = BoardModel::from_domain(&domain, None);
+    // A two-column stage exercises the split compositor across the crossings.
+    assert_eq!(
+        apply_intent(&mut domain, &mut model, BoardIntent::StageRight, None)
+            .expect("slide to the split stage"),
+        IntentOutcome::None
+    );
+
+    for width in [109, 110].into_iter().cycle().take(40) {
+        let mut terminal = Terminal::new(TestBackend::new(width, 24)).expect("test terminal");
+        let poll = board_frame(
+            &mut model,
+            || panic!("no walkthrough"),
+            |model| {
+                terminal
+                    .draw(|frame| {
+                        let _ = draw_board(frame, model);
+                    })
+                    .expect("settled responsive frame");
+                Ok(())
+            },
+            |_| Ok(false),
+            false,
+        )
+        .expect("responsive board frame");
+        assert_eq!(poll, FramePoll::Idle);
+    }
+}
+
+#[test]
+fn threshold_crossings_without_task_verbs_leave_domain_unchanged() {
+    let mut domain = DomainState::new();
+    let id = domain
+        .create(
+            "immutable through resize",
+            Some("domain must not move".to_string()),
+            TaskScope::Global,
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create task");
+    let before = domain.get(id).expect("task").clone();
+    let mut model = BoardModel::from_domain(&domain, None);
+
+    // Slide to the rail stage: two-column geometry with the task owning focus, reached
+    // without invoking any task verb.
+    assert_eq!(
+        apply_intent(&mut domain, &mut model, BoardIntent::StageRight, None)
+            .expect("slide to the split stage"),
+        IntentOutcome::None
+    );
+    assert_eq!(
+        apply_intent(&mut domain, &mut model, BoardIntent::StageRight, None)
+            .expect("slide to the rail stage"),
+        IntentOutcome::None
+    );
+    for width in [109, 110].into_iter().cycle().take(20) {
+        let mut terminal = Terminal::new(TestBackend::new(width, 24)).expect("test terminal");
+        let poll = board_frame(
+            &mut model,
+            || panic!("no walkthrough"),
+            |model| {
+                terminal
+                    .draw(|frame| {
+                        let _ = draw_board(frame, model);
+                    })
+                    .expect("draw threshold frame");
+                Ok(())
+            },
+            |_| Ok(false),
+            false,
+        )
+        .expect("threshold frame");
+        assert_eq!(poll, FramePoll::Idle);
+    }
+
+    assert_eq!(domain.get(id), Some(&before));
 }

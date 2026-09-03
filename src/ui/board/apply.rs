@@ -12,6 +12,7 @@ use crate::ui::edit::{flatten_line_breaks, EditBuffer};
 use crate::ui::input::BoardIntent;
 use crate::ui::mouse::BoardPopup;
 use crate::ui::queue::ThreadProjectCollapseKey;
+use crate::ui::tier::{FocusedSurface, WideStage};
 
 use super::commands::{resolve_board_command, CommandSurface};
 use super::model::{
@@ -172,8 +173,21 @@ fn apply_board_intent(
     // the pin still named the hidden task, and the next `space` or `d` mutated something the
     // user could not see. Excluding them lets `reanchor_selection` move the pin to a visible
     // row, which is what it already does for every other way a task leaves the deck.
-    let closes_the_page = matches!(intent, BoardIntent::CloseLayer | BoardIntent::OpenTaskPage);
-    if !closes_the_page
+    if model.focused_surface() == FocusedSurface::Task
+        && model.input_mode == BoardInputMode::TaskPage
+        && matches!(
+            intent,
+            BoardIntent::SelectNext | BoardIntent::SelectPrev | BoardIntent::SelectIndex(_)
+        )
+    {
+        return Ok(IntentOutcome::None);
+    }
+    let closes_the_page = matches!(
+        intent,
+        BoardIntent::CloseLayer | BoardIntent::OpenTaskPage | BoardIntent::StageLeft
+    );
+    if model.focused_surface() == FocusedSurface::Task
+        && !closes_the_page
         && matches!(
             model.input_mode,
             BoardInputMode::TaskPage
@@ -555,7 +569,9 @@ fn apply_board_intent(
             return Ok(IntentOutcome::None);
         }
         BoardIntent::SelectIndex(idx) => {
-            model.select_index(idx);
+            if !model.select_index(idx) {
+                return Ok(IntentOutcome::None);
+            }
             // A row click also expands that row's peek; a second click on the same row
             // inside the double-click window opens the task page instead.
             if let Some(id) = model.selected_id() {
@@ -565,7 +581,7 @@ fn apply_board_intent(
                 });
                 if is_double {
                     model.last_row_click = None;
-                    open_task_page_on(domain, model, id);
+                    open_full_task_page(domain, model, id);
                 } else {
                     model.last_row_click = Some((now, id));
                     if model.detail_open == Some(id) {
@@ -577,7 +593,35 @@ fn apply_board_intent(
             }
             return Ok(IntentOutcome::None);
         }
+        BoardIntent::FocusBoardAndSelectIndex(idx) => {
+            if !model.select_index(idx) {
+                return Ok(IntentOutcome::None);
+            }
+            // A left-side click takes focus left: a rail click in G selects the row and lands
+            // the board in A. In 0 and A the click selects in place. A second click on the
+            // same row inside the double-click window opens the full task page.
+            model.detail_open = None;
+            if model.wide_stage == WideStage::Rail {
+                model.wide_stage = WideStage::Split;
+            }
+            if let Some(id) = model.selected_id() {
+                let now = Instant::now();
+                let is_double = model.last_row_click.is_some_and(|(at, last)| {
+                    last == id && now.duration_since(at) <= ROW_DOUBLE_CLICK_WINDOW
+                });
+                if is_double {
+                    model.last_row_click = None;
+                    open_full_task_page(domain, model, id);
+                } else {
+                    model.last_row_click = Some((now, id));
+                }
+            }
+            return Ok(IntentOutcome::None);
+        }
         BoardIntent::ListScrollTo(offset) => {
+            if model.focused_surface() != FocusedSurface::Board {
+                return Ok(IntentOutcome::None);
+            }
             model.set_list_scroll(offset);
             return Ok(IntentOutcome::None);
         }
@@ -625,8 +669,10 @@ fn apply_board_intent(
                     }
                 }
             }
-            // The page already open: move focus into the asked field, keep every draft.
+            // The page already open: move focus into the asked field, keep every draft, and
+            // transfer input ownership before the editor can accept a key.
             if model.form.as_ref().is_some_and(BoardForm::is_task) {
+                enter_task_stage(model);
                 model.focus_form_field(focus);
                 return Ok(IntentOutcome::None);
             }
@@ -642,6 +688,7 @@ fn apply_board_intent(
                     form.editing = true;
                     model.input_mode = form.parent_mode();
                     model.form = Some(form);
+                    enter_task_stage(model);
                     model.clear_message();
                 }
             }
@@ -1101,6 +1148,14 @@ fn apply_board_intent(
                 }
             }
         }
+        BoardIntent::StageRight => {
+            stage_right(domain, model);
+            return Ok(IntentOutcome::None);
+        }
+        BoardIntent::StageLeft => {
+            stage_left(model);
+            return Ok(IntentOutcome::None);
+        }
         BoardIntent::OpenTaskPage => {
             // Enter never opens inline step editing. A selected step remains selected in either
             // page state; Ctrl+E is the deliberate route into its editor.
@@ -1116,15 +1171,24 @@ fn apply_board_intent(
                 return Ok(IntentOutcome::None);
             }
             if model.form.as_ref().is_some_and(BoardForm::is_task) {
-                model.form = None;
-                model.input_mode = BoardInputMode::Normal;
-                model.clear_message();
+                // Enter beside the rail opens the full page; on the full page (or the
+                // single-pane page) it toggles the page shut, as it always has.
+                if model.focused_surface() == FocusedSurface::Board
+                    || model.wide_stage == WideStage::Rail
+                {
+                    let Some(id) = model.selected_id() else {
+                        return Ok(IntentOutcome::None);
+                    };
+                    open_full_task_page(domain, model, id);
+                } else {
+                    leave_task_page(model);
+                }
                 return Ok(IntentOutcome::None);
             }
             let Some(id) = model.selected_id() else {
                 return Ok(IntentOutcome::None);
             };
-            open_task_page_on(domain, model, id);
+            open_full_task_page(domain, model, id);
             return Ok(IntentOutcome::None);
         }
         BoardIntent::SelectStep(index) => {
@@ -1167,6 +1231,9 @@ fn apply_board_intent(
             return Ok(IntentOutcome::None);
         }
         BoardIntent::PageScrollTo(offset) => {
+            if model.focused_surface() != FocusedSurface::Task {
+                return Ok(IntentOutcome::None);
+            }
             if let Some(form) = model.form.as_mut().filter(|form| form.is_task()) {
                 if model.input_mode == BoardInputMode::TaskPage {
                     let horizon = form.notes_max_scroll.get();
@@ -1176,6 +1243,9 @@ fn apply_board_intent(
             return Ok(IntentOutcome::None);
         }
         BoardIntent::PageWheelScrollUp | BoardIntent::PageWheelScrollDown => {
+            if model.focused_surface() != FocusedSurface::Task {
+                return Ok(IntentOutcome::None);
+            }
             if let Some(form) = model.form.as_mut().filter(|form| form.is_task()) {
                 if matches!(
                     model.input_mode,
@@ -1194,6 +1264,9 @@ fn apply_board_intent(
             return Ok(IntentOutcome::None);
         }
         BoardIntent::PageScrollUp => {
+            if model.focused_surface() != FocusedSurface::Task {
+                return Ok(IntentOutcome::None);
+            }
             // A fresh add is independent of the surrounding task edit session, so it may be
             // open directly from task view. It has no rename draft to park: keep its cursor
             // alive and scroll the same shared body that task view uses.
@@ -1236,6 +1309,9 @@ fn apply_board_intent(
             return Ok(IntentOutcome::None);
         }
         BoardIntent::PageScrollDown => {
+            if model.focused_surface() != FocusedSurface::Task {
+                return Ok(IntentOutcome::None);
+            }
             // See Up above. This must precede `task_editing()`, because Ctrl+A and the trailing
             // add target also open a fresh editor directly from task view.
             if model.input_mode == BoardInputMode::EditStep && !model.park_rename_step_draft() {
@@ -1344,7 +1420,18 @@ fn apply_board_intent(
                     return Ok(IntentOutcome::None);
                 }
             }
-            if model.form.take().is_some() {
+            if model.form.as_ref().is_some_and(BoardForm::is_task)
+                && model.focused_surface() == FocusedSurface::Task
+            {
+                leave_task_page(model);
+                return Ok(IntentOutcome::None);
+            }
+            if model.focused_surface() == FocusedSurface::Board
+                && model.form.as_ref().is_some_and(BoardForm::is_task)
+            {
+                // A parked page is not a visible layer on the board: Esc falls through to
+                // the board's own close order instead of silently dropping the session.
+            } else if model.form.take().is_some() {
                 model.input_mode = if model.quick_add.is_some() {
                     BoardInputMode::QuickAdd
                 } else {
@@ -1439,6 +1526,8 @@ fn apply_board_intent(
                     }
                     // Deleting from the page deletes the page's own task: the surface closes and
                     // the undo route back to it lives on the board row, same as the notice says.
+                    // A task-owned stage (G or F) hands the slider back to the board the same
+                    // way `Esc` would, so the arrows keep answering on the row with the undo.
                     if model
                         .form
                         .as_ref()
@@ -1448,6 +1537,14 @@ fn apply_board_intent(
                     {
                         model.form = None;
                         model.input_mode = BoardInputMode::Normal;
+                        if matches!(model.wide_stage, WideStage::Rail | WideStage::FullTask) {
+                            // Normal mode is board-owned, so the stage must be too: back to
+                            // the full board when F was entered from it, otherwise to A.
+                            model.wide_stage = match model.stage_origin.take() {
+                                Some(WideStage::FullBoard) => WideStage::FullBoard,
+                                _ => WideStage::Split,
+                            };
+                        }
                     }
                 }
             }
@@ -1511,8 +1608,112 @@ fn edit_draft(model: &mut BoardModel, operation: impl FnOnce(&mut EditBuffer)) {
     }
 }
 
-/// Open the task page in view mode on `id`, replacing whatever surface held input. Shared
-/// by the keyboard route (`Enter`) and the mouse route (a row double-click).
+/// Move the slider one stage to the right. Stages A, G and F need a selected task; the
+/// pane binds (or rebinds) its page to the selection on the way into G.
+fn stage_right(domain: &DomainState, model: &mut BoardModel) {
+    match model.wide_stage {
+        WideStage::FullBoard => {
+            if model.selected_id().is_some() {
+                model.wide_stage = WideStage::Split;
+            }
+        }
+        WideStage::Split => {
+            if model.selected_id().is_some() {
+                bind_selected_task_page(domain, model);
+                model.wide_stage = WideStage::Rail;
+            }
+        }
+        WideStage::Rail => {
+            // A disk merge can remove the task G is showing; the parked form still pins it
+            // as the selection, so ask the domain, not the pin. F needs a live task.
+            if model
+                .selected_id()
+                .is_some_and(|id| domain.get(id).is_some())
+            {
+                model.stage_origin = Some(WideStage::Rail);
+                model.wide_stage = WideStage::FullTask;
+            }
+        }
+        WideStage::FullTask => {}
+    }
+}
+
+/// Move the slider one stage to the left. The page session is parked, never dropped: G → A
+/// keeps the pane bound to the same task (a dirty draft included), and F always returns to G.
+fn stage_left(model: &mut BoardModel) {
+    match model.wide_stage {
+        WideStage::FullBoard => {}
+        WideStage::Split => model.wide_stage = WideStage::FullBoard,
+        WideStage::Rail => model.wide_stage = WideStage::Split,
+        WideStage::FullTask => {
+            model.stage_origin = None;
+            model.wide_stage = WideStage::Rail;
+        }
+    }
+}
+
+/// Enter the task-owned stage nearest to the current board-owned one, when a task-side
+/// action (a field edit from the board) needs the task to own input.
+fn enter_task_stage(model: &mut BoardModel) {
+    match model.wide_stage {
+        WideStage::FullBoard => {
+            model.stage_origin = Some(WideStage::FullBoard);
+            model.wide_stage = WideStage::FullTask;
+        }
+        WideStage::Split => model.wide_stage = WideStage::Rail,
+        WideStage::Rail | WideStage::FullTask => {}
+    }
+}
+
+/// Close the task page from a task-owned stage. F returns to the stage `Enter` left; G
+/// returns to A. A page that returns to the bare board is closed, one that returns to a
+/// pane-bearing stage stays parked so its scroll and step cursor survive.
+fn leave_task_page(model: &mut BoardModel) {
+    let target = match model.wide_stage {
+        WideStage::FullTask => model.stage_origin.take().unwrap_or(WideStage::FullBoard),
+        WideStage::Rail => WideStage::Split,
+        stage @ (WideStage::Split | WideStage::FullBoard) => stage,
+    };
+    model.stage_origin = None;
+    model.wide_stage = target;
+    if target == WideStage::FullBoard {
+        model.form = None;
+        model.input_mode = if model.quick_add.is_some() {
+            BoardInputMode::QuickAdd
+        } else {
+            BoardInputMode::Normal
+        };
+    }
+    model.clear_message();
+}
+
+/// Make sure the task page is bound to the selected task before a task-owned stage paints it.
+fn bind_selected_task_page(domain: &DomainState, model: &mut BoardModel) {
+    // `BoardModel::input_mode()` reports Normal while a task form is parked, so every
+    // refocus route must restore the raw TaskPage mode before task input can dispatch.
+    let Some(id) = model.selected_id() else {
+        return;
+    };
+    if model.edit_target() != Some(id) || model.input_mode != BoardInputMode::TaskPage {
+        open_task_page_on(domain, model, id);
+    }
+}
+
+/// Open the full task page (stage F) on `id`, remembering the stage it left. Shared by the
+/// keyboard route (`Enter`) and the mouse route (a row double-click).
+fn open_full_task_page(domain: &DomainState, model: &mut BoardModel, id: Uuid) {
+    if domain.get(id).is_none() {
+        return;
+    }
+    if model.wide_stage != WideStage::FullTask {
+        model.stage_origin = Some(model.wide_stage);
+    }
+    if model.edit_target() != Some(id) || model.input_mode != BoardInputMode::TaskPage {
+        open_task_page_on(domain, model, id);
+    }
+    model.wide_stage = WideStage::FullTask;
+}
+
 fn open_task_page_on(domain: &DomainState, model: &mut BoardModel, id: Uuid) {
     let Some(task) = domain.get(id) else {
         return;
@@ -1951,10 +2152,12 @@ fn select_last_step_for_edit(model: &mut BoardModel) {
 /// Resolve the page's selected step to live task and step ids, declining a stale index after
 /// a domain change. Task view and task edit sessions share this selection.
 fn selected_step(domain: &DomainState, model: &BoardModel) -> Option<(Uuid, Uuid)> {
-    if !matches!(
-        model.input_mode,
-        BoardInputMode::TaskPage | BoardInputMode::EditStep
-    ) {
+    if model.focused_surface() != FocusedSurface::Task
+        || !matches!(
+            model.input_mode,
+            BoardInputMode::TaskPage | BoardInputMode::EditStep
+        )
+    {
         return None;
     }
     let form = model.form.as_ref().filter(|form| form.is_task())?;

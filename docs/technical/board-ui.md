@@ -38,10 +38,13 @@ number of live done tasks (the `drawer_open` branches currently agree).
 
 ### Model
 
-`BoardModel` is session-only: location (home tab vs project path), selection id,
-scroll, peek, collapse sets, input mode, optional `BoardForm` / `QuickAddState`,
-palette, help, save-recovery presentation, text selection,
-ephemeral message + delete-recovery notice.
+`BoardModel` is session-only: location (home tab vs project path), selected id,
+wide stage (`WideStage`, with the origin stage `Enter` left), board and page scroll,
+peek, collapse sets, input mode, optional `BoardForm` / `QuickAddState`, palette,
+help, save-recovery presentation, text selection, ephemeral message +
+delete-recovery notice. The focused surface derives from the stage (`FullBoard` and
+`Split` are board-owned, `Rail` and `FullTask` task-owned). The stage is not
+persisted; the board always opens in `FullBoard`.
 
 `BoardFormBinding` is `Task(id)` XOR `Capture(snapshot)` for the form's lifetime.
 Quick-add expansion (`Tab`) stashes title·notes·scope so Esc returns to the line
@@ -65,7 +68,14 @@ open without deleting it.
 
 ### Keys
 
-`map_key(mode, key)`. Mutating letters require the fixed Ctrl modifier.
+`map_key(mode, key)` remains the source for every surface key table.
+`route_responsive_key` adds only the stage slider: at 110 usable columns or wider,
+bare `→` / `←` in Normal or TaskPage view mode emit `StageRight` / `StageLeft`
+(0 → A → G → F and back; inert at the ends), `Enter` opens the full page and records
+the origin stage, `Esc` (`CloseLayer`) from F returns there and from G parks the page
+beside the board (A). `Tab` is never a stage key. Active editors continue through
+their existing maps; below 110 columns every route is unchanged. Mutating letters
+require the fixed Ctrl modifier.
 `1`/`2`/`3` select home tabs only in `Normal` at home without ctrl/alt/super.
 `map_board_form_key` shares `map_form_edit_key` with capture. Task-page view mode
 (`TaskPage`) keeps the board keymap so bare `e` enters edit rather than inserting
@@ -73,18 +83,51 @@ into a hidden draft.
 
 ### Mouse
 
-Row click peeks; same row again closes peek; fast double-click opens the page.
-Scrollbar track/thumb: `ListScrollTo` / `PageScrollTo` without changing
-selection. Thread headers are not in the hit map. Form fields ignore clicks until
-an edit has started. Text drag uses `text_select` + autoscroll
+Below 110 columns, row click peeks; the same row again closes peek; fast
+double-click opens the page. At wide widths a board or rail row click selects in
+place (`FocusBoardAndSelectIndex`: stage unchanged, no peek; the pane or page
+retargets), a fast double-click opens F with the origin recorded, and any stage A
+press inside the task column slides to G first (`wide_mouse_focus_intent`) and then
+dispatches against the painted frame's hits, so the control keeps its identity across
+the column resize. The shared footer routes to the focused surface's verbs in every
+stage. `map_responsive_board_mouse` routes only translated renderer-owned hits inside
+the live surface; a left-side (board or rail) click owns the left — a rail row click
+selects the row and lands the board in A, blank rail space slides the same way. Scrollbar
+track/thumb: `ListScrollTo` / `PageScrollTo` without changing selection. Thread
+headers are not in the hit map. Form fields ignore clicks until an edit has
+started. Text drag uses `text_select` + autoscroll
 (`DEFAULT_BASE_TICK` vs short tick). Copy is OSC 52, capped at 100_000 chars.
 
 ### Paint
 
 `ui::tier::resolve`: **standard** when width ≥ 78 **and** height ≥ 24; else
-**compact**. Geometry is defined down to 1×1 without panic; product floor is
-40×10. Standard reserves 28 cells of trailing meta; compact is glyph + title.
-Verb-bar budgets: 7 standard, 5 compact. Project chip max 24 cells.
+**compact**. `resolve_responsive(width, height, stage)` adds the inclusive 110-column
+stage slider: `FullBoard` and `FullTask` use the whole frame; `Split` is board
+`floor(w * 0.4)` · rule 1 · task remainder; `Rail` is rail 32 · rule 1 · task
+remainder. The task rect's first cell is a pad (`task_content`). Density follows the
+frame, so a split at 130×24 keeps the standard rhythm and the stage A board keeps its
+meta column. No box, no border, no colour: `assert_buffer_mono` holds at every width.
+Below 110, `FullBoard`/`Split` render `SingleBoard` and `Rail`/`FullTask` render
+`SingleTask`, keeping the stage. Geometry is defined down to 1×1 without panic;
+product floor is 40×10. Standard reserves 28 cells of trailing meta; compact is glyph +
+title. Verb-bar budgets: 7 standard, 5 compact. Project chip max 24 cells.
+
+Wide chrome (`draw_wide_board`): both columns share the frame's row rhythm (blank row,
+selector row, viewport) through `tier::resolve_column`, a dim `│` rule column sits
+between them, and `render::draw_queue_footer` paints exactly one rule, status row and
+verb bar across the frame. The status row's right side carries a dim stage crumb and
+the keys that apply (`→ pane · enter open`, `board ▸ task    → task · ← close · enter
+open`, `board ◂ task    ← board · → full page`, `← rail · esc back`, or `shift+enter
+save · esc cancel` while an editor is active); refusal text on the left wins the row,
+dropping the crumb first. `render::draw_task_column` paints the task header on the selector row — the status
+glyph, `T12 title`, and the `status · project` state slot (or `editing <field>` /
+`unsaved`), DIM in A, BOLD in G/F — with its dash rule on the row under it; the page
+body starts below that, with the in-page header, divider and bottom chrome suppressed; the footer meta is `created … · updated
+…` (plus the thread, and the scope while an edit session is active). With no selected
+task the column paints `no task ───` and a dim hint and exposes no hits.
+`render::draw_rail_frame` is the stage G rail: the list at 32 columns, no meta column,
+no done drawer, rows `  <mark> T<n> <title>` wrapped with `edit::wrap_text` and a
+four-cell continuation indent, `▹` on the selected row, every cell DIM.
 
 `draw_queue_frame` paints selector, list, rule, status, verb bar, overlays
 (palette, help, save recovery, walkthrough, bottom input slot). `present_line`
@@ -94,7 +137,8 @@ Notes markdown: [invariants](invariants.md) §27. Peek runs the same painter the
 `dim_line`. `paint_task_row` uses `status_glyph`: ready `○`, started `▸`, blocked
 `■`, review `▲`, done `✓`.
 
-`MONO_MODIFIERS` only; `assert_buffer_mono` / `strip_color` in tests.
+Surface content uses `MONO_MODIFIERS` only, wide chrome included; there is no colour
+anywhere. `assert_buffer_mono` / `strip_color` cover every surface at every width.
 
 ### Selection reanchor
 

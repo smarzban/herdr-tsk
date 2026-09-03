@@ -27,5 +27,9 @@ Canonical terms for this repo. No implementation detail.
 - **thread token**: the `!t name` capture directive, sibling of `!p`; bare `!t` means unthreaded. Stripped from the saved title.
 - **thread header**: a derived, non-selectable board row above a thread's open tasks in a scoped deck group, showing the thread name and open count. Chrome, not a task.
 - **unthreaded**: carrying no thread. Unthreaded tasks list after thread groups within their deck group.
+- **wide stage**: the session-only slider position of a wide (≥110 column) board: 0 `FullBoard`, A `Split`, G `Rail`, F `FullTask` (`ui::tier::WideStage`). Focus and geometry derive from the stage; it is never persisted and survives resizes.
+- **rail**: the 32-column dim board column of stage G: tabs, section rules, and wrapped task rows, without the meta column or the done drawer.
+- **single-pane view**: a presentation that shows only the focused board or task surface.
+- **focused surface**: the board or task view that currently owns interaction; at wide widths it derives from the wide stage (0/A board-owned, G/F task-owned), below 110 from the single-pane presentation.
 - **open task**: human status ready, blocked, or review, and not soft-deleted. The tasks a thread header groups and counts.
 - **thread block**: the derived unit of one thread's header plus its ordered open tasks inside a deck section. Exists only in query output, never in the store.

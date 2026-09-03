@@ -21,6 +21,7 @@ use super::input::{BoardIntent, CaptureIntent, PrimaryCaptureAction, PRIMARY_CAP
 use super::render::{
     form_verb_items, QueueHitMap, QueueHitTarget, PALETTE_VERBS, QUICK_ADD_VERBS, SCOPE_VERBS,
 };
+use super::tier::{resolve, resolve_responsive, FocusedSurface, ResponsivePresentation, WideStage};
 
 /// Transient presentation that still exists on the V1 queue board.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -371,6 +372,147 @@ fn hit_at(hits: &QueueHitMap, pos: Position) -> Option<QueueHitTarget> {
         .map(|hit| hit.target)
 }
 
+/// Rectangle that currently owns pointer input for this presentation.
+pub fn focused_mouse_area(model: &BoardModel, area: Rect) -> Rect {
+    let responsive = resolve_responsive(area.width, area.height, model.wide_stage());
+    if model.focused_surface() == FocusedSurface::Task {
+        responsive.task_content()
+    } else {
+        responsive.board
+    }
+}
+
+/// Whether a press lands on the surface that owns pointer input. The focused column always
+/// does; so does the shared wide footer, which spans the frame and routes to the focused
+/// surface regardless of which column it is painted under (verbs, status controls, inputs).
+pub fn press_on_focused_surface(model: &BoardModel, area: Rect, pos: Position) -> bool {
+    if focused_mouse_area(model, area).contains(pos) {
+        return true;
+    }
+    let responsive = resolve_responsive(area.width, area.height, model.wide_stage());
+    responsive.presentation == ResponsivePresentation::WideSplit
+        && area.contains(pos)
+        && pos.y >= wide_footer_top(area)
+}
+
+/// First row of the shared wide footer (its rule). Column clicks stop above it.
+fn wide_footer_top(area: Rect) -> u16 {
+    resolve(area.width, area.height)
+        .rule_row
+        .unwrap_or(area.height)
+}
+
+/// Stage move that must run before dispatching a stage A click on the task column.
+///
+/// Any press inside the preview column (above the shared footer) slides to G first; the
+/// caller then dispatches the same click against the frame the user saw (AC-11).
+pub fn wide_mouse_focus_intent(
+    model: &BoardModel,
+    _hits: &QueueHitMap,
+    area: Rect,
+    mouse: MouseEvent,
+) -> Option<BoardIntent> {
+    if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
+        || model.wide_stage() != WideStage::Split
+        || model.input_mode() != BoardInputMode::Normal
+    {
+        return None;
+    }
+    let responsive = resolve_responsive(area.width, area.height, model.wide_stage());
+    if responsive.presentation != ResponsivePresentation::WideSplit {
+        return None;
+    }
+    let pos = point(mouse.column, mouse.row);
+    (responsive.task.contains(pos)
+        && pos.y < wide_footer_top(area)
+        && model.selected_id().is_some())
+    .then_some(BoardIntent::StageRight)
+}
+
+/// Map pointer input only through the live responsive surface and translated renderer hits.
+pub fn map_responsive_board_mouse(
+    model: &BoardModel,
+    hits: &QueueHitMap,
+    area: Rect,
+    mouse: MouseEvent,
+) -> Option<BoardIntent> {
+    let responsive = resolve_responsive(area.width, area.height, model.wide_stage());
+    if responsive.presentation != ResponsivePresentation::WideSplit {
+        return map_board_mouse(model, hits, mouse);
+    }
+    let pos = point(mouse.column, mouse.row);
+    match mouse.kind {
+        MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
+            return focused_mouse_area(model, area)
+                .contains(pos)
+                .then(|| map_board_mouse(model, hits, mouse))?;
+        }
+        MouseEventKind::Down(MouseButton::Left) => {}
+        _ => return None,
+    }
+
+    // The shared footer belongs to whichever surface owns input: its verbs, status controls
+    // and inputs route exactly as the single-pane frame's own bottom rows do.
+    if pos.y >= wide_footer_top(area) {
+        return map_board_mouse(model, hits, mouse);
+    }
+
+    let view_mode = matches!(
+        model.input_mode(),
+        BoardInputMode::Normal | BoardInputMode::TaskPage
+    );
+    let clean_or_dirty_task_editor = model.edit_target().is_some()
+        && matches!(
+            model.input_mode(),
+            BoardInputMode::EditTitle
+                | BoardInputMode::EditNotes
+                | BoardInputMode::EditThread
+                | BoardInputMode::EditScope
+                | BoardInputMode::FormScopeDropdown
+        );
+    // A board-row click selects in place; a rail-row click selects and lands the board in A
+    // (the reducer moves the stage). The reducer retargets the pane or page and refuses while
+    // a dirty draft is bound elsewhere.
+    if responsive.board.contains(pos) && (view_mode || clean_or_dirty_task_editor) {
+        if let Some(QueueHitTarget::Task(id)) = hit_at(hits, pos) {
+            if clean_or_dirty_task_editor && model.edit_target() == Some(id) {
+                return None;
+            }
+            return model
+                .visible_ids()
+                .iter()
+                .position(|&visible| visible == id)
+                .map(BoardIntent::FocusBoardAndSelectIndex);
+        }
+    }
+
+    if !view_mode {
+        if focused_mouse_area(model, area).contains(pos) {
+            return map_board_mouse(model, hits, mouse);
+        }
+        return match model.input_mode() {
+            BoardInputMode::Help => Some(BoardIntent::CloseLayer),
+            BoardInputMode::Palette => Some(BoardIntent::CloseCommandSurface),
+            _ => None,
+        };
+    }
+
+    if responsive.board.contains(pos) {
+        if model.focused_surface() == FocusedSurface::Task {
+            // The task owns input, so a press on the rail takes focus left.
+            if model.wide_stage() == WideStage::Rail {
+                return Some(BoardIntent::StageLeft);
+            }
+            return None;
+        }
+        return map_board_mouse(model, hits, mouse);
+    }
+    if responsive.task.contains(pos) && model.focused_surface() == FocusedSurface::Task {
+        return map_board_mouse(model, hits, mouse);
+    }
+    None
+}
+
 fn scrollbar_target_intent(target: QueueHitTarget) -> Option<BoardIntent> {
     match target {
         QueueHitTarget::ListScroll(offset) => Some(BoardIntent::ListScrollTo(offset)),
@@ -445,7 +587,9 @@ pub fn map_scrollbar_mouse(
     match mouse.kind {
         MouseEventKind::Down(MouseButton::Left) => {
             let pos = Position::new(mouse.column, mouse.row);
-            if let Some(intent) = scrollbar_hit_at(hits, pos) {
+            if let Some(intent) = scrollbar_hit_at(hits, pos)
+                .filter(|intent| matches!(intent, BoardIntent::PageScrollTo(_)) == page)
+            {
                 *dragging = true;
                 ScrollbarMouse::Intent(intent)
             } else {
