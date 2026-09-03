@@ -37,8 +37,12 @@ commands is `cli::router`, not this helper.
 5. On `FramePoll::Idle`, `revalidate_board_from_store` if the watch says `tsk.json`
    mtime/size changed **and** save recovery is not pending.
 6. On event: coalesce resize bursts (`RESIZE_DEBOUNCE` 50 ms, cap 250 ms), paint
-   at the settled size, then dispatch. Keys go through `board_keyboard_intent`.
-   Mouse through `map_board_mouse`. Paste through `map_edit_paste`.
+   at the settled size, then dispatch. Keys go through `route_responsive_key` (the
+   stage slider: intent, inert, or hand the key to the surface) and the existing
+   `board_keyboard_intent`. Mouse uses translated frame hits through
+   `map_responsive_board_mouse`; a stage A press on the task column slides to G first
+   and then dispatches the same click against the painted hits. Paste goes through
+   `map_edit_paste` for the focused mode.
 7. Mutating intents take a domain clone as `BoardSaveContext.baseline` *before*
    `apply_intent` (`board_intent_needs_fresh_state` / `board_intent_may_persist`).
 8. `IntentOutcome::Persist` → `reload_merge_save`. Failure → `SaveRecovery::fail`
@@ -60,6 +64,12 @@ snapshots plus the error string. Only one unresolved failure (`debug_assert`).
   so “save cancelled” is not claimed for a capture that never landed.
 
 The form and its mode stay allocated through this whole window (invariant 19).
+Responsive presentation is derived for each event from the model's `WideStage`. At 110
+usable columns or wider, board or rail hits use the left column, task hits are
+translated from the task column past its pad cell, and the shared footer's hits span
+the frame. Coordinates outside the focused column are inert except for the explicit
+row selects, the stage A task-column slide, and the footer. Scrollbar and drag
+ownership use the same column (`drag_content_area`).
 `board_keyboard_intent` only hands keys to `map_board_form_key` when the resolved
 mode is a **form field** (`EditTitle` / `EditNotes` / `EditThread` / `EditScope` /
 `FormScopeDropdown`). `SaveRecovery` is not on that allowlist, so `r` / `c` / Esc

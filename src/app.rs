@@ -25,11 +25,13 @@ use crate::ui::capture::{
 };
 use crate::ui::input::{
     map_board_form_key, map_capture_key_state, map_capture_paste_state, map_edit_paste, map_key,
-    map_task_form_key, BoardIntent, CaptureIntent,
+    map_task_form_key, route_responsive_key, BoardIntent, CaptureIntent, ResponsiveKeyRoute,
 };
 use crate::ui::mouse::{
-    capture_layout_for_model, enable_terminal_input, keyboard_enhancement_supported,
-    map_capture_mouse, map_scrollbar_mouse, ScrollbarMouse,
+    capture_layout_for_model, enable_terminal_input, focused_mouse_area,
+    keyboard_enhancement_supported, map_capture_mouse, map_responsive_board_mouse,
+    map_scrollbar_mouse, press_on_focused_surface, scrollbar_hit_at, wide_mouse_focus_intent,
+    ScrollbarMouse,
 };
 use crate::ui::queue::BoardTab;
 use crate::ui::scheduler;
@@ -392,7 +394,8 @@ fn run_board() -> Result<(), Box<dyn Error>> {
                     // longer varies by area, per fix 1's gate removal), so no held-open modal
                     // can end up invisible under a shrunk pane and leave q / Esc unreachable.
                     let mode = resolve_board_surface(area, &mut model);
-                    let Some(intent) = board_keyboard_intent(&model, mode, key) else {
+                    let Some(intent) = board_keyboard_intent_for_area(&model, area, mode, key)
+                    else {
                         continue;
                     };
                     let Some(intent) = board_intent_for_area(area, intent) else {
@@ -419,12 +422,29 @@ fn run_board() -> Result<(), Box<dyn Error>> {
                     // so a drag does not also fire the Down-time peek/select path.
                     use crate::ui::text_select::{DragSelectOutcome, DragSelectPhase};
                     use crossterm::event::{MouseButton, MouseEventKind};
-                    match map_scrollbar_mouse(
-                        model.input_mode(),
+                    let area = terminal_area(terminal)?;
+                    let task_focus_candidate =
+                        wide_mouse_focus_intent(&model, &frame_hits, area, mouse);
+                    let (quit, mode, scrollbar) = board_scrollbar_mouse_route(
+                        area,
+                        &mut model,
                         &frame_hits,
                         mouse,
                         &mut scrollbar_drag,
-                    ) {
+                        |model, focus| {
+                            handle_board_intent(
+                                &store,
+                                &mut domain,
+                                model,
+                                focus,
+                                &mut save_recovery,
+                            )
+                        },
+                    )?;
+                    if quit {
+                        break;
+                    }
+                    match scrollbar {
                         ScrollbarMouse::Miss => {}
                         ScrollbarMouse::Intent(intent) => {
                             drag_gesture.clear();
@@ -447,8 +467,15 @@ fn run_board() -> Result<(), Box<dyn Error>> {
                     let mut click = mouse;
                     match mouse.kind {
                         MouseEventKind::Drag(MouseButton::Left) => {
-                            let pos = Position::new(mouse.column, mouse.row);
+                            let pos = clamp_position_to_area(
+                                Position::new(mouse.column, mouse.row),
+                                focused_mouse_area(&model, area),
+                            );
                             model.drag_text_selection(pos);
+                            if model.text_selection().is_none() {
+                                drag_gesture.clear();
+                                continue;
+                            }
                             if let Some(sel) = model.text_selection() {
                                 if let Some(text) =
                                     selection_text(&frame_rows, &frame_copyable, &sel)
@@ -472,7 +499,14 @@ fn run_board() -> Result<(), Box<dyn Error>> {
                             continue;
                         }
                         MouseEventKind::Up(MouseButton::Left) => {
-                            let pos = Position::new(mouse.column, mouse.row);
+                            let pos = if model.text_selection().is_some() {
+                                clamp_position_to_area(
+                                    Position::new(mouse.column, mouse.row),
+                                    focused_mouse_area(&model, area),
+                                )
+                            } else {
+                                Position::new(mouse.column, mouse.row)
+                            };
                             // Some hosts omit Drag and only move between Down and Up.
                             // Grow the selection from the press cell before clearing it
                             // so copy still works there (and peek is not fired instead).
@@ -510,9 +544,37 @@ fn run_board() -> Result<(), Box<dyn Error>> {
                         }
                         MouseEventKind::Down(MouseButton::Left) => {
                             // Anchor a would-be selection and stash the Down for Up;
-                            // do not map the click yet.
+                            // do not map the click yet. A wide board-row click remains live
+                            // while task-focused, every other press belongs to the focused side.
+                            //
+                            // INVARIANT: this Down-time gate and the Up-time dispatch
+                            // (`board_mouse_click_intent_after_focus` → `board_mouse_intent` →
+                            // `map_responsive_board_mouse`) are two calls of the same mapper over
+                            // the same model and hit map, and no intent runs between them. They
+                            // must agree: a press survives the gate below if and only if the
+                            // release route maps it to a dispatchable intent. If either the gate
+                            // (`press_survives_off_focus`) or the mapper's wide routing changes,
+                            // both sides must change together.
                             let pos = Position::new(mouse.column, mouse.row);
-                            model.begin_mouse_press(pos);
+                            let responsive_intent =
+                                map_responsive_board_mouse(&model, &frame_hits, area, mouse);
+                            let focused = press_on_focused_surface(&model, area, pos);
+                            if !focused
+                                && !press_survives_off_focus(
+                                    responsive_intent.as_ref(),
+                                    mode,
+                                    task_focus_candidate.as_ref(),
+                                )
+                            {
+                                model.end_mouse_press();
+                                drag_gesture.clear();
+                                continue;
+                            }
+                            if focused {
+                                model.begin_mouse_press(pos);
+                            } else {
+                                model.end_mouse_press();
+                            }
                             let _ = drag_gesture.handle(DragSelectPhase::Press, pos, None);
                             if let Some(line) =
                                 copyable_line_at(&frame_rows, &frame_copyable, pos.y)
@@ -524,7 +586,25 @@ fn run_board() -> Result<(), Box<dyn Error>> {
                         _ => {}
                     }
                     let area = terminal_area(terminal)?;
-                    let Some(intent) = board_mouse_intent(area, &mut model, click) else {
+                    let (quit, intent) = board_mouse_click_intent_after_focus(
+                        area,
+                        &mut model,
+                        &frame_hits,
+                        click,
+                        |model, focus| {
+                            handle_board_intent(
+                                &store,
+                                &mut domain,
+                                model,
+                                focus,
+                                &mut save_recovery,
+                            )
+                        },
+                    )?;
+                    if quit {
+                        break;
+                    }
+                    let Some(intent) = intent else {
                         continue;
                     };
                     if handle_board_intent(
@@ -603,19 +683,47 @@ fn copy_drag_selection(
     model.clear_text_selection();
 }
 
+fn clamp_position_to_area(position: Position, area: Rect) -> Position {
+    if area.is_empty() {
+        return position;
+    }
+    Position::new(
+        position
+            .x
+            .clamp(area.x, area.x.saturating_add(area.width).saturating_sub(1)),
+        position
+            .y
+            .clamp(area.y, area.y.saturating_add(area.height).saturating_sub(1)),
+    )
+}
+
 /// Content rect that edge auto-scroll watches during a text drag.
 pub fn drag_content_area(model: &BoardModel, area: Rect) -> Rect {
-    let geo = crate::ui::tier::resolve(area.width, area.height);
-    match model.input_mode() {
-        BoardInputMode::TaskPage => {
-            // Approximate the shared notes/steps viewport: below a one-row header,
-            // above the rule. Exact step halving is unnecessary for edge detection.
-            let top = geo.viewport_top.saturating_add(1);
-            let bottom = geo.rule_row.unwrap_or(geo.height.saturating_sub(2));
-            let height = bottom.saturating_sub(top);
-            Rect::new(0, top, area.width, height)
-        }
-        _ => Rect::new(0, geo.viewport_top, area.width, geo.viewport_height),
+    let responsive =
+        crate::ui::tier::resolve_responsive(area.width, area.height, model.wide_stage());
+    let surface = if model.focused_surface() == crate::ui::tier::FocusedSurface::Task {
+        responsive.task_content()
+    } else {
+        responsive.board
+    };
+    // Only chrome row positions shape this drag viewport; they depend on the live
+    // content height, not the renderer's standard/compact density decision.
+    let geo = crate::ui::tier::resolve(surface.width, surface.height);
+    if model.focused_surface() == crate::ui::tier::FocusedSurface::Task {
+        // Approximate the shared notes/steps viewport: below the two-row header, above
+        // the rule. Exact step halving is unnecessary for edge detection.
+        let top = surface.y.saturating_add(geo.viewport_top).saturating_add(1);
+        let bottom = surface
+            .y
+            .saturating_add(geo.rule_row.unwrap_or(geo.height.saturating_sub(2)));
+        Rect::new(surface.x, top, surface.width, bottom.saturating_sub(top))
+    } else {
+        Rect::new(
+            surface.x,
+            surface.y.saturating_add(geo.viewport_top),
+            surface.width,
+            geo.viewport_height,
+        )
     }
 }
 
@@ -628,9 +736,23 @@ pub fn tick_drag_autoscroll(
     copyable: &[Rect],
     content: Rect,
 ) {
-    let delta = match model.input_mode() {
-        BoardInputMode::TaskPage => model.nudge_notes_scroll(auto.direction, auto.speed),
-        BoardInputMode::Normal => model.nudge_list_scroll(auto.direction, auto.speed),
+    let delta = match model.focused_surface() {
+        crate::ui::tier::FocusedSurface::Task
+            if matches!(
+                model.input_mode(),
+                BoardInputMode::TaskPage | BoardInputMode::EditStep
+            ) =>
+        {
+            model.nudge_notes_scroll(auto.direction, auto.speed)
+        }
+        crate::ui::tier::FocusedSurface::Board
+            if matches!(
+                model.input_mode(),
+                BoardInputMode::Normal | BoardInputMode::TaskPage
+            ) =>
+        {
+            model.nudge_list_scroll(auto.direction, auto.speed)
+        }
         _ => 0,
     };
     if delta == 0 {
@@ -778,6 +900,22 @@ pub struct BoardSaveContext<'a> {
 /// field of the open form actually has focus (or its scope dropdown is open). The task
 /// page's view mode keeps its own keymap even though a form is open -- otherwise a bare
 /// `e` on the page would be inserted into the title draft instead of entering edit mode.
+fn board_keyboard_intent_for_area(
+    model: &BoardModel,
+    area: Rect,
+    mode: BoardInputMode,
+    key: crossterm::event::KeyEvent,
+) -> Option<BoardIntent> {
+    let presentation =
+        crate::ui::tier::resolve_responsive(area.width, area.height, model.wide_stage())
+            .presentation;
+    match route_responsive_key(mode, model.wide_stage(), presentation, key) {
+        ResponsiveKeyRoute::Intent(intent) => Some(intent),
+        ResponsiveKeyRoute::Inert => None,
+        ResponsiveKeyRoute::Surface => board_keyboard_intent(model, mode, key),
+    }
+}
+
 fn board_keyboard_intent(
     model: &BoardModel,
     mode: BoardInputMode,
@@ -901,6 +1039,7 @@ pub fn apply_board_intent_with_save_recovery(
             BoardIntent::SelectNext
             | BoardIntent::SelectPrev
             | BoardIntent::SelectIndex(_)
+            | BoardIntent::FocusBoardAndSelectIndex(_)
             | BoardIntent::ListScrollTo(_)
             | BoardIntent::PageScrollTo(_)
             | BoardIntent::OpenCommandPalette
@@ -913,6 +1052,8 @@ pub fn apply_board_intent_with_save_recovery(
             | BoardIntent::OpenHelp
             | BoardIntent::CloseLayer
             | BoardIntent::OpenTaskPage
+            | BoardIntent::StageRight
+            | BoardIntent::StageLeft
             | BoardIntent::PeekDetail
             | BoardIntent::CollapseDetail
             | BoardIntent::PageScrollUp
@@ -1024,6 +1165,107 @@ fn board_paste_intent(area: Rect, model: &mut BoardModel, text: &str) -> Option<
     resolve_board_command(model, intent)
 }
 
+/// Whether a press outside the focused column still reaches dispatch: an explicit row
+/// select, a stage slide (`←` from the rail, `→` into the task column), a modal close
+/// route, or a focus transfer.
+///
+/// This is the Down-time half of the press gate; the Up-time half re-maps the same press in
+/// `board_mouse_intent`. Both call `map_responsive_board_mouse` over the same model and hit
+/// map with no intent in between, so they must agree: keep this predicate in lockstep with
+/// the mapper's wide routing (see the invariant at the `Down(MouseButton::Left)` arm).
+fn press_survives_off_focus(
+    responsive_intent: Option<&BoardIntent>,
+    mode: BoardInputMode,
+    task_focus_candidate: Option<&BoardIntent>,
+) -> bool {
+    let slide_or_select = matches!(
+        responsive_intent,
+        Some(
+            BoardIntent::FocusBoardAndSelectIndex(_)
+                | BoardIntent::StageLeft
+                | BoardIntent::StageRight
+        )
+    );
+    let existing_mode_route = matches!(
+        (mode, responsive_intent),
+        (BoardInputMode::Help, Some(BoardIntent::CloseLayer))
+            | (
+                BoardInputMode::Palette,
+                Some(BoardIntent::CloseCommandSurface)
+            )
+    );
+    slide_or_select || existing_mode_route || task_focus_candidate.is_some()
+}
+
+/// Run the release-time task focus handoff before mapping the same click.
+///
+/// The dispatcher is the real save-recovery-aware event-loop boundary in production and a
+/// direct reducer in tests. Keeping both operations in this helper pins their ordering.
+fn board_mouse_click_intent_after_focus<E>(
+    area: Rect,
+    model: &mut BoardModel,
+    painted_hits: &crate::ui::render::QueueHitMap,
+    click: crossterm::event::MouseEvent,
+    mut dispatch_focus: impl FnMut(&mut BoardModel, BoardIntent) -> Result<bool, E>,
+) -> Result<(bool, Option<BoardIntent>), E> {
+    if let Some(focus) = wide_mouse_focus_intent(model, painted_hits, area, click) {
+        if dispatch_focus(model, focus)? {
+            return Ok((true, None));
+        }
+        // The stage moved under the pointer, so the columns may have changed width. The
+        // click still names the control the user saw: dispatch it against the painted frame
+        // rather than a repaint whose rows no longer line up with the press.
+        resolve_board_surface(area, model);
+        model.cancel_project_header_double_click();
+        let intent = map_responsive_board_mouse(model, painted_hits, area, click)
+            .and_then(|intent| board_intent_for_area(area, intent))
+            .and_then(|intent| resolve_board_command(model, intent));
+        return Ok((false, intent));
+    }
+    Ok((false, board_mouse_intent(area, model, click)))
+}
+
+/// Route a scrollbar event, focusing and repainting a task preview before page dispatch.
+///
+/// Board-focused previews paint from a clone, so their scrollbar can advertise a different
+/// wrapping bound from the retained page session. Once focus transfers, one scratch paint
+/// refreshes that retained bound before the clicked offset reaches the reducer.
+fn board_scrollbar_mouse_route<E>(
+    area: Rect,
+    model: &mut BoardModel,
+    painted_hits: &crate::ui::render::QueueHitMap,
+    mouse: crossterm::event::MouseEvent,
+    dragging: &mut bool,
+    mut dispatch_focus: impl FnMut(&mut BoardModel, BoardIntent) -> Result<bool, E>,
+) -> Result<(bool, BoardInputMode, ScrollbarMouse), E> {
+    use crossterm::event::{MouseButton, MouseEventKind};
+
+    let task_scrollbar_press = matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
+        && matches!(
+            scrollbar_hit_at(painted_hits, Position::new(mouse.column, mouse.row)),
+            Some(BoardIntent::PageScrollTo(_))
+        );
+    let preview_focus = if task_scrollbar_press {
+        wide_mouse_focus_intent(model, painted_hits, area, mouse)
+    } else {
+        None
+    };
+    let refresh_retained_bound = preview_focus.is_some();
+    if let Some(focus) = preview_focus {
+        if dispatch_focus(model, focus)? {
+            return Ok((true, model.input_mode(), ScrollbarMouse::Consumed));
+        }
+    }
+    let mode = resolve_board_surface(area, model);
+    let routed = if refresh_retained_bound {
+        let refreshed_hits = crate::ui::board::board_hit_map(area, model);
+        map_scrollbar_mouse(mode, &refreshed_hits, mouse, dragging)
+    } else {
+        map_scrollbar_mouse(mode, painted_hits, mouse, dragging)
+    };
+    Ok((false, mode, routed))
+}
+
 /// Route a mouse event to the board intent the painted frame accepts.
 ///
 /// `resolve_board_surface`'s side effects run first, exactly as for a key press: a shrink
@@ -1069,7 +1311,7 @@ fn board_mouse_intent(
     } else {
         crate::ui::render::QueueHitMap::default()
     };
-    let intent = crate::ui::mouse::map_board_mouse(model, &hits, mouse);
+    let intent = map_responsive_board_mouse(model, &hits, area, mouse);
     if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
         && !matches!(
             intent,
@@ -1852,17 +2094,318 @@ mod tests {
     use super::*;
     use std::path::Path;
 
-    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use crossterm::event::{
+        KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+    };
 
     use crate::context::InvocationSnapshot;
     use crate::domain::{HumanStatus, ProvenanceOrigin, TaskScope};
     use crate::ui::board::CommandSurface;
     use crate::ui::capture::CaptureField;
     use crate::ui::input::{map_key, CaptureIntent};
-    use crate::ui::mouse::map_board_mouse;
+    use crate::ui::mouse::{
+        focused_mouse_area, left_click, map_board_mouse, map_responsive_board_mouse,
+        press_on_focused_surface,
+    };
     use crate::ui::queue::BoardTab;
 
     static TEMP_DIR_SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+    fn board_fixture(title: &str, notes: Option<String>) -> (DomainState, BoardModel) {
+        let mut domain = DomainState::new();
+        domain
+            .create(
+                title,
+                notes,
+                TaskScope::Global,
+                ProvenanceOrigin::Manual,
+                None,
+            )
+            .expect("create board fixture");
+        let model = BoardModel::from_domain(&domain, None);
+        (domain, model)
+    }
+
+    fn click_at(area: Rect) -> MouseEvent {
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: area.x,
+            row: area.y,
+            modifiers: KeyModifiers::NONE,
+        }
+    }
+
+    fn stage_right(domain: &mut DomainState, model: &mut BoardModel, times: usize) {
+        for _ in 0..times {
+            apply_intent(domain, model, BoardIntent::StageRight, None).expect("stage right");
+        }
+    }
+
+    #[test]
+    fn app_keyboard_route_owns_stage_slider_keys() {
+        let (mut domain, mut model) = board_fixture("keyboard stage", None);
+        let wide = Rect::new(0, 0, 110, 24);
+        let single = Rect::new(0, 0, 109, 24);
+        let key = |code| KeyEvent::new(code, KeyModifiers::NONE);
+        let route = |model: &mut BoardModel, area, code| {
+            let mode = resolve_board_surface(area, model);
+            board_keyboard_intent_for_area(model, area, mode, key(code))
+        };
+
+        // Stage 0: → slides, Enter opens the full page, ← is inert at wide widths.
+        assert_eq!(model.wide_stage(), crate::ui::tier::WideStage::FullBoard);
+        assert_eq!(
+            route(&mut model, wide, KeyCode::Right),
+            Some(BoardIntent::StageRight)
+        );
+        assert_eq!(
+            route(&mut model, wide, KeyCode::Enter),
+            Some(BoardIntent::OpenTaskPage)
+        );
+        assert_eq!(route(&mut model, wide, KeyCode::Left), None);
+        // Below the threshold the narrow routes are untouched.
+        assert_eq!(
+            route(&mut model, single, KeyCode::Enter),
+            Some(BoardIntent::OpenTaskPage)
+        );
+        assert_eq!(
+            route(&mut model, single, KeyCode::Right),
+            Some(BoardIntent::PeekDetail)
+        );
+        assert_eq!(
+            route(&mut model, single, KeyCode::Left),
+            Some(BoardIntent::CollapseDetail)
+        );
+
+        // Stage G: ← and → slide, Esc is the page's own close, j/k stay page navigation.
+        stage_right(&mut domain, &mut model, 2);
+        assert_eq!(model.wide_stage(), crate::ui::tier::WideStage::Rail);
+        assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+        assert_eq!(
+            route(&mut model, wide, KeyCode::Left),
+            Some(BoardIntent::StageLeft)
+        );
+        assert_eq!(
+            route(&mut model, wide, KeyCode::Right),
+            Some(BoardIntent::StageRight)
+        );
+        assert_eq!(
+            route(&mut model, wide, KeyCode::Esc),
+            Some(BoardIntent::CloseLayer)
+        );
+        assert_eq!(
+            route(&mut model, wide, KeyCode::Char('j')),
+            Some(BoardIntent::PageScrollDown)
+        );
+        assert_eq!(
+            route(&mut model, wide, KeyCode::Tab),
+            Some(BoardIntent::FormFocusNext),
+            "Tab keeps its task-page meaning"
+        );
+        // Narrow task page: ← stays inert, Esc closes, exactly as before the slider.
+        assert_eq!(route(&mut model, single, KeyCode::Left), None);
+        assert_eq!(
+            route(&mut model, single, KeyCode::Esc),
+            Some(BoardIntent::CloseLayer)
+        );
+
+        // Stage F: → is inert, ← goes back to the rail.
+        stage_right(&mut domain, &mut model, 1);
+        assert_eq!(model.wide_stage(), crate::ui::tier::WideStage::FullTask);
+        assert_eq!(route(&mut model, wide, KeyCode::Right), None);
+        assert_eq!(
+            route(&mut model, wide, KeyCode::Left),
+            Some(BoardIntent::StageLeft)
+        );
+    }
+
+    #[test]
+    fn app_mouse_click_moves_stage_a_to_g_before_dispatching_same_control() {
+        let (mut domain, mut model) = board_fixture("mouse stage", None);
+        let area = Rect::new(0, 0, 110, 24);
+        stage_right(&mut domain, &mut model, 1);
+        assert_eq!(model.wide_stage(), crate::ui::tier::WideStage::Split);
+        let task_area =
+            crate::ui::tier::resolve_responsive(area.width, area.height, model.wide_stage()).task;
+        let hits = crate::ui::board::board_hit_map(area, &model);
+        let control = hits
+            .regions
+            .iter()
+            .find(|hit| {
+                task_area.contains(hit.area.as_position())
+                    && matches!(hit.target, crate::ui::render::QueueHitTarget::StepAdd)
+            })
+            .expect("task-side add-step control in the preview");
+        let click = click_at(control.area);
+        let (quit, intent) =
+            board_mouse_click_intent_after_focus(area, &mut model, &hits, click, |model, focus| {
+                assert_eq!(focus, BoardIntent::StageRight);
+                apply_intent(&mut domain, model, focus, None)?;
+                Ok::<bool, DomainError>(false)
+            })
+            .expect("route click");
+
+        assert!(!quit);
+        assert_eq!(model.wide_stage(), crate::ui::tier::WideStage::Rail);
+        assert_eq!(
+            model.focused_surface(),
+            crate::ui::tier::FocusedSurface::Task
+        );
+        let intent = intent.expect("same click dispatches after the stage change");
+        assert_eq!(intent, BoardIntent::BeginAddStep);
+        apply_intent(&mut domain, &mut model, intent, None).expect("apply task control");
+        assert_eq!(model.input_mode(), BoardInputMode::EditStep);
+        assert_eq!(model.wide_stage(), crate::ui::tier::WideStage::Rail);
+    }
+
+    #[test]
+    fn app_press_gate_keeps_shared_footer_verbs_outside_the_focused_column() {
+        // F-8: the shared footer spans the frame, but the Down gate only accepted presses
+        // inside the focused column, so a footer verb painted under the other column died
+        // before Up could dispatch it. Stage G: the left 33 cells of the verb bar sit under
+        // the rail; stage A: the right cells sit under the preview.
+        for (times, stage) in [
+            (1, crate::ui::tier::WideStage::Split),
+            (2, crate::ui::tier::WideStage::Rail),
+        ] {
+            let (mut domain, mut model) = board_fixture("footer gate", None);
+            stage_right(&mut domain, &mut model, times);
+            assert_eq!(model.wide_stage(), stage);
+            let area = Rect::new(0, 0, 130, 24);
+            let hits = crate::ui::board::board_hit_map(area, &model);
+            let focused = focused_mouse_area(&model, area);
+            let verb = hits
+                .regions
+                .iter()
+                .find(|hit| {
+                    matches!(hit.target, crate::ui::render::QueueHitTarget::Verb(_))
+                        && !focused.contains(hit.area.as_position())
+                })
+                .unwrap_or_else(|| panic!("{stage:?}: a footer verb outside the focused column"))
+                .area;
+            let pos = Position::new(verb.x, verb.y);
+            let intent =
+                map_responsive_board_mouse(&model, &hits, area, left_click(verb.x, verb.y));
+            assert!(intent.is_some(), "{stage:?}: footer verb maps an intent");
+            assert!(
+                press_on_focused_surface(&model, area, pos),
+                "{stage:?}: the Down gate keeps a shared-footer press"
+            );
+        }
+    }
+
+    #[test]
+    fn app_press_gate_keeps_rail_slides_and_drops_unmapped_presses() {
+        let (mut domain, mut model) = board_fixture("gate rail", None);
+        stage_right(&mut domain, &mut model, 2);
+        assert_eq!(model.wide_stage(), crate::ui::tier::WideStage::Rail);
+        let area = Rect::new(0, 0, 110, 24);
+        let hits = crate::ui::board::board_hit_map(area, &model);
+
+        // Blank rail space maps a slide and the press gate keeps it.
+        let blank = left_click(4, 9);
+        let intent = map_responsive_board_mouse(&model, &hits, area, blank);
+        assert_eq!(intent, Some(BoardIntent::StageLeft));
+        assert!(press_survives_off_focus(
+            intent.as_ref(),
+            model.input_mode(),
+            None
+        ));
+
+        // The rule column maps nothing and the press is dropped.
+        let rule = left_click(32, 9);
+        let intent = map_responsive_board_mouse(&model, &hits, area, rule);
+        assert_eq!(intent, None);
+        assert!(!press_survives_off_focus(
+            intent.as_ref(),
+            model.input_mode(),
+            None
+        ));
+
+        // A rail row still routes its select.
+        let row = hits
+            .regions
+            .iter()
+            .find(|hit| matches!(hit.target, crate::ui::render::QueueHitTarget::Task(_)))
+            .expect("rail row")
+            .area;
+        let intent = map_responsive_board_mouse(&model, &hits, area, left_click(row.x, row.y));
+        assert!(matches!(
+            intent,
+            Some(BoardIntent::FocusBoardAndSelectIndex(_))
+        ));
+        assert!(press_survives_off_focus(
+            intent.as_ref(),
+            model.input_mode(),
+            None
+        ));
+
+        // And the whole route lands the board beside the rail.
+        apply_intent(&mut domain, &mut model, intent.expect("row intent"), None).expect("apply");
+        assert_eq!(model.wide_stage(), crate::ui::tier::WideStage::Split);
+    }
+
+    #[test]
+    fn app_task_scrollbar_moves_stage_refreshes_bound_and_routes_page_scroll() {
+        let (mut domain, mut model) =
+            board_fixture("scrollbar stage", Some("long notes ".repeat(500)));
+        // Open the full page, then slide back to A so the page is parked behind the preview.
+        apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None)
+            .expect("open task page");
+        apply_intent(&mut domain, &mut model, BoardIntent::StageLeft, None).expect("F to G");
+        apply_intent(&mut domain, &mut model, BoardIntent::StageLeft, None).expect("G to A");
+        assert_eq!(model.wide_stage(), crate::ui::tier::WideStage::Split);
+
+        let wide = Rect::new(0, 0, 110, 24);
+        let preview_hits = crate::ui::board::board_hit_map(wide, &model);
+        let bottom = preview_hits
+            .regions
+            .iter()
+            .filter_map(|hit| match hit.target {
+                crate::ui::render::QueueHitTarget::PageScroll(offset) => Some((offset, hit.area)),
+                _ => None,
+            })
+            .max_by_key(|(offset, _)| *offset)
+            .expect("task preview scrollbar");
+        assert!(bottom.0 > 0);
+        model.set_page_scroll_horizon_for_test(0);
+        let mut dragging = false;
+        let (quit, mode, routed) = board_scrollbar_mouse_route(
+            wide,
+            &mut model,
+            &preview_hits,
+            click_at(bottom.1),
+            &mut dragging,
+            |model, focus| {
+                assert_eq!(focus, BoardIntent::StageRight);
+                apply_intent(&mut domain, model, focus, None)?;
+                Ok::<bool, DomainError>(false)
+            },
+        )
+        .expect("route task scrollbar");
+
+        assert!(!quit);
+        assert_eq!(mode, BoardInputMode::TaskPage);
+        assert_eq!(model.wide_stage(), crate::ui::tier::WideStage::Rail);
+        let ScrollbarMouse::Intent(BoardIntent::PageScrollTo(offset)) = routed else {
+            panic!("scrollbar press must route a page scroll, got {routed:?}");
+        };
+        assert!(offset > 0);
+        assert_eq!(
+            model.page_scroll_horizon(),
+            offset,
+            "the bound is refreshed for the stage G column before the offset is applied"
+        );
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::PageScrollTo(offset),
+            None,
+        )
+        .expect("apply page scroll");
+        assert_eq!(model.page_scroll(), offset);
+        assert!(dragging);
+    }
 
     #[test]
     fn default_mode_is_board() {
