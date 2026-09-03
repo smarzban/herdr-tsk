@@ -90,11 +90,15 @@ started. Text drag uses `text_select` + autoscroll
 ### Paint
 
 `ui::tier::resolve`: **standard** when width ≥ 78 **and** height ≥ 24; else
-**compact**. `resolve_responsive` adds an inclusive 110-column split: one divider
-column, then equal board and task rectangles whose widths differ by at most one.
-Both halves use density from the narrower half. Below 110, the focused surface
-uses the full frame. Geometry is defined down to 1×1 without panic; product floor
-is 40×10. Standard reserves 28 cells of trailing meta; compact is glyph + title.
+**compact**. `resolve_responsive` adds an inclusive 110-column split: touching left
+and right allocations whose widths differ by at most one. The board uses the complete
+left allocation without a border; the task renderer uses the inset interior of a fully
+bordered right allocation. Both surfaces use density from the narrower content
+rectangle. The task border and title are cyan plus bold with task focus and dark gray
+plus dim with board focus. Surface content remains monochrome. Below 110, the focused
+surface uses the full frame without a box. Geometry is defined down to 1×1
+without panic; product floor is 40×10. Standard reserves 28 cells of trailing meta;
+compact is glyph + title.
 Verb-bar budgets: 7 standard, 5 compact. Project chip max 24 cells.
 
 `draw_queue_frame` paints selector, list, rule, status, verb bar, overlays
@@ -105,7 +109,9 @@ Notes markdown: [invariants](invariants.md) §27. Peek runs the same painter the
 `dim_line`. `paint_task_row` uses `status_glyph`: ready `○`, started `▸`, blocked
 `■`, review `▲`, done `✓`.
 
-`MONO_MODIFIERS` only; `assert_buffer_mono` / `strip_color` in tests.
+Surface content uses `MONO_MODIFIERS` only; wide task-panel chrome has the explicit
+cyan/dark-gray focus exception described above. `assert_buffer_mono` / `strip_color`
+still cover content and every unboxed surface.
 
 ### Selection reanchor
 

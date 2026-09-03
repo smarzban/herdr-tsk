@@ -645,7 +645,12 @@ import { parseCapture } from "./capture.js";
 
   function renderPage(embedded = false) {
     const task = selectedTask();
-    if (!task) return `<div class="${embedded ? "tsk-task-surface tsk-surface" : "tsk-overlay"}"><div class="dim">no task</div></div>`;
+    if (!task) {
+      if (embedded) {
+        return `<div class="tsk-task-panel tsk-panel ${state.surfaceFocus === "task" ? "is-focused-surface" : ""}" data-panel-title="task" aria-label="task panel"><div class="tsk-task-surface tsk-surface"><div class="dim">no task selected</div></div></div>`;
+      }
+      return `<div class="tsk-overlay"><div class="dim">no task selected</div></div>`;
+    }
     const editing = state.editField;
     const title =
       editing === "title"
@@ -655,8 +660,8 @@ import { parseCapture } from "./capture.js";
       editing === "notes"
         ? `<textarea class="tsk-field tsk-notes" id="tsk-edit">${esc(state.editDraft)}</textarea>`
         : `<div class="tsk-page-notes">${esc(task.notes || "no notes yet")}</div>`;
-    return `
-      <div class="${embedded ? "tsk-task-surface tsk-surface" : "tsk-overlay"} tsk-page ${state.surfaceFocus === "task" ? "is-focused-surface" : ""}">
+    const page = `
+      <div class="${embedded ? "tsk-task-surface tsk-surface" : "tsk-overlay"} tsk-page">
         ${title}
         <div class="dim">${esc(task.status)} · ${esc(projectName(task))}${task.thread ? ` · #${esc(task.thread)}` : ""}</div>
         ${notes}
@@ -668,6 +673,8 @@ import { parseCapture } from "./capture.js";
           <span>esc board</span>
         </div>
       </div>`;
+    if (!embedded) return page;
+    return `<div class="tsk-task-panel tsk-panel ${state.surfaceFocus === "task" ? "is-focused-surface" : ""}" data-panel-title="T${task.number} · task" aria-label="T${task.number} task panel">${page}</div>`;
   }
 
   function renderBoard(rows) {
@@ -738,8 +745,7 @@ import { parseCapture } from "./capture.js";
     if (wide && state.overlay === "page") state.overlay = null;
     let html = wide
       ? `<div class="tsk-wide-split">
-           <div class="tsk-board-surface tsk-surface ${state.surfaceFocus === "board" ? "is-focused-surface" : ""}">${renderBoard(rows)}</div>
-           <div class="tsk-wide-divider" aria-hidden="true"></div>
+           <div class="tsk-board-surface tsk-surface">${renderBoard(rows)}</div>
            ${renderPage(true)}
          </div>`
       : renderBoard(rows);

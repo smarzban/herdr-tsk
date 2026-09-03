@@ -1,8 +1,10 @@
 use std::path::PathBuf;
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 use ratatui::backend::TestBackend;
+use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
+use ratatui::style::{Color, Modifier};
 use ratatui::Terminal;
 use tsk_tui::domain::{DomainState, HumanStatus, ProvenanceOrigin, TaskScope};
 use tsk_tui::ui::board::{
@@ -14,7 +16,7 @@ use tsk_tui::ui::mouse::{
     left_click, map_board_mouse, map_responsive_board_mouse, map_scrollbar_mouse,
     wide_mouse_focus_intent, ScrollbarMouse,
 };
-use tsk_tui::ui::render::{assert_buffer_mono, QueueHitMap, QueueHitTarget};
+use tsk_tui::ui::render::{assert_buffer_mono, QueueHitMap, QueueHitTarget, MONO_MODIFIERS};
 use tsk_tui::ui::tier::Tier;
 use tsk_tui::ui::{apply_intent, draw_board, BoardInputMode, BoardIntent, BoardModel};
 
@@ -38,14 +40,45 @@ fn board_model(domain: &DomainState) -> BoardModel {
     BoardModel::from_domain(domain, Some(PathBuf::from("/repos/tsk")))
 }
 
-fn render_board(model: &BoardModel, width: u16, height: u16) -> (Vec<String>, QueueHitMap) {
+fn render_board_buffer(model: &BoardModel, width: u16, height: u16) -> (Buffer, QueueHitMap) {
     let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("test terminal");
     let mut hits = QueueHitMap::default();
     terminal
         .draw(|frame| hits = draw_board(frame, model))
         .expect("draw board");
-    let buffer = terminal.backend().buffer();
-    assert_buffer_mono(buffer);
+    (terminal.backend().buffer().clone(), hits)
+}
+
+fn render_board(model: &BoardModel, width: u16, height: u16) -> (Vec<String>, QueueHitMap) {
+    let (buffer, hits) = render_board_buffer(model, width, height);
+    if width < WIDE_SPLIT_MIN_WIDTH {
+        assert_buffer_mono(&buffer);
+    } else {
+        let geometry = resolve_responsive(width, height, model.focused_surface());
+        for y in 0..height {
+            for x in 0..width {
+                let on_border = [geometry.task].into_iter().any(|panel| {
+                    x >= panel.x
+                        && x < panel.x.saturating_add(panel.width)
+                        && y >= panel.y
+                        && y < panel.y.saturating_add(panel.height)
+                        && (x == panel.x
+                            || x + 1 == panel.x.saturating_add(panel.width)
+                            || y == panel.y
+                            || y + 1 == panel.y.saturating_add(panel.height))
+                });
+                let cell = &buffer[(x, y)];
+                assert_eq!(cell.bg, Color::Reset, "wide cell ({x},{y}) background");
+                if !on_border {
+                    assert_eq!(cell.fg, Color::Reset, "wide content cell ({x},{y}) color");
+                    assert!(
+                        cell.modifier.difference(MONO_MODIFIERS).is_empty(),
+                        "wide content cell ({x},{y}) modifier"
+                    );
+                }
+            }
+        }
+    }
     let rows = (0..height)
         .map(|y| {
             (0..width)
@@ -54,6 +87,31 @@ fn render_board(model: &BoardModel, width: u16, height: u16) -> (Vec<String>, Qu
         })
         .collect();
     (rows, hits)
+}
+
+fn assert_full_border_style(buffer: &Buffer, panel: Rect, foreground: Color, modifier: Modifier) {
+    for y in panel.y..panel.y.saturating_add(panel.height) {
+        for x in panel.x..panel.x.saturating_add(panel.width) {
+            let on_ring = x == panel.x
+                || x + 1 == panel.x.saturating_add(panel.width)
+                || y == panel.y
+                || y + 1 == panel.y.saturating_add(panel.height);
+            if !on_ring {
+                continue;
+            }
+            let cell = &buffer[(x, y)];
+            assert_eq!(cell.fg, foreground, "task border cell ({x},{y}) color");
+            assert_eq!(
+                cell.bg,
+                Color::Reset,
+                "task border cell ({x},{y}) background"
+            );
+            assert_eq!(
+                cell.modifier, modifier,
+                "task border cell ({x},{y}) modifier"
+            );
+        }
+    }
 }
 
 fn region_text(rows: &[String], area: Rect) -> String {
@@ -81,54 +139,167 @@ fn wide_geometry_activates_at_110_and_109_stays_single() {
         ResponsivePresentation::SingleBoard
     );
     assert_eq!(single_board.board, Rect::new(0, 0, 109, 24));
+    assert_eq!(single_board.board_content(), single_board.board);
     assert_eq!(single_board.task, Rect::default());
-    assert_eq!(single_board.divider, None);
 
     let single_task = resolve_responsive(WIDE_SPLIT_MIN_WIDTH - 1, 24, FocusedSurface::Task);
     assert_eq!(single_task.presentation, ResponsivePresentation::SingleTask);
     assert_eq!(single_task.board, Rect::default());
     assert_eq!(single_task.task, Rect::new(0, 0, 109, 24));
-    assert_eq!(single_task.divider, None);
+    assert_eq!(single_task.task_content(), single_task.task);
 }
 
 #[test]
-fn wide_geometry_reserves_one_divider_and_balances_remaining_columns() {
+fn wide_geometry_balances_touching_allocations_without_a_gap() {
     for width in WIDE_SPLIT_MIN_WIDTH..=201 {
         let geometry = resolve_responsive(width, 30, FocusedSurface::Board);
-        assert_eq!(geometry.presentation, ResponsivePresentation::WideSplit);
+        let expected_board_width = width / 2;
+        let expected_task_width = width - expected_board_width;
 
-        let divider = geometry.divider.expect("wide split divider");
-        assert_eq!(divider.width, 1, "{width} columns");
-        assert_eq!(geometry.board.x, 0, "{width} columns");
-        assert_eq!(divider.x, geometry.board.width, "{width} columns");
-        assert_eq!(geometry.task.x, divider.x + 1, "{width} columns");
+        assert_eq!(geometry.board, Rect::new(0, 0, expected_board_width, 30));
         assert_eq!(
-            geometry.board.width + divider.width + geometry.task.width,
-            width,
-            "{width} columns"
+            geometry.task,
+            Rect::new(expected_board_width, 0, expected_task_width, 30)
         );
+        assert_eq!(geometry.board.width + geometry.task.width, width);
+        assert_eq!(geometry.board.x + geometry.board.width, geometry.task.x);
+        assert!(geometry.board.width.abs_diff(geometry.task.width) <= 1);
+        assert_eq!(geometry.board_content(), geometry.board);
+        assert_eq!(
+            geometry.board_content().x + geometry.board_content().width,
+            geometry.task.x
+        );
+        assert_eq!(geometry.task_content().x, geometry.task.x + 1);
+    }
+}
+
+#[test]
+fn exact_110_wide_frame_paints_unboxed_board_beside_titled_task_box() {
+    let domain = domain_with_tasks(&[("boxed selected task", "boxed notes")]);
+    let mut task = domain.tasks()[0].clone();
+    task.number = Some(2);
+    let model = BoardModel::from_tasks(vec![task], Some(PathBuf::from("/repos/tsk")));
+    let number = 2;
+    let (buffer, _) = render_board_buffer(&model, 110, 24);
+    let top = (0..110)
+        .map(|x| buffer[(x, 0)].symbol())
+        .collect::<String>();
+    let bottom = (0..110)
+        .map(|x| buffer[(x, 23)].symbol())
+        .collect::<String>();
+
+    assert!(!top.contains("board"));
+    assert_ne!(buffer[(0, 0)].symbol(), "┌");
+    assert_ne!(buffer[(54, 0)].symbol(), "┐");
+    assert_eq!(buffer[(55, 0)].symbol(), "┌");
+    assert!(top.contains(&format!("T{number} · task")));
+    assert_eq!(buffer[(109, 0)].symbol(), "┐");
+    assert!(!bottom.starts_with('└'));
+    assert_ne!(buffer[(54, 23)].symbol(), "┘");
+    assert_eq!(buffer[(55, 23)].symbol(), "└");
+    assert_eq!(buffer[(109, 23)].symbol(), "┘");
+}
+
+#[test]
+fn wide_task_border_style_tracks_focus_without_coloring_board() {
+    let mut domain = domain_with_tasks(&[("style task", "style notes")]);
+    let mut model = board_model(&domain);
+    let task_panel = resolve_responsive(110, 24, FocusedSurface::Board).task;
+    let (board_focused, _) = render_board_buffer(&model, 110, 24);
+
+    assert_full_border_style(&board_focused, task_panel, Color::DarkGray, Modifier::DIM);
+    for y in 0..24 {
+        for x in 0..55 {
+            assert_eq!(board_focused[(x, y)].fg, Color::Reset);
+        }
+    }
+    assert_eq!(board_focused[(56, 2)].fg, Color::Reset);
+
+    focus_task(&mut domain, &mut model);
+    let (task_focused, _) = render_board_buffer(&model, 110, 24);
+    assert_full_border_style(&task_focused, task_panel, Color::Cyan, Modifier::BOLD);
+    for y in 0..24 {
+        for x in 0..55 {
+            assert_eq!(task_focused[(x, y)].fg, Color::Reset);
+        }
+    }
+    assert_eq!(task_focused[(56, 2)].fg, Color::Reset);
+}
+
+#[test]
+fn wide_no_selection_task_box_uses_plain_title_and_inert_interior() {
+    let model = board_model(&DomainState::new());
+    let (buffer, hits) = render_board_buffer(&model, 110, 24);
+    let top = (0..110)
+        .map(|x| buffer[(x, 0)].symbol())
+        .collect::<String>();
+    let right = Rect::new(55, 0, 55, 24);
+    let interior = Rect::new(56, 1, 53, 22);
+
+    assert!(!top.contains("board"));
+    assert_ne!(buffer[(0, 0)].symbol(), "┌");
+    let right_top = (55..110)
+        .map(|x| buffer[(x, 0)].symbol())
+        .collect::<String>();
+    assert!(right_top.starts_with("┌ task "));
+    assert!(region_text(
+        &(0..24)
+            .map(|y| (0..110).map(|x| buffer[(x, y)].symbol()).collect())
+            .collect::<Vec<String>>(),
+        interior,
+    )
+    .contains("no task selected"));
+    assert!(hits.regions.iter().all(|hit| hit.area.x < right.x));
+}
+
+#[test]
+fn wide_hits_and_copy_regions_stay_inside_board_allocation_or_task_interior() {
+    let mut domain = domain_with_tasks(&[("boxed hit task", "boxed hit notes")]);
+    let mut model = board_model(&domain);
+    focus_task(&mut domain, &mut model);
+    let (_, hits) = render_board_buffer(&model, 111, 24);
+    let board_inner = Rect::new(0, 0, 55, 24);
+    let task_inner = Rect::new(56, 1, 54, 22);
+
+    assert!(
+        hits.regions
+            .iter()
+            .any(|hit| hit.area.x == board_inner.x && hit.area.y == board_inner.y + 1),
+        "board controls must retain the full allocation origin and row budget"
+    );
+    for area in hits
+        .regions
+        .iter()
+        .map(|hit| hit.area)
+        .chain(hits.copyable.iter().copied())
+    {
+        let bounded_by = if area.x < 55 { board_inner } else { task_inner };
         assert!(
-            geometry.board.width.abs_diff(geometry.task.width) <= 1,
-            "{width} columns produced {} and {}",
-            geometry.board.width,
-            geometry.task.width
+            area.x >= bounded_by.x
+                && area.y >= bounded_by.y
+                && area.x.saturating_add(area.width)
+                    <= bounded_by.x.saturating_add(bounded_by.width)
+                && area.y.saturating_add(area.height)
+                    <= bounded_by.y.saturating_add(bounded_by.height),
+            "hit or copy region escapes panel interior: {area:?}"
         );
     }
 }
 
 #[test]
-fn wide_geometry_uses_the_narrower_half_for_shared_density() {
-    let uneven = resolve_responsive(156, 24, FocusedSurface::Task);
-    assert_eq!(uneven.board.width, 77);
-    assert_eq!(uneven.task.width, 78);
+fn wide_geometry_uses_narrower_content_for_shared_density() {
+    let uneven = resolve_responsive(157, 26, FocusedSurface::Task);
+    assert_eq!(uneven.board_content().width, 78);
+    assert_eq!(uneven.task_content().width, 77);
     assert_eq!(uneven.density, Tier::Compact);
 
-    let both_standard = resolve_responsive(157, 24, FocusedSurface::Board);
-    assert_eq!(both_standard.board.width, 78);
-    assert_eq!(both_standard.task.width, 78);
+    let both_standard = resolve_responsive(160, 26, FocusedSurface::Board);
+    assert_eq!(both_standard.board_content().width, 80);
+    assert_eq!(both_standard.task_content().width, 78);
     assert_eq!(both_standard.density, Tier::Standard);
 
-    let short = resolve_responsive(200, 23, FocusedSurface::Board);
+    let short = resolve_responsive(200, 25, FocusedSurface::Board);
+    assert_eq!(short.task_content().height, 23);
     assert_eq!(short.density, Tier::Compact);
 }
 
@@ -139,10 +310,12 @@ fn wide_geometry_is_bounded_across_supported_sizes() {
             let frame = Rect::new(0, 0, width, height);
             for focus in [FocusedSurface::Board, FocusedSurface::Task] {
                 let geometry = resolve_responsive(width, height, focus);
-                for area in [geometry.board, geometry.task]
-                    .into_iter()
-                    .chain(geometry.divider)
-                {
+                for area in [
+                    geometry.board,
+                    geometry.task,
+                    geometry.board_content(),
+                    geometry.task_content(),
+                ] {
                     assert!(area.x <= frame.width, "{width}x{height}: x {}", area.x);
                     assert!(area.y <= frame.height, "{width}x{height}: y {}", area.y);
                     assert!(
@@ -166,14 +339,12 @@ fn wide_layout_activates_at_110_and_109_stays_single_pane() {
 
     let (wide_rows, _) = render_board(&model, 110, 24);
     let wide = resolve_responsive(110, 24, FocusedSurface::Board);
-    assert!(region_text(&wide_rows, wide.board).contains("selected wide task"));
-    assert!(region_text(&wide_rows, wide.task).contains("selected wide task"));
-    let divider = region_text(&wide_rows, wide.divider.expect("divider"));
-    assert_eq!(divider.matches('│').count(), 24);
-    assert!(divider
-        .chars()
-        .filter(|character| !character.is_whitespace())
-        .all(|character| character == '│'));
+    assert!(region_text(&wide_rows, wide.board_content()).contains("selected wide task"));
+    assert!(region_text(&wide_rows, wide.task_content()).contains("selected wide task"));
+    assert_ne!(wide_rows[0].chars().nth(54), Some('┐'));
+    assert_eq!(wide_rows[0].chars().nth(55), Some('┌'));
+    assert_ne!(wide_rows[23].chars().nth(54), Some('┘'));
+    assert_eq!(wide_rows[23].chars().nth(55), Some('└'));
 
     let (single_rows, _) = render_board(&model, 109, 24);
     assert_eq!(
@@ -202,15 +373,17 @@ fn wide_split_never_paints_or_hits_outside_supported_frames() {
     for (width, height) in [(110, 10), (111, 24), (156, 23), (157, 24), (240, 80)] {
         let (rows, hits) = render_board(&model, width, height);
         let geometry = resolve_responsive(width, height, FocusedSurface::Board);
-        let divider = geometry.divider.expect("wide divider");
-        let divider_text = region_text(&rows, divider);
-        assert_eq!(divider_text.matches('│').count(), height as usize);
-        assert!(divider_text
-            .chars()
-            .filter(|character| !character.is_whitespace())
-            .all(|character| character == '│'));
+        assert_ne!(rows[0].chars().next(), Some('┌'));
+        assert_ne!(
+            rows[0].chars().nth(geometry.board.width as usize - 1),
+            Some('┐')
+        );
+        assert_eq!(rows[0].chars().nth(geometry.task.x as usize), Some('┌'));
+        assert_ne!(rows[height as usize - 1].chars().next(), Some('└'));
         assert!(
-            hits.copyable.iter().any(|area| area.x >= geometry.task.x),
+            hits.copyable
+                .iter()
+                .any(|area| area.x >= geometry.task_content().x),
             "{width}x{height}: selected task side must declare bounded copy regions"
         );
         for area in hits
@@ -227,10 +400,18 @@ fn wide_split_never_paints_or_hits_outside_supported_frames() {
                 u32::from(area.y) + u32::from(area.height) <= u32::from(height),
                 "{width}x{height}: vertical hit overflow for {area:?}"
             );
+            let content = if area.x < geometry.task.x {
+                geometry.board_content()
+            } else {
+                geometry.task_content()
+            };
             assert!(
-                area.x.saturating_add(area.width) <= geometry.board.width
-                    || area.x >= geometry.task.x,
-                "{width}x{height}: hit or copy region crosses the divider: {area:?}"
+                area.x >= content.x
+                    && area.y >= content.y
+                    && area.x.saturating_add(area.width) <= content.x.saturating_add(content.width)
+                    && area.y.saturating_add(area.height)
+                        <= content.y.saturating_add(content.height),
+                "{width}x{height}: hit or copy region escapes panel interior: {area:?}"
             );
         }
     }
@@ -571,7 +752,7 @@ fn board_selection_after_focus_return_repaints_right_side() {
     assert_ne!(selected, parked);
 
     let (rows, _) = render_board(&model, 110, 24);
-    let task = resolve_responsive(110, 24, FocusedSurface::Board).task;
+    let task = resolve_responsive(110, 24, FocusedSurface::Board).task_content();
     let task_text = region_text(&rows, task);
 
     assert!(task_text.contains(&domain.get(selected).expect("selected task").title));
@@ -748,10 +929,13 @@ fn assert_model_and_domain_outcome_equal(
 }
 
 fn assert_equal_task_surface_mouse_outcomes(label: &str, domain: &DomainState, model: &BoardModel) {
-    let single_area = Rect::new(0, 0, 55, 24);
-    let wide_area = Rect::new(0, 0, 111, 24);
-    let task_area = resolve_responsive(111, 24, FocusedSurface::Task).task;
-    assert_eq!(task_area.width, single_area.width);
+    let single_area = Rect::new(0, 0, 55, 22);
+    let wide_area = Rect::new(0, 0, 114, 24);
+    let task_area = resolve_responsive(114, 24, FocusedSurface::Task).task_content();
+    assert_eq!(
+        (task_area.width, task_area.height),
+        (single_area.width, single_area.height)
+    );
     let (single_rows, single_hits) = render_board(model, single_area.width, single_area.height);
     let (wide_rows, wide_hits) = render_board(model, wide_area.width, wide_area.height);
 
@@ -778,7 +962,7 @@ fn assert_equal_task_surface_mouse_outcomes(label: &str, domain: &DomainState, m
     }) {
         let local = Rect::new(
             wide_hit.area.x - task_area.x,
-            wide_hit.area.y,
+            wide_hit.area.y - task_area.y,
             wide_hit.area.width,
             wide_hit.area.height,
         );
@@ -852,7 +1036,7 @@ fn focused_wide_task_surface_matches_single_pane_keyboard_and_mouse_outcomes() {
     domain.add_step(id, "second parity step").expect("step");
     let mut view = board_model(&domain);
     focus_task(&mut domain, &mut view);
-    let _ = render_board(&view, 55, 24);
+    let _ = render_board(&view, 55, 22);
 
     let mut scenarios = vec![("task view", view.clone())];
     for (label, intent) in [
@@ -1038,8 +1222,9 @@ fn wide_task_control_click_preserves_clicked_status_action_with_foreign_parked_c
     .expect("select target");
 
     let (preview_rows, preview_hits) = render_board(&model, 110, 24);
-    let task_area = resolve_responsive(110, 24, FocusedSurface::Board).task;
-    let verb_row = &preview_rows[task_area.height.saturating_sub(1) as usize];
+    let task_area = resolve_responsive(110, 24, FocusedSurface::Board).task_content();
+    let verb_y = task_area.y + task_area.height.saturating_sub(1);
+    let verb_row = &preview_rows[verb_y as usize];
     let preview_verbs = verb_row
         .chars()
         .skip(task_area.x as usize)
@@ -1052,7 +1237,7 @@ fn wide_task_control_click_preserves_clicked_status_action_with_foreign_parked_c
     let done_x = task_area.x
         + u16::try_from(preview_verbs.find("done").expect("preview done verb"))
             .expect("done column");
-    let click = left_click(done_x, task_area.height.saturating_sub(1));
+    let click = left_click(done_x, verb_y);
     assert_eq!(
         wide_mouse_focus_intent(&model, &preview_hits, Rect::new(0, 0, 110, 24), click),
         Some(BoardIntent::FocusTaskSurface)
@@ -1099,7 +1284,7 @@ fn wide_task_step_click_preserves_scrolled_step_target() {
     .expect("park scrolled page");
 
     let (_, preview_hits) = render_board(&model, 110, 24);
-    let task_area = resolve_responsive(110, 24, FocusedSurface::Board).task;
+    let task_area = resolve_responsive(110, 24, FocusedSurface::Board).task_content();
     let step_zero = preview_hits
         .regions
         .iter()
@@ -1199,7 +1384,7 @@ fn quick_add_ignores_unfocused_task_preview_verb_hits() {
     .expect("type quick-add draft");
     let draft = model.quick_add_title_value().to_string();
     let (_, hits) = render_board(&model, 110, 24);
-    let task_area = resolve_responsive(110, 24, FocusedSurface::Board).task;
+    let task_area = resolve_responsive(110, 24, FocusedSurface::Board).task_content();
     let foreign_verb = hits
         .regions
         .iter()
@@ -1240,7 +1425,7 @@ fn wide_help_and_palette_close_on_foreign_surface_verbs_without_dispatching_them
         apply_intent(&mut domain, &mut model, open, None).expect("open modal");
         assert_eq!(model.input_mode(), mode);
         let (_, hits) = render_board(&model, 110, 24);
-        let task_area = resolve_responsive(110, 24, FocusedSurface::Board).task;
+        let task_area = resolve_responsive(110, 24, FocusedSurface::Board).task_content();
         let foreign_verb = hits
             .regions
             .iter()
@@ -1273,7 +1458,7 @@ fn wide_board_task_click_selects_and_returns_board_focus() {
         .regions
         .iter()
         .find(|hit| {
-            hit.area.x < geometry.divider.expect("divider").x
+            hit.area.x < geometry.task.x
                 && matches!(hit.target, QueueHitTarget::Task(id) if Some(id) != model.selected_id())
         })
         .expect("other board row");
@@ -1339,9 +1524,27 @@ fn wide_mouse_coordinates_outside_live_surface_hits_are_inert() {
         ),
         None
     );
-    let divider = geometry.divider.expect("divider");
     assert_eq!(
-        map_responsive_board_mouse(&model, &hits, area, left_click(divider.x, divider.y),),
+        map_responsive_board_mouse(
+            &model,
+            &hits,
+            area,
+            left_click(geometry.task.x, geometry.task.y),
+        ),
+        None
+    );
+    assert_eq!(
+        map_responsive_board_mouse(
+            &model,
+            &hits,
+            area,
+            MouseEvent {
+                kind: MouseEventKind::ScrollDown,
+                column: geometry.task.x,
+                row: 1,
+                modifiers: KeyModifiers::NONE,
+            },
+        ),
         None
     );
 }
@@ -1722,7 +1925,7 @@ fn board_focused_task_field_edit_focuses_and_paints_live_editor() {
         .expect("edit visible draft");
 
     let (rows, _) = render_board(&model, 110, 24);
-    let task = resolve_responsive(110, 24, FocusedSurface::Task).task;
+    let task = resolve_responsive(110, 24, FocusedSurface::Task).task_content();
     assert!(region_text(&rows, task).contains(model.edit_buffer()));
 }
 

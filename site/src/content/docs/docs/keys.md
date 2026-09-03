@@ -15,8 +15,9 @@ and the palette offers the same command.
 
 ## Wide split focus
 
-At 110 usable columns or wider, the board and selected task page share the frame.
-With board focus, `Enter` or `→` moves to task focus. From task view, `Esc` or `←`
+At 110 usable columns or wider, the unboxed board and bordered task page share the
+frame. The task border is cyan plus bold with task focus and dark gray plus dim with
+board focus. With board focus, `Enter` or `→` moves to task focus. From task view, `Esc` or `←`
 returns to board focus. Active task editors keep the field, step, and save keys
 listed below. Mouse clicks follow the same focus owner.
 

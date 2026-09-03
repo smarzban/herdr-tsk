@@ -53,6 +53,11 @@ test("docs and demo describe wide surface focus and threshold", async () => {
   assert.match(demo, /state\.surfaceFocus = "task"/);
   assert.match(demo, /state\.surfaceFocus = "board"/);
   assert.match(styles, /\.tsk-wide-split/);
+  assert.doesNotMatch(demo, /data-panel-title="board"/);
+  assert.match(demo, /data-panel-title="T\$\{task\.number\} · task"/);
+  assert.doesNotMatch(demo, /tsk-wide-divider/);
+  assert.match(styles, /grid-template-columns: minmax\(0, 1fr\) minmax\(0, 1fr\)/);
+  assert.match(styles, /\.tsk-panel\.is-focused-surface[\s\S]{0,80}var\(--terminal-focus\)/);
 });
 
 test("demo matches the quick-add, peek, and group-toggle contracts", async () => {

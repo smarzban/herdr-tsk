@@ -22,6 +22,7 @@
   --terminal-sel: #ffffff;
   --terminal-sec: #d4d4d4;
   --terminal-meta: #8a8a8a;
+  --terminal-focus: #00ffff;
   --btn-fg: #000000;
   --grain-opacity: 0.06;
   --grain-blend: soft-light;
@@ -45,6 +46,7 @@ html[data-theme="light"] {
   --terminal-sel: #9dffb0;
   --terminal-sec: #7eb89a;
   --terminal-meta: #8a9a88;
+  --terminal-focus: #00d7d7;
   --btn-fg: #eef2ea;
   --grain-opacity: 0.045;
   --grain-blend: multiply;
@@ -377,7 +379,8 @@ html[data-theme="light"] .theme-toggle .icon-moon {
 
 .tsk-wide-split {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 1px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0;
   flex: 1 1 auto;
   min-height: 22rem;
 }
@@ -390,13 +393,40 @@ html[data-theme="light"] .theme-toggle .icon-moon {
   padding: 0 0.7rem;
 }
 
-.tsk-wide-divider {
-  width: 1px;
-  background: var(--line);
+.tsk-panel {
+  position: relative;
+  box-sizing: border-box;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  border: 1px solid var(--terminal-dim);
+  padding: 0.85rem 0 0.7rem;
 }
 
-.tsk-surface.is-focused-surface {
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--terminal-sel) 22%, transparent);
+.tsk-panel > .tsk-surface {
+  flex: 1 1 auto;
+}
+
+.tsk-panel::before {
+  position: absolute;
+  top: 0;
+  left: 0.7rem;
+  padding: 0 0.3rem;
+  transform: translateY(-55%);
+  background: var(--terminal-bg);
+  color: var(--terminal-dim);
+  content: attr(data-panel-title);
+  font-weight: 400;
+}
+
+.tsk-panel.is-focused-surface {
+  border-color: var(--terminal-focus);
+}
+
+.tsk-panel.is-focused-surface::before {
+  color: var(--terminal-focus);
+  font-weight: 700;
 }
 
 .tsk-task-surface {

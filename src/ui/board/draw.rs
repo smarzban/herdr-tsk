@@ -2,7 +2,9 @@
 
 use std::time::SystemTime;
 
-use ratatui::widgets::Paragraph;
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::Span;
+use ratatui::widgets::{Block, Paragraph};
 use ratatui::Frame;
 
 use crate::domain::{HumanStatus, TaskScope};
@@ -585,13 +587,34 @@ fn surface_geometry(area: ratatui::layout::Rect, density_width: u16) -> tier::Ti
     geometry
 }
 
+fn wide_panel_style(focused: bool) -> Style {
+    if focused {
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default()
+            .fg(Color::DarkGray)
+            .add_modifier(Modifier::DIM)
+    }
+}
+
+fn draw_wide_panel(frame: &mut Frame, area: ratatui::layout::Rect, title: &str, focused: bool) {
+    let style = wide_panel_style(focused);
+    let panel = Block::bordered()
+        .border_style(style)
+        .title(Span::styled(format!(" {title} "), style));
+    frame.render_widget(panel, area);
+}
+
 fn draw_board_impl(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap {
     let area = frame.area();
     let responsive = tier::resolve_responsive(area.width, area.height, model.focused_surface());
     let wide = responsive.presentation == tier::ResponsivePresentation::WideSplit;
-    let board_area = responsive.board;
+    let board_area = responsive.board_content();
+    let task_area = responsive.task_content();
     let shared_width = if wide {
-        responsive.board.width.min(responsive.task.width)
+        board_area.width.min(task_area.width)
     } else {
         area.width
     };
@@ -600,9 +623,22 @@ fn draw_board_impl(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap
     } else {
         tier::resolve(area.width, area.height)
     };
-    let task_geo =
-        (responsive.task.width > 0).then(|| surface_geometry(responsive.task, shared_width));
+    let task_geo = (task_area.width > 0).then(|| surface_geometry(task_area, shared_width));
     let queue_view = model.queue_view();
+    let selection_id = model.saved_task.or(model.selection_id);
+    let selected_task = selection_id.and_then(|id| model.tasks.iter().find(|task| task.id == id));
+    if wide {
+        let task_title = selected_task
+            .and_then(|task| task.number)
+            .map(|number| format!("T{number} · task"))
+            .unwrap_or_else(|| "task".to_string());
+        draw_wide_panel(
+            frame,
+            responsive.task,
+            &task_title,
+            model.focused_surface() == tier::FocusedSurface::Task,
+        );
+    }
     let scope_label = match &model.board_location {
         BoardLocation::Home { .. } => String::new(),
         BoardLocation::Project(path) => project_option_label(path.as_path()),
@@ -757,8 +793,6 @@ fn draw_board_impl(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap
         QueueOverlay::None
     };
 
-    let selection_id = model.saved_task.or(model.selection_id);
-    let selected_task = selection_id.and_then(|id| model.tasks.iter().find(|task| task.id == id));
     let preview_form = (wide && model.focused_surface() == tier::FocusedSurface::Board)
         .then(|| {
             let retained = model.form.as_ref().filter(|form| {
@@ -864,18 +898,9 @@ fn draw_board_impl(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap
         };
         let (mut board_hits, painted_list_scroll) =
             render::draw_queue_frame(frame, &board_frame, &geo, board_area);
-        let (mut task_hits, _) =
-            render::draw_queue_frame(frame, &task_frame, &task_geo, responsive.task);
+        let (mut task_hits, _) = render::draw_queue_frame(frame, &task_frame, &task_geo, task_area);
         board_hits.regions.append(&mut task_hits.regions);
         board_hits.copyable.append(&mut task_hits.copyable);
-        if let Some(divider) = responsive.divider {
-            let buffer = frame.buffer_mut();
-            for y in divider.y..divider.y.saturating_add(divider.height) {
-                buffer[(divider.x, y)]
-                    .set_symbol("│")
-                    .set_style(render::style_dim());
-            }
-        }
         (board_hits, painted_list_scroll)
     } else {
         let frame_model = QueueFrameModel {

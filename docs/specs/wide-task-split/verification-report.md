@@ -13,7 +13,7 @@ The full Rust green bar, site checks, criterion-linked tests, and isolated live 
 | --- | --- | --- |
 | AC-1 | test-backed | wide_layout_activates_at_110_and_109_stays_single_pane |
 | AC-2 | test-backed | wide_layout_activates_at_110_and_109_stays_single_pane |
-| AC-3 | test-backed | wide_geometry_reserves_one_divider_and_balances_remaining_columns |
+| AC-3 | test-backed | wide_geometry_balances_touching_allocations_without_a_gap |
 | AC-4 | test-backed | wide_split_never_paints_or_hits_outside_supported_frames |
 | AC-5 | test-backed | wide_board_selection_repaints_task_side_without_inline_peek |
 | AC-6 | test-backed | wide_board_selection_repaints_task_side_without_inline_peek |
@@ -56,6 +56,23 @@ The final two-seat verification found no regressions. Terra marked all kept find
 
 Merged `origin/main` at release `v0.4.0` without rewriting feature commits. The only textual conflict was `AGENTS.md`; the resolution keeps main's current 0.4.0 store and Ctrl-key guidance plus the new responsive board contract. Four feature fixtures were adapted to main's stabilized `DomainState::create` signature. The full Rust and site bars passed, then the rebuilt release binary received a fresh isolated terminal smoke at 110 and 109 columns. The split, active editor preservation, and same-bound editor click safety all passed.
 
+## Owner-approved task-box-only follow-up
+
+The wide-only compositor now leaves the board unboxed across its full left allocation and paints one bordered task panel in the right allocation. The task's left border is the sole visual center separator. Its border and title are cyan plus bold with task focus and dark gray plus dim with board focus; all content remains monochrome. New geometry, exact-110 rendering, task-border styling, no-selection, bounded hit/copy, and equal-content-geometry parity tests cover the presentation. Below 110 columns remains unboxed.
+
+```text
+wide_geometry_balances_touching_allocations_without_a_gap: ok
+exact_110_wide_frame_paints_unboxed_board_beside_titled_task_box: ok
+wide_task_border_style_tracks_focus_without_coloring_board: ok
+wide_no_selection_task_box_uses_plain_title_and_inert_interior: ok
+wide_hits_and_copy_regions_stay_inside_board_allocation_or_task_interior: ok
+wide_task_drag_uses_bordered_content_edges_for_autoscroll: ok
+focused_wide_task_surface_matches_single_pane_keyboard_and_mouse_outcomes: ok
+cargo test aggregate: 716 passed, 0 failed, 5 ignored across 26 result blocks
+site npm test: 6 passed, 0 failed
+site build: 10 pages built
+```
+
 ## Mechanical corroboration
 
-`sdlc-check 0.20.1 --require ledger --require verification-report`: passed with 0 findings and 0 notes before the initial push, after Review panel repairs, and after final main integration.
+`sdlc-check 0.20.1 --require ledger --require verification-report`: passed with 0 findings and 0 notes before the initial push, after Review panel repairs, after final main integration, and after the task-box-only follow-up.

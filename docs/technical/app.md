@@ -63,8 +63,10 @@ snapshots plus the error string. Only one unresolved failure (`debug_assert`).
 
 The form and its mode stay allocated through this whole window (invariant 19).
 Responsive presentation is derived for each event. At 110 usable columns or wider,
-coordinates outside the focused surface are inert except for the explicit board-row
-and task-control focus transfers. Scrollbar and drag ownership use the same surface.
+the task panel border is inert, board hits use the full left allocation, and task hits
+are translated from the inset right interior. Coordinates outside the focused surface are inert except
+for the explicit board-row and task-control focus transfers. Scrollbar and drag
+ownership use the same surface.
 `board_keyboard_intent` only hands keys to `map_board_form_key` when the resolved
 mode is a **form field** (`EditTitle` / `EditNotes` / `EditThread` / `EditScope` /
 `FormScopeDropdown`). `SaveRecovery` is not on that allowlist, so `r` / `c` / Esc

@@ -702,11 +702,20 @@ pub fn drag_content_area(model: &BoardModel, area: Rect) -> Rect {
     let responsive =
         crate::ui::tier::resolve_responsive(area.width, area.height, model.focused_surface());
     let surface = if model.focused_surface() == crate::ui::tier::FocusedSurface::Task {
-        responsive.task
+        responsive.task_content()
     } else {
-        responsive.board
+        responsive.board_content()
     };
-    let geo = crate::ui::tier::resolve(surface.width, surface.height);
+    let density_width =
+        if responsive.presentation == crate::ui::tier::ResponsivePresentation::WideSplit {
+            responsive
+                .board_content()
+                .width
+                .min(responsive.task_content().width)
+        } else {
+            surface.width
+        };
+    let geo = crate::ui::tier::resolve(density_width, surface.height).with_row_width(surface.width);
     if model.focused_surface() == crate::ui::tier::FocusedSurface::Task {
         // Approximate the shared notes/steps viewport: below a one-row header,
         // above the rule. Exact step halving is unnecessary for edge detection.

@@ -40,8 +40,10 @@ For scriptable board work, use `tsk add` and `tsk list`; read
   headers with open counts; headers consume row budget but are not selectable or
   hit-testable.
 - Standard ≥78×24, compact below, operable to 40×10. At 110 usable columns or wider,
-  the board and complete selected-task page share an equal split around one divider column.
-  Board focus starts the session; `Enter` or `→` moves to task focus, `Esc` or `←` returns
+  the board fills the left allocation and the complete selected-task page sits in a bordered
+  right allocation, with no gap. The task border is cyan and bold with task focus, dark gray
+  and dim with board focus; content stays monochrome. Board focus starts the session;
+  `Enter` or `→` moves to task focus, `Esc` or `←` returns
   to board focus from task view. Below 110, the focused surface fills the frame.
   Persisted task rows paint a dim `T<number>` prefix before the title, including task page
   and done drawer; clicking that prefix copies it. Peek relies on its parent row's prefix.
@@ -76,7 +78,8 @@ For scriptable board work, use `tsk add` and `tsk list`; read
   parks an existing-step rename; `Shift+Enter` saves the complete task-edit
   session, with `Alt+Enter` as the legacy-terminal fallback. The scope footer is
   inert until an edit has started.
-- Mono modifiers only. No color theme module.
+- Content uses mono modifiers only. The wide task panel border and title are the sole color
+  exception: task-focused cyan and bold, board-focused dark gray and dim. No color theme module.
 - No host attention poll, park/resume, linking, or dispatch recovery on the board.
 - Text wraps, never truncates: one wrap engine (`edit::wrap_text`, word-boundary,
   display-cell measured) feeds notes, task-page titles, list rows, quick-add, capture

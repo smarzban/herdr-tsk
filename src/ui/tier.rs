@@ -24,14 +24,38 @@ pub enum ResponsivePresentation {
     WideSplit,
 }
 
-/// Bounded surface rectangles and shared internal density for one usable frame.
+/// Bounded surface allocations and shared internal density for one usable frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ResponsiveGeometry {
     pub presentation: ResponsivePresentation,
     pub board: Rect,
     pub task: Rect,
-    pub divider: Option<Rect>,
     pub density: Tier,
+}
+
+impl ResponsiveGeometry {
+    /// Board renderer area. The wide board uses its complete left allocation.
+    pub fn board_content(self) -> Rect {
+        self.board
+    }
+
+    /// Task renderer area, inset only when the wide task panel chrome is present.
+    pub fn task_content(self) -> Rect {
+        if self.presentation == ResponsivePresentation::WideSplit {
+            inset_panel(self.task)
+        } else {
+            self.task
+        }
+    }
+}
+
+fn inset_panel(panel: Rect) -> Rect {
+    Rect::new(
+        panel.x.saturating_add(u16::from(panel.width > 0)),
+        panel.y.saturating_add(u16::from(panel.height > 0)),
+        panel.width.saturating_sub(2),
+        panel.height.saturating_sub(2),
+    )
 }
 
 /// Minimum usable width for the wide split view.
@@ -151,8 +175,9 @@ pub fn resolve(width: u16, height: u16) -> TierGeometry {
 
 /// Map usable dimensions and retained focus to one or two bounded surfaces.
 ///
-/// Wide split reserves one divider column, then divides the remainder equally.
-/// Both halves use the density selected by the narrower half.
+/// Wide split divides the frame into touching balanced allocations. The board uses
+/// its full allocation, the task renderer paints inside its border, and both use the
+/// density selected by the narrower content rectangle.
 pub fn resolve_responsive(width: u16, height: u16, focused: FocusedSurface) -> ResponsiveGeometry {
     if width < WIDE_SPLIT_MIN_WIDTH {
         let frame = Rect::new(0, 0, width, height);
@@ -161,29 +186,32 @@ pub fn resolve_responsive(width: u16, height: u16, focused: FocusedSurface) -> R
                 presentation: ResponsivePresentation::SingleBoard,
                 board: frame,
                 task: Rect::default(),
-                divider: None,
                 density: resolve(width, height).tier,
             },
             FocusedSurface::Task => ResponsiveGeometry {
                 presentation: ResponsivePresentation::SingleTask,
                 board: Rect::default(),
                 task: frame,
-                divider: None,
                 density: resolve(width, height).tier,
             },
         };
     }
 
-    let surface_columns = width - 1;
-    let board_width = surface_columns / 2;
-    let task_width = surface_columns - board_width;
-    let divider_x = board_width;
+    let board_width = width / 2;
+    let task_width = width - board_width;
+    let board = Rect::new(0, 0, board_width, height);
+    let task = Rect::new(board_width, 0, task_width, height);
+    let board_content = board;
+    let task_content = inset_panel(task);
     ResponsiveGeometry {
         presentation: ResponsivePresentation::WideSplit,
-        board: Rect::new(0, 0, board_width, height),
-        task: Rect::new(divider_x + 1, 0, task_width, height),
-        divider: Some(Rect::new(divider_x, 0, 1, height)),
-        density: resolve(board_width.min(task_width), height).tier,
+        board,
+        task,
+        density: resolve(
+            board_content.width.min(task_content.width),
+            board_content.height.min(task_content.height),
+        )
+        .tier,
     }
 }
 

@@ -376,9 +376,9 @@ fn hit_at(hits: &QueueHitMap, pos: Position) -> Option<QueueHitTarget> {
 pub fn focused_mouse_area(model: &BoardModel, area: Rect) -> Rect {
     let responsive = resolve_responsive(area.width, area.height, model.focused_surface());
     if model.focused_surface() == FocusedSurface::Task {
-        responsive.task
+        responsive.task_content()
     } else {
-        responsive.board
+        responsive.board_content()
     }
 }
 

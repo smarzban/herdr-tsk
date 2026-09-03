@@ -4,8 +4,9 @@ description: "View and edit one task: title, notes, thread, and scope."
 ---
 
 Below 110 usable columns, `Enter` opens the selected task full height. At 110
-usable columns or wider, the complete task page stays beside the board. `Enter`
-or `→` moves from board focus to task focus; from task view, `Esc` or `←` returns
+usable columns or wider, the complete task page stays beside the board inside a
+bordered panel titled `T<number> · task`; with no selection, its title is `task`.
+`Enter` or `→` moves from board focus to task focus; from task view, `Esc` or `←` returns
 to board focus without resetting page scroll or the step cursor.
 
 The dim `T30` prefix in the header copies that task identifier when clicked. In

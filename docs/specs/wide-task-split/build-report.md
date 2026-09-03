@@ -34,8 +34,8 @@ $ cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test &
 exit 0
 cargo test aggregate: 686 passed, 0 failed, 5 ignored across 26 result blocks
 wide_geometry_activates_at_110_and_109_stays_single: ok
-wide_geometry_reserves_one_divider_and_balances_remaining_columns: ok
-wide_geometry_uses_the_narrower_half_for_shared_density: ok
+wide_geometry_balances_touching_allocations_without_a_gap: ok
+wide_geometry_uses_narrower_content_for_shared_density: ok
 wide_geometry_is_bounded_across_supported_sizes: ok
 cargo build --release: finished release profile
 ```
@@ -156,6 +156,24 @@ Final two-seat Review panel verification reported no regressions. Terra marked e
 ## Main integration
 
 Merged `origin/main` at `v0.4.0` as `6ed7d8f`, resolved the `AGENTS.md` guidance conflict, and adapted four feature test fixtures to the stabilized domain creation signature. The complete Rust bar passed with 711 passed, 0 failed, and 5 ignored across 26 result blocks. Site tests passed 6 of 6 and built 10 pages. A fresh isolated smoke of the rebuilt release binary passed at 110 and 109 columns, including active editor preservation and same-bound row click safety.
+
+## Owner-approved task-box-only follow-up
+
+The wide compositor now lets the board use its complete left allocation and places only the task page inside a bordered right allocation. The task's left border is the sole visual center separator. This changes presentation geometry and explicit task-border focus styling only; input tables, domain behavior, persistence, and below-threshold rendering are unchanged. Fresh red and green evidence is recorded in `.agent-sdlc/briefs/wide-task-split/PR-30-boxed-chrome-report.md`.
+
+```text
+wide_geometry_balances_touching_allocations_without_a_gap: ok
+exact_110_wide_frame_paints_unboxed_board_beside_titled_task_box: ok
+wide_task_border_style_tracks_focus_without_coloring_board: ok
+wide_no_selection_task_box_uses_plain_title_and_inert_interior: ok
+wide_hits_and_copy_regions_stay_inside_board_allocation_or_task_interior: ok
+wide_task_drag_uses_bordered_content_edges_for_autoscroll: ok
+focused_wide_task_surface_matches_single_pane_keyboard_and_mouse_outcomes: ok
+cargo test aggregate: 716 passed, 0 failed, 5 ignored across 26 result blocks
+site npm test: 6 passed, 0 failed
+site build: 10 pages built
+sdlc-check 0.20.1 --require ledger --require verification-report: 0 findings, 0 notes
+```
 
 ## Final build corroboration
 

@@ -136,8 +136,11 @@ what fails if it is violated. Subsystem pages restate the subset they own.
     into `\u{00xx}` escapes. Notes markdown is view/peek only; edit is raw source.
     Peek paints the same markers then dims every span.
 
-28. **Mono modifiers only.** `ui::render::MONO_MODIFIERS`. No color theme module.
-    Tests assert buffers have no SGR color.
+28. **Monochrome content with one wide-chrome exception.** Surface content uses
+    `ui::render::MONO_MODIFIERS`. In wide split only, the task panel border and title
+    use cyan plus bold with task focus and dark gray plus dim with board focus. The
+    board has no border. No color theme module. Tests assert content cells remain
+    color-free and task chrome uses only the approved colors.
 
 29. **Frame loop is settle → paint → wait.** `board_frame` owns that order so an idle
     poll cannot skip settle. Idle merge is skipped while save recovery is pending
