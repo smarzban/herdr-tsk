@@ -1168,7 +1168,11 @@ fn apply_board_intent(
                 return Ok(IntentOutcome::None);
             }
             if model.form.as_ref().is_some_and(BoardForm::is_task) {
-                if model.focused_surface() == FocusedSurface::Board {
+                // Enter beside the rail opens the full page; on the full page (or the
+                // single-pane page) it toggles the page shut, as it always has.
+                if model.focused_surface() == FocusedSurface::Board
+                    || model.wide_stage == WideStage::Rail
+                {
                     let Some(id) = model.selected_id() else {
                         return Ok(IntentOutcome::None);
                     };

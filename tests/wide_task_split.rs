@@ -2,16 +2,22 @@
 
 use std::path::PathBuf;
 
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Modifier;
 use ratatui::Terminal;
 use tsk_tui::domain::{DomainState, HumanStatus, ProvenanceOrigin, TaskScope};
-use tsk_tui::ui::board::{resolve_responsive, WideStage, WIDE_SPLIT_MIN_WIDTH};
+use tsk_tui::ui::board::{
+    resolve_responsive, FocusedSurface, ResponsivePresentation, WideStage, WIDE_SPLIT_MIN_WIDTH,
+};
+use tsk_tui::ui::input::map_responsive_key;
 use tsk_tui::ui::render::{assert_buffer_mono, QueueHitMap, QueueHitTarget};
 use tsk_tui::ui::tier::{Tier, STANDARD_VERB_BAR_ENTRY_BUDGET};
-use tsk_tui::ui::{apply_intent, draw_board, BoardInputMode, BoardIntent, BoardModel};
+use tsk_tui::ui::{
+    apply_intent, draw_board, BoardInputMode, BoardIntent, BoardModel, IntentOutcome,
+};
 
 const REPO: &str = "/repos/tsk";
 
@@ -588,4 +594,523 @@ fn narrow_board_is_unchanged_by_the_stage_model() {
         "peek still works narrow"
     );
     assert_eq!(model.input_mode(), BoardInputMode::Normal);
+}
+
+// ---------------------------------------------------------------------------
+// T3 stage routing
+// ---------------------------------------------------------------------------
+
+fn key(code: KeyCode) -> KeyEvent {
+    KeyEvent::new(code, KeyModifiers::NONE)
+}
+
+fn wide_key(model: &BoardModel, code: KeyCode) -> Option<BoardIntent> {
+    map_responsive_key(
+        model.input_mode(),
+        model.wide_stage(),
+        ResponsivePresentation::WideSplit,
+        model.task_editing(),
+        key(code),
+    )
+}
+
+/// Press one key at a wide width: map it, apply it when it maps to something.
+fn press(domain: &mut DomainState, model: &mut BoardModel, code: KeyCode) -> Option<BoardIntent> {
+    let intent = wide_key(model, code);
+    if let Some(intent) = intent.clone() {
+        go(domain, model, intent);
+    }
+    intent
+}
+
+#[test]
+fn stage_zero_keys_slide_open_select_and_stay_put() {
+    let (mut domain, mut model) = fixture();
+    let first = model.selected_id();
+    assert_eq!(wide_key(&model, KeyCode::Left), None, "← is inert in 0");
+    assert_eq!(
+        wide_key(&model, KeyCode::Esc),
+        Some(BoardIntent::CloseLayer)
+    );
+    assert_eq!(
+        press(&mut domain, &mut model, KeyCode::Char('j')),
+        Some(BoardIntent::SelectNext)
+    );
+    assert_ne!(model.selected_id(), first);
+    assert_eq!(model.wide_stage(), WideStage::FullBoard);
+    assert_eq!(press(&mut domain, &mut model, KeyCode::Tab), None);
+    assert_eq!(model.wide_stage(), WideStage::FullBoard);
+    assert_eq!(
+        press(&mut domain, &mut model, KeyCode::Right),
+        Some(BoardIntent::StageRight)
+    );
+    assert_eq!(model.wide_stage(), WideStage::Split);
+    assert_eq!(model.focused_surface(), FocusedSurface::Board);
+
+    let (mut domain, mut model) = fixture();
+    assert_eq!(
+        press(&mut domain, &mut model, KeyCode::Enter),
+        Some(BoardIntent::OpenTaskPage)
+    );
+    assert_eq!(model.wide_stage(), WideStage::FullTask);
+    assert_eq!(model.stage_origin(), Some(WideStage::FullBoard));
+    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+}
+
+#[test]
+fn stage_a_keys_slide_both_ways_open_and_retarget_the_pane() {
+    let (mut domain, mut model) = fixture();
+    to_stage(&mut domain, &mut model, WideStage::Split);
+    let first = model.selected_id().expect("selection");
+    assert_eq!(
+        wide_key(&model, KeyCode::Esc),
+        Some(BoardIntent::CloseLayer)
+    );
+    assert_eq!(
+        press(&mut domain, &mut model, KeyCode::Char('j')),
+        Some(BoardIntent::SelectNext)
+    );
+    let second = model.selected_id().expect("moved selection");
+    assert_ne!(second, first);
+    assert_eq!(model.wide_stage(), WideStage::Split);
+    let geometry = resolve_responsive(130, 24, WideStage::Split);
+    let (rows, _) = render(&model, 130, 24);
+    assert!(column_text(&rows, geometry.task_content(), 1).contains("T15 Renew domain"));
+    assert_eq!(press(&mut domain, &mut model, KeyCode::Tab), None);
+    assert_eq!(
+        model.wide_stage(),
+        WideStage::Split,
+        "Tab is not a stage key"
+    );
+
+    assert_eq!(
+        press(&mut domain, &mut model, KeyCode::Left),
+        Some(BoardIntent::StageLeft)
+    );
+    assert_eq!(model.wide_stage(), WideStage::FullBoard);
+    to_stage(&mut domain, &mut model, WideStage::Split);
+    assert_eq!(
+        press(&mut domain, &mut model, KeyCode::Right),
+        Some(BoardIntent::StageRight)
+    );
+    assert_eq!(model.wide_stage(), WideStage::Rail);
+    assert_eq!(model.focused_surface(), FocusedSurface::Task);
+    assert_eq!(model.edit_target(), Some(second));
+    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+
+    let (mut domain, mut model) = fixture();
+    to_stage(&mut domain, &mut model, WideStage::Split);
+    assert_eq!(
+        press(&mut domain, &mut model, KeyCode::Enter),
+        Some(BoardIntent::OpenTaskPage)
+    );
+    assert_eq!(model.wide_stage(), WideStage::FullTask);
+    assert_eq!(model.stage_origin(), Some(WideStage::Split));
+}
+
+#[test]
+fn stage_g_keys_slide_open_close_and_navigate_the_page() {
+    let (mut domain, mut model) = fixture();
+    to_stage(&mut domain, &mut model, WideStage::Rail);
+    let bound = model.edit_target().expect("bound page");
+    assert_eq!(
+        press(&mut domain, &mut model, KeyCode::Char('j')),
+        Some(BoardIntent::PageScrollDown)
+    );
+    assert_eq!(model.wide_stage(), WideStage::Rail);
+    assert_eq!(
+        model.selected_id(),
+        Some(bound),
+        "j navigates the page, not the rail"
+    );
+    assert_eq!(
+        press(&mut domain, &mut model, KeyCode::Right),
+        Some(BoardIntent::StageRight)
+    );
+    assert_eq!(model.wide_stage(), WideStage::FullTask);
+    assert_eq!(model.stage_origin(), Some(WideStage::Rail));
+
+    let (mut domain, mut model) = fixture();
+    to_stage(&mut domain, &mut model, WideStage::Rail);
+    let bound = model.edit_target().expect("bound page");
+    assert_eq!(
+        press(&mut domain, &mut model, KeyCode::Left),
+        Some(BoardIntent::StageLeft)
+    );
+    assert_eq!(model.wide_stage(), WideStage::Split);
+    assert_eq!(model.focused_surface(), FocusedSurface::Board);
+    assert_eq!(model.input_mode(), BoardInputMode::Normal);
+    assert_eq!(model.edit_target(), Some(bound), "the pane stays bound");
+
+    let (mut domain, mut model) = fixture();
+    to_stage(&mut domain, &mut model, WideStage::Rail);
+    assert_eq!(
+        press(&mut domain, &mut model, KeyCode::Esc),
+        Some(BoardIntent::CloseLayer)
+    );
+    assert_eq!(model.wide_stage(), WideStage::Split);
+
+    let (mut domain, mut model) = fixture();
+    to_stage(&mut domain, &mut model, WideStage::Rail);
+    let bound = model.edit_target().expect("bound page");
+    assert_eq!(
+        press(&mut domain, &mut model, KeyCode::Enter),
+        Some(BoardIntent::OpenTaskPage)
+    );
+    assert_eq!(model.wide_stage(), WideStage::FullTask);
+    assert_eq!(model.stage_origin(), Some(WideStage::Rail));
+    assert_eq!(model.edit_target(), Some(bound));
+}
+
+#[test]
+fn stage_f_keys_return_to_the_rail_or_the_origin() {
+    for origin in [WideStage::FullBoard, WideStage::Split, WideStage::Rail] {
+        let (mut domain, mut model) = fixture();
+        to_stage(&mut domain, &mut model, origin);
+        press(&mut domain, &mut model, KeyCode::Enter);
+        assert_eq!(model.wide_stage(), WideStage::FullTask, "{origin:?}");
+        assert_eq!(
+            wide_key(&model, KeyCode::Right),
+            None,
+            "{origin:?}: → inert in F"
+        );
+        assert_eq!(
+            press(&mut domain, &mut model, KeyCode::Char('k')),
+            Some(BoardIntent::PageScrollUp)
+        );
+        assert_eq!(model.wide_stage(), WideStage::FullTask);
+        assert_eq!(
+            press(&mut domain, &mut model, KeyCode::Esc),
+            Some(BoardIntent::CloseLayer)
+        );
+        assert_eq!(model.wide_stage(), origin, "Esc returns to {origin:?}");
+        assert_eq!(model.stage_origin(), None, "origin memory clears");
+        assert_eq!(
+            model.focused_surface(),
+            origin.focused_surface(),
+            "{origin:?}"
+        );
+        if origin == WideStage::FullBoard {
+            assert_eq!(
+                model.edit_target(),
+                None,
+                "back on the bare board the page closes"
+            );
+        } else {
+            assert!(
+                model.edit_target().is_some(),
+                "{origin:?} keeps the page session"
+            );
+        }
+    }
+
+    for origin in [WideStage::FullBoard, WideStage::Split, WideStage::Rail] {
+        let (mut domain, mut model) = fixture();
+        to_stage(&mut domain, &mut model, origin);
+        press(&mut domain, &mut model, KeyCode::Enter);
+        assert_eq!(
+            press(&mut domain, &mut model, KeyCode::Left),
+            Some(BoardIntent::StageLeft)
+        );
+        assert_eq!(
+            model.wide_stage(),
+            WideStage::Rail,
+            "← from F always goes to G"
+        );
+        assert_eq!(model.stage_origin(), None);
+        assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+    }
+}
+
+#[test]
+fn enter_in_stage_f_closes_the_page_like_the_single_pane_page() {
+    let (mut domain, mut model) = fixture();
+    to_stage(&mut domain, &mut model, WideStage::Split);
+    press(&mut domain, &mut model, KeyCode::Enter);
+    assert_eq!(model.wide_stage(), WideStage::FullTask);
+    press(&mut domain, &mut model, KeyCode::Enter);
+    assert_eq!(
+        model.wide_stage(),
+        WideStage::Split,
+        "Enter toggles the page shut"
+    );
+    assert_eq!(model.stage_origin(), None);
+}
+
+#[test]
+fn stage_keys_need_a_selection() {
+    let mut domain = DomainState::new();
+    let mut model = BoardModel::from_tasks(Vec::new(), Some(PathBuf::from(REPO)));
+    for code in [KeyCode::Right, KeyCode::Enter] {
+        press(&mut domain, &mut model, code);
+        assert_eq!(model.wide_stage(), WideStage::FullBoard, "{code:?}");
+        assert_eq!(model.input_mode(), BoardInputMode::Normal);
+    }
+    assert_eq!(model.edit_target(), None);
+}
+
+#[test]
+fn stage_keys_fall_through_to_editor_semantics_while_editing() {
+    let (mut domain, mut model) = fixture();
+    to_stage(&mut domain, &mut model, WideStage::Rail);
+    go(&mut domain, &mut model, BoardIntent::BeginEditTitle);
+    assert_eq!(model.input_mode(), BoardInputMode::EditTitle);
+    assert_eq!(
+        wide_key(&model, KeyCode::Left),
+        Some(BoardIntent::EditMoveLeft)
+    );
+    assert_eq!(
+        wide_key(&model, KeyCode::Right),
+        Some(BoardIntent::EditMoveRight)
+    );
+    assert_eq!(
+        wide_key(&model, KeyCode::Esc),
+        Some(BoardIntent::CancelEdit)
+    );
+    // An edit session in view mode (add target selected) keeps the page's own Esc.
+    go(&mut domain, &mut model, BoardIntent::CancelEdit);
+    go(&mut domain, &mut model, BoardIntent::BeginEditTitle);
+    for _ in 0..8 {
+        if model.input_mode() == BoardInputMode::TaskPage {
+            break;
+        }
+        go(&mut domain, &mut model, BoardIntent::FormFocusNext);
+    }
+    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+    assert!(model.task_editing());
+    assert_eq!(wide_key(&model, KeyCode::Left), None);
+    assert_eq!(
+        wide_key(&model, KeyCode::Esc),
+        Some(BoardIntent::CloseLayer)
+    );
+    press(&mut domain, &mut model, KeyCode::Esc);
+    assert!(!model.task_editing(), "Esc cancels the session first");
+    assert_eq!(
+        model.wide_stage(),
+        WideStage::Rail,
+        "and leaves the stage alone"
+    );
+}
+
+#[test]
+fn narrow_routes_are_unchanged_by_the_slider() {
+    let (mut domain, mut model) = fixture();
+    let narrow = |model: &BoardModel, code| {
+        map_responsive_key(
+            model.input_mode(),
+            model.wide_stage(),
+            ResponsivePresentation::SingleBoard,
+            model.task_editing(),
+            key(code),
+        )
+    };
+    assert_eq!(
+        narrow(&model, KeyCode::Right),
+        Some(BoardIntent::PeekDetail)
+    );
+    assert_eq!(
+        narrow(&model, KeyCode::Left),
+        Some(BoardIntent::CollapseDetail)
+    );
+    assert_eq!(
+        narrow(&model, KeyCode::Enter),
+        Some(BoardIntent::OpenTaskPage)
+    );
+    go(&mut domain, &mut model, BoardIntent::OpenTaskPage);
+    let page = |model: &BoardModel, code| {
+        map_responsive_key(
+            model.input_mode(),
+            model.wide_stage(),
+            ResponsivePresentation::SingleTask,
+            model.task_editing(),
+            key(code),
+        )
+    };
+    assert_eq!(page(&model, KeyCode::Left), None);
+    assert_eq!(page(&model, KeyCode::Right), None);
+    assert_eq!(page(&model, KeyCode::Esc), Some(BoardIntent::CloseLayer));
+    go(&mut domain, &mut model, BoardIntent::CloseLayer);
+    assert_eq!(model.input_mode(), BoardInputMode::Normal);
+    assert_eq!(model.edit_target(), None);
+    assert_eq!(model.wide_stage(), WideStage::FullBoard);
+}
+
+#[test]
+fn shrinking_and_growing_keeps_every_stage_and_its_session() {
+    let long = "long notes ".repeat(400);
+    for stage in STAGES {
+        let mut domain = DomainState::new();
+        domain
+            .create(
+                "resize survivor",
+                Some(long.clone()),
+                TaskScope::Global,
+                ProvenanceOrigin::Manual,
+                None,
+            )
+            .expect("create survivor");
+        domain
+            .create(
+                "other row",
+                None,
+                TaskScope::Global,
+                ProvenanceOrigin::Manual,
+                None,
+            )
+            .expect("create other");
+        let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(REPO)));
+        let survivor = domain
+            .tasks()
+            .iter()
+            .find(|task| task.title == "resize survivor")
+            .expect("survivor")
+            .id;
+        let index = model
+            .visible_ids()
+            .iter()
+            .position(|&id| id == survivor)
+            .expect("survivor row");
+        go(&mut domain, &mut model, BoardIntent::SelectIndex(index));
+        to_stage(&mut domain, &mut model, stage);
+        let _ = render(&model, 130, 24);
+        if stage.focused_surface() == FocusedSurface::Task {
+            go(&mut domain, &mut model, BoardIntent::PageWheelScrollDown);
+            assert!(
+                model.page_scroll() > 0,
+                "{stage:?}: fixture exercises page scroll"
+            );
+        }
+        let before = (
+            model.wide_stage(),
+            model.focused_surface(),
+            model.selected_id(),
+            model.edit_target(),
+            model.page_scroll(),
+            model.input_mode(),
+        );
+
+        let (narrow_rows, _) = render(&model, 109, 24);
+        let narrow = resolve_responsive(109, 24, stage);
+        match stage.focused_surface() {
+            FocusedSurface::Board => {
+                assert_eq!(narrow.presentation, ResponsivePresentation::SingleBoard);
+                assert!(narrow_rows[1].contains("desk  ·  projects"), "{stage:?}");
+            }
+            FocusedSurface::Task => {
+                assert_eq!(narrow.presentation, ResponsivePresentation::SingleTask);
+                assert!(
+                    !narrow_rows.join("\n").contains("other row"),
+                    "{stage:?}: the page fills the frame"
+                );
+            }
+        }
+        assert_eq!(
+            (
+                model.wide_stage(),
+                model.focused_surface(),
+                model.selected_id(),
+                model.edit_target(),
+                model.page_scroll(),
+                model.input_mode(),
+            ),
+            before,
+            "{stage:?}: shrink keeps the stage and session"
+        );
+
+        let (wide_rows, _) = render(&model, 130, 24);
+        assert_eq!(
+            (
+                model.wide_stage(),
+                model.focused_surface(),
+                model.selected_id(),
+                model.edit_target(),
+                model.page_scroll(),
+                model.input_mode(),
+            ),
+            before,
+            "{stage:?}: grow keeps the stage and session"
+        );
+        let geometry = resolve_responsive(130, 24, stage);
+        if geometry.task.width > 0 {
+            assert!(
+                column_text(&wide_rows, geometry.task_content(), 1).contains("resize survivor"),
+                "{stage:?}"
+            );
+        }
+        if geometry.board.width > 0 {
+            assert!(
+                region_text(&wide_rows, geometry.board).contains("resize survivor"),
+                "{stage:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn shrinking_during_an_edit_keeps_mode_draft_cursor_and_binding() {
+    let (mut domain, mut model) = fixture();
+    to_stage(&mut domain, &mut model, WideStage::Rail);
+    go(&mut domain, &mut model, BoardIntent::BeginEditTitle);
+    go(&mut domain, &mut model, BoardIntent::EditInsert('!'));
+    go(&mut domain, &mut model, BoardIntent::EditMoveLeft);
+    let before = (
+        model.wide_stage(),
+        model.input_mode(),
+        model.edit_target(),
+        model.edit_buffer().to_string(),
+        model.edit_cursor(),
+    );
+    assert!(model.task_session_dirty());
+    let (narrow_rows, _) = render(&model, 109, 24);
+    assert!(narrow_rows.join("\n").contains(&before.3));
+    let _ = render(&model, 130, 24);
+    assert_eq!(
+        (
+            model.wide_stage(),
+            model.input_mode(),
+            model.edit_target(),
+            model.edit_buffer().to_string(),
+            model.edit_cursor(),
+        ),
+        before
+    );
+}
+
+#[test]
+fn repeated_threshold_crossings_keep_every_stage_live() {
+    for stage in STAGES {
+        let (mut domain, mut model) = fixture();
+        to_stage(&mut domain, &mut model, stage);
+        for width in [109u16, 110].into_iter().cycle().take(20) {
+            let (rows, hits) = render(&model, width, 24);
+            assert!(!rows.is_empty());
+            assert!(!hits.regions.is_empty(), "{stage:?} at {width}");
+        }
+        assert_eq!(model.wide_stage(), stage);
+    }
+}
+
+#[test]
+fn stage_changes_never_mutate_the_domain() {
+    let (mut domain, mut model) = fixture();
+    let before = domain.clone();
+    for intent in [
+        BoardIntent::StageRight,
+        BoardIntent::StageRight,
+        BoardIntent::StageRight,
+        BoardIntent::StageLeft,
+        BoardIntent::StageLeft,
+        BoardIntent::OpenTaskPage,
+        BoardIntent::CloseLayer,
+        BoardIntent::StageLeft,
+    ] {
+        let outcome = apply_intent(&mut domain, &mut model, intent, None).expect("stage intent");
+        assert_eq!(outcome, IntentOutcome::None);
+    }
+    assert_eq!(model.wide_stage(), WideStage::FullBoard);
+    assert_eq!(domain.tasks(), before.tasks());
+    for width in [109u16, 110, 130, 109] {
+        let _ = render(&model, width, 24);
+    }
+    assert_eq!(domain.tasks(), before.tasks());
 }
