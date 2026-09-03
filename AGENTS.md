@@ -39,12 +39,19 @@ For scriptable board work, use `tsk add` and `tsk list`; read
   project-scoped · done drawer (`z`). Scoped ON DECK thread blocks paint dim `#name`
   headers with open counts; headers consume row budget but are not selectable or
   hit-testable.
-- Standard ≥78×24, compact below, operable to 40×10. At 110 usable columns or wider,
-  the board fills the left allocation and the complete selected-task page sits in a bordered
-  right allocation, with no gap. The task border is cyan and bold with task focus, dark gray
-  and dim with board focus; content stays monochrome. Board focus starts the session;
-  `Enter` or `→` moves to task focus, `Esc` or `←` returns
-  to board focus from task view. Below 110, the focused surface fills the frame.
+- Standard ≥78×24, compact below, operable to 40×10. At 110 usable columns or wider the
+  board is a four-stage slider, and focus is the stage: **0** board full width · **A** board
+  `floor(w*0.4)` beside the task page (board focus) · **G** a dim 32-column rail beside the
+  page (task focus) · **F** page full width. One dim `│` rule column and one pad cell sit
+  between the columns; no box, no border, no colour anywhere. Bare `→` / `←` slide the stage,
+  `Enter` opens F and remembers the stage it left, `Esc` from F returns there and from G parks
+  the page beside the board. `→` never peeks at wide widths. The session opens in stage 0; the
+  stage is never persisted and survives resizes (0/A render the single board below 110, G/F
+  the single task page). Exactly one footer spans the frame: rule, status row (with a dim
+  stage crumb on the right), verb bar following focus. The task column paints a header rule
+  on the selector row (`T12 title ──── started · tsk`, DIM in A, BOLD in G/F; the slot reads
+  `editing <field>` or `unsaved`) instead of the in-page header. Below 110, nothing changes:
+  the focused surface fills the frame.
   Persisted task rows paint a dim `T<number>` prefix before the title, including task page
   and done drawer; clicking that prefix copies it. Peek relies on its parent row's prefix.
   Drafts without a number paint none.
@@ -78,8 +85,7 @@ For scriptable board work, use `tsk add` and `tsk list`; read
   parks an existing-step rename; `Shift+Enter` saves the complete task-edit
   session, with `Alt+Enter` as the legacy-terminal fallback. The scope footer is
   inert until an edit has started.
-- Content uses mono modifiers only. The wide task panel border and title are the sole color
-  exception: task-focused cyan and bold, board-focused dark gray and dim. No color theme module.
+- Content and chrome use mono modifiers only, at every width. No color theme module.
 - No host attention poll, park/resume, linking, or dispatch recovery on the board.
 - Text wraps, never truncates: one wrap engine (`edit::wrap_text`, word-boundary,
   display-cell measured) feeds notes, task-page titles, list rows, quick-add, capture

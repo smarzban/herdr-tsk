@@ -49,19 +49,31 @@ task. Agents do not auto-complete work.
 `ctrl+o` reopens. `ctrl+b` toggles blocked. **review** is set from the command
 palette (`:` → `set status: review`), not from a dedicated letter.
 
-## Wide split and focus
+## Wide stage slider
 
-At 110 usable columns or wider, the board fills the left allocation without a border
-and the selected complete task page sits in a bordered right allocation. There is no
-gap: the task's left border is the sole visual center separator. That task border and
-title are cyan plus bold with task focus and dark gray plus dim with board focus. Board focus starts the session.
-`Enter` or `→` moves to task focus; from task view, `Esc` or `←` returns to board focus. Active editors
-keep their normal key handling.
+At 110 usable columns or wider the board is a four-stage slider. Focus and geometry
+are the same thing:
 
-Changing board selection updates the task side without a wide peek. Click a board
-row to select it and return board focus. Click an interactive task-side control to
-focus the task before running that control. Below 110 columns, only the focused
-surface fills the pane, and resizing preserves focus and scroll positions.
+| Stage | Left | Right | Focus |
+| --- | --- | --- | --- |
+| 0 | board, full width | none | board |
+| A | board, 40% | task page | board |
+| G | dim rail, 32 columns | task page | task |
+| F | none | task page, full width | task |
+
+One dim `│` rule separates the columns. There is no box and no colour: the task
+header rule (`T12 title ──── started · tsk`) is dim in A and bold in G and F, and its
+right slot reads `editing <field>` or `unsaved` when that applies. One footer spans
+the frame: the rule, the status row with a dim stage crumb on the right, and the verb
+bar for whichever side owns focus. The session opens in stage 0; the stage is never
+saved.
+
+`→` and `←` slide the stage. `Enter` opens F and remembers where it came from; `Esc`
+returns there. Changing the selection in A retargets the pane, with no peek. Click a
+board or rail row to select it in place; double-click to open F. Click inside the
+stage A task column to move to G and run the control you clicked. Below 110 columns
+the stage is kept: 0 and A show the board, G and F show the page, and growing back
+restores the same view.
 
 ## Peek and mouse
 
@@ -77,7 +89,7 @@ Click the same row again to close. A fast double-click opens the
 
 | Pane | What you get |
 | --- | --- |
-| at least 110 columns | wide split: unboxed board and bordered complete task page |
+| at least 110 columns | wide stage slider: board, board beside page, rail beside page, or page |
 | at least 78×24 and below 110 columns | standard single-pane board: section headers, row meta, full verb legend |
 | smaller | compact: glyph, `T` identifier, and title; help, palette, and the task page take the full pane |
 | down to 40×10 | still operable |

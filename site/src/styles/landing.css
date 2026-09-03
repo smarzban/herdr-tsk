@@ -22,7 +22,6 @@
   --terminal-sel: #ffffff;
   --terminal-sec: #d4d4d4;
   --terminal-meta: #8a8a8a;
-  --terminal-focus: #00ffff;
   --btn-fg: #000000;
   --grain-opacity: 0.06;
   --grain-blend: soft-light;
@@ -46,7 +45,6 @@ html[data-theme="light"] {
   --terminal-sel: #9dffb0;
   --terminal-sec: #7eb89a;
   --terminal-meta: #8a9a88;
-  --terminal-focus: #00d7d7;
   --btn-fg: #eef2ea;
   --grain-opacity: 0.045;
   --grain-blend: multiply;
@@ -379,10 +377,71 @@ html[data-theme="light"] .theme-toggle .icon-moon {
 
 .tsk-wide-split {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 0;
   flex: 1 1 auto;
   min-height: 22rem;
+}
+
+/* Stage A: board 40%, one rule column, task page. Stage G: 32-column rail beside the page. */
+.tsk-wide-split.is-split {
+  grid-template-columns: minmax(0, 2fr) 1px minmax(0, 3fr);
+}
+
+.tsk-wide-split.is-rail {
+  grid-template-columns: 32ch 1px minmax(0, 1fr);
+}
+
+.tsk-wide-split.is-page {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.tsk-rule-column {
+  background: var(--line);
+}
+
+.tsk-rail {
+  opacity: 0.7;
+}
+
+.tsk-rail .tsk-row.is-sel {
+  background: transparent;
+}
+
+.tsk-task-column {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.tsk-task-header {
+  display: flex;
+  gap: 0.35rem;
+  overflow: hidden;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  padding-top: 0.15rem;
+}
+
+.tsk-task-header .rule {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: clip;
+}
+
+.tsk-task-header.is-bold .sec {
+  font-weight: 700;
+  color: var(--terminal-fg);
+}
+
+.tsk-status-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.tsk-stage-hint {
+  white-space: nowrap;
 }
 
 .tsk-surface {
@@ -391,42 +450,6 @@ html[data-theme="light"] .theme-toggle .icon-moon {
   min-height: 0;
   flex-direction: column;
   padding: 0 0.7rem;
-}
-
-.tsk-panel {
-  position: relative;
-  box-sizing: border-box;
-  display: flex;
-  min-width: 0;
-  min-height: 0;
-  flex-direction: column;
-  border: 1px solid var(--terminal-dim);
-  padding: 0.85rem 0 0.7rem;
-}
-
-.tsk-panel > .tsk-surface {
-  flex: 1 1 auto;
-}
-
-.tsk-panel::before {
-  position: absolute;
-  top: 0;
-  left: 0.7rem;
-  padding: 0 0.3rem;
-  transform: translateY(-55%);
-  background: var(--terminal-bg);
-  color: var(--terminal-dim);
-  content: attr(data-panel-title);
-  font-weight: 400;
-}
-
-.tsk-panel.is-focused-surface {
-  border-color: var(--terminal-focus);
-}
-
-.tsk-panel.is-focused-surface::before {
-  color: var(--terminal-focus);
-  font-weight: 700;
 }
 
 .tsk-task-surface {

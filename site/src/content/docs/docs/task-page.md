@@ -4,14 +4,17 @@ description: "View and edit one task: title, notes, thread, and scope."
 ---
 
 Below 110 usable columns, `Enter` opens the selected task full height. At 110
-usable columns or wider, the complete task page stays beside the board inside a
-bordered panel titled `T<number> · task`; with no selection, its title is `task`.
-`Enter` or `→` moves from board focus to task focus; from task view, `Esc` or `←` returns
-to board focus without resetting page scroll or the step cursor.
+usable columns or wider the page is the right column of the
+[stage slider](/docs/board/#wide-stage-slider): a preview beside the board in stage
+A, the focused page beside a dim rail in G, or the whole frame in F. Its header is a
+rule on the selector row, `T12 title ──── started · tsk`, dim in A and bold in G and F.
+With no selection the column reads `no task` and is inert. `←` from G parks the page
+beside the board without resetting page scroll or the step cursor; `→` brings it back.
 
-The dim `T30` prefix in the header copies that task identifier when clicked. In
-wide split, clicking any interactive task-side control focuses the task before
-running the same action it has in the single-pane page.
+The dim `T30` prefix in the header copies that task identifier when clicked. A click
+inside the stage A task column moves to G before running the same action the control
+has in the single-pane page. The footer meta is `created … · updated …`; the project
+lives in the header slot.
 
 It is view-first. Nothing is in edit mode until you ask. `ctrl+e` edits the title,
 `ctrl+n` edits notes. In view, Tab and Shift+Tab loop only through stored steps and
@@ -67,8 +70,8 @@ an L-shaped `└` connector.
 
 ## Peek vs page
 
-Below 110 columns, `→` or a row click peeks up to five wrapped note lines. In
-wide split, selection updates the complete task side and no inline peek opens.
+Below 110 columns, `→` or a row click peeks up to five wrapped note lines. At wide
+widths, selection updates the task column and no inline peek opens.
 
 Text on the page wraps. It does not truncate.
 

@@ -92,7 +92,7 @@ domain + session; the query is a pure function of tasks; paint consumes both.
 3. **Local, concurrent writers.** Board + capture overlay + `tsk add` share one JSON file. The lock plus per-task revision (not wall clock) is the concurrency model. Same-task concurrent edits refuse rather than last-write-win.
 4. **Terminal as a hostile display.** Task titles and notes are untrusted. C0/C1 never reach the emulator as controls (`ui::terminal_text`). Text wraps; it does not truncate (chrome ellipsis is a different budget).
 5. **Operable in a herdr split.** Standard layout at ≥78×24 (typical split width), compact below, no panic to 40×10. Sections are computed, never navigated.
-6. **Monochrome content with explicit wide task chrome.** Content uses bold, dim, underline, and reverse without color. The wide task panel border and title alone use cyan plus bold with task focus and dark gray plus dim with board focus; the board stays unboxed. No color theme module. Markdown on notes remains a styled subset of the mono modifiers.
+6. **Monochrome everywhere.** Content and chrome use bold, dim, underline, and reverse without color, at every width. The wide layout is a four-stage slider (board · board beside page · dim rail beside page · page) separated by one dim rule column; focus shows through the stage and the task header's weight, never through colour. No color theme module. Markdown on notes remains a styled subset of the mono modifiers.
 7. **Mutating keys are chording.** Bare letters do nothing on the board so a focused pane cannot complete or delete work. Nav, peek, `Enter`, `P`, `1`/`2`/`3`, `z`, `:`, `?`, `+`, `Esc` stay bare.
 8. **v1 cuts dispatch.** The board has no host attention poll, park/resume, linking, or dispatch recovery.
 

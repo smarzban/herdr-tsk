@@ -136,11 +136,18 @@ what fails if it is violated. Subsystem pages restate the subset they own.
     into `\u{00xx}` escapes. Notes markdown is view/peek only; edit is raw source.
     Peek paints the same markers then dims every span.
 
-28. **Monochrome content with one wide-chrome exception.** Surface content uses
-    `ui::render::MONO_MODIFIERS`. In wide split only, the task panel border and title
-    use cyan plus bold with task focus and dark gray plus dim with board focus. The
-    board has no border. No color theme module. Tests assert content cells remain
-    color-free and task chrome uses only the approved colors.
+28. **Monochrome everywhere.** Every surface uses `ui::render::MONO_MODIFIERS` only,
+    wide chrome included: the stage slider is unboxed, its rule column and footer are
+    dim, focus shows through stage geometry and the task header's weight (DIM in A,
+    BOLD in G/F), never through colour. No color theme module. `assert_buffer_mono`
+    holds at every width and stage.
+
+28a. **The wide stage is session state and the only focus source.** `BoardModel`
+    holds one `WideStage`; the focused surface derives from it and it is never
+    persisted. Stage changes never mutate the domain. Below 110 columns the stage is
+    kept (0/A render the single board, G/F the single task page) and every narrow
+    route is unchanged. Exactly one footer paints at wide widths, and the task header
+    rule replaces the in-page header in A, G and F.
 
 29. **Frame loop is settle → paint → wait.** `board_frame` owns that order so an idle
     poll cannot skip settle. Idle merge is skipped while save recovery is pending

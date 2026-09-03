@@ -36,7 +36,7 @@ test("demo rows lead with copyable T task identifiers", async () => {
   assert.doesNotMatch(demo, /#\$\{task\.number\}/);
 });
 
-test("docs and demo describe wide surface focus and threshold", async () => {
+test("docs and demo describe the wide stage slider and threshold", async () => {
   const board = await read("../src/content/docs/docs/board.md");
   const keys = await read("../src/content/docs/docs/keys.md");
   const taskPage = await read("../src/content/docs/docs/task-page.md");
@@ -44,20 +44,27 @@ test("docs and demo describe wide surface focus and threshold", async () => {
   const styles = await read("../src/styles/landing.css");
 
   assert.match(board, /110 usable columns/);
-  assert.match(board, /`Enter` or `→`[\s\S]{0,40}task focus/);
-  assert.match(board, /`Esc` or `←`[\s\S]{0,40}board focus/);
-  assert.match(keys, /wide split/i);
+  assert.match(board, /four-stage slider/);
+  assert.match(board, /\| G \| dim rail, 32 columns \| task page \| task \|/);
+  assert.doesNotMatch(board, /bordered|cyan/);
+  assert.match(keys, /Wide stage slider/);
+  assert.match(keys, /\| F \| nothing \| → G \|/);
+  assert.doesNotMatch(keys, /cyan|border/);
   assert.match(taskPage, /110 usable columns/);
+  assert.match(taskPage, /T12 title ──── started · tsk/);
+  assert.doesNotMatch(taskPage, /bordered panel/);
   assert.match(demo, /const WIDE_SPLIT_MIN_COLUMNS = 110;/);
-  assert.match(demo, /surfaceFocus: "board"/);
-  assert.match(demo, /state\.surfaceFocus = "task"/);
-  assert.match(demo, /state\.surfaceFocus = "board"/);
-  assert.match(styles, /\.tsk-wide-split/);
-  assert.doesNotMatch(demo, /data-panel-title="board"/);
-  assert.match(demo, /data-panel-title="T\$\{task\.number\} · task"/);
-  assert.doesNotMatch(demo, /tsk-wide-divider/);
-  assert.match(styles, /grid-template-columns: minmax\(0, 1fr\) minmax\(0, 1fr\)/);
-  assert.match(styles, /\.tsk-panel\.is-focused-surface[\s\S]{0,80}var\(--terminal-focus\)/);
+  assert.match(demo, /stage: "board",/);
+  assert.match(demo, /function stageRight\(\)/);
+  assert.match(demo, /function stageLeft\(\)/);
+  assert.match(demo, /state\.stageOrigin = state\.stage;/);
+  assert.match(demo, /class="tsk-wide-split is-rail"/);
+  assert.match(demo, /tsk-rule-column/);
+  assert.match(demo, /board ▸ task    → task · ← close · enter open/);
+  assert.doesNotMatch(demo, /surfaceFocus|data-panel-title|is-focused-surface/);
+  assert.match(styles, /\.tsk-wide-split\.is-split \{\s*grid-template-columns: minmax\(0, 2fr\) 1px minmax\(0, 3fr\);/);
+  assert.match(styles, /\.tsk-wide-split\.is-rail \{\s*grid-template-columns: 32ch 1px/);
+  assert.doesNotMatch(styles, /terminal-focus|tsk-panel/);
 });
 
 test("demo matches the quick-add, peek, and group-toggle contracts", async () => {

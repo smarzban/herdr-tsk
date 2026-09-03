@@ -9,30 +9,46 @@ The full Rust green bar, site checks, criterion-linked tests, and isolated live 
 
 ## Proof map
 
+Refreshed for the stage-slider rework (`stage-slider-rework.md`). Unless noted, tests live in
+`tests/wide_task_split.rs`.
+
 | Criterion | Type | Proof |
 | --- | --- | --- |
-| AC-1 | test-backed | wide_layout_activates_at_110_and_109_stays_single_pane |
-| AC-2 | test-backed | wide_layout_activates_at_110_and_109_stays_single_pane |
-| AC-3 | test-backed | wide_geometry_balances_touching_allocations_without_a_gap |
-| AC-4 | test-backed | wide_split_never_paints_or_hits_outside_supported_frames |
-| AC-5 | test-backed | wide_board_selection_repaints_task_side_without_inline_peek |
-| AC-6 | test-backed | wide_board_selection_repaints_task_side_without_inline_peek |
-| AC-7 | test-backed | wide_board_enter_and_right_focus_the_same_selected_task |
-| AC-8 | test-backed | task_view_escape_and_left_return_focus_without_resetting_page_session |
-| AC-9 | test-backed | focused_wide_task_surface_matches_single_pane_keyboard_and_mouse_outcomes |
-| AC-10 | test-backed | wide_board_task_click_selects_and_returns_board_focus |
-| AC-11 | test-backed | wide_task_control_click_focuses_task_before_dispatch |
-| AC-12 | test-backed | shrinking_with_board_focus_preserves_selection_and_list_scroll |
-| AC-13 | test-backed | shrinking_with_task_focus_preserves_page_scroll_and_session |
-| AC-14 | test-backed | shrinking_during_task_edit_preserves_mode_draft_cursor_and_binding |
-| AC-15 | test-backed | growing_back_to_wide_restores_focus_and_page_session |
-| AC-16 | test-backed | dirty_wide_task_session_refuses_keyboard_task_switch, dirty_wide_task_session_refuses_mouse_task_switch_and_keeps_binding |
-| AC-17 | test-backed | dirty_switch_refusal_preserves_draft_and_clears_after_save, dirty_switch_refusal_clears_after_cancel |
-| AC-18 | test-backed | wide_split_without_selection_paints_inert_task_empty_state |
-| AC-19 | test-backed | repeated_threshold_resizes_keep_board_loop_live |
-| AC-20 | test-backed | threshold_crossings_without_task_verbs_leave_domain_unchanged |
+| AC-1 | test-backed | wide_stage_geometry_has_exact_allocations_and_preserves_narrow_mapping (src/ui/tier.rs), stage_a_board_keeps_its_meta_column |
+| AC-2 | test-backed | shrinking_and_growing_keeps_every_stage_and_its_session, narrow_board_is_unchanged_by_the_stage_model |
+| AC-3 | test-backed | wide_stage_geometry_has_exact_allocations_and_preserves_narrow_mapping, wide_stage_geometry_is_bounded_and_exhausts_every_column (src/ui/tier.rs), stage_a_board_keeps_its_meta_column |
+| AC-4 | test-backed | wide_hits_stay_inside_their_column_or_the_footer, wide_frames_are_mono_at_every_stage_width_and_height |
+| AC-5 | test-backed | stage_a_keys_slide_both_ways_open_and_retarget_the_pane, board_row_click_selects_without_changing_stage_or_peeking |
+| AC-6 | test-backed | board_row_click_selects_without_changing_stage_or_peeking, stage_zero_keys_slide_open_select_and_stay_put |
+| AC-7 | test-backed | stage_zero_keys_slide_open_select_and_stay_put, stage_a_keys_slide_both_ways_open_and_retarget_the_pane, app_keyboard_route_owns_stage_slider_keys (src/app.rs) |
+| AC-8 | test-backed | stage_g_keys_slide_open_close_and_navigate_the_page, stage_f_keys_return_to_the_rail_or_the_origin, stage_keys_fall_through_to_editor_semantics_while_editing |
+| AC-9 | test-backed | task_surface_controls_in_g_and_f_match_the_single_pane_page, enter_in_stage_f_closes_the_page_like_the_single_pane_page |
+| AC-10 | test-backed | board_row_click_selects_without_changing_stage_or_peeking, rail_row_click_retargets_the_page_in_place, row_double_click_opens_the_full_page_and_records_the_origin |
+| AC-11 | test-backed | stage_a_task_column_click_moves_to_g_then_dispatches_against_the_painted_frame, app_mouse_click_moves_stage_a_to_g_before_dispatching_same_control, app_task_scrollbar_moves_stage_refreshes_bound_and_routes_page_scroll (src/app.rs) |
+| AC-12 | test-backed | shrinking_and_growing_keeps_every_stage_and_its_session |
+| AC-13 | test-backed | shrinking_and_growing_keeps_every_stage_and_its_session |
+| AC-14 | test-backed | shrinking_during_an_edit_keeps_mode_draft_cursor_and_binding |
+| AC-15 | test-backed | shrinking_and_growing_keeps_every_stage_and_its_session |
+| AC-16 | test-backed | dirty_draft_refuses_keyboard_retarget_in_stage_a, dirty_draft_refuses_rail_row_click_and_keeps_the_editor, changed_thread_and_scope_drafts_refuse_retarget_and_paint_unsaved |
+| AC-17 | test-backed | dirty_refusal_clears_after_save_and_the_pane_retargets_again, dirty_refusal_clears_after_cancel, dirty_draft_slides_left_to_a_and_right_back_to_g_untouched |
+| AC-18 | test-backed | empty_pane_paints_no_task_header_and_is_inert, stage_a_task_column_click_without_selection_is_inert, stage_keys_need_a_selection |
+| AC-19 | test-backed | repeated_threshold_crossings_keep_every_stage_live, repeated_threshold_resizes_keep_board_loop_live (tests/queue_board_loop.rs) |
+| AC-20 | test-backed | stage_changes_never_mutate_the_domain, threshold_crossings_without_task_verbs_leave_domain_unchanged (tests/queue_board_loop.rs) |
+| AC-21 | test-backed | stage_zero_keys_slide_open_select_and_stay_put, stage_a_keys_slide_both_ways_open_and_retarget_the_pane, stage_g_keys_slide_open_close_and_navigate_the_page, stage_f_keys_return_to_the_rail_or_the_origin, stage_keys_need_a_selection, narrow_routes_are_unchanged_by_the_slider |
+| AC-22 | test-backed | wide_paints_exactly_one_footer_at_every_stage, task_column_header_replaces_the_in_pane_header_with_stage_weight, status_row_crumb_and_keys_follow_the_stage, status_row_refusal_wins_over_the_crumb_then_the_keys, status_row_shows_editor_keys_while_an_editor_is_active, stage_zero_and_full_task_render_the_standard_tier_at_130x24 |
+| AC-23 | test-backed | wide_frames_are_mono_at_every_stage_width_and_height (and every `render` call in the suite asserts mono) |
+| AC-24 | test-backed | rail_wraps_titles_with_indent_four_and_dims_every_cell |
 
-## Fresh PR-boundary verification
+## Stage-slider rework
+
+The boxed 50/50 design was replaced by the four-stage slider (commits `feat: paint the wide
+stage slider chrome` through `docs: describe the wide stage slider`). `tests/wide_task_split.rs`
+was rewritten (44 tests), the three `src/app.rs` focus tests were rewritten for stages, and
+`tests/queue_board_loop.rs` / `tests/queue_board_mouse.rs` wide fixtures were adapted. Narrow
+goldens were not regenerated. Live herdr smoke of the rework was not run by the implementer;
+the sections below describe the earlier boxed design's verification.
+
+## Fresh PR-boundary verification (boxed design, superseded)
 
 ```text
 $ cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && cargo build --release && cd site && npm ci && npm test && npm run build

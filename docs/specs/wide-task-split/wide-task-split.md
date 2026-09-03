@@ -24,6 +24,12 @@ At widths below 110, exactly one surface fills the frame. Shrinking keeps whiche
 
 ## Acceptance Criteria
 
+> Superseded in part by [stage-slider-rework.md](stage-slider-rework.md): geometry, chrome,
+> focus signalling and key/mouse routing follow the four-stage slider (0 · A · G · F). AC-7,
+> AC-8, AC-10 and AC-11 read through that document's key and mouse tables; AC-3 and AC-21 to
+> AC-24 below state the slider's own contract. Dirty-edit protection (AC-14 to AC-17), resize
+> continuity (AC-12, 13, 15, 19, 20) and no domain mutation from layout stay as written.
+
 For AC-9, **the same outcome** means that, from the same task, task-page session state, and task-surface width and height, an input produces the same task-page intent, domain change, page-session transition, wrapping, and text inside the task surface. The focused-surface marker and the layout-only return from task view to the board are excluded.
 
 ### Layout
@@ -32,7 +38,7 @@ For AC-9, **the same outcome** means that, from the same task, task-page session
 
 **AC-2** At 109 usable columns, only the focused surface renders. *(Verification type: **test-backed**: unit)*
 
-**AC-3** Wide split view divides all usable columns between touching left and right allocations whose widths differ by at most one column, with no gap; the board uses the full left allocation and the task's left border is the sole visual center separator. *(Verification type: **test-backed**: property)*
+**AC-3** Wide stages A and G divide all usable columns between a left column, exactly one rule column painting `│`, and a task column whose first cell is a pad; there is no box, no border ring, and no gap. Stage A's left column is `floor(w * 0.4)` wide, stage G's rail is 32. *(Verification type: **test-backed**: property)*
 
 **AC-4** At every width of at least 110 columns and every supported height of at least 10 rows, wide split view paints entirely within the frame. *(Verification type: **test-backed**: property)*
 
@@ -74,6 +80,16 @@ For AC-9, **the same outcome** means that, from the same task, task-page session
 
 **AC-20** Crossing the 110-column threshold without invoking a task verb produces no domain mutation. *(Verification type: **test-backed**: integration)*
 
+### Stage slider
+
+**AC-21** At 110 usable columns or wider the board is a four-stage slider whose stage is the focus owner: `FullBoard` (board, full width), `Split` (board beside the task page, board focus), `Rail` (dim 32-column rail beside the page, task focus), `FullTask` (page, full width). Bare `→` / `←` move one stage (inert at the ends), `Enter` from 0, A or G opens F and records the origin, `Esc` from F returns there and from G returns to A, `←` from F always goes to G, `Tab` is never a stage key, and stages A, G and F cannot be entered without a selected task. The stage is session-only, opens at `FullBoard`, and survives threshold crossings. *(Verification type: **test-backed**: unit)*
+
+**AC-22** At wide widths exactly one footer paints across the whole frame: one rule row, one status row (left: today's content; right: a dim stage crumb and the keys that apply, dropped crumb-first when the left text needs the room), one verb bar following focus with its `ctrl+` prefixes and leading space. The task column paints no bottom chrome of its own, and its in-page header row and divider are replaced by a header rule on the selector row (`T<n> title ──── status · project`; `editing <field>`; `unsaved`), DIM in A and BOLD in G and F. *(Verification type: **test-backed**: unit)*
+
+**AC-23** Every frame is monochrome at every width and stage: `assert_buffer_mono` holds, and there is no colour exception for wide chrome. *(Verification type: **test-backed**: property)*
+
+**AC-24** Rail rows are `  <mark> T<n> <title>` wrapped with `edit::wrap_text` at the rail width with a four-cell continuation indent; a title longer than the rail occupies several rows, is never truncated, and no glyph touches the rule column. The selected rail row paints `▹`; the rail has no meta column and no done drawer; every rail cell carries DIM. *(Verification type: **test-backed**: unit)*
+
 ### Negative criteria
 
 - NC-1: No draggable panel boundary or ratio-setting control.
@@ -107,6 +123,10 @@ For AC-9, **the same outcome** means that, from the same task, task-page session
 | AC-18 | unit test |
 | AC-19 | e2e test |
 | AC-20 | integration test |
+| AC-21 | unit test |
+| AC-22 | unit test |
+| AC-23 | property test |
+| AC-24 | unit test |
 
 ### Deferred
 
