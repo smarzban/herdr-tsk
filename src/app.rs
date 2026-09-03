@@ -548,23 +548,13 @@ fn run_board() -> Result<(), Box<dyn Error>> {
                             let pos = Position::new(mouse.column, mouse.row);
                             let responsive_intent =
                                 map_responsive_board_mouse(&model, &frame_hits, area, mouse);
-                            let row_focus = matches!(
-                                responsive_intent.as_ref(),
-                                Some(BoardIntent::FocusBoardAndSelectIndex(_))
-                            );
-                            let existing_mode_route = matches!(
-                                (mode, responsive_intent.as_ref()),
-                                (BoardInputMode::Help, Some(BoardIntent::CloseLayer))
-                                    | (
-                                        BoardInputMode::Palette,
-                                        Some(BoardIntent::CloseCommandSurface)
-                                    )
-                            );
                             let focused = focused_mouse_area(&model, area).contains(pos);
                             if !focused
-                                && !row_focus
-                                && !existing_mode_route
-                                && task_focus_candidate.is_none()
+                                && !press_survives_off_focus(
+                                    responsive_intent.as_ref(),
+                                    mode,
+                                    task_focus_candidate.as_ref(),
+                                )
                             {
                                 model.end_mouse_press();
                                 drag_gesture.clear();
@@ -1169,6 +1159,33 @@ fn board_paste_intent(area: Rect, model: &mut BoardModel, text: &str) -> Option<
     let intent = map_edit_paste(mode, text)?;
     let intent = board_intent_for_area(area, intent)?;
     resolve_board_command(model, intent)
+}
+
+/// Whether a press outside the focused column still reaches dispatch: an explicit row
+/// select, a stage slide (`←` from the rail, `→` into the task column), a modal close
+/// route, or a focus transfer.
+fn press_survives_off_focus(
+    responsive_intent: Option<&BoardIntent>,
+    mode: BoardInputMode,
+    task_focus_candidate: Option<&BoardIntent>,
+) -> bool {
+    let slide_or_select = matches!(
+        responsive_intent,
+        Some(
+            BoardIntent::FocusBoardAndSelectIndex(_)
+                | BoardIntent::StageLeft
+                | BoardIntent::StageRight
+        )
+    );
+    let existing_mode_route = matches!(
+        (mode, responsive_intent),
+        (BoardInputMode::Help, Some(BoardIntent::CloseLayer))
+            | (
+                BoardInputMode::Palette,
+                Some(BoardIntent::CloseCommandSurface)
+            )
+    );
+    slide_or_select || existing_mode_route || task_focus_candidate.is_some()
 }
 
 /// Run the release-time task focus handoff before mapping the same click.
@@ -2077,7 +2094,7 @@ mod tests {
     use crate::ui::board::CommandSurface;
     use crate::ui::capture::CaptureField;
     use crate::ui::input::{map_key, CaptureIntent};
-    use crate::ui::mouse::map_board_mouse;
+    use crate::ui::mouse::{left_click, map_board_mouse, map_responsive_board_mouse};
     use crate::ui::queue::BoardTab;
 
     static TEMP_DIR_SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
@@ -2227,6 +2244,57 @@ mod tests {
         apply_intent(&mut domain, &mut model, intent, None).expect("apply task control");
         assert_eq!(model.input_mode(), BoardInputMode::EditStep);
         assert_eq!(model.wide_stage(), crate::ui::tier::WideStage::Rail);
+    }
+
+    #[test]
+    fn app_press_gate_keeps_rail_slides_and_drops_unmapped_presses() {
+        let (mut domain, mut model) = board_fixture("gate rail", None);
+        stage_right(&mut domain, &mut model, 2);
+        assert_eq!(model.wide_stage(), crate::ui::tier::WideStage::Rail);
+        let area = Rect::new(0, 0, 110, 24);
+        let hits = crate::ui::board::board_hit_map(area, &model);
+
+        // Blank rail space maps a slide and the press gate keeps it.
+        let blank = left_click(4, 9);
+        let intent = map_responsive_board_mouse(&model, &hits, area, blank);
+        assert_eq!(intent, Some(BoardIntent::StageLeft));
+        assert!(press_survives_off_focus(
+            intent.as_ref(),
+            model.input_mode(),
+            None
+        ));
+
+        // The rule column maps nothing and the press is dropped.
+        let rule = left_click(32, 9);
+        let intent = map_responsive_board_mouse(&model, &hits, area, rule);
+        assert_eq!(intent, None);
+        assert!(!press_survives_off_focus(
+            intent.as_ref(),
+            model.input_mode(),
+            None
+        ));
+
+        // A rail row still routes its select.
+        let row = hits
+            .regions
+            .iter()
+            .find(|hit| matches!(hit.target, crate::ui::render::QueueHitTarget::Task(_)))
+            .expect("rail row")
+            .area;
+        let intent = map_responsive_board_mouse(&model, &hits, area, left_click(row.x, row.y));
+        assert!(matches!(
+            intent,
+            Some(BoardIntent::FocusBoardAndSelectIndex(_))
+        ));
+        assert!(press_survives_off_focus(
+            intent.as_ref(),
+            model.input_mode(),
+            None
+        ));
+
+        // And the whole route lands the board beside the rail.
+        apply_intent(&mut domain, &mut model, intent.expect("row intent"), None).expect("apply");
+        assert_eq!(model.wide_stage(), crate::ui::tier::WideStage::Split);
     }
 
     #[test]
