@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
-use ratatui::layout::Rect;
+use ratatui::layout::{Position, Rect};
 use ratatui::style::{Color, Modifier};
 use ratatui::Terminal;
 use tsk_tui::domain::{DomainState, HumanStatus, ProvenanceOrigin, TaskScope};
@@ -17,7 +17,7 @@ use tsk_tui::ui::mouse::{
     wide_mouse_focus_intent, ScrollbarMouse,
 };
 use tsk_tui::ui::render::{assert_buffer_mono, QueueHitMap, QueueHitTarget, MONO_MODIFIERS};
-use tsk_tui::ui::tier::Tier;
+use tsk_tui::ui::tier::{Tier, COMPACT_VERB_BAR_ENTRY_BUDGET};
 use tsk_tui::ui::{apply_intent, draw_board, BoardInputMode, BoardIntent, BoardModel};
 
 fn domain_with_tasks(tasks: &[(&str, &str)]) -> DomainState {
@@ -55,6 +55,11 @@ fn render_board(model: &BoardModel, width: u16, height: u16) -> (Vec<String>, Qu
         assert_buffer_mono(&buffer);
     } else {
         let geometry = resolve_responsive(width, height, model.focused_surface());
+        let (foreground, modifier) = match model.focused_surface() {
+            FocusedSurface::Board => (Color::DarkGray, Modifier::DIM),
+            FocusedSurface::Task => (Color::Cyan, Modifier::BOLD),
+        };
+        assert_full_border_style(&buffer, geometry.task, foreground, modifier);
         for y in 0..height {
             for x in 0..width {
                 let on_border = [geometry.task].into_iter().any(|panel| {
@@ -201,29 +206,59 @@ fn exact_110_wide_frame_paints_unboxed_board_beside_titled_task_box() {
 }
 
 #[test]
+fn wide_task_border_title_follows_rendered_selection_across_numbered_tasks() {
+    let mut domain = domain_with_tasks(&[
+        ("first numbered task", "first notes"),
+        ("second numbered task", "second notes"),
+    ]);
+    let mut tasks = domain.tasks().to_vec();
+    tasks[0].number = Some(11);
+    tasks[1].number = Some(22);
+    let numbered = tasks
+        .iter()
+        .map(|task| (task.id, task.number.expect("number"), task.title.clone()))
+        .collect::<Vec<_>>();
+    let mut model = BoardModel::from_tasks(tasks, Some(PathBuf::from("/repos/tsk")));
+    let task_area = resolve_responsive(110, 24, FocusedSurface::Board).task_content();
+
+    let initial = model.selected_id().expect("initial selection");
+    let (_, initial_number, initial_title) = numbered
+        .iter()
+        .find(|(id, _, _)| *id == initial)
+        .expect("initial numbered task");
+    let (initial_rows, _) = render_board(&model, 110, 24);
+    assert!(initial_rows[0].contains(&format!("T{initial_number} · task")));
+    assert!(region_text(&initial_rows, task_area).contains(initial_title));
+
+    apply_intent(&mut domain, &mut model, BoardIntent::SelectNext, None)
+        .expect("select next numbered task");
+    let selected = model.selected_id().expect("changed selection");
+    assert_ne!(selected, initial);
+    let (_, selected_number, selected_title) = numbered
+        .iter()
+        .find(|(id, _, _)| *id == selected)
+        .expect("selected numbered task");
+    let (selected_rows, _) = render_board(&model, 110, 24);
+    assert!(selected_rows[0].contains(&format!("T{selected_number} · task")));
+    assert!(region_text(&selected_rows, task_area).contains(selected_title));
+    assert!(!selected_rows[0].contains(&format!("T{initial_number} · task")));
+}
+
+#[test]
 fn wide_task_border_style_tracks_focus_without_coloring_board() {
-    let mut domain = domain_with_tasks(&[("style task", "style notes")]);
-    let mut model = board_model(&domain);
-    let task_panel = resolve_responsive(110, 24, FocusedSurface::Board).task;
-    let (board_focused, _) = render_board_buffer(&model, 110, 24);
+    for (width, height) in [(110, 24), (111, 24), (157, 26), (160, 24)] {
+        let mut domain = domain_with_tasks(&[("style task", "style notes")]);
+        let mut model = board_model(&domain);
+        let task_panel = resolve_responsive(width, height, FocusedSurface::Board).task;
+        let (board_buffer, _) = render_board_buffer(&model, width, height);
+        assert_full_border_style(&board_buffer, task_panel, Color::DarkGray, Modifier::DIM);
+        let _ = render_board(&model, width, height);
 
-    assert_full_border_style(&board_focused, task_panel, Color::DarkGray, Modifier::DIM);
-    for y in 0..24 {
-        for x in 0..55 {
-            assert_eq!(board_focused[(x, y)].fg, Color::Reset);
-        }
+        focus_task(&mut domain, &mut model);
+        let (task_buffer, _) = render_board_buffer(&model, width, height);
+        assert_full_border_style(&task_buffer, task_panel, Color::Cyan, Modifier::BOLD);
+        let _ = render_board(&model, width, height);
     }
-    assert_eq!(board_focused[(56, 2)].fg, Color::Reset);
-
-    focus_task(&mut domain, &mut model);
-    let (task_focused, _) = render_board_buffer(&model, 110, 24);
-    assert_full_border_style(&task_focused, task_panel, Color::Cyan, Modifier::BOLD);
-    for y in 0..24 {
-        for x in 0..55 {
-            assert_eq!(task_focused[(x, y)].fg, Color::Reset);
-        }
-    }
-    assert_eq!(task_focused[(56, 2)].fg, Color::Reset);
 }
 
 #[test]
@@ -242,6 +277,7 @@ fn wide_no_selection_task_box_uses_plain_title_and_inert_interior() {
         .map(|x| buffer[(x, 0)].symbol())
         .collect::<String>();
     assert!(right_top.starts_with("┌ task "));
+    assert_full_border_style(&buffer, right, Color::DarkGray, Modifier::DIM);
     assert!(region_text(
         &(0..24)
             .map(|y| (0..110).map(|x| buffer[(x, y)].symbol()).collect())
@@ -282,6 +318,48 @@ fn wide_hits_and_copy_regions_stay_inside_board_allocation_or_task_interior() {
                 && area.y.saturating_add(area.height)
                     <= bounded_by.y.saturating_add(bounded_by.height),
             "hit or copy region escapes panel interior: {area:?}"
+        );
+    }
+}
+
+#[test]
+fn wide_renderer_consumes_shared_compact_density_at_width_and_height_boundaries() {
+    let domain = domain_with_tasks(&[("shared density", "density notes")]);
+    let model = board_model(&domain);
+
+    for (width, height) in [(157, 26), (160, 24)] {
+        let geometry = resolve_responsive(width, height, FocusedSurface::Board);
+        assert_eq!(geometry.density, Tier::Compact);
+        let (_, hits) = render_board_buffer(&model, width, height);
+        let board_verbs = hits
+            .regions
+            .iter()
+            .filter(|hit| {
+                geometry
+                    .board_content()
+                    .contains(Position::new(hit.area.x, hit.area.y))
+                    && matches!(hit.target, QueueHitTarget::Verb(_))
+            })
+            .count();
+        let task_verbs = hits
+            .regions
+            .iter()
+            .filter(|hit| {
+                geometry
+                    .task_content()
+                    .contains(Position::new(hit.area.x, hit.area.y))
+                    && matches!(hit.target, QueueHitTarget::Verb(_))
+            })
+            .count();
+        assert_eq!(
+            board_verbs,
+            usize::from(COMPACT_VERB_BAR_ENTRY_BUDGET),
+            "board must consume shared compact density at {width}x{height}"
+        );
+        assert_eq!(
+            task_verbs,
+            usize::from(COMPACT_VERB_BAR_ENTRY_BUDGET),
+            "task must consume shared compact density at {width}x{height}"
         );
     }
 }

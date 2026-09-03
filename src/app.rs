@@ -706,16 +706,9 @@ pub fn drag_content_area(model: &BoardModel, area: Rect) -> Rect {
     } else {
         responsive.board_content()
     };
-    let density_width =
-        if responsive.presentation == crate::ui::tier::ResponsivePresentation::WideSplit {
-            responsive
-                .board_content()
-                .width
-                .min(responsive.task_content().width)
-        } else {
-            surface.width
-        };
-    let geo = crate::ui::tier::resolve(density_width, surface.height).with_row_width(surface.width);
+    // Only chrome row positions shape this drag viewport; they depend on the live
+    // content height, not the renderer's standard/compact density decision.
+    let geo = crate::ui::tier::resolve(surface.width, surface.height);
     if model.focused_surface() == crate::ui::tier::FocusedSurface::Task {
         // Approximate the shared notes/steps viewport: below a one-row header,
         // above the rule. Exact step halving is unnecessary for edge detection.

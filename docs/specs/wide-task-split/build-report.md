@@ -159,7 +159,7 @@ Merged `origin/main` at `v0.4.0` as `6ed7d8f`, resolved the `AGENTS.md` guidance
 
 ## Owner-approved task-box-only follow-up
 
-The wide compositor now lets the board use its complete left allocation and places only the task page inside a bordered right allocation. The task's left border is the sole visual center separator. This changes presentation geometry and explicit task-border focus styling only; input tables, domain behavior, persistence, and below-threshold rendering are unchanged. Fresh red and green evidence is recorded in `.agent-sdlc/briefs/wide-task-split/PR-30-boxed-chrome-report.md`.
+The wide compositor now lets the board use its complete left allocation and places only the task page inside a bordered right allocation. The task's left border is the sole visual center separator. This changes presentation geometry and explicit task-border focus styling only; input tables, domain behavior, persistence, and below-threshold rendering are unchanged. The bounded Review panel remediation made the responsive resolver's density authoritative for both rendered surfaces, expanded full-ring styling coverage, and pinned numbered-title retargeting. Fresh red and green evidence is recorded in `.agent-sdlc/briefs/wide-task-split/PR-30-boxed-chrome-report.md`.
 
 ```text
 wide_geometry_balances_touching_allocations_without_a_gap: ok
@@ -167,9 +167,11 @@ exact_110_wide_frame_paints_unboxed_board_beside_titled_task_box: ok
 wide_task_border_style_tracks_focus_without_coloring_board: ok
 wide_no_selection_task_box_uses_plain_title_and_inert_interior: ok
 wide_hits_and_copy_regions_stay_inside_board_allocation_or_task_interior: ok
+wide_renderer_consumes_shared_compact_density_at_width_and_height_boundaries: ok
+wide_task_border_title_follows_rendered_selection_across_numbered_tasks: ok
 wide_task_drag_uses_bordered_content_edges_for_autoscroll: ok
 focused_wide_task_surface_matches_single_pane_keyboard_and_mouse_outcomes: ok
-cargo test aggregate: 716 passed, 0 failed, 5 ignored across 26 result blocks
+cargo test aggregate: 718 passed, 0 failed, 5 ignored across 26 result blocks
 site npm test: 6 passed, 0 failed
 site build: 10 pages built
 sdlc-check 0.20.1 --require ledger --require verification-report: 0 findings, 0 notes

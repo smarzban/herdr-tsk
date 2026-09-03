@@ -37,7 +37,8 @@ The full Rust green bar, site checks, criterion-linked tests, and isolated live 
 ```text
 $ cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && cargo build --release && cd site && npm ci && npm test && npm run build
 exit 0
-cargo test after Review panel repairs and main integration: 711 passed, 0 failed, 5 ignored across 26 result blocks
+cargo test after task-box Review panel remediation: 718 passed, 0 failed, 5 ignored across 26 result blocks
+wide_renderer_consumes_shared_compact_density_at_width_and_height_boundaries: ok
 site npm test: 6 passed, 0 failed
 site build: 10 pages built
 ```
@@ -58,7 +59,7 @@ Merged `origin/main` at release `v0.4.0` without rewriting feature commits. The 
 
 ## Owner-approved task-box-only follow-up
 
-The wide-only compositor now leaves the board unboxed across its full left allocation and paints one bordered task panel in the right allocation. The task's left border is the sole visual center separator. Its border and title are cyan plus bold with task focus and dark gray plus dim with board focus; all content remains monochrome. New geometry, exact-110 rendering, task-border styling, no-selection, bounded hit/copy, and equal-content-geometry parity tests cover the presentation. Below 110 columns remains unboxed.
+The wide-only compositor now leaves the board unboxed across its full left allocation and paints one bordered task panel in the right allocation. The task's left border is the sole visual center separator. Its border and title are cyan plus bold with task focus and dark gray plus dim with board focus; all content remains monochrome. The bounded Review panel remediation proves both renderers consume the shared responsive density at width and height boundaries, checks every task-ring cell across representative sizes and focus states, and proves numbered titles follow the rendered selection. Below 110 columns remains unboxed.
 
 ```text
 wide_geometry_balances_touching_allocations_without_a_gap: ok
@@ -66,9 +67,11 @@ exact_110_wide_frame_paints_unboxed_board_beside_titled_task_box: ok
 wide_task_border_style_tracks_focus_without_coloring_board: ok
 wide_no_selection_task_box_uses_plain_title_and_inert_interior: ok
 wide_hits_and_copy_regions_stay_inside_board_allocation_or_task_interior: ok
+wide_renderer_consumes_shared_compact_density_at_width_and_height_boundaries: ok
+wide_task_border_title_follows_rendered_selection_across_numbered_tasks: ok
 wide_task_drag_uses_bordered_content_edges_for_autoscroll: ok
 focused_wide_task_surface_matches_single_pane_keyboard_and_mouse_outcomes: ok
-cargo test aggregate: 716 passed, 0 failed, 5 ignored across 26 result blocks
+cargo test aggregate: 718 passed, 0 failed, 5 ignored across 26 result blocks
 site npm test: 6 passed, 0 failed
 site build: 10 pages built
 ```

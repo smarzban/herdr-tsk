@@ -581,10 +581,8 @@ pub fn board_hit_map(area: ratatui::layout::Rect, model: &BoardModel) -> render:
     hits
 }
 
-fn surface_geometry(area: ratatui::layout::Rect, density_width: u16) -> tier::TierGeometry {
-    let mut geometry = tier::resolve(density_width, area.height).with_row_width(area.width);
-    geometry.width = area.width;
-    geometry
+fn surface_geometry(area: ratatui::layout::Rect, density: tier::Tier) -> tier::TierGeometry {
+    tier::resolve_density(area.width, area.height, density)
 }
 
 fn wide_panel_style(focused: bool) -> Style {
@@ -613,17 +611,12 @@ fn draw_board_impl(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap
     let wide = responsive.presentation == tier::ResponsivePresentation::WideSplit;
     let board_area = responsive.board_content();
     let task_area = responsive.task_content();
-    let shared_width = if wide {
-        board_area.width.min(task_area.width)
-    } else {
-        area.width
-    };
     let geo = if wide {
-        surface_geometry(board_area, shared_width)
+        surface_geometry(board_area, responsive.density)
     } else {
         tier::resolve(area.width, area.height)
     };
-    let task_geo = (task_area.width > 0).then(|| surface_geometry(task_area, shared_width));
+    let task_geo = (task_area.width > 0).then(|| surface_geometry(task_area, responsive.density));
     let queue_view = model.queue_view();
     let selection_id = model.saved_task.or(model.selection_id);
     let selected_task = selection_id.and_then(|id| model.tasks.iter().find(|task| task.id == id));

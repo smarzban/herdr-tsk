@@ -141,7 +141,14 @@ pub fn resolve(width: u16, height: u16) -> TierGeometry {
     } else {
         Tier::Compact
     };
+    resolve_density(width, height, tier)
+}
 
+/// Build frame geometry at an already-resolved responsive density.
+///
+/// Row positions still follow this surface's own height; title, metadata, and verb
+/// budgets follow the shared density decision.
+pub(crate) fn resolve_density(width: u16, height: u16, tier: Tier) -> TierGeometry {
     let (selector_row, viewport_top, viewport_height, rule_row, status_row, verb_row) =
         chrome_rows(height);
 
