@@ -19,6 +19,10 @@ cargo build --release: finished release profile
 
 ## Task ledger
 
+> The boxed-design ledger below is **superseded** by the stage-slider rework ledger that
+> follows it. Its test names were deleted or renamed when `tests/wide_task_split.rs` was
+> rewritten; the current criterion-to-test map lives in `verification-report.md`.
+
 | Task | Status | Commit | AC advanced | Notes |
 | --- | --- | --- | --- | --- |
 | T-1 | done | 8e2df2e | AC-3 | Initial review passed: 0 Critical, 0 Important, 5 Minor |
@@ -26,6 +30,36 @@ cargo build --release: finished release profile
 | T-3 | done | 7db49c8 | AC-7, AC-8, AC-12, AC-13, AC-15, AC-19, AC-20 | Four blockers remediated; re-review approved |
 | T-4 | done | d90f631 | AC-9, AC-10, AC-11 | Owner-approved round 2 passed; Rust and site green |
 | T-5 | done | a9c7523 | AC-14, AC-16, AC-17 | Initial review passed: 0 Critical, 0 Important, 5 Minor |
+
+## Stage-slider rework ledger (current)
+
+The boxed design was replaced by the four-stage slider specified in
+`stage-slider-rework.md`. One commit per task, test-first; the boxed ledger's tests were
+rewritten in the same commits (44 tests in `tests/wide_task_split.rs` at the end of T5,
+plus adapted fixtures in `tests/queue_board_loop.rs` and `tests/queue_board_mouse.rs`).
+
+| Task | Commit | Content |
+| --- | --- | --- |
+| T1 geometry | `ac66ce1` | `WideStage` and `resolve_responsive`: board/rule/task rects per stage, frame-derived density |
+| T2 chrome | `f74851f` | unboxed columns, dim `│` rule column, task header rule, rail renderer, shared footer with stage crumb, inert empty pane |
+| T3 routing | `2a5e82b` | `route_responsive_key` key table, Enter/Esc origin memory, no-selection guards, resize continuity |
+| T4 mouse | `72bb0eb` | stage A focus-before-dispatch, rail retargets, row double-click opens F, G/F parity with the single-pane page |
+| T5 dirty drafts | `2b27324` | slides keep parked drafts, retarget refusals in A and on the rail, `unsaved` header slot |
+| T6 docs | `d28e9f2` | AGENTS.md, technical docs, site pages, demo, spec acceptance criteria |
+
+Tweaks from owner smoke-testing, one commit each:
+
+| Commit | Content |
+| --- | --- |
+| `296e807` | a left-side click takes focus left: rail row selects and lands in A; blank rail space slides too |
+| `ed0b1a7` | the header regains its status glyph; the dash rule moves to the row under the title |
+| `3049a1a` | the press gate keeps stage slides, so a blank rail press reaches dispatch |
+
+## Boxed-design history (superseded)
+
+Everything below this line records the boxed 50/50 era: T-1 to T-5, its smokes, repairs,
+the task-box follow-up, and the main integration and mechanical corroboration of that time.
+It is kept for history only; its test names no longer exist.
 
 ### T-1 (@ `8e2df2e`)
 
@@ -118,7 +152,7 @@ site build: 10 pages built
 
 Initial review: pass, 0 Critical, 0 Important, 5 Minor. No remediation pass was required.
 
-## Live UX and UI smoke
+## Live UX and UI smoke (boxed design, superseded)
 
 Ran the release binary with isolated `TSK_STATE_DIR` and `TSK_CONFIG_DIR` in a controlled 184x45 pseudo-terminal launched from Herdr, then drove the real Crossterm event path.
 
@@ -130,7 +164,7 @@ Ran the release binary with isolated `TSK_STATE_DIR` and `TSK_CONFIG_DIR` in a c
 - A task-side step mouse click focused the task and selected the intended step, reflected by the `toggle step` verb.
 - Five repeated 109/110 threshold crossings left the process alive. The smoke process was then exited and its isolated state/config directories were deleted.
 
-## Post-build PR review repairs
+## Post-build PR review repairs (boxed design, superseded)
 
 Review panel discovery kept F-14, F-7, F-8, F-1, F-10, F-13, and F-9. Commit `4ee409d` added visible editor focus, app-level keyboard/mouse/scrollbar handoff coverage, retained scroll-bound refresh, thread/scope dirty tests, and clean-editor retargeting. Verification then found same-bound editor clicks could hide the editor; commit `4586803` made those clicks inert and added clean/dirty regressions.
 
@@ -157,7 +191,7 @@ Final two-seat Review panel verification reported no regressions. Terra marked e
 
 Merged `origin/main` at `v0.4.0` as `6ed7d8f`, resolved the `AGENTS.md` guidance conflict, and adapted four feature test fixtures to the stabilized domain creation signature. The complete Rust bar passed with 711 passed, 0 failed, and 5 ignored across 26 result blocks. Site tests passed 6 of 6 and built 10 pages. A fresh isolated smoke of the rebuilt release binary passed at 110 and 109 columns, including active editor preservation and same-bound row click safety.
 
-## Owner-approved task-box-only follow-up
+## Owner-approved task-box-only follow-up (superseded)
 
 The wide compositor now lets the board use its complete left allocation and places only the task page inside a bordered right allocation. The task's left border is the sole visual center separator. This changes presentation geometry and explicit task-border focus styling only; input tables, domain behavior, persistence, and below-threshold rendering are unchanged. The bounded Review panel remediation made the responsive resolver's density authoritative for both rendered surfaces, expanded full-ring styling coverage, and pinned numbered-title retargeting. Fresh red and green evidence is recorded in `.agent-sdlc/briefs/wide-task-split/PR-30-boxed-chrome-report.md`.
 

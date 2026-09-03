@@ -56,8 +56,9 @@ opens in stage 0.
 - Stage 0 / A: single row click selects (and retargets the pane in A), stage unchanged.
 - Stage A: any click inside the task column moves to G first, then dispatches the click to the
   task surface (existing focus-before-dispatch rule, AC-11).
-- Stage G: rail row click retargets the task in place, stage stays G. Refused while the bound
-  task has a dirty draft (same feedback as the keyboard refusal).
+- Stage G: a click on the left side takes focus left. A rail row click selects that row and
+  lands the board in A; blank rail space, tabs, and section headers slide the same way. A
+  retarget refused by a dirty draft keeps the stage (same feedback as the keyboard refusal).
 - Any stage: fast double-click on a board/rail row opens F with that task; origin stage recorded.
 - Task-page controls in G and F behave exactly as the single-pane task page (AC-9).
 
@@ -84,21 +85,23 @@ footer in wide, spanning the whole frame.
 
 ### Task column header (replaces the in-pane `▸ T12 title … status` row and its rule)
 
-A section rule in the board's own idiom, painted on the selector row of the task column:
+Two rows in the board's own idiom: the title row on the selector row of the task column, and a
+full-width dash rule on the row under it.
 
 ```
-T12 Frame the wide task view ──────────────────────────────── started · tsk
+ ▸ T12 Frame the wide task view                               started · tsk
+ ────────────────────────────────────────────────────────────────────────────
 ```
 
-- Left: `T<number> <title>`, capped like the existing task-page header (chrome limit, not task
-  text). Drafts without a number omit the prefix.
-- Right (state slot, always kept): `status · project` normally; `editing <field>` while an editor
-  is active; `unsaved` while a dirty draft exists and no editor is active.
+- Title row: the task's status glyph (`▸`, `○`, …), `T<number> <title>`, capped like the existing
+  task-page header (chrome limit, not task text). Drafts without a number omit the prefix.
+- Right of the title row (state slot, always kept): `status · project` normally; `editing <field>`
+  while an editor is active; `unsaved` while a dirty draft exists and no editor is active.
 - Weight: DIM in stage A (preview), BOLD in G and F. `T<number>` keeps its copy hit region.
-- No selected task: `no task ─────` and a dim body line `  select a task to preview it here`.
-  The pane is inert (no hits).
+- No selected task: `no task` over the same dash rule, then a dim body line
+  `  select a task to preview it here`. The pane is inert (no hits).
 
-Task body starts on the row after the header. The task page's own bottom chrome (rule, done
+Task body starts on the row after the rule. The task page's own bottom chrome (rule, done
 count, verb bar) is not painted inside the column; the shared footer owns it. Task footer meta
 becomes `created … · updated …` (project moves up to the header slot).
 
@@ -150,52 +153,57 @@ Today's board renderer at `floor(w * 0.4)` columns, nothing else changes. Select
 Stage A, board focus:
 
 ```
- desk  ·  projects  ·  threads                      │ T12 Frame the wide task view ──────────────────────────────── started · tsk
-                                                    │ Rework the wide split so the task page reads as a **detail pane**,
- IN MOTION ───────────────────────────────────────1 │ not a boxed clone.
+ desk  ·  projects  ·  threads                      │  ▸ T12 Frame the wide task view                               started · tsk
+                                                    │ ────────────────────────────────────────────────────────────────────────────
+ IN MOTION ───────────────────────────────────────1 │   Rework the wide split so the task page reads as a detail pane,
+                                                    │   not a boxed clone.
+  ▸ T12 Frame the wide                     tsk · 0s │
+        task view                                   │   - keep board unboxed
+                                                    │   - decide separator
+ desk ────────────────────────────────────────────1 │   - verb bar ownership
                                                     │
-  ▸ T12 Frame the wide task view           tsk · 0s │ - keep board unboxed
-                                                    │ - decide separator
- desk ────────────────────────────────────────────1 │ - verb bar ownership
+  ○ T15 Renew domain                             0s │   ```
+                                                    │   resolve_responsive(w, h, focus)
+                                                    │   ```
                                                     │
-  ○ T15 Renew domain                             0s │ ```
-                                                    │ resolve_responsive(w, h, focus)
-                                                    │ ```
                                                     │
-                                                    │ steps 0/0
-                                                    │   + step
+                                                    │   steps 0/0
+                                                    │    + step
                                                     │
-                                                    │ created 0s ago · updated 0s ago
+                                                    │
+                                                    │
+                                                    │   created 0s ago · updated 0s ago
 ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- 0 done                                                                       board ▸ task    → task · ← close · enter open
+ 0 done                                                                             board ▸ task    → task · ← close · enter open
  enter open · ctrl+d done · ctrl+b block · : palette · ? help · + capture
 ```
 
 Stage G, task focus (rail dim, header bold):
 
 ```
- desk  ·  projects  ·  threads  │ T12 Frame the wide task view ──────────────────────────────────────────────────── started · tsk
-                                │ Rework the wide split so the task page reads as a **detail pane**, not a boxed clone.
- IN MOTION ───────────────────1 │
-                                │ - keep board unboxed
-  ▹ T12 Frame the wide task     │ - decide separator
-    view                        │ - verb bar ownership
+ desk  ·  projects  ·  threads  │  ▸ T12 Frame the wide task view                                                   started · tsk
+                                │ ────────────────────────────────────────────────────────────────────────────────────────────────
+ IN MOTION ───────────────────1 │   Rework the wide split so the task page reads as a detail pane, not a boxed clone.
                                 │
- desk ────────────────────────1 │ ```
-                                │ resolve_responsive(w, h, focus)
-  ○ T15 Renew domain            │ ```
+  ▹ T12 Frame the wide task     │   - keep board unboxed
+    view                        │   - decide separator
+                                │   - verb bar ownership
+ desk ────────────────────────1 │
+                                │   ```
+  ○ T15 Renew domain            │   resolve_responsive(w, h, focus)
+                                │   ```
                                 │
-                                │ steps 0/0
-                                │   + step
                                 │
-                                │ created 0s ago · updated 0s ago
+                                │   steps 0/0
+                                │    + step
+                                │
+                                │
+                                │
+                                │   created 0s ago · updated 0s ago
 ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- 0 done                                                                             board ◂ task    ← board · → full page
- ctrl+e edit · ctrl+n notes · ctrl+s start · ctrl+d done · ctrl+b block
+ 0 done                                                                                     board ◂ task    ← board · → full page
+ ctrl+e edit · ctrl+d done · ctrl+b block · esc close
 ```
-
-(The header rule in these frames is drawn on row 0 for compactness; implement it on the selector
-row so both columns share the row rhythm.)
 
 ## Tasks
 

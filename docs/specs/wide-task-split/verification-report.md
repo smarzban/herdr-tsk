@@ -5,7 +5,22 @@ Main-integrated product head before final report refresh: `6ed7d8f`
 
 ## Result
 
-The full Rust green bar, site checks, criterion-linked tests, and isolated live terminal smoke passed. `git diff --check main...HEAD` was clean before this report was written.
+The stage-slider rework passed the full Rust green bar and the site checks; the owner then
+smoked it live. `git diff --check main...HEAD` was clean before this report was written.
+
+```text
+$ cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && cargo build --release
+exit 0
+cargo test aggregate: 718 passed, 0 failed, 5 ignored across 26 result blocks
+tests/wide_task_split.rs: 44 passed
+site npm test: 6 passed, 0 failed
+```
+
+Owner live smoke on the stage slider passed at ~178 cols: 0→A→G→F→G→A→0, Enter/Esc origin
+memory, editing state slot, shrink below 110 and grow back.
+
+Live herdr smoke of the rework was not run by the implementer; the boxed-design smoke and
+evidence below are kept under one superseded heading.
 
 ## Proof map
 
@@ -35,20 +50,26 @@ Refreshed for the stage-slider rework (`stage-slider-rework.md`). Unless noted, 
 | AC-19 | test-backed | repeated_threshold_crossings_keep_every_stage_live, repeated_threshold_resizes_keep_board_loop_live (tests/queue_board_loop.rs) |
 | AC-20 | test-backed | stage_changes_never_mutate_the_domain, threshold_crossings_without_task_verbs_leave_domain_unchanged (tests/queue_board_loop.rs) |
 | AC-21 | test-backed | stage_zero_keys_slide_open_select_and_stay_put, stage_a_keys_slide_both_ways_open_and_retarget_the_pane, stage_g_keys_slide_open_close_and_navigate_the_page, stage_f_keys_return_to_the_rail_or_the_origin, stage_keys_need_a_selection, narrow_routes_are_unchanged_by_the_slider |
-| AC-22 | test-backed | wide_paints_exactly_one_footer_at_every_stage, task_column_header_replaces_the_in_pane_header_with_stage_weight, status_row_crumb_and_keys_follow_the_stage, status_row_refusal_wins_over_the_crumb_then_the_keys, status_row_shows_editor_keys_while_an_editor_is_active, stage_zero_and_full_task_render_the_standard_tier_at_130x24 |
+| AC-22 | test-backed | wide_paints_exactly_one_footer_rule_row_at_every_stage, task_column_header_replaces_the_in_pane_header_with_stage_weight, status_row_crumb_and_keys_follow_the_stage, status_row_refusal_wins_over_the_crumb_then_the_keys, status_row_shows_editor_keys_while_an_editor_is_active, stage_zero_and_full_task_render_the_standard_tier_at_130x24 |
 | AC-23 | test-backed | wide_frames_are_mono_at_every_stage_width_and_height (and every `render` call in the suite asserts mono) |
 | AC-24 | test-backed | rail_wraps_titles_with_indent_four_and_dims_every_cell |
 
 ## Stage-slider rework
 
 The boxed 50/50 design was replaced by the four-stage slider (commits `feat: paint the wide
-stage slider chrome` through `docs: describe the wide stage slider`). `tests/wide_task_split.rs`
-was rewritten (44 tests), the three `src/app.rs` focus tests were rewritten for stages, and
-`tests/queue_board_loop.rs` / `tests/queue_board_mouse.rs` wide fixtures were adapted. Narrow
-goldens were not regenerated. Live herdr smoke of the rework was not run by the implementer;
-the sections below describe the earlier boxed design's verification.
+stage slider chrome` through `docs: describe the wide stage slider`, then the owner-smoke
+tweaks `fix: move focus left when the rail is clicked`, `fix: give the task header its glyph
+and an underline rule`, and `fix: let every left-side press reach dispatch`).
+`tests/wide_task_split.rs` was rewritten (44 tests), the three `src/app.rs` focus tests were
+rewritten for stages, and `tests/queue_board_loop.rs` / `tests/queue_board_mouse.rs` wide
+fixtures were adapted. Narrow goldens were not regenerated.
 
-## Fresh PR-boundary verification (boxed design, superseded)
+## Boxed-design evidence (superseded)
+
+Everything below this heading verifies the earlier boxed 50/50 design. It is kept for
+history only; the test names it cites no longer exist.
+
+### Fresh PR-boundary verification
 
 ```text
 $ cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && cargo build --release && cd site && npm ci && npm test && npm run build
@@ -59,21 +80,21 @@ site npm test: 6 passed, 0 failed
 site build: 10 pages built
 ```
 
-## Live terminal smoke
+### Live terminal smoke
 
 Using isolated state and config directories, the release binary was exercised at 184, 110, and 109 columns. Verified side-by-side rendering, selected-task retargeting, keyboard focus transfer, task-side mouse focus-before-dispatch, editor-preserving shrink/grow, editor-safe board clicks, intended step selection, cancellation, and repeated threshold crossings. The process remained live and the isolated data was removed afterward.
 
-## Review panel and repair verification
+### Review panel and repair verification
 
 Review panel discovery ran 9 seats, with 8 votes and one lost qwen holistic seat. Seven findings were kept for repair: F-14, F-7, F-8, F-1, F-10, F-13, and F-9. Two repair commits added live-editor focus, app-level keyboard/mouse/scrollbar wiring tests, refreshed retained scroll bounds, dirty thread/scope coverage, clean-editor retargeting, and same-bound editor safety.
 
 The final two-seat verification found no regressions. Terra marked all kept findings resolved. Claude marked six resolved and returned F-8 as still present without evidence; the harness judged F-8 resolved from the concrete app-level focus-before-dispatch helpers and tests cited by Terra and present in `src/app.rs`.
 
-## Main integration
+### Main integration
 
 Merged `origin/main` at release `v0.4.0` without rewriting feature commits. The only textual conflict was `AGENTS.md`; the resolution keeps main's current 0.4.0 store and Ctrl-key guidance plus the new responsive board contract. Four feature fixtures were adapted to main's stabilized `DomainState::create` signature. The full Rust and site bars passed, then the rebuilt release binary received a fresh isolated terminal smoke at 110 and 109 columns. The split, active editor preservation, and same-bound editor click safety all passed.
 
-## Owner-approved task-box-only follow-up
+### Owner-approved task-box-only follow-up
 
 The wide-only compositor now leaves the board unboxed across its full left allocation and paints one bordered task panel in the right allocation. The task's left border is the sole visual center separator. Its border and title are cyan plus bold with task focus and dark gray plus dim with board focus; all content remains monochrome. The bounded Review panel remediation proves both renderers consume the shared responsive density at width and height boundaries, checks every task-ring cell across representative sizes and focus states, and proves numbered titles follow the rendered selection. Below 110 columns remains unboxed.
 
@@ -92,6 +113,6 @@ site npm test: 6 passed, 0 failed
 site build: 10 pages built
 ```
 
-## Mechanical corroboration
+### Mechanical corroboration
 
 `sdlc-check 0.20.1 --require ledger --require verification-report`: passed with 0 findings and 0 notes before the initial push, after Review panel repairs, after final main integration, and after the task-box-only follow-up.

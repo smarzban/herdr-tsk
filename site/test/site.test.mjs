@@ -51,7 +51,7 @@ test("docs and demo describe the wide stage slider and threshold", async () => {
   assert.match(keys, /\| F \| nothing \| → G \|/);
   assert.doesNotMatch(keys, /cyan|border/);
   assert.match(taskPage, /110 usable columns/);
-  assert.match(taskPage, /T12 title ──── started · tsk/);
+  assert.match(taskPage, /▸ T12 title … started · tsk/);
   assert.doesNotMatch(taskPage, /bordered panel/);
   assert.match(demo, /const WIDE_SPLIT_MIN_COLUMNS = 110;/);
   assert.match(demo, /stage: "board",/);

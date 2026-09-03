@@ -180,7 +180,7 @@ fn wide_frames_are_mono_at_every_stage_width_and_height() {
 }
 
 #[test]
-fn wide_paints_exactly_one_footer_at_every_stage() {
+fn wide_paints_exactly_one_footer_rule_row_at_every_stage() {
     for stage in STAGES {
         let (mut domain, mut model) = fixture();
         to_stage(&mut domain, &mut model, stage);
@@ -192,14 +192,32 @@ fn wide_paints_exactly_one_footer_at_every_stage() {
             .filter(|(_, row)| row.chars().all(|c| c == '─'))
             .map(|(y, _)| y)
             .collect();
-        // Stage F's header rule spans the whole frame too; every other stage keeps
-        // exactly one full-width rule row.
-        let expected = if stage == WideStage::FullTask {
-            vec![2usize, rule_y as usize]
+        // The shared footer paints exactly one full-width rule row, at `rule_y`.
+        let footer_rules: Vec<usize> = rule_rows
+            .iter()
+            .copied()
+            .filter(|&y| y == rule_y as usize)
+            .collect();
+        assert_eq!(
+            footer_rules,
+            vec![rule_y as usize],
+            "{stage:?}: exactly one footer rule row"
+        );
+        // Any other full-width dash row is a task-column header underline: that exists
+        // only in stage F, where the column spans the whole frame, and only on row 2.
+        let header_underlines: Vec<usize> = rule_rows
+            .into_iter()
+            .filter(|&y| y != rule_y as usize)
+            .collect();
+        let expected_underlines = if stage == WideStage::FullTask {
+            vec![2usize]
         } else {
-            vec![rule_y as usize]
+            vec![]
         };
-        assert_eq!(rule_rows, expected, "{stage:?}: one footer rule");
+        assert_eq!(
+            header_underlines, expected_underlines,
+            "{stage:?}: header underline rows"
+        );
         let done_rows: Vec<usize> = rows
             .iter()
             .enumerate()
