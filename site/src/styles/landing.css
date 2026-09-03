@@ -418,6 +418,16 @@ html[data-theme="light"] .theme-toggle .icon-moon {
   border-color: var(--accent);
 }
 
+.hero-side {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.hero-side .cta {
+  margin-top: 0;
+}
+
 .spec {
   margin: 0;
   padding: 0;
@@ -722,7 +732,17 @@ html[data-theme="light"] .pane {
 }
 
 .tsk-peek {
+  display: flex;
   padding-left: 0.15rem;
+}
+
+.tsk-peek-gutter {
+  flex: 0 0 auto;
+  white-space: pre;
+}
+
+.tsk-peek-text {
+  min-width: 0;
   white-space: pre-wrap;
 }
 
@@ -845,7 +865,11 @@ html[data-theme="light"] .pane {
   display: grid;
   gap: 0;
   flex: 1 1 auto;
-  min-height: 22rem;
+  min-height: 18rem;
+}
+
+.tsk-wide-split + .tsk-foot {
+  margin-top: 0.6rem;
 }
 
 .tsk-wide-split.is-split {
@@ -898,11 +922,29 @@ html[data-theme="light"] .pane {
 
 .tsk-task-header {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: 0.5rem;
   white-space: nowrap;
   padding-top: 0.15rem;
   color: var(--ink-2);
+}
+
+.tsk-task-header .glyph {
+  color: var(--ink-2);
+}
+
+.tsk-task-header.is-bold .glyph {
+  color: var(--accent);
+}
+
+.tsk-task-rule {
+  height: 1px;
+  margin: 0.25rem 0 0.5rem;
+  background: var(--line-2);
+}
+
+.tsk-task-header.is-bold + .tsk-task-rule {
+  background: var(--ink-2);
 }
 
 .tsk-task-header .sec {
@@ -912,13 +954,6 @@ html[data-theme="light"] .pane {
   min-width: 0;
 }
 
-.tsk-task-header .rule {
-  flex: 1 1 auto;
-  height: 1px;
-  min-width: 1.5rem;
-  background: var(--line-2);
-}
-
 .tsk-task-header.is-bold .sec {
   font-weight: 700;
   color: var(--ink);
@@ -926,6 +961,7 @@ html[data-theme="light"] .pane {
 
 .tsk-task-header .tsk-state-slot {
   flex: 0 0 auto;
+  margin-left: auto;
   color: var(--dim);
 }
 
@@ -1069,19 +1105,25 @@ html[data-theme="light"] .pane {
   font-weight: 500;
 }
 
-.agent-line {
-  display: block;
-  margin: 0 0 0.35rem;
-  padding-left: 2ch;
-  text-indent: -2ch;
+.agent {
+  display: flex;
+  flex-direction: column;
 }
 
-.agent-line.out {
-  text-indent: 0;
+.agent-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.agent-line {
+  margin: 0 0 0.75rem;
 }
 
 .agent .you {
   color: var(--ink);
+  padding-left: 2ch;
+  text-indent: -2ch;
 }
 
 .agent .you::before {
@@ -1089,18 +1131,94 @@ html[data-theme="light"] .pane {
   color: var(--accent);
 }
 
-.agent .act::before {
-  content: "▸ ";
+.agent .say {
+  color: var(--ink-2);
+  padding-left: 2ch;
+  text-indent: -2ch;
+}
+
+.agent .say::before {
+  content: "● ";
+  color: var(--ink);
+}
+
+.agent .say b {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.agent-tool {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0 0.5rem;
+  margin: 0 0 0.6rem;
+  padding-left: 2ch;
+  position: relative;
+}
+
+.agent-tool::before {
+  content: "●";
+  position: absolute;
+  left: 0;
+  top: 0;
+  color: var(--accent);
+}
+
+.tool-name {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.tool-name::after {
+  content: "(";
+  color: var(--dim);
+  font-weight: 400;
+}
+
+.tool-arg {
+  color: var(--ink-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-arg::after {
+  content: ")";
   color: var(--dim);
 }
 
-.agent .out {
+.tool-out {
+  grid-column: 1 / -1;
   color: var(--dim);
   padding-left: 2ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.agent .you + .act {
-  margin-top: 0.6rem;
+.tool-out::before {
+  content: "⎿ ";
+}
+
+.agent-input {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  padding: 0.45rem 0.7rem;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  color: var(--ink);
+}
+
+.agent-prompt {
+  color: var(--accent);
+}
+
+.agent-shortcut {
+  margin-left: auto;
+  font-size: 0.7rem;
+  color: var(--dim);
 }
 
 .agent .cursor {
@@ -1109,7 +1227,7 @@ html[data-theme="light"] .pane {
   height: 0.09em;
   background: var(--accent);
   vertical-align: 0;
-  margin-left: 0.2em;
+  animation: blink 1.1s steps(1) infinite;
 }
 
 .divider {
@@ -1263,7 +1381,7 @@ html[data-theme="light"] .pane {
 }
 
 .stage-name b {
-  color: var(--accent);
+  color: var(--ink);
   font-weight: 700;
 }
 
@@ -1567,7 +1685,7 @@ html[data-theme="light"] .pane {
   display: grid;
   grid-template-columns: minmax(0, 1.55fr) minmax(16rem, 0.9fr);
   gap: clamp(1.5rem, 4vw, 3rem);
-  align-items: start;
+  align-items: stretch;
 }
 
 .screen {
@@ -1724,20 +1842,23 @@ html[data-theme="light"] .pane {
   padding: 0;
   display: flex;
   flex-direction: column;
+  justify-content: space-between;
+  border-top: 1px solid var(--line-2);
+  border-bottom: 1px solid var(--line-2);
 }
 
 .legend li {
   display: grid;
   grid-template-columns: 1.4rem minmax(0, 1fr);
   gap: 0.85rem;
-  padding: 0.8rem 0;
+  padding: 0.7rem 0;
   border-top: 1px solid var(--line);
-  font-size: 0.86rem;
+  font-size: 0.84rem;
   color: var(--ink-2);
 }
 
-.legend li:last-child {
-  border-bottom: 1px solid var(--line);
+.legend li:first-child {
+  border-top: 0;
 }
 
 .legend b {
@@ -1829,7 +1950,21 @@ html[data-theme="light"] .pane {
   display: grid;
   grid-template-columns: minmax(0, 1.6fr) minmax(16rem, 0.8fr);
   gap: clamp(1.5rem, 4vw, 3rem);
-  align-items: start;
+  align-items: stretch;
+}
+
+.cli-side {
+  display: flex;
+  flex-direction: column;
+  padding: 1.1rem 1.25rem;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  background: var(--bg-2);
+}
+
+.cli-side .side-note {
+  margin-top: auto;
+  padding-top: 1rem;
 }
 
 .shell {
@@ -1847,7 +1982,8 @@ html[data-theme="light"] .pane {
 }
 
 .side-title {
-  margin: 0 0 0.75rem;
+  margin: 0 0 0.6rem;
+  line-height: 1.7;
   font-size: 0.78rem;
   font-weight: 500;
   letter-spacing: 0.08em;
@@ -1863,15 +1999,10 @@ html[data-theme="light"] .pane {
 
 .exits th,
 .exits td {
-  padding: 0.6rem 0;
+  padding: 0.55rem 0;
   border-top: 1px solid var(--line);
   text-align: left;
   vertical-align: top;
-}
-
-.exits tr:last-child th,
-.exits tr:last-child td {
-  border-bottom: 1px solid var(--line);
 }
 
 .exits th {
@@ -2139,7 +2270,7 @@ html[data-theme="light"] .pane {
     align-items: start;
   }
 
-  .spec {
+  .hero-side {
     max-width: 30rem;
   }
 

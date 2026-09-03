@@ -141,6 +141,12 @@
       toggles.forEach((t) => t.setAttribute("aria-pressed", t.dataset.layout === name ? "true" : "false"));
       if (beside) setAgent(agentForBoardColumns(BESIDE_COLUMNS));
       readout();
+      // Full terminal opens straight into the split (stage A); beside an agent the board is
+      // narrow, so it returns to the plain board.
+      const frame = document.getElementById("board-demo");
+      if (frame && frame.dataset.ready) {
+        frame.dispatchEvent(new CustomEvent("tsk:set-stage", { detail: beside ? "board" : "split" }));
+      }
     };
 
     const readout = () => {
@@ -198,6 +204,16 @@
     }
 
     setLayout("beside");
+    // The demo script is a module and runs after this one; mark the frame once it has rendered.
+    if ("MutationObserver" in window) {
+      const mo = new MutationObserver(() => {
+        if (board.childElementCount) {
+          document.getElementById("board-demo").dataset.ready = "1";
+          mo.disconnect();
+        }
+      });
+      mo.observe(board, { childList: true });
+    }
   }
 
   // ── copy buttons ─────────────────────────────────────────────────────────
