@@ -882,7 +882,11 @@ fn stage_keys_fall_through_to_editor_semantics_while_editing() {
     }
     assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
     assert!(model.task_editing());
-    assert_eq!(wide_key(&model, KeyCode::Left), None);
+    assert_eq!(
+        wide_key(&model, KeyCode::Left),
+        Some(BoardIntent::StageLeft),
+        "a parked session slides; the pane stays bound"
+    );
     assert_eq!(
         wide_key(&model, KeyCode::Esc),
         Some(BoardIntent::CloseLayer)
@@ -1644,4 +1648,338 @@ fn task_surface_controls_in_g_and_f_match_the_single_pane_page() {
             }
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// T5 dirty drafts across stages
+// ---------------------------------------------------------------------------
+
+/// Stage G with a dirty title draft parked in the page's edit session (view mode).
+fn dirty_session_in_g() -> (DomainState, BoardModel) {
+    let (mut domain, mut model) = fixture();
+    to_stage(&mut domain, &mut model, WideStage::Rail);
+    go(&mut domain, &mut model, BoardIntent::BeginEditTitle);
+    go(&mut domain, &mut model, BoardIntent::EditInsert('!'));
+    for _ in 0..8 {
+        if model.input_mode() == BoardInputMode::TaskPage {
+            break;
+        }
+        go(&mut domain, &mut model, BoardIntent::FormFocusNext);
+    }
+    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+    assert!(model.task_editing());
+    assert!(model.task_session_dirty());
+    (domain, model)
+}
+
+/// Stage G with the title editor open and dirty.
+fn dirty_editor_in_g() -> (DomainState, BoardModel) {
+    let (mut domain, mut model) = fixture();
+    to_stage(&mut domain, &mut model, WideStage::Rail);
+    go(&mut domain, &mut model, BoardIntent::BeginEditTitle);
+    go(&mut domain, &mut model, BoardIntent::EditInsert('!'));
+    assert_eq!(model.input_mode(), BoardInputMode::EditTitle);
+    assert!(model.task_session_dirty());
+    (domain, model)
+}
+
+fn header_state(model: &BoardModel, stage: WideStage) -> String {
+    let geometry = resolve_responsive(130, 24, stage);
+    let (rows, _) = render(model, 130, 24);
+    let header = column_text(&rows, geometry.task_content(), 1);
+    header
+        .trim_end()
+        .rsplit("─ ")
+        .next()
+        .unwrap_or_default()
+        .to_string()
+}
+
+#[test]
+fn dirty_draft_slides_left_to_a_and_right_back_to_g_untouched() {
+    let (mut domain, mut model) = dirty_session_in_g();
+    let bound = model.edit_target().expect("bound");
+    let draft = model.edit_buffer().to_string();
+    assert_eq!(header_state(&model, WideStage::Rail), "unsaved");
+
+    assert_eq!(
+        press(&mut domain, &mut model, KeyCode::Left),
+        Some(BoardIntent::StageLeft),
+        "← from G is allowed with a dirty draft"
+    );
+    assert_eq!(model.wide_stage(), WideStage::Split);
+    assert_eq!(model.input_mode(), BoardInputMode::Normal);
+    assert_eq!(model.edit_target(), Some(bound), "the pane stays bound");
+    assert_eq!(model.selected_id(), Some(bound));
+    assert_eq!(header_state(&model, WideStage::Split), "unsaved");
+    assert!(model.message().is_none(), "no refusal for a stage move");
+
+    assert_eq!(
+        press(&mut domain, &mut model, KeyCode::Right),
+        Some(BoardIntent::StageRight)
+    );
+    assert_eq!(model.wide_stage(), WideStage::Rail);
+    assert_eq!(model.edit_target(), Some(bound));
+    assert_eq!(model.edit_buffer(), draft, "the draft is untouched");
+    assert!(model.task_editing());
+    assert!(model.task_session_dirty());
+    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+}
+
+#[test]
+fn dirty_draft_refuses_keyboard_retarget_in_stage_a() {
+    let (mut domain, mut model) = dirty_session_in_g();
+    press(&mut domain, &mut model, KeyCode::Left);
+    assert_eq!(model.wide_stage(), WideStage::Split);
+    let bound = model.edit_target().expect("bound");
+    let draft = model.edit_buffer().to_string();
+    for code in [KeyCode::Char('j'), KeyCode::Char('k')] {
+        let intent = press(&mut domain, &mut model, code).expect("select key");
+        assert!(matches!(
+            intent,
+            BoardIntent::SelectNext | BoardIntent::SelectPrev
+        ));
+        assert_eq!(
+            model.selected_id(),
+            Some(bound),
+            "{code:?}: selection refused"
+        );
+        assert_eq!(model.edit_target(), Some(bound));
+        assert_eq!(model.edit_buffer(), draft);
+        assert_eq!(model.wide_stage(), WideStage::Split);
+        assert!(model
+            .message()
+            .is_some_and(|message| message.contains("save or cancel")));
+    }
+    let (rows, _) = render(&model, 130, 24);
+    assert!(
+        rows[22].contains("save or cancel"),
+        "refusal paints on the status row"
+    );
+}
+
+#[test]
+fn dirty_draft_refuses_rail_row_click_and_keeps_the_editor() {
+    let (mut domain, mut model) = dirty_editor_in_g();
+    let bound = model.edit_target().expect("bound");
+    let draft = model.edit_buffer().to_string();
+    let geometry = resolve_responsive(130, 24, WideStage::Rail);
+    let (_, hits) = render(&model, 130, 24);
+    let other = row_hit(&hits, geometry.board, |id| id != bound);
+    let intent = click_map(&model, &hits, other.x, other.y)
+        .expect("a rail row stays an explicit retarget attempt");
+    go(&mut domain, &mut model, intent);
+    assert_eq!(model.wide_stage(), WideStage::Rail);
+    assert_eq!(model.selected_id(), Some(bound));
+    assert_eq!(model.edit_target(), Some(bound));
+    assert_eq!(model.input_mode(), BoardInputMode::EditTitle);
+    assert_eq!(model.edit_buffer(), draft);
+    assert!(model
+        .message()
+        .is_some_and(|message| message.contains("save or cancel")));
+
+    // The same bound row is not a retarget at all.
+    let same = row_hit(&hits, geometry.board, |id| id == bound);
+    assert_eq!(click_map(&model, &hits, same.x, same.y), None);
+}
+
+#[test]
+fn dirty_refusal_clears_after_save_and_the_pane_retargets_again() {
+    let (mut domain, mut model) = dirty_editor_in_g();
+    let bound = model.edit_target().expect("bound");
+    let draft = model.edit_buffer().to_string();
+    go(&mut domain, &mut model, BoardIntent::SelectNext);
+    assert!(
+        model.message().is_some(),
+        "SelectNext in an editor is a refused retarget"
+    );
+    assert_eq!(header_state(&model, WideStage::Rail), "editing title");
+
+    go(&mut domain, &mut model, BoardIntent::ConfirmEdit);
+    assert!(model.message().is_none());
+    assert!(!model.task_session_dirty());
+    assert_eq!(domain.get(bound).expect("saved").title, draft);
+    assert_eq!(header_state(&model, WideStage::Rail), "started · tsk");
+
+    press(&mut domain, &mut model, KeyCode::Left);
+    assert_eq!(model.wide_stage(), WideStage::Split);
+    press(&mut domain, &mut model, KeyCode::Char('j'));
+    assert_ne!(
+        model.selected_id(),
+        Some(bound),
+        "retarget works after the save"
+    );
+    assert_eq!(model.edit_target(), model.selected_id());
+}
+
+#[test]
+fn dirty_refusal_clears_after_cancel() {
+    let (mut domain, mut model) = dirty_editor_in_g();
+    let bound = model.edit_target().expect("bound");
+    let saved = domain.get(bound).expect("bound").title.clone();
+    go(&mut domain, &mut model, BoardIntent::SelectNext);
+    assert!(model.message().is_some());
+    go(&mut domain, &mut model, BoardIntent::CancelEdit);
+    assert!(model.message().is_none());
+    assert!(!model.task_session_dirty());
+    assert_eq!(model.edit_buffer(), saved);
+    assert_eq!(header_state(&model, WideStage::Rail), "started · tsk");
+    press(&mut domain, &mut model, KeyCode::Left);
+    press(&mut domain, &mut model, KeyCode::Char('j'));
+    assert_ne!(model.selected_id(), Some(bound));
+}
+
+#[test]
+fn clean_editor_rail_row_click_retargets_in_place() {
+    let (mut domain, mut model) = fixture();
+    to_stage(&mut domain, &mut model, WideStage::Rail);
+    go(&mut domain, &mut model, BoardIntent::BeginEditTitle);
+    assert!(!model.task_session_dirty());
+    let bound = model.edit_target().expect("bound");
+    let geometry = resolve_responsive(130, 24, WideStage::Rail);
+    let (_, hits) = render(&model, 130, 24);
+    let other = row_hit(&hits, geometry.board, |id| id != bound);
+    let intent = click_map(&model, &hits, other.x, other.y).expect("clean retarget");
+    go(&mut domain, &mut model, intent);
+    assert_eq!(model.wide_stage(), WideStage::Rail);
+    assert_ne!(model.edit_target(), Some(bound));
+    assert_eq!(model.edit_target(), model.selected_id());
+    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+    assert!(model.message().is_none());
+}
+
+#[test]
+fn changed_thread_and_scope_drafts_refuse_retarget_and_paint_unsaved() {
+    // Thread.
+    let (mut domain, mut model) = fixture();
+    to_stage(&mut domain, &mut model, WideStage::Rail);
+    go(&mut domain, &mut model, BoardIntent::BeginEditTitle);
+    go(
+        &mut domain,
+        &mut model,
+        BoardIntent::FocusFormField(CaptureField::Thread),
+    );
+    go(&mut domain, &mut model, BoardIntent::ToggleThreadEditing);
+    go(&mut domain, &mut model, BoardIntent::EditInsert('x'));
+    assert_eq!(header_state(&model, WideStage::Rail), "editing thread");
+    let bound = model.edit_target().expect("bound");
+    let other = model
+        .visible_ids()
+        .iter()
+        .position(|&id| id != bound)
+        .expect("other row");
+    go(
+        &mut domain,
+        &mut model,
+        BoardIntent::FocusBoardAndSelectIndex(other),
+    );
+    assert_eq!(model.edit_target(), Some(bound));
+    assert_eq!(model.selected_id(), Some(bound));
+    assert!(model
+        .message()
+        .is_some_and(|message| message.contains("save or cancel")));
+
+    // Scope, then back to view mode: the header slot reads `unsaved`.
+    let (mut domain, mut model) = fixture();
+    to_stage(&mut domain, &mut model, WideStage::Rail);
+    go(&mut domain, &mut model, BoardIntent::BeginEditTitle);
+    go(
+        &mut domain,
+        &mut model,
+        BoardIntent::FocusFormField(CaptureField::Scope),
+    );
+    let original = model.form_scope().cloned();
+    go(&mut domain, &mut model, BoardIntent::FormCycleScope);
+    assert_ne!(model.form_scope(), original.as_ref());
+    assert_eq!(header_state(&model, WideStage::Rail), "editing scope");
+    let bound = model.edit_target().expect("bound");
+    let other = model
+        .visible_ids()
+        .iter()
+        .position(|&id| id != bound)
+        .expect("other row");
+    go(
+        &mut domain,
+        &mut model,
+        BoardIntent::FocusBoardAndSelectIndex(other),
+    );
+    assert_eq!(model.edit_target(), Some(bound));
+    assert!(model.message().is_some());
+    for _ in 0..8 {
+        if model.input_mode() == BoardInputMode::TaskPage {
+            break;
+        }
+        go(&mut domain, &mut model, BoardIntent::FormFocusNext);
+    }
+    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+    assert!(model.task_session_dirty());
+    assert_eq!(header_state(&model, WideStage::Rail), "unsaved");
+}
+
+#[test]
+fn dirty_scope_dropdown_same_bound_row_click_keeps_the_visible_editor() {
+    let (mut domain, mut model) = dirty_editor_in_g();
+    let draft = model.edit_buffer().to_string();
+    go(
+        &mut domain,
+        &mut model,
+        BoardIntent::FocusFormField(CaptureField::Scope),
+    );
+    go(&mut domain, &mut model, BoardIntent::OpenFormScopeDropdown);
+    assert_eq!(model.input_mode(), BoardInputMode::FormScopeDropdown);
+    let bound = model.edit_target().expect("bound");
+    let geometry = resolve_responsive(130, 24, WideStage::Rail);
+    let (_, hits) = render(&model, 130, 24);
+    let row = row_hit(&hits, geometry.board, |id| id == bound);
+    let mapped = click_map(&model, &hits, row.x, row.y);
+    if let Some(intent) = mapped.clone() {
+        go(&mut domain, &mut model, intent);
+    }
+    assert_eq!(mapped, None);
+    assert_eq!(model.input_mode(), BoardInputMode::FormScopeDropdown);
+    assert_eq!(model.wide_stage(), WideStage::Rail);
+    go(
+        &mut domain,
+        &mut model,
+        BoardIntent::CancelFormScopeDropdown,
+    );
+    go(
+        &mut domain,
+        &mut model,
+        BoardIntent::FocusFormField(CaptureField::Title),
+    );
+    assert_eq!(model.edit_buffer(), draft);
+}
+
+#[test]
+fn board_focused_field_edit_enters_the_task_stage() {
+    // From A, Ctrl+E enters G with the editor live in the column.
+    let (mut domain, mut model) = fixture();
+    to_stage(&mut domain, &mut model, WideStage::Split);
+    go(&mut domain, &mut model, BoardIntent::BeginEditTitle);
+    assert_eq!(model.wide_stage(), WideStage::Rail);
+    assert_eq!(model.input_mode(), BoardInputMode::EditTitle);
+    go(&mut domain, &mut model, BoardIntent::EditInsert('!'));
+    let geometry = resolve_responsive(130, 24, WideStage::Rail);
+    let (rows, _) = render(&model, 130, 24);
+    let header = column_text(&rows, geometry.task_content(), 1);
+    assert!(header.contains(model.edit_buffer()), "{header}");
+    assert!(header.trim_end().ends_with("editing title"));
+
+    // From 0, Ctrl+E opens the full page with the bare board as its origin.
+    let (mut domain, mut model) = fixture();
+    go(&mut domain, &mut model, BoardIntent::BeginEditTitle);
+    assert_eq!(model.wide_stage(), WideStage::FullTask);
+    assert_eq!(model.stage_origin(), Some(WideStage::FullBoard));
+    go(&mut domain, &mut model, BoardIntent::CancelEdit);
+    go(&mut domain, &mut model, BoardIntent::CloseLayer);
+    assert_eq!(
+        model.wide_stage(),
+        WideStage::FullTask,
+        "first Esc ends the session"
+    );
+    assert!(!model.task_editing());
+    go(&mut domain, &mut model, BoardIntent::CloseLayer);
+    assert_eq!(model.wide_stage(), WideStage::FullBoard);
+    assert_eq!(model.edit_target(), None);
 }

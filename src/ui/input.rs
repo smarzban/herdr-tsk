@@ -630,18 +630,19 @@ pub enum ResponsiveKeyRoute {
 /// Only bare `→` / `←` in the Normal and TaskPage view modes are stage keys, and only while
 /// the frame is wide. `Enter` and `Esc` keep their surface meaning (`OpenTaskPage` records the
 /// origin stage; `CloseLayer` restores it), `Tab` is never a stage key, and every editor keeps
-/// its own arrow semantics. Below the wide threshold nothing here fires.
+/// its own arrow semantics. A task edit session parked in view mode (a dirty draft with no
+/// editor open) still slides: the pane stays bound, so nothing is lost. Below the wide
+/// threshold nothing here fires.
 pub fn route_responsive_key(
     mode: BoardInputMode,
     stage: WideStage,
     presentation: ResponsivePresentation,
-    task_editing: bool,
+    _task_editing: bool,
     key: KeyEvent,
 ) -> ResponsiveKeyRoute {
     if presentation != ResponsivePresentation::WideSplit
         || !matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat)
         || !key.modifiers.is_empty()
-        || task_editing
     {
         return ResponsiveKeyRoute::Surface;
     }
