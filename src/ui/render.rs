@@ -3066,7 +3066,7 @@ fn paint_scope_dropdown(
         bounds,
         ModalCardSpec {
             title: &title,
-            content_rows: (rows + tabs_rows) as u16,
+            content_rows: (rows + tabs_rows + usize::from(tabs.is_some())) as u16,
             legend: SCOPE_FOOTER,
             dismiss: None,
         },
@@ -3106,8 +3106,21 @@ fn paint_scope_dropdown(
             Rect::new(content.x.saturating_add(main_w + 1), y, archived_w, 1),
         );
     }
+    // AC-37: a dim rule row sits directly under the picker's tabs row, like the
+    // board's rule under its tabs.
+    let rule_rows = usize::from(tabs.is_some());
+    if tabs.is_some() {
+        let y = content.y.saturating_add(1);
+        let rule = "\u{2500}".repeat(content.width as usize);
+        put_line_at(
+            frame,
+            surface,
+            Rect::new(content.x, y, content.width, 1),
+            Line::from(Span::styled(rule, style_dim())),
+        );
+    }
     if empty_state {
-        let y = content.y.saturating_add(tabs_rows as u16);
+        let y = content.y.saturating_add((tabs_rows + rule_rows) as u16);
         put_line_at(
             frame,
             surface,
@@ -3116,11 +3129,11 @@ fn paint_scope_dropdown(
         );
         return;
     }
-    let paintable = rows.min((content.height as usize).saturating_sub(tabs_rows));
+    let paintable = rows.min((content.height as usize).saturating_sub(tabs_rows + rule_rows));
     for (j, opt) in options.iter().enumerate().skip(scroll).take(paintable) {
         let y = content
             .y
-            .saturating_add(tabs_rows as u16)
+            .saturating_add((tabs_rows + rule_rows) as u16)
             .saturating_add((j - scroll) as u16);
         let marker = if j == selected { "▸ " } else { "  " };
         let text = format!("{marker}{opt}");
@@ -3815,37 +3828,22 @@ fn paint_collapsible_header(chevron: &str, title: &str, count: usize, width: u16
     )
 }
 
-/// The archived group's header: ` ▸ archived ─── n `. Every span is dim; the row
-/// selected paints reverse. Unlike the section headers it is a control, so it has a
-/// chevron and no bold.
+/// The archived group's header: `{chevron} archived · {n}` with no rule. Selected,
+/// the word is bold and the rest dim; unselected, everything is dim. Never reverse.
 fn paint_archived_header(
     count: usize,
     width: u16,
     selected: bool,
     collapsed: bool,
 ) -> Line<'static> {
-    let style = if selected {
-        style_reverse()
-    } else {
-        style_dim()
-    };
-    let chevron = if collapsed { "▸" } else { "▾" };
-    let left = present_line(&format!(" {chevron} archived "), width as usize);
-    let right_budget = (width as usize).saturating_sub(display_width(&left));
-    let right = if right_budget == 0 {
-        String::new()
-    } else {
-        present_line(&format!("{} ", count), right_budget)
-    };
-    let rule_w = (width as usize)
-        .saturating_sub(display_width(&left))
-        .saturating_sub(display_width(&right));
-    let rule = "─".repeat(rule_w);
+    let word_style = if selected { style_bold() } else { style_dim() };
+    let rest_style = style_dim();
+    let chevron = if collapsed { "\u{25b8}" } else { "\u{25be}" };
     bound_line(
         Line::from(vec![
-            Span::styled(left, style),
-            Span::styled(rule, style),
-            Span::styled(right, style),
+            Span::styled(format!(" {chevron} "), rest_style),
+            Span::styled("archived".to_string(), word_style),
+            Span::styled(format!(" \u{b7} {count}"), rest_style),
         ]),
         width as usize,
     )
@@ -4205,7 +4203,7 @@ fn paint_selector_row(
 fn mutating_verb_key(key: &str) -> bool {
     matches!(
         key,
-        "s" | "d" | "o" | "b" | "x" | "a" | "e" | "u" | "n" | "q"
+        "s" | "d" | "o" | "b" | "x" | "a" | "e" | "u" | "n" | "q" | "g"
     )
 }
 

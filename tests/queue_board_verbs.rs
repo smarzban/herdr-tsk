@@ -1498,7 +1498,7 @@ fn ctrl_s_replaces_ctrl_space_as_the_primary_verb() {
 }
 
 #[test]
-fn ctrl_g_maps_to_home_group_toggle_and_the_palette_hides_it_elsewhere() {
+fn ctrl_g_maps_to_the_archived_group_and_the_palette_keeps_group_toggle() {
     let (mut domain, mut model, _) = board_with_task("Grouped task", HumanStatus::Ready);
     apply_intent(
         &mut domain,
@@ -1514,11 +1514,15 @@ fn ctrl_g_maps_to_home_group_toggle_and_the_palette_hides_it_elsewhere() {
             .any(|command| command.label == "toggle groups"),
         "the active grouped lens exposes the palette command"
     );
+    // AC-38: the ctrl+g chord now toggles the archived group; group toggling stays
+    // reachable through the palette's `toggle groups` command.
     let toggle = map_key(BoardInputMode::Normal, ctrl(KeyCode::Char('g'))).expect("Ctrl+G maps");
-    assert_eq!(toggle, BoardIntent::ToggleAllGroups);
-    apply_intent(&mut domain, &mut model, toggle.clone(), None).expect("collapse groups");
+    assert_eq!(toggle, BoardIntent::ToggleArchivedGroup);
+    apply_intent(&mut domain, &mut model, BoardIntent::ToggleAllGroups, None)
+        .expect("collapse groups");
     assert!(model.visible_ids().is_empty());
-    apply_intent(&mut domain, &mut model, toggle, None).expect("expand groups");
+    apply_intent(&mut domain, &mut model, BoardIntent::ToggleAllGroups, None)
+        .expect("expand groups");
     assert_eq!(model.visible_ids().len(), 1);
 
     apply_intent(
@@ -3704,5 +3708,89 @@ fn picker_archive_of_the_focused_project_keeps_an_unarchived_cwd_default_for_qui
         probe.scope,
         project(THIS_REPO),
         "the unarchived invocation default still drives quick-add"
+    );
+}
+
+#[test]
+fn ctrl_g_toggles_the_archived_group_from_any_selection_and_opens_the_drawer_when_closed() {
+    let mut domain = DomainState::new();
+    let archived = domain
+        .create(
+            "ctrl+g target",
+            None,
+            project(THIS_REPO),
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create archived");
+    domain.archive_task(archived).expect("archive it");
+    let live = domain
+        .create(
+            "live row",
+            None,
+            project(THIS_REPO),
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create live");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
+
+    // Drawer closed: ctrl+g opens the drawer and expands the group.
+    assert!(!model.drawer_open());
+    let intent = map_key(BoardInputMode::Normal, ctrl(KeyCode::Char('g')))
+        .expect("ctrl+g is bound in normal mode");
+    assert_eq!(intent, BoardIntent::ToggleArchivedGroup);
+    apply_intent(&mut domain, &mut model, intent, None).expect("ctrl+g opens the drawer");
+    assert!(model.drawer_open(), "the drawer opened");
+    assert!(
+        model.visible_ids().contains(&archived),
+        "the group expanded"
+    );
+
+    // Header selected after the keyboard toggle.
+    assert!(model.archived_header_selected());
+
+    // From a task row with the drawer open: ctrl+g collapses, again expands.
+    let idx = model
+        .visible_ids()
+        .iter()
+        .position(|&v| v == live)
+        .expect("live row");
+    apply_intent(&mut domain, &mut model, BoardIntent::SelectIndex(idx), None)
+        .expect("select live");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        map_key(BoardInputMode::Normal, ctrl(KeyCode::Char('g'))).expect("bound"),
+        None,
+    )
+    .expect("collapse from a task row");
+    assert!(
+        !model.visible_ids().contains(&archived),
+        "ctrl+g collapsed the group from a task row"
+    );
+    apply_intent(
+        &mut domain,
+        &mut model,
+        map_key(BoardInputMode::Normal, ctrl(KeyCode::Char('g'))).expect("bound"),
+        None,
+    )
+    .expect("expand again from a task row");
+    assert!(
+        model.visible_ids().contains(&archived),
+        "ctrl+g expanded the group again"
+    );
+
+    // Enter on the header keeps working: collapse.
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ToggleArchivedGroup,
+        None,
+    )
+    .expect("select header + collapse");
+    assert!(
+        !model.visible_ids().contains(&archived),
+        "enter on the header collapses the group"
     );
 }

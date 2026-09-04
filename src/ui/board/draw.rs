@@ -75,6 +75,14 @@ pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
                 },
             },
             VerbEntry {
+                key: "g",
+                label: if model.archived_collapsed {
+                    "expand"
+                } else {
+                    "collapse"
+                },
+            },
+            VerbEntry {
                 key: ":",
                 label: help(":", "palette"),
             },

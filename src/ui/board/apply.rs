@@ -1421,11 +1421,16 @@ fn apply_board_intent(
             return Ok(IntentOutcome::None);
         }
         BoardIntent::ToggleArchivedGroup => {
-            // Select the header row, then flip the group. The header stays in the
-            // visible set collapsed or expanded, so reanchoring keeps it selected.
+            // From the keyboard with the drawer closed: open the drawer and expand the
+            // group. Otherwise flip the group. Either way the header row is selected.
             let previous_visible = model.visible_ids();
+            if !model.drawer_open {
+                model.drawer_open = true;
+                model.archived_collapsed = false;
+            } else {
+                model.toggle_archived_collapsed();
+            }
             model.select_archived_header();
-            model.toggle_archived_collapsed();
             model.reanchor_selection(Some(ARCHIVED_HEADER_ROW_ID), &previous_visible);
             return Ok(IntentOutcome::None);
         }

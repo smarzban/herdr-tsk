@@ -16,7 +16,7 @@
 │  ✓ T8 Ship the queue board milestone                                  tsk · 5h │
 │  ✓ T9 Retire classic board chrome                                           6h │
 │                                                                                │
-│ ▾ archived ──────────────────────────────────────────────────────────────────2 │
+│ ▾ archived · 2                                                                 │
 │                                                                                │
 │  ○ T31 Archived receipt sweep                                        tsk · 45m │
 │  ■ T32 Archived vendored spike                                             50m │

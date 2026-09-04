@@ -309,7 +309,7 @@ pub enum BoardIntent {
 }
 
 /// Bottom chrome: compact key legend for primary board actions.
-pub const BOARD_HELP_LINE: &str = "↑↓/jk  ·  ctrl+s primary  ·  enter open  ·  → peek  ·  ctrl+d done  ·  ctrl+o reopen  ·  ctrl+b block  ·  + capture  ·  ctrl+e title  ·  ctrl+x del  ·  ctrl+u undo  ·  ctrl+g groups  ·  z drawer  ·  : palette  ·  ? help  ·  ctrl+q quit";
+pub const BOARD_HELP_LINE: &str = "↑↓/jk  ·  ctrl+s primary  ·  enter open  ·  → peek  ·  ctrl+d done  ·  ctrl+o reopen  ·  ctrl+b block  ·  + capture  ·  ctrl+e title  ·  ctrl+x del  ·  ctrl+u undo  ·  ctrl+g archived group  ·  z drawer  ·  : palette  ·  ? help  ·  ctrl+q quit";
 /// Compact legend shown while the action sheet or command palette is open.
 pub const COMMAND_SURFACE_HELP_LINE: &str =
     "↑↓ select  ·  type to filter  ·  Enter run  ·  Esc close";
@@ -470,6 +470,13 @@ const NORMAL_KEYMAP: &[NormalKeyEntry] = &[
         verb: true,
     },
     NormalKeyEntry {
+        code: KeyCode::Char('g'),
+        intent: BoardIntent::ToggleArchivedGroup,
+        help_chord: "ctrl+g",
+        help_label: "archived group",
+        verb: true,
+    },
+    NormalKeyEntry {
         code: KeyCode::Char('z'),
         intent: BoardIntent::ToggleDoneDrawer,
         help_chord: "z",
@@ -534,9 +541,6 @@ pub fn normal_help_bindings() -> Vec<(&'static str, &'static str)> {
             bindings.push(binding);
         }
     }
-    // Ctrl+G is deliberately not a normal key-map entry: it only acts on the home
-    // Projects and Threads lenses, never while a task page owns input.
-    bindings.push(("ctrl+g", "groups"));
     bindings
 }
 
@@ -1079,12 +1083,6 @@ fn verb_mod_held(mods: KeyModifiers) -> bool {
 
 fn map_normal(key: KeyEvent) -> Option<BoardIntent> {
     let mods = key.modifiers;
-    if key.code == KeyCode::Char('g')
-        && mods.contains(KeyModifiers::CONTROL)
-        && !mods.intersects(KeyModifiers::ALT | KeyModifiers::SUPER)
-    {
-        return Some(BoardIntent::ToggleAllGroups);
-    }
     if key.code == KeyCode::Char('c') && mods.contains(KeyModifiers::CONTROL) {
         return Some(BoardIntent::Quit);
     }

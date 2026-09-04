@@ -4058,16 +4058,18 @@ fn archived_header_selection_follows_the_viewport() {
     assert_buffer_mono(buffer);
     let header_visible = (0..24).any(|y| {
         let row: String = (0..80).map(|x| buffer[(x, y)].symbol()).collect();
-        row.contains("archived")
-            && row.contains('▾')
-            && buffer[(2, y)]
-                .style()
-                .add_modifier
-                .contains(Modifier::REVERSED)
+        if !(row.contains("archived") && row.contains('\u{25be}')) {
+            return false;
+        }
+        // Selected paint: the word `archived` is bold (AC-13 amended), never reverse.
+        (0..20).any(|x| {
+            buffer[(x, y)].symbol() == "a"
+                && buffer[(x, y)].style().add_modifier.contains(Modifier::BOLD)
+        })
     });
     assert!(
         header_visible,
-        "the selected archived header must scroll into view in reverse style:\n{}",
+        "the selected archived header must scroll into view, word bold:\n{}",
         (0..24)
             .map(|y| {
                 let row: String = (0..80).map(|x| buffer[(x, y)].symbol()).collect();
@@ -4075,5 +4077,176 @@ fn archived_header_selection_follows_the_viewport() {
             })
             .collect::<Vec<_>>()
             .join("\n")
+    );
+}
+
+#[test]
+fn archived_header_reads_chevron_word_dot_count_and_selection_is_bold_not_reverse() {
+    use ratatui::style::Modifier;
+
+    let mut domain = DomainState::new();
+    let archived_id = domain
+        .create(
+            "archived header paint",
+            None,
+            TaskScope::Global,
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create archived");
+    domain.archive_task(archived_id).expect("archive it");
+    let mut model = BoardModel::from_domain(&domain, None);
+    apply_intent(&mut domain, &mut model, BoardIntent::ToggleDoneDrawer, None).expect("drawer");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ToggleArchivedGroup,
+        None,
+    )
+    .expect("expand and select the header");
+
+    let paint = |model: &BoardModel| {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        terminal
+            .draw(|frame| {
+                let _ = draw_board(frame, model);
+            })
+            .expect("draw board");
+        terminal.backend().buffer().clone()
+    };
+
+    // Selected: `▾ archived · 1`, the word bold, nothing reversed.
+    let buffer = paint(&model);
+    assert_buffer_mono(&buffer);
+    let header_y = (0..24)
+        .map(|y| {
+            let row: String = (0..80).map(|x| buffer[(x, y)].symbol()).collect();
+            (y, row)
+        })
+        .find(|(_, row)| row.contains("archived") && row.contains('▾'))
+        .expect("header row paints")
+        .0;
+    let row: String = (0..80).map(|x| buffer[(x, header_y)].symbol()).collect();
+    assert!(
+        row.contains("▾ archived · 1"),
+        "header reads chevron, word, dot, count: {row:?}"
+    );
+    let mut rule_cells = 0;
+    let mut word_bold = false;
+    let mut any_reverse = false;
+    for x in 0..80 {
+        let cell = buffer[(x, header_y)].clone();
+        let symbol = cell.symbol().to_string();
+        if symbol == "─" {
+            rule_cells += 1;
+        }
+        if cell.style().add_modifier.contains(Modifier::REVERSED) {
+            any_reverse = true;
+        }
+        let style = cell.style().add_modifier;
+        if style.contains(Modifier::BOLD) && symbol == "a" {
+            word_bold = true;
+        }
+    }
+    assert_eq!(rule_cells, 0, "the header has no rule row cells: {row:?}");
+    assert!(!any_reverse, "selected header never paints a reverse block");
+    assert!(
+        word_bold,
+        "the word `archived` is bold when selected: {row:?}"
+    );
+
+    // Unselected: all dim, no bold.
+    apply_intent(&mut domain, &mut model, BoardIntent::SelectIndex(1), None)
+        .expect("select the archived task row (index 0 is the header)");
+    let buffer = paint(&model);
+    assert_buffer_mono(&buffer);
+    let header_y = (0..24)
+        .map(|y| {
+            let row: String = (0..80).map(|x| buffer[(x, y)].symbol()).collect();
+            (y, row)
+        })
+        .find(|(_, row)| row.contains("archived") && row.contains('▾'))
+        .expect("header row still paints when unselected")
+        .0;
+    let row: String = (0..80).map(|x| buffer[(x, header_y)].symbol()).collect();
+    assert!(
+        row.contains("▾ archived · 1"),
+        "unselected header keeps its text: {row:?}"
+    );
+    for x in 0..80 {
+        let cell = buffer[(x, header_y)].clone();
+        if cell.symbol() == " " {
+            continue;
+        }
+        let style = cell.style().add_modifier;
+        assert!(
+            !style.contains(Modifier::BOLD),
+            "unselected header has no bold (cell {x}): {row:?}"
+        );
+        assert!(
+            !style.contains(Modifier::REVERSED),
+            "unselected header has no reverse (cell {x}): {row:?}"
+        );
+    }
+}
+
+#[test]
+fn picker_paints_a_dim_rule_under_its_tabs() {
+    let mut domain = DomainState::new();
+    domain
+        .create(
+            "picker task",
+            None,
+            TaskScope::Global,
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create");
+    let mut model = BoardModel::from_domain(&domain, None);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenProjectSelector,
+        None,
+    )
+    .expect("open picker");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ProjectPickerSwitchTab,
+        None,
+    )
+    .expect("switch to the archived tab");
+
+    let backend = TestBackend::new(80, 24);
+    let mut terminal = Terminal::new(backend).expect("terminal");
+    terminal
+        .draw(|frame| {
+            let _ = draw_board(frame, &model);
+        })
+        .expect("draw board");
+    let buffer = terminal.backend().buffer();
+    assert_buffer_mono(buffer);
+    let tabs_y = (0..24)
+        .map(|y| {
+            let row: String = (0..80).map(|x| buffer[(x, y)].symbol()).collect();
+            (y, row)
+        })
+        .find(|(_, row)| row.contains("projects") && row.contains("archived"))
+        .expect("tabs row paints")
+        .0;
+    let rule_row: String = (0..80).map(|x| buffer[(x, tabs_y + 1)].symbol()).collect();
+    let rule_cells = rule_row.matches('─').count();
+    assert!(
+        rule_cells >= 4,
+        "a dim rule row paints directly under the tabs: {rule_row:?}"
+    );
+    assert!(
+        buffer[(20, tabs_y + 1)]
+            .style()
+            .add_modifier
+            .contains(ratatui::style::Modifier::DIM),
+        "the rule is dim: {rule_row:?}"
     );
 }
