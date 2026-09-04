@@ -3554,3 +3554,59 @@ fn ctrl_f_and_ctrl_u_on_the_archived_tab_unarchive_and_every_task_keeps_its_stat
     );
     let _ = a;
 }
+
+#[test]
+fn file_on_a_taskless_invocation_repo_refuses_on_the_status_line() {
+    let mut domain = DomainState::new();
+    domain
+        .create(
+            "desk only",
+            None,
+            TaskScope::Global,
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create desk task");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenProjectSelector,
+        None,
+    )
+    .expect("open picker");
+
+    // Select the invocation repo option: it has no tasks, so there is nothing to archive.
+    let target = tsk_tui::ui::board::ProjectScopeOption::Project(PathBuf::from(THIS_REPO));
+    for _ in 0..model.project_options().len() {
+        let index = model.project_picker_index().expect("picker index");
+        if model.project_options()[index] == target {
+            break;
+        }
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::ProjectPickerNext,
+            None,
+        )
+        .expect("next");
+    }
+    apply_intent(&mut domain, &mut model, BoardIntent::File, None).expect("file applies");
+
+    assert_eq!(
+        model.input_mode(),
+        BoardInputMode::ProjectPicker,
+        "the picker stays open"
+    );
+    let message = model
+        .message()
+        .expect("a refusal paints on the status slot");
+    assert!(
+        message.contains("nothing to archive") && message.contains("app"),
+        "the refusal names the empty project: {message:?}"
+    );
+    assert!(
+        !domain.is_project_archived(THIS_REPO),
+        "no record was written"
+    );
+}

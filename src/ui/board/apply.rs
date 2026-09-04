@@ -1643,8 +1643,15 @@ fn apply_board_intent(
                     PickerTab::Main => domain.archive_project(&scope_path),
                     PickerTab::Archived => domain.unarchive_project(&scope_path).map(|_| true),
                 };
-                if result.is_err() {
-                    // Unknown project and friends leave the picker untouched.
+                if let Err(error) = result {
+                    // Unknown project and friends leave the picker untouched and paint
+                    // the refusal on the status slot, per the status-slot rule.
+                    if error == DomainError::UnknownProject(scope_path.clone()) {
+                        let short = crate::ui::render::short_project(&scope_path);
+                        model.set_message(format!("nothing to archive in {short}"));
+                    } else {
+                        model.set_message(error.to_string());
+                    }
                     return Ok(IntentOutcome::None);
                 }
                 model.sync_from_domain(domain);
