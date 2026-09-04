@@ -44,6 +44,7 @@ integration tests in `tests/`.
 | K4 torn-tail glue (no O_APPEND) | `store::tests::trash_rewrite_drops_torn_tails_instead_of_gluing_new_lines` (AC-16 `store::tests::trash_sync_failure_leaves_the_live_document_untouched` re-verified meaningful) |
 | K5 future deleted_at | `store::tests::trash_rewrite_keeps_lines_with_a_future_deleted_at` |
 | K6 local state after trash | `store::tests::reload_merge_save_drops_trashed_tasks_from_the_callers_state` |
+| V1 (verify regression) trash-rewrite failure after a durable restore reported as failure, retry said "not in trash" | `store::tests::failed_trash_rewrite_after_a_durable_restore_still_reports_success` |
 
 ## Done-means
 

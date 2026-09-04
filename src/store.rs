@@ -286,6 +286,10 @@ impl TaskStore {
     /// live replace and the trash rewrite leaves the task in both places and readers
     /// dedupe by id with the live copy winning; the reverse order could lose the
     /// task from both files on a failed live save.
+    ///
+    /// Once the live document is durable the restore has happened, so a failure of the
+    /// trailing trash rewrite is not an error: the stale line is hidden by every reader
+    /// and dropped by the next trash rewrite (which removes lines whose id is live).
     pub fn restore_from_trash(&self, target: TrashTarget) -> Result<TrashLine, TrashError> {
         self.restore_from_trash_with(target, &StdFilesystem)
     }
@@ -316,8 +320,10 @@ impl TaskStore {
         state.clear_merge_bases();
         self.save_unlocked_with(&mut state, filesystem)
             .map_err(TrashError::Store)?;
-        self.rewrite_trash_filtered(filesystem, |candidate| candidate.task.id != restored_id)
-            .map_err(TrashError::Store)?;
+        // Deferred cleanup: the restore is complete, a failed rewrite leaves a stale line
+        // that readers hide and the next trash rewrite removes.
+        let _ =
+            self.rewrite_trash_filtered(filesystem, |candidate| candidate.task.id != restored_id);
         Ok(line)
     }
 
@@ -2013,6 +2019,38 @@ mod tests {
         assert!(read_trash_lines(&dir).is_empty());
         let live = store.load().expect("reload");
         assert!(!live.get(gone).expect("task is live").soft_deleted);
+    }
+
+    #[test]
+    fn failed_trash_rewrite_after_a_durable_restore_still_reports_success() {
+        let dir = temp_dir("restore-trash-rewrite-fails");
+        let _guard = TempDirGuard(dir.clone());
+        let store = TaskStore::new(&dir);
+        let gone = seed_live_and_trashed(&store, &dir);
+        let trash_before = fs::read(trash_path(&dir)).expect("read trash");
+
+        // The live save succeeds (FileSync) but the trash rewrite fails (TrashFileSync).
+        let filesystem = RealFilesystemWithFailure {
+            fail_at: Some(SaveStage::TrashFileSync),
+        };
+        let restored = store
+            .restore_from_trash_with(TrashTarget::Id(gone), &filesystem)
+            .expect("a durable live save is a completed restore");
+        assert_eq!(restored.task.id, gone);
+
+        let live = store.load().expect("reload");
+        assert!(!live.get(gone).expect("task is live").soft_deleted);
+        assert_eq!(
+            fs::read(trash_path(&dir)).expect("read trash"),
+            trash_before,
+            "the stale line stays until the next trash rewrite"
+        );
+        // Readers hide the stale line behind the live copy, and a retry is refused as
+        // already live rather than reported as a store failure.
+        let retry = store
+            .restore_from_trash(TrashTarget::Id(gone))
+            .expect_err("the task is live");
+        assert!(matches!(retry, TrashError::NotInTrash), "{retry}");
     }
 
     #[test]
