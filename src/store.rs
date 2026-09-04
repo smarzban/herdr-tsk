@@ -64,6 +64,17 @@ fn migrate_with(
     Ok(document)
 }
 
+/// Parse trash lines tolerantly from raw bytes: split on `b'\n'`, skip any line
+/// that fails UTF-8 (a crash can cut a multibyte title mid-sequence) or JSON.
+fn parse_trash_lines(content: &[u8]) -> Vec<TrashLine> {
+    content
+        .split(|byte| *byte == b'\n')
+        .filter_map(|line| std::str::from_utf8(line).ok())
+        .filter(|line| !line.trim().is_empty())
+        .filter_map(|line| serde_json::from_str(line).ok())
+        .collect()
+}
+
 /// One line of `trash.jsonl`: a task removed from the live store, with the
 /// `at` of its last `soft_deleted` history event.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -249,16 +260,12 @@ impl TaskStore {
 
     fn load_trash_unlocked(&self) -> Result<Vec<TrashLine>, StoreError> {
         let path = self.path.join(TRASH_FILE);
-        let content = match fs::read_to_string(&path) {
+        let content = match fs::read(&path) {
             Ok(content) => content,
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
             Err(error) => return Err(error.into()),
         };
-        Ok(content
-            .lines()
-            .filter(|line| !line.trim().is_empty())
-            .filter_map(|line| serde_json::from_str(line).ok())
-            .collect())
+        Ok(parse_trash_lines(&content))
     }
 
     /// Restore one task from trash into the live state under the exclusive lock:
@@ -1509,6 +1516,58 @@ mod tests {
             .lines()
             .map(|line| serde_json::from_str(line).expect("trash line parses"))
             .collect()
+    }
+
+    /// Build one trash line for a fresh task with the given title.
+    fn trash_line(title: &str, secs: u64) -> TrashLine {
+        let mut state = DomainState::new();
+        state
+            .create(
+                title,
+                None,
+                TaskScope::Global,
+                ProvenanceOrigin::Manual,
+                None,
+            )
+            .expect("create");
+        state.assign_numbers_for_persistence();
+        let task = state.tasks()[0].clone();
+        TrashLine {
+            deleted_at: UNIX_EPOCH + Duration::from_secs(secs),
+            task,
+        }
+    }
+
+    #[test]
+    fn load_trash_skips_a_torn_non_utf8_tail() {
+        let dir = temp_dir("trash-non-utf8");
+        let _guard = TempDirGuard(dir.clone());
+        let store = TaskStore::new(&dir);
+        let line1 = trash_line("first", 100);
+        let line2 = trash_line("second", 200);
+        let line3 = trash_line("café third", 300);
+
+        let mut content = Vec::new();
+        content.extend_from_slice(&serde_json::to_vec(&line1).expect("encode"));
+        content.push(b'\n');
+        content.extend_from_slice(&serde_json::to_vec(&line2).expect("encode"));
+        content.push(b'\n');
+        // A crash cut the third line mid-multibyte character (first byte of é only).
+        let third = serde_json::to_vec(&line3).expect("encode");
+        let e_pos = third
+            .windows(2)
+            .position(|window| window == [0xC3, 0xA9])
+            .expect("é is present in the third line");
+        content.extend_from_slice(&third[..e_pos + 1]);
+        fs::create_dir_all(&dir).expect("mkdir");
+        fs::write(trash_path(&dir), &content).expect("write torn trash");
+
+        let lines = store
+            .load_trash()
+            .expect("a torn non-UTF-8 tail must not fail the read");
+        assert_eq!(lines.len(), 2, "both valid lines load, torn tail skipped");
+        assert_eq!(lines[0].task.title, "first");
+        assert_eq!(lines[1].task.title, "second");
     }
 
     #[test]
