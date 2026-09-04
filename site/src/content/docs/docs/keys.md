@@ -54,7 +54,7 @@ moves to G, then runs the control you clicked.
 | `1` `2` `3` | home tabs: desk · projects · threads |
 | `ctrl+g` | expand or collapse all visible groups |
 | `Esc` | close one layer |
-| `ctrl+q` | quit |
+| `ctrl+q` or `ctrl+c` | quit |
 
 Click a dim task identifier (`T30`) to copy it. Click elsewhere on a row to peek, click it again to close, and fast double-click to open the page.
 
@@ -83,14 +83,40 @@ Title, Notes, Thread, and Scope clicks are inert until task editing starts. Once
 has, Title and Notes open their fields, Scope opens its picker, and Thread first
 selects, then opens or closes its text editor on a second click.
 
+## Any text field
+
+Title, notes, thread, step, quick-add, and the palette query share one editor.
+
+| Key | Does |
+| --- | --- |
+| `ctrl+a` / `ctrl+e` | line start / end (on the task page `ctrl+a` adds a step instead) |
+| `ctrl+←` / `ctrl+→` | word left / right |
+| `Home` / `End` | line start / end |
+| `Backspace` / `Delete` | delete back / forward |
+| `↑` `↓` in notes | move between wrapped rows |
+| paste | inserts; line breaks stay only in notes, elsewhere they become spaces |
+
+## Palette, picker, and recovery
+
+| Surface | Keys |
+| --- | --- |
+| `:` palette | type to filter · `↑` `↓` or `Tab` / `Shift+Tab` move · `Enter` run · `Esc` close |
+| `P` project picker | `j` `k` or arrows · `Enter` choose · `Esc` or `q` cancel |
+| `?` help | any key closes |
+| save failed | `r` or `Enter` retry · `c` or `Esc` cancel |
+
 ## Capture line and form
 
 | Key | Does |
 | --- | --- |
 | `Tab` / `Shift+Tab` | Title, Notes, Thread, Scope |
-| `Enter` in Title | save |
+| `Enter` in Title or Thread | save |
 | `Enter` in Notes | new line |
 | `Ctrl+Enter` | save from any field (`Alt+Enter` is the legacy-terminal fallback) |
+| `1` `2` `3` on Scope | this project · desk · other path |
+| `s`, `Space`, `←` `→` on Scope | cycle the scope |
+| `p` or `e` on Scope | type another path; `Enter` confirms it |
+| `Enter` on Scope | save |
 | `Esc` | cancel |
 
 On the board `+` line: `Enter` saves and closes, `Shift+Enter` saves and stays

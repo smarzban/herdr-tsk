@@ -28,9 +28,22 @@ The CLI is how an agent reaches the board. The rules that matter:
 The repo ships the same rules as an agent skill in
 [`skills/tsk-cli/SKILL.md`](https://github.com/smarzban/herdr-tsk/blob/main/skills/tsk-cli/SKILL.md).
 
+## Commands
+
+| Command | Does |
+| --- | --- |
+| `tsk` | opens the board |
+| `tsk capture` | opens the capture form (also `TSK_MODE=capture`) |
+| `tsk add` · `tsk list` · `tsk steps` | headless; below |
+| `tsk --help` | usage, exit 0 |
+| `tsk --find-board-pane` | herdr helper: reads `pane list` JSON on stdin, prints the id of the pane labelled `tsk`; exit 1 when none |
+
+Every headless command takes `--state-dir <dir>` to work against another store.
+
 ## add
 
-Create one task, or apply a JSON plan.
+Create one task, or apply a JSON plan. Human output is `added <title>` or
+`task already exists`.
 
 ```
 tsk add -t <title> [-n <notes>] [-p <project> | --desk] [--thread <name>] [--json] [--state-dir <dir>]
@@ -47,6 +60,8 @@ Values that start with `-` need `--title=…`, `--notes=…`, `--project=…`,
 `--state-dir=…`, or `--file=…`. Item flags plus `--file` is usage (exit 2,
 nothing persists). Piped stdin with item flags is ignored and not read.
 
+Notes that trim to nothing are dropped.
+
 `--json` on a flag add prints one object: `outcome` (`created` or `existing`),
 `id`, `number`, `title`, and `project` (or `null`).
 
@@ -56,8 +71,10 @@ Plan JSON is an array:
 [{"title": "...", "notes": "...", "project": "...", "thread": "..."}]
 ```
 
-`thread` may be `null`. The result is `{ "created": [...], "existing": [...], "failed": [...] }`.
-Notes are not echoed.
+`project` null means desk; a missing `project` means the invocation default (the
+repo you ran from, or desk). `thread` may be `null` or missing. The result is
+`{ "created": [...], "existing": [...], "failed": [...] }`, each item carrying its
+index `i`; failed items add `code` and `error`. Notes are not echoed.
 
 ```bash
 tsk add --file plan.json
@@ -81,10 +98,14 @@ desk outside a repository.
 - `--deleted` soft-deleted only
 - `--thread` filters within the selected scope
 
+Human output groups rows under `STARTED`, `READY`, `BLOCKED`, `REVIEW`, then
+`DONE` or `DELETED` when asked, as `- <number> <title> #thread`. With `--all`, a
+trailing scope label (`desk` or `project: <path>`) tells the groups apart.
+
 A store-global task number (`T12`, `t12`, or bare `12`) or a task UUID lists
 that one task and its steps (`[x]` / `[ ]` plus the step short id). Direct lookup
 ignores cwd. A task operand cannot combine with scope, thread, or status
-filters.
+filters. An address that matches nothing is a usage error (exit 2).
 
 `--json` is a flat array of `id`, `number`, `title`, `status`, `project`, and
 `thread`. Single-task JSON also attaches `steps`.
@@ -98,6 +119,8 @@ tsk steps <task> add <text> [--state-dir <dir>]
 tsk steps <task> toggle <step-short-id> [--state-dir <dir>]
 ```
 
+Output is `added <short-id> <text>` or `toggled <short-id> [x] <text>`.
+
 See [steps](/docs/steps/) for the board side. `toggle` is not idempotent. Verify
 with `tsk list <task>` before a retry.
 
@@ -107,12 +130,12 @@ with `tsk list <task>` before a retry.
 | --- | --- |
 | 0 | listed, or every add item created/existed, or the step applied |
 | 1 | one or more item refusals (add/steps). Retry only the failed subset. For toggle, list first. |
-| 2 | usage or parse error. Nothing persisted. |
+| 2 | usage or parse error, including a `list` address that matches nothing. Nothing persisted. |
 | 3 | store I/O. Commit is indeterminate. `tsk list` before retrying. |
 
-Add refusal codes include `empty-title`, `invalid-title`, `invalid-item`. Any C0
-control in a title or step text is `invalid-title` / `invalid-step-text` before
-trimming.
+Add refusal codes: `empty-title`, `invalid-title`, `invalid-thread`, `invalid-item`.
+Any C0 control in a title or step text is `invalid-title` / `invalid-step-text`
+before trimming.
 
 Steps refusals (exit 1): `empty-step-text`, `invalid-step-text`, `unknown-task`,
 `soft-deleted-task`, `unknown-step`, `ambiguous-step`.

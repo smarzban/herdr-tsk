@@ -28,6 +28,9 @@ inline step state.
 - `ctrl+x` in view first marks the selected step and the second press removes it,
   while task editing immediately hides and stages its removal until save
 
+The section is labelled `steps <done>/<total>`. Rows paint `▪` open, `✓` done, and
+`✗` while a step is marked for removal.
+
 A new-step draft lives in the steps section. From view or task edit, it persists
 independently: it never joins the enclosing task edit session. Plain `Enter` saves one new
 step and selects that new stored step. `Shift+Enter` saves one and opens the next
