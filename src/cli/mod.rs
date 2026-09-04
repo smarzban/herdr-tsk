@@ -83,7 +83,7 @@ fn run_archive(args: Vec<String>, verb: &'static str, archive: bool) -> CliOutpu
     };
     match archive::run_task(task, archive, input.state_dir) {
         Ok(result) => presenter::archived(result, verb),
-        Err(error) => presenter::archive_rejected(error),
+        Err(error) => presenter::archive_rejected(error, verb),
     }
 }
 
@@ -104,7 +104,7 @@ fn run_project(args: Vec<String>) -> CliOutput {
     };
     match archive::run_project(name, archive, input.state_dir) {
         Ok(result) => presenter::project_archived(result, verb),
-        Err(error) => presenter::archive_rejected(error),
+        Err(error) => presenter::archive_rejected(error, verb),
     }
 }
 

@@ -227,3 +227,21 @@ fn project_archive_and_unarchive_resolve_basename_and_path_exit_0_and_are_idempo
         unknown.stderr
     );
 }
+
+#[test]
+fn unarchive_refusals_name_the_unarchive_verb() {
+    let dir = temp_state_dir("verb-refusal");
+    let _guard = TempDirGuard(dir.clone());
+    let added = add_task(&dir, "verb check");
+    assert_eq!(added.code, 0);
+
+    let unknown = archive(&dir, "unarchive", "T99");
+    assert_eq!(unknown.code, 1);
+    assert!(
+        unknown
+            .stderr
+            .starts_with("tsk unarchive: T99 is not on the board"),
+        "{:?}",
+        unknown.stderr
+    );
+}

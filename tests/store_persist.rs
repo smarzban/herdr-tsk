@@ -767,11 +767,13 @@ fn v1_migration_strips_defensive_archived_keys() {
     )
     .expect("install document");
 
-    let state = TaskStore::new(&dir).load().expect("load v1 through the chain");
+    let state = TaskStore::new(&dir)
+        .load()
+        .expect("load v1 through the chain");
     assert_eq!(state.format_version(), 2);
     let task = state.tasks().first().expect("fixture task");
-    assert_eq!(
-        task.archived, false,
+    assert!(
+        !task.archived,
         "migration must strip the defensive archived key"
     );
     assert_eq!(task.status, HumanStatus::Done, "status is untouched");

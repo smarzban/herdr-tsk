@@ -568,12 +568,14 @@ pub fn archived(result: ArchiveResult, verb: &str) -> CliOutput {
     }
 }
 
-pub fn archive_rejected(error: ArchiveCliError) -> CliOutput {
+pub fn archive_rejected(error: ArchiveCliError, verb: &str) -> CliOutput {
+    // Task-verb refusals name the invoked verb (`tsk archive:` / `tsk unarchive:`);
+    // project refusals keep their own prefix.
     let (verb, detail, code) = match error {
-        ArchiveCliError::Store(detail) => ("archive", detail, 3),
-        ArchiveCliError::UnknownTask(detail) => ("archive", detail, 1),
-        ArchiveCliError::SoftDeleted(detail) => ("archive", detail, 1),
-        ArchiveCliError::UnknownProject(detail) => ("project", detail, 1),
+        ArchiveCliError::Store(detail) => (verb.to_string(), detail, 3),
+        ArchiveCliError::UnknownTask(detail) => (verb.to_string(), detail, 1),
+        ArchiveCliError::SoftDeleted(detail) => (verb.to_string(), detail, 1),
+        ArchiveCliError::UnknownProject(detail) => ("project".to_string(), detail, 1),
     };
     CliOutput {
         stdout: String::new(),
