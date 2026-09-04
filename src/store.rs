@@ -383,6 +383,19 @@ impl TaskStore {
         durable.assign_numbers_for_persistence();
         durable.clear_merge_bases();
         self.save_unlocked_with(&mut durable, filesystem)?;
+        // A task that moved to trash during the save must leave the caller's local
+        // state too, along with any undo entry targeting it: otherwise a stale undo
+        // would resurrect it (its number was cleared by the persisted sync) under a
+        // fresh task number.
+        let trashed: std::collections::BTreeSet<Uuid> = local
+            .tasks()
+            .iter()
+            .map(|task| task.id)
+            .filter(|id| durable.get(*id).is_none())
+            .collect();
+        if !trashed.is_empty() {
+            local.remove_tasks(&trashed);
+        }
         local.sync_numbers_from_persisted(&durable);
         local.clear_merge_bases();
         Ok(())
@@ -2126,6 +2139,68 @@ mod tests {
         assert!(
             lines.iter().any(|line| line.task.title == "fresh trash"),
             "the new line is still added"
+        );
+    }
+
+    #[test]
+    fn reload_merge_save_drops_trashed_tasks_from_the_callers_state() {
+        let dir = temp_dir("trash-local-state");
+        let _guard = TempDirGuard(dir.clone());
+        let store = TaskStore::new(&dir);
+        let mut seed = DomainState::new();
+        let deleted = seed
+            .create(
+                "delete me",
+                None,
+                TaskScope::Global,
+                ProvenanceOrigin::Manual,
+                None,
+            )
+            .expect("create");
+        let kept = seed
+            .create(
+                "keep me",
+                None,
+                TaskScope::Global,
+                ProvenanceOrigin::Manual,
+                None,
+            )
+            .expect("create");
+        store.save(&seed).expect("seed");
+
+        let mut local = store.load().expect("load");
+        local.soft_delete(deleted).expect("soft delete");
+        local.complete(kept).expect("a later undoable action");
+        store.reload_merge_save(&mut local).expect("merge-save");
+
+        assert_eq!(
+            read_trash_lines(&dir).len(),
+            1,
+            "the task is trashed on disk"
+        );
+        assert!(
+            local.get(deleted).is_none(),
+            "the trashed task must leave the caller's local state"
+        );
+        assert!(
+            local
+                .last_undo()
+                .is_none_or(|entry| entry.target().0 != deleted),
+            "no local undo entry may target the trashed task"
+        );
+        // Walk the remaining undo stack; the trashed task must not reappear.
+        while local.last_undo().is_some() {
+            if local.undo().is_err() {
+                break;
+            }
+        }
+        assert!(
+            local.get(deleted).is_none(),
+            "undo must not resurrect the trashed task"
+        );
+        assert_eq!(
+            local.get(kept).expect("kept task").status,
+            crate::domain::HumanStatus::Ready
         );
     }
 
