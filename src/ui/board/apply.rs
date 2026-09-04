@@ -1616,6 +1616,8 @@ fn apply_board_intent(
             model.set_message(format!(
                 "project {name} is archived · quick-add goes to your desk this session"
             ));
+            // Session-only change: nothing durable to write.
+            return Ok(IntentOutcome::None);
         }
         BoardIntent::File => {
             // Picker open: archive the selected main-tab project, or unarchive the

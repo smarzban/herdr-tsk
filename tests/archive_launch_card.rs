@@ -335,3 +335,44 @@ fn card_is_offered_once_per_session_whichever_choice() {
     assert_eq!(model.input_mode(), BoardInputMode::Normal);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn keep_archived_persists_nothing() {
+    let (store, mut state, mut model, dir) = setup(true);
+    let snapshot = snapshot_for(PROJ);
+    let before = std::fs::read(dir.join("tsk.json")).expect("read store bytes");
+    let mut recovery = SaveRecovery::new();
+
+    let intent = map_key(BoardInputMode::LaunchCard, press(KeyCode::Char('n')))
+        .expect("n maps to keep archived");
+    let baseline = state.clone();
+    let outcome = apply_board_intent_with_save_recovery(
+        &mut state,
+        &mut model,
+        &mut recovery,
+        BoardSaveContext {
+            baseline,
+            intent,
+            snapshot: Some(&snapshot),
+        },
+        |domain| {
+            store
+                .reload_merge_save(domain)
+                .map_err(|error| error.to_string())
+        },
+    )
+    .expect("keep archived applies");
+
+    assert_eq!(
+        outcome,
+        tsk_tui::ui::board::IntentOutcome::None,
+        "keep archived must be a non-persisting outcome"
+    );
+    assert_eq!(
+        std::fs::read(dir.join("tsk.json")).expect("read store bytes after"),
+        before,
+        "the store file's bytes are unchanged"
+    );
+    assert!(store.load().expect("reload").is_project_archived(PROJ));
+    let _ = std::fs::remove_dir_all(dir);
+}
