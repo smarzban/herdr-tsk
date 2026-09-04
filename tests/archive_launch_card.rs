@@ -376,3 +376,68 @@ fn keep_archived_persists_nothing() {
     assert!(store.load().expect("reload").is_project_archived(PROJ));
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn launch_card_is_one_message_line_with_choices_in_the_footer() {
+    let (_store, _state, model, dir) = setup(true);
+    assert_eq!(model.input_mode(), BoardInputMode::LaunchCard);
+    let rows = board_rows(&model, STANDARD.0, STANDARD.1);
+    let frame = rows.join("\n");
+
+    // The body is one message line, the whole question on it.
+    assert!(
+        frame.contains("project proj is archived, would you like to unarchive it?"),
+        "the card body asks the question on one line:\n{frame}"
+    );
+    // No title row: the old title text was the bare `project proj is archived`, painted
+    // into the card's top border. The only place that phrase appears now is the body.
+    let title_rows = rows
+        .iter()
+        .filter(|row| row.contains("project proj is archived"))
+        .count();
+    assert_eq!(title_rows, 1, "no separate title row:\n{frame}");
+    // No option rows.
+    assert!(
+        !rows.iter().any(|row| row.contains("\u{25b8} unarchive")),
+        "the card has no option rows:\n{frame}"
+    );
+    assert!(
+        !rows.iter().any(|row| row.contains("keep archived")
+            && !row.contains("unarchive it?")
+            && !row.contains("\u{b7}")),
+        "the second option is not its own row:\n{frame}"
+    );
+    // Footer reads the two choices.
+    assert!(
+        frame.contains("y unarchive \u{b7} n keep archived"),
+        "the footer carries both choices:\n{frame}"
+    );
+
+    // Both footer entries are clickable, and they land on the right intents.
+    let hits = tsk_tui::ui::board::board_hit_map(
+        ratatui::layout::Rect::new(0, 0, STANDARD.0, STANDARD.1),
+        &model,
+    );
+    let footer_row = rows
+        .iter()
+        .position(|row| row.contains("y unarchive \u{b7} n keep archived"))
+        .expect("footer row") as u16;
+    for (index, intent) in [
+        (0usize, BoardIntent::LaunchUnarchive),
+        (1usize, BoardIntent::LaunchKeepArchived),
+    ] {
+        let hit = hits
+            .regions
+            .iter()
+            .find(|hit| matches!(hit.target, QueueHitTarget::LaunchOption(i) if i == index))
+            .unwrap_or_else(|| panic!("footer entry {index} is hit-testable"));
+        assert_eq!(
+            hit.area.y, footer_row,
+            "footer entry {index} sits on the footer row"
+        );
+        let mapped = map_board_mouse(&model, &hits, left_click(hit.area.x, hit.area.y))
+            .expect("the footer click maps");
+        assert_eq!(mapped, intent);
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}

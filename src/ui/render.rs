@@ -1759,6 +1759,9 @@ struct ModalCardSpec<'a> {
     legend: &'a [VerbEntry<'a>],
     /// A full-frame dismiss hit to push first, before the card's own chrome (see below).
     dismiss: Option<QueueHitTarget>,
+    /// Per-entry hit targets for the footer legend, for cards whose choices live there
+    /// (the launch card, AC-22). `None` leaves the legend inert, as every other card.
+    legend_hits: Option<fn(usize) -> QueueHitTarget>,
 }
 
 /// Fixed row overhead a [`paint_modal_card`] with a footer legend (or not) spends on its
@@ -1788,6 +1791,7 @@ fn paint_modal_card(
         content_rows,
         legend,
         dismiss,
+        legend_hits,
     } = spec;
     if geo.row_width == 0 || geo.height == 0 || bounds.width == 0 || bounds.height == 0 {
         return Rect::default();
@@ -1851,6 +1855,28 @@ fn paint_modal_card(
             legend_offset,
             modal_legend_line(legend, card_w as usize),
         );
+        if let Some(target_for) = legend_hits {
+            // Mirror `modal_legend_line`'s layout: two leading pad cells, then
+            // `key label` per entry with ` · ` between them.
+            let mut cursor = x0.saturating_add(2);
+            let legend_y = y0.saturating_add(legend_offset);
+            for (index, entry) in legend.iter().enumerate() {
+                if index > 0 {
+                    cursor = cursor.saturating_add(3);
+                }
+                let entry_w = display_width(&format!("{} {}", entry.key, entry.label)) as u16;
+                let right = x0.saturating_add(card_w).saturating_sub(1);
+                if cursor >= right {
+                    break;
+                }
+                let width = entry_w.min(right.saturating_sub(cursor));
+                hits.push(
+                    target_for(index),
+                    Rect::new(cursor, legend_y, width.max(1), 1),
+                );
+                cursor = cursor.saturating_add(entry_w);
+            }
+        }
     }
 
     // Side borders for every middle row that is not already a full `├─┤` / top / bottom
@@ -2069,6 +2095,7 @@ fn paint_palette_overlay(
             content_rows: rows as u16,
             legend: PALETTE_FOOTER,
             dismiss: None,
+            legend_hits: None,
         },
         hits,
     );
@@ -2179,6 +2206,7 @@ fn paint_help_overlay(
             content_rows: shown.len() as u16,
             legend: HELP_FOOTER,
             dismiss: Some(QueueHitTarget::HelpDismiss),
+            legend_hits: None,
         },
         hits,
     );
@@ -2972,42 +3000,32 @@ fn paint_launch_card(
         return;
     }
     let bounds = Rect::new(0, 0, geo.row_width, geo.height);
-    let title = format!("project {name} is archived");
+    // AC-22 (amended): no title row and no option rows. One body line asks the
+    // question; the two choices live in the footer legend and are clickable there.
     let content = paint_modal_card(
         frame,
         geo,
         surface,
         bounds,
         ModalCardSpec {
-            title: &title,
-            content_rows: 2,
+            title: "",
+            content_rows: 1,
             legend: LAUNCH_FOOTER,
             dismiss: None,
+            legend_hits: Some(QueueHitTarget::LaunchOption),
         },
         hits,
     );
     if content.width == 0 || content.height == 0 {
         return;
     }
-    let options = [("unarchive", "y"), ("keep archived", "n")];
-    for (index, (label, key)) in options.iter().enumerate() {
-        let y = content.y.saturating_add(index as u16);
-        let marker = if index == 0 { "\u{25b8} " } else { "  " };
-        let text = format!("{marker}{label}  {key}");
-        let style = if index == 0 {
-            style_reverse()
-        } else {
-            style_plain()
-        };
-        let rect = Rect::new(content.x, y, content.width, 1);
-        put_line_at(
-            frame,
-            surface,
-            rect,
-            paint_bounded_line(&text, content.width, style),
-        );
-        hits.push(QueueHitTarget::LaunchOption(index), rect);
-    }
+    let message = format!("project {name} is archived, would you like to unarchive it?");
+    put_line_at(
+        frame,
+        surface,
+        Rect::new(content.x, content.y, content.width, 1),
+        paint_bounded_line(&message, content.width, style_plain()),
+    );
 }
 
 /// The board's `P` project-scope picker: a centered modal card, not the chip-anchored
@@ -3069,6 +3087,7 @@ fn paint_scope_dropdown(
             content_rows: (rows + tabs_rows + usize::from(tabs.is_some())) as u16,
             legend: SCOPE_FOOTER,
             dismiss: None,
+            legend_hits: None,
         },
         hits,
     );
