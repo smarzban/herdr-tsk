@@ -266,9 +266,20 @@ impl TaskStore {
     /// `updated_at` now. Refuses when no line matches or the id already exists
     /// live, both as [`TrashError::NotInTrash`].
     ///
-    /// Order under the lock: find the line, rewrite the trash without it, insert
-    /// the restored task, then replace the live document.
+    /// Order under the lock: find the line, insert the restored task, replace the
+    /// live document, then rewrite the trash without the line. A crash between the
+    /// live replace and the trash rewrite leaves the task in both places and readers
+    /// dedupe by id with the live copy winning; the reverse order could lose the
+    /// task from both files on a failed live save.
     pub fn restore_from_trash(&self, target: TrashTarget) -> Result<TrashLine, TrashError> {
+        self.restore_from_trash_with(target, &StdFilesystem)
+    }
+
+    fn restore_from_trash_with<F: AtomicFilesystem>(
+        &self,
+        target: TrashTarget,
+        filesystem: &F,
+    ) -> Result<TrashLine, TrashError> {
         let _guard = self.lock_exclusive().map_err(TrashError::Store)?;
         let mut state = self.load_unlocked().map_err(TrashError::Store)?;
         let lines = self.load_trash_unlocked().map_err(TrashError::Store)?;
@@ -284,13 +295,14 @@ impl TaskStore {
             return Err(TrashError::NotInTrash);
         }
         let restored_id = line.task.id;
-        self.rewrite_trash_filtered(&StdFilesystem, |candidate| candidate.task.id != restored_id)
-            .map_err(TrashError::Store)?;
         state.insert_restored(line.task.clone());
         state.assign_numbers_for_persistence();
         state.prune_undo_for_persistence();
         state.clear_merge_bases();
-        self.save_unlocked(&mut state).map_err(TrashError::Store)?;
+        self.save_unlocked_with(&mut state, filesystem)
+            .map_err(TrashError::Store)?;
+        self.rewrite_trash_filtered(filesystem, |candidate| candidate.task.id != restored_id)
+            .map_err(TrashError::Store)?;
         Ok(line)
     }
 
@@ -1773,6 +1785,142 @@ mod tests {
                 .any(|task| task["id"] == deleted.to_string()),
             "the task is still live"
         );
+    }
+
+    /// Real filesystem operations with one injectable stage failure, so tests can
+    /// fail the live save while a trash rewrite genuinely lands (or vice versa).
+    struct RealFilesystemWithFailure {
+        fail_at: Option<SaveStage>,
+    }
+
+    struct LabeledFile {
+        file: File,
+        trash: bool,
+    }
+
+    impl AtomicFilesystem for RealFilesystemWithFailure {
+        type File = LabeledFile;
+
+        fn create_file(&self, path: &Path) -> io::Result<Self::File> {
+            let trash = is_trash_path(path);
+            File::create(path).map(|file| LabeledFile { file, trash })
+        }
+
+        fn write_all(&self, file: &mut Self::File, data: &[u8]) -> io::Result<()> {
+            file.file.write_all(data)
+        }
+
+        fn sync_file(&self, file: &Self::File) -> io::Result<()> {
+            let stage = if file.trash {
+                SaveStage::TrashFileSync
+            } else {
+                SaveStage::FileSync
+            };
+            if self.fail_at == Some(stage) {
+                return Err(io::Error::other("injected failure"));
+            }
+            file.file.sync_all()
+        }
+
+        fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
+            fs::rename(from, to)
+        }
+
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        fn sync_directory(&self, path: &Path) -> io::Result<()> {
+            File::open(path)?.sync_all()
+        }
+
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        fn sync_directory(&self, _path: &Path) -> io::Result<()> {
+            Ok(())
+        }
+
+        fn remove_file(&self, path: &Path) -> io::Result<()> {
+            fs::remove_file(path)
+        }
+
+        fn open_append(&self, path: &Path) -> io::Result<Self::File> {
+            let trash = is_trash_path(path);
+            OpenOptions::new()
+                .append(true)
+                .create(true)
+                .open(path)
+                .map(|file| LabeledFile { file, trash })
+        }
+    }
+
+    /// Seed one live task and one trashed task; returns the trashed task's id.
+    fn seed_live_and_trashed(store: &TaskStore, dir: &Path) -> Uuid {
+        let mut seed = DomainState::new();
+        let keep = seed
+            .create(
+                "keep",
+                None,
+                TaskScope::Global,
+                ProvenanceOrigin::Manual,
+                None,
+            )
+            .expect("create");
+        let gone = seed
+            .create(
+                "gone",
+                None,
+                TaskScope::Global,
+                ProvenanceOrigin::Manual,
+                None,
+            )
+            .expect("create");
+        store.save(&seed).expect("seed");
+        let mut state = store.load().expect("load");
+        state.soft_delete(gone).expect("soft delete");
+        state.complete(keep).expect("a later undoable action");
+        store.save(&state).expect("trash the deleted task");
+        assert_eq!(read_trash_lines(dir).len(), 1);
+        let _ = fs::read(dir.join(STATE_FILE)).expect("live exists");
+        gone
+    }
+
+    #[test]
+    fn failed_restore_live_save_keeps_the_trash_line_for_retry() {
+        let dir = temp_dir("restore-save-fails");
+        let _guard = TempDirGuard(dir.clone());
+        let store = TaskStore::new(&dir);
+        let gone = seed_live_and_trashed(&store, &dir);
+        let trash_before = fs::read(trash_path(&dir)).expect("read trash");
+        let live_before = fs::read(dir.join(STATE_FILE)).expect("read live");
+
+        // The trash rewrite succeeds (TrashFileSync) but the live save fails (FileSync).
+        let filesystem = RealFilesystemWithFailure {
+            fail_at: Some(SaveStage::FileSync),
+        };
+        let error = store
+            .restore_from_trash_with(TrashTarget::Id(gone), &filesystem)
+            .expect_err("the live save failure must surface");
+        assert!(
+            matches!(error, TrashError::Store(StoreError::Io(_))),
+            "{error}"
+        );
+
+        assert_eq!(
+            fs::read(trash_path(&dir)).expect("read trash"),
+            trash_before,
+            "a failed live save must not drop the trash line"
+        );
+        assert_eq!(
+            fs::read(dir.join(STATE_FILE)).expect("read live"),
+            live_before,
+            "a failed live save leaves the live document unchanged"
+        );
+
+        // A retry against a healthy filesystem restores the task and clears the line.
+        let restored = store
+            .restore_from_trash(TrashTarget::Id(gone))
+            .expect("retry succeeds");
+        assert_eq!(restored.task.id, gone);
+        assert!(read_trash_lines(&dir).is_empty());
+        let live = store.load().expect("reload");
+        assert!(!live.get(gone).expect("task is live").soft_deleted);
     }
 
     fn round_tripped_v1_state(title: &str) -> DomainState {
