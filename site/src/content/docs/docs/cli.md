@@ -1,14 +1,32 @@
 ---
 title: CLI
-description: Headless tsk add, list, and steps.
+description: Headless tsk add, list, and steps. The agents' door to the board.
 ---
 
-The same `~/.tsk` store backs the board, herdr, and these commands.
+The same `~/.tsk` store backs the board, herdr, and these commands. The board
+reads a change on its next tick.
 
 ```bash
 tsk add -t "Draft release notes"
 tsk list
 ```
+
+## For agents
+
+The CLI is how an agent reaches the board. The rules that matter:
+
+- Put work on the board with `tsk add`, one task per call or a JSON plan through
+  `--file`. A repeat of the same title, project, and thread returns the existing
+  task, so a retried plan is safe.
+- Plan with `tsk steps <task> add`. Read back with `tsk list <task>` before a
+  toggle, because toggle is not idempotent.
+- Prefer `--json` and read the exit code. Exit 1 means retry only the failed
+  items. Exit 3 means list before retrying.
+- Done is a human verb on the board. The CLI has no verb for it, and no status
+  verb yet.
+
+The repo ships the same rules as an agent skill in
+[`skills/tsk-cli/SKILL.md`](https://github.com/smarzban/herdr-tsk/blob/main/skills/tsk-cli/SKILL.md).
 
 ## add
 

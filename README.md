@@ -1,10 +1,11 @@
 # tsk
 
-**A task board for your terminal.**
+**A task board for you and your agents.**
 
-tsk captures work and moves it through human status: ready, started, blocked,
-review, done. It ships as a [herdr](https://herdr.dev) plugin, and the `tsk`
-binary also runs standalone against `~/.tsk`.
+You and your agents put work on one board and move it through human status:
+ready, started, blocked, review, done. Agents reach the board through the CLI.
+Only a human marks a task done. It ships as a [herdr](https://herdr.dev) plugin,
+and the `tsk` binary also runs standalone against `~/.tsk`.
 
 - Queue board with desk · projects · threads
 - Quick-add on the board, plus a herdr capture overlay

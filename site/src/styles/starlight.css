@@ -51,11 +51,23 @@
   letter-spacing: -0.04em;
 }
 
+/* Wordmark at the landing page's size. */
 .site-title img {
-  height: 1.05rem;
+  height: 1.45rem;
   width: auto;
 }
 
+/* ── type scale: the landing's section headings, not Starlight's ────────── */
+
+:root {
+  --sl-text-h1: 2.2rem;
+  --sl-text-h2: 1.5rem;
+  --sl-text-h3: 1.2rem;
+  --sl-text-h4: 1rem;
+  --sl-text-h5: 0.95rem;
+}
+
+.content-panel h1,
 .sl-markdown-content h1,
 .sl-markdown-content h2,
 .sl-markdown-content h3 {
@@ -63,9 +75,99 @@
   font-weight: 800;
 }
 
+.sl-markdown-content h2 {
+  margin-top: 2.5rem;
+}
+
+/* Mono text is literal: no ligatures turning |- or -> into glyphs. */
+.expressive-code,
+.sl-markdown-content code,
+.sl-markdown-content kbd {
+  font-variant-ligatures: none;
+}
+
+/* ── inline code vs keys ────────────────────────────────────────────────── */
+
+/* Flags, paths, commands: quiet, no border. */
 .sl-markdown-content code:not(:where(pre *)) {
-  border: 1px solid var(--sl-color-hairline);
+  border: 0;
   border-radius: 3px;
+  background: var(--sl-color-gray-6);
+  color: var(--sl-color-gray-1);
+}
+
+/* Keys: a keycap with a 2px bottom edge. Rendered by src/plugins/rehype-kbd.mjs. */
+.sl-markdown-content kbd {
+  font-family: var(--sl-font);
+  font-size: var(--sl-text-code-sm);
+  line-height: 1;
+  display: inline-block;
+  padding: 0.18em 0.45em 0.14em;
+  margin-block: -0.125rem;
+  border: 1px solid var(--sl-color-gray-5);
+  border-bottom-width: 2px;
+  border-radius: 3px;
+  background: var(--sl-color-gray-6);
+  color: var(--sl-color-white);
+  white-space: nowrap;
+}
+
+.sl-markdown-content th kbd {
+  vertical-align: 0.06em;
+}
+
+/* ── sidebar: the rule turns amber where you are, no filled block ───────── */
+
+.sidebar-content a[aria-current="page"],
+.sidebar-content a[aria-current="page"]:hover,
+.sidebar-content a[aria-current="page"]:focus {
+  background: transparent;
+  color: var(--sl-color-accent);
+  font-weight: 600;
+  border-radius: 0;
+  margin-inline-start: calc(-1 * var(--sl-sidebar-item-padding-inline) - 1px);
+  padding-inline-start: calc(2 * var(--sl-sidebar-item-padding-inline) + 1px);
+  box-shadow: inset 2px 0 0 var(--sl-color-accent);
+}
+
+/* ── code blocks: one frame, no window dots ─────────────────────────────── */
+
+.expressive-code .frame.is-terminal .header {
+  display: none;
+}
+
+.expressive-code .frame.is-terminal pre {
+  border-top: var(--ec-brdWd) solid var(--ec-brdCol);
+  border-radius: var(--ec-brdRad);
+}
+
+.expressive-code .frame.is-terminal {
+  --button-spacing: calc(0.4rem + var(--ec-brdWd) + 2 * var(--ec-uiPadBlk));
+}
+
+/* ── pager: a rule above, no card ───────────────────────────────────────── */
+
+.pagination-links a {
+  border: 0;
+  border-top: 1px solid var(--sl-color-hairline);
+  border-radius: 0;
+  padding: 1rem 0;
+  box-shadow: none;
+}
+
+.pagination-links a:hover {
+  border-color: var(--sl-color-accent);
+}
+
+.pagination-links .link-title {
+  color: var(--sl-color-white);
+}
+
+/* ── footer meta ────────────────────────────────────────────────────────── */
+
+.sl-markdown-content ~ footer,
+footer .meta {
+  font-size: var(--sl-text-sm);
 }
 
 /* Match landing theme transition */

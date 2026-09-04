@@ -8,9 +8,10 @@ home (`1` / `2` / `3`). `P` opens the project picker from the keyboard.
 
 ## Tabs
 
-- **desk**: IN MOTION is every started task, from any project. ON DECK is desk
-  work that is ready, blocked, or review. Thread headers sit above those open
-  desk tasks.
+- **desk**: your own planning space. IN MOTION is every started task, from any
+  project. ON DECK is desk work that is ready, blocked, or review: general to-dos,
+  future projects, anything that belongs to no repository. Thread headers sit
+  above those open desk tasks.
 - **projects**: one collapsible group per project. Single-click a header to
   collapse it. Double-click a header to focus that project. Inside a group:
   started, then review, blocked, ready.
