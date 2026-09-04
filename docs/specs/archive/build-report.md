@@ -63,3 +63,21 @@ pass 10, fail 0
 Live smoke: `.agent-sdlc/briefs/archive/SMOKE-report.md` (implementer, `HERDR_ENV=1`,
 `TSK_STATE_DIR=/tmp/tsk-archive-smoke`, 23 steps, nothing failed live). Conductor did not re-drive
 the smoke; the review panel runs next on the whole change.
+
+## Review fixes (Review panel on main..HEAD, eight kept findings, all fixed)
+
+| K | Commit | Regression test (watched failing first) |
+| --- | --- | --- |
+| K1 | `5dd3850` fix(K1): plan-form add refuses archived-project items | `tests/cli_add.rs::plan_items_resolving_to_an_archived_project_refuse_with_project_archived` (red: all three items saved, exit 0) |
+| K2 | `137b8d8` fix(K2): list `--archived` conflicts are usage errors | `tests/cli_list.rs::archived_conflicts_are_usage_errors` (red: no conflict validation, exit 0) |
+| K3 | `3bf08ef` fix(K3): keep archived is a non-persisting outcome | `tests/archive_launch_card.rs::keep_archived_persists_nothing` (red: outcome was `Persisted`, store rewritten) |
+| K4 | `7b5c4f3` fix(K4): archived header pin drives viewport follow | `tests/queue_board_render.rs::archived_header_selection_follows_the_viewport` (red: header stayed below the fold) |
+| K5 | `f5dde44` fix(K5): idle merge resets project focus archived by another process | `tests/queue_board_loop.rs::idle_merge_leaves_a_project_focus_archived_by_another_process` (red via hand-revert: `selected_project` stayed `Some("/repos/focus")`) |
+| K6 | `1319319` fix(K6): v1 migration strips defensive archived keys | `tests/store_persist.rs::v1_migration_strips_defensive_archived_keys` (red: `archived == true` survived) |
+| K7 | `d5df66f` fix(K7): archive refusals name the invoked verb | `tests/cli_archive.rs::unarchive_refusals_name_the_unarchive_verb` (red: `tsk archive: T99 ...` hardcoded) |
+| K8 | `dc3d802` fix(K8): picker file refusal for a taskless project paints on the status slot | `tests/queue_board_verbs.rs::file_on_a_taskless_invocation_repo_refuses_on_the_status_line` (red via hand-revert: no message, picker open) |
+
+Advisory (not fixed, per review): the picker archived tab paints live state while acting on
+its snapshot after an idle merge.
+
+Final: `cargo test` 811 passed, 0 failed; clippy `-D warnings` clean; release build ok.

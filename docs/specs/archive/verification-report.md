@@ -40,4 +40,22 @@ Every AC mapped to its proving test(s). Suite counts: `cargo test` 803 passed /
 | AC-33 | `tests/store_persist.rs::v1_document_loads_through_the_chain_and_first_save_leaves_tsk_json_v1_beside_the_live_file` + `src/store.rs::tests::save_emits_format_version_two` |
 | AC-34 | `tests/store_persist.rs::literal_current_v2_fixture_round_trips_byte_identical` + `archive_flag_survives_save_and_load` (no `archived` key on unarchived tasks) |
 | AC-35 | `tests/queue_board_verbs.rs::help_card_lists_ctrl_f_and_the_verb_bar_shows_file_for_a_task_row_and_the_group` + `tests/v1_keymap_guard.rs::normal_mode_keymap_equals_the_readme_and_queue_board_v1_set` |
+| AC-28 (plan form) | `tests/cli_add.rs::plan_items_resolving_to_an_archived_project_refuse_with_project_archived` (review fix K1) |
+| AC-32 (conflicts) | `tests/cli_list.rs::archived_conflicts_are_usage_errors` (review fix K2) |
 | AC-36 | Reviewer-checked: `site/src/content/docs/docs/{keys,board,capture,cli}.md`, `site/public/board-demo.js`, `skills/tsk-cli/SKILL.md`, `CHANGELOG.md`, `README.md` diffed against `src/ui/input.rs`, `src/ui/board/commands.rs` (no palette entry, per plan), and `src/cli/`; `cd site && npm test` 10/10 |
+
+## Review fixes (Review panel, eight kept findings)
+
+| K | Test |
+| --- | --- |
+| K1 | `tests/cli_add.rs::plan_items_resolving_to_an_archived_project_refuse_with_project_archived` (AC-28 plan form) |
+| K2 | `tests/cli_list.rs::archived_conflicts_are_usage_errors` (AC-32 flag conflicts) |
+| K3 | `tests/archive_launch_card.rs::keep_archived_persists_nothing` (AC-24 outcome + store bytes) |
+| K4 | `tests/queue_board_render.rs::archived_header_selection_follows_the_viewport` (AC-12 viewport follow) |
+| K5 | `tests/queue_board_loop.rs::idle_merge_leaves_a_project_focus_archived_by_another_process` (AC-9/AC-19 focus reset) |
+| K6 | `tests/store_persist.rs::v1_migration_strips_defensive_archived_keys` (AC-33 literal no-archived-tasks) |
+| K7 | `tests/cli_archive.rs::unarchive_refusals_name_the_unarchive_verb` (AC-29 refusal wording) |
+| K8 | `tests/queue_board_verbs.rs::file_on_a_taskless_invocation_repo_refuses_on_the_status_line` (AC-16 refusal wording) |
+
+Advisory, not fixed (per review): the picker archived tab paints live state while acting on
+its snapshot after an idle merge.
