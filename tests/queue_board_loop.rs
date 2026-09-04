@@ -352,3 +352,79 @@ fn threshold_crossings_without_task_verbs_leave_domain_unchanged() {
 
     assert_eq!(domain.get(id), Some(&before));
 }
+
+#[test]
+fn idle_merge_hides_a_task_archived_by_another_process_without_moving_selection() {
+    use tsk_tui::app::{revalidate_board_from_store, StoreWatch};
+    use tsk_tui::save_recovery::SaveRecovery;
+    use tsk_tui::store::TaskStore;
+
+    let dir = temp_state_dir("idle-archive");
+    let _guard = TempDirGuard(dir.clone());
+    let store = TaskStore::new(&dir);
+
+    let mut seed = DomainState::new();
+    seed.create(
+        "Merge archived X",
+        None,
+        TaskScope::Global,
+        ProvenanceOrigin::Manual,
+        None,
+    )
+    .expect("create X");
+    let y = seed
+        .create(
+            "Stay selected Y",
+            None,
+            TaskScope::Global,
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create Y");
+    store.save(&seed).expect("seed two tasks");
+
+    // Process A: newest task (Y) sorts first, so the seeded selection rests on it.
+    let mut domain = store.load().expect("load A");
+    let mut model = BoardModel::from_domain(&domain, None);
+    assert_eq!(model.selected_id(), Some(y), "selection starts on Y");
+    let mut watch = StoreWatch::seeded(&store);
+
+    // Process B archives X behind A's back.
+    store
+        .locked_transition(|state| {
+            state
+                .archive_task(x_id(&seed))
+                .map_err(|error| error.to_string())?;
+            Ok(())
+        })
+        .expect("B archives X");
+
+    let changed = revalidate_board_from_store(
+        &store,
+        &mut domain,
+        &mut model,
+        &mut watch,
+        &SaveRecovery::new(),
+    );
+    assert!(changed, "the sibling write must be picked up");
+
+    let visible = model.visible_ids();
+    assert!(
+        !visible.contains(&x_id(&seed)),
+        "archived X must leave the visible rows: {visible:?}"
+    );
+    assert!(visible.contains(&y), "Y stays visible");
+    assert_eq!(
+        model.selected_id(),
+        Some(y),
+        "the selection must not move for a task it never held"
+    );
+}
+
+fn x_id(seed: &DomainState) -> uuid::Uuid {
+    seed.tasks()
+        .iter()
+        .find(|task| task.title == "Merge archived X")
+        .expect("seeded task X")
+        .id
+}

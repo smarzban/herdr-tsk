@@ -3448,3 +3448,115 @@ fn scrolled_done_section_pins_done_under_the_tabs() {
         rows.join("\n")
     );
 }
+
+#[test]
+fn archived_task_paints_in_no_working_lens_in_any_status_at_any_tier() {
+    for status in [
+        HumanStatus::Ready,
+        HumanStatus::Started,
+        HumanStatus::Blocked,
+        HumanStatus::Review,
+        HumanStatus::Done,
+    ] {
+        let mut domain = DomainState::new();
+        let project = TaskScope::Project {
+            path: "/repos/lens".into(),
+        };
+        domain
+            .create(
+                "visible row task",
+                None,
+                project.clone(),
+                ProvenanceOrigin::Manual,
+                None,
+            )
+            .expect("create live task");
+        let archived_title = format!("archived-{status:?} row");
+        let archived_id = domain
+            .create(
+                archived_title.clone(),
+                None,
+                project,
+                ProvenanceOrigin::Manual,
+                None,
+            )
+            .expect("create archived task");
+        domain.archive_task(archived_id).expect("archive it");
+        let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/lens")));
+
+        // Lens setups: desk, projects, threads (home tabs) and project focus.
+        let lens_names = ["desk", "projects", "threads", "project focus"];
+        for (lens_index, lens) in lens_names.iter().enumerate() {
+            match lens_index {
+                0 => {
+                    apply_intent(
+                        &mut domain,
+                        &mut model,
+                        BoardIntent::SelectHomeTab(BoardTab::Desk),
+                        None,
+                    )
+                    .expect("desk tab");
+                }
+                1 => {
+                    apply_intent(
+                        &mut domain,
+                        &mut model,
+                        BoardIntent::SelectHomeTab(BoardTab::Projects),
+                        None,
+                    )
+                    .expect("projects tab");
+                }
+                2 => {
+                    apply_intent(
+                        &mut domain,
+                        &mut model,
+                        BoardIntent::SelectHomeTab(BoardTab::Threads),
+                        None,
+                    )
+                    .expect("threads tab");
+                }
+                _ => {
+                    apply_intent(
+                        &mut domain,
+                        &mut model,
+                        BoardIntent::OpenProjectSelector,
+                        None,
+                    )
+                    .expect("open picker");
+                    apply_intent(
+                        &mut domain,
+                        &mut model,
+                        BoardIntent::SelectProjectOption(1),
+                        None,
+                    )
+                    .expect("focus the project");
+                }
+            }
+
+            for (width, height) in [(80u16, 24u16), (40u16, 10u16)] {
+                let rows = board_rows(&model, width, height);
+                assert!(
+                    !rows.iter().any(|row| row.contains(&archived_title)),
+                    "archived {status:?} task painted at {width}x{height} in {lens}:\n{}",
+                    rows.join("\n")
+                );
+            }
+
+            // Stage G rail at a wide width: the board column is a 32-cell rail.
+            for _ in 0..2 {
+                apply_intent(&mut domain, &mut model, BoardIntent::StageRight, None)
+                    .expect("stage right");
+            }
+            let rows = board_rows(&model, 130, 24);
+            assert!(
+                !rows.iter().any(|row| row.contains(&archived_title)),
+                "archived {status:?} task painted on the stage G rail in {lens}:\n{}",
+                rows.join("\n")
+            );
+            for _ in 0..2 {
+                apply_intent(&mut domain, &mut model, BoardIntent::StageLeft, None)
+                    .expect("stage left");
+            }
+        }
+    }
+}

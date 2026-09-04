@@ -100,13 +100,41 @@ pub fn query_lens(
     lens: BoardLens<'_>,
     drawer_open: bool,
 ) -> QueueView {
+    query_board(tasks, &BTreeSet::new(), current_repo, lens, drawer_open)
+}
+
+/// Derive queue sections with an archived-project set. A task is hidden when it is
+/// soft-deleted, archived, or belongs to an archived project: no working lens paints it.
+pub fn query_board(
+    tasks: &[Task],
+    archived_projects: &BTreeSet<String>,
+    current_repo: Option<&Path>,
+    lens: BoardLens<'_>,
+    drawer_open: bool,
+) -> QueueView {
     match lens {
-        BoardLens::Home(BoardTab::Desk) => query_home_desk(tasks, drawer_open),
+        BoardLens::Home(BoardTab::Desk) => query_home_desk(tasks, archived_projects, drawer_open),
         BoardLens::Home(BoardTab::Projects) => {
-            query_home_projects(tasks, current_repo, drawer_open)
+            query_home_projects(tasks, archived_projects, current_repo, drawer_open)
         }
-        BoardLens::Home(BoardTab::Threads) => query_home_threads(tasks, drawer_open),
-        BoardLens::Project(path) => query_project_focus(tasks, path, drawer_open),
+        BoardLens::Home(BoardTab::Threads) => {
+            query_home_threads(tasks, archived_projects, drawer_open)
+        }
+        BoardLens::Project(path) => {
+            query_project_focus(tasks, archived_projects, path, drawer_open)
+        }
+    }
+}
+
+/// A task survives the working-lens filter: not soft-deleted, not archived, and no
+/// archived project owns its scope.
+fn is_live(task: &Task, archived_projects: &BTreeSet<String>) -> bool {
+    if task.soft_deleted || task.archived {
+        return false;
+    }
+    match &task.scope {
+        TaskScope::Global => true,
+        TaskScope::Project { path } => !archived_projects.contains(path),
     }
 }
 
@@ -173,8 +201,15 @@ fn push_section_tasks(out: &mut Vec<Uuid>, section: &QueueSection) {
     out.extend(section.task_ids.iter().copied());
 }
 
-fn query_home_desk(tasks: &[Task], drawer_open: bool) -> QueueView {
-    let live: Vec<&Task> = tasks.iter().filter(|task| !task.soft_deleted).collect();
+fn query_home_desk(
+    tasks: &[Task],
+    archived_projects: &BTreeSet<String>,
+    drawer_open: bool,
+) -> QueueView {
+    let live: Vec<&Task> = tasks
+        .iter()
+        .filter(|task| is_live(task, archived_projects))
+        .collect();
 
     let mut motion: Vec<&Task> = live
         .iter()
@@ -211,10 +246,14 @@ fn query_home_desk(tasks: &[Task], drawer_open: bool) -> QueueView {
 
 fn query_home_projects(
     tasks: &[Task],
+    archived_projects: &BTreeSet<String>,
     current_repo: Option<&Path>,
     drawer_open: bool,
 ) -> QueueView {
-    let live: Vec<&Task> = tasks.iter().filter(|task| !task.soft_deleted).collect();
+    let live: Vec<&Task> = tasks
+        .iter()
+        .filter(|task| is_live(task, archived_projects))
+        .collect();
     let project_paths = open_project_paths(&live, current_repo);
 
     let mut sections = Vec::new();
@@ -238,8 +277,15 @@ fn query_home_projects(
     }
 }
 
-fn query_home_threads(tasks: &[Task], drawer_open: bool) -> QueueView {
-    let live: Vec<&Task> = tasks.iter().filter(|task| !task.soft_deleted).collect();
+fn query_home_threads(
+    tasks: &[Task],
+    archived_projects: &BTreeSet<String>,
+    drawer_open: bool,
+) -> QueueView {
+    let live: Vec<&Task> = tasks
+        .iter()
+        .filter(|task| is_live(task, archived_projects))
+        .collect();
 
     let mut by_thread: BTreeMap<String, Vec<&Task>> = BTreeMap::new();
     for task in live
@@ -280,11 +326,16 @@ fn query_home_threads(tasks: &[Task], drawer_open: bool) -> QueueView {
     }
 }
 
-fn query_project_focus(tasks: &[Task], path: &Path, drawer_open: bool) -> QueueView {
+fn query_project_focus(
+    tasks: &[Task],
+    archived_projects: &BTreeSet<String>,
+    path: &Path,
+    drawer_open: bool,
+) -> QueueView {
     let scope = DeckScope::Project(path);
     let live: Vec<&Task> = tasks
         .iter()
-        .filter(|task| !task.soft_deleted && task_matches_scope(task, scope))
+        .filter(|task| is_live(task, archived_projects) && task_matches_scope(task, scope))
         .collect();
 
     let mut motion: Vec<&Task> = live
@@ -619,6 +670,132 @@ mod tests {
             .iter()
             .flat_map(|s| s.task_ids.iter().copied())
             .collect()
+    }
+
+    #[test]
+    fn thread_header_and_open_count_exclude_an_archived_task() {
+        let mut tasks = vec![task_with_thread(
+            1,
+            HumanStatus::Ready,
+            project("/repos/a"),
+            false,
+            30,
+            Some("release"),
+        )];
+        tasks[0].archived = true;
+
+        // Scoped deck (project focus): the thread's only open task is archived, so no
+        // block paints.
+        let deck = query_lens(
+            &tasks,
+            None,
+            BoardLens::Project(Path::new("/repos/a")),
+            false,
+        );
+        let on_deck = deck
+            .sections
+            .iter()
+            .find(|s| s.kind == SectionKind::OnDeck)
+            .expect("project focus on deck");
+        assert!(
+            on_deck.thread_blocks.is_empty(),
+            "an archived-only thread must paint no header: {:?}",
+            on_deck.thread_blocks
+        );
+
+        // Threads tab: no section for the thread at all.
+        let threads = query_lens(&tasks, None, BoardLens::Home(BoardTab::Threads), false);
+        assert!(
+            !threads
+                .sections
+                .iter()
+                .any(|s| s.thread_label.as_deref() == Some("release")),
+            "an archived-only thread must not paint on the threads tab"
+        );
+
+        // Sanity: unarchived again, the header and its open count are back.
+        tasks[0].archived = false;
+        let deck = query_lens(
+            &tasks,
+            None,
+            BoardLens::Project(Path::new("/repos/a")),
+            false,
+        );
+        let on_deck = deck
+            .sections
+            .iter()
+            .find(|s| s.kind == SectionKind::OnDeck)
+            .expect("project focus on deck");
+        assert_eq!(on_deck.thread_blocks.len(), 1);
+        assert_eq!(on_deck.thread_blocks[0].open_count, 1);
+    }
+
+    #[test]
+    fn archived_project_hides_its_tasks_from_projects_threads_and_desk_in_motion() {
+        let mut archived = BTreeSet::new();
+        archived.insert("/repos/gone".to_string());
+        let tasks = vec![
+            task(1, HumanStatus::Started, project("/repos/gone"), false, 50),
+            task(2, HumanStatus::Ready, project("/repos/gone"), false, 40),
+            task_with_thread(
+                3,
+                HumanStatus::Ready,
+                project("/repos/gone"),
+                false,
+                30,
+                Some("release"),
+            ),
+            task(4, HumanStatus::Started, TaskScope::Global, false, 20),
+            task(5, HumanStatus::Ready, project("/repos/here"), false, 10),
+        ];
+
+        // Projects tab: the archived project paints no group, the live one stays.
+        let projects = query_board(
+            &tasks,
+            &archived,
+            None,
+            BoardLens::Home(BoardTab::Projects),
+            false,
+        );
+        assert!(
+            !projects
+                .sections
+                .iter()
+                .any(|s| s.project_label.as_deref() == Some("/repos/gone")),
+            "archived project must not paint a projects-tab group"
+        );
+        assert!(projects
+            .sections
+            .iter()
+            .any(|s| s.project_label.as_deref() == Some("/repos/here")),);
+
+        // Threads tab: the archived project's thread contributes nothing.
+        let threads = query_board(
+            &tasks,
+            &archived,
+            None,
+            BoardLens::Home(BoardTab::Threads),
+            false,
+        );
+        assert!(
+            !threads
+                .sections
+                .iter()
+                .any(|s| s.thread_label.as_deref() == Some("release")),
+            "an archived project's thread must not paint on the threads tab"
+        );
+
+        // Desk IN MOTION: the archived project's started task is gone, the global one stays.
+        let desk = query_board(
+            &tasks,
+            &archived,
+            None,
+            BoardLens::Home(BoardTab::Desk),
+            false,
+        );
+        let motion = section_ids(&desk, SectionKind::InMotion);
+        assert!(!motion.contains(&Uuid::from_u128(1)));
+        assert!(motion.contains(&Uuid::from_u128(4)));
     }
 
     #[test]

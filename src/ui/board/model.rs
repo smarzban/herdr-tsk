@@ -542,6 +542,9 @@ fn board_form_scope_options(
 #[derive(Debug, Clone)]
 pub struct BoardModel {
     pub(super) tasks: Vec<Task>,
+    /// Scope paths of archived projects, carried from domain state so the lens
+    /// query can filter hidden tasks without re-deriving from records.
+    pub(super) archived_projects: BTreeSet<String>,
     pub(super) this_repo: Option<PathBuf>,
     /// Session board location (home tab or focused project). Not durable.
     pub(super) board_location: BoardLocation,
@@ -649,6 +652,7 @@ impl BoardModel {
     pub fn from_tasks(tasks: Vec<Task>, this_repo: Option<PathBuf>) -> Self {
         let mut model = Self {
             tasks,
+            archived_projects: BTreeSet::new(),
             this_repo,
             board_location: BoardLocation::Home {
                 tab: BoardTab::Desk,
@@ -697,10 +701,9 @@ impl BoardModel {
         if !self.board_location.at_home() || !self.visible_ids().is_empty() {
             return;
         }
-        let has_open = self
-            .tasks
-            .iter()
-            .any(|task| !task.soft_deleted && task.status != HumanStatus::Done);
+        let has_open = self.tasks.iter().any(|task| {
+            !task.soft_deleted && !self.is_hidden(task) && task.status != HumanStatus::Done
+        });
         if !has_open {
             return;
         }
@@ -847,7 +850,20 @@ impl BoardModel {
 
     /// Snapshot tasks from domain state (default agent kind; seed env at open).
     pub fn from_domain(state: &DomainState, this_repo: Option<PathBuf>) -> Self {
-        Self::from_tasks(state.tasks().to_vec(), this_repo)
+        let mut model = Self::from_tasks(state.tasks().to_vec(), this_repo);
+        model.archived_projects = state.archived_projects();
+        model
+    }
+
+    /// The one hidden predicate every working-lens surface filters on.
+    fn is_hidden(&self, task: &Task) -> bool {
+        if task.archived {
+            return true;
+        }
+        match &task.scope {
+            TaskScope::Global => false,
+            TaskScope::Project { path } => self.archived_projects.contains(path),
+        }
     }
 
     /// Switch the home tab, when needed, so `id` would appear in [`Self::visible_ids`].
@@ -858,7 +874,7 @@ impl BoardModel {
         let Some(task) = self
             .tasks
             .iter()
-            .find(|task| task.id == id && !task.soft_deleted)
+            .find(|task| task.id == id && !task.soft_deleted && !self.is_hidden(task))
         else {
             return;
         };
@@ -887,6 +903,7 @@ impl BoardModel {
         let previous_visible = self.visible_ids();
         let previous_id_set: HashSet<Uuid> = self.tasks.iter().map(|task| task.id).collect();
         self.tasks = state.tasks().to_vec();
+        self.archived_projects = state.archived_projects();
         let new_ids: Vec<Uuid> = self
             .tasks
             .iter()
@@ -1113,7 +1130,10 @@ impl BoardModel {
             }
         };
         if let Some(repo) = self.this_repo.clone() {
-            push(repo, &mut paths);
+            let repo_path = repo.to_string_lossy().into_owned();
+            if !self.archived_projects.contains(&repo_path) {
+                push(repo, &mut paths);
+            }
         }
         let mut from_tasks: Vec<PathBuf> = Vec::new();
         for task in &self.tasks {
@@ -1121,6 +1141,9 @@ impl BoardModel {
                 continue;
             }
             if let TaskScope::Project { path } = &task.scope {
+                if self.archived_projects.contains(path) {
+                    continue;
+                }
                 push(PathBuf::from(path), &mut from_tasks);
             }
         }
@@ -1142,8 +1165,9 @@ impl BoardModel {
 
     /// Queue sections + counts for the current session location.
     pub fn queue_view(&self) -> QueueView {
-        queue::query_lens(
+        queue::query_board(
             &self.tasks,
+            &self.archived_projects,
             self.this_repo.as_deref(),
             self.board_location.lens(),
             self.drawer_open,
