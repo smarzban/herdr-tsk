@@ -1981,3 +1981,102 @@ fn add_into_an_archived_project_exits_1_with_project_archived_and_names_the_ways
     let _ = std::fs::remove_dir_all(repo);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn plan_items_resolving_to_an_archived_project_refuse_with_project_archived() {
+    let _env = env_lock();
+    let repo = temp_state_dir("plan-archived-repo");
+    std::fs::create_dir(repo.join(".git")).expect("create git marker");
+    let dir = temp_state_dir("plan-archived");
+    let seeded = run_with(
+        [
+            "tsk",
+            "add",
+            "--state-dir",
+            &state_dir_arg(&dir),
+            "-t",
+            "seed",
+            "-p",
+            &repo.to_string_lossy(),
+        ],
+        Cursor::new(Vec::<u8>::new()),
+        true,
+    );
+    assert_eq!(seeded.code, 0, "{:?}", seeded.stderr);
+    let mut writable = TaskStore::new(&dir).load().expect("load store");
+    writable
+        .archive_project(&repo.to_string_lossy())
+        .expect("archive the repo project");
+    TaskStore::new(&dir)
+        .save(&writable)
+        .expect("persist record");
+
+    let prior = std::env::var_os("HERDR_PLUGIN_CONTEXT_JSON");
+    let context = format!(
+        r#"{{"focused_pane_cwd":{}}}"#,
+        serde_json::to_string(&repo).expect("serialize repo")
+    );
+    // SAFETY: ENV_LOCK serializes this test's process-wide environment mutation.
+    unsafe { std::env::set_var("HERDR_PLUGIN_CONTEXT_JSON", context) };
+
+    // Item 0 omits `project` and resolves to the archived cwd default; item 1 names it
+    // explicitly; item 2 is a desk item and must persist.
+    let output = run_with(
+        [
+            "tsk",
+            "add",
+            "--state-dir",
+            &state_dir_arg(&dir),
+            "--file",
+            "-",
+        ],
+        Cursor::new(
+            format!(
+                r#"[{{"title":"plan default"}},{{"title":"plan explicit","project":{}}},{{"title":"plan desk","project":null}}]"#,
+                serde_json::to_string(&repo.to_string_lossy()).expect("serialize path")
+            )
+            .into_bytes(),
+        ),
+        true,
+    );
+
+    match prior {
+        Some(value) => unsafe { std::env::set_var("HERDR_PLUGIN_CONTEXT_JSON", value) },
+        None => unsafe { std::env::remove_var("HERDR_PLUGIN_CONTEXT_JSON") },
+    }
+
+    assert_eq!(output.code, 1, "{output:?}");
+    let report: serde_json::Value = serde_json::from_str(&output.stdout).expect("plan report JSON");
+    let failed = report["failed"].as_array().expect("failed rows");
+    assert_eq!(
+        failed.len(),
+        2,
+        "both archived-project items refuse: {report}"
+    );
+    assert_eq!(failed[0]["code"], "project-archived");
+    assert_eq!(failed[0]["title"], "plan default");
+    assert_eq!(
+        failed[0]["error"],
+        "project is archived: use --desk, -p, or tsk project unarchive"
+    );
+    assert_eq!(failed[1]["code"], "project-archived");
+    assert_eq!(failed[1]["title"], "plan explicit");
+    let created = report["created"].as_array().expect("created rows");
+    assert_eq!(created.len(), 1);
+    assert_eq!(created[0]["title"], "plan desk");
+
+    let store = TaskStore::new(&dir).load().expect("load store");
+    assert!(
+        store
+            .tasks()
+            .iter()
+            .all(|task| task.title != "plan default" && task.title != "plan explicit"),
+        "refused plan items persisted nothing"
+    );
+    assert!(
+        store.tasks().iter().any(|task| task.title == "plan desk"),
+        "the desk item persisted"
+    );
+    let _ = std::fs::remove_dir_all(repo);
+    let _ = std::fs::remove_dir_all(dir);
+}

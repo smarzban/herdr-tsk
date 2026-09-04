@@ -201,6 +201,17 @@ pub fn run_plan(
             let mut created = Vec::with_capacity(resolved.len());
             let mut existing = Vec::new();
             for item in resolved {
+                if let TaskScope::Project { path } = &item.scope {
+                    if domain.is_project_archived(path) {
+                        failed.push(Failed {
+                            i: item.i,
+                            title: Some(item.title),
+                            code: "project-archived",
+                            error: "project is archived: use --desk, -p, or tsk project unarchive",
+                        });
+                        continue;
+                    }
+                }
                 if let Some(task) =
                     existing_task(domain, &item.title, &item.scope, item.thread.as_deref())
                 {
