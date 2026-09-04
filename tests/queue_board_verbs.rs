@@ -3378,3 +3378,179 @@ fn help_card_lists_ctrl_f_and_the_verb_bar_shows_file_for_a_task_row_and_the_gro
         "archived row verb bar must show `f unarchive`: {verbs:?}"
     );
 }
+
+#[test]
+fn ctrl_f_in_the_picker_archives_the_selected_project_and_keeps_the_picker_open() {
+    let mut domain = DomainState::new();
+    domain
+        .create(
+            "in app",
+            None,
+            project(THIS_REPO),
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create");
+    let other = "/repos/other";
+    domain
+        .create(
+            "in other",
+            None,
+            project(other),
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenProjectSelector,
+        None,
+    )
+    .expect("open picker");
+    assert_eq!(model.input_mode(), BoardInputMode::ProjectPicker);
+
+    // Walk the main list onto the other project's option.
+    let target = tsk_tui::ui::board::ProjectScopeOption::Project(PathBuf::from(other));
+    for _ in 0..model.project_options().len() {
+        let index = model.project_picker_index().expect("picker index");
+        if model.project_options()[index] == target {
+            break;
+        }
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::ProjectPickerNext,
+            None,
+        )
+        .expect("next");
+    }
+    let index = model.project_picker_index().expect("picker index");
+    assert_eq!(
+        model.project_options()[index],
+        target,
+        "walked onto the project"
+    );
+
+    apply_intent(&mut domain, &mut model, BoardIntent::File, None).expect("ctrl+f files");
+
+    assert!(
+        domain.is_project_archived(other),
+        "ctrl+f archives the selected project"
+    );
+    assert_eq!(
+        model.input_mode(),
+        BoardInputMode::ProjectPicker,
+        "the picker stays open"
+    );
+    assert!(
+        !model.project_options().contains(&target),
+        "the project leaves the main list"
+    );
+    assert!(
+        model
+            .archived_project_options()
+            .contains(&PathBuf::from(other)),
+        "the project is listed on the archived tab"
+    );
+}
+
+#[test]
+fn ctrl_f_and_ctrl_u_on_the_archived_tab_unarchive_and_every_task_keeps_its_status() {
+    let mut domain = DomainState::new();
+    let a = domain
+        .create(
+            "a ready",
+            None,
+            project("/repos/a"),
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create a");
+    let b = domain
+        .create(
+            "b started",
+            None,
+            project("/repos/b"),
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create b");
+    domain.set_status(b, HumanStatus::Started).expect("started");
+    let statuses_before: Vec<(uuid::Uuid, HumanStatus)> = domain
+        .tasks()
+        .iter()
+        .map(|task| (task.id, task.status))
+        .collect();
+    domain.archive_project("/repos/a").expect("archive a");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/a")));
+
+    // Switch to the archived tab and ctrl+f the entry: the project unarchives.
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenProjectSelector,
+        None,
+    )
+    .expect("open picker");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ProjectPickerSwitchTab,
+        None,
+    )
+    .expect("switch tab");
+    apply_intent(&mut domain, &mut model, BoardIntent::File, None).expect("ctrl+f unarchives");
+    assert!(
+        !domain.is_project_archived("/repos/a"),
+        "ctrl+f on the archived tab unarchives"
+    );
+    assert_eq!(
+        model.archived_project_options(),
+        Vec::<PathBuf>::new(),
+        "no archived projects remain"
+    );
+    assert!(
+        model
+            .project_options()
+            .contains(&tsk_tui::ui::board::ProjectScopeOption::Project(
+                PathBuf::from("/repos/a")
+            )),
+        "the project returns to the main list (and the projects tab)"
+    );
+
+    // Re-archive, switch, and ctrl+u: same unarchive route, statuses untouched.
+    domain.archive_project("/repos/a").expect("archive again");
+    model.sync_from_domain(&domain);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenProjectSelector,
+        None,
+    )
+    .expect("open picker");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ProjectPickerSwitchTab,
+        None,
+    )
+    .expect("switch tab");
+    apply_intent(&mut domain, &mut model, BoardIntent::Undo, None).expect("ctrl+u unarchives");
+    assert!(
+        !domain.is_project_archived("/repos/a"),
+        "ctrl+u on the archived tab unarchives"
+    );
+
+    let statuses_after: Vec<(uuid::Uuid, HumanStatus)> = domain
+        .tasks()
+        .iter()
+        .map(|task| (task.id, task.status))
+        .collect();
+    assert_eq!(
+        statuses_before, statuses_after,
+        "project archive round-trips leave every task's status alone"
+    );
+    let _ = a;
+}

@@ -843,6 +843,7 @@ fn overlay_rows_are_padded_exact_no_base_bleed() {
         model.overlay = QueueOverlay::ScopeDropdown {
             options: &scope_opts,
             selected: 0,
+            tabs: None,
         };
         let (rows, _geo) = paint(80, 24, &model);
         let desk_row = rows
@@ -3854,6 +3855,159 @@ fn task_page_header_slot_reads_archived_for_an_archived_task() {
     assert!(
         rows.iter().any(|row| row.contains("ready")),
         "unarchived task keeps its status word:\n{}",
+        rows.join("\n")
+    );
+}
+
+#[test]
+fn archived_tab_lists_exactly_the_archived_projects_and_paints_an_empty_state_line() {
+    let mut domain = DomainState::new();
+    domain
+        .create(
+            "app task",
+            None,
+            TaskScope::Project {
+                path: "/repos/zebra".into(),
+            },
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/zebra")));
+
+    // Empty archived tab: the tabs row paints and an empty-state line names the gap.
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenProjectSelector,
+        None,
+    )
+    .expect("open picker");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ProjectPickerSwitchTab,
+        None,
+    )
+    .expect("switch to the archived tab");
+    let rows = board_rows(&model, 80, 24);
+    assert!(
+        rows.iter()
+            .any(|row| row.contains("projects") && row.contains("archived")),
+        "the tabs row paints:\n{}",
+        rows.join("\n")
+    );
+    assert!(
+        rows.iter().any(|row| row.contains("no archived projects")),
+        "an empty archived tab paints an empty-state line:\n{}",
+        rows.join("\n")
+    );
+
+    // Archive the project elsewhere, reopen, switch: the tab lists exactly it.
+    domain
+        .archive_project("/repos/zebra")
+        .expect("archive zebra");
+    model = BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/zebra")));
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenProjectSelector,
+        None,
+    )
+    .expect("open picker");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ProjectPickerSwitchTab,
+        None,
+    )
+    .expect("switch to the archived tab");
+    let rows = board_rows(&model, 80, 24);
+    assert!(
+        rows.iter().any(|row| row.contains("zebra")),
+        "the archived tab lists the archived project:\n{}",
+        rows.join("\n")
+    );
+    assert!(
+        !rows.iter().any(|row| row.contains("no archived projects")),
+        "the empty-state line yields to the entry:\n{}",
+        rows.join("\n")
+    );
+}
+
+#[test]
+fn archived_project_paints_nowhere_on_home_tabs_or_the_picker_main_list() {
+    let mut domain = DomainState::new();
+    domain
+        .create(
+            "gone started task",
+            None,
+            TaskScope::Project {
+                path: "/repos/gone".into(),
+            },
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create");
+    domain
+        .set_status(domain.tasks()[0].id, HumanStatus::Started)
+        .expect("started");
+    domain
+        .create(
+            "here task",
+            None,
+            TaskScope::Project {
+                path: "/repos/here".into(),
+            },
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create");
+    domain.archive_project("/repos/gone").expect("archive gone");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/here")));
+
+    for tab in [BoardTab::Desk, BoardTab::Projects, BoardTab::Threads] {
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::SelectHomeTab(tab),
+            None,
+        )
+        .expect("switch tab");
+        let rows = board_rows(&model, 80, 24);
+        assert!(
+            !rows.iter().any(|row| row.contains("gone started task")),
+            "{tab:?}: the archived project's task paints:\n{}",
+            rows.join("\n")
+        );
+        if tab == BoardTab::Projects {
+            assert!(
+                !rows.iter().any(|row| row.contains("gone")),
+                "{tab:?}: the archived project paints a group:\n{}",
+                rows.join("\n")
+            );
+        }
+    }
+
+    // The picker's main list skips it too.
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenProjectSelector,
+        None,
+    )
+    .expect("open picker");
+    let rows = board_rows(&model, 80, 24);
+    // The picker paints basenames: the archived project's basename must be gone while
+    // the live project's stays.
+    assert!(
+        !rows.iter().any(|row| row.contains("gone")),
+        "picker main list paints the archived project:\n{}",
+        rows.join("\n")
+    );
+    assert!(
+        rows.iter().any(|row| row.contains("here")),
+        "picker main list keeps the live project:\n{}",
         rows.join("\n")
     );
 }

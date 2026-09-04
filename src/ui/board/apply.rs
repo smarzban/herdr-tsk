@@ -16,8 +16,8 @@ use crate::ui::tier::{FocusedSurface, WideStage};
 
 use super::commands::{resolve_board_command, CommandSurface};
 use super::model::{
-    BoardForm, BoardInputMode, BoardLocation, BoardModel, IntentOutcome, ProjectPickerState,
-    ProjectScopeOption, StepEditor, StepEditorSave, TaskEditSave,
+    BoardForm, BoardInputMode, BoardLocation, BoardModel, BoardTab, IntentOutcome, PickerTab,
+    ProjectPickerState, ProjectScopeOption, StepEditor, StepEditorSave, TaskEditSave,
 };
 
 /// What the row says when an action that aims at the selection is asked for on a board that
@@ -941,7 +941,13 @@ fn apply_board_intent(
             model.close_popup();
             model.close_command_surface();
             model.close_help();
-            model.project_picker = Some(ProjectPickerState { options, selected });
+            model.project_picker = Some(ProjectPickerState {
+                options,
+                selected,
+                tab: PickerTab::Main,
+                archived: model.archived_project_options(),
+                archived_selected: 0,
+            });
             model.popup = BoardPopup::ProjectPicker;
             return Ok(IntentOutcome::None);
         }
@@ -953,8 +959,24 @@ fn apply_board_intent(
             model.move_project_picker(false);
             return Ok(IntentOutcome::None);
         }
+        BoardIntent::ProjectPickerSwitchTab | BoardIntent::SelectPickerTab(_) => {
+            if let Some(picker) = model.project_picker.as_mut() {
+                picker.tab = match intent {
+                    BoardIntent::SelectPickerTab(tab) => tab,
+                    _ => match picker.tab {
+                        PickerTab::Main => PickerTab::Archived,
+                        PickerTab::Archived => PickerTab::Main,
+                    },
+                };
+            }
+            return Ok(IntentOutcome::None);
+        }
         BoardIntent::ConfirmProjectChoice => {
             // Session-only navigation: nothing durable is touched, so no outcome persists.
+            // The archived tab's entries are informational: Enter is inert there.
+            if model.picker_tab() == Some(PickerTab::Archived) {
+                return Ok(IntentOutcome::None);
+            }
             let Some(picker) = model.project_picker.take() else {
                 return Ok(IntentOutcome::None);
             };
@@ -975,6 +997,10 @@ fn apply_board_intent(
             // `SelectIndex` chooses a task row directly, instead of stepping
             // `ProjectPickerNext`/`Prev` to it first. Session-only
             // navigation: nothing durable is touched, so no outcome persists.
+            // The archived tab has no choose action: its rows are inert.
+            if model.picker_tab() == Some(PickerTab::Archived) {
+                return Ok(IntentOutcome::None);
+            }
             let Some(picker) = model.project_picker.take() else {
                 return Ok(IntentOutcome::None);
             };
@@ -1567,9 +1593,42 @@ fn apply_board_intent(
             }
         }
         BoardIntent::File => {
-            // The picker handles File itself (T-8); for now it stays inert.
-            if model.project_picker.is_some() {
-                return Ok(IntentOutcome::None);
+            // Picker open: archive the selected main-tab project, or unarchive the
+            // selected archived-tab entry. The picker stays open either way.
+            if let Some(picker) = model.project_picker.as_ref() {
+                let tab = picker.tab;
+                let chosen = match tab {
+                    PickerTab::Main => picker.options.get(picker.selected).cloned(),
+                    PickerTab::Archived => picker
+                        .archived
+                        .get(picker.archived_selected)
+                        .map(|path| ProjectScopeOption::Project(path.clone())),
+                };
+                let Some(ProjectScopeOption::Project(path)) = chosen else {
+                    // Main + Home (or an empty tab) is inert.
+                    return Ok(IntentOutcome::None);
+                };
+                let scope_path = path.to_string_lossy().into_owned();
+                let was_focused = model.board_location == BoardLocation::Project(path.clone());
+                let previous_visible = model.visible_ids();
+                let previous = model.selection_id;
+                let result = match tab {
+                    PickerTab::Main => domain.archive_project(&scope_path),
+                    PickerTab::Archived => domain.unarchive_project(&scope_path).map(|_| true),
+                };
+                if result.is_err() {
+                    // Unknown project and friends leave the picker untouched.
+                    return Ok(IntentOutcome::None);
+                }
+                model.sync_from_domain(domain);
+                model.refresh_project_picker();
+                if was_focused {
+                    model.board_location = BoardLocation::Home {
+                        tab: BoardTab::Desk,
+                    };
+                }
+                model.reanchor_selection(previous, &previous_visible);
+                return Ok(IntentOutcome::Persist);
             }
             model.close_popup();
             let Some(id) = model.selected_id() else {
@@ -1588,9 +1647,22 @@ fn apply_board_intent(
             // Success has no message: the row's disappearance (or return) is the feedback.
         }
         BoardIntent::Undo => {
-            // The picker handles Undo itself (T-8); for now it stays inert.
-            if model.project_picker.is_some() {
-                return Ok(IntentOutcome::None);
+            // Picker open: the archived tab's ctrl+u is the unarchive route; the main
+            // tab stays inert (undo exactly as before the feature).
+            if let Some(picker) = model.project_picker.as_ref() {
+                if picker.tab == PickerTab::Main {
+                    return Ok(IntentOutcome::None);
+                }
+                let Some(path) = picker.archived.get(picker.archived_selected).cloned() else {
+                    return Ok(IntentOutcome::None);
+                };
+                let scope_path = path.to_string_lossy().into_owned();
+                if domain.unarchive_project(&scope_path).is_err() {
+                    return Ok(IntentOutcome::None);
+                }
+                model.sync_from_domain(domain);
+                model.refresh_project_picker();
+                return Ok(IntentOutcome::Persist);
             }
             model.close_popup();
             // ctrl+u on an archived selection is the unarchive route, never an undo:

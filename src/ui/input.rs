@@ -6,7 +6,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 use crate::domain::HumanStatus;
 
-use super::board::BoardInputMode;
+use super::board::{BoardInputMode, PickerTab};
 use super::capture::{CaptureField, CaptureScopeChoice};
 use super::tier::{ResponsivePresentation, WideStage};
 
@@ -288,6 +288,11 @@ pub enum BoardIntent {
     /// `ctrl+f` — the file verb: toggle the task's archived flag (picker: archive/
     /// unarchive the selected project). No undo entry. Reducer lands in.
     File,
+    /// Picker `Tab` / `←` / `→`: flip the project selector between its main and
+    /// archived tabs. Reducer lands in.
+    ProjectPickerSwitchTab,
+    /// Mouse route onto the picker's painted tab row.
+    SelectPickerTab(PickerTab),
     /// Expand/collapse the done drawer's archived group (Enter or click on its header,
     /// which the intent also selects). Session-only. Reducer lands in.
     ToggleArchivedGroup,
@@ -1035,6 +1040,8 @@ pub fn intent_primary_action(intent: &BoardIntent) -> Option<PrimaryBoardAction>
         | BoardIntent::ListScrollTo(_)
         | BoardIntent::ToggleDoneDrawer
         | BoardIntent::ToggleArchivedGroup
+        | BoardIntent::ProjectPickerSwitchTab
+        | BoardIntent::SelectPickerTab(_)
         | BoardIntent::File
         | BoardIntent::OpenHelp
         | BoardIntent::CloseLayer
@@ -1157,6 +1164,7 @@ fn map_project_picker(key: KeyEvent) -> Option<BoardIntent> {
         KeyCode::Enter => Some(BoardIntent::ConfirmProjectChoice),
         KeyCode::Char('j') | KeyCode::Down => Some(BoardIntent::ProjectPickerNext),
         KeyCode::Char('k') | KeyCode::Up => Some(BoardIntent::ProjectPickerPrev),
+        KeyCode::Tab | KeyCode::Left | KeyCode::Right => Some(BoardIntent::ProjectPickerSwitchTab),
         _ => None,
     }
 }

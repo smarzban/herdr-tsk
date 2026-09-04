@@ -2861,3 +2861,35 @@ fn archived_group_is_collapsed_on_a_fresh_model_and_enter_or_click_on_the_header
         "the second click collapsed the group"
     );
 }
+
+#[test]
+fn the_project_picker_tab_row_click_selects_the_tab() {
+    let (mut domain, mut model, _id) = board_with_task("tab click", HumanStatus::Ready);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenProjectSelector,
+        None,
+    )
+    .expect("open picker");
+    let hits = board_hit_map(STANDARD, &model);
+    let tab_hit = hits
+        .regions
+        .iter()
+        .find(|hit| {
+            matches!(hit.target, QueueHitTarget::PickerTab(t) if t == tsk_tui::ui::board::PickerTab::Archived)
+        })
+        .expect("the picker paints tab hit regions");
+    let intent = map_board_mouse(&model, &hits, left_click(tab_hit.area.x, tab_hit.area.y))
+        .expect("a tab click maps to an intent");
+    assert_eq!(
+        intent,
+        BoardIntent::SelectPickerTab(tsk_tui::ui::board::PickerTab::Archived)
+    );
+    apply_intent(&mut domain, &mut model, intent, None).expect("switch via click");
+    assert_eq!(
+        model.picker_tab(),
+        Some(tsk_tui::ui::board::PickerTab::Archived),
+        "the click switched to the archived tab"
+    );
+}

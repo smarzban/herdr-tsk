@@ -360,6 +360,7 @@ fn form_verb_intent(model: &BoardModel, index: usize) -> Option<BoardIntent> {
 fn scope_dropdown_verb_intent(index: usize) -> Option<BoardIntent> {
     match SCOPE_VERBS.get(index)?.key {
         "enter" => Some(BoardIntent::ConfirmProjectChoice),
+        "f" => Some(BoardIntent::File),
         "esc" => Some(BoardIntent::CancelProjectPicker),
         _ => None,
     }
@@ -672,6 +673,7 @@ pub fn map_board_mouse(
             Some(QueueHitTarget::ProjectOption(index)) => {
                 Some(BoardIntent::SelectProjectOption(index))
             }
+            Some(QueueHitTarget::PickerTab(tab)) => Some(BoardIntent::SelectPickerTab(tab)),
             Some(QueueHitTarget::ModalChrome) => None,
             Some(QueueHitTarget::ModalClose) => Some(BoardIntent::CancelProjectPicker),
             Some(QueueHitTarget::Verb(index)) => scope_dropdown_verb_intent(index),

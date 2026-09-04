@@ -106,6 +106,18 @@ pub enum WalkthroughOutcome {
 pub(super) struct ProjectPickerState {
     pub(super) options: Vec<ProjectScopeOption>,
     pub(super) selected: usize,
+    /// Which tab the picker shows. Session-only.
+    pub(super) tab: PickerTab,
+    /// Archived tab entries (sorted scope paths), rebuilt from domain state.
+    pub(super) archived: Vec<PathBuf>,
+    pub(super) archived_selected: usize,
+}
+
+/// Which list the session project selector shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PickerTab {
+    Main,
+    Archived,
 }
 
 /// One session-only destination offered by the project selector (`P`).
@@ -1163,7 +1175,36 @@ impl BoardModel {
 
     /// Index into [`Self::project_options`] the open selector highlights.
     pub fn project_picker_index(&self) -> Option<usize> {
-        self.project_picker.as_ref().map(|picker| picker.selected)
+        let picker = self.project_picker.as_ref()?;
+        Some(match picker.tab {
+            PickerTab::Main => picker.selected,
+            PickerTab::Archived => picker.archived_selected,
+        })
+    }
+
+    /// Which tab the open selector shows.
+    pub fn picker_tab(&self) -> Option<PickerTab> {
+        self.project_picker.as_ref().map(|picker| picker.tab)
+    }
+
+    /// Archived tab entries: sorted scope paths of the archived projects.
+    pub fn archived_project_options(&self) -> Vec<PathBuf> {
+        self.archived_projects.iter().map(PathBuf::from).collect()
+    }
+
+    /// Rebuild the open selector's lists from the current snapshot and clamp both
+    /// selections. No-op when the picker is closed.
+    pub(super) fn refresh_project_picker(&mut self) {
+        let Some(mut picker) = self.project_picker.take() else {
+            return;
+        };
+        picker.options = self.project_options();
+        picker.selected = picker.selected.min(picker.options.len().saturating_sub(1));
+        picker.archived = self.archived_project_options();
+        picker.archived_selected = picker
+            .archived_selected
+            .min(picker.archived.len().saturating_sub(1));
+        self.project_picker = Some(picker);
     }
 
     /// Queue sections + counts for the current session location.
@@ -2086,14 +2127,18 @@ impl BoardModel {
         let Some(picker) = self.project_picker.as_mut() else {
             return;
         };
-        let len = picker.options.len();
+        // Movement stays within the active tab.
+        let (selected, len) = match picker.tab {
+            PickerTab::Main => (&mut picker.selected, picker.options.len()),
+            PickerTab::Archived => (&mut picker.archived_selected, picker.archived.len()),
+        };
         if len == 0 {
             return;
         }
-        picker.selected = if forward {
-            (picker.selected + 1) % len
+        *selected = if forward {
+            (*selected + 1) % len
         } else {
-            picker.selected.checked_sub(1).unwrap_or(len - 1)
+            selected.checked_sub(1).unwrap_or(len - 1)
         };
     }
 

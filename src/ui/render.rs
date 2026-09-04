@@ -438,6 +438,8 @@ pub enum QueueOverlay<'a> {
     ScopeDropdown {
         options: &'a [String],
         selected: usize,
+        /// Picker tabs (main/archived). None for non-picker uses.
+        tabs: Option<PickerTabsPaint>,
     },
     /// Inline title edit surface (accordion row on standard; full takeover on compact).
     EditTitle { draft: String, cursor_col: u16 },
@@ -566,6 +568,14 @@ pub struct QueueFrameModel<'a> {
     pub archived_header_selected: bool,
 }
 
+/// The project picker's tab row: which list is active and how many entries the
+/// archived one carries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PickerTabsPaint {
+    pub archived_active: bool,
+    pub archived_count: usize,
+}
+
 /// Logical control under a painted rectangle (rebuilt every frame).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QueueHitTarget {
@@ -593,6 +603,8 @@ pub enum QueueHitTarget {
     /// One painted row of the open project-scope dropdown, indexed exactly as
     /// `BoardModel::project_options()` orders them.
     ProjectOption(usize),
+    /// One painted tab of the project picker's tab row.
+    PickerTab(crate::ui::board::PickerTab),
     /// One painted home tab on the selector row.
     HomeTab(BoardTab),
     /// One ON DECK project-group header on the Projects tab, indexed into sections.
@@ -1486,6 +1498,10 @@ pub(crate) const SCOPE_VERBS: &[VerbEntry<'static>] = &[
         label: "choose",
     },
     VerbEntry {
+        key: "f",
+        label: "file",
+    },
+    VerbEntry {
         key: "enter",
         label: "scope",
     },
@@ -1513,8 +1529,12 @@ fn paint_overlay(
         QueueOverlay::Help { lines } => {
             paint_help_overlay(frame, geo, surface, lines, hits);
         }
-        QueueOverlay::ScopeDropdown { options, selected } => {
-            paint_scope_dropdown(frame, geo, surface, options, *selected, hits);
+        QueueOverlay::ScopeDropdown {
+            options,
+            selected,
+            tabs,
+        } => {
+            paint_scope_dropdown(frame, geo, surface, options, *selected, *tabs, hits);
         }
         QueueOverlay::EditTitle {
             ref draft,
@@ -2929,11 +2949,15 @@ fn paint_scope_dropdown(
     surface: Rect,
     options: &[String],
     selected: usize,
+    tabs: Option<PickerTabsPaint>,
     hits: &mut QueueHitMap,
 ) {
-    if geo.row_width == 0 || options.is_empty() {
+    if geo.row_width == 0 || (tabs.is_none() && options.is_empty()) {
         return;
     }
+    let tabs_rows = usize::from(tabs.is_some());
+    // An empty archived list still paints its empty-state row.
+    let empty_state = tabs.is_some() && options.is_empty();
     // Help/project-scope have nothing worth preserving underneath (no query row like the
     // palette), so the full frame is the ceiling: a narrow compact terminal gets every row
     // the border+footer would otherwise leave idle.
@@ -2943,12 +2967,18 @@ fn paint_scope_dropdown(
     let capacity = bounds
         .height
         .saturating_sub(modal_chrome_rows(geo.tier, true));
+    // The tab row shares the card's content area with the list.
+    let list_capacity = (capacity.max(1) as usize).saturating_sub(tabs_rows);
     let max_n = if geo.tier == Tier::Compact {
-        capacity.max(1) as usize
+        list_capacity.max(1)
     } else {
-        options.len().min(12).min(capacity.max(1) as usize)
+        options.len().min(12).min(list_capacity.max(1))
     };
-    let rows = max_n.min(options.len());
+    let rows = if empty_state {
+        1
+    } else {
+        max_n.min(options.len())
+    };
     let selected = selected.min(options.len().saturating_sub(1));
     let scroll = if selected < rows {
         0
@@ -2966,7 +2996,7 @@ fn paint_scope_dropdown(
         bounds,
         ModalCardSpec {
             title: &title,
-            content_rows: rows as u16,
+            content_rows: (rows + tabs_rows) as u16,
             legend: SCOPE_FOOTER,
             dismiss: None,
         },
@@ -2975,9 +3005,53 @@ fn paint_scope_dropdown(
     if content.width == 0 || content.height == 0 {
         return;
     }
-    let paintable = rows.min(content.height as usize);
+    // The picker's tab row: `projects · archived (n)`, active bold, inactive dim.
+    if let Some(tabs) = tabs {
+        let y = content.y;
+        let main = " projects ";
+        let archived = format!(" archived ({}) ", tabs.archived_count);
+        let main_w = display_width(main) as u16;
+        let archived_w = display_width(&archived) as u16;
+        let (main_style, archived_style) = if tabs.archived_active {
+            (style_dim(), style_bold())
+        } else {
+            (style_bold(), style_dim())
+        };
+        put_line_at(
+            frame,
+            surface,
+            Rect::new(content.x, y, content.width, 1),
+            Line::from(vec![
+                Span::styled(main.to_string(), main_style),
+                Span::styled("·".to_string(), style_dim()),
+                Span::styled(archived, archived_style),
+            ]),
+        );
+        hits.push(
+            QueueHitTarget::PickerTab(crate::ui::board::PickerTab::Main),
+            Rect::new(content.x, y, main_w, 1),
+        );
+        hits.push(
+            QueueHitTarget::PickerTab(crate::ui::board::PickerTab::Archived),
+            Rect::new(content.x.saturating_add(main_w + 1), y, archived_w, 1),
+        );
+    }
+    if empty_state {
+        let y = content.y.saturating_add(tabs_rows as u16);
+        put_line_at(
+            frame,
+            surface,
+            Rect::new(content.x, y, content.width, 1),
+            paint_bounded_line("  no archived projects", content.width, style_dim()),
+        );
+        return;
+    }
+    let paintable = rows.min((content.height as usize).saturating_sub(tabs_rows));
     for (j, opt) in options.iter().enumerate().skip(scroll).take(paintable) {
-        let y = content.y.saturating_add((j - scroll) as u16);
+        let y = content
+            .y
+            .saturating_add(tabs_rows as u16)
+            .saturating_add((j - scroll) as u16);
         let marker = if j == selected { "▸ " } else { "  " };
         let text = format!("{marker}{opt}");
         let style = if j == selected {

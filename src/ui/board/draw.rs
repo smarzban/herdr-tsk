@@ -20,7 +20,7 @@ use super::chrome::{notice_framed, row_width, DELETE_NOTICE_UNDO};
 use super::commands::CommandSurface;
 use super::model::{
     project_option_label, project_scope_option_label, BoardForm, BoardInputMode, BoardLocation,
-    BoardModel,
+    BoardModel, PickerTab, ProjectScopeOption,
 };
 
 /// Verb bar for the base board list: labels follow the selected task.
@@ -660,6 +660,7 @@ struct OverlayPayloads<'a> {
     help_lines: Vec<String>,
     palette_commands: Vec<PaletteCommandRow<'a>>,
     scope_options: Vec<String>,
+    scope_tabs: Option<render::PickerTabsPaint>,
     scope_selected: usize,
 }
 
@@ -686,11 +687,21 @@ impl<'a> OverlayPayloads<'a> {
                 Vec::new()
             };
         let scope_options: Vec<String> = if model.popup() == BoardPopup::ProjectPicker {
-            model
-                .project_options()
-                .iter()
-                .map(project_scope_option_label)
-                .collect()
+            let labels = match model.picker_tab() {
+                Some(PickerTab::Archived) => model
+                    .archived_project_options()
+                    .iter()
+                    .map(|path| {
+                        project_scope_option_label(&ProjectScopeOption::Project(path.clone()))
+                    })
+                    .collect(),
+                _ => model
+                    .project_options()
+                    .iter()
+                    .map(project_scope_option_label)
+                    .collect(),
+            };
+            labels
         } else if model.input_mode() == BoardInputMode::FormScopeDropdown {
             // Short project names: the dropdown lists scopes, not filesystem paths.
             model
@@ -713,11 +724,16 @@ impl<'a> OverlayPayloads<'a> {
                 .position(|scope| Some(scope) == model.form_scope_dropdown_choice())
                 .unwrap_or(0)
         };
+        let scope_tabs = model.picker_tab().map(|tab| render::PickerTabsPaint {
+            archived_active: tab == PickerTab::Archived,
+            archived_count: model.archived_project_options().len(),
+        });
         Self {
             help_lines,
             palette_commands,
             scope_options,
             scope_selected,
+            scope_tabs,
         }
     }
 
@@ -790,6 +806,7 @@ impl<'a> OverlayPayloads<'a> {
             return Some(QueueOverlay::ScopeDropdown {
                 options: &self.scope_options,
                 selected: self.scope_selected,
+                tabs: self.scope_tabs,
             });
         }
         None
