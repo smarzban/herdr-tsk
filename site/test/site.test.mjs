@@ -93,7 +93,7 @@ test("docs paint keys as keycaps and leave flags as code", async () => {
   for (const key of ["ctrl+s", "Shift+Enter", "Enter", "Esc", "→", "j", "P", "+", ":", "?"]) {
     assert.ok(isKeyName(key), `${key} is a key`);
   }
-  for (const code of ["--json", "-", "tsk add", "~/.tsk", "T30", "global", "ctrl+"]) {
+  for (const code of ["--json", "-", "tsk add", "~/.tsk", "T30", "T", "i", "n", "global", "ctrl+"]) {
     assert.ok(!isKeyName(code), `${code} is not a key`);
   }
 });

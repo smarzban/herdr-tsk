@@ -16,7 +16,7 @@
 │         │  task page                                                 │         │
 │         │  ctrl+e title | ctrl+n notes                               │         │
 │         │  ctrl+a step | tab/↓ steps                                 │         │
-│         │  shift+enter save | esc close                              │         │
+│         │  shift+enter save edit | esc close                         │         │
 │         │                                                            │         │
 │         ├────────────────────────────────────────────────────────────┤         │
 │         │ any key close                                              │         │

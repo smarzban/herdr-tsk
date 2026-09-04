@@ -534,7 +534,7 @@ pub fn task_page_help_bindings() -> Vec<(&'static str, &'static str)> {
         ("ctrl+n", "notes"),
         ("ctrl+a", "step"),
         ("tab/↓", "steps"),
-        ("shift+enter", "save"),
+        ("shift+enter", "save edit"),
         ("esc", "close"),
     ]
 }

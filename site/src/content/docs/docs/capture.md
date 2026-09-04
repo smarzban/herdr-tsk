@@ -47,8 +47,9 @@ herdr plugin action invoke quick-capture --plugin herdr-tsk
 ```
 
 Tab through Title, Notes, Thread, Scope. `Enter` in Title or Thread saves. `Enter`
-in Notes inserts a line. `Ctrl+Enter` saves from any field, with `Alt+Enter` as the
-legacy-terminal fallback. `Esc` cancels and leaves.
+in Notes inserts a line. `Ctrl+Enter` saves from Title, Notes, or Thread, with
+`Alt+Enter` as the legacy-terminal fallback; on Scope, plain `Enter` saves. `Esc`
+cancels and leaves.
 
 If text is selected in the pane you invoked it from, it arrives as the title.
 

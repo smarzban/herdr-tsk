@@ -85,7 +85,8 @@ selects, then opens or closes its text editor on a second click.
 
 ## Any text field
 
-Title, notes, thread, step, quick-add, and the palette query share one editor.
+Title, notes, thread, step, and quick-add share one editor. The palette query takes
+only typing, arrows, Tab, Enter, Esc, and Backspace.
 
 | Key | Does |
 | --- | --- |
@@ -94,7 +95,7 @@ Title, notes, thread, step, quick-add, and the palette query share one editor.
 | `Home` / `End` | line start / end |
 | `Backspace` / `Delete` | delete back / forward |
 | `↑` `↓` in notes | move between wrapped rows |
-| paste | inserts; line breaks stay only in notes, elsewhere they become spaces |
+| paste | inserts; line breaks stay in notes, elsewhere they become spaces |
 
 ## Palette, picker, and recovery
 
@@ -112,7 +113,7 @@ Title, notes, thread, step, quick-add, and the palette query share one editor.
 | `Tab` / `Shift+Tab` | Title, Notes, Thread, Scope |
 | `Enter` in Title or Thread | save |
 | `Enter` in Notes | new line |
-| `Ctrl+Enter` | save from any field (`Alt+Enter` is the legacy-terminal fallback) |
+| `Ctrl+Enter` in Title, Notes, or Thread | save (`Alt+Enter` is the legacy-terminal fallback) |
 | `1` `2` `3` on Scope | this project · desk · other path |
 | `s`, `Space`, `←` `→` on Scope | cycle the scope |
 | `p` or `e` on Scope | type another path; `Enter` confirms it |

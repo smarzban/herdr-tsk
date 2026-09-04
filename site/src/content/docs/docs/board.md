@@ -53,7 +53,8 @@ task. Agents do not auto-complete work.
 
 `ctrl+s` starts a ready task, or reopens a done one. On a started, blocked, or
 review task it does nothing, and the verb bar drops the entry. `ctrl+d` marks done.
-`ctrl+o` sets ready again from any status. `ctrl+b` toggles blocked; a done task
+`ctrl+o` sets ready again from any status; the palette's `reopen` entry appears only
+for a done task. `ctrl+b` toggles blocked; a done task
 answers `completed tasks cannot be blocked`. **review** is set from the command
 palette (`:` → `set status: review`), not from a dedicated letter. With nothing
 selected, every verb answers `select a task first`.
@@ -121,7 +122,7 @@ discards the draft and selects that row.
 | --- | --- |
 | at least 110 columns | wide stage slider: board, board beside page, rail beside page, or page. The rail paints no meta, done drawer, or peek |
 | at least 78×24 and below 110 columns | standard single-pane board: section headers, row meta, full verb legend |
-| smaller | compact: glyph, `T` identifier, and title; help, palette, and the task page take the full pane |
+| smaller | compact: glyph, `T<number>` identifier, and title; help, palette, and the task page take the full pane |
 | down to 40×10 | still operable |
 
 A typical herdr split is 78 columns, which is the standard board.

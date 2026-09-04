@@ -699,13 +699,12 @@ fn apply_board_intent(
             return Ok(IntentOutcome::None);
         }
         BoardIntent::EditInsertText(text) => {
-            // Title stays one line in either form; Notes preserves pasted line breaks.
-            // The step editor is one line by construction, so it flattens like Title.
+            // Title and Thread stay one line in either form; Notes preserves pasted line
+            // breaks. The step editor is one line by construction, so it flattens like Title.
             let single_line = model.input_mode == BoardInputMode::EditStep
-                || model
-                    .form
-                    .as_ref()
-                    .is_some_and(|form| form.focus == CaptureField::Title);
+                || model.form.as_ref().is_some_and(|form| {
+                    matches!(form.focus, CaptureField::Title | CaptureField::Thread)
+                });
             edit_draft(model, |draft| {
                 if single_line {
                     draft.insert_text(&flatten_line_breaks(&text));
