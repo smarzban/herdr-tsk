@@ -2255,13 +2255,15 @@ html[data-theme="light"] .pane {
   }
 }
 
-[data-reveal] {
+/* Progressive enhancement: content is visible without JavaScript.
+   landing.js adds .js to <html> synchronously, then reveals on scroll. */
+.js [data-reveal] {
   opacity: 0;
   transform: translateY(14px);
   transition: opacity 640ms var(--ease), transform 640ms var(--ease);
 }
 
-[data-reveal].is-in {
+.js [data-reveal].is-in {
   opacity: 1;
   transform: none;
 }

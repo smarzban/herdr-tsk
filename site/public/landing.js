@@ -1,4 +1,8 @@
 (() => {
+  // Mark JS availability before the first paint of any [data-reveal] band:
+  // without this class every band stays fully visible (no-JS fallback).
+  document.documentElement.classList.add("js");
+
   const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   // ── reveal on scroll ─────────────────────────────────────────────────────

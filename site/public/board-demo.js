@@ -46,7 +46,7 @@ import { parseCapture } from "./capture.js";
       }),
       task({
         title: "Edit target binding pin",
-        status: "started",
+        status: "ready",
         project: "herdr",
         notes: "Keep the save pin on the row the current lens still paints.",
         createdAt: NOW - 12 * MIN,
@@ -916,6 +916,16 @@ import { parseCapture } from "./capture.js";
   }
 
   function onKey(e) {
+    // Never swallow keys pressed on the landing chrome inside the pane
+    // (pane bar, layout toggle, divider): those keep their own keyboard
+    // behavior. Buttons inside the board canvas (rows, tabs, chips, verbs,
+    // close boxes) also keep native activation, except while the quick-add
+    // overlay is open and borrowing the frame's keys for its input.
+    const el = e.target;
+    if (el !== frame) {
+      if (el.closest(".pane-bar, .layout-toggle, [data-divider]")) return;
+      if (state.overlay !== "quick" && el.closest("button")) return;
+    }
     const wide = isWideSplit();
     const taskPageActive = taskFocus();
     if (state.overlay === "quick") {
