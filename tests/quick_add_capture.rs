@@ -1071,3 +1071,82 @@ fn capture_bar_renders_spaced_three_row_block_and_stays_bounded_without_color_sg
     let output = String::from_utf8(bytes.borrow().clone()).expect("ANSI output");
     tsk_tui::ui::render::assert_no_color_sgr(&output);
 }
+
+#[test]
+fn p_token_naming_an_archived_project_refuses_on_the_open_line_and_clears_on_close() {
+    let mut domain = DomainState::new();
+    domain
+        .create(
+            "anchor",
+            None,
+            TaskScope::Project {
+                path: "/repos/other".into(),
+            },
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create anchor");
+    domain.archive_project("/repos/other").expect("archive");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/invocation")));
+    let snap = snapshot();
+
+    open(&mut domain, &mut model, &snap);
+    type_title(&mut domain, &mut model, "ship it !p other");
+    let tasks_before = domain.tasks().len();
+
+    assert_eq!(
+        apply(&mut domain, &mut model, BoardIntent::QuickAddSave, None),
+        IntentOutcome::None,
+        "the save is refused"
+    );
+    assert_eq!(
+        model.input_mode(),
+        BoardInputMode::QuickAdd,
+        "the line stays open"
+    );
+    let message = model.message().expect("a refusal paints");
+    assert!(
+        message.contains("other"),
+        "the refusal names the project: {message:?}"
+    );
+    assert!(
+        message.contains("archived"),
+        "the refusal says archived: {message:?}"
+    );
+    assert_eq!(domain.tasks().len(), tasks_before, "nothing was saved");
+
+    // The refusal clears when the line closes.
+    apply(&mut domain, &mut model, BoardIntent::CancelQuickAdd, None);
+    assert_eq!(model.message(), None, "cancel clears the status slot");
+
+    // A verbatim path to the archived project behaves the same.
+    open(&mut domain, &mut model, &snap);
+    type_title(&mut domain, &mut model, "ship it !p /repos/other");
+    assert_eq!(
+        apply(&mut domain, &mut model, BoardIntent::QuickAddSave, None),
+        IntentOutcome::None
+    );
+    let message = model
+        .message()
+        .expect("a refusal paints for the verbatim path");
+    assert!(
+        message.contains("other") && message.contains("archived"),
+        "{message:?}"
+    );
+    apply(&mut domain, &mut model, BoardIntent::CancelQuickAdd, None);
+
+    // Bare `!p` (desk) and an unarchived name still save.
+    open(&mut domain, &mut model, &snap);
+    type_title(&mut domain, &mut model, "desk task !p");
+    assert_eq!(
+        apply(&mut domain, &mut model, BoardIntent::QuickAddSave, None),
+        IntentOutcome::Persist
+    );
+    open(&mut domain, &mut model, &snap);
+    type_title(&mut domain, &mut model, "live task !p invocation");
+    assert_eq!(
+        apply(&mut domain, &mut model, BoardIntent::QuickAddSave, None),
+        IntentOutcome::Persist
+    );
+    assert_eq!(domain.tasks().len(), tasks_before + 2);
+}

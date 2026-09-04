@@ -1967,9 +1967,16 @@ fn lift_quick_add_tokens(
             "!p" => {
                 let argument = quick_add_token_argument(&words, index);
                 scope = Some(match argument {
-                    Some(path) => TaskScope::Project {
-                        path: crate::scope::resolve_project_path(path, domain, snapshot),
-                    },
+                    Some(path) => {
+                        let resolved = crate::scope::resolve_project_path(path, domain, snapshot);
+                        if domain.is_project_archived(&resolved) {
+                            return Err(format!(
+                                "project {} is archived",
+                                crate::ui::render::short_project(&resolved)
+                            ));
+                        }
+                        TaskScope::Project { path: resolved }
+                    }
                     None => TaskScope::Global,
                 });
                 index += usize::from(argument.is_some()) + 1;
