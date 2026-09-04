@@ -40,12 +40,6 @@ export default defineConfig({
       title: 'tsk',
       description: 'A task board for you and your agents, in your terminal.',
       favicon: '/icon-dark.svg',
-      logo: {
-        light: './src/assets/wordmark-light.svg',
-        dark: './src/assets/wordmark-dark.svg',
-        alt: 'tsk',
-        replacesTitle: true,
-      },
       social: [
         {
           icon: 'github',
@@ -84,6 +78,7 @@ export default defineConfig({
         },
       },
       components: {
+        SiteTitle: './src/components/DocsTitle.astro',
         ThemeSelect: './src/components/ThemeSelect.astro',
         SocialIcons: './src/components/DocsLinks.astro',
       },

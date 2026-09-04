@@ -105,3 +105,10 @@ test("docs open on the two-party board and keep done human", async () => {
   const cli = await read("../src/content/docs/docs/cli.md");
   assert.match(cli, /## For agents/);
 });
+
+test("docs keep the phone layout until the right TOC fits", async () => {
+  const css = await read("../src/styles/starlight.css");
+  assert.match(css, /@media \(min-width: 50rem\) and \(max-width: 71\.99rem\)/);
+  const links = await read("../src/components/DocsLinks.astro");
+  assert.doesNotMatch(links, /install/);
+});

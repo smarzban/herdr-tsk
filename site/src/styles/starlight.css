@@ -46,15 +46,55 @@
   --sl-color-text-accent: #a85f00;
 }
 
-.site-title {
-  font-weight: 800;
-  letter-spacing: -0.04em;
-}
+/* ── tablet: one column, menu button, like a phone ─────────────────────── */
 
-/* Wordmark at the landing page's size. */
-.site-title img {
-  height: 1.45rem;
-  width: auto;
+/* Starlight shows the sidebar from 50rem but the right TOC only from 72rem. In
+   between, a 300px sidebar plus a 45rem column leaves the page lopsided, so the
+   band keeps the phone layout: menu button, full-width content, TOC dropdown. */
+@media (min-width: 50rem) and (max-width: 71.99rem) {
+  :root[data-has-sidebar] {
+    --sl-content-inline-start: 0rem;
+  }
+
+  [data-has-sidebar] header.header {
+    padding-inline-end: calc(var(--sl-nav-gap) + var(--sl-nav-pad-x) + var(--sl-menu-button-size));
+  }
+
+  header.header > .header {
+    display: flex;
+  }
+
+  .header .right-group {
+    display: none;
+  }
+
+  starlight-menu-button > button.md\:sl-hidden {
+    display: flex;
+  }
+
+  .sidebar-pane {
+    --sl-sidebar-visibility: hidden;
+    width: 100%;
+    background-color: var(--sl-color-black);
+    border-inline-end: 0;
+  }
+
+  [aria-expanded="true"] ~ .sidebar-pane {
+    --sl-sidebar-visibility: visible;
+  }
+
+  .sidebar-content > .md\:sl-hidden {
+    display: block;
+  }
+
+  mobile-starlight-toc nav {
+    inset-inline-start: 0;
+  }
+
+  /* Centre the 45rem column in the single-column band. */
+  .main-pane .sl-container {
+    margin-inline: auto;
+  }
 }
 
 /* ── type scale: the landing's section headings, not Starlight's ────────── */
