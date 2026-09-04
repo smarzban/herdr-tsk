@@ -408,7 +408,12 @@ fn apply_board_intent(
             };
             let scope = lifted.scope.unwrap_or_else(|| quick_add.scope.clone());
             let snapshot = quick_add.snapshot.as_ref().clone();
-            let mut form = BoardForm::capture(snapshot, model.this_repo.as_deref(), &model.tasks);
+            let mut form = BoardForm::capture(
+                snapshot,
+                model.this_repo.as_deref(),
+                &model.tasks,
+                &model.archived_projects,
+            );
             form.title = crate::ui::edit::seeded_draft(&lifted.title);
             form.scope = scope;
             form.thread =
@@ -692,8 +697,13 @@ fn apply_board_intent(
                     // One immutable id and three independent drafts are captured at open.
                     // `sync_from_domain` deliberately never writes this form, so background
                     // refresh can reanchor selection without redirecting its later save.
-                    let mut form =
-                        BoardForm::task(task, model.this_repo.as_deref(), &model.tasks, focus);
+                    let mut form = BoardForm::task(
+                        task,
+                        model.this_repo.as_deref(),
+                        &model.tasks,
+                        focus,
+                        &model.archived_projects,
+                    );
                     // A direct board edit is a real edit session too, so its confirmed task
                     // page keeps step interaction available after the field saves.
                     form.editing = true;
@@ -1472,6 +1482,7 @@ fn apply_board_intent(
                         model.this_repo.as_deref(),
                         &model.tasks,
                         CaptureField::Title,
+                        &model.archived_projects,
                     );
                     model.input_mode = BoardInputMode::TaskPage;
                     model.clear_message();
@@ -1894,6 +1905,7 @@ fn open_task_page_on(domain: &DomainState, model: &mut BoardModel, id: Uuid) {
         model.this_repo.as_deref(),
         &model.tasks,
         CaptureField::Title,
+        &model.archived_projects,
     );
     model.form = Some(form);
     model.input_mode = BoardInputMode::TaskPage;

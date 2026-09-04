@@ -1079,6 +1079,7 @@ fn draw_wide_board(
                     model.this_repo.as_deref(),
                     &model.tasks,
                     CaptureField::Title,
+                    &model.archived_projects,
                 )
             })
         })

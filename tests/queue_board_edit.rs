@@ -1439,3 +1439,87 @@ fn title_edit_on_an_archived_task_persists_and_keeps_the_flag() {
     assert_eq!(task.status, HumanStatus::Ready, "status is unchanged");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn task_page_scope_dropdown_omits_archived_projects_but_keeps_the_current_scope() {
+    // Three projects: the invocation repo (live), a live one, and an archived one.
+    let mut domain = DomainState::new();
+    let live = domain
+        .create(
+            "live project task",
+            None,
+            project("/repos/other"),
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create live");
+    let stranded = domain
+        .create(
+            "task inside the archived project",
+            None,
+            project("/repos/filed"),
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create stranded");
+    domain.archive_project("/repos/filed").expect("archive it");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
+
+    // Editing a live task: the archived project is not on offer.
+    let index = model
+        .visible_ids()
+        .iter()
+        .position(|&id| id == live)
+        .expect("live row");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::SelectIndex(index),
+        None,
+    )
+    .expect("select live");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None).expect("edit");
+    let options = model.form_scope_options();
+    assert!(
+        !options.contains(&project("/repos/filed")),
+        "an archived project is never offered: {options:?}"
+    );
+    assert!(
+        options.contains(&project("/repos/other")) && options.contains(&TaskScope::Global),
+        "live projects and desk stay: {options:?}"
+    );
+    apply_intent(&mut domain, &mut model, BoardIntent::CancelEdit, None).expect("cancel");
+
+    // A form whose initial scope IS the archived project keeps it as the current value
+    // (the stranded task's own scope is never dropped from under it).
+    let snapshot = tsk_tui::context::InvocationSnapshot {
+        default_scope: project("/repos/filed"),
+        this_repo: Some(PathBuf::from("/repos/filed")),
+        title_prefill: None,
+        provenance: ProvenanceOrigin::Capture,
+    };
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/filed")));
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenCapture,
+        Some(&snapshot),
+    )
+    .expect("open capture");
+    apply_intent(&mut domain, &mut model, BoardIntent::ExpandQuickAdd, None).expect("expand");
+    let options = model.form_scope_options();
+    assert_eq!(
+        options.first(),
+        Some(&project("/repos/filed")),
+        "the form's own archived scope stays as its current value: {options:?}"
+    );
+    assert_eq!(
+        options
+            .iter()
+            .filter(|scope| **scope == project("/repos/filed"))
+            .count(),
+        1,
+        "and it is offered exactly once: {options:?}"
+    );
+    let _ = stranded;
+}

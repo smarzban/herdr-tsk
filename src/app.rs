@@ -277,6 +277,8 @@ fn run_capture() -> Result<(), Box<dyn Error>> {
     let mut domain = store.load()?;
     let snapshot = load_snapshot();
     let mut model = CaptureModel::from_snapshot(&snapshot);
+    // AC-39: an archived invocation repository is not on offer as a scope.
+    model.mark_archived_projects(&domain.archived_projects());
 
     // Query before the alternate screen is entered: it can block on a terminal round-trip,
     // and a blank alternate screen is what the user would be staring at meanwhile.

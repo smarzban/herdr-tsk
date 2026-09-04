@@ -1150,3 +1150,53 @@ fn p_token_naming_an_archived_project_refuses_on_the_open_line_and_clears_on_clo
     );
     assert_eq!(domain.tasks().len(), tasks_before + 2);
 }
+
+#[test]
+fn expanded_quick_add_scope_omits_archived_projects() {
+    let mut domain = DomainState::new();
+    domain
+        .create(
+            "live elsewhere",
+            None,
+            TaskScope::Project {
+                path: "/repos/other".into(),
+            },
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create live");
+    domain
+        .create(
+            "filed away",
+            None,
+            TaskScope::Project {
+                path: "/repos/filed".into(),
+            },
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create filed");
+    domain.archive_project("/repos/filed").expect("archive");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/invocation")));
+    let snap = snapshot();
+    open(&mut domain, &mut model, &snap);
+    apply(&mut domain, &mut model, BoardIntent::ExpandQuickAdd, None);
+
+    let options = model.form_scope_options();
+    assert!(
+        !options.contains(&TaskScope::Project {
+            path: "/repos/filed".into()
+        }),
+        "the expanded draft's scope list omits archived projects: {options:?}"
+    );
+    assert!(
+        options.contains(&TaskScope::Project {
+            path: "/repos/other".into()
+        }),
+        "live projects stay on offer: {options:?}"
+    );
+    assert!(
+        options.contains(&TaskScope::Global),
+        "desk stays on offer: {options:?}"
+    );
+}

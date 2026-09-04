@@ -265,6 +265,7 @@ impl BoardForm {
         this_repo: Option<&Path>,
         tasks: &[Task],
         focus: CaptureField,
+        archived: &BTreeSet<String>,
     ) -> Self {
         let mut form = Self::new(
             &task.title,
@@ -274,6 +275,7 @@ impl BoardForm {
             BoardFormBinding::Task(task.id),
             this_repo,
             tasks,
+            archived,
         );
         form.thread = seeded_draft(task.thread.as_deref().unwrap_or_default());
         form.task_snapshot = Some(Box::new(task.clone()));
@@ -284,6 +286,7 @@ impl BoardForm {
         snapshot: Option<InvocationSnapshot>,
         this_repo: Option<&Path>,
         tasks: &[Task],
+        archived: &BTreeSet<String>,
     ) -> Self {
         let initial_scope = snapshot
             .as_ref()
@@ -302,9 +305,11 @@ impl BoardForm {
             BoardFormBinding::Capture(Box::new(snapshot)),
             this_repo,
             tasks,
+            archived,
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn new(
         title: &str,
         notes: &str,
@@ -313,8 +318,9 @@ impl BoardForm {
         binding: BoardFormBinding,
         this_repo: Option<&Path>,
         tasks: &[Task],
+        archived: &BTreeSet<String>,
     ) -> Self {
-        let scope_options = board_form_scope_options(&scope, this_repo, tasks);
+        let scope_options = board_form_scope_options(&scope, this_repo, tasks, archived);
         let scope_selected = scope_options
             .iter()
             .position(|option| option == &scope)
@@ -523,6 +529,7 @@ fn board_form_scope_options(
     initial_scope: &TaskScope,
     this_repo: Option<&Path>,
     tasks: &[Task],
+    archived: &BTreeSet<String>,
 ) -> Vec<TaskScope> {
     let mut options = Vec::new();
     let push = |scope: TaskScope, options: &mut Vec<TaskScope>| {
@@ -530,19 +537,28 @@ fn board_form_scope_options(
             options.push(scope);
         }
     };
+    // AC-39: no dropdown offers an archived project. The form's own initial scope is
+    // exempt: a task already sitting in an archived project keeps it as its value.
+    let filed = |scope: &TaskScope| match scope {
+        TaskScope::Project { path } => archived.contains(path),
+        TaskScope::Global => false,
+    };
     push(initial_scope.clone(), &mut options);
     if let Some(repo) = this_repo {
-        push(
-            TaskScope::Project {
-                path: repo.to_string_lossy().into_owned(),
-            },
-            &mut options,
-        );
+        let scope = TaskScope::Project {
+            path: repo.to_string_lossy().into_owned(),
+        };
+        if !filed(&scope) {
+            push(scope, &mut options);
+        }
     }
     for task in tasks {
         if !task.soft_deleted {
             if let TaskScope::Project { path } = &task.scope {
-                push(TaskScope::Project { path: path.clone() }, &mut options);
+                let scope = TaskScope::Project { path: path.clone() };
+                if !filed(&scope) {
+                    push(scope, &mut options);
+                }
             }
         }
     }
@@ -2141,6 +2157,7 @@ impl BoardModel {
             && requested != bound
             && self.form.as_ref().is_some_and(BoardForm::is_task)
         {
+            let archived = self.archived_projects.clone();
             self.form = requested.and_then(|id| {
                 self.tasks.iter().find(|task| task.id == id).map(|task| {
                     BoardForm::task(
@@ -2148,6 +2165,7 @@ impl BoardModel {
                         self.this_repo.as_deref(),
                         &self.tasks,
                         CaptureField::Title,
+                        &archived,
                     )
                 })
             });
