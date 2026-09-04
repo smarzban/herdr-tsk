@@ -40,3 +40,4 @@ Canonical terms for this repo. No implementation detail.
 - **thread block**: the derived unit of one thread's header plus its ordered open tasks inside a deck section. Exists only in query output, never in the store.
 - **working lens**: any board or CLI view meant for current work: desk tab, projects tab, threads tab, project focus, IN MOTION, ON DECK, thread headers and counts, the rail, and default `tsk list` views. Archived tasks and archived projects never paint in one.
 - **session**: one board process from launch to quit. Session-only state (collapse, wide stage, the launch card having been shown) resets on relaunch.
+- **hidden**: a task that is archived, or whose project is archived. The single predicate every working lens filters on; distinct from soft-deleted.

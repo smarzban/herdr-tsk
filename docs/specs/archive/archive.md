@@ -274,3 +274,143 @@ and default `tsk list` views. "Session" means one board process from launch to q
 ### Glossary terms touched
 
 `working lens` and `session` as defined at the top of this section; mirrored into `CONTEXT.md`.
+
+## Design
+
+Feature level. Fits the existing shape: domain verbs mutate `DomainState`, the store persists it,
+the lens query derives sections from tasks, the board model turns intents into domain calls and
+re-derives its rows, the renderer paints rows and chrome, the CLI shares domain and store. Nothing
+here introduces a new layer; every component below is an existing module gaining one
+responsibility, except the two picker/card surfaces which extend the existing popup shape.
+
+### Components
+
+1. **Archive domain** — owns the archived flag on a task, the lazy project record map, and the
+   four verbs (`archive task`, `unarchive task`, `archive project`, `unarchive project`) plus the
+   derived predicate *hidden* (task archived, or its project archived). Verbs record a history
+   event and a new revision, push no undo entry, and are idempotent. Errors: unknown task,
+   soft-deleted task, project with no tasks and no record. Inputs are ids or scope paths; output
+   is the mutated state. The one place any other component learns whether something is archived.
+2. **Store format v2** — bumps the document version to 2 and adds the v1 → v2 chain step (empty
+   project map, no archived tasks). Contract: a v1 document loads migrated in memory; the first
+   save writes `tsk.json.v1` (spec A's rule); an unarchived task serialises with no archived key;
+   an empty project map serialises as an empty map. Errors unchanged from spec A.
+3. **Lens query** — derives board sections from tasks and the project record map. Contract: no
+   working-lens section contains a hidden task; the project set excludes archived projects;
+   thread headers and counts use *open task* (which excludes archived); the done drawer gains an
+   ARCHIVED section (header + rows, collapsible) listing archived tasks in the drawer's scope,
+   after the DONE rows. Input: tasks, project record map, lens, drawer state, archived-group
+   collapse state. Output: `QueueView`. No errors (pure derivation).
+4. **Board model and intents** — turns key/mouse intents into domain calls and session state. New
+   intent *File* (from `ctrl+f`); *Undo* is re-routed to *unarchive* when the selection is an
+   archived task or an archived project in the picker. Owns session-only state: archived-group
+   collapse (default collapsed), launch-card shown flag, session quick-add default override
+   (desk after "keep archived"). Contract: every mutation goes through the domain then the store's
+   merge-save; refusals paint on the status slot and clear per the status-slot rule; selection
+   after archive reanchors to a visible row (never rests on a hidden task).
+5. **Key and mouse mapping** — maps `ctrl+f` to *File* in Normal, drawer, picker and task-page
+   modes; keeps `ctrl+u` mapped to *Undo* (the model decides). Adds hit regions for the archived
+   header, archived rows, picker tabs and the launch card's two options. Contract: bare `f` does
+   nothing; the help card lists `ctrl+f`.
+6. **Board renderer** — paints the ARCHIVED header (`archived · n`, dim) and its rows (dim,
+   status glyph and `T<n>` kept), the verb bar entry for *File* when the selection is archivable,
+   and the task-page header slot `archived`. Contract: mono only; header rows consume row budget
+   like thread headers but, unlike them, the archived header is selectable so `Enter` can toggle
+   it.
+7. **Project picker** — the existing `P` picker gains two tabs: main (unarchived projects plus
+   Home) and archived (archived projects, empty-state line when none). `ctrl+f` on main archives
+   the selected project in place; `ctrl+f` or `ctrl+u` on archived unarchives it. Contract: the
+   picker never closes on archive/unarchive; Home cannot be archived.
+8. **Launch card** — a two-choice modal on the existing popup shape (as Save Recovery): shown at
+   most once per session when the invocation default resolves to an archived project. Options
+   `unarchive` (`y`, click) and `keep archived` (`n`, `Esc`, click). Contract: while up, it owns
+   the status slot and blocks board verbs; `unarchive` is a domain verb plus merge-save; `keep`
+   sets the session default to desk and paints the status line.
+9. **Capture scope resolution** — resolves `!p` tokens (quick-add) and `-p` / cwd defaults (CLI
+   add) to a scope, and now refuses an archived project. Contract: quick-add refusal message
+   names the project and follows the open-line refusal rule; CLI refusal is error code
+   `project-archived`, exit 1, nothing persisted, hint text naming `--desk`, `-p`, and
+   `tsk project unarchive`.
+10. **CLI archive surfaces** — `tsk archive T<n>`, `tsk unarchive T<n>`, `tsk project archive
+    <name>`, `tsk project unarchive <name>`, `tsk list --archived`. Contract: verbs exit 0 and are
+    idempotent, refusals exit 1 with a message, store I/O exits 3 (existing exit contract); default
+    list views exclude hidden tasks; `--archived` rows carry `archived` or `project archived`.
+    Name resolution reuses component 9's `!p` rules.
+11. **Docs and site** — keymap, board, capture and CLI pages, the web demo, the CLI skill and the
+    changelog describe the feature as built. Contract: reviewer-checked against AC-36.
+
+### Data flow and key state
+
+- Board verb: key → mapping (5) → intent → model (4) → domain verb (1) → store merge-save (2) →
+  `sync_from_domain` → lens (3) → renderer (6). Same path the existing status verbs take.
+- Launch: invocation snapshot (cwd) → scope resolution (9) → domain `is project archived` (1) →
+  model (4) raises the card (8) → choice → domain verb or session default.
+- CLI verb: parser → router → surface (10) → `locked_transition` → domain verb (1) → store (2).
+- Key state: the archived flag and project records live in the live document (kind: single
+  versioned JSON document, as today). Collapse, card-shown and session default are model state,
+  never persisted.
+
+### Trust and failure boundaries
+
+- Untrusted input enters at the CLI parser (numbers, names, paths) and at the quick-add token
+  parser; both validate before touching the domain. Paths from `-p /path` are used verbatim as
+  today.
+- A failed merge-save after an archive verb lands in the existing Save Recovery popup; the
+  in-memory flag stays until Retry or Cancel resolves it, like any other verb.
+- The launch card's `unarchive` failing to save shows Save Recovery in place of the card; the
+  session default is not changed until the save succeeds.
+- Two processes: archive verbs are ordinary revision-guarded mutations, so a concurrent edit of
+  the same task is rejected by the existing merge rule rather than overwritten. Project records
+  are merged by key; last writer wins is acceptable because the record has one boolean.
+
+### Criterion → component map
+
+| AC | Component(s) |
+| --- | --- |
+| AC-1 | Archive domain, Board model and intents, Key and mouse mapping |
+| AC-2 | Archive domain, Board model and intents |
+| AC-3 | Board model and intents, Archive domain |
+| AC-4 | Board model and intents |
+| AC-5 | Lens query |
+| AC-6 | Lens query, Archive domain |
+| AC-7 | Archive domain |
+| AC-8 | Board renderer, Board model and intents |
+| AC-9 | Store format v2, Archive domain |
+| AC-10 | Lens query, Board renderer |
+| AC-11 | Board model and intents, Lens query |
+| AC-12 | Board model and intents, Key and mouse mapping |
+| AC-13 | Board renderer, Lens query |
+| AC-14 | Lens query |
+| AC-15 | Board renderer |
+| AC-16 | Project picker, Archive domain |
+| AC-17 | Project picker, Board renderer |
+| AC-18 | Project picker, Archive domain |
+| AC-19 | Lens query, Project picker |
+| AC-20 | Archive domain |
+| AC-21 | Archive domain, Store format v2 |
+| AC-22 | Launch card, Capture scope resolution |
+| AC-23 | Launch card, Archive domain |
+| AC-24 | Launch card, Board model and intents |
+| AC-25 | Board model and intents |
+| AC-26 | Launch card |
+| AC-27 | Capture scope resolution, Board model and intents |
+| AC-28 | Capture scope resolution, CLI archive surfaces |
+| AC-29 | CLI archive surfaces, Archive domain |
+| AC-30 | CLI archive surfaces, Capture scope resolution |
+| AC-31 | CLI archive surfaces, Archive domain |
+| AC-32 | CLI archive surfaces |
+| AC-33 | Store format v2 |
+| AC-34 | Store format v2 |
+| AC-35 | Board renderer, Key and mouse mapping |
+| AC-36 | Docs and site |
+
+### ADRs created
+
+`docs/specs/adr/0004-lazy-project-record.md` (written at the idea stage; covers flag-not-place
+and the lazy record). No new ADR: the `ctrl+u` dual meaning is a keymap choice, reversible, and
+recorded in the Brief's decisions table.
+
+### Glossary terms touched
+
+`hidden` (a task that is archived or whose project is archived; the predicate every working lens
+filters on). Mirrored into `CONTEXT.md`.
