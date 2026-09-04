@@ -181,8 +181,14 @@ pub fn parse(args: &[String]) -> Result<ListInput, String> {
     if input.global && input.project.is_some() {
         return Err("--desk cannot be used with --project".into());
     }
+    if input.task.is_some() && (input.done || input.deleted || input.archived) {
+        return Err("task operand cannot be used with --done, --deleted, or --archived".into());
+    }
     if input.done && input.deleted {
         return Err("--done cannot be used with --deleted".into());
+    }
+    if input.archived && (input.done || input.deleted) {
+        return Err("--archived cannot be used with --done or --deleted".into());
     }
     Ok(input)
 }

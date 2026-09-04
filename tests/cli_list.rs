@@ -2022,3 +2022,43 @@ fn list_archived_marks_task_and_project_rows_once_per_id() {
         "the task flag wins over the project mark"
     );
 }
+
+#[test]
+fn archived_conflicts_are_usage_errors() {
+    let dir = temp_state_dir("archived-conflicts");
+    for (extra, label) in [
+        (vec!["--done".to_string()], "--done"),
+        (vec!["--deleted".to_string()], "--deleted"),
+    ] {
+        let mut args = vec![
+            "tsk".to_string(),
+            "list".to_string(),
+            "--archived".to_string(),
+            "--state-dir".to_string(),
+            state_dir_arg(&dir),
+        ];
+        args.extend(extra);
+        let output = list(&args);
+        assert_eq!(output.code, 2, "{label}: {output:?}");
+        assert!(
+            output.stderr.contains("--archived"),
+            "{label} conflict must name --archived: {:?}",
+            output.stderr
+        );
+    }
+
+    let with_task = list(&[
+        "tsk".into(),
+        "list".into(),
+        "--archived".into(),
+        "T1".into(),
+        "--state-dir".into(),
+        state_dir_arg(&dir),
+    ]);
+    assert_eq!(with_task.code, 2, "{with_task:?}");
+    assert!(
+        with_task.stderr.contains("--archived"),
+        "task-operand conflict must name --archived: {:?}",
+        with_task.stderr
+    );
+}
