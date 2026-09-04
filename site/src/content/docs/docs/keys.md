@@ -47,6 +47,7 @@ moves to G, then runs the control you clicked.
 | `+` | [capture](/docs/capture/) |
 | `ctrl+e` | edit title |
 | `ctrl+x` or `ctrl+Delete` | delete (`ctrl+u` undoes) |
+| `ctrl+f` | file: toggle the task's archived flag. No undo entry. In the picker, archives the selected project; on the picker's archived tab (or `ctrl+u` on an archived selection) it unarchives |
 | `z` | done drawer |
 | `:` | command palette |
 | `?` | help |
@@ -102,7 +103,8 @@ only typing, arrows, Tab, Enter, Esc, and Backspace.
 | Surface | Keys |
 | --- | --- |
 | `:` palette | type to filter · `↑` `↓` or `Tab` / `Shift+Tab` move · `Enter` run · `Esc` close |
-| `P` project picker | `j` `k` or arrows · `Enter` choose · `Esc` or `q` cancel |
+| `P` project picker | `j` `k` or arrows · `Tab` main/archived tabs · `Enter` choose · `ctrl+f` archive (archived tab: unarchive) · `Esc` or `q` cancel |
+| launch card | `y` unarchive · `n` or `Esc` keep archived |
 | `?` help | any key closes |
 | save failed | `r` or `Enter` retry · `c` or `Esc` cancel |
 

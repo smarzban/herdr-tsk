@@ -37,6 +37,11 @@ rejoined with single spaces.
 An ambiguous project basename is stored as typed. `tsk list --all --json` is how
 you find a typo scope later.
 
+An archived project refuses capture: a title token naming one leaves the line
+open with a refusal that names the project (`project <name> is archived`), and
+the refusal clears when the line closes. `tsk add` refuses the same way with
+error code `project-archived`.
+
 ## Quick capture (herdr)
 
 **Quick capture** opens the capture form as a short-lived overlay, without first

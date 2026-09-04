@@ -48,7 +48,9 @@ The store is `~/.tsk/tsk.json`; walkthrough dismissal is kept beside it in
 previous document is kept as `tsk.json.1`, and a format migration backs up the
 pre-migration document as `tsk.json.v<N>`. Override with `TSK_STATE_DIR` /
 `TSK_CONFIG_DIR`. herdr's injected plugin dirs are ignored, so
-the pane and the CLI edit the same board.
+the pane and the CLI edit the same board. Archived tasks and projects stay on
+the board but out of every working view (`ctrl+f`, `tsk archive`,
+`tsk project archive`, `tsk list --archived`).
 
 Keep `~/.tsk` on a local disk. The writer lock is `flock`-style and every save
 is a rename-based atomic replace; NFS, Dropbox, iCloud Drive, and similar

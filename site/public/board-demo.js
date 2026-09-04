@@ -29,6 +29,7 @@ import { parseCapture } from "./capture.js";
       notes: "",
       thread: null,
       project: null,
+      archived: false,
       createdAt: NOW - 3 * MIN,
       updatedAt: NOW - 3 * MIN,
       ...partial,
@@ -112,6 +113,14 @@ import { parseCapture } from "./capture.js";
         createdAt: NOW - 2 * DAY,
         updatedAt: NOW - 6 * HOUR,
       }),
+      task({
+        title: "File the old vendored spike away",
+        status: "ready",
+        archived: true,
+        notes: "Archived: kept, off the radar. Find it in the drawer's archived group.",
+        createdAt: NOW - 3 * DAY,
+        updatedAt: NOW - 1 * DAY,
+      }),
     ];
   };
 
@@ -125,6 +134,7 @@ import { parseCapture } from "./capture.js";
     flashId: null,
     copyNotice: "",
     drawer: false,
+    archivedOpen: false,
     overlay: null,
     draft: "",
     paletteQ: "",
@@ -221,9 +231,20 @@ import { parseCapture } from "./capture.js";
     return null;
   }
 
+  function archivedInScope() {
+    const archived = state.tasks.filter((t) => t.archived).sort(byUpdated);
+    if (state.focusProject) {
+      const inP = (t) =>
+        state.focusProject === "desk" ? !t.project : t.project === state.focusProject;
+      return archived.filter(inP);
+    }
+    return archived;
+  }
+
   function visibleTasks() {
-    const open = state.tasks.filter((t) => t.status !== "done");
-    const done = state.tasks.filter((t) => t.status === "done").sort(byUpdated);
+    // Hidden (archived) tasks leave every working view.
+    const open = state.tasks.filter((t) => t.status !== "done" && !t.archived);
+    const done = state.tasks.filter((t) => t.status === "done" && !t.archived).sort(byUpdated);
     if (state.focusProject) {
       const inP = (t) =>
         state.focusProject === "desk" ? !t.project : t.project === state.focusProject;
@@ -269,6 +290,11 @@ import { parseCapture } from "./capture.js";
       if (state.drawer) {
         pushHeader("section", "DONE", v.done.length);
         v.done.forEach((t) => pushTask(t));
+        const archived = archivedInScope();
+        if (archived.length) {
+          rows.push({ kind: "archived", label: "archived", count: archived.length, selectable: true });
+          if (state.archivedOpen) archived.forEach((t) => rows.push({ kind: "task", task: t, indent: 0, selectable: true, id: t.id, dim: true }));
+        }
       }
       return rows;
     }
@@ -290,6 +316,11 @@ import { parseCapture } from "./capture.js";
       if (state.drawer) {
         pushHeader("section", "DONE", v.done.length);
         v.done.forEach((t) => pushTask(t));
+        const archived = archivedInScope();
+        if (archived.length) {
+          rows.push({ kind: "archived", label: "archived", count: archived.length, selectable: true });
+          if (state.archivedOpen) archived.forEach((t) => rows.push({ kind: "task", task: t, indent: 0, selectable: true, id: t.id, dim: true }));
+        }
       }
       return rows;
     }
@@ -303,7 +334,7 @@ import { parseCapture } from "./capture.js";
       for (const name of names) {
         const key = `p:${name}`;
         const collapsed = state.collapsed.has(key);
-        const group = state.tasks.filter((t) => (t.project || "desk") === name && t.status !== "done");
+        const group = state.tasks.filter((t) => (t.project || "desk") === name && t.status !== "done" && !t.archived);
         const started = group.filter((t) => t.status === "started").sort(byUpdated);
         const review = group.filter((t) => t.status === "review").sort(byUpdated);
         const blocked = group.filter((t) => t.status === "blocked").sort(byUpdated);
@@ -328,15 +359,20 @@ import { parseCapture } from "./capture.js";
         }
       }
       if (state.drawer) {
-        const done = state.tasks.filter((t) => t.status === "done").sort(byUpdated);
+        const done = state.tasks.filter((t) => t.status === "done" && !t.archived).sort(byUpdated);
         pushHeader("section", "DONE", done.length);
         done.forEach((t) => pushTask(t));
+        const archived = archivedInScope();
+        if (archived.length) {
+          rows.push({ kind: "archived", label: "archived", count: archived.length, selectable: true });
+          if (state.archivedOpen) archived.forEach((t) => rows.push({ kind: "task", task: t, indent: 0, selectable: true, id: t.id, dim: true }));
+        }
       }
       return rows;
     }
 
     const threads = new Map();
-    for (const t of state.tasks.filter((x) => x.status !== "done" && x.thread)) {
+    for (const t of state.tasks.filter((x) => x.status !== "done" && !x.archived && x.thread)) {
       if (!threads.has(t.thread)) threads.set(t.thread, []);
       threads.get(t.thread).push(t);
     }
@@ -365,7 +401,7 @@ import { parseCapture } from "./capture.js";
         }
       }
     }
-    const unthreaded = state.tasks.filter((t) => t.status !== "done" && !t.thread);
+    const unthreaded = state.tasks.filter((t) => t.status !== "done" && !t.archived && !t.thread);
     if (unthreaded.length) {
       const key = "t:unthreaded";
       const collapsed = state.collapsed.has(key);
@@ -373,9 +409,14 @@ import { parseCapture } from "./capture.js";
       if (!collapsed) unthreaded.sort(byUpdated).forEach((t) => pushTask(t, 1));
     }
     if (state.drawer) {
-      const done = state.tasks.filter((t) => t.status === "done").sort(byUpdated);
+      const done = state.tasks.filter((t) => t.status === "done" && !t.archived).sort(byUpdated);
       pushHeader("section", "DONE", done.length);
       done.forEach((t) => pushTask(t));
+      const archived = archivedInScope();
+      if (archived.length) {
+        rows.push({ kind: "archived", label: "archived", count: archived.length, selectable: true });
+        if (state.archivedOpen) archived.forEach((t) => rows.push({ kind: "task", task: t, indent: 0, selectable: true, id: t.id, dim: true }));
+      }
     }
     return rows;
   }
@@ -441,6 +482,7 @@ import { parseCapture } from "./capture.js";
       items.push({ id: "done", label: "d done" });
       items.push({ id: "block", label: task.status === "blocked" ? "b unblock" : "b block" });
     }
+    items.push({ id: "file", label: task.archived ? "f unarchive" : "f archive" });
     items.push({ id: "palette", label: ": palette" }, { id: "help", label: "? help" }, { id: "capture", label: "+ capture" });
     return items;
   }
@@ -457,6 +499,7 @@ import { parseCapture } from "./capture.js";
     if (id === "start" || id === "reopen") primaryVerb();
     if (id === "done") setStatus("done");
     if (id === "block") toggleBlock();
+    if (id === "file") fileSelected();
   }
 
   // Word-wrap note lines to the board width so each visual line carries its own │ gutter,
@@ -599,6 +642,14 @@ import { parseCapture } from "./capture.js";
     return true;
   }
 
+  function fileSelected() {
+    const task = selectedTask();
+    if (!task) return;
+    task.archived = !task.archived;
+    state.peekId = null;
+    // The file verb has no undo entry: ctrl+u never brings it back.
+  }
+
   function deleteSelected() {
     const task = selectedTask();
     if (!task) return;
@@ -698,6 +749,7 @@ import { parseCapture } from "./capture.js";
     }
     if (id === "done") setStatus("done");
     if (id === "block") toggleBlock();
+    if (id === "file") fileSelected();
   }
 
   // The wide task column: a header rule on the selector row (dim in split, bold when the task
@@ -766,6 +818,10 @@ import { parseCapture } from "./capture.js";
           const pad = row.indent ? "  " : "";
           return `<button type="button" class="tsk-group" data-collapse="${esc(row.collapseKey)}" data-project="${esc(row.project || "")}">${pad}<span class="dim">${mark}</span> <span class="sec">${esc(row.label)}</span> <span class="count">${row.count}</span></button>`;
         }
+        if (row.kind === "archived") {
+          const mark = state.archivedOpen ? "▾" : "▸";
+          return `<button type="button" class="tsk-group" data-archived-header="1"><span class="dim">${mark}</span> <span class="sec">archived</span><span class="rule" aria-hidden="true"></span><span class="count dim">${row.count}</span></button>`;
+        }
         const task = row.task;
         if (rail && task.status === "done") return "";
         const selected = task.id === state.selectedId;
@@ -786,7 +842,8 @@ import { parseCapture } from "./capture.js";
                 `<div class="tsk-peek dim">${indent}    └</div>`,
               ].join("")
             : "";
-        return `<button type="button" class="tsk-row ${selected ? "is-sel" : ""} ${flash ? "is-flash" : ""}" data-task="${task.id}">
+        const dimRow = row.dim ? "dim" : "";
+        return `<button type="button" class="tsk-row ${dimRow} ${selected ? "is-sel" : ""} ${flash ? "is-flash" : ""}" data-task="${task.id}">
           <span class="tsk-row-main">${indent}  <span class="${selected ? "sel" : "glyph"}">${glyph}</span> <span class="tsk-task-id ${selected ? "sel-text" : ""}" data-copy-task="${esc(task.id)}" title="copy T${task.number}">T${task.number}</span> <span class="${selected ? "sel-text" : ""}">${esc(task.title)}</span></span>
           <span class="meta">${esc(metaFor(task))}</span>
         </button>${peek}`;
@@ -1182,6 +1239,12 @@ import { parseCapture } from "./capture.js";
       render();
       return;
     }
+    if (e.key === "f") {
+      e.preventDefault();
+      fileSelected();
+      render();
+      return;
+    }
     if (e.key === "x") {
       e.preventDefault();
       deleteSelected();
@@ -1254,6 +1317,12 @@ import { parseCapture } from "./capture.js";
     if (chip) {
       state.overlay = "picker";
       state.pickerI = 0;
+      render();
+      return;
+    }
+    const archivedHeader = e.target.closest("[data-archived-header]");
+    if (archivedHeader) {
+      state.archivedOpen = !state.archivedOpen;
       render();
       return;
     }

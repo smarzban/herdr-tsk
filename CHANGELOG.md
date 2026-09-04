@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+Archive for tasks and projects: `ctrl+f` on a board row toggles a task's
+archived flag (no undo entry), and archived tasks keep their human status while
+leaving every working lens — desk, projects, threads, project focus, and the
+default `tsk list` views. The done drawer gains a collapsible `archived · n`
+group (closed on launch, dim rows), the project picker gains main/archived tabs
+with in-place archive and unarchive, and launching inside an archived project
+raises a one-time `project <name> is archived` card (`y` unarchives, `n` keeps
+archived and sends quick-add to the desk for the session). Quick-add `!p <name>`
+and `tsk add` into an archived project refuse with code `project-archived`. New
+CLI: `tsk archive T<n>`, `tsk unarchive T<n>`,
+`tsk project archive|unarchive <name>` (all idempotent), and
+`tsk list --archived` with `archived` / `project archived` row marks.
+
+Store format 2: documents gain an always-present `projects` map (empty when no
+project is archived). A v1 store loads through a migration chain and its first
+save leaves a byte-identical `tsk.json.v1` backup beside the live file.
+
 Trash for deleted tasks: a soft-deleted task leaves the board store once it is
 no longer undoable (an undo entry no longer restores it) or once it has been
 deleted for 7 days, and moves to `trash.jsonl` beside `tsk.json`. The file

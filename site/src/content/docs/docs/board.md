@@ -39,6 +39,14 @@ One urgency-ordered list. Sections are computed, not navigated.
   review tasks, with thread headers above their open rows
 - **z** opens the done drawer
 
+An archived task keeps its human status and leaves every working lens (desk,
+projects, threads, project focus, and default `tsk list` views). The done
+drawer lists archived tasks in its scope under an `archived · n` group below
+DONE: closed on every launch, one click or `Enter` on the header toggles it, and
+expanded rows paint dim with their status glyph and `T<n>`. `ctrl+f` on a row
+files it, and `ctrl+f` or `ctrl+u` on an archived selection brings it back;
+neither writes an undo entry.
+
 Thread headers on a scoped deck show `#name` and an open count. They take a list
 row of space. They are not selectable and clicks do not land on them.
 
@@ -115,6 +123,24 @@ overflows, a scrollbar appears on the right: click the track to jump, drag the t
 to scroll. Dragging across text selects it and copies on release (`copied`), using
 the terminal's clipboard protocol. With the quick-add line open, clicking a task row
 discards the draft and selects that row.
+
+## Project picker
+
+`P` opens the project picker with two tabs: main (unarchived projects plus
+Home) and archived. `Tab` or the arrows flip tabs; the archived tab lists every
+archived project and reads `no archived projects` when empty. `ctrl+f` on a
+main-tab project archives it in place — the picker stays open and the project
+leaves the main list, the projects tab, threads, desk IN MOTION, and the rail.
+`ctrl+f` or `ctrl+u` on an archived-tab entry unarchives it, and every task
+returns in the status it had.
+
+## Launch inside an archived project
+
+When the board starts with its quick-add default inside an archived project, a
+card reads `project <name> is archived` before the first keypress: `y`
+unarchives it durably, `n` or `Esc` keeps it archived and sends quick-add to
+your desk for this session (a dim status line says so). The card shows at most
+once per session, and launching anywhere else paints nothing.
 
 ## Pane size
 
