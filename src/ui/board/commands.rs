@@ -11,7 +11,7 @@ use super::model::{BoardLocation, BoardModel, BoardTab};
 pub enum CommandSurface {
     #[default]
     None,
-    /// Searchable command discovery (`?`).
+    /// Searchable command discovery (`:`).
     Palette,
 }
 

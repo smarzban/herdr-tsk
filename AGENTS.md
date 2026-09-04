@@ -125,10 +125,18 @@ For scriptable board work, use `tsk add` and `tsk list`; read
 - Landing page and Starlight docs live in `site/` (Astro). They are not part of
   the `tsk` binary. Production: https://tsk-gules.vercel.app. Point Vercel at
   this repo with Root Directory `site`.
-- Changes to the keymap, status verbs, or tab/section semantics need a matching
-  `site/` update (`src/content/docs/docs/{keys,board,capture,cli}.md` and
-  `public/board-demo.js`). The web demo uses bare verb keys on purpose (browsers
-  reserve control chords); do not "fix" that to match the TUI.
+- The docs and the website ship with the feature. Any change that adds, removes, or
+  alters user-visible behaviour (a key, verb, palette command, mouse target, status
+  message, CLI flag or output, exit code, board section, file or env var) lands in the
+  same PR as its `site/` update: the relevant page under
+  `site/src/content/docs/docs/`, the landing page (`site/src/pages/index.astro`) and
+  demo (`site/public/board-demo.js`) when they show it, `site/public/llms.txt`, and
+  the README when the claim lives there. Remove docs for what you remove. The docs
+  describe only what ships; upcoming work is marked as such, never as present.
+  Before calling a docs pass done, diff the guide against `src/` (keymaps in
+  `src/ui/input.rs`, palette in `src/ui/board/commands.rs`, CLI in `src/cli/`).
+  The web demo uses bare verb keys on purpose (browsers reserve control chords); do
+  not "fix" that to match the TUI.
 
 ### Live herdr smoke
 

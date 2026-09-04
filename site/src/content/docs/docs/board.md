@@ -147,7 +147,8 @@ letters appear in order anywhere in a label, so `ssr` finds `set status: review`
 
 Mutating keys always use Ctrl.
 
-`?` opens the help card. Any key closes it. Help, the palette, and the project
+`?` opens the help card, which lists the board chords and, below them, the task-page
+chords. Any key closes it. Help, the palette, and the project
 picker are boxed cards: the `[x]` in the corner or a click outside also closes them.
 
 ## When a save fails
