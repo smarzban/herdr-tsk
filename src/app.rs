@@ -2,10 +2,9 @@
 
 use std::env;
 use std::error::Error;
-use std::fs;
 use std::io;
 use std::path::PathBuf;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::layout::{Position, Rect};
@@ -15,7 +14,7 @@ use crate::config::{default_config_dir, WalkthroughRecord};
 use crate::context::{build_snapshot, InvocationSnapshot, RawHostContext};
 use crate::domain::{DomainError, DomainState};
 use crate::save_recovery::SaveRecovery;
-use crate::store::{default_state_dir, StoreError, TaskStore};
+use crate::store::{default_state_dir, StoreError, StoreSignature, TaskStore};
 use crate::ui::board::{
     apply_intent, board_intent_may_persist, draw_board, resolve_board_command, BoardInputMode,
     BoardModel, IntentOutcome, SaveResolution, WalkthroughOutcome,
@@ -781,12 +780,12 @@ fn board_background_work_allowed(recovery: &SaveRecovery<DomainState>) -> bool {
 
 /// Cheap idle-tick change detector for the store's on-disk document.
 ///
-/// Holds only `tsk.json`'s last-seen modification time + length, so the frame loop's Idle
+/// Holds only `tsk.json`'s last-seen [`StoreSignature`], so the frame loop's Idle
 /// branch -- which runs about 4 times a second --
 /// pays for a `stat`, not a parse, on every tick where nothing changed.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct StoreWatch {
-    last_seen: Option<(SystemTime, u64)>,
+    last_seen: Option<StoreSignature>,
 }
 
 impl StoreWatch {
@@ -799,7 +798,7 @@ impl StoreWatch {
     /// Seed from the store's current on-disk signature (e.g. right after `load_board()`).
     pub fn seeded(store: &TaskStore) -> Self {
         Self {
-            last_seen: store_state_signature(store),
+            last_seen: store.state_signature(),
         }
     }
 
@@ -808,8 +807,8 @@ impl StoreWatch {
     /// [`Self::record`] with the returned signature only once the load it gates actually
     /// succeeds, so a transient read failure leaves the watch exactly where it was
     /// and the very next tick tries again instead of treating the failed read as caught up.
-    fn poll(&self, store: &TaskStore) -> Option<Option<(SystemTime, u64)>> {
-        let current = store_state_signature(store);
+    fn poll(&self, store: &TaskStore) -> Option<Option<StoreSignature>> {
+        let current = store.state_signature();
         if current == self.last_seen {
             None
         } else {
@@ -819,26 +818,14 @@ impl StoreWatch {
 
     /// Record a signature already returned by [`Self::poll`], after the load it gated
     /// succeeded.
-    fn record(&mut self, signature: Option<(SystemTime, u64)>) {
+    fn record(&mut self, signature: Option<StoreSignature>) {
         self.last_seen = signature;
     }
 }
 
-/// `tsk.json`'s modification time + length. `None` when the file does not exist yet (a
-/// fresh, never-saved store) or its metadata could not be read.
-///
-/// Store internals (the lock protocol, the atomic-write path) are frozen; this only stats the
-/// document store.rs already names in its own doc comment, it does not reimplement any of
-/// store.rs's load/save/lock contract.
-fn store_state_signature(store: &TaskStore) -> Option<(SystemTime, u64)> {
-    let metadata = fs::metadata(store.state_file()).ok()?;
-    let modified = metadata.modified().ok()?;
-    Some((modified, metadata.len()))
-}
-
 /// On the frame loop's Idle branch: revalidate the store cheaply, no host calls.
 ///
-/// Only when [`StoreWatch::changed`] reports a changed mtime/size does this pay for
+/// Only when [`StoreWatch::poll`] reports a changed signature does this pay for
 /// `store.load()` + [`DomainState::merge_tasks_from_disk`] + [`BoardModel::sync_from_domain`],
 /// so a quick-capture popup (a separate process writing the same `tsk.json`) becomes
 /// visible on an open, idle board without a persisting intent from this board and without a
@@ -1710,6 +1697,64 @@ mod idle_store_revalidation_tests {
         assert!(
             model.visible_ids().contains(&captured_id),
             "model must sync so the quick-capture task renders without a persisting intent"
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// A replace whose document has the same byte length, with the mtime forced back to the
+    /// previous save's tick, must still be detected: the signature carries the inode.
+    #[cfg(unix)]
+    #[test]
+    fn idle_tick_sees_a_replace_that_keeps_mtime_and_length() {
+        let dir = temp_store_dir("same-mtime");
+        let store = TaskStore::new(&dir);
+        let mut domain = DomainState::new();
+        let id = domain
+            .create(
+                "seed",
+                None,
+                project_scope(),
+                ProvenanceOrigin::Manual,
+                None,
+            )
+            .unwrap();
+        store.save(&domain).unwrap();
+
+        let mut model = BoardModel::from_domain(&domain, Some(std::path::PathBuf::from(THIS_REPO)));
+        let mut watch = StoreWatch::seeded(&store);
+        let save_recovery = SaveRecovery::<DomainState>::new();
+        let first = store.state_signature().expect("signature after seed save");
+
+        // A separate writer saves a byte-identical document (a rename replace with no
+        // content change) and forces the replaced file's mtime back to the seed tick.
+        let writer_store = TaskStore::new(&dir);
+        let writer_domain = writer_store.load().unwrap();
+        writer_store.save(&writer_domain).unwrap();
+        let file = std::fs::File::options()
+            .write(true)
+            .open(store.state_file())
+            .unwrap();
+        file.set_modified(first.modified).unwrap();
+        drop(file);
+        let second = store.state_signature().expect("signature after rewrite");
+        assert_eq!(first.len, second.len, "same-length documents");
+        assert_eq!(first.modified, second.modified, "mtime forced equal");
+
+        let merged = revalidate_board_from_store(
+            &store,
+            &mut domain,
+            &mut model,
+            &mut watch,
+            &save_recovery,
+        );
+        assert!(
+            merged,
+            "an equal-mtime equal-length replace must still read as changed"
+        );
+        assert!(
+            domain.get(id).is_some(),
+            "the merged domain still holds the task"
         );
 
         let _ = fs::remove_dir_all(&dir);

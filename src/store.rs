@@ -108,6 +108,29 @@ impl AtomicFilesystem for StdFilesystem {
     }
 }
 
+/// Identity of the live document on disk, cheap to stat.
+///
+/// Every save renames a fresh temp file over the live one, so the inode changes on
+/// every replace: two saves inside one mtime tick with equal length are still
+/// distinguishable. On non-Unix platforms the inode is not claimed, so only the
+/// mtime and length are carried.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg(unix)]
+pub struct StoreSignature {
+    pub dev: u64,
+    pub ino: u64,
+    pub modified: SystemTime,
+    pub len: u64,
+}
+
+/// Identity of the live document on disk, cheap to stat.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg(not(unix))]
+pub struct StoreSignature {
+    pub modified: SystemTime,
+    pub len: u64,
+}
+
 /// Load/save `DomainState` as JSON under a state directory.
 #[derive(Debug, Clone)]
 pub struct TaskStore {
@@ -127,6 +150,28 @@ impl TaskStore {
     /// Live document path (`tsk.json` under the state directory).
     pub fn state_file(&self) -> PathBuf {
         self.path.join(STATE_FILE)
+    }
+
+    /// The live document's change signature. `None` when the file does not exist
+    /// yet (a fresh, never-saved store) or its metadata could not be read.
+    pub fn state_signature(&self) -> Option<StoreSignature> {
+        let metadata = fs::metadata(self.state_file()).ok()?;
+        let modified = metadata.modified().ok()?;
+        let len = metadata.len();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            Some(StoreSignature {
+                dev: metadata.dev(),
+                ino: metadata.ino(),
+                modified,
+                len,
+            })
+        }
+        #[cfg(not(unix))]
+        {
+            Some(StoreSignature { modified, len })
+        }
     }
 
     /// Load domain state. Missing file yields an empty state (first run).
@@ -1160,6 +1205,62 @@ mod tests {
             !dir.join("tasks.json.lock").exists(),
             "the pre-rebrand lock name must not be written"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn signature_distinguishes_same_mtime_same_length_replaces() {
+        let dir = temp_dir("signature-inode");
+        let _guard = TempDirGuard(dir.clone());
+        let store = TaskStore::new(&dir);
+        let state = round_tripped_v1_state("same bytes");
+        store.save(&state).expect("first save");
+        let first = store.state_signature().expect("first signature");
+
+        store
+            .save(&state)
+            .expect("second save, byte-identical document");
+        // Force the replaced file's mtime back to the first save's tick: the old
+        // (mtime, len) signature can no longer tell these two saves apart.
+        let file = File::options()
+            .write(true)
+            .open(store.state_file())
+            .expect("open live document");
+        file.set_modified(first.modified)
+            .expect("force equal mtime");
+        drop(file);
+
+        let second = store.state_signature().expect("second signature");
+        assert_eq!(
+            first.len, second.len,
+            "identical documents, identical length"
+        );
+        assert_eq!(first.modified, second.modified, "mtime forced equal");
+        assert_ne!(
+            first.ino, second.ino,
+            "rename replace allocates a new inode"
+        );
+        assert_ne!(
+            first, second,
+            "the signature must distinguish the two saves"
+        );
+    }
+
+    #[test]
+    fn signature_missing_file_is_none_and_unchanged_file_is_stable() {
+        let dir = temp_dir("signature-stable");
+        let _guard = TempDirGuard(dir.clone());
+        let store = TaskStore::new(&dir);
+        assert_eq!(
+            store.state_signature(),
+            None,
+            "a store that never saved has no live document"
+        );
+
+        store.save(&DomainState::new()).expect("save");
+        let first = store.state_signature().expect("signature after save");
+        let second = store.state_signature().expect("signature again");
+        assert_eq!(first, second, "an unchanged file reads equal twice");
     }
 
     fn round_tripped_v1_state(title: &str) -> DomainState {

@@ -10,8 +10,8 @@ integration tests in `tests/`.
 | AC-2 | injected v1→v2 step loads migrated; first save leaves `tsk.json.v1` byte-identical, live at v2; second save leaves it alone | `store::tests::migrate_with_walks_the_chain_from_the_given_version`, `store::tests::migrated_load_backs_up_the_original_before_the_first_higher_version_save`, `store::tests::save_never_overwrites_an_existing_version_backup` |
 | AC-3 | higher version refused, no state-dir change (listing + bytes) | `store::tests::load_refuses_a_higher_version_and_changes_nothing_in_the_state_dir` |
 | AC-4 | failing migration step surfaces from load, no file changes | `store::tests::failed_migration_step_surfaces_from_load_without_file_changes` |
-| AC-5 | equal mtime + equal length saves produce different signatures on Unix | (T2 pending) |
-| AC-6 | missing file → None; unchanged file → equal signature twice | (T2 pending) |
+| AC-5 | equal mtime + equal length saves produce different signatures on Unix | `store::tests::signature_distinguishes_same_mtime_same_length_replaces`, `app::idle_store_revalidation_tests::idle_tick_sees_a_replace_that_keeps_mtime_and_length` |
+| AC-6 | missing file → None; unchanged file → equal signature twice | `store::tests::signature_missing_file_is_none_and_unchanged_file_is_stable` |
 | AC-7 | 51 undoable actions + save leaves exactly 50 | (T3 pending) |
 | AC-8 | stale entry pruned, live entry beneath kept | (T3 pending) |
 | AC-9 | existing undo tests stay green | full `cargo test` (undo module tests unchanged) |

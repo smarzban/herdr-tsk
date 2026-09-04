@@ -33,8 +33,8 @@ Every regression test was watched failing with its fix hunk reverted by hand
 
 | Task | Commit | ACs | Notes |
 | --- | --- | --- | --- |
-| T1 migration hook | (pending) | AC-1..AC-4 | chain empty at v1; seams `load_unlocked_supported` / `save_unlocked_supported` |
-| T2 store signature | | AC-5, AC-6 | |
+| T1 migration hook | f8340d8 | AC-1..AC-4 | chain empty at v1; seams `load_unlocked_supported` / `save_unlocked_supported` |
+| T2 store signature | (pending) | AC-5, AC-6 | |
 | T3 undo cap + prune | | AC-7..AC-9 | |
 | T4 trash file | | AC-10..AC-16 | |
 | T5 docs | | docs items | |
@@ -52,3 +52,12 @@ Every regression test was watched failing with its fix hunk reverted by hand
   `save_unlocked_supported`. Failed without the fix:
   `migrated_load_backs_up_the_original_before_the_first_higher_version_save`
   (panics reading `tsk.json.v1`). Restored.
+
+### T2
+
+- Revert: `state_signature` zeroed `dev`/`ino` (old `(mtime, len)` identity).
+  Failed without the fix:
+  `store::tests::signature_distinguishes_same_mtime_same_length_replaces`
+  and the product-level
+  `app::idle_store_revalidation_tests::idle_tick_sees_a_replace_that_keeps_mtime_and_length`
+  (idle tick misses the replace). Restored.
