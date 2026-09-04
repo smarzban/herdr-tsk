@@ -94,3 +94,22 @@ $ cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test &
 exit 0
 cargo test: 813 passed, 0 failed
 ```
+
+## Owner-smoke amendment round (T-14..T-17, spec at `44a2c25`)
+
+| Task | Commit | Failing test(s) watched red first |
+| --- | --- | --- |
+| T-14 archived header paint, `ctrl+g`, picker rule | `9ec1bd9` | `queue_board_render::archived_header_reads_chevron_word_dot_count_and_selection_is_bold_not_reverse`, `queue_board_render::picker_paints_a_dim_rule_under_its_tabs`, `queue_board_verbs::ctrl_g_toggles_the_archived_group_from_any_selection_and_opens_the_drawer_when_closed` |
+| T-15 launch card body and footer | `6793472` | `archive_launch_card::launch_card_is_one_message_line_with_choices_in_the_footer` |
+| T-16 scope dropdowns hide archived projects | `cf70dbf` | `queue_board_edit::task_page_scope_dropdown_omits_archived_projects_but_keeps_the_current_scope`, `quick_add_capture::expanded_quick_add_scope_omits_archived_projects`, `src/ui/capture.rs::tests::capture_scope_never_offers_an_archived_this_project` |
+| T-17 read-only archived project focus | `ded748a` | `queue_board_verbs::enter_on_the_archived_tab_opens_a_read_only_focus_that_persists_nothing`, `::every_mutating_verb_in_read_only_focus_refuses_with_the_archived_message`, `::ctrl_u_in_read_only_focus_unarchives_in_place`, `::leaving_read_only_focus_hides_the_archived_projects_tasks_again`, `queue_board_render::archived_tab_verb_bar_advertises_ctrl_u_enter_esc`, `queue_board_edit::task_page_in_read_only_focus_refuses_edit_mode` |
+
+Keymap change of record: `ctrl+g` moved from `ToggleAllGroups` to `ToggleArchivedGroup`
+(AC-38). Group toggling keeps its palette command; the superseded chord test was renamed
+to `ctrl_g_maps_to_the_archived_group_and_the_palette_keeps_group_toggle`.
+
+Final: `cargo test` **826 passed, 0 failed**; `cd site && npm test` 10/10; clippy
+`-D warnings` clean; release build ok. Live smoke 2:
+`.agent-sdlc/briefs/archive/SMOKE2-report.md` (11 steps on `/tmp/tsk-b-try`, nothing
+failed live, store left as found). Verification report rewritten as one
+`| Criterion | Type | Proof |` table over AC-1..AC-45.
