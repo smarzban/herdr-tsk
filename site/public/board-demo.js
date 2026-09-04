@@ -46,7 +46,7 @@ import { parseCapture } from "./capture.js";
       }),
       task({
         title: "Edit target binding pin",
-        status: "started",
+        status: "ready",
         project: "herdr",
         notes: "Keep the save pin on the row the current lens still paints.",
         createdAt: NOW - 12 * MIN,
@@ -459,15 +459,32 @@ import { parseCapture } from "./capture.js";
     if (id === "block") toggleBlock();
   }
 
+  // Word-wrap note lines to the board width so each visual line carries its own │ gutter,
+  // as the app paints peek. At most five rows, like peekLines.
+  function wrapPeek(lines, width) {
+    const out = [];
+    for (const line of lines) {
+      const words = line.split(/\s+/).filter(Boolean);
+      let current = "";
+      for (const word of words) {
+        if (!current) current = word;
+        else if (current.length + 1 + word.length <= width) current += ` ${word}`;
+        else {
+          out.push(current);
+          current = word;
+        }
+        if (out.length >= 5) return out.slice(0, 5);
+      }
+      if (current || !words.length) out.push(current);
+      if (out.length >= 5) return out.slice(0, 5);
+    }
+    return out;
+  }
+
   function peekLines(task) {
     const notes = (task.notes || "").trim();
     if (!notes) return ["no notes yet"];
     return notes.split(/\n/).slice(0, 5);
-  }
-
-  function rule(label, count) {
-    const pad = Math.max(4, 52 - label.length);
-    return `${"─".repeat(pad)}${count}`;
   }
 
   function paletteCommands() {
@@ -613,19 +630,19 @@ import { parseCapture } from "./capture.js";
 
   function renderHelp() {
     return `
-      <div class="tsk-overlay tsk-help">
-        <div class="tsk-help-title">keys</div>
-        <div class="tsk-help-body">
+      <div class="tsk-box tsk-help" role="dialog" aria-label="help">
+        <div class="tsk-box-top"><span class="tsk-box-title">help</span><button type="button" class="tsk-box-close" data-close="1" aria-label="close">[x]</button></div>
+        <div class="tsk-box-body tsk-help-body">
           <div>esc close | click a verb to run it</div>
           <div>j/k · ↑/↓ move | s primary</div>
           <div>d done | o reopen | b block</div>
-          <div>enter open | →/← peek | + capture</div>
+          <div>enter open | →/← peek or slide | + capture</div>
           <div>e title | n notes | x delete | u undo</div>
           <div>z drawer | : palette | ? help</div>
           <div>P project | 1 2 3 tabs | g groups (projects/threads)</div>
           <div class="dim">app needs ctrl on verbs · demo also accepts bare keys</div>
-          <div class="dim">any key to close</div>
         </div>
+        <div class="tsk-box-foot">any key close</div>
       </div>`;
   }
 
@@ -640,12 +657,12 @@ import { parseCapture } from "./capture.js";
       })
       .join("");
     return `
-      <div class="tsk-overlay tsk-palette">
-        <div class="tsk-help-title">command</div>
-        ${list || `<div class="dim">no matches</div>`}
+      <div class="tsk-box tsk-palette" role="dialog" aria-label="command">
+        <div class="tsk-box-top"><span class="tsk-box-title">command</span><button type="button" class="tsk-box-close" data-close="1" aria-label="close">[x]</button></div>
+        <div class="tsk-box-body">${list || `<div class="dim">  no matches</div>`}</div>
+        <div class="tsk-box-foot">↑/↓ move · enter run · esc close · type to filter</div>
       </div>
-      <div class="tsk-input-row"><span class="tsk-prompt">:</span><span class="tsk-draft">${esc(state.paletteQ)}</span><span class="cursor">█</span></div>
-      <div class="foot dim">enter run · esc close · type to filter</div>`;
+      <div class="tsk-input-row"><span class="tsk-prompt">:</span><span class="tsk-draft">${esc(state.paletteQ)}</span><span class="cursor">█</span></div>`;
   }
 
   function renderPicker() {
@@ -660,11 +677,11 @@ import { parseCapture } from "./capture.js";
       })
       .join("");
     return `
-      <div class="tsk-overlay tsk-palette">
-        <div class="tsk-help-title">project</div>
-        ${list}
-      </div>
-      <div class="foot dim">enter choose · esc close · j/k move</div>`;
+      <div class="tsk-box tsk-palette" role="dialog" aria-label="project">
+        <div class="tsk-box-top"><span class="tsk-box-title">project</span><button type="button" class="tsk-box-close" data-close="1" aria-label="close">[x]</button></div>
+        <div class="tsk-box-body">${list}</div>
+        <div class="tsk-box-foot">↑/↓ move · enter choose · esc close</div>
+      </div>`;
   }
 
   function runPageVerb(id) {
@@ -690,7 +707,7 @@ import { parseCapture } from "./capture.js";
     const focused = taskFocus();
     if (!task) {
       if (embedded) {
-        return `<div class="tsk-task-column tsk-surface" aria-label="task column"><div class="tsk-task-header dim"><span class="sec">no task</span> <span class="rule">${esc(rule("no task", ""))}</span></div><div class="tsk-task-surface"><div class="dim">  select a task to preview it here</div></div></div>`;
+        return `<div class="tsk-task-column tsk-surface" aria-label="task column"><div class="tsk-task-header dim"><span class="sec">no task</span></div><div class="tsk-task-rule" aria-hidden="true"></div><div class="tsk-task-surface"><div class="dim">  select a task to preview it here</div></div></div>`;
       }
       return `<div class="tsk-overlay"><div class="dim">no task</div><div class="dim">  select a task to preview it here</div></div>`;
     }
@@ -700,7 +717,8 @@ import { parseCapture } from "./capture.js";
       editing === "title"
         ? `<input class="tsk-field" id="tsk-edit" value="${esc(state.editDraft)}" />`
         : esc(task.title);
-    const header = `<div class="tsk-task-header ${focused ? "is-bold" : "dim"}"><span class="tsk-task-id" data-copy-task="${esc(task.id)}" title="copy T${task.number}">T${task.number}</span> <span class="sec">${headTitle}</span> <span class="rule">${esc(rule(`T${task.number} ${task.title}`, stateSlot))}</span></div>`;
+    const glyph = GLYPH[task.status] || "○";
+    const header = `<div class="tsk-task-header ${focused ? "is-bold" : "dim"}"><span class="glyph">${glyph}</span> <span class="tsk-task-id" data-copy-task="${esc(task.id)}" title="copy T${task.number}">T${task.number}</span> <span class="sec">${headTitle}</span><span class="tsk-state-slot">${esc(stateSlot)}</span></div><div class="tsk-task-rule" aria-hidden="true"></div>`;
     const notes =
       editing === "notes"
         ? `<textarea class="tsk-field tsk-notes" id="tsk-edit">${esc(state.editDraft)}</textarea>`
@@ -714,13 +732,7 @@ import { parseCapture } from "./capture.js";
         ${header}
         ${notes}
         ${meta}
-        <div class="foot dim tsk-verbs">
-          <button type="button" class="tsk-verb" data-page-verb="edit">e title</button><span> · </span>
-          <button type="button" class="tsk-verb" data-page-verb="notes">n notes</button><span> · </span>
-          <button type="button" class="tsk-verb" data-page-verb="done">d done</button><span> · </span>
-          <button type="button" class="tsk-verb" data-page-verb="block">b block</button><span> · </span>
-          <span>esc back</span>
-        </div>
+        <div class="foot dim tsk-verbs">${pageVerbBar()}</div>
       </div>`;
   }
 
@@ -733,7 +745,7 @@ import { parseCapture } from "./capture.js";
     return "← rail · esc back";
   }
 
-  function renderBoard(rows, rail = false) {
+  function renderBoard(rows, rail = false, bare = false) {
     const tabs = TABS.map((tab) => {
       const on = !state.focusProject && state.tab === tab;
       return `<button type="button" class="tsk-tab ${on ? "is-on" : ""}" data-tab="${tab}">${tab}</button>`;
@@ -747,7 +759,7 @@ import { parseCapture } from "./capture.js";
       .map((row) => {
         if (row.kind === "section" || row.kind === "sub") {
           const cls = row.kind === "sub" ? "tsk-sub" : "tsk-sec";
-          return `<div class="${cls}"><span class="sec">${esc(row.label)}</span> <span class="rule">${esc(rule(row.label, row.count))}</span></div>`;
+          return `<div class="${cls}"><span class="sec">${esc(row.label)}</span><span class="rule" aria-hidden="true"></span><span class="count">${row.count}</span></div>`;
         }
         if (row.kind === "group") {
           const mark = row.collapsed ? "▸" : "▾";
@@ -768,7 +780,9 @@ import { parseCapture } from "./capture.js";
         const peek =
           state.peekId === task.id
             ? [
-                ...peekLines(task).map((line) => `<div class="tsk-peek dim">${indent}    │ ${esc(line)}</div>`),
+                ...wrapPeek(peekLines(task), Math.max(20, terminalColumns() - indent.length - 12)).map(
+                  (line) => `<div class="tsk-peek dim">${indent}    │ ${esc(line)}</div>`,
+                ),
                 `<div class="tsk-peek dim">${indent}    └</div>`,
               ].join("")
             : "";
@@ -779,28 +793,48 @@ import { parseCapture } from "./capture.js";
       })
       .join("");
 
+    const column = `
+      <div class="tsk-tabs">${state.focusProject ? chip : tabs}</div>
+      <div class="tsk-list">${body || `<div class="dim">  nothing here</div>`}</div>`;
+    // Wide stages paint one shared footer under both columns, so a column omits its own.
+    return rail || bare ? column : column + renderFooter();
+  }
+
+  const PAGE_VERBS = [
+    { id: "edit", label: "e title" },
+    { id: "notes", label: "n notes" },
+    { id: "done", label: "d done" },
+    { id: "block", label: "b block" },
+  ];
+
+  function pageVerbBar() {
+    return (
+      PAGE_VERBS.map((v) => `<button type="button" class="tsk-verb" data-page-verb="${v.id}">${v.label}</button>`).join(
+        "<span> · </span>",
+      ) + "<span> · </span><span>esc back</span>"
+    );
+  }
+
+  // One footer for the frame: a rule, the status row (done count · stage crumb), and the verb
+  // bar for whichever side owns focus. Wide stages paint it under both columns, as the app does.
+  function renderFooter() {
     const doneN = state.tasks.filter((t) => t.status === "done").length;
     const task = selectedTask();
+    const verbs = taskFocus()
+      ? pageVerbBar()
+      : verbItems(task)
+          .map((v) => `<button type="button" class="tsk-verb" data-verb="${esc(v.id)}">${esc(v.label)}</button>`)
+          .join("<span> · </span>");
     const footer =
       state.overlay === "quick"
         ? `<div class="tsk-input-row"><span class="tsk-prompt">+</span><input class="tsk-field" id="tsk-add" value="${esc(state.draft)}" placeholder="title  ·  !p project  ·  !t thread" autocomplete="off" /><span class="cursor">█</span></div>
            <div class="foot dim">${state.refuse ? esc(state.refuse) : "enter save · shift+enter stay · tab page · esc close"}</div>`
         : `<div class="tsk-status-row"><button type="button" class="tsk-done-count foot" data-drawer="1">${doneN} done</button><span class="foot dim tsk-stage-hint">${esc(stageHint())}</span></div>
-           <div class="foot dim tsk-verbs">${verbItems(task)
-             .map((v) => `<button type="button" class="tsk-verb" data-verb="${esc(v.id)}">${esc(v.label)}</button>`)
-             .join("<span> · </span>")}</div>
+           <div class="foot dim tsk-verbs">${verbs}</div>
            ${state.copyNotice ? `<div class="foot dim">${esc(state.copyNotice)}</div>` : ""}`;
-
-    if (rail) {
-      return `
-      <div class="tsk-tabs">${state.focusProject ? chip : tabs}</div>
-      <div class="tsk-list">${body || `<div class="dim">  nothing here</div>`}</div>`;
-    }
     return `
-      <div class="tsk-tabs">${state.focusProject ? chip : tabs}</div>
-      <div class="tsk-list">${body || `<div class="dim">  nothing here</div>`}</div>
       <div class="tsk-foot">
-        <div class="foot-rule">──────────────────────────────────────────────────────────────</div>
+        <div class="foot-rule" aria-hidden="true"></div>
         ${footer}
       </div>`;
   }
@@ -812,18 +846,18 @@ import { parseCapture } from "./capture.js";
     let html;
     if (wide && state.stage === "split") {
       html = `<div class="tsk-wide-split is-split">
-           <div class="tsk-board-surface tsk-surface">${renderBoard(rows)}</div>
+           <div class="tsk-board-surface tsk-surface">${renderBoard(rows, false, true)}</div>
            <div class="tsk-rule-column dim" aria-hidden="true"></div>
            ${renderPage(true)}
-         </div>`;
+         </div>${renderFooter()}`;
     } else if (wide && state.stage === "rail") {
       html = `<div class="tsk-wide-split is-rail">
            <div class="tsk-board-surface tsk-rail tsk-surface dim">${renderBoard(rows, true)}</div>
            <div class="tsk-rule-column dim" aria-hidden="true"></div>
            ${renderPage(true)}
-         </div>`;
+         </div>${renderFooter()}`;
     } else if (wide && state.stage === "page") {
-      html = `<div class="tsk-wide-split is-page">${renderPage(true)}</div>`;
+      html = `<div class="tsk-wide-split is-page">${renderPage(true)}</div>${renderFooter()}`;
     } else {
       html = renderBoard(rows);
     }
@@ -882,6 +916,16 @@ import { parseCapture } from "./capture.js";
   }
 
   function onKey(e) {
+    // Never swallow keys pressed on the landing chrome inside the pane
+    // (pane bar, layout toggle, divider): those keep their own keyboard
+    // behavior. Buttons inside the board canvas (rows, tabs, chips, verbs,
+    // close boxes) also keep native activation, except while the quick-add
+    // overlay is open and borrowing the frame's keys for its input.
+    const el = e.target;
+    if (el !== frame) {
+      if (el.closest(".pane-bar, .layout-toggle, [data-divider]")) return;
+      if (state.overlay !== "quick" && el.closest("button")) return;
+    }
     const wide = isWideSplit();
     const taskPageActive = taskFocus();
     if (state.overlay === "quick") {
@@ -1185,6 +1229,14 @@ import { parseCapture } from "./capture.js";
     // A stage A click inside the task column slides to G first, then the control runs.
     const taskColumn = e.target.closest(".tsk-task-column");
     if (taskColumn && isWideSplit() && state.stage === "split") stageRight();
+    const close = e.target.closest("[data-close]");
+    if (close) {
+      state.overlay = null;
+      state.paletteQ = "";
+      frame.focus();
+      render();
+      return;
+    }
     const copy = e.target.closest("[data-copy-task]");
     if (copy) {
       const task = state.tasks.find((item) => item.id === copy.getAttribute("data-copy-task"));
@@ -1277,6 +1329,17 @@ import { parseCapture } from "./capture.js";
   });
 
   frame.addEventListener("keydown", onKey);
+  // The landing page's layout toggle asks for a stage directly (full terminal opens in split).
+  frame.addEventListener("tsk:set-stage", (e) => {
+    const stage = e.detail;
+    if (!["board", "split", "rail", "page"].includes(stage)) return;
+    if (stage !== "board" && !state.selectedId) return;
+    state.stage = stage;
+    state.stageOrigin = null;
+    state.peekId = null;
+    if (state.overlay !== "quick") state.overlay = null;
+    render();
+  });
   new ResizeObserver(() => render()).observe(root);
   frame.addEventListener("focusin", () => frame.classList.add("is-focused"));
   frame.addEventListener("focusout", (e) => {

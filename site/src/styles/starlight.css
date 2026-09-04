@@ -1,32 +1,71 @@
-/* Starlight docs chrome — align with tsk brand faces. */
+/* Starlight docs chrome, aligned with the landing page: one mono face, amber accent. */
 :root,
 [data-theme="dark"] {
-  --sl-font: "IBM Plex Mono", ui-monospace, monospace;
-  --sl-font-system: "IBM Plex Mono", ui-monospace, monospace;
-  --sl-color-accent-low: #262626;
-  --sl-color-accent: #f5f5f5;
-  --sl-color-accent-high: #ffffff;
-  --sl-color-bg: #000000;
-  --sl-color-bg-nav: #0a0a0a;
-  --sl-color-bg-sidebar: #0a0a0a;
-  --sl-color-hairline: #2a2a2a;
+  --sl-font: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --sl-font-system: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --sl-font-system-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --sl-color-accent-low: #2a1e0a;
+  --sl-color-accent: #f2a93b;
+  --sl-color-accent-high: #f7c778;
+  --sl-color-white: #ebe7dc;
+  --sl-color-gray-1: #d9d5ca;
+  --sl-color-gray-2: #aca89e;
+  --sl-color-gray-3: #7d7a72;
+  --sl-color-gray-4: #4a4843;
+  --sl-color-gray-5: #36363b;
+  --sl-color-gray-6: #1d1d20;
+  --sl-color-black: #121214;
+  --sl-color-bg: #121214;
+  --sl-color-bg-nav: #171719;
+  --sl-color-bg-sidebar: #171719;
+  --sl-color-hairline: #2a2a2e;
+  --sl-color-hairline-light: #2a2a2e;
+  --sl-color-hairline-shade: #1d1d20;
+  --sl-color-text-accent: #f2a93b;
 }
 
 [data-theme="light"] {
-  --sl-color-accent-low: #c5e6d8;
-  --sl-color-accent: #0f6e56;
-  --sl-color-accent-high: #084536;
+  --sl-color-accent-low: #f3e2c6;
+  --sl-color-accent: #a85f00;
+  --sl-color-accent-high: #6b3c00;
+  --sl-color-white: #151517;
+  --sl-color-gray-1: #2b2a27;
+  --sl-color-gray-2: #4d4b46;
+  --sl-color-gray-3: #8b887f;
+  --sl-color-gray-4: #b5b1a6;
+  --sl-color-gray-5: #d9d5ca;
+  --sl-color-gray-6: #ebe7de;
+  --sl-color-gray-7: #f4f1ea;
+  --sl-color-black: #faf8f3;
+  --sl-color-bg: #f4f1ea;
+  --sl-color-bg-nav: #faf8f3;
+  --sl-color-bg-sidebar: #faf8f3;
+  --sl-color-hairline: #d9d5ca;
+  --sl-color-hairline-light: #d9d5ca;
+  --sl-color-hairline-shade: #ebe7de;
+  --sl-color-text-accent: #a85f00;
 }
 
 .site-title {
-  font-family: "Syne", sans-serif;
   font-weight: 800;
   letter-spacing: -0.04em;
 }
 
 .site-title img {
-  height: 1.15rem;
+  height: 1.05rem;
   width: auto;
+}
+
+.sl-markdown-content h1,
+.sl-markdown-content h2,
+.sl-markdown-content h3 {
+  letter-spacing: -0.03em;
+  font-weight: 800;
+}
+
+.sl-markdown-content code:not(:where(pre *)) {
+  border: 1px solid var(--sl-color-hairline);
+  border-radius: 3px;
 }
 
 /* Match landing theme transition */
