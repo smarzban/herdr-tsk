@@ -38,3 +38,5 @@ Canonical terms for this repo. No implementation detail.
 - **archived group**: the collapsible `archived · n` header and its rows inside the done drawer, closed by default, session-only collapse state. Chrome plus dimmed task rows.
 - **file**: the `ctrl+f` verb. On a task row it toggles the task's archived flag; in the picker it archives the project, on the picker's archived tab it unarchives it. Has no undo entry. `ctrl+u` on an archived selection also unarchives; on anything else it stays undo.
 - **thread block**: the derived unit of one thread's header plus its ordered open tasks inside a deck section. Exists only in query output, never in the store.
+- **working lens**: any board or CLI view meant for current work: desk tab, projects tab, threads tab, project focus, IN MOTION, ON DECK, thread headers and counts, the rail, and default `tsk list` views. Archived tasks and archived projects never paint in one.
+- **session**: one board process from launch to quit. Session-only state (collapse, wide stage, the launch card having been shown) resets on relaunch.
