@@ -2,7 +2,7 @@
 //! Uses temp dirs only; never writes real plugin state.
 
 use std::fs;
-use std::io::Cursor;
+use std::io::{Cursor, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -242,6 +242,40 @@ fn restore_refuses_when_the_task_is_already_live() {
     );
     let state = store.load().expect("reload");
     assert_eq!(state.tasks().len(), 1, "no second copy is inserted");
+}
+
+#[test]
+fn list_deleted_dedupes_duplicate_trash_lines() {
+    let dir = temp_state_dir("list-dedupes");
+    let _guard = TempDirGuard(dir.clone());
+    for title in ["one", "two"] {
+        assert_eq!(add_task(&dir, title).code, 0);
+    }
+    trash_task(&dir, "one", "two");
+
+    // Append a duplicate line for the same task with a later deleted_at.
+    let store = TaskStore::new(&dir);
+    let mut duplicate = store.load_trash().expect("load trash")[0].clone();
+    duplicate.deleted_at += std::time::Duration::from_secs(60);
+    let mut file = fs::OpenOptions::new()
+        .append(true)
+        .open(dir.join("trash.jsonl"))
+        .expect("open trash");
+    writeln!(
+        file,
+        "{}",
+        serde_json::to_string(&duplicate).expect("encode")
+    )
+    .expect("append");
+
+    let output = list_deleted(&dir);
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    assert_eq!(
+        output.stdout.matches("1 one").count(),
+        1,
+        "duplicate trash lines list once:\n{}",
+        output.stdout
+    );
 }
 
 #[test]

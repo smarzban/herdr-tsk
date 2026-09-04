@@ -65,14 +65,26 @@ fn migrate_with(
 }
 
 /// Parse trash lines tolerantly from raw bytes: split on `b'\n'`, skip any line
-/// that fails UTF-8 (a crash can cut a multibyte title mid-sequence) or JSON.
+/// that fails UTF-8 (a crash can cut a multibyte title mid-sequence) or JSON,
+/// and dedupe by task id with the last line for an id winning. Every trash
+/// reader and rewrite inherits the dedupe.
 fn parse_trash_lines(content: &[u8]) -> Vec<TrashLine> {
-    content
+    let mut lines: Vec<TrashLine> = Vec::new();
+    for entry in content
         .split(|byte| *byte == b'\n')
         .filter_map(|line| std::str::from_utf8(line).ok())
         .filter(|line| !line.trim().is_empty())
-        .filter_map(|line| serde_json::from_str(line).ok())
-        .collect()
+        .filter_map(|line| serde_json::from_str::<TrashLine>(line).ok())
+    {
+        match lines
+            .iter_mut()
+            .find(|existing| existing.task.id == entry.task.id)
+        {
+            Some(existing) => *existing = entry,
+            None => lines.push(entry),
+        }
+    }
+    lines
 }
 
 /// One line of `trash.jsonl`: a task removed from the live store, with the
@@ -528,35 +540,40 @@ impl TaskStore {
     }
 
     /// Rewrite `trash.jsonl` keeping only the lines `keep` accepts; lines that fail to
-    /// parse are dropped. Same durability as the live file: temp in the same dir,
-    /// `sync_all`, rename, dir sync.
+    /// parse and duplicate ids are dropped (the parse dedupes, last line wins). Same
+    /// durability as the live file: temp in the same dir, `sync_all`, rename, dir sync.
     fn rewrite_trash_filtered<F: AtomicFilesystem>(
         &self,
         filesystem: &F,
         keep: impl Fn(&TrashLine) -> bool,
     ) -> Result<(), StoreError> {
         let trash = self.path.join(TRASH_FILE);
-        let content = match fs::read_to_string(&trash) {
+        let content = match fs::read(&trash) {
             Ok(content) => content,
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
             Err(error) => return Err(error.into()),
         };
         let mut kept = String::new();
-        for line in content.lines() {
-            if line.trim().is_empty() {
-                continue;
-            }
-            if let Ok(entry) = serde_json::from_str::<TrashLine>(line) {
-                if keep(&entry) {
-                    kept.push_str(line);
-                    kept.push('\n');
-                }
+        for entry in parse_trash_lines(&content) {
+            if keep(&entry) {
+                kept.push_str(&serde_json::to_string(&entry)?);
+                kept.push('\n');
             }
         }
+        self.write_trash_atomic(filesystem, &kept)
+    }
+
+    /// Write the whole trash file: temp in the same dir, `sync_all`, rename, dir sync.
+    fn write_trash_atomic<F: AtomicFilesystem>(
+        &self,
+        filesystem: &F,
+        content: &str,
+    ) -> Result<(), StoreError> {
+        let trash = self.path.join(TRASH_FILE);
         let tmp = self.trash_tmp_path();
         let write_result = (|| -> Result<(), StoreError> {
             let mut temp_file = filesystem.create_file(&tmp)?;
-            filesystem.write_all(&mut temp_file, kept.as_bytes())?;
+            filesystem.write_all(&mut temp_file, content.as_bytes())?;
             filesystem.sync_file(&temp_file)?;
             drop(temp_file);
             filesystem.rename(&tmp, &trash)?;
@@ -1980,6 +1997,41 @@ mod tests {
         assert!(read_trash_lines(&dir).is_empty());
         let live = store.load().expect("reload");
         assert!(!live.get(gone).expect("task is live").soft_deleted);
+    }
+
+    #[test]
+    fn trash_lines_dedupe_by_id_with_the_last_line_winning() {
+        let dir = temp_dir("trash-dedupe");
+        let _guard = TempDirGuard(dir.clone());
+        let store = TaskStore::new(&dir);
+        let first = trash_line("duplicate", 100);
+        let mut second = trash_line("duplicate", 200);
+        second.task.id = first.task.id;
+        fs::create_dir_all(&dir).expect("mkdir");
+        fs::write(
+            trash_path(&dir),
+            format!(
+                "{}\n{}\n",
+                serde_json::to_string(&first).expect("encode"),
+                serde_json::to_string(&second).expect("encode")
+            ),
+        )
+        .expect("write duplicate lines");
+
+        let lines = store.load_trash().expect("load");
+        assert_eq!(lines.len(), 1, "duplicate ids dedupe to one entry");
+        assert_eq!(
+            lines[0].deleted_at, second.deleted_at,
+            "the last line for an id wins"
+        );
+
+        // A rewrite inherits the dedupe.
+        store
+            .rewrite_trash_filtered(&StdFilesystem, |_| true)
+            .expect("rewrite");
+        let rewritten = read_trash_lines(&dir);
+        assert_eq!(rewritten.len(), 1, "the rewrite leaves one line");
+        assert_eq!(rewritten[0].deleted_at, second.deleted_at);
     }
 
     fn round_tripped_v1_state(title: &str) -> DomainState {
