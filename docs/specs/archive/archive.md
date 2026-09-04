@@ -414,3 +414,22 @@ recorded in the Brief's decisions table.
 
 `hidden` (a task that is archived or whose project is archived; the predicate every working lens
 filters on). Mirrored into `CONTEXT.md`.
+
+## Tech Stack
+
+Feature level. No new dependency. Every component from the design lands on a crate already pinned
+in `Cargo.toml` / `Cargo.lock` (versions read from the lockfile on 2026-09-04) or on the standard
+library. Adding anything would duplicate an existing capability, so none is justified.
+
+| Component | Product | Version | Claim the component leans on | Status |
+| --- | --- | --- | --- | --- |
+| Archive domain | Rust std (`BTreeMap`, `Uuid` from `uuid`) | uuid 1.24 | none new | n/a |
+| Store format v2 | `serde` + `serde_json` | 1.0 / 1.0.151 | `#[serde(default)]` on a new `BTreeMap` field plus `skip_serializing_if` on a `bool` coexist with `deny_unknown_fields` | `verified-by-probe`: the repo already does exactly this for `Task.number`, `Task.thread`, `Task.steps` (see `src/domain/task.rs`), and spec A's migration tests exercise the chain |
+| Lens query, Board model, Key/mouse mapping, Project picker, Launch card, Capture scope resolution | Rust std, existing `ui::*` modules | toolchain 1.96.0 | `ctrl+f` arrives as `KeyCode::Char('f')` with `KeyModifiers::CONTROL` | `verified-by-probe`: identical delivery path to the existing `ctrl+e` / `ctrl+n` / `ctrl+x` chords in `src/ui/input.rs`, covered by their tests |
+| Board renderer | `ratatui` + `crossterm` | 0.30.2 / 0.29.0 | dim modifier and selectable header rows | `verified-by-probe`: thread headers and dim peek rows already paint with `Modifier::DIM`; golden fixtures in `tests/queue_board_render.rs` |
+| CLI archive surfaces | Rust std (hand-rolled parser in `src/cli/parser.rs`) | toolchain 1.96.0 | none new | n/a |
+| Docs and site | Astro / Starlight in `site/` | as pinned in `site/package-lock.json` | none new | n/a |
+
+Green bar (unchanged): `cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && cargo build --release`; site: `cd site && npm test`.
+
+Unverified: nothing. Rejected: a `clap`-style argument parser for the new CLI verbs would duplicate the existing hand-rolled parser and its exit contract tests.
