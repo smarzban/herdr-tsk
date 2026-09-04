@@ -3,7 +3,7 @@
 mod events;
 mod task;
 mod thread;
-mod time_serde;
+pub(crate) mod time_serde;
 mod undo;
 
 pub use events::*;

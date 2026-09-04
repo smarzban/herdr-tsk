@@ -1,6 +1,6 @@
 ---
 title: CLI
-description: Headless tsk add, list, and steps. The agents' door to the board.
+description: Headless tsk add, list, steps, and trash. The agents' door to the board.
 ---
 
 The same `~/.tsk` store backs the board, herdr, and these commands. The board
@@ -34,7 +34,7 @@ The repo ships the same rules as an agent skill in
 | --- | --- |
 | `tsk` | opens the board |
 | `tsk capture` | opens the capture form (also `TSK_MODE=capture`) |
-| `tsk add` · `tsk list` · `tsk steps` | headless; below |
+| `tsk add` · `tsk list` · `tsk steps` · `tsk trash` | headless; below |
 | `tsk --help` | usage, exit 0 |
 | `tsk --find-board-pane` | herdr helper: reads `pane list` JSON on stdin, prints the id of the pane labelled `tsk`; exit 1 when none |
 
@@ -95,7 +95,9 @@ desk outside a repository.
 - `--desk` selects desk
 - `--all` every scope
 - `--done` done only
-- `--deleted` soft-deleted only
+- `--deleted` soft-deleted only: live soft-deletes plus trash entries from
+  `trash.jsonl` (kept 30 days), deduped by task with the live copy winning,
+  newest deletion first
 - `--thread` filters within the selected scope
 
 Human output groups rows under `STARTED`, `READY`, `BLOCKED`, `REVIEW`, then
@@ -124,12 +126,27 @@ Output is `added <short-id> <text>` or `toggled <short-id> [x] <text>`.
 See [steps](/docs/steps/) for the board side. `toggle` is not idempotent. Verify
 with `tsk list <task>` before a retry.
 
+## trash
+
+```
+tsk trash restore <task> [--state-dir <dir>]
+```
+
+A soft-deleted task leaves the board store once it is no longer undoable, or
+after 7 days, and lives in `trash.jsonl` for 30 days. `tsk list --deleted`
+shows trash entries beside live soft-deletes, with their `T<n>` number.
+
+`tsk trash restore T<n>` puts the task back on the board: not soft-deleted,
+with a `restored` history event, a new revision, and its old number. A missing
+line, or a task that is already live, refuses with `T<n> is not in trash`
+(exit 1). Usage errors exit 2; store I/O exits 3.
+
 ## Exit contract
 
 | Exit | Meaning |
 | --- | --- |
-| 0 | listed, or every add item created/existed, or the step applied |
-| 1 | one or more item refusals (add/steps). Retry only the failed subset. For toggle, list first. |
+| 0 | listed, every add item created/existed, the step applied, or the task restored |
+| 1 | one or more item refusals (add/steps), or a trash restore with no matching line. Retry only the failed subset. For toggle, list first. |
 | 2 | usage or parse error, including a `list` address that matches nothing. Nothing persisted. |
 | 3 | store I/O. Commit is indeterminate. `tsk list` before retrying. |
 

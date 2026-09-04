@@ -11,6 +11,7 @@ pub mod parser;
 pub mod presenter;
 pub mod router;
 pub mod steps;
+pub mod trash;
 
 /// Captured process output, used by the binary and headless integration tests.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,7 +36,8 @@ where
         Some("add") => run_add(args, &mut stdin, stdin_is_tty),
         Some("steps") => run_steps(args),
         Some("list") => run_list(args),
-        _ => presenter::usage("expected add, steps, or list command"),
+        Some("trash") => run_trash(args),
+        _ => presenter::usage("expected add, steps, list, or trash command"),
     }
 }
 
@@ -68,6 +70,27 @@ fn run_list(args: Vec<String>) -> CliOutput {
     match list::run(input) {
         Ok(result) => presenter::list(result, json),
         Err(error) => presenter::list_rejected(error),
+    }
+}
+
+fn run_trash(args: Vec<String>) -> CliOutput {
+    let input = match parser::parse_flag_trash(&args) {
+        Ok(input) => input,
+        Err(reason) => return presenter::trash_usage(&reason),
+    };
+    if input.help {
+        return presenter::trash_help();
+    }
+    let Some(action) = input.action else {
+        return presenter::trash_usage("trash action is required");
+    };
+    match action {
+        parser::TrashAction::Restore { target } => {
+            match trash::run_restore(target, input.state_dir) {
+                Ok(result) => presenter::trash_restored(result),
+                Err(error) => presenter::trash_rejected(error),
+            }
+        }
     }
 }
 

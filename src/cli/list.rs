@@ -219,6 +219,9 @@ pub fn run(input: ListInput) -> Result<ListResult, ListError> {
     } else {
         ListView::Open
     };
+    if view == ListView::Deleted {
+        return deleted_rows(&store, &domain, &scope, input.thread.as_deref(), input.all);
+    }
     let mut rows = domain
         .tasks()
         .iter()
@@ -241,6 +244,52 @@ pub fn run(input: ListInput) -> Result<ListResult, ListError> {
         rows,
         view,
         include_scope: input.all,
+        steps: Vec::new(),
+    })
+}
+
+/// `--deleted` listing: live soft-deleted tasks plus trash entries, deduped by id
+/// with the live copy winning, ordered by `deleted_at` descending. Trash entries
+/// render exactly like live rows and keep their `T<n>` number.
+fn deleted_rows(
+    store: &TaskStore,
+    domain: &crate::domain::DomainState,
+    scope: &Option<TaskScope>,
+    thread: Option<&str>,
+    include_scope: bool,
+) -> Result<ListResult, ListError> {
+    let trash = store
+        .load_trash()
+        .map_err(|error| ListError::Store(error.to_string()))?;
+    let in_scope = |task: &crate::domain::Task| {
+        scope.as_ref().is_none_or(|scope| task.scope == *scope)
+            && thread.is_none_or(|thread| task.thread.as_deref() == Some(thread))
+    };
+    let mut dated: Vec<(std::time::SystemTime, ListRow)> = domain
+        .tasks()
+        .iter()
+        .filter(|task| task.soft_deleted && in_scope(task))
+        .map(|task| {
+            (
+                task.soft_deleted_at().unwrap_or(task.updated_at),
+                row_for(task),
+            )
+        })
+        .collect();
+    let live_ids: std::collections::BTreeSet<Uuid> =
+        domain.tasks().iter().map(|task| task.id).collect();
+    for line in trash {
+        // A task in both places is listed once, from the live copy.
+        if live_ids.contains(&line.task.id) || !in_scope(&line.task) {
+            continue;
+        }
+        dated.push((line.deleted_at, row_for(&line.task)));
+    }
+    dated.sort_by(|(left, _), (right, _)| right.cmp(left));
+    Ok(ListResult {
+        rows: dated.into_iter().map(|(_, row)| row).collect(),
+        view: ListView::Deleted,
+        include_scope,
         steps: Vec::new(),
     })
 }
