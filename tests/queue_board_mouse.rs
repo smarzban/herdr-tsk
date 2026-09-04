@@ -1803,15 +1803,7 @@ fn page_step_add_footer_chip_routes_to_begin_add_step() {
         .iter()
         .position(|entry| entry.key == "a")
         .expect("visible a step chip");
-    // The page verb bar grew by the file verb, so its tail clips at 80 columns; the
-    // chip itself still paints and routes at a standard-tier width that fits it.
-    let wide = Rect {
-        x: 0,
-        y: 0,
-        width: 100,
-        height: 24,
-    };
-    let hits = board_hit_map(wide, &model);
+    let hits = board_hit_map(STANDARD, &model);
     let area = hits
         .regions
         .iter()

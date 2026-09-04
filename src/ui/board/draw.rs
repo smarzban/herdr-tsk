@@ -214,14 +214,6 @@ fn task_page_verb_items(model: &BoardModel, task: &crate::domain::Task) -> Vec<V
         });
     }
     entries.push(VerbEntry {
-        key: "f",
-        label: if task.archived {
-            "unarchive"
-        } else {
-            "archive"
-        },
-    });
-    entries.push(VerbEntry {
         key: "esc",
         label: "close",
     });
@@ -231,6 +223,15 @@ fn task_page_verb_items(model: &BoardModel, task: &crate::domain::Task) -> Vec<V
             label: "step",
         });
     }
+    // The file verb is last so the width budget clips it before the established page verbs.
+    entries.push(VerbEntry {
+        key: "f",
+        label: if task.archived {
+            "unarchive"
+        } else {
+            "archive"
+        },
+    });
     entries
 }
 
