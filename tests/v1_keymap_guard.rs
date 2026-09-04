@@ -40,6 +40,7 @@ fn normal_mode_keymap_equals_the_readme_and_queue_board_v1_set() {
         (KeyCode::Char('x'), BoardIntent::SoftDelete),
         (KeyCode::Delete, BoardIntent::SoftDelete),
         (KeyCode::Char('u'), BoardIntent::Undo),
+        (KeyCode::Char('f'), BoardIntent::File),
         (KeyCode::Char('z'), BoardIntent::ToggleDoneDrawer),
         (KeyCode::Char(':'), BoardIntent::OpenCommandPalette),
         (KeyCode::Char('?'), BoardIntent::OpenHelp),
@@ -60,6 +61,7 @@ fn normal_mode_keymap_equals_the_readme_and_queue_board_v1_set() {
         KeyCode::Char('x'),
         KeyCode::Delete,
         KeyCode::Char('u'),
+        KeyCode::Char('f'),
     ];
     for (key, intent) in documented {
         if mutating.contains(&key) {
@@ -71,7 +73,7 @@ fn normal_mode_keymap_equals_the_readme_and_queue_board_v1_set() {
     }
 
     for retired in [
-        'a', 'v', 'p', 'r', 'l', 'c', 'n', 's', 't', 'i', 'f', '1', '2', '3', '[', ']',
+        'a', 'v', 'p', 'r', 'l', 'c', 'n', 's', 't', 'i', '1', '2', '3', '[', ']',
     ] {
         assert_eq!(
             normal(KeyCode::Char(retired)),

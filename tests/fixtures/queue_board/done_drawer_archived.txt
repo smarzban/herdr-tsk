@@ -22,5 +22,5 @@
 │  ■ T32 Archived vendored spike                                             50m │
 │────────────────────────────────────────────────────────────────────────────────│
 │ 2 done                                                                         │
-│ enter open · ctrl+d done · ctrl+b block · : palette · ? help · + capture       │
+│ enter open · ctrl+d done · ctrl+b block · f archive · : palette · ? help · + c…│
 └────────────────────────────────────────────────────────────────────────────────┘

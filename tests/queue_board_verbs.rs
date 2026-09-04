@@ -3165,3 +3165,216 @@ fn archived_group_is_collapsed_on_a_fresh_model_and_enter_or_click_on_the_header
         "the live task is unaffected"
     );
 }
+
+#[test]
+fn ctrl_f_archives_the_selected_task_keeping_status_and_pushing_no_undo() {
+    let mut domain = DomainState::new();
+    let b = domain
+        .create(
+            "second row",
+            None,
+            project(THIS_REPO),
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create b");
+    let a = domain
+        .create(
+            "archive target",
+            None,
+            project(THIS_REPO),
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create a");
+    domain.set_status(a, HumanStatus::Review).expect("review");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
+    // Newest (A) sorts first in ON DECK, so the seeded selection rests on it.
+    assert_eq!(model.selected_id(), Some(a));
+
+    apply_intent(&mut domain, &mut model, BoardIntent::File, None).expect("file verb");
+    let task_a = domain.get(a).expect("task a");
+    assert!(task_a.archived, "ctrl+f archives the selected task");
+    assert_eq!(task_a.status, HumanStatus::Review, "human status is kept");
+    assert!(
+        !model.visible_ids().contains(&a),
+        "the archived row leaves the working lens"
+    );
+
+    // Select the remaining row and undo: nothing about A may change (AC-7).
+    apply_intent(&mut domain, &mut model, BoardIntent::SelectIndex(0), None).expect("select b");
+    assert_eq!(model.selected_id(), Some(b));
+    apply_intent(&mut domain, &mut model, BoardIntent::Undo, None).expect("undo");
+    let task_a = domain.get(a).expect("task a");
+    assert!(
+        task_a.archived,
+        "archive pushes no undo entry, so undo cannot touch A"
+    );
+    assert_eq!(task_a.status, HumanStatus::Review);
+    assert_eq!(
+        domain.get(b).expect("task b").status,
+        HumanStatus::Ready,
+        "the empty-stack undo is a no-op"
+    );
+}
+
+#[test]
+fn ctrl_f_in_the_archived_group_unarchives_and_the_row_returns_to_the_deck() {
+    let (mut domain, mut model, id) = board_with_task("filed away", HumanStatus::Ready);
+    domain.archive_task(id).expect("archive");
+    model.sync_from_domain(&domain);
+    apply_intent(&mut domain, &mut model, BoardIntent::ToggleDoneDrawer, None).expect("drawer");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ToggleArchivedGroup,
+        None,
+    )
+    .expect("expand");
+    let idx = model
+        .visible_ids()
+        .iter()
+        .position(|&visible| visible == id)
+        .expect("archived row visible after expanding the group");
+    apply_intent(&mut domain, &mut model, BoardIntent::SelectIndex(idx), None)
+        .expect("select the archived row");
+    apply_intent(&mut domain, &mut model, BoardIntent::File, None).expect("file verb");
+    assert!(
+        !domain.get(id).expect("task").archived,
+        "ctrl+f in the archived group unarchives"
+    );
+    assert!(
+        model.visible_ids().contains(&id),
+        "the row returns to the deck"
+    );
+}
+
+#[test]
+fn ctrl_u_on_an_archived_selection_unarchives_without_popping_the_undo_stack() {
+    let mut domain = DomainState::new();
+    let a = domain
+        .create(
+            "archived undo target",
+            None,
+            project(THIS_REPO),
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create a");
+    let k = domain
+        .create(
+            "undoable done",
+            None,
+            project(THIS_REPO),
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create k");
+    domain.complete(k).expect("complete seeds one undo entry");
+    domain.archive_task(a).expect("archive a");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
+    apply_intent(&mut domain, &mut model, BoardIntent::ToggleDoneDrawer, None).expect("drawer");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ToggleArchivedGroup,
+        None,
+    )
+    .expect("expand");
+    let idx = model
+        .visible_ids()
+        .iter()
+        .position(|&visible| visible == a)
+        .expect("archived row visible");
+    apply_intent(&mut domain, &mut model, BoardIntent::SelectIndex(idx), None)
+        .expect("select the archived row");
+    apply_intent(&mut domain, &mut model, BoardIntent::Undo, None).expect("ctrl+u");
+    assert!(
+        !domain.get(a).expect("a").archived,
+        "ctrl+u on an archived selection unarchives"
+    );
+
+    // The undo entry seeded before the unarchive is still on top of the stack:
+    // ctrl+u on the non-archived task pops exactly that entry.
+    let idx = model
+        .visible_ids()
+        .iter()
+        .position(|&visible| visible == k)
+        .expect("done row visible in the open drawer");
+    apply_intent(&mut domain, &mut model, BoardIntent::SelectIndex(idx), None).expect("select k");
+    apply_intent(&mut domain, &mut model, BoardIntent::Undo, None).expect("undo k");
+    assert_eq!(
+        domain.get(k).expect("k").status,
+        HumanStatus::Ready,
+        "the seeded undo entry survived the unarchive (stack length unchanged)"
+    );
+}
+
+#[test]
+fn help_card_lists_ctrl_f_and_the_verb_bar_shows_file_for_a_task_row_and_the_group() {
+    let (mut domain, mut model, _id) = board_with_task("help me", HumanStatus::Ready);
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenHelp, None).expect("help");
+    let frame = rendered_board(&model, 80, 24);
+    assert!(
+        frame.contains("ctrl+f"),
+        "help card must list ctrl+f:\n{frame}"
+    );
+    assert!(
+        frame.to_ascii_lowercase().contains("file"),
+        "help card must label the file verb:\n{frame}"
+    );
+    apply_intent(&mut domain, &mut model, BoardIntent::CloseLayer, None).expect("close help");
+
+    // A deck row's verb bar offers `f archive`.
+    let verbs = board_verb_items(&model);
+    assert!(
+        verbs
+            .iter()
+            .any(|entry| entry.key == "f" && entry.label == "archive"),
+        "deck row verb bar must show `f archive`: {verbs:?}"
+    );
+
+    // The expanded archived group: header shows its toggle, a row shows `f unarchive`.
+    let archived = domain
+        .create(
+            "filed row",
+            None,
+            project(THIS_REPO),
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create archived");
+    domain.archive_task(archived).expect("archive it");
+    model.sync_from_domain(&domain);
+    apply_intent(&mut domain, &mut model, BoardIntent::ToggleDoneDrawer, None).expect("drawer");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ToggleArchivedGroup,
+        None,
+    )
+    .expect("expand");
+
+    let verbs = board_verb_items(&model);
+    assert!(
+        verbs
+            .iter()
+            .any(|entry| entry.key == "enter" && entry.label == "collapse"),
+        "header selected: verb bar shows `enter collapse`: {verbs:?}"
+    );
+
+    let idx = model
+        .visible_ids()
+        .iter()
+        .position(|&visible| visible == archived)
+        .expect("archived row visible");
+    apply_intent(&mut domain, &mut model, BoardIntent::SelectIndex(idx), None)
+        .expect("select the archived row");
+    let verbs = board_verb_items(&model);
+    assert!(
+        verbs
+            .iter()
+            .any(|entry| entry.key == "f" && entry.label == "unarchive"),
+        "archived row verb bar must show `f unarchive`: {verbs:?}"
+    );
+}

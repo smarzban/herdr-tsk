@@ -61,6 +61,7 @@ pub fn board_intent_may_persist(intent: &BoardIntent) -> bool {
             | BoardIntent::Reopen
             | BoardIntent::SoftDelete
             | BoardIntent::Undo
+            | BoardIntent::File
             | BoardIntent::PrimaryVerb
             | BoardIntent::ToggleBlock
             | BoardIntent::QuickAddSave
@@ -1565,8 +1566,42 @@ fn apply_board_intent(
                 }
             }
         }
-        BoardIntent::Undo => {
+        BoardIntent::File => {
+            // The picker handles File itself (T-8); for now it stays inert.
+            if model.project_picker.is_some() {
+                return Ok(IntentOutcome::None);
+            }
             model.close_popup();
+            let Some(id) = model.selected_id() else {
+                model.set_message(NO_SELECTION);
+                return Ok(IntentOutcome::None);
+            };
+            let Some(task) = domain.get(id) else {
+                model.set_message("that task is no longer here");
+                return Ok(IntentOutcome::None);
+            };
+            if task.archived {
+                domain.unarchive_task(id)?;
+            } else {
+                domain.archive_task(id)?;
+            }
+            // Success has no message: the row's disappearance (or return) is the feedback.
+        }
+        BoardIntent::Undo => {
+            // The picker handles Undo itself (T-8); for now it stays inert.
+            if model.project_picker.is_some() {
+                return Ok(IntentOutcome::None);
+            }
+            model.close_popup();
+            // ctrl+u on an archived selection is the unarchive route, never an undo:
+            // the stack is not popped (AC-3).
+            if let Some(id) = model.selected_id() {
+                if domain.get(id).is_some_and(|task| task.archived) {
+                    domain.unarchive_task(id)?;
+                    model.sync_from_domain(domain);
+                    return Ok(IntentOutcome::Persist);
+                }
+            }
             if let Err(error) = domain.undo() {
                 if let DomainError::StaleUndo(id) = error {
                     model.sync_from_domain(domain);

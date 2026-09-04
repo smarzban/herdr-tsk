@@ -312,6 +312,7 @@ fn verb_intent(model: &BoardModel, index: usize) -> Option<BoardIntent> {
         "b" => Some(BoardIntent::ToggleBlock),
         "x" => Some(BoardIntent::SoftDelete),
         "u" => Some(BoardIntent::Undo),
+        "f" => Some(BoardIntent::File),
         "e" => Some(BoardIntent::BeginEditTitle),
         "n" => Some(BoardIntent::BeginEditNotes),
         "a" => Some(BoardIntent::BeginAddStep),

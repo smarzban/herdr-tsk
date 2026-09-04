@@ -285,6 +285,9 @@ pub enum BoardIntent {
     PageWheelScrollDown,
     /// `z` — open/close the done drawer. Reducer lands in.
     ToggleDoneDrawer,
+    /// `ctrl+f` — the file verb: toggle the task's archived flag (picker: archive/
+    /// unarchive the selected project). No undo entry. Reducer lands in.
+    File,
     /// Expand/collapse the done drawer's archived group (Enter or click on its header,
     /// which the intent also selects). Session-only. Reducer lands in.
     ToggleArchivedGroup,
@@ -450,6 +453,13 @@ const NORMAL_KEYMAP: &[NormalKeyEntry] = &[
         verb: true,
     },
     NormalKeyEntry {
+        code: KeyCode::Char('f'),
+        intent: BoardIntent::File,
+        help_chord: "f",
+        help_label: "file",
+        verb: true,
+    },
+    NormalKeyEntry {
         code: KeyCode::Char('z'),
         intent: BoardIntent::ToggleDoneDrawer,
         help_chord: "z",
@@ -521,7 +531,7 @@ pub fn normal_help_bindings() -> Vec<(&'static str, &'static str)> {
 }
 
 fn help_chord_shown(chord: &str) -> String {
-    const MUTATING: &[&str] = &["q", "s", "d", "o", "b", "e", "x/Delete", "u"];
+    const MUTATING: &[&str] = &["q", "s", "d", "o", "b", "e", "x/Delete", "u", "f"];
     if MUTATING.contains(&chord) {
         format!("ctrl+{chord}")
     } else {
@@ -1025,6 +1035,7 @@ pub fn intent_primary_action(intent: &BoardIntent) -> Option<PrimaryBoardAction>
         | BoardIntent::ListScrollTo(_)
         | BoardIntent::ToggleDoneDrawer
         | BoardIntent::ToggleArchivedGroup
+        | BoardIntent::File
         | BoardIntent::OpenHelp
         | BoardIntent::CloseLayer
         | BoardIntent::ToggleAllGroups => None,
@@ -1096,6 +1107,7 @@ fn map_task_page(key: KeyEvent) -> Option<BoardIntent> {
         KeyCode::Char('b') if verb => Some(BoardIntent::ToggleBlock),
         KeyCode::Char('x') | KeyCode::Delete if verb => Some(BoardIntent::SoftDelete),
         KeyCode::Char('u') if verb => Some(BoardIntent::Undo),
+        KeyCode::Char('f') if verb => Some(BoardIntent::File),
         KeyCode::Char('e') if verb => Some(BoardIntent::BeginEditTitle),
         KeyCode::Char('n') if verb => Some(BoardIntent::BeginEditNotes),
         KeyCode::Tab if !extra => Some(BoardIntent::FormFocusNext),
@@ -1127,10 +1139,17 @@ fn map_help(key: KeyEvent) -> Option<BoardIntent> {
 
 /// Project selector modal.
 fn map_project_picker(key: KeyEvent) -> Option<BoardIntent> {
-    if key
-        .modifiers
-        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER)
+    let mods = key.modifiers;
+    if mods.contains(KeyModifiers::CONTROL)
+        && !mods.intersects(KeyModifiers::ALT | KeyModifiers::SUPER)
     {
+        return match key.code {
+            KeyCode::Char('f') => Some(BoardIntent::File),
+            KeyCode::Char('u') => Some(BoardIntent::Undo),
+            _ => None,
+        };
+    }
+    if mods.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER) {
         return None;
     }
     match key.code {

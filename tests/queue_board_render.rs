@@ -566,9 +566,11 @@ fn standard_78x24_fixture_has_selector_list_rule_status_verb_and_no_other_chrome
     // Imp-3 (round 2): `space` is context-dependent -- this fixture's selection is a Doing
     // task, and `PrimaryVerb` is a silent no-op there, so a correct legend omits the entry
     // rather than advertise a no-op. `enter`/`?` are always present regardless of selection.
+    // T-6 (archive): the `f archive` entry joins the bar (AC-35), so `+ capture`'s label
+    // tail now ellipsizes at the 78-column floor; the entry itself stays last.
     assert!(
-        verbs.contains("enter") && verbs.contains('?') && verbs.contains("+ capture"),
-        "standard verb bar must retain open, help, and capture: {verbs:?}"
+        verbs.contains("enter") && verbs.contains('?') && verbs.contains("+"),
+        "standard verb bar must retain open and help, with capture's tail: {verbs:?}"
     );
 
     // Chrome is exactly selector + rule + status + verb. Viewport rows are list content only
@@ -2614,8 +2616,9 @@ fn palette_golden_scene_commands_are_bound_to_the_real_m1_catalog_and_exclude_di
 /// pre-T-7 verb bar exactly: the with-steps bar is the without-steps bar plus the
 /// one step-add entry — modifier implied by the bar's prefix convention — and
 /// nothing else. The full listing is asserted at a width the whole bar fits; at
-/// the 78-column standard floor the bar's existing width clipping may take the
-/// entry's label tail but never its key chord.
+/// the 78-column standard floor the bar's width clipping may take whole tail
+/// entries (the file verb joined the bar, so `esc close` is now the tail that
+/// ellipsizes there) but the row itself never overflows.
 #[test]
 fn footer_lists_the_step_add_verb() {
     let page_verb_row_with = |steps: &[&str], width: u16| -> String {
@@ -2660,8 +2663,12 @@ fn footer_lists_the_step_add_verb() {
 
     let floor = page_verb_row_with(&["only step"], 78);
     assert!(
-        floor.contains("ctrl+a…"),
-        "the compact verb-bar budget may ellipsize the final Ctrl chord, without making the bar overflow:\n{floor}"
+        floor.contains("esc cl"),
+        "the compact verb-bar budget may ellipsize the tail entry's label, without making the bar overflow:\n{floor}"
+    );
+    assert!(
+        floor.chars().count() <= 78,
+        "the verb row must stay bounded by its width:\n{floor}"
     );
 }
 

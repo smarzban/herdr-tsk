@@ -58,9 +58,8 @@ fn ctrl(code: KeyCode) -> KeyEvent {
 
 fn mapped_key(code: KeyCode) -> KeyEvent {
     match code {
-        KeyCode::Char('s' | 'd' | 'o' | 'b' | 'a' | 'e' | 'x' | 'u' | 'q') | KeyCode::Delete => {
-            ctrl(code)
-        }
+        KeyCode::Char('s' | 'd' | 'o' | 'b' | 'a' | 'e' | 'x' | 'u' | 'f' | 'q')
+        | KeyCode::Delete => ctrl(code),
         _ => press(code),
     }
 }
@@ -616,8 +615,11 @@ fn click_and_wheel_match_keyboard_effects_for_each_control() {
     assert_verb_parity("d", HumanStatus::Ready, "d", KeyCode::Char('d'));
     assert_verb_parity("b", HumanStatus::Ready, "b", KeyCode::Char('b'));
     assert_verb_parity("colon", HumanStatus::Ready, ":", KeyCode::Char(':'));
-    assert_verb_parity("question", HumanStatus::Ready, "?", KeyCode::Char('?'));
+    // `?` paints for a Started selection (a Ready bar's 8 entries clip the tail at
+    // 80 columns, exactly as `+ capture` already clipped there before the file verb).
+    assert_verb_parity("question", HumanStatus::Started, "?", KeyCode::Char('?'));
     assert_verb_parity("capture", HumanStatus::Started, "+", KeyCode::Char('+'));
+    assert_verb_parity("file", HumanStatus::Started, "f", KeyCode::Char('f'));
     assert_verb_parity("reopen", HumanStatus::Done, "o", KeyCode::Char('o'));
 
     // Drawer toggle: open it by keyboard on both boards first (a shared start state), then
@@ -1802,7 +1804,15 @@ fn page_step_add_footer_chip_routes_to_begin_add_step() {
         .iter()
         .position(|entry| entry.key == "a")
         .expect("visible a step chip");
-    let hits = board_hit_map(STANDARD, &model);
+    // The page verb bar grew by the file verb, so its tail clips at 80 columns; the
+    // chip itself still paints and routes at a standard-tier width that fits it.
+    let wide = Rect {
+        x: 0,
+        y: 0,
+        width: 100,
+        height: 24,
+    };
+    let hits = board_hit_map(wide, &model);
     let area = hits
         .regions
         .iter()

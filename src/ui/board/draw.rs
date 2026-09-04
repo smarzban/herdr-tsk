@@ -132,6 +132,14 @@ pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
                 },
             });
         }
+        entries.push(VerbEntry {
+            key: "f",
+            label: if task.archived {
+                "unarchive"
+            } else {
+                "archive"
+            },
+        });
     }
     entries.push(VerbEntry {
         key: ":",
@@ -200,6 +208,14 @@ fn task_page_verb_items(model: &BoardModel, task: &crate::domain::Task) -> Vec<V
             },
         });
     }
+    entries.push(VerbEntry {
+        key: "f",
+        label: if task.archived {
+            "unarchive"
+        } else {
+            "archive"
+        },
+    });
     entries.push(VerbEntry {
         key: "esc",
         label: "close",
