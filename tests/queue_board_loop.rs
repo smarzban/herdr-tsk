@@ -428,3 +428,122 @@ fn x_id(seed: &DomainState) -> uuid::Uuid {
         .expect("seeded task X")
         .id
 }
+
+#[test]
+fn idle_merge_leaves_a_project_focus_archived_by_another_process() {
+    use tsk_tui::app::{revalidate_board_from_store, StoreWatch};
+    use tsk_tui::save_recovery::SaveRecovery;
+    use tsk_tui::store::TaskStore;
+
+    let focus_path = "/repos/focus";
+    let dir = temp_state_dir("idle-focus-archived");
+    let _guard = TempDirGuard(dir.clone());
+    let store = TaskStore::new(&dir);
+
+    let mut seed = DomainState::new();
+    seed.create(
+        "focus task",
+        None,
+        TaskScope::Project {
+            path: focus_path.to_string(),
+        },
+        ProvenanceOrigin::Manual,
+        None,
+    )
+    .expect("create focus task");
+    seed.create(
+        "desk task",
+        None,
+        TaskScope::Global,
+        ProvenanceOrigin::Manual,
+        None,
+    )
+    .expect("create desk task");
+    store.save(&seed).expect("seed");
+
+    // Process A focuses the project.
+    let mut domain = store.load().expect("load A");
+    let mut model = BoardModel::from_domain(&domain, None);
+    model.set_selected_project(Some(std::path::PathBuf::from(focus_path)));
+    assert_eq!(
+        model.selected_project(),
+        Some(std::path::Path::new(focus_path))
+    );
+    let mut watch = StoreWatch::seeded(&store);
+
+    // Process B archives the focused project on disk.
+    store
+        .locked_transition(|state| {
+            state
+                .archive_project(focus_path)
+                .map_err(|error| error.to_string())?;
+            Ok(())
+        })
+        .expect("B archives the focus project");
+
+    let changed = revalidate_board_from_store(
+        &store,
+        &mut domain,
+        &mut model,
+        &mut watch,
+        &SaveRecovery::new(),
+    );
+    assert!(changed, "the sibling write must be picked up");
+
+    // The focus reset: home desk, a dim status line naming the project, and the
+    // archived task stays hidden.
+    assert_eq!(
+        model.selected_project(),
+        None,
+        "project focus must reset to home desk"
+    );
+    let message = model.message().expect("a status line names the project");
+    assert!(
+        message.contains("focus"),
+        "message names the project: {message:?}"
+    );
+    assert!(
+        !model.visible_ids().iter().any(|id| {
+            domain
+                .get(*id)
+                .is_some_and(|task| task.title == "focus task")
+        }),
+        "the archived project's task stays hidden"
+    );
+
+    // The quick-add default never resolves to the archived project after the merge.
+    let snapshot = tsk_tui::context::InvocationSnapshot {
+        default_scope: TaskScope::Project {
+            path: focus_path.to_string(),
+        },
+        this_repo: Some(std::path::PathBuf::from(focus_path)),
+        title_prefill: None,
+        provenance: ProvenanceOrigin::Capture,
+    };
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenCapture,
+        Some(&snapshot),
+    )
+    .expect("open capture");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::QuickAddInsertText("probe".into()),
+        None,
+    )
+    .expect("type");
+    apply_intent(&mut domain, &mut model, BoardIntent::QuickAddSave, None).expect("save");
+    model.sync_from_domain(&domain);
+    let probe = domain
+        .tasks()
+        .iter()
+        .find(|task| task.title == "probe")
+        .expect("probe saved");
+    assert_eq!(
+        probe.scope,
+        TaskScope::Global,
+        "quick-add must not resolve to the archived project after the merge"
+    );
+}

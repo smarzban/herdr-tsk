@@ -960,6 +960,28 @@ impl BoardModel {
             .filter(|task| !previous_id_set.contains(&task.id))
             .map(|task| task.id)
             .collect();
+        // A merge may archive the project this board is focused on: reset the focus to
+        // home desk, name the project on the status row, and give the session a desk
+        // quick-add default so capture can never resolve to the archived project.
+        let focus_archived = match &self.board_location {
+            BoardLocation::Project(path) => self
+                .archived_projects
+                .contains(path.to_string_lossy().as_ref()),
+            BoardLocation::Home { .. } => false,
+        };
+        if focus_archived {
+            let name = match &self.board_location {
+                BoardLocation::Project(path) => {
+                    crate::ui::render::short_project(&path.to_string_lossy()).to_string()
+                }
+                _ => String::new(),
+            };
+            self.board_location = BoardLocation::Home {
+                tab: BoardTab::Desk,
+            };
+            self.session_default_scope = Some(TaskScope::Global);
+            self.set_message(format!("project {name} is archived"));
+        }
         let pinned_edit = self.task_edit_save.as_ref().map(|pending| pending.id);
         let pinned_quick_add = self.quick_add_save.as_ref().map(|pending| pending.id);
         self.finish_quick_add_save();
