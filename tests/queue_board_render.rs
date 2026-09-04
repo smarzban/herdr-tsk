@@ -3778,3 +3778,82 @@ fn expanded_archived_rows_are_dim_keep_glyph_and_identifier_and_are_selectable_a
         "the archived row is hit-testable: {hits:?}"
     );
 }
+
+#[test]
+fn task_page_header_slot_reads_archived_for_an_archived_task() {
+    let mut domain = DomainState::new();
+    domain
+        .create(
+            "live row task",
+            None,
+            TaskScope::Global,
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create live");
+    let archived_id = domain
+        .create(
+            "archived page task",
+            None,
+            TaskScope::Global,
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create archived");
+    domain.archive_task(archived_id).expect("archive it");
+
+    let open_page = |domain: &mut DomainState| -> BoardModel {
+        let mut model = BoardModel::from_domain(domain, None);
+        apply_intent(domain, &mut model, BoardIntent::ToggleDoneDrawer, None).expect("drawer");
+        apply_intent(domain, &mut model, BoardIntent::ToggleArchivedGroup, None)
+            .expect("expand archived group");
+        let idx = model
+            .visible_ids()
+            .iter()
+            .position(|&visible| visible == archived_id)
+            .expect("archived row visible");
+        apply_intent(domain, &mut model, BoardIntent::SelectIndex(idx), None)
+            .expect("select the archived row");
+        apply_intent(domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
+        model
+    };
+
+    // Single-pane 80x24: the header slot reads `archived`, not the status word.
+    let model = open_page(&mut domain);
+    let rows = board_rows(&model, 80, 24);
+    assert!(
+        rows.iter().any(|row| row.contains("archived")),
+        "header slot must read archived:\n{}",
+        rows.join("\n")
+    );
+    assert!(
+        !rows.iter().any(|row| row.contains("ready")),
+        "the status word must give way to archived:\n{}",
+        rows.join("\n")
+    );
+
+    // Wide 130x24 stage F: same header contract.
+    let model = open_page(&mut domain);
+    let rows = board_rows(&model, 130, 24);
+    assert!(
+        rows.iter().any(|row| row.contains("archived")),
+        "wide header slot must read archived:\n{}",
+        rows.join("\n")
+    );
+    assert!(
+        !rows.iter().any(|row| row.contains("ready")),
+        "wide status word must give way to archived:\n{}",
+        rows.join("\n")
+    );
+
+    // An unarchived task still shows its status word.
+    let mut model = BoardModel::from_domain(&domain, None);
+    apply_intent(&mut domain, &mut model, BoardIntent::SelectIndex(0), None).expect("select live");
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
+    let rows = board_rows(&model, 80, 24);
+    assert!(
+        rows.iter().any(|row| row.contains("ready")),
+        "unarchived task keeps its status word:\n{}",
+        rows.join("\n")
+    );
+}

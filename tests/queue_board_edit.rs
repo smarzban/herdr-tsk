@@ -1373,3 +1373,69 @@ fn thread_paste_flattens_line_breaks_like_title() {
         "Thread must flatten pasted line breaks like Title"
     );
 }
+
+#[test]
+fn title_edit_on_an_archived_task_persists_and_keeps_the_flag() {
+    let mut domain = DomainState::new();
+    let id = domain
+        .create(
+            "Archived editable",
+            None,
+            project(THIS_REPO),
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create");
+    domain.archive_task(id).expect("archive it");
+    // Persist first so the task carries a number like a real session's rows do.
+    let dir = std::env::temp_dir().join(format!(
+        "tsk-edit-archived-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
+    ));
+    let store = tsk_tui::store::TaskStore::new(&dir);
+    store.save(&domain).expect("seed store");
+    domain = store.load().expect("reload persisted");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
+
+    // Open the archived task's page through the drawer's archived group.
+    apply_intent(&mut domain, &mut model, BoardIntent::ToggleDoneDrawer, None).expect("drawer");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ToggleArchivedGroup,
+        None,
+    )
+    .expect("expand");
+    let idx = model
+        .visible_ids()
+        .iter()
+        .position(|&visible| visible == id)
+        .expect("archived row visible");
+    apply_intent(&mut domain, &mut model, BoardIntent::SelectIndex(idx), None)
+        .expect("select the archived row");
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
+
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None).expect("edit title");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::EditInsertText(" (kept)".to_string()),
+        None,
+    )
+    .expect("type");
+    let outcome = apply_intent(&mut domain, &mut model, BoardIntent::ConfirmEdit, None)
+        .expect("confirm title edit");
+    assert_eq!(outcome, IntentOutcome::Persist);
+
+    store.reload_merge_save(&mut domain).expect("durable save");
+    let reloaded = store.load().expect("reload");
+    let task = reloaded.get(id).expect("task survives");
+    assert_eq!(task.title, "Archived editable (kept)");
+    assert!(task.archived, "the archived flag survives the save");
+    assert_eq!(task.status, HumanStatus::Ready, "status is unchanged");
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -361,12 +361,16 @@ fn build_task_page_overlay<'a>(
     let status = bound_task
         .map(|task| task.status)
         .unwrap_or(HumanStatus::Ready);
-    let status_word = match status {
-        HumanStatus::Ready => "ready",
-        HumanStatus::Started => "started",
-        HumanStatus::Blocked => "blocked",
-        HumanStatus::Review => "review",
-        HumanStatus::Done => "done",
+    // AC-8: an archived task's header slot reads `archived` in place of the status word.
+    let status_word = match bound_task {
+        Some(task) if task.archived => "archived",
+        _ => match status {
+            HumanStatus::Ready => "ready",
+            HumanStatus::Started => "started",
+            HumanStatus::Blocked => "blocked",
+            HumanStatus::Review => "review",
+            HumanStatus::Done => "done",
+        },
     };
     let glyph = render::status_glyph(status);
 
@@ -858,12 +862,16 @@ fn task_header_state(model: &BoardModel, form: &BoardForm, task: &crate::domain:
     if is_retained && model.task_session_dirty() {
         return "unsaved".to_string();
     }
-    let status = match task.status {
-        HumanStatus::Ready => "ready",
-        HumanStatus::Started => "started",
-        HumanStatus::Blocked => "blocked",
-        HumanStatus::Review => "review",
-        HumanStatus::Done => "done",
+    let status = if task.archived {
+        "archived"
+    } else {
+        match task.status {
+            HumanStatus::Ready => "ready",
+            HumanStatus::Started => "started",
+            HumanStatus::Blocked => "blocked",
+            HumanStatus::Review => "review",
+            HumanStatus::Done => "done",
+        }
     };
     let project = match &task.scope {
         TaskScope::Project { path } => render::short_project(path).to_string(),
