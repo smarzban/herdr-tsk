@@ -59,3 +59,6 @@ Every AC mapped to its proving test(s). Suite counts: `cargo test` 803 passed /
 
 Advisory, not fixed (per review): the picker archived tab paints live state while acting on
 its snapshot after an idle merge.
+
+| V1 (verify regression) plan `failed` order | `cli_add::plan_failed_rows_keep_item_order_when_an_archived_refusal_precedes_a_parse_failure` |
+| V2 (verify regression) picker archive of the focused project must not override an unarchived cwd default | `queue_board_verbs::picker_archive_of_the_focused_project_keeps_an_unarchived_cwd_default_for_quick_add` |

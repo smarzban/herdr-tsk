@@ -3610,3 +3610,99 @@ fn file_on_a_taskless_invocation_repo_refuses_on_the_status_line() {
         "no record was written"
     );
 }
+
+#[test]
+fn picker_archive_of_the_focused_project_keeps_an_unarchived_cwd_default_for_quick_add() {
+    // Focus /repos/other, archive it from the picker. The board goes home, but the
+    // invocation default (THIS_REPO, unarchived) must still drive quick-add: archiving one
+    // project is not a session-wide "everything goes to the desk".
+    let mut domain = DomainState::new();
+    domain
+        .create(
+            "in app",
+            None,
+            project(THIS_REPO),
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create");
+    let other = "/repos/other";
+    domain
+        .create(
+            "in other",
+            None,
+            project(other),
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
+    let target = tsk_tui::ui::board::ProjectScopeOption::Project(PathBuf::from(other));
+    let walk_to_other = |domain: &mut DomainState, model: &mut BoardModel| {
+        apply_intent(domain, model, BoardIntent::OpenProjectSelector, None).expect("open picker");
+        for _ in 0..model.project_options().len() {
+            let index = model.project_picker_index().expect("picker index");
+            if model.project_options()[index] == target {
+                break;
+            }
+            apply_intent(domain, model, BoardIntent::ProjectPickerNext, None).expect("next");
+        }
+    };
+    walk_to_other(&mut domain, &mut model);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ConfirmProjectChoice,
+        None,
+    )
+    .expect("focus other");
+    assert_eq!(model.selected_project(), Some(Path::new(other)));
+
+    walk_to_other(&mut domain, &mut model);
+    apply_intent(&mut domain, &mut model, BoardIntent::File, None).expect("ctrl+f files");
+    assert!(domain.is_project_archived(other));
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::CancelProjectPicker,
+        None,
+    )
+    .expect("close picker");
+    assert_eq!(
+        model.selected_project(),
+        None,
+        "focus on the archived project resets to home"
+    );
+
+    let snapshot = InvocationSnapshot {
+        default_scope: project(THIS_REPO),
+        this_repo: Some(PathBuf::from(THIS_REPO)),
+        title_prefill: None,
+        provenance: ProvenanceOrigin::Capture,
+    };
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenCapture,
+        Some(&snapshot),
+    )
+    .expect("open capture");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::QuickAddInsertText("probe".into()),
+        None,
+    )
+    .expect("type");
+    apply_intent(&mut domain, &mut model, BoardIntent::QuickAddSave, None).expect("save");
+    let probe = domain
+        .tasks()
+        .iter()
+        .find(|task| task.title == "probe")
+        .expect("probe saved");
+    assert_eq!(
+        probe.scope,
+        project(THIS_REPO),
+        "the unarchived invocation default still drives quick-add"
+    );
+}

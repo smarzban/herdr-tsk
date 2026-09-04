@@ -2080,3 +2080,70 @@ fn plan_items_resolving_to_an_archived_project_refuse_with_project_archived() {
     let _ = std::fs::remove_dir_all(repo);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn plan_failed_rows_keep_item_order_when_an_archived_refusal_precedes_a_parse_failure() {
+    let _env = env_lock();
+    let repo = temp_state_dir("plan-archived-order-repo");
+    std::fs::create_dir(repo.join(".git")).expect("create git marker");
+    let dir = temp_state_dir("plan-archived-order");
+    let seeded = run_with(
+        [
+            "tsk",
+            "add",
+            "--state-dir",
+            &state_dir_arg(&dir),
+            "-t",
+            "seed",
+            "-p",
+            &repo.to_string_lossy(),
+        ],
+        Cursor::new(Vec::<u8>::new()),
+        true,
+    );
+    assert_eq!(seeded.code, 0, "{:?}", seeded.stderr);
+    let mut writable = TaskStore::new(&dir).load().expect("load store");
+    writable
+        .archive_project(&repo.to_string_lossy())
+        .expect("archive the repo project");
+    TaskStore::new(&dir)
+        .save(&writable)
+        .expect("persist record");
+
+    // Item 0 is an archived-project refusal (decided inside the transaction), item 1 is a
+    // parse failure (decided before it), item 2 persists. `failed` must still read 0, 1.
+    let output = run_with(
+        [
+            "tsk",
+            "add",
+            "--state-dir",
+            &state_dir_arg(&dir),
+            "--file",
+            "-",
+        ],
+        Cursor::new(
+            format!(
+                r#"[{{"title":"archived first","project":{}}},{{"title":"   "}},{{"title":"desk last","project":null}}]"#,
+                serde_json::to_string(&repo.to_string_lossy()).expect("serialize path")
+            )
+            .into_bytes(),
+        ),
+        true,
+    );
+    assert_eq!(output.code, 1, "{output:?}");
+    let report: serde_json::Value = serde_json::from_str(&output.stdout).expect("plan report JSON");
+    let failed = report["failed"].as_array().expect("failed rows");
+    let indices: Vec<u64> = failed
+        .iter()
+        .map(|row| row["i"].as_u64().expect("index"))
+        .collect();
+    assert_eq!(
+        indices,
+        vec![0, 1],
+        "failed rows are in item order: {report}"
+    );
+    assert_eq!(failed[0]["code"], "project-archived");
+    assert_eq!(failed[1]["code"], "empty-title");
+    let _ = std::fs::remove_dir_all(repo);
+    let _ = std::fs::remove_dir_all(dir);
+}

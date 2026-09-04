@@ -247,6 +247,9 @@ pub fn run_plan(
                 });
             }
             let changed = !created.is_empty();
+            // Archived-project refusals join the parse failures inside the transaction, so
+            // restore item order before reporting.
+            failed.sort_by_key(|failure| failure.i);
             Ok((
                 PlanResult {
                     created,

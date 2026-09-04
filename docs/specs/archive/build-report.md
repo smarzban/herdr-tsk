@@ -81,3 +81,16 @@ Advisory (not fixed, per review): the picker archived tab paints live state whil
 its snapshot after an idle merge.
 
 Final: `cargo test` 811 passed, 0 failed; clippy `-D warnings` clean; release build ok.
+
+### Verify regressions (conductor fixes)
+
+| Id | Commit | Fix | Test (watched red on hand revert) |
+| --- | --- | --- | --- |
+| V1 | (this commit) | plan-form `failed` rows sorted by item index after the in-transaction archived refusals join the pre-transaction parse failures | `cli_add::plan_failed_rows_keep_item_order_when_an_archived_refusal_precedes_a_parse_failure` (red: `[1, 0]`) |
+| V2 | (this commit) | the "never an archived quick-add default" invariant moved to `OpenCapture` (falls back to desk only when the resolved default is archived); `sync_from_domain` no longer sets a session-wide desk default; redundant `was_focused` block removed from the picker `File` arm | `queue_board_verbs::picker_archive_of_the_focused_project_keeps_an_unarchived_cwd_default_for_quick_add` (red: `Global`) |
+
+```text
+$ cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && cargo build --release
+exit 0
+cargo test: 813 passed, 0 failed
+```

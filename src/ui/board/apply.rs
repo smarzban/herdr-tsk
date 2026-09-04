@@ -16,7 +16,7 @@ use crate::ui::tier::{FocusedSurface, WideStage};
 
 use super::commands::{resolve_board_command, CommandSurface};
 use super::model::{
-    BoardForm, BoardInputMode, BoardLocation, BoardModel, BoardTab, IntentOutcome, PickerTab,
+    BoardForm, BoardInputMode, BoardLocation, BoardModel, IntentOutcome, PickerTab,
     ProjectPickerState, ProjectScopeOption, StepEditor, StepEditorSave, TaskEditSave,
 };
 
@@ -302,6 +302,15 @@ fn apply_board_intent(
                 .quick_add_scope()
                 .or_else(|| snapshot.map(crate::ui::capture::CaptureModel::default_scope))
                 .unwrap_or(TaskScope::Global);
+            // The default never resolves to an archived project, however the archive
+            // arrived (launch card kept, picker verb, or a sibling process): fall back to
+            // the desk.
+            let scope = match scope {
+                TaskScope::Project { ref path } if domain.is_project_archived(path) => {
+                    TaskScope::Global
+                }
+                other => other,
+            };
             model.quick_add = Some(super::model::QuickAddState::new(snapshot.cloned(), scope));
             model.quick_add_save = None;
             model.input_mode = BoardInputMode::QuickAdd;
@@ -1636,7 +1645,6 @@ fn apply_board_intent(
                     return Ok(IntentOutcome::None);
                 };
                 let scope_path = path.to_string_lossy().into_owned();
-                let was_focused = model.board_location == BoardLocation::Project(path.clone());
                 let previous_visible = model.visible_ids();
                 let previous = model.selection_id;
                 let result = match tab {
@@ -1654,13 +1662,9 @@ fn apply_board_intent(
                     }
                     return Ok(IntentOutcome::None);
                 }
+                // `sync_from_domain` resets a focus that now points at an archived project.
                 model.sync_from_domain(domain);
                 model.refresh_project_picker();
-                if was_focused {
-                    model.board_location = BoardLocation::Home {
-                        tab: BoardTab::Desk,
-                    };
-                }
                 model.reanchor_selection(previous, &previous_visible);
                 return Ok(IntentOutcome::Persist);
             }

@@ -960,9 +960,10 @@ impl BoardModel {
             .filter(|task| !previous_id_set.contains(&task.id))
             .map(|task| task.id)
             .collect();
-        // A merge may archive the project this board is focused on: reset the focus to
-        // home desk, name the project on the status row, and give the session a desk
-        // quick-add default so capture can never resolve to the archived project.
+        // A merge (or this board's own picker verb) may archive the project this board is
+        // focused on: reset the focus to home desk and name the project on the status row.
+        // The quick-add default is guarded at `OpenCapture`, which never resolves to an
+        // archived project, so the session default is left alone here.
         let focus_archived = match &self.board_location {
             BoardLocation::Project(path) => self
                 .archived_projects
@@ -979,7 +980,6 @@ impl BoardModel {
             self.board_location = BoardLocation::Home {
                 tab: BoardTab::Desk,
             };
-            self.session_default_scope = Some(TaskScope::Global);
             self.set_message(format!("project {name} is archived"));
         }
         let pinned_edit = self.task_edit_save.as_ref().map(|pending| pending.id);
