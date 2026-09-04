@@ -3090,3 +3090,78 @@ fn t_token_capture_threads_while_item_text_stays_literal() {
         Some("release-2026")
     );
 }
+
+#[test]
+fn archived_group_is_collapsed_on_a_fresh_model_and_enter_or_click_on_the_header_toggles_it() {
+    let mut domain = DomainState::new();
+    let live = domain
+        .create(
+            "live task",
+            None,
+            project(THIS_REPO),
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create live");
+    let archived = domain
+        .create(
+            "archived task",
+            None,
+            project(THIS_REPO),
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create archived");
+    domain.archive_task(archived).expect("archive it");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
+    apply_intent(&mut domain, &mut model, BoardIntent::ToggleDoneDrawer, None).expect("drawer");
+
+    // A fresh model starts collapsed: the header row is in the visible set, the
+    // archived task's row is not.
+    assert!(
+        model
+            .visible_ids()
+            .contains(&tsk_tui::ui::queue::ARCHIVED_HEADER_ROW_ID),
+        "the archived header row must be selectable in the visible set"
+    );
+    assert!(
+        !model.visible_ids().contains(&archived),
+        "a fresh model must start with the archived group collapsed"
+    );
+
+    // Toggle (the mouse route's intent): selects the header and expands.
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ToggleArchivedGroup,
+        None,
+    )
+    .expect("toggle archived group");
+    assert!(
+        model.visible_ids().contains(&archived),
+        "after the toggle the archived row is visible"
+    );
+    assert_eq!(
+        model.selected_id(),
+        None,
+        "the header row itself is never reported as a selected task"
+    );
+
+    // Enter with the header selected collapses again.
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("enter");
+    assert!(
+        !model.visible_ids().contains(&archived),
+        "enter on the selected header must collapse the group"
+    );
+
+    // A fresh model is collapsed again (session-only state, not persisted).
+    let fresh = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
+    assert!(
+        !fresh.visible_ids().contains(&archived),
+        "a fresh model must start collapsed"
+    );
+    assert!(
+        fresh.visible_ids().contains(&live),
+        "the live task is unaffected"
+    );
+}

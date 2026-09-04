@@ -560,6 +560,8 @@ pub struct BoardModel {
     pub(super) collapsed_thread_projects: HashSet<ThreadProjectCollapseKey>,
     /// Whether the done drawer lists completed tasks. Session-only.
     pub(super) drawer_open: bool,
+    /// The done drawer's archived group starts collapsed on every launch. Session-only.
+    pub(super) archived_collapsed: bool,
     /// Accordion/takeover detail open on this task id, if any. Session-only.
     pub(super) detail_open: Option<Uuid>,
     /// Id-pinned selection into the queue-visible row set.
@@ -663,6 +665,7 @@ impl BoardModel {
             collapsed_threads: HashSet::new(),
             collapsed_thread_projects: HashSet::new(),
             drawer_open: false,
+            archived_collapsed: true,
             detail_open: None,
             selection_id: None,
             last_row_click: None,
@@ -1255,6 +1258,24 @@ impl BoardModel {
         self.drawer_open
     }
 
+    /// Toggle the archived group's collapse. Session-only; never persisted.
+    pub(super) fn toggle_archived_collapsed(&mut self) {
+        self.archived_collapsed = !self.archived_collapsed;
+    }
+
+    /// Whether the archived group's header row holds the selection.
+    pub fn archived_header_selected(&self) -> bool {
+        self.selection_id == Some(queue::ARCHIVED_HEADER_ROW_ID)
+    }
+
+    /// Pin the selection onto the archived header row (chrome, not a task).
+    pub(super) fn select_archived_header(&mut self) -> bool {
+        self.retarget_selection(
+            Some(queue::ARCHIVED_HEADER_ROW_ID),
+            SelectionRetarget::Explicit,
+        )
+    }
+
     /// Task id whose accordion/takeover detail is open, if any (session-only).
     pub fn detail_open(&self) -> Option<Uuid> {
         self.detail_open
@@ -1273,6 +1294,7 @@ impl BoardModel {
             &self.collapsed_projects,
             &self.collapsed_threads,
             &self.collapsed_thread_projects,
+            self.archived_collapsed,
         )
     }
 
@@ -1290,9 +1312,14 @@ impl BoardModel {
         self.visible_ids().iter().position(|&row| row == id)
     }
 
-    /// Selected task id, if any.
+    /// Selected task id, if any. The archived header row is chrome, not a task:
+    /// with it selected every task verb refuses with `select a task first`.
     pub fn selected_id(&self) -> Option<Uuid> {
-        self.selection_id
+        if self.selection_id == Some(queue::ARCHIVED_HEADER_ROW_ID) {
+            None
+        } else {
+            self.selection_id
+        }
     }
 
     /// Current list viewport offset.

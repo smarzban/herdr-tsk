@@ -62,6 +62,31 @@ pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
     }
 
     let mut entries = Vec::with_capacity(7);
+    // The archived header holds the selection: its own verbs only.
+    if model.archived_header_selected() {
+        return vec![
+            VerbEntry {
+                key: "enter",
+                label: if model.archived_collapsed {
+                    "expand"
+                } else {
+                    "collapse"
+                },
+            },
+            VerbEntry {
+                key: ":",
+                label: help(":", "palette"),
+            },
+            VerbEntry {
+                key: "?",
+                label: help("?", "help"),
+            },
+            VerbEntry {
+                key: "+",
+                label: "capture",
+            },
+        ];
+    }
     let selected_task = model
         .selected_id()
         .and_then(|id| model.tasks.iter().find(|t| t.id == id));
@@ -898,6 +923,8 @@ fn draw_board_impl(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap
         detail_open: model.detail_open,
         list_scroll: model.list_scroll.get(),
         follow_list: model.follow_list.get(),
+        archived_collapsed: model.archived_collapsed,
+        archived_header_selected: model.archived_header_selected(),
     };
     let (hits, painted_list_scroll) = render::draw_queue_frame(frame, &frame_model, &geo, area);
     if let Some((scroll, max_scroll)) = painted_list_scroll {
@@ -1064,6 +1091,8 @@ fn draw_wide_board(
         detail_open: None,
         list_scroll: model.list_scroll.get(),
         follow_list: model.follow_list.get(),
+        archived_collapsed: model.archived_collapsed,
+        archived_header_selected: model.archived_header_selected(),
     };
     let task_frame = QueueFrameModel {
         overlay: task_overlay.clone(),

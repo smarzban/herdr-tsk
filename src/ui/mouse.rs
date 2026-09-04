@@ -796,6 +796,7 @@ pub fn map_board_mouse(
                 subgroup_idx,
             }),
             Some(QueueHitTarget::Drawer) => Some(BoardIntent::ToggleDoneDrawer),
+            Some(QueueHitTarget::ArchivedHeader) => Some(BoardIntent::ToggleArchivedGroup),
             Some(QueueHitTarget::TaskNumber(id)) => Some(BoardIntent::CopyTaskNumber(id)),
             Some(QueueHitTarget::Task(id)) => model
                 .visible_ids()

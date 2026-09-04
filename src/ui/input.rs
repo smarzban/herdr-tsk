@@ -285,6 +285,9 @@ pub enum BoardIntent {
     PageWheelScrollDown,
     /// `z` — open/close the done drawer. Reducer lands in.
     ToggleDoneDrawer,
+    /// Expand/collapse the done drawer's archived group (Enter or click on its header,
+    /// which the intent also selects). Session-only. Reducer lands in.
+    ToggleArchivedGroup,
     /// `?` — open the help card. Surface wiring lands in.
     OpenHelp,
     /// `Esc` — layered close. Full layer order lands in.
@@ -1021,6 +1024,7 @@ pub fn intent_primary_action(intent: &BoardIntent) -> Option<PrimaryBoardAction>
         | BoardIntent::PageScrollTo(_)
         | BoardIntent::ListScrollTo(_)
         | BoardIntent::ToggleDoneDrawer
+        | BoardIntent::ToggleArchivedGroup
         | BoardIntent::OpenHelp
         | BoardIntent::CloseLayer
         | BoardIntent::ToggleAllGroups => None,

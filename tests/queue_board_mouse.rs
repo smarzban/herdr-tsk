@@ -2803,3 +2803,51 @@ fn task_page_autoscroll_tick_moves_notes() {
         after.join("\n")
     );
 }
+
+#[test]
+fn archived_group_is_collapsed_on_a_fresh_model_and_enter_or_click_on_the_header_toggles_it() {
+    let mut domain = DomainState::new();
+    let archived = domain
+        .create(
+            "archived click me",
+            None,
+            project(THIS_REPO),
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create archived");
+    domain.archive_task(archived).expect("archive it");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
+    apply_intent(&mut domain, &mut model, BoardIntent::ToggleDoneDrawer, None).expect("drawer");
+
+    let hits = board_hit_map(STANDARD, &model);
+    let header = hits
+        .regions
+        .iter()
+        .find(|hit| matches!(hit.target, QueueHitTarget::ArchivedHeader))
+        .expect("the archived header paints a hit region");
+    let intent = map_board_mouse(&model, &hits, left_click(header.area.x, header.area.y))
+        .expect("a header click maps to an intent");
+    assert_eq!(intent, BoardIntent::ToggleArchivedGroup);
+    apply_intent(&mut domain, &mut model, intent, None).expect("toggle");
+
+    assert!(
+        model.visible_ids().contains(&archived),
+        "the click expanded the group: archived row visible"
+    );
+
+    // Click again: collapses.
+    let hits = board_hit_map(STANDARD, &model);
+    let header = hits
+        .regions
+        .iter()
+        .find(|hit| matches!(hit.target, QueueHitTarget::ArchivedHeader))
+        .expect("header hit after expand");
+    let intent = map_board_mouse(&model, &hits, left_click(header.area.x, header.area.y))
+        .expect("header click maps after expand");
+    apply_intent(&mut domain, &mut model, intent, None).expect("toggle closed");
+    assert!(
+        !model.visible_ids().contains(&archived),
+        "the second click collapsed the group"
+    );
+}

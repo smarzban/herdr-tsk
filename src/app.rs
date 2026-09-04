@@ -1047,7 +1047,8 @@ pub fn apply_board_intent_with_save_recovery(
             | BoardIntent::PageScrollDown
             | BoardIntent::PageWheelScrollUp
             | BoardIntent::PageWheelScrollDown
-            | BoardIntent::ToggleDoneDrawer => return apply_intent(domain, model, intent, None),
+            | BoardIntent::ToggleDoneDrawer
+            | BoardIntent::ToggleArchivedGroup => return apply_intent(domain, model, intent, None),
             _ => {
                 model.begin_save_recovery(recovery.error().unwrap_or("save failed"));
                 return Ok(IntentOutcome::None);

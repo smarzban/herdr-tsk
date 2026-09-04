@@ -342,6 +342,8 @@ fn fixture_model_on_tab<'a>(
         detail_open: None,
         list_scroll: 0,
         follow_list: true,
+        archived_collapsed: true,
+        archived_header_selected: false,
     }
 }
 
@@ -2436,6 +2438,34 @@ fn golden_scenes() -> Vec<GoldenScene> {
     let done_model = fixture_model(&tasks, &done_view);
     let (done_rows, _) = paint(80, 24, &done_model);
 
+    // `done_drawer_archived`: the drawer open with an expanded archived group below the
+    // DONE rows -- the dim header with its count and the dim rows (glyph + T<n> kept).
+    let mut archived_tasks = fixture_tasks();
+    let mut archived_one = task(
+        7301,
+        "Archived receipt sweep",
+        HumanStatus::Ready,
+        project("/repos/tsk"),
+        45 * 60,
+    );
+    archived_one.number = Some(31);
+    archived_one.archived = true;
+    let mut archived_two = task(
+        7302,
+        "Archived vendored spike",
+        HumanStatus::Blocked,
+        TaskScope::Global,
+        50 * 60,
+    );
+    archived_two.number = Some(32);
+    archived_two.archived = true;
+    archived_tasks.push(archived_one);
+    archived_tasks.push(archived_two);
+    let archived_view = fixture_view(&archived_tasks, true);
+    let mut archived_model = fixture_model(&archived_tasks, &archived_view);
+    archived_model.archived_collapsed = false;
+    let (archived_rows, _) = paint(80, 24, &archived_model);
+
     vec![
         GoldenScene {
             name: "board",
@@ -2465,6 +2495,11 @@ fn golden_scenes() -> Vec<GoldenScene> {
         GoldenScene {
             name: "done_drawer",
             rows: done_rows,
+            width: 80,
+        },
+        GoldenScene {
+            name: "done_drawer_archived",
+            rows: archived_rows,
             width: 80,
         },
     ]
@@ -2996,8 +3031,9 @@ fn all_golden_frames_pass_no_color_sgr_scan() {
         scanned += 1;
     }
     assert_eq!(
-        scanned, 6,
-        "expected the six board surface goldens (board, board_default_split_78, accordion, palette, help, done_drawer) in {dir:?}"
+        scanned, 7,
+        "expected the seven board surface goldens (board, board_default_split_78, accordion, \
+         palette, help, done_drawer, done_drawer_archived) in {dir:?}"
     );
 }
 
@@ -3559,4 +3595,179 @@ fn archived_task_paints_in_no_working_lens_in_any_status_at_any_tier() {
             }
         }
     }
+}
+
+#[test]
+fn archived_group_paints_below_done_with_its_count_and_no_header_when_empty() {
+    let mut domain = DomainState::new();
+    let project = TaskScope::Project {
+        path: "/repos/tsk".into(),
+    };
+    domain
+        .create(
+            "done row task",
+            None,
+            project.clone(),
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create done task");
+    let done_id = domain.tasks()[0].id;
+    domain.complete(done_id).expect("complete it");
+    let a = domain
+        .create(
+            "archived alpha",
+            None,
+            project.clone(),
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create a");
+    let b = domain
+        .create(
+            "archived beta",
+            None,
+            project,
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create b");
+    domain.archive_task(a).expect("archive a");
+    domain.archive_task(b).expect("archive b");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/tsk")));
+    apply_intent(&mut domain, &mut model, BoardIntent::ToggleDoneDrawer, None).expect("drawer");
+
+    let rows = board_rows(&model, 80, 24);
+    let done_row = rows
+        .iter()
+        .position(|row| row.contains("DONE"))
+        .expect("DONE header paints with the drawer open");
+    let archived_row = rows
+        .iter()
+        .position(|row| row.contains("archived") && row.contains('2'))
+        .expect("an `archived 2` header row must paint below DONE");
+    assert!(
+        archived_row > done_row,
+        "the archived group paints below DONE"
+    );
+    assert!(
+        !rows.iter().any(|row| row.contains("archived alpha")),
+        "collapsed: archived titles stay hidden:\n{}",
+        rows.join("\n")
+    );
+    assert!(!rows.iter().any(|row| row.contains("archived beta")));
+
+    // Zero archived: no archived header row at all.
+    domain.unarchive_task(a).expect("unarchive a");
+    domain.unarchive_task(b).expect("unarchive b");
+    model.sync_from_domain(&domain);
+    let rows = board_rows(&model, 80, 24);
+    assert!(
+        !rows.iter().any(|row| row.contains("archived")),
+        "no archived group with zero archived tasks:\n{}",
+        rows.join("\n")
+    );
+}
+
+#[test]
+fn expanded_archived_rows_are_dim_keep_glyph_and_identifier_and_are_selectable_and_hit_testable() {
+    use tsk_tui::ui::board::board_hit_map;
+    use tsk_tui::ui::render::QueueHitTarget;
+
+    let mut domain = DomainState::new();
+    domain
+        .create(
+            "live open task",
+            None,
+            TaskScope::Global,
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create live task");
+    let archived_id = domain
+        .create(
+            "archived deep work",
+            None,
+            TaskScope::Global,
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create archived task");
+    domain.archive_task(archived_id).expect("archive it");
+    // Numbers are assigned at the persistence boundary: round-trip through a store so
+    // the archived row carries its `T<n>` like a real session's rows do.
+    let dir = std::env::temp_dir().join(format!("tsk-render-archived-{}", Uuid::new_v4()));
+    let store = tsk_tui::store::TaskStore::new(&dir);
+    store.save(&domain).expect("save for numbers");
+    domain = store.load().expect("reload with numbers");
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(domain
+        .get(archived_id)
+        .and_then(|task| task.number)
+        .is_some());
+    let mut model = BoardModel::from_domain(&domain, None);
+    apply_intent(&mut domain, &mut model, BoardIntent::ToggleDoneDrawer, None).expect("drawer");
+    // The toggle intent selects the header row and expands the group.
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ToggleArchivedGroup,
+        None,
+    )
+    .expect("expand archived group");
+
+    // Paint BEFORE selecting the row: unselected archived rows are all-dim.
+    let backend = TestBackend::new(80, 24);
+    let mut terminal = Terminal::new(backend).expect("terminal");
+    terminal
+        .draw(|frame| {
+            let _ = draw_board(frame, &model);
+        })
+        .expect("draw board");
+    let buffer = terminal.backend().buffer();
+    assert_buffer_mono(buffer);
+    let row_y = (0..24)
+        .map(|y| {
+            let row: String = (0..80).map(|x| buffer[(x, y)].symbol()).collect();
+            (y, row)
+        })
+        .find(|(_, row)| row.contains("archived deep work"))
+        .expect("expanded archived row paints")
+        .0;
+    let row_text: String = (0..80).map(|x| buffer[(x, row_y)].symbol()).collect();
+    assert!(
+        row_text.contains("T2"),
+        "identifier prefix paints: {row_text}"
+    );
+    assert!(row_text.contains('○'), "status glyph is kept: {row_text}");
+    for x in 0..80 {
+        let symbol = buffer[(x, row_y)].symbol();
+        if symbol == " " {
+            continue;
+        }
+        assert!(
+            buffer[(x, row_y)]
+                .style()
+                .add_modifier
+                .contains(Modifier::DIM),
+            "every cell of the archived row is dim (cell {x}): {row_text}"
+        );
+    }
+
+    // Selectable: SelectNext from the header lands on the archived row.
+    apply_intent(&mut domain, &mut model, BoardIntent::SelectNext, None).expect("select next");
+    assert_eq!(
+        model.selected_id(),
+        Some(archived_id),
+        "SelectNext must land on the archived row"
+    );
+
+    // Hit-testable: the painted row carries the task's hit target.
+    let hits = board_hit_map(ratatui::layout::Rect::new(0, 0, 80, 24), &model);
+    assert!(
+        hits.regions
+            .iter()
+            .any(|hit| matches!(hit.target, QueueHitTarget::Task(t) if t == archived_id)),
+        "the archived row is hit-testable: {hits:?}"
+    );
 }

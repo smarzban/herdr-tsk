@@ -110,6 +110,8 @@ pub struct TaskRowPaint<'a> {
     pub selected: bool,
     /// Bold the title when unselected (e.g. attention emphasis).
     pub title_bold: bool,
+    /// Dim every span (the archived group's rows). Glyph and identifier are kept.
+    pub dim: bool,
 }
 
 /// One painted task-row line plus the title-content cells a text selection may copy.
@@ -168,6 +170,8 @@ pub fn paint_task_row_lines(
     let indent = " ".repeat(title_x);
     let continuation_style = if row.selected {
         style_reverse()
+    } else if row.dim {
+        style_dim()
     } else if row.title_bold {
         style_bold()
     } else {
@@ -247,6 +251,8 @@ fn paint_task_row_with_indent(
             style_reverse_dim(),
             style_reverse_dim(),
         )
+    } else if row.dim {
+        (style_dim(), style_dim(), style_dim(), style_dim())
     } else {
         (
             if row.title_bold {
@@ -554,6 +560,10 @@ pub struct QueueFrameModel<'a> {
     pub list_scroll: usize,
     /// Nudge `list_scroll` so the selection (or its peek) stays on screen.
     pub follow_list: bool,
+    /// The archived group starts collapsed (session-only).
+    pub archived_collapsed: bool,
+    /// The archived header row holds the selection.
+    pub archived_header_selected: bool,
 }
 
 /// Logical control under a painted rectangle (rebuilt every frame).
@@ -573,6 +583,8 @@ pub enum QueueHitTarget {
     ///
     /// [`BoardIntent::ToggleDoneDrawer`]: crate::ui::input::BoardIntent::ToggleDoneDrawer
     Drawer,
+    /// The done drawer's archived group header: selects the row and toggles the group.
+    ArchivedHeader,
     /// One painted row of the open palette, indexed exactly as
     /// `BoardModel::visible_commands()` orders them, so a click resolves straight to that
     /// command's own intent ( residual: mapped through the model's command list, never
@@ -3007,6 +3019,11 @@ enum ListRow {
         subgroup_idx: usize,
         line: Line<'static>,
     },
+    /// The done drawer's archived group header (sticky, selectable, hits map to the
+    /// toggle intent). Selection styling is baked into the line.
+    ArchivedHeader {
+        line: Line<'static>,
+    },
     Hint(Line<'static>),
     /// Decorative scoped ON DECK thread-block label inside project focus.
     ThreadHeader(Line<'static>),
@@ -3037,6 +3054,7 @@ impl ListRow {
                 | ListRow::ProjectGroupHeader { .. }
                 | ListRow::ThreadGroupHeader { .. }
                 | ListRow::ThreadProjectHeader { .. }
+                | ListRow::ArchivedHeader { .. }
                 | ListRow::ThreadHeader(_)
         )
     }
@@ -3115,6 +3133,15 @@ fn paint_list_row(
                         section_idx: *section_idx,
                         subgroup_idx: *subgroup_idx,
                     },
+                    Rect::new(0, y, content_width, 1),
+                );
+            }
+        }
+        ListRow::ArchivedHeader { line } => {
+            put_line(frame, surface, y, content_width, line.clone());
+            if base_list_interactive {
+                hits.push(
+                    QueueHitTarget::ArchivedHeader,
                     Rect::new(0, y, content_width, 1),
                 );
             }
@@ -3244,7 +3271,8 @@ fn build_list_rows(
                      selected_idx: &mut Option<usize>,
                      anchor_last_idx: &mut Option<usize>,
                      in_project_section: bool,
-                     indented_under_thread: bool| {
+                     indented_under_thread: bool,
+                     dim: bool| {
         let Some(task) = model.tasks.iter().find(|task| task.id == id) else {
             // Stale ids may outlive a snapshot refresh. Skip them without inventing a row.
             return;
@@ -3272,6 +3300,7 @@ fn build_list_rows(
                     meta: &meta,
                     selected,
                     title_bold: false,
+                    dim,
                 },
                 geo,
                 usize::from(indented_under_thread) * 2,
@@ -3307,8 +3336,37 @@ fn build_list_rows(
     };
 
     for (section_idx, section) in model.view.sections.iter().enumerate() {
-        // The rail drops the done drawer: it is a navigation strip for open work.
-        if rail && section.kind == SectionKind::Done {
+        // The rail drops the done drawer and its archived group: it is a navigation
+        // strip for open work.
+        if rail && matches!(section.kind, SectionKind::Done | SectionKind::Archived) {
+            continue;
+        }
+        // The archived group paints its own selectable header, dim rows under it.
+        if section.kind == SectionKind::Archived {
+            out.push(ListRow::Blank);
+            out.push(ListRow::ArchivedHeader {
+                line: paint_archived_header(
+                    section.count,
+                    geo.row_width,
+                    model.archived_header_selected,
+                    model.archived_collapsed,
+                ),
+            });
+            out.push(ListRow::Blank);
+            if model.archived_collapsed {
+                continue;
+            }
+            for id in section.task_ids.iter().copied() {
+                push_task(
+                    id,
+                    &mut out,
+                    &mut selected_idx,
+                    &mut anchor_last_idx,
+                    false,
+                    false,
+                    true,
+                );
+            }
             continue;
         }
         if !matches!(out.last(), Some(&ListRow::Blank)) {
@@ -3338,6 +3396,7 @@ fn build_list_rows(
                     &mut selected_idx,
                     &mut anchor_last_idx,
                     true,
+                    false,
                     false,
                 );
             }
@@ -3386,6 +3445,7 @@ fn build_list_rows(
                         &mut anchor_last_idx,
                         true,
                         true,
+                        false,
                     );
                 }
                 out.push(ListRow::Blank);
@@ -3420,6 +3480,7 @@ fn build_list_rows(
                         &mut anchor_last_idx,
                         in_project_section,
                         true,
+                        false,
                     );
                 }
                 out.push(ListRow::Blank);
@@ -3432,6 +3493,7 @@ fn build_list_rows(
                     &mut anchor_last_idx,
                     in_project_section,
                     false,
+                    false,
                 );
             }
         } else {
@@ -3442,6 +3504,7 @@ fn build_list_rows(
                     &mut selected_idx,
                     &mut anchor_last_idx,
                     in_project_section,
+                    false,
                     false,
                 );
             }
@@ -3604,6 +3667,42 @@ fn paint_collapsible_header(chevron: &str, title: &str, count: usize, width: u16
     )
 }
 
+/// The archived group's header: ` ▸ archived ─── n `. Every span is dim; the row
+/// selected paints reverse. Unlike the section headers it is a control, so it has a
+/// chevron and no bold.
+fn paint_archived_header(
+    count: usize,
+    width: u16,
+    selected: bool,
+    collapsed: bool,
+) -> Line<'static> {
+    let style = if selected {
+        style_reverse()
+    } else {
+        style_dim()
+    };
+    let chevron = if collapsed { "▸" } else { "▾" };
+    let left = present_line(&format!(" {chevron} archived "), width as usize);
+    let right_budget = (width as usize).saturating_sub(display_width(&left));
+    let right = if right_budget == 0 {
+        String::new()
+    } else {
+        present_line(&format!("{} ", count), right_budget)
+    };
+    let rule_w = (width as usize)
+        .saturating_sub(display_width(&left))
+        .saturating_sub(display_width(&right));
+    let rule = "─".repeat(rule_w);
+    bound_line(
+        Line::from(vec![
+            Span::styled(left, style),
+            Span::styled(rule, style),
+            Span::styled(right, style),
+        ]),
+        width as usize,
+    )
+}
+
 fn paint_section_header(
     section: &QueueSection,
     width: u16,
@@ -3636,6 +3735,7 @@ fn section_title(section: &QueueSection, at_home: bool, home_tab: BoardTab) -> S
     match section.kind {
         SectionKind::InMotion => "IN MOTION".to_string(),
         SectionKind::Done => "DONE".to_string(),
+        SectionKind::Archived => "archived".to_string(),
         SectionKind::OnDeck
             if at_home && home_tab == BoardTab::Desk && section.project_label.is_none() =>
         {
@@ -4212,6 +4312,8 @@ mod tests {
                 meta: long_meta,
                 selected: false,
                 title_bold: false,
+
+                dim: false,
             },
             &geo,
         );
@@ -4258,6 +4360,8 @@ mod tests {
                 meta: "1h",
                 selected: false,
                 title_bold: false,
+
+                dim: false,
             },
             &geo,
         );
@@ -4274,6 +4378,8 @@ mod tests {
                 meta: long_meta,
                 selected: false,
                 title_bold: false,
+
+                dim: false,
             },
             &geo,
         );
@@ -4321,6 +4427,8 @@ mod tests {
                                 meta,
                                 selected,
                                 title_bold: selected,
+
+                                dim: false,
                             },
                             &geo,
                         );
@@ -4370,6 +4478,8 @@ mod tests {
                 meta: "1m",
                 selected: false,
                 title_bold: false,
+
+                dim: false,
             },
             &geo,
         );
@@ -4389,6 +4499,8 @@ mod tests {
                 meta: "1m",
                 selected: true,
                 title_bold: false,
+
+                dim: false,
             },
             &geo,
         );
@@ -4437,6 +4549,8 @@ mod tests {
                 meta: "1h",
                 selected: false,
                 title_bold: false,
+
+                dim: false,
             },
             TaskRowPaint {
                 glyph: "▲",
@@ -4445,6 +4559,8 @@ mod tests {
                 meta: "tsk · 2m",
                 selected: false,
                 title_bold: true,
+
+                dim: false,
             },
             TaskRowPaint {
                 glyph: "◓",
@@ -4453,6 +4569,8 @@ mod tests {
                 meta: "3d",
                 selected: true,
                 title_bold: false,
+
+                dim: false,
             },
         ];
 

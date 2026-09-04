@@ -24,7 +24,13 @@ pub enum SectionKind {
     InMotion,
     OnDeck,
     Done,
+    /// The done drawer's archived group (header + dim rows, collapsible).
+    Archived,
 }
+
+/// Row id the archived group's header occupies in `visible_task_ids`.
+/// Chrome, not a task: `BoardModel::selected_id()` hides it from verbs.
+pub const ARCHIVED_HEADER_ROW_ID: Uuid = Uuid::from_u128(0xFFFF_FFFF_FFFF_FFFF_0000_0000_0000_0001);
 
 /// Session filter for project focus (today's scoped project board).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -138,6 +144,14 @@ fn is_live(task: &Task, archived_projects: &BTreeSet<String>) -> bool {
     }
 }
 
+/// Whether an archived project owns the task's scope (its own flag is irrelevant here).
+fn task_owned_by_archived_project(task: &Task, archived_projects: &BTreeSet<String>) -> bool {
+    match &task.scope {
+        TaskScope::Global => false,
+        TaskScope::Project { path } => archived_projects.contains(path),
+    }
+}
+
 /// Task ids visible for selection, honoring home-tab collapse state.
 pub fn visible_task_ids(
     view: &QueueView,
@@ -145,9 +159,19 @@ pub fn visible_task_ids(
     collapsed_projects: &HashSet<String>,
     collapsed_threads: &HashSet<String>,
     collapsed_thread_projects: &HashSet<ThreadProjectCollapseKey>,
+    archived_collapsed: bool,
 ) -> Vec<Uuid> {
     let mut out = Vec::new();
     for section in &view.sections {
+        if section.kind == SectionKind::Archived {
+            // The archived header is always selectable so Enter can toggle it;
+            // its rows paint only when the group is expanded.
+            out.push(ARCHIVED_HEADER_ROW_ID);
+            if !archived_collapsed {
+                out.extend(section.task_ids.iter().copied());
+            }
+            continue;
+        }
         match lens {
             BoardLens::Home(BoardTab::Projects) => {
                 let Some(path) = section.project_label.as_deref() else {
@@ -210,6 +234,10 @@ fn query_home_desk(
         .iter()
         .filter(|task| is_live(task, archived_projects))
         .collect();
+    let archived_pool: Vec<&Task> = tasks
+        .iter()
+        .filter(|task| !task_owned_by_archived_project(task, archived_projects))
+        .collect();
 
     let mut motion: Vec<&Task> = live
         .iter()
@@ -237,6 +265,7 @@ fn query_home_desk(
     sections.push(deck_section(None, &desk));
 
     append_done(&mut sections, &live, drawer_open);
+    append_archived(&mut sections, &archived_pool, drawer_open);
 
     QueueView {
         sections,
@@ -254,6 +283,10 @@ fn query_home_projects(
         .iter()
         .filter(|task| is_live(task, archived_projects))
         .collect();
+    let archived_pool: Vec<&Task> = tasks
+        .iter()
+        .filter(|task| !task_owned_by_archived_project(task, archived_projects))
+        .collect();
     let project_paths = open_project_paths(&live, current_repo);
 
     let mut sections = Vec::new();
@@ -270,6 +303,7 @@ fn query_home_projects(
     }
 
     append_done(&mut sections, &live, drawer_open);
+    append_archived(&mut sections, &archived_pool, drawer_open);
 
     QueueView {
         sections,
@@ -285,6 +319,10 @@ fn query_home_threads(
     let live: Vec<&Task> = tasks
         .iter()
         .filter(|task| is_live(task, archived_projects))
+        .collect();
+    let archived_pool: Vec<&Task> = tasks
+        .iter()
+        .filter(|task| !task_owned_by_archived_project(task, archived_projects))
         .collect();
 
     let mut by_thread: BTreeMap<String, Vec<&Task>> = BTreeMap::new();
@@ -319,6 +357,7 @@ fn query_home_threads(
     }
 
     append_done(&mut sections, &live, drawer_open);
+    append_archived(&mut sections, &archived_pool, drawer_open);
 
     QueueView {
         sections,
@@ -369,6 +408,12 @@ fn query_project_focus(
     }
     sections.push(deck_section(Some(label), &open));
     append_done(&mut sections, &live, drawer_open);
+    let in_scope: Vec<&Task> = tasks
+        .iter()
+        .filter(|task| task_matches_scope(task, scope))
+        .filter(|task| !task_owned_by_archived_project(task, archived_projects))
+        .collect();
+    append_archived(&mut sections, &in_scope, drawer_open);
 
     QueueView {
         sections,
@@ -468,6 +513,24 @@ fn append_done(sections: &mut Vec<QueueSection>, live: &[&Task], drawer_open: bo
     sort_by_updated_desc(&mut done);
     if !done.is_empty() {
         sections.push(section_from(SectionKind::Done, None, None, &done));
+    }
+}
+
+/// The done drawer's archived group: individually archived tasks the drawer's scope
+/// would otherwise show (not soft-deleted, not owned by an archived project), newest
+/// first. Paints only while the drawer is open, and only when non-empty.
+fn append_archived(sections: &mut Vec<QueueSection>, in_scope: &[&Task], drawer_open: bool) {
+    if !drawer_open {
+        return;
+    }
+    let mut archived: Vec<&Task> = in_scope
+        .iter()
+        .copied()
+        .filter(|task| task.archived && !task.soft_deleted)
+        .collect();
+    sort_by_updated_desc(&mut archived);
+    if !archived.is_empty() {
+        sections.push(section_from(SectionKind::Archived, None, None, &archived));
     }
 }
 
@@ -670,6 +733,50 @@ mod tests {
             .iter()
             .flat_map(|s| s.task_ids.iter().copied())
             .collect()
+    }
+
+    #[test]
+    fn archived_group_follows_the_drawer_scope() {
+        let mut gone = BTreeSet::new();
+        gone.insert("/repos/gone".to_string());
+        let mut tasks = vec![
+            task(1, HumanStatus::Done, project("/repos/a"), false, 10),
+            task(2, HumanStatus::Done, TaskScope::Global, false, 20),
+            task(3, HumanStatus::Done, project("/repos/gone"), false, 30),
+        ];
+        for task in &mut tasks {
+            task.archived = true;
+        }
+
+        // Home drawer: every scope's archived tasks, newest first. A task whose
+        // project is archived stays hidden (task 3).
+        let home = query_board(&tasks, &gone, None, BoardLens::Home(BoardTab::Desk), true);
+        let group = home
+            .sections
+            .iter()
+            .find(|s| s.kind == SectionKind::Archived)
+            .expect("archived group at home");
+        assert_eq!(
+            ids(group),
+            vec![Uuid::from_u128(2), Uuid::from_u128(1)],
+            "newest first, archived project's task excluded"
+        );
+        assert_eq!(group.count, 2);
+
+        // Project focus: only that project's archived tasks.
+        let focus = query_board(
+            &tasks,
+            &gone,
+            None,
+            BoardLens::Project(Path::new("/repos/a")),
+            true,
+        );
+        let group = focus
+            .sections
+            .iter()
+            .find(|s| s.kind == SectionKind::Archived)
+            .expect("archived group in project focus");
+        assert_eq!(ids(group), vec![Uuid::from_u128(1)]);
     }
 
     #[test]
@@ -992,6 +1099,7 @@ mod tests {
             &collapsed_projects,
             &HashSet::new(),
             &HashSet::new(),
+            false,
         );
         assert_eq!(visible, vec![Uuid::from_u128(2)]);
 
@@ -1004,6 +1112,7 @@ mod tests {
             &HashSet::new(),
             &collapsed_threads,
             &HashSet::new(),
+            false,
         );
         assert!(visible_threads.is_empty());
     }
@@ -1033,6 +1142,7 @@ mod tests {
             &HashSet::new(),
             &HashSet::new(),
             &HashSet::new(),
+            false,
         );
         assert_eq!(
             visible,

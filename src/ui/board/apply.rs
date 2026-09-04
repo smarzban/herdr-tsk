@@ -11,7 +11,7 @@ use crate::ui::capture::{CaptureField, TITLE_REQUIRED_MESSAGE};
 use crate::ui::edit::{flatten_line_breaks, EditBuffer};
 use crate::ui::input::BoardIntent;
 use crate::ui::mouse::BoardPopup;
-use crate::ui::queue::ThreadProjectCollapseKey;
+use crate::ui::queue::{ThreadProjectCollapseKey, ARCHIVED_HEADER_ROW_ID};
 use crate::ui::tier::{FocusedSurface, WideStage};
 
 use super::commands::{resolve_board_command, CommandSurface};
@@ -1156,6 +1156,14 @@ fn apply_board_intent(
             return Ok(IntentOutcome::None);
         }
         BoardIntent::OpenTaskPage => {
+            // Enter on the archived header toggles the group instead of opening a page:
+            // the header is chrome, never a task.
+            if model.archived_header_selected() {
+                let previous_visible = model.visible_ids();
+                model.toggle_archived_collapsed();
+                model.reanchor_selection(Some(ARCHIVED_HEADER_ROW_ID), &previous_visible);
+                return Ok(IntentOutcome::None);
+            }
             // Enter never opens inline step editing. A selected step remains selected in either
             // page state; Ctrl+E is the deliberate route into its editor.
             if selected_step(domain, model).is_some() {
@@ -1373,6 +1381,15 @@ fn apply_board_intent(
             let previous = model.selection_id;
             model.drawer_open = !model.drawer_open;
             model.reanchor_selection(previous, &previous_visible);
+            return Ok(IntentOutcome::None);
+        }
+        BoardIntent::ToggleArchivedGroup => {
+            // Select the header row, then flip the group. The header stays in the
+            // visible set collapsed or expanded, so reanchoring keeps it selected.
+            let previous_visible = model.visible_ids();
+            model.select_archived_header();
+            model.toggle_archived_collapsed();
+            model.reanchor_selection(Some(ARCHIVED_HEADER_ROW_ID), &previous_visible);
             return Ok(IntentOutcome::None);
         }
         BoardIntent::OpenHelp => {
