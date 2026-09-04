@@ -44,6 +44,9 @@ pub enum DeckScope<'a> {
 pub enum BoardLens<'a> {
     Home(BoardTab),
     Project(&'a Path),
+    /// Read-only focus on an archived project (AC-41): the same shape as `Project`, but
+    /// the project's archived state does not hide its tasks.
+    ArchivedProject(&'a Path),
 }
 
 /// Ordered open tasks sharing a normalized thread name in a scoped ON DECK section.
@@ -128,6 +131,11 @@ pub fn query_board(
         }
         BoardLens::Project(path) => {
             query_project_focus(tasks, archived_projects, path, drawer_open)
+        }
+        // AC-41/AC-45: the read-only focus is the only lens that paints an archived
+        // project's tasks. It is the project focus computed as if the project were live.
+        BoardLens::ArchivedProject(path) => {
+            query_project_focus(tasks, &BTreeSet::new(), path, drawer_open)
         }
     }
 }

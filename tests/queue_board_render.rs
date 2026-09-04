@@ -344,6 +344,7 @@ fn fixture_model_on_tab<'a>(
         follow_list: true,
         archived_collapsed: true,
         archived_header_selected: false,
+        rows_dim: false,
     }
 }
 
@@ -4248,5 +4249,55 @@ fn picker_paints_a_dim_rule_under_its_tabs() {
             .add_modifier
             .contains(ratatui::style::Modifier::DIM),
         "the rule is dim: {rule_row:?}"
+    );
+}
+
+#[test]
+fn archived_tab_verb_bar_advertises_ctrl_u_enter_esc() {
+    let mut domain = DomainState::new();
+    domain
+        .create(
+            "filed task",
+            None,
+            TaskScope::Project {
+                path: "/repos/filed".into(),
+            },
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create");
+    domain.archive_project("/repos/filed").expect("archive");
+    let mut model = BoardModel::from_domain(&domain, None);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenProjectSelector,
+        None,
+    )
+    .expect("picker");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ProjectPickerSwitchTab,
+        None,
+    )
+    .expect("archived tab");
+
+    let backend = TestBackend::new(80, 24);
+    let mut terminal = Terminal::new(backend).expect("terminal");
+    terminal
+        .draw(|frame| {
+            let _ = draw_board(frame, &model);
+        })
+        .expect("draw");
+    let buffer = terminal.backend().buffer();
+    assert_buffer_mono(buffer);
+    let frame: String = (0..24)
+        .map(|y| (0..80).map(|x| buffer[(x, y)].symbol()).collect::<String>())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        frame.contains("ctrl+u unarchive \u{b7} enter open \u{b7} esc close"),
+        "the archived tab's footer reads its own verbs:\n{frame}"
     );
 }

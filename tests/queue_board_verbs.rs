@@ -3747,8 +3747,15 @@ fn ctrl_g_toggles_the_archived_group_from_any_selection_and_opens_the_drawer_whe
         "the group expanded"
     );
 
-    // Header selected after the keyboard toggle.
+    // Header selected after the keyboard toggle, and the verb bar advertises the chord
+    // while the drawer is open and the group has rows (AC-38).
     assert!(model.archived_header_selected());
+    let bar = board_verb_items(&model);
+    let entry = bar
+        .iter()
+        .find(|entry| entry.key == "g")
+        .expect("the verb bar carries the ctrl+g entry");
+    assert_eq!(entry.label, "collapse", "expanded group offers collapse");
 
     // From a task row with the drawer open: ctrl+g collapses, again expands.
     let idx = model
@@ -3768,6 +3775,12 @@ fn ctrl_g_toggles_the_archived_group_from_any_selection_and_opens_the_drawer_whe
     assert!(
         !model.visible_ids().contains(&archived),
         "ctrl+g collapsed the group from a task row"
+    );
+    let bar = board_verb_items(&model);
+    assert_eq!(
+        bar.iter().find(|entry| entry.key == "g").map(|e| e.label),
+        Some("expand"),
+        "collapsed group offers expand"
     );
     apply_intent(
         &mut domain,
@@ -3793,4 +3806,291 @@ fn ctrl_g_toggles_the_archived_group_from_any_selection_and_opens_the_drawer_whe
         !model.visible_ids().contains(&archived),
         "enter on the header collapses the group"
     );
+}
+
+/// A board focused (read-only) on an archived project holding one Ready task.
+fn read_only_focus() -> (DomainState, BoardModel, uuid::Uuid) {
+    let mut domain = DomainState::new();
+    let inside = domain
+        .create(
+            "filed away task",
+            None,
+            project(THIS_REPO),
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create inside");
+    domain
+        .create(
+            "desk task",
+            None,
+            TaskScope::Global,
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create desk");
+    domain.archive_project(THIS_REPO).expect("archive project");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenProjectSelector,
+        None,
+    )
+    .expect("open picker");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ProjectPickerSwitchTab,
+        None,
+    )
+    .expect("archived tab");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ConfirmProjectChoice,
+        None,
+    )
+    .expect("enter opens read-only focus");
+    (domain, model, inside)
+}
+
+#[test]
+fn enter_on_the_archived_tab_opens_a_read_only_focus_that_persists_nothing() {
+    let mut domain = DomainState::new();
+    let inside = domain
+        .create(
+            "filed away task",
+            None,
+            project(THIS_REPO),
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create inside");
+    domain
+        .create(
+            "second filed task",
+            None,
+            project(THIS_REPO),
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create second");
+    domain.archive_project(THIS_REPO).expect("archive project");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
+    assert!(
+        !model.visible_ids().contains(&inside),
+        "no working lens paints an archived project's tasks"
+    );
+
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenProjectSelector,
+        None,
+    )
+    .expect("open picker");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ProjectPickerSwitchTab,
+        None,
+    )
+    .expect("archived tab");
+    let outcome = apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ConfirmProjectChoice,
+        None,
+    )
+    .expect("enter opens the focus");
+    assert_eq!(
+        outcome,
+        IntentOutcome::None,
+        "entering a read-only focus persists nothing"
+    );
+    assert!(
+        domain.is_project_archived(THIS_REPO),
+        "the project is still archived"
+    );
+    assert_eq!(model.input_mode(), BoardInputMode::Normal, "picker closed");
+    assert!(model.focus_is_archived(), "the focus is the read-only one");
+    assert!(
+        model.visible_ids().contains(&inside),
+        "the archived project's tasks paint in this focus"
+    );
+
+    // The chip says so, and the rows paint dim.
+    let frame = rendered_board(&model, 80, 24);
+    assert!(
+        frame.contains("app \u{b7} archived"),
+        "the chip reads `<name> · archived`:\n{frame}"
+    );
+    assert!(
+        frame.contains("ctrl+u unarchive \u{b7} enter open \u{b7} esc back"),
+        "the focus verb bar offers only what works here:\n{frame}"
+    );
+    let backend = TestBackend::new(80, 24);
+    let mut terminal = Terminal::new(backend).expect("terminal");
+    terminal
+        .draw(|frame| {
+            let _ = draw_board(frame, &model);
+        })
+        .expect("draw");
+    let buffer = terminal.backend().buffer().clone();
+    let selected = model.selected_id();
+    let unselected_title = if selected == Some(inside) {
+        "second filed task"
+    } else {
+        "filed away task"
+    };
+    let row_y = (0..24u16)
+        .find(|y| {
+            (0..80u16)
+                .map(|x| buffer[(x, *y)].symbol())
+                .collect::<String>()
+                .contains(unselected_title)
+        })
+        .expect("the task row paints");
+    let row: String = (0..80u16).map(|x| buffer[(x, row_y)].symbol()).collect();
+    let title_x = row.find(unselected_title).expect("title on the row") as u16;
+    for x in title_x..title_x + 5 {
+        assert!(
+            buffer[(x, row_y)]
+                .style()
+                .add_modifier
+                .contains(ratatui::style::Modifier::DIM),
+            "the archived project's task titles paint dim (cell {x}): {row:?}"
+        );
+    }
+}
+
+#[test]
+fn every_mutating_verb_in_read_only_focus_refuses_with_the_archived_message() {
+    let refusal = "project app is archived \u{b7} ctrl+u unarchive";
+    let chords = [
+        BoardIntent::PrimaryVerb,
+        BoardIntent::Complete,
+        BoardIntent::Reopen,
+        BoardIntent::ToggleBlock,
+        BoardIntent::BeginEditTitle,
+        BoardIntent::BeginEditNotes,
+        BoardIntent::SoftDelete,
+        BoardIntent::File,
+        BoardIntent::OpenCapture,
+    ];
+    for intent in chords {
+        let (mut domain, mut model, inside) = read_only_focus();
+        let before = domain
+            .tasks()
+            .iter()
+            .find(|task| task.id == inside)
+            .cloned()
+            .expect("task before");
+        let outcome = apply_intent(&mut domain, &mut model, intent.clone(), None)
+            .unwrap_or_else(|error| panic!("{intent:?} applies: {error}"));
+        assert_eq!(
+            outcome,
+            IntentOutcome::None,
+            "{intent:?} changes nothing durable"
+        );
+        assert_eq!(
+            model.message(),
+            Some(refusal),
+            "{intent:?} refuses with the archived message"
+        );
+        assert_eq!(
+            model.input_mode(),
+            BoardInputMode::Normal,
+            "{intent:?} opens no surface"
+        );
+        let after = domain
+            .tasks()
+            .iter()
+            .find(|task| task.id == inside)
+            .cloned()
+            .expect("task after");
+        assert_eq!(after.status, before.status, "{intent:?} changed the status");
+        assert_eq!(
+            after.soft_deleted, before.soft_deleted,
+            "{intent:?} deleted the task"
+        );
+        assert_eq!(after.archived, before.archived, "{intent:?} archived it");
+        assert!(
+            model.focus_is_archived(),
+            "{intent:?} left the read-only focus"
+        );
+    }
+}
+
+#[test]
+fn ctrl_u_in_read_only_focus_unarchives_in_place() {
+    let (mut domain, mut model, inside) = read_only_focus();
+    assert!(domain.is_project_archived(THIS_REPO));
+
+    let outcome = apply_intent(&mut domain, &mut model, BoardIntent::Undo, None)
+        .expect("ctrl+u unarchives in place");
+    assert_eq!(outcome, IntentOutcome::Persist, "the unarchive is durable");
+    assert!(
+        !domain.is_project_archived(THIS_REPO),
+        "the project is live again"
+    );
+    assert!(
+        !model.focus_is_archived(),
+        "the focus became a normal project focus"
+    );
+    assert_eq!(
+        model.selected_project(),
+        Some(Path::new(THIS_REPO)),
+        "on the same project"
+    );
+    assert!(
+        model.visible_ids().contains(&inside),
+        "its tasks stay on the board"
+    );
+
+    let frame = rendered_board(&model, 80, 24);
+    assert!(
+        !frame.contains("app \u{b7} archived"),
+        "the chip drops the archived suffix:\n{frame}"
+    );
+
+    // Verbs work again.
+    let index = model
+        .visible_ids()
+        .iter()
+        .position(|&id| id == inside)
+        .expect("row");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::SelectIndex(index),
+        None,
+    )
+    .expect("select");
+    let outcome = apply_intent(&mut domain, &mut model, BoardIntent::Complete, None)
+        .expect("ctrl+d works again");
+    assert_eq!(outcome, IntentOutcome::Persist);
+}
+
+#[test]
+fn leaving_read_only_focus_hides_the_archived_projects_tasks_again() {
+    for leave in [
+        BoardIntent::CancelEdit,
+        BoardIntent::SelectHomeTab(BoardTab::Desk),
+        BoardIntent::SelectHomeTab(BoardTab::Projects),
+    ] {
+        let (mut domain, mut model, inside) = read_only_focus();
+        assert!(model.visible_ids().contains(&inside));
+        apply_intent(&mut domain, &mut model, leave.clone(), None)
+            .unwrap_or_else(|error| panic!("{leave:?} applies: {error}"));
+        assert!(
+            !model.focus_is_archived(),
+            "{leave:?} leaves the read-only focus"
+        );
+        assert!(
+            !model.visible_ids().contains(&inside),
+            "{leave:?} hides the archived project's tasks again"
+        );
+    }
 }

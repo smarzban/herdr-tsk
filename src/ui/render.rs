@@ -568,6 +568,8 @@ pub struct QueueFrameModel<'a> {
     pub archived_collapsed: bool,
     /// The archived header row holds the selection.
     pub archived_header_selected: bool,
+    /// Every task row paints dim: the read-only archived focus (AC-41).
+    pub rows_dim: bool,
 }
 
 /// The project picker's tab row: which list is active and how many entries the
@@ -2015,6 +2017,23 @@ const PALETTE_FOOTER: &[VerbEntry<'static>] = &[
 ];
 
 /// Legend footer for the project-scope card.
+/// AC-40: the picker's archived tab has its own verbs. `ctrl+f` still unarchives, it is
+/// simply not advertised beside the chord that reads as the undo of filing.
+const ARCHIVED_TAB_FOOTER: &[VerbEntry<'static>] = &[
+    VerbEntry {
+        key: "ctrl+u",
+        label: "unarchive",
+    },
+    VerbEntry {
+        key: "enter",
+        label: "open",
+    },
+    VerbEntry {
+        key: "esc",
+        label: "close",
+    },
+];
+
 const SCOPE_FOOTER: &[VerbEntry<'static>] = &[
     VerbEntry {
         key: "↑/↓",
@@ -3085,7 +3104,11 @@ fn paint_scope_dropdown(
         ModalCardSpec {
             title: &title,
             content_rows: (rows + tabs_rows + usize::from(tabs.is_some())) as u16,
-            legend: SCOPE_FOOTER,
+            legend: if tabs.is_some_and(|tabs| tabs.archived_active) {
+                ARCHIVED_TAB_FOOTER
+            } else {
+                SCOPE_FOOTER
+            },
             dismiss: None,
             legend_hits: None,
         },
@@ -3476,7 +3499,8 @@ fn build_list_rows(
                     meta: &meta,
                     selected,
                     title_bold: false,
-                    dim,
+                    // AC-41: every row of a read-only archived focus paints dim.
+                    dim: dim || model.rows_dim,
                 },
                 geo,
                 usize::from(indented_under_thread) * 2,

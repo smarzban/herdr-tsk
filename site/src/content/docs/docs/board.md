@@ -41,11 +41,13 @@ One urgency-ordered list. Sections are computed, not navigated.
 
 An archived task keeps its human status and leaves every working lens (desk,
 projects, threads, project focus, and default `tsk list` views). The done
-drawer lists archived tasks in its scope under an `archived · n` group below
-DONE: closed on every launch, one click or `Enter` on the header toggles it, and
-expanded rows paint dim with their status glyph and `T<n>`. `ctrl+f` on a row
-files it, and `ctrl+f` or `ctrl+u` on an archived selection brings it back;
-neither writes an undo entry.
+drawer lists archived tasks in its scope under an `▾ archived · n` group below
+DONE: closed on every launch, one click, `Enter` on the header, or `ctrl+g` from
+any row toggles it, and expanded rows paint dim with their status glyph and
+`T<n>`. The header paints the word bold when it holds the selection, never a
+reverse block. With the drawer closed, `ctrl+g` opens the drawer and expands the
+group. `ctrl+f` on a row files it, and `ctrl+f` or `ctrl+u` on an archived
+selection brings it back; neither writes an undo entry.
 
 Thread headers on a scoped deck show `#name` and an open count. They take a list
 row of space. They are not selectable and clicks do not land on them.
@@ -132,15 +134,33 @@ archived project and reads `no archived projects` when empty. `ctrl+f` on a
 main-tab project archives it in place — the picker stays open and the project
 leaves the main list, the projects tab, threads, desk IN MOTION, and the rail.
 `ctrl+f` or `ctrl+u` on an archived-tab entry unarchives it, and every task
-returns in the status it had.
+returns in the status it had. A dim rule sits under the tabs row, and the
+archived tab's footer reads `ctrl+u unarchive · enter open · esc close`.
+
+## Read-only archived focus
+
+`Enter` on an archived-tab entry opens that project in read-only focus: the chip
+reads `<name> · archived`, its tasks paint dim, and nothing is written by
+entering. It is the only lens that paints an archived project's tasks; `Esc`,
+`P`, or `1`/`2`/`3` leave it and hide them again. Every mutating verb (`ctrl+s`,
+`ctrl+d`, `ctrl+o`, `ctrl+b`, `ctrl+e`, `ctrl+n`, `ctrl+x`, `ctrl+f`, `+`, and
+step toggles) refuses with `project <name> is archived · ctrl+u unarchive` and
+changes nothing; the task page opens view-only for the same reason. `ctrl+u`
+unarchives the project in place and the focus becomes an ordinary project
+focus.
+
+No scope dropdown offers an archived project: not the task page's scope footer,
+not an expanded quick-add draft, not the capture surface. A task already inside
+an archived project still shows that scope as its own value.
 
 ## Launch inside an archived project
 
 When the board starts with its quick-add default inside an archived project, a
-card reads `project <name> is archived` before the first keypress: `y`
-unarchives it durably, `n` or `Esc` keeps it archived and sends quick-add to
-your desk for this session (a dim status line says so). The card shows at most
-once per session, and launching anywhere else paints nothing.
+card asks `project <name> is archived, would you like to unarchive it?` before
+the first keypress, with `y unarchive · n keep archived` in its footer (both
+clickable): `y` unarchives it durably, `n` or `Esc` keeps it archived and sends
+quick-add to your desk for this session (a dim status line says so). The card
+shows at most once per session, and launching anywhere else paints nothing.
 
 ## Pane size
 

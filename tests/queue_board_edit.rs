@@ -1523,3 +1523,81 @@ fn task_page_scope_dropdown_omits_archived_projects_but_keeps_the_current_scope(
     );
     let _ = stranded;
 }
+
+#[test]
+fn task_page_in_read_only_focus_refuses_edit_mode() {
+    let mut domain = DomainState::new();
+    let inside = domain
+        .create(
+            "read-only page task",
+            None,
+            project(THIS_REPO),
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create");
+    domain.archive_project(THIS_REPO).expect("archive project");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenProjectSelector,
+        None,
+    )
+    .expect("picker");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ProjectPickerSwitchTab,
+        None,
+    )
+    .expect("archived tab");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ConfirmProjectChoice,
+        None,
+    )
+    .expect("read-only focus");
+    let index = model
+        .visible_ids()
+        .iter()
+        .position(|&id| id == inside)
+        .expect("row");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::SelectIndex(index),
+        None,
+    )
+    .expect("select");
+
+    // The page opens: it is view-only, not shut.
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("page opens");
+    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+
+    let refusal = "project app is archived \u{b7} ctrl+u unarchive";
+    for intent in [
+        BoardIntent::BeginEditTitle,
+        BoardIntent::BeginEditNotes,
+        BoardIntent::ExpandQuickAdd,
+        BoardIntent::BeginAddStep,
+    ] {
+        apply_intent(&mut domain, &mut model, intent.clone(), None)
+            .unwrap_or_else(|error| panic!("{intent:?} applies: {error}"));
+        assert_eq!(
+            model.input_mode(),
+            BoardInputMode::TaskPage,
+            "{intent:?} must not enter edit mode"
+        );
+        assert_eq!(
+            model.message(),
+            Some(refusal),
+            "{intent:?} paints the archived refusal"
+        );
+        assert!(
+            !model.task_session_dirty(),
+            "{intent:?} started no edit session"
+        );
+    }
+}

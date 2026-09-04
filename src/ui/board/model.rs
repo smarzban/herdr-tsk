@@ -135,8 +135,13 @@ pub enum ProjectScopeOption {
 /// Session-only board location: home tabs or one focused project.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum BoardLocation {
-    Home { tab: BoardTab },
+    Home {
+        tab: BoardTab,
+    },
     Project(PathBuf),
+    /// Read-only focus on an archived project, opened with Enter from the picker's
+    /// archived tab (AC-41). Session-only: leaving it hides those tasks again.
+    ArchivedProject(PathBuf),
 }
 
 impl BoardLocation {
@@ -144,6 +149,7 @@ impl BoardLocation {
         match self {
             Self::Home { tab } => BoardLens::Home(*tab),
             Self::Project(path) => BoardLens::Project(path.as_path()),
+            Self::ArchivedProject(path) => BoardLens::ArchivedProject(path.as_path()),
         }
     }
 
@@ -984,7 +990,9 @@ impl BoardModel {
             BoardLocation::Project(path) => self
                 .archived_projects
                 .contains(path.to_string_lossy().as_ref()),
-            BoardLocation::Home { .. } => false,
+            // A read-only focus is deliberately on an archived project (AC-41): it is
+            // not the accident this reset exists for.
+            BoardLocation::ArchivedProject(_) | BoardLocation::Home { .. } => false,
         };
         if focus_archived {
             let name = match &self.board_location {
@@ -1054,11 +1062,20 @@ impl BoardModel {
     pub fn home_tab(&self) -> BoardTab {
         match &self.board_location {
             BoardLocation::Home { tab } => *tab,
-            BoardLocation::Project(_) => BoardTab::Desk,
+            BoardLocation::Project(_) | BoardLocation::ArchivedProject(_) => BoardTab::Desk,
         }
     }
 
     pub(super) fn set_home_tab(&mut self, tab: BoardTab) {
+        // AC-45: `1`/`2`/`3` from the read-only archived focus go home, which hides that
+        // project's tasks again.
+        if self.focus_is_archived() {
+            let previous_visible = self.visible_ids();
+            self.board_location = BoardLocation::Home { tab };
+            self.reanchor_selection(None, &previous_visible);
+            self.seed_selection();
+            return;
+        }
         let BoardLocation::Home { tab: current } = self.board_location else {
             return;
         };
@@ -1075,7 +1092,62 @@ impl BoardModel {
     pub fn selected_project(&self) -> Option<&Path> {
         match &self.board_location {
             BoardLocation::Project(path) => Some(path.as_path()),
-            BoardLocation::Home { .. } => None,
+            BoardLocation::ArchivedProject(_) | BoardLocation::Home { .. } => None,
+        }
+    }
+
+    /// True while the board is in the read-only focus on an archived project (AC-41).
+    pub fn focus_is_archived(&self) -> bool {
+        matches!(self.board_location, BoardLocation::ArchivedProject(_))
+    }
+
+    /// The archived project this session is focused on, if any.
+    pub fn archived_focus(&self) -> Option<&Path> {
+        match &self.board_location {
+            BoardLocation::ArchivedProject(path) => Some(path.as_path()),
+            _ => None,
+        }
+    }
+
+    /// The refusal every mutating verb paints in read-only focus (AC-42).
+    pub(super) fn archived_focus_refusal(&self) -> Option<String> {
+        let path = self.archived_focus()?;
+        let path = path.to_string_lossy().into_owned();
+        let name = crate::ui::render::short_project(&path);
+        Some(format!(
+            "project {name} is archived \u{b7} ctrl+u unarchive"
+        ))
+    }
+
+    /// Leave the read-only archived focus for the desk (AC-45).
+    pub(super) fn leave_archived_focus(&mut self) {
+        let previous_visible = self.visible_ids();
+        self.board_location = BoardLocation::Home {
+            tab: BoardTab::Desk,
+        };
+        self.reanchor_selection(None, &previous_visible);
+        self.seed_selection();
+        self.clear_message();
+    }
+
+    /// Turn a read-only focus into the ordinary project focus on the same project
+    /// (AC-43), keeping the selection where the user left it.
+    pub(super) fn enter_project_focus(&mut self, path: PathBuf) {
+        let previous_visible = self.visible_ids();
+        let previous = self.selection_id;
+        self.board_location = BoardLocation::Project(path);
+        self.reanchor_selection(previous, &previous_visible);
+    }
+
+    /// Open the read-only focus on `path` (AC-41). Session-only: nothing persists.
+    pub(super) fn open_archived_focus(&mut self, path: PathBuf) {
+        self.close_popup();
+        let previous_visible = self.visible_ids();
+        let previous = self.selection_id;
+        self.board_location = BoardLocation::ArchivedProject(path);
+        self.reanchor_selection(previous, &previous_visible);
+        if self.selection_id.is_none() {
+            self.seed_selection();
         }
     }
 
@@ -1083,9 +1155,12 @@ impl BoardModel {
     pub(super) fn quick_add_scope(&self) -> Option<TaskScope> {
         match &self.board_location {
             BoardLocation::Home { .. } => self.session_default_scope.clone(),
-            BoardLocation::Project(path) => Some(TaskScope::Project {
-                path: path.to_string_lossy().into_owned(),
-            }),
+            // Quick-add is refused outright in read-only focus, so its scope is moot.
+            BoardLocation::Project(path) | BoardLocation::ArchivedProject(path) => {
+                Some(TaskScope::Project {
+                    path: path.to_string_lossy().into_owned(),
+                })
+            }
         }
     }
 

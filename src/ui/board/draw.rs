@@ -47,6 +47,32 @@ pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
         ];
     }
 
+    // AC-41/AC-43: the read-only archived focus offers only what works there.
+    if model.focus_is_archived() {
+        return vec![
+            VerbEntry {
+                key: "u",
+                label: "unarchive",
+            },
+            VerbEntry {
+                key: "enter",
+                label: "open",
+            },
+            VerbEntry {
+                key: "esc",
+                label: "back",
+            },
+            VerbEntry {
+                key: ":",
+                label: "palette",
+            },
+            VerbEntry {
+                key: "?",
+                label: "help",
+            },
+        ];
+    }
+
     // The task page's view mode: its own legend, true for the bound task.
     let page_task = if model.input_mode() == BoardInputMode::TaskPage {
         model
@@ -952,6 +978,10 @@ fn draw_board_impl(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap
     let scope_label = match &model.board_location {
         BoardLocation::Home { .. } => String::new(),
         BoardLocation::Project(path) => project_option_label(path.as_path()),
+        // AC-41: the read-only focus says so on the chip.
+        BoardLocation::ArchivedProject(path) => {
+            format!("{} \u{b7} archived", project_option_label(path.as_path()))
+        }
     };
     let (status_owned, status_undo_offset) = status_row_content(model);
     // The verb bar entries: computed from the selection and the open surface so the label
@@ -992,6 +1022,7 @@ fn draw_board_impl(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap
         follow_list: model.follow_list.get(),
         archived_collapsed: model.archived_collapsed,
         archived_header_selected: model.archived_header_selected(),
+        rows_dim: model.focus_is_archived(),
     };
     let (hits, painted_list_scroll) = render::draw_queue_frame(frame, &frame_model, &geo, area);
     if let Some((scroll, max_scroll)) = painted_list_scroll {
@@ -1047,6 +1078,10 @@ fn draw_wide_board(
     let scope_label = match &model.board_location {
         BoardLocation::Home { .. } => String::new(),
         BoardLocation::Project(path) => project_option_label(path.as_path()),
+        // AC-41: the read-only focus says so on the chip.
+        BoardLocation::ArchivedProject(path) => {
+            format!("{} \u{b7} archived", project_option_label(path.as_path()))
+        }
     };
     let (status_owned, status_undo_offset) = status_row_content(model);
     let verbs = board_verb_items(model);
@@ -1161,6 +1196,7 @@ fn draw_wide_board(
         follow_list: model.follow_list.get(),
         archived_collapsed: model.archived_collapsed,
         archived_header_selected: model.archived_header_selected(),
+        rows_dim: model.focus_is_archived(),
     };
     let task_frame = QueueFrameModel {
         overlay: task_overlay.clone(),
