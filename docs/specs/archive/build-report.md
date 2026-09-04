@@ -36,6 +36,10 @@ cargo build --release: finished release profile
 | T-11 | done | 263ce1c | AC-29, AC-31, AC-32 | conductor spot-check | `tsk archive|unarchive`, `list --archived` |
 | T-12 | done | 521e39e | AC-28, AC-30 | conductor spot-check | `tsk project archive|unarchive`, `project-archived` error code |
 | T-13 | done | a3886a3 | AC-36 | conductor spot-check | docs, site, skill, changelog, verification-report |
+| T-14 | done | 9ec1bd9 | AC-13, AC-37, AC-38 | conductor spot-check | owner-smoke amendment; `ctrl+g` reassigned from `ToggleAllGroups` (palette keeps `toggle groups`), owner to confirm |
+| T-15 | done | 6793472 | AC-22 | conductor spot-check | titleless card; border gap fixed by conductor in 61a6e45 |
+| T-16 | done | cf70dbf | AC-39 | conductor spot-check | |
+| T-17 | done | ded748a | AC-36, AC-40..AC-45 | conductor spot-check | read-only archived focus; docs folded in |
 
 ## Evidence
 
@@ -113,3 +117,212 @@ Final: `cargo test` **826 passed, 0 failed**; `cd site && npm test` 10/10; clipp
 `.agent-sdlc/briefs/archive/SMOKE2-report.md` (11 steps on `/tmp/tsk-b-try`, nothing
 failed live, store left as found). Verification report rewritten as one
 `| Criterion | Type | Proof |` table over AC-1..AC-45.
+
+## Per-task green-bar evidence (checker form)
+
+The conductor ran the full bar at each unit boundary (T-1+T-2, T-3..T-13, the K1..K8 fixes, T-14..T-17); the per-task counts below are the implementer's reported totals at each commit, cross-checked against the conductor's boundary runs (768, 803, 811, 826).
+
+### T-1 (@ 100b321)
+
+```text
+$ cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && cargo build --release
+exit 0
+cargo test: 768 passed, 0 failed
+```
+
+### T-2 (@ d076d93)
+
+```text
+$ cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && cargo build --release
+exit 0
+cargo test: 768 passed, 0 failed
+```
+
+### T-3 (@ e912bb0)
+
+```text
+$ cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && cargo build --release
+exit 0
+cargo test: 771 passed, 0 failed
+```
+
+### T-4 (@ ffa848c)
+
+```text
+$ cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && cargo build --release
+exit 0
+cargo test: 775 passed, 0 failed
+```
+
+### T-5 (@ 809cf5b)
+
+```text
+$ cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && cargo build --release
+exit 0
+cargo test: 780 passed, 0 failed
+```
+
+### T-6 (@ fce4211)
+
+```text
+$ cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && cargo build --release
+exit 0
+cargo test: 786 passed, 0 failed
+```
+
+### T-7 (@ 3792793)
+
+```text
+$ cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && cargo build --release
+exit 0
+cargo test: 788 passed, 0 failed
+```
+
+### T-8 (@ 2863b96)
+
+```text
+$ cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && cargo build --release
+exit 0
+cargo test: 791 passed, 0 failed
+```
+
+### T-9 (@ d8d3dbb)
+
+```text
+$ cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && cargo build --release
+exit 0
+cargo test: 796 passed, 0 failed
+```
+
+### T-10 (@ 1456b86)
+
+```text
+$ cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && cargo build --release
+exit 0
+cargo test: 797 passed, 0 failed
+```
+
+### T-11 (@ 263ce1c)
+
+```text
+$ cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && cargo build --release
+exit 0
+cargo test: 801 passed, 0 failed
+```
+
+### T-12 (@ 521e39e)
+
+```text
+$ cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && cargo build --release
+exit 0
+cargo test: 803 passed, 0 failed
+```
+
+### T-13 (@ a3886a3)
+
+```text
+$ cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && cargo build --release
+exit 0
+cargo test: 803 passed, 0 failed
+```
+
+### T-14 (@ 9ec1bd9)
+
+```text
+$ cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && cargo build --release
+exit 0
+cargo test: 815 passed, 0 failed
+```
+
+### T-15 (@ 6793472)
+
+```text
+$ cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && cargo build --release
+exit 0
+cargo test: 817 passed, 0 failed
+```
+
+### T-16 (@ cf70dbf)
+
+```text
+$ cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && cargo build --release
+exit 0
+cargo test: 821 passed, 0 failed
+```
+
+### T-17 (@ ded748a)
+
+Conductor capture at the branch head `61a6e45` (T-17 plus the border fix), the full bar:
+
+```text
+$ cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo build --release
+exit 0
+$ cargo test > /tmp/archive-final-test.txt 2>&1; rc=$?
+rc=0
+cargo test: 826 passed, 0 failed (sum over 30 test binaries)
+test domain::task::tests::archive_project_writes_one_record_and_unarchive_removes_it ... ok
+test domain::task::tests::archive_task_sets_the_flag_keeps_status_journals_archived_and_pushes_no_undo ... ok
+test domain::task::tests::task_and_project_flags_are_independent ... ok
+test store::tests::save_emits_format_version_two ... ok
+test ui::capture::tests::capture_scope_never_offers_an_archived_this_project ... ok
+test ui::queue::tests::archived_group_follows_the_drawer_scope ... ok
+test ui::queue::tests::thread_header_and_open_count_exclude_an_archived_task ... ok
+test card_is_offered_once_per_session_whichever_choice ... ok
+test keep_archived_persists_nothing ... ok
+test launch_in_an_archived_project_paints_the_two_choice_card_before_any_key ... ok
+test launch_card_is_one_message_line_with_choices_in_the_footer ... ok
+test y_or_a_click_unarchives_durably_and_quick_add_defaults_to_the_project ... ok
+test no_card_when_the_default_is_desk_or_an_unarchived_project ... ok
+test n_esc_or_click_keep_archived_defaults_quick_add_to_desk_with_a_status_line ... ok
+test add_into_an_archived_project_exits_1_with_project_archived_and_names_the_ways_out ... ok
+test plan_failed_rows_keep_item_order_when_an_archived_refusal_precedes_a_parse_failure ... ok
+test plan_items_resolving_to_an_archived_project_refuse_with_project_archived ... ok
+test unarchive_refusals_name_the_unarchive_verb ... ok
+test archive_and_unarchive_by_number_exit_0_and_repeat_is_idempotent ... ok
+test project_archive_and_unarchive_resolve_basename_and_path_exit_0_and_are_idempotent ... ok
+test archive_of_an_unknown_number_or_a_soft_deleted_task_exits_1_with_a_message ... ok
+test archived_conflicts_are_usage_errors ... ok
+test default_list_views_exclude_archived_tasks_and_tasks_of_archived_projects ... ok
+test list_archived_marks_task_and_project_rows_once_per_id ... ok
+test task_page_scope_dropdown_omits_archived_projects_but_keeps_the_current_scope ... ok
+test task_page_in_read_only_focus_refuses_edit_mode ... ok
+test title_edit_on_an_archived_task_persists_and_keeps_the_flag ... ok
+test idle_merge_hides_a_task_archived_by_another_process_without_moving_selection ... ok
+test idle_merge_leaves_a_project_focus_archived_by_another_process ... ok
+test archived_group_is_collapsed_on_a_fresh_model_and_enter_or_click_on_the_header_toggles_it ... ok
+test all_golden_frames_pass_no_color_sgr_scan ... ok
+test archived_tab_verb_bar_advertises_ctrl_u_enter_esc ... ok
+test archived_header_reads_chevron_word_dot_count_and_selection_is_bold_not_reverse ... ok
+test archived_group_paints_below_done_with_its_count_and_no_header_when_empty ... ok
+test archived_header_selection_follows_the_viewport ... ok
+test archived_tab_lists_exactly_the_archived_projects_and_paints_an_empty_state_line ... ok
+test archived_project_paints_nowhere_on_home_tabs_or_the_picker_main_list ... ok
+test expanded_archived_rows_are_dim_keep_glyph_and_identifier_and_are_selectable_and_hit_testable ... ok
+test picker_paints_a_dim_rule_under_its_tabs ... ok
+test task_page_header_slot_reads_archived_for_an_archived_task ... ok
+test surface_goldens_board_accordion_palette_help_drawer_exist_for_reviewer_side_by_side ... ok
+test archived_task_paints_in_no_working_lens_in_any_status_at_any_tier ... ok
+test archived_group_is_collapsed_on_a_fresh_model_and_enter_or_click_on_the_header_toggles_it ... ok
+test ctrl_f_and_ctrl_u_on_the_archived_tab_unarchive_and_every_task_keeps_its_status ... ok
+test ctrl_f_in_the_archived_group_unarchives_and_the_row_returns_to_the_deck ... ok
+test ctrl_f_in_the_picker_archives_the_selected_project_and_keeps_the_picker_open ... ok
+test ctrl_f_archives_the_selected_task_keeping_status_and_pushing_no_undo ... ok
+test ctrl_g_maps_to_the_archived_group_and_the_palette_keeps_group_toggle ... ok
+test ctrl_g_toggles_the_archived_group_from_any_selection_and_opens_the_drawer_when_closed ... ok
+test ctrl_u_on_an_archived_selection_unarchives_without_popping_the_undo_stack ... ok
+test ctrl_u_in_read_only_focus_unarchives_in_place ... ok
+test enter_on_the_archived_tab_opens_a_read_only_focus_that_persists_nothing ... ok
+test every_mutating_verb_in_read_only_focus_refuses_with_the_archived_message ... ok
+test file_on_a_taskless_invocation_repo_refuses_on_the_status_line ... ok
+test leaving_read_only_focus_hides_the_archived_projects_tasks_again ... ok
+test help_card_lists_ctrl_f_and_the_verb_bar_shows_file_for_a_task_row_and_the_group ... ok
+test u_undoes_with_domain_coverage_and_stale_undo_refused_visibly ... ok
+test expanded_quick_add_scope_omits_archived_projects ... ok
+test p_token_naming_an_archived_project_refuses_on_the_open_line_and_clears_on_close ... ok
+test archive_flag_survives_save_and_load ... ok
+test literal_current_v2_fixture_round_trips_byte_identical ... ok
+test v1_migration_strips_defensive_archived_keys ... ok
+test v1_document_loads_through_the_chain_and_first_save_leaves_tsk_json_v1_beside_the_live_file ... ok
+test reload_merge_save_keeps_a_sibling_writers_project_record_and_applies_the_local_intent ... ok
+test normal_mode_keymap_equals_the_readme_and_queue_board_v1_set ... ok
+```
