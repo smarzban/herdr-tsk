@@ -4002,3 +4002,78 @@ fn archived_project_paints_nowhere_on_home_tabs_or_the_picker_main_list() {
         rows.join("\n")
     );
 }
+
+#[test]
+fn archived_header_selection_follows_the_viewport() {
+    use ratatui::style::Modifier;
+
+    let mut domain = DomainState::new();
+    for i in 0..30u128 {
+        let id = domain
+            .create(
+                format!("done filler {i}"),
+                None,
+                TaskScope::Global,
+                ProvenanceOrigin::Manual,
+                None,
+            )
+            .expect("create done filler");
+        domain.complete(id).expect("complete filler");
+    }
+    let archived_id = domain
+        .create(
+            "archived below the fold",
+            None,
+            TaskScope::Global,
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create archived");
+    domain.archive_task(archived_id).expect("archive it");
+    let mut model = BoardModel::from_domain(&domain, None);
+    apply_intent(&mut domain, &mut model, BoardIntent::ToggleDoneDrawer, None).expect("drawer");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ToggleArchivedGroup,
+        None,
+    )
+    .expect("expand archived group");
+
+    // The toggle intent selects the header while the group expands; the header sits
+    // below 30 done rows, so without viewport follow it stays below the fold.
+    assert!(
+        model.archived_header_selected(),
+        "selection rests on the archived header"
+    );
+
+    let backend = TestBackend::new(80, 24);
+    let mut terminal = Terminal::new(backend).expect("terminal");
+    terminal
+        .draw(|frame| {
+            let _ = draw_board(frame, &model);
+        })
+        .expect("draw board");
+    let buffer = terminal.backend().buffer();
+    assert_buffer_mono(buffer);
+    let header_visible = (0..24).any(|y| {
+        let row: String = (0..80).map(|x| buffer[(x, y)].symbol()).collect();
+        row.contains("archived")
+            && row.contains('▾')
+            && buffer[(2, y)]
+                .style()
+                .add_modifier
+                .contains(Modifier::REVERSED)
+    });
+    assert!(
+        header_visible,
+        "the selected archived header must scroll into view in reverse style:\n{}",
+        (0..24)
+            .map(|y| {
+                let row: String = (0..80).map(|x| buffer[(x, y)].symbol()).collect();
+                format!("{y:02} {row}")
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+}

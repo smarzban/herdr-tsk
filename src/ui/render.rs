@@ -3496,6 +3496,10 @@ fn build_list_rows(
                     model.archived_collapsed,
                 ),
             });
+            // The header pin must drive viewport follow exactly like a task row.
+            if model.archived_header_selected {
+                selected_idx = Some(out.len() - 1);
+            }
             out.push(ListRow::Blank);
             if model.archived_collapsed {
                 continue;
