@@ -580,6 +580,57 @@ fn overlapping_creates_under_lock_receive_distinct_numbers() {
 }
 
 #[test]
+fn archive_flag_survives_save_and_load() {
+    let dir = temp_state_dir();
+    let _guard = TempDirGuard(dir.clone());
+    let store = TaskStore::new(&dir);
+    let mut state = DomainState::new();
+    let kept = state
+        .create(
+            "Kept open",
+            None,
+            TaskScope::Global,
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create kept task");
+    let filed = state
+        .create(
+            "Filed away",
+            None,
+            TaskScope::Global,
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create filed task");
+    state.archive_task(filed).expect("archive one task");
+
+    store.save(&state).expect("save archived state");
+    let loaded = store.load().expect("reload archived state");
+    let filed_task = loaded.get(filed).expect("archived task survives reload");
+    assert!(filed_task.archived);
+    assert_eq!(filed_task.status, HumanStatus::Ready, "status is untouched");
+    assert!(
+        !loaded
+            .get(kept)
+            .expect("kept task survives reload")
+            .archived
+    );
+
+    // An unarchived task serialises without an archived key.
+    let document: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(dir.join("tsk.json")).expect("read live"))
+            .expect("json");
+    let tasks = document["tasks"].as_array().expect("tasks array");
+    assert_eq!(tasks.len(), 2);
+    assert!(!tasks[0]
+        .as_object()
+        .expect("task object")
+        .contains_key("archived"));
+    assert_eq!(tasks[1]["archived"], serde_json::json!(true));
+}
+
+#[test]
 fn noncurrent_store_is_refused_without_rewriting_the_file() {
     let dir = temp_state_dir();
     let _guard = TempDirGuard(dir.clone());

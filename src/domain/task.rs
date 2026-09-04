@@ -67,6 +67,10 @@ pub struct Task {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub steps: Vec<Step>,
     pub soft_deleted: bool,
+    /// Kept, off the radar: hidden from every working lens, visible only in the
+    /// archived group of the done drawer. Human status is independent of it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub archived: bool,
     #[serde(with = "super::time_serde")]
     pub created_at: SystemTime,
     #[serde(with = "super::time_serde")]
@@ -228,6 +232,7 @@ impl DomainState {
             }],
             steps: Vec::new(),
             soft_deleted: false,
+            archived: false,
             created_at: now,
             updated_at: now,
         });
@@ -277,6 +282,36 @@ impl DomainState {
         task.soft_deleted = false;
         record_mutation(task, TaskEventKind::Restored);
         Ok(())
+    }
+
+    /// Archive: keep the task but off every working lens. Human status is untouched
+    /// and no undo entry is pushed. Returns `Ok(false)` when the flag already has the
+    /// requested value: no event, no revision change.
+    pub fn archive_task(&mut self, id: Uuid) -> Result<bool, DomainError> {
+        self.set_archived(id, true, TaskEventKind::Archived)
+    }
+
+    /// Clear the archived flag. Same contract as [`DomainState::archive_task`].
+    pub fn unarchive_task(&mut self, id: Uuid) -> Result<bool, DomainError> {
+        self.set_archived(id, false, TaskEventKind::Unarchived)
+    }
+
+    fn set_archived(
+        &mut self,
+        id: Uuid,
+        archived: bool,
+        kind: TaskEventKind,
+    ) -> Result<bool, DomainError> {
+        let task = self.task_mut(id)?;
+        if task.soft_deleted {
+            return Err(DomainError::SoftDeleted(id));
+        }
+        if task.archived == archived {
+            return Ok(false);
+        }
+        task.archived = archived;
+        record_mutation(task, kind);
+        Ok(true)
     }
 
     /// Edit title, notes, scope, and thread together. Title uses the same non-empty trim rule as create.
@@ -858,6 +893,77 @@ mod tests {
         assert!(state.get(id).expect("task exists").soft_deleted);
         state.restore(id).expect("restore");
         assert!(!state.get(id).expect("task exists").soft_deleted);
+    }
+
+    #[test]
+    fn archive_task_sets_the_flag_keeps_status_journals_archived_and_pushes_no_undo() {
+        let mut state = DomainState::new();
+        let id = create_sample(&mut state);
+        state
+            .set_status(id, HumanStatus::Blocked)
+            .expect("blocked status");
+        let undo_before = state.last_undo().cloned();
+
+        // Archive: the flag is set, human status is untouched, one Archived event is
+        // journaled, and no undo entry appears.
+        assert_eq!(state.archive_task(id), Ok(true));
+        {
+            let task = state.get(id).expect("task exists");
+            assert!(task.archived);
+            assert_eq!(task.status, HumanStatus::Blocked);
+            assert_eq!(
+                task.history.last().map(|event| event.kind),
+                Some(TaskEventKind::Archived)
+            );
+        }
+        assert_eq!(state.last_undo(), undo_before.as_ref());
+
+        // Unarchive clears the flag with an Unarchived event.
+        assert_eq!(state.unarchive_task(id), Ok(true));
+        {
+            let task = state.get(id).expect("task exists");
+            assert!(!task.archived);
+            assert_eq!(
+                task.history.last().map(|event| event.kind),
+                Some(TaskEventKind::Unarchived)
+            );
+        }
+
+        // Re-archiving journals again, and a second call is a no-op: Ok(false), no event,
+        // no revision change.
+        assert_eq!(state.archive_task(id), Ok(true));
+        let history_len = state.get(id).expect("task exists").history.len();
+        assert_eq!(state.archive_task(id), Ok(false));
+        assert_eq!(
+            state.get(id).expect("task exists").history.len(),
+            history_len,
+            "an already-archived task gains no event"
+        );
+        assert_eq!(
+            state.last_undo(),
+            undo_before.as_ref(),
+            "archive never touches the undo stack"
+        );
+
+        // Soft-deleted tasks are refused by both verbs.
+        let gone = state
+            .create(
+                "gone",
+                None,
+                TaskScope::Global,
+                ProvenanceOrigin::Manual,
+                None,
+            )
+            .expect("create");
+        state.soft_delete(gone).expect("soft delete");
+        assert_eq!(
+            state.archive_task(gone),
+            Err(DomainError::SoftDeleted(gone))
+        );
+        assert_eq!(
+            state.unarchive_task(gone),
+            Err(DomainError::SoftDeleted(gone))
+        );
     }
 
     #[test]

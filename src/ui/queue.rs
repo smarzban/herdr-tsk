@@ -590,6 +590,7 @@ mod tests {
             }],
             steps: Vec::new(),
             soft_deleted,
+            archived: false,
             created_at: at,
             updated_at: at,
         }
