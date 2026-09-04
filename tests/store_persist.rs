@@ -748,3 +748,31 @@ fn noncurrent_store_is_refused_without_rewriting_the_file() {
     assert!(error.to_string().contains("expected 2"));
     assert_eq!(fs::read(dir.join("tsk.json")).expect("read"), bytes);
 }
+
+#[test]
+fn v1_migration_strips_defensive_archived_keys() {
+    // A v1 binary never wrote an archived key; the chain removes one defensively so
+    // "a v1 document has no archived tasks" holds literally after the load.
+    let mut document: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/current_store_v1.json"))
+            .expect("v1 fixture is valid JSON");
+    assert_eq!(document["format_version"], 1);
+    document["tasks"][0]["archived"] = serde_json::json!(true);
+
+    let dir = temp_state_dir();
+    let _guard = TempDirGuard(dir.clone());
+    fs::write(
+        dir.join("tsk.json"),
+        serde_json::to_vec_pretty(&document).expect("encode v1 with archived key"),
+    )
+    .expect("install document");
+
+    let state = TaskStore::new(&dir).load().expect("load v1 through the chain");
+    assert_eq!(state.format_version(), 2);
+    let task = state.tasks().first().expect("fixture task");
+    assert_eq!(
+        task.archived, false,
+        "migration must strip the defensive archived key"
+    );
+    assert_eq!(task.status, HumanStatus::Done, "status is untouched");
+}

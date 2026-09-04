@@ -39,6 +39,8 @@ type MigrationStep = fn(serde_json::Value) -> Result<serde_json::Value, StoreErr
 const MIGRATIONS: &[MigrationStep] = &[migrate_v1_to_v2];
 
 /// v1 -> v2: a v1 store has no archived projects, so it gains an empty project map.
+/// A v1 binary never wrote an `archived` task key either; one is stripped defensively
+/// so a migrated document holds no archived tasks.
 fn migrate_v1_to_v2(mut document: serde_json::Value) -> Result<serde_json::Value, StoreError> {
     let object = document
         .as_object_mut()
@@ -46,6 +48,16 @@ fn migrate_v1_to_v2(mut document: serde_json::Value) -> Result<serde_json::Value
     object
         .entry("projects".to_string())
         .or_insert_with(|| serde_json::json!({}));
+    for task in object
+        .get_mut("tasks")
+        .and_then(|tasks| tasks.as_array_mut())
+        .into_iter()
+        .flatten()
+    {
+        if let Some(task_object) = task.as_object_mut() {
+            task_object.remove("archived");
+        }
+    }
     Ok(document)
 }
 
