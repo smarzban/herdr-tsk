@@ -40,9 +40,87 @@ pub fn parse_task_address(value: &str) -> Result<TaskAddress, String> {
         .map_err(|_| format!("invalid task id {value}"))
 }
 
+/// Parsed `trash` input. Positionals are the action (`restore`) and the task address.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FlagTrash {
+    pub action: Option<TrashAction>,
+    pub state_dir: Option<PathBuf>,
+    pub help: bool,
+}
+
+/// The parsed `trash` action.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TrashAction {
+    Restore { target: TaskAddress },
+}
+
+/// Parse `tsk trash` arguments, including argv0 and the `trash` subcommand.
+pub fn parse_flag_trash(args: &[String]) -> Result<FlagTrash, String> {
+    if args.get(1).map(String::as_str) != Some("trash") {
+        return Err("expected trash command".into());
+    }
+
+    let mut parsed = FlagTrash {
+        action: None,
+        state_dir: None,
+        help: false,
+    };
+    let mut positionals: Vec<&str> = Vec::new();
+    let mut index = 2;
+    while let Some(flag) = args.get(index).map(String::as_str) {
+        let value = |name: &str| match args.get(index + 1) {
+            Some(value) if !value.starts_with('-') => Ok(value.clone()),
+            _ => Err(format!("missing value for {name}")),
+        };
+        match flag {
+            "--help" => {
+                parsed.help = true;
+                index += 1;
+            }
+            flag if flag.starts_with("--state-dir=") => {
+                parsed.state_dir = Some(PathBuf::from(flag["--state-dir=".len()..].to_owned()));
+                index += 1;
+            }
+            "--state-dir" => {
+                parsed.state_dir = Some(PathBuf::from(value(flag)?));
+                index += 2;
+            }
+            flag if flag.starts_with('-') => return Err(format!("unknown trash argument {flag}")),
+            positional => {
+                if positionals.len() == 2 {
+                    return Err(format!("unexpected trash argument {positional}"));
+                }
+                positionals.push(positional);
+                index += 1;
+            }
+        }
+    }
+
+    if parsed.help {
+        return Ok(parsed);
+    }
+    match positionals.as_slice() {
+        [] => {}
+        ["restore", address] => {
+            parsed.action = Some(TrashAction::Restore {
+                target: parse_task_address(address)?,
+            });
+        }
+        [action, _] => return Err(format!("unknown trash action {action}")),
+        [action] => {
+            return Err(match *action {
+                "restore" => "task id is required".into(),
+                other => format!("unknown trash action {other}"),
+            })
+        }
+        _ => unreachable!("positionals are capped at two"),
+    }
+    Ok(parsed)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{parse_task_address, TaskAddress};
+    use super::{parse_flag_trash, parse_task_address, TaskAddress, TrashAction};
 
     #[test]
     fn task_addresses_accept_the_displayed_identifier_case_insensitively() {
@@ -50,6 +128,46 @@ mod tests {
         assert_eq!(parse_task_address("t30"), Ok(TaskAddress::Number(30)));
         assert_eq!(parse_task_address("30"), Ok(TaskAddress::Number(30)));
         assert!(parse_task_address("T-30").is_err());
+    }
+
+    #[test]
+    fn trash_parse_accepts_restore_with_number_and_flags() {
+        let parsed = parse_flag_trash(&[
+            "tsk".into(),
+            "trash".into(),
+            "restore".into(),
+            "T7".into(),
+            "--state-dir".into(),
+            "/tmp/dir".into(),
+        ])
+        .expect("parse");
+        assert_eq!(
+            parsed.action,
+            Some(TrashAction::Restore {
+                target: TaskAddress::Number(7)
+            })
+        );
+        assert_eq!(
+            parsed.state_dir.as_deref(),
+            Some(std::path::Path::new("/tmp/dir"))
+        );
+
+        let parsed =
+            parse_flag_trash(&["tsk".into(), "trash".into(), "--help".into()]).expect("parse help");
+        assert!(parsed.help);
+
+        assert!(parse_flag_trash(&["tsk".into(), "trash".into(), "restore".into()]).is_err());
+        assert!(
+            parse_flag_trash(&["tsk".into(), "trash".into(), "bogus".into(), "T1".into()]).is_err()
+        );
+        assert!(parse_flag_trash(&[
+            "tsk".into(),
+            "trash".into(),
+            "restore".into(),
+            "T1".into(),
+            "extra".into()
+        ])
+        .is_err());
     }
 }
 

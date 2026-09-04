@@ -341,15 +341,18 @@ fn list_done_and_deleted_filters_are_status_and_soft_delete_specific() {
     assert_eq!(deleted.code, 0);
     let deleted_rows: Vec<serde_json::Value> =
         serde_json::from_str(&deleted.stdout).expect("deleted JSON rows");
+    // Newest deletion first. "deleted ready" was deleted earlier, so a later
+    // undoable action finalized it into trash.jsonl; "deleted done" is still a
+    // live soft-delete. The deleted view merges both.
     assert_eq!(
         deleted_rows
             .iter()
             .map(|row| row["title"].as_str().expect("title"))
             .collect::<Vec<_>>(),
-        vec!["deleted ready", "deleted done"]
+        vec!["deleted done", "deleted ready"]
     );
-    assert_eq!(deleted_rows[0]["status"], "ready");
-    assert_eq!(deleted_rows[1]["status"], "done");
+    assert_eq!(deleted_rows[0]["status"], "done");
+    assert_eq!(deleted_rows[1]["status"], "ready");
 
     let deleted_human = list(&[
         "tsk".into(),
@@ -361,7 +364,7 @@ fn list_done_and_deleted_filters_are_status_and_soft_delete_specific() {
     assert_eq!(deleted_human.code, 0);
     assert_eq!(
         deleted_human.stdout,
-        "DELETED\n - 2 deleted ready\n - 3 deleted done\n"
+        "DELETED\n - 3 deleted done\n - 2 deleted ready\n"
     );
 
     let _ = std::fs::remove_dir_all(repo);
@@ -555,7 +558,8 @@ fn list_all_groups_each_status_by_concise_scope_for_every_filter() {
             .iter()
             .map(|row| row["title"].as_str().expect("title"))
             .collect::<Vec<_>>(),
-        vec!["global deleted", "other deleted"]
+        // Newest deletion first: "other deleted" was soft-deleted after "global deleted".
+        vec!["other deleted", "global deleted"]
     );
     let deleted_human = list(&[
         "tsk".into(),
@@ -567,7 +571,7 @@ fn list_all_groups_each_status_by_concise_scope_for_every_filter() {
     ]);
     assert_eq!(
         deleted_human.stdout,
-        "DELETED\n  desk\n    - 9 global deleted\n  other\n    - 10 other deleted\n"
+        "DELETED\n  other\n    - 10 other deleted\n  desk\n    - 9 global deleted\n"
     );
 
     let _ = std::fs::remove_dir_all(repo);

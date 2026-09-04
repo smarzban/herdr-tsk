@@ -15,10 +15,10 @@ integration tests in `tests/`.
 | AC-7 | 51 undoable actions + save leaves exactly 50 | `domain::undo::tests::save_keeps_exactly_fifty_undo_entries_and_evicts_the_oldest`, `domain::undo::tests::cap_runs_after_merge_undo_entries_union` |
 | AC-8 | stale entry pruned, live entry beneath kept | `domain::undo::tests::save_drops_stale_undo_entries_and_keeps_live_ones_beneath_them`, `domain::undo::tests::prune_runs_before_the_cap_so_a_dead_entry_never_evicts_a_live_one`, `domain::undo::tests::stale_top_entry_still_refuses_in_memory_because_pruning_runs_only_at_save` |
 | AC-9 | existing undo tests stay green | `domain::undo::tests::soft_delete_then_undo_clears_soft_deleted`, `domain::undo::tests::complete_then_undo_returns_status_ready`, `domain::undo::tests::undo_with_empty_stack_is_noop` (unchanged, green in full `cargo test`) |
-| AC-10 | delete + later complete + save → trash with right `deleted_at` | (T4 pending) |
-| AC-11 | delete + immediate save stays live, undo restores | (T4 pending) |
-| AC-12 | 8-day-old delete trashed even as top entry | (T4 pending) |
-| AC-13 | 31-day line purged on next append, 29-day stays, malformed dropped/skipped | (T4 pending) |
-| AC-14 | process A does not resurrect a task B trashed | (T4 pending) |
-| AC-15 | `list --deleted` shows trash; `trash restore` round-trip; refusals | (T4 pending) |
-| AC-16 | trash sync failure leaves `tsk.json` unchanged, task live | (T4 pending) |
+| AC-10 | delete + later complete + save → trash with right `deleted_at` | `store::tests::soft_delete_moves_to_trash_once_a_later_undoable_action_is_on_top`, `cli_trash::trash_restore_round_trip_refusals_and_events` (trashing step) |
+| AC-11 | delete + immediate save stays live, undo restores | `store::tests::fresh_soft_delete_stays_live_while_the_top_undo_entry_restores_it` |
+| AC-12 | 8-day-old delete trashed even as top entry | `store::tests::eight_day_old_soft_delete_moves_to_trash_even_as_top_undo_entry` |
+| AC-13 | 31-day line purged on next append, 29-day stays, malformed dropped/skipped | `store::tests::trash_append_purges_expired_lines_and_drops_malformed_ones`, `cli_trash::list_deleted_skips_malformed_trash_lines` |
+| AC-14 | process A does not resurrect a task B trashed | `trash_store::reload_merge_save_does_not_resurrect_a_task_another_process_trashed`, `trash_store::merge_tasks_from_disk_drops_a_locally_held_task_that_was_trashed_elsewhere` |
+| AC-15 | `list --deleted` shows trash; `trash restore` round-trip; refusals | `cli_trash::list_deleted_shows_a_trashed_task_with_its_number`, `cli_trash::trash_restore_round_trip_refusals_and_events`, `cli_trash::restore_accepts_the_bare_number_and_the_uuid`, `cli_trash::restore_refuses_when_the_task_is_already_live`, `cli::router::tests::trash_positional_selects_trash_surface`, `cli::parser::tests::trash_parse_accepts_restore_with_number_and_flags` |
+| AC-16 | trash sync failure leaves `tsk.json` unchanged, task live | `store::tests::trash_sync_failure_leaves_the_live_document_untouched` |

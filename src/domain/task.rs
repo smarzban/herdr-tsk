@@ -3,7 +3,7 @@
 //! Human status remains the source of truth.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -117,6 +117,26 @@ fn record_mutation(task: &mut Task, kind: TaskEventKind) {
 
 /// Document version written by this binary.
 pub const STORE_FORMAT_VERSION: u32 = 1;
+
+/// A soft-deleted task older than this moves to `trash.jsonl` at the next save
+/// even while its undo entry is still the top of the stack.
+const TRASH_AFTER: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+
+impl Task {
+    /// The `at` of the last `soft_deleted` history event, if any.
+    pub fn soft_deleted_at(&self) -> Option<SystemTime> {
+        self.last_event_at(TaskEventKind::SoftDeleted)
+    }
+
+    /// The `at` of the last history event of `kind`, if any.
+    pub(crate) fn last_event_at(&self, kind: TaskEventKind) -> Option<SystemTime> {
+        self.history
+            .iter()
+            .rev()
+            .find(|event| event.kind == kind)
+            .map(|event| event.at)
+    }
+}
 
 /// In-memory task set. Persistence is Task Store.
 ///
@@ -469,6 +489,7 @@ impl DomainState {
                 None => self.tasks.push(incoming.clone()),
             }
         }
+        self.drop_tasks_trashed_elsewhere(other);
         self.merge_undo_entries(other);
     }
 
@@ -492,8 +513,27 @@ impl DomainState {
             }
         }
         self.next_task_number = self.next_task_number.max(disk.next_task_number);
+        self.drop_tasks_trashed_elsewhere(disk);
         self.merge_undo_entries(disk);
         Ok(())
+    }
+
+    /// A local task absent from disk that is soft-deleted with no merge base was trashed
+    /// by another process (or by this one on an earlier save): drop it instead of
+    /// resurrecting it on the next write. A local task that is not soft-deleted, or that
+    /// carries a `merge_base_revision`, is a local creation or mutation and stays.
+    fn drop_tasks_trashed_elsewhere(&mut self, disk: &DomainState) {
+        let disk_ids: BTreeSet<Uuid> = disk.tasks.iter().map(|task| task.id).collect();
+        let before = self.tasks.len();
+        self.tasks.retain(|task| {
+            disk_ids.contains(&task.id) || !task.soft_deleted || task.merge_base_revision.is_some()
+        });
+        if self.tasks.len() != before {
+            self.undo_stack.retain(|entry| {
+                let (id, _) = entry.target();
+                self.tasks.iter().any(|task| task.id == id)
+            });
+        }
     }
 
     /// Assign missing task numbers in deterministic creation order. The store calls this only
@@ -544,6 +584,65 @@ impl DomainState {
                 self.undo_stack.push(incoming.clone());
             }
         }
+    }
+
+    /// Soft-deleted tasks eligible to move to `trash.jsonl`, with each task's
+    /// `deleted_at` (the last `soft_deleted` event). A soft-deleted task moves when:
+    ///
+    /// - it was deleted more than [`TRASH_AFTER`] ago (even as the top undo entry), or
+    /// - no undo entry on the stack targets it, or
+    /// - a later undoable action exists: some live undo entry's recorded action is
+    ///   timestamped after this task's delete. A concurrent or earlier action (e.g. a
+    ///   sibling writer's completion merged in from disk) does not finalize the delete.
+    ///
+    /// Stale entries are pruned at the persistence boundary before this runs, so a live
+    /// entry's target task carries exactly the event that entry records.
+    pub(crate) fn trash_eligible(&self, now: SystemTime) -> Vec<(SystemTime, Task)> {
+        let entry_times: Vec<SystemTime> = self
+            .undo_stack
+            .iter()
+            .filter_map(|entry| {
+                let (id, _) = entry.target();
+                let task = self.tasks.iter().find(|task| task.id == id)?;
+                match entry {
+                    UndoEntry::SoftDelete { .. } => task.soft_deleted_at(),
+                    UndoEntry::Complete { .. } => task.last_event_at(TaskEventKind::Completed),
+                }
+            })
+            .collect();
+        let targeted: BTreeSet<Uuid> = self
+            .undo_stack
+            .iter()
+            .map(|entry| entry.target().0)
+            .collect();
+        self.tasks
+            .iter()
+            .filter(|task| task.soft_deleted)
+            .filter_map(|task| {
+                let deleted_at = task.soft_deleted_at().unwrap_or(task.updated_at);
+                let aged = now
+                    .duration_since(deleted_at)
+                    .is_ok_and(|age| age > TRASH_AFTER);
+                let later_action = entry_times.iter().any(|time| *time > deleted_at);
+                (aged || !targeted.contains(&task.id) || later_action)
+                    .then(|| (deleted_at, task.clone()))
+            })
+            .collect()
+    }
+
+    /// Remove the given tasks and every undo entry targeting one of them.
+    pub(crate) fn remove_tasks(&mut self, ids: &BTreeSet<Uuid>) {
+        self.tasks.retain(|task| !ids.contains(&task.id));
+        self.undo_stack
+            .retain(|entry| !ids.contains(&entry.target().0));
+    }
+
+    /// Re-insert one task restored from trash: `soft_deleted` cleared, a `restored`
+    /// history event, a new revision, `updated_at` now. Number and history are kept.
+    pub(crate) fn insert_restored(&mut self, task: Task) {
+        let id = task.id;
+        self.tasks.push(task);
+        self.restore(id).expect("the task was just inserted");
     }
 
     /// Persistence-boundary prune, run at the same locked boundary as number

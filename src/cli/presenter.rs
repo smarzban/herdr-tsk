@@ -6,6 +6,7 @@ use super::CliOutput;
 use crate::cli::add::{AddError, FlagAddResult};
 use crate::cli::list::{ListError, ListResult, ListRow, ListView};
 use crate::cli::steps::{StepLine, StepsError, StepsResult};
+use crate::cli::trash::{TrashCliError, TrashRestoreResult};
 use crate::domain::HumanStatus;
 use crate::ui::terminal_text;
 
@@ -22,7 +23,7 @@ pub fn list_help() -> CliOutput {
             "Lists ready, started, blocked, and review tasks in the invocation project by default, or your desk outside a repository.\n",
             "With a task number (bare digits) or UUID from add --json or list --json, lists that one task alone and prints its steps: one line per step with its [x]/[ ] state and step short id. Direct lookup ignores cwd. A task operand cannot be combined with scope, thread, or status filters.\n",
             "--project uses the same basename-or-path scope resolution as add; --desk selects your desk, tasks not tied to a project; --all selects every scope. --thread normalizes a thread name and filters within the selected scope; an invalid name is a usage error (exit 2). For dash-leading project and state-directory values, use --project=<scope> and --state-dir=<dir>.\n",
-            "--done lists done tasks only. --deleted lists soft-deleted tasks only, regardless of status.\n",
+            "--done lists done tasks only. --deleted lists soft-deleted tasks only, regardless of status: live soft-deletes plus trash entries from trash.jsonl (kept 30 days), deduped by task with the live copy winning, newest deletion first.\n",
             "To recover a typo scope, use tsk list --all --json.\n",
             "--json emits a flat array of id, number, title, status, project, and thread (or null) in displayed group order. Human --all groups rows by status, then project scope, using a unique concise trailing path or desk.\n\n",
             "Exit contract:\n",
@@ -438,6 +439,54 @@ pub fn steps_rejected(error: StepsError) -> CliOutput {
     CliOutput {
         stdout: String::new(),
         stderr: format!("tsk steps: {detail}\n"),
+        code,
+    }
+}
+
+pub fn trash_help() -> CliOutput {
+    CliOutput {
+        stdout: concat!(
+            "usage: tsk trash restore <task> [--state-dir <dir>]\n\n",
+            "restore puts a trashed task back on the board. The task is a task number (T<number>, or bare digits) or UUID, as shown by tsk list --deleted. The task returns not soft-deleted, with a restored event, a new revision, and its old number.\n",
+            "Deleted tasks live beside the board in trash.jsonl for 30 days; tsk list --deleted lists live soft-deleted tasks and trash entries together, newest deletion first.\n\n",
+            "Exit contract:\n",
+            "  exit 0: task restored\n",
+            "  exit 1: no matching trash line, or the task is already live\n",
+            "  exit 2: usage or parse error, nothing persisted\n",
+            "  exit 3: store I/O, commit indeterminate, verify with tsk list --deleted before retrying\n"
+        )
+        .into(),
+        stderr: String::new(),
+        code: 0,
+    }
+}
+
+pub fn trash_usage(reason: &str) -> CliOutput {
+    CliOutput {
+        stdout: String::new(),
+        stderr: format!(
+            "tsk trash: {reason}\nusage: tsk trash restore <task> [--state-dir <dir>]\n"
+        ),
+        code: 2,
+    }
+}
+
+pub fn trash_restored(result: TrashRestoreResult) -> CliOutput {
+    CliOutput {
+        stdout: format!("restored T{} {}\n", result.number, result.title),
+        stderr: String::new(),
+        code: 0,
+    }
+}
+
+pub fn trash_rejected(error: TrashCliError) -> CliOutput {
+    let (detail, code) = match error {
+        TrashCliError::Store(detail) => (detail, 3),
+        TrashCliError::NotInTrash(detail) => (detail, 1),
+    };
+    CliOutput {
+        stdout: String::new(),
+        stderr: format!("tsk trash: {detail}\n"),
         code,
     }
 }

@@ -8,6 +8,7 @@ pub enum Surface {
     Add,
     Steps,
     List,
+    Trash,
     FindBoardPane,
     GlobalHelp,
     Usage,
@@ -48,6 +49,7 @@ pub fn route<S: AsRef<str>>(
             "add" => Surface::Add,
             "steps" => Surface::Steps,
             "list" => Surface::List,
+            "trash" => Surface::Trash,
             _ => Surface::Usage,
         };
     }
@@ -109,6 +111,14 @@ mod tests {
         assert_eq!(
             route(["tsk", "steps", "id", "toggle", "abc"], None),
             Surface::Steps
+        );
+    }
+
+    #[test]
+    fn trash_positional_selects_trash_surface() {
+        assert_eq!(
+            route(["tsk", "trash", "restore", "T3"], None),
+            Surface::Trash
         );
     }
 

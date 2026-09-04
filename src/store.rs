@@ -10,9 +10,12 @@ use std::env;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use crate::domain::{DomainState, STORE_FORMAT_VERSION};
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+use crate::domain::{DomainState, Task, STORE_FORMAT_VERSION};
 
 /// On-disk document name under the state directory.
 const STATE_FILE: &str = "tsk.json";
@@ -20,6 +23,10 @@ const STATE_FILE: &str = "tsk.json";
 const BACKUP_FILE: &str = "tsk.json.1";
 /// Inter-process exclusive lock file (sibling of the state document).
 const LOCK_FILE: &str = "tsk.json.lock";
+/// Append-only trash file for tasks removed from the live store.
+const TRASH_FILE: &str = "trash.jsonl";
+/// Trash lines older than this are dropped on the next trash append.
+const TRASH_PURGE_AFTER: Duration = Duration::from_secs(30 * 24 * 60 * 60);
 
 /// One document-format migration step.
 type MigrationStep = fn(serde_json::Value) -> Result<serde_json::Value, StoreError>;
@@ -57,6 +64,41 @@ fn migrate_with(
     Ok(document)
 }
 
+/// One line of `trash.jsonl`: a task removed from the live store, with the
+/// `at` of its last `soft_deleted` history event.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TrashLine {
+    #[serde(with = "crate::domain::time_serde")]
+    pub deleted_at: SystemTime,
+    pub task: Task,
+}
+
+/// Address one trash line by its task's human number or id.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrashTarget {
+    Number(u64),
+    Id(Uuid),
+}
+
+/// Restore failures.
+#[derive(Debug)]
+pub enum TrashError {
+    /// No trash line matches, or the task already exists live (live wins).
+    NotInTrash,
+    Store(StoreError),
+}
+
+impl std::fmt::Display for TrashError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TrashError::NotInTrash => write!(f, "not in trash"),
+            TrashError::Store(error) => write!(f, "{error}"),
+        }
+    }
+}
+
+impl std::error::Error for TrashError {}
+
 /// Filesystem operations that make atomic replacement durable.
 ///
 /// Keeping the stages separate lets tests verify their ordering and failure propagation.
@@ -69,6 +111,7 @@ trait AtomicFilesystem {
     fn rename(&self, from: &Path, to: &Path) -> io::Result<()>;
     fn sync_directory(&self, path: &Path) -> io::Result<()>;
     fn remove_file(&self, path: &Path) -> io::Result<()>;
+    fn open_append(&self, path: &Path) -> io::Result<Self::File>;
 }
 
 struct StdFilesystem;
@@ -105,6 +148,10 @@ impl AtomicFilesystem for StdFilesystem {
 
     fn remove_file(&self, path: &Path) -> io::Result<()> {
         fs::remove_file(path)
+    }
+
+    fn open_append(&self, path: &Path) -> io::Result<Self::File> {
+        OpenOptions::new().append(true).create(true).open(path)
     }
 }
 
@@ -191,6 +238,60 @@ impl TaskStore {
         durable.assign_numbers_for_persistence();
         durable.clear_merge_bases();
         self.save_unlocked(&mut durable)
+    }
+
+    /// Read the trash lines, skipping any line that fails to parse (a torn tail
+    /// after a crash). Takes the exclusive lock so a read never races an append.
+    pub fn load_trash(&self) -> Result<Vec<TrashLine>, StoreError> {
+        let _guard = self.lock_exclusive()?;
+        self.load_trash_unlocked()
+    }
+
+    fn load_trash_unlocked(&self) -> Result<Vec<TrashLine>, StoreError> {
+        let path = self.path.join(TRASH_FILE);
+        let content = match fs::read_to_string(&path) {
+            Ok(content) => content,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => return Err(error.into()),
+        };
+        Ok(content
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .filter_map(|line| serde_json::from_str(line).ok())
+            .collect())
+    }
+
+    /// Restore one task from trash into the live state under the exclusive lock:
+    /// `soft_deleted = false`, a `restored` history event, a new revision,
+    /// `updated_at` now. Refuses when no line matches or the id already exists
+    /// live, both as [`TrashError::NotInTrash`].
+    ///
+    /// Order under the lock: find the line, rewrite the trash without it, insert
+    /// the restored task, then replace the live document.
+    pub fn restore_from_trash(&self, target: TrashTarget) -> Result<TrashLine, TrashError> {
+        let _guard = self.lock_exclusive().map_err(TrashError::Store)?;
+        let mut state = self.load_unlocked().map_err(TrashError::Store)?;
+        let lines = self.load_trash_unlocked().map_err(TrashError::Store)?;
+        let index = lines
+            .iter()
+            .position(|line| match target {
+                TrashTarget::Number(number) => line.task.number == Some(number),
+                TrashTarget::Id(id) => line.task.id == id,
+            })
+            .ok_or(TrashError::NotInTrash)?;
+        let line = lines[index].clone();
+        if state.get(line.task.id).is_some() {
+            return Err(TrashError::NotInTrash);
+        }
+        let restored_id = line.task.id;
+        self.rewrite_trash_filtered(&StdFilesystem, |candidate| candidate.task.id != restored_id)
+            .map_err(TrashError::Store)?;
+        state.insert_restored(line.task.clone());
+        state.assign_numbers_for_persistence();
+        state.prune_undo_for_persistence();
+        state.clear_merge_bases();
+        self.save_unlocked(&mut state).map_err(TrashError::Store)?;
+        Ok(line)
     }
 
     /// Hold the exclusive store lock across a state transition and its durable replacement.
@@ -316,6 +417,7 @@ impl TaskStore {
         // Locked persistence boundary: every save path and locked_transition lands here,
         // after number assignment and any merge-undo union.
         state.prune_undo_for_persistence();
+        self.move_eligible_to_trash(state, filesystem)?;
         fs::create_dir_all(&self.path)?;
         self.sweep_orphan_temps();
         let file = self.state_file();
@@ -362,6 +464,102 @@ impl TaskStore {
         write_result
     }
 
+    /// Move soft-deleted tasks undo can no longer reach (or that aged past the
+    /// trash window) into `trash.jsonl` before the live document is replaced.
+    ///
+    /// Durability order under the lock: append every eligible task to the trash and
+    /// sync it, rewrite the trash purged, then remove the tasks from the live state
+    /// and replace the live document. A crash between trash write and live replace
+    /// leaves a task in both places; readers dedupe by id with the live copy winning.
+    fn move_eligible_to_trash<F: AtomicFilesystem>(
+        &self,
+        state: &mut DomainState,
+        filesystem: &F,
+    ) -> Result<(), StoreError> {
+        let now = SystemTime::now();
+        let eligible = state.trash_eligible(now);
+        if eligible.is_empty() {
+            return Ok(());
+        }
+        let trash = self.path.join(TRASH_FILE);
+        let mut appended = String::new();
+        for (deleted_at, task) in &eligible {
+            let line = TrashLine {
+                deleted_at: *deleted_at,
+                task: task.clone(),
+            };
+            appended.push_str(&serde_json::to_string(&line)?);
+            appended.push('\n');
+        }
+        let mut file = filesystem.open_append(&trash)?;
+        filesystem.write_all(&mut file, appended.as_bytes())?;
+        filesystem.sync_file(&file)?;
+        drop(file);
+        // Every append also rewrites the trash without lines past the purge window.
+        self.rewrite_trash_filtered(filesystem, |line| {
+            now.duration_since(line.deleted_at)
+                .is_ok_and(|age| age <= TRASH_PURGE_AFTER)
+        })?;
+        let ids = eligible
+            .iter()
+            .map(|(_, task)| task.id)
+            .collect::<std::collections::BTreeSet<_>>();
+        state.remove_tasks(&ids);
+        Ok(())
+    }
+
+    /// Rewrite `trash.jsonl` keeping only the lines `keep` accepts; lines that fail to
+    /// parse are dropped. Same durability as the live file: temp in the same dir,
+    /// `sync_all`, rename, dir sync.
+    fn rewrite_trash_filtered<F: AtomicFilesystem>(
+        &self,
+        filesystem: &F,
+        keep: impl Fn(&TrashLine) -> bool,
+    ) -> Result<(), StoreError> {
+        let trash = self.path.join(TRASH_FILE);
+        let content = match fs::read_to_string(&trash) {
+            Ok(content) => content,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error.into()),
+        };
+        let mut kept = String::new();
+        for line in content.lines() {
+            if line.trim().is_empty() {
+                continue;
+            }
+            if let Ok(entry) = serde_json::from_str::<TrashLine>(line) {
+                if keep(&entry) {
+                    kept.push_str(line);
+                    kept.push('\n');
+                }
+            }
+        }
+        let tmp = self.trash_tmp_path();
+        let write_result = (|| -> Result<(), StoreError> {
+            let mut temp_file = filesystem.create_file(&tmp)?;
+            filesystem.write_all(&mut temp_file, kept.as_bytes())?;
+            filesystem.sync_file(&temp_file)?;
+            drop(temp_file);
+            filesystem.rename(&tmp, &trash)?;
+            filesystem.sync_directory(&self.path)?;
+            Ok(())
+        })();
+        if write_result.is_err() {
+            let _ = filesystem.remove_file(&tmp);
+        }
+        write_result
+    }
+
+    /// Unique trash rewrite temp path, swept like the live document's temps.
+    fn trash_tmp_path(&self) -> PathBuf {
+        let pid = std::process::id();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        self.path.join(format!(".{TRASH_FILE}.tmp.{pid}.{nanos}"))
+    }
+
     /// Exclusive lock held for the duration of load-modify-save critical sections.
     fn lock_exclusive(&self) -> Result<StoreLockGuard, StoreError> {
         fs::create_dir_all(&self.path)?;
@@ -376,15 +574,16 @@ impl TaskStore {
         Ok(StoreLockGuard { file })
     }
 
-    /// Remove leftover `.tsk.json.tmp.*` files. Safe only under the exclusive lock.
+    /// Remove leftover temp files. Safe only under the exclusive lock.
     fn sweep_orphan_temps(&self) {
         let Ok(entries) = fs::read_dir(&self.path) else {
             return;
         };
-        let prefix = format!(".{STATE_FILE}.tmp.");
+        let prefixes = [format!(".{STATE_FILE}.tmp."), format!(".{TRASH_FILE}.tmp.")];
         for entry in entries.flatten() {
             let name = entry.file_name();
-            if name.to_string_lossy().starts_with(&prefix) {
+            let name = name.to_string_lossy();
+            if prefixes.iter().any(|prefix| name.starts_with(prefix)) {
                 let _ = fs::remove_file(entry.path());
             }
         }
@@ -531,6 +730,7 @@ mod tests {
     use super::*;
     use crate::domain::{ProvenanceOrigin, TaskScope};
     use std::sync::{Mutex, OnceLock};
+    use uuid::Uuid;
 
     static TEMP_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     /// Serialize env mutation across tests in this process.
@@ -565,6 +765,15 @@ mod tests {
         FileSync,
         Rename,
         DirectorySync,
+        TrashWrite,
+        TrashFileSync,
+    }
+
+    /// True for any trash path (`trash.jsonl` or its rewrite temps).
+    fn is_trash_path(path: &Path) -> bool {
+        path.file_name()
+            .map(|name| name.to_string_lossy().contains("trash"))
+            .unwrap_or(false)
     }
 
     struct RecordingFilesystem {
@@ -594,18 +803,26 @@ mod tests {
     }
 
     impl AtomicFilesystem for RecordingFilesystem {
-        type File = ();
+        type File = bool; // true marks a trash file
 
-        fn create_file(&self, _path: &Path) -> io::Result<Self::File> {
-            Ok(())
+        fn create_file(&self, path: &Path) -> io::Result<Self::File> {
+            Ok(is_trash_path(path))
         }
 
-        fn write_all(&self, _file: &mut Self::File, _data: &[u8]) -> io::Result<()> {
-            self.record(SaveStage::Write)
+        fn write_all(&self, file: &mut Self::File, _data: &[u8]) -> io::Result<()> {
+            self.record(if *file {
+                SaveStage::TrashWrite
+            } else {
+                SaveStage::Write
+            })
         }
 
-        fn sync_file(&self, _file: &Self::File) -> io::Result<()> {
-            self.record(SaveStage::FileSync)
+        fn sync_file(&self, file: &Self::File) -> io::Result<()> {
+            self.record(if *file {
+                SaveStage::TrashFileSync
+            } else {
+                SaveStage::FileSync
+            })
         }
 
         fn rename(&self, _from: &Path, _to: &Path) -> io::Result<()> {
@@ -618,6 +835,10 @@ mod tests {
 
         fn remove_file(&self, _path: &Path) -> io::Result<()> {
             Ok(())
+        }
+
+        fn open_append(&self, path: &Path) -> io::Result<Self::File> {
+            Ok(is_trash_path(path))
         }
     }
 
@@ -1264,6 +1485,294 @@ mod tests {
         let first = store.state_signature().expect("signature after save");
         let second = store.state_signature().expect("signature again");
         assert_eq!(first, second, "an unchanged file reads equal twice");
+    }
+
+    fn trash_path(dir: &Path) -> PathBuf {
+        dir.join("trash.jsonl")
+    }
+
+    fn read_trash_lines(dir: &Path) -> Vec<TrashLine> {
+        let content = fs::read_to_string(trash_path(dir)).expect("read trash.jsonl");
+        content
+            .lines()
+            .map(|line| serde_json::from_str(line).expect("trash line parses"))
+            .collect()
+    }
+
+    #[test]
+    fn soft_delete_moves_to_trash_once_a_later_undoable_action_is_on_top() {
+        let dir = temp_dir("trash-eligible");
+        let _guard = TempDirGuard(dir.clone());
+        let store = TaskStore::new(&dir);
+        let mut seed = DomainState::new();
+        let deleted = seed
+            .create(
+                "delete me",
+                None,
+                TaskScope::Global,
+                ProvenanceOrigin::Manual,
+                None,
+            )
+            .expect("create");
+        let kept = seed
+            .create(
+                "keep me",
+                None,
+                TaskScope::Global,
+                ProvenanceOrigin::Manual,
+                None,
+            )
+            .expect("create");
+        store.save(&seed).expect("seed");
+
+        let mut state = store.load().expect("load");
+        state.soft_delete(deleted).expect("soft delete");
+        state.complete(kept).expect("a later undoable action");
+        let deleted_at = state
+            .get(deleted)
+            .expect("task")
+            .soft_deleted_at()
+            .expect("soft-deleted event");
+        store.save(&state).expect("save");
+
+        let lines = read_trash_lines(&dir);
+        assert_eq!(lines.len(), 1, "exactly one task moves to trash");
+        assert_eq!(lines[0].task.id, deleted);
+        assert_eq!(
+            lines[0].deleted_at, deleted_at,
+            "deleted_at is the last soft_deleted history event"
+        );
+        assert_eq!(
+            lines[0].task.number,
+            Some(1),
+            "the trash entry keeps its number"
+        );
+
+        let live: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(dir.join(STATE_FILE)).expect("read"))
+                .expect("json");
+        assert_eq!(live["tasks"].as_array().expect("tasks").len(), 1);
+        let undo_stack = live["undo_stack"].as_array().expect("undo_stack");
+        assert_eq!(undo_stack.len(), 1, "only the completion entry survives");
+        assert!(
+            !undo_stack
+                .iter()
+                .any(|entry| entry.to_string().contains(&deleted.to_string())),
+            "no undo entry references the trashed task"
+        );
+    }
+
+    #[test]
+    fn fresh_soft_delete_stays_live_while_the_top_undo_entry_restores_it() {
+        let dir = temp_dir("trash-top-entry");
+        let _guard = TempDirGuard(dir.clone());
+        let store = TaskStore::new(&dir);
+        let mut seed = DomainState::new();
+        let id = seed
+            .create(
+                "undoable delete",
+                None,
+                TaskScope::Global,
+                ProvenanceOrigin::Manual,
+                None,
+            )
+            .expect("create");
+        store.save(&seed).expect("seed");
+
+        let mut state = store.load().expect("load");
+        state.soft_delete(id).expect("soft delete");
+        store.save(&state).expect("save immediately");
+
+        assert!(
+            !trash_path(&dir).exists(),
+            "no trash line while the delete is still undoable"
+        );
+        let mut reloaded = store.load().expect("reload");
+        assert!(reloaded.get(id).expect("task").soft_deleted);
+        reloaded.undo().expect("undo restores");
+        assert!(!reloaded.get(id).expect("task").soft_deleted);
+    }
+
+    #[test]
+    fn eight_day_old_soft_delete_moves_to_trash_even_as_top_undo_entry() {
+        let dir = temp_dir("trash-aged");
+        let _guard = TempDirGuard(dir.clone());
+        let store = TaskStore::new(&dir);
+        let mut seed = DomainState::new();
+        let id = seed
+            .create(
+                "old delete",
+                None,
+                TaskScope::Global,
+                ProvenanceOrigin::Manual,
+                None,
+            )
+            .expect("create");
+        store.save(&seed).expect("seed");
+        let mut state = store.load().expect("load");
+        state.soft_delete(id).expect("soft delete");
+
+        // Backdate the soft_deleted history event by 8 days.
+        let mut value = serde_json::to_value(&state).expect("serialize");
+        let eight_days = 8 * 24 * 60 * 60u64;
+        let mut backdated = None;
+        for event in value["tasks"][0]["history"]
+            .as_array_mut()
+            .expect("history")
+        {
+            if event["kind"] == "soft_deleted" {
+                let at = event["at"].as_array_mut().expect("time pair");
+                at[0] = serde_json::json!(at[0].as_u64().expect("secs") - eight_days);
+                backdated = Some((at[0].as_u64().unwrap(), at[1].as_u64().unwrap()));
+            }
+        }
+        let (secs, nanos) = backdated.expect("soft_deleted event present");
+        write_state_json(&dir, value);
+
+        let state = store.load().expect("load backdated");
+        store.save(&state).expect("save");
+
+        let lines = read_trash_lines(&dir);
+        assert_eq!(lines.len(), 1, "an aged delete trashes even as top entry");
+        assert_eq!(lines[0].task.id, id);
+        let age = lines[0]
+            .deleted_at
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("after epoch");
+        assert_eq!((age.as_secs(), age.subsec_nanos() as u64), (secs, nanos));
+    }
+
+    #[test]
+    fn trash_append_purges_expired_lines_and_drops_malformed_ones() {
+        let dir = temp_dir("trash-purge");
+        let _guard = TempDirGuard(dir.clone());
+        let store = TaskStore::new(&dir);
+
+        // Seed trash with a 31-day line, a 29-day line, and a torn tail.
+        let mut seed = DomainState::new();
+        let template = seed
+            .create(
+                "template",
+                None,
+                TaskScope::Global,
+                ProvenanceOrigin::Manual,
+                None,
+            )
+            .expect("create");
+        seed.assign_numbers_for_persistence();
+        let task_value =
+            serde_json::to_value(seed.get(template).expect("task")).expect("serialize task");
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_secs();
+        let line = |age_days: u64, number: u64| {
+            let mut task = task_value.clone();
+            task["number"] = serde_json::json!(number);
+            task["id"] = serde_json::json!(Uuid::new_v4().to_string());
+            serde_json::json!({
+                "deleted_at": [now - age_days * 24 * 60 * 60, 0],
+                "task": task,
+            })
+            .to_string()
+        };
+        fs::create_dir_all(&dir).expect("mkdir");
+        fs::write(
+            trash_path(&dir),
+            format!("{}\n{}\n{{\"torn\": tru\n", line(31, 90), line(29, 91)),
+        )
+        .expect("seed trash");
+
+        // Trigger an append: an eligible soft-deleted task saves.
+        let mut state = DomainState::new();
+        let id = state
+            .create(
+                "fresh trash",
+                None,
+                TaskScope::Global,
+                ProvenanceOrigin::Manual,
+                None,
+            )
+            .expect("create");
+        state.soft_delete(id).expect("soft delete");
+        state.pop_undo();
+        store
+            .save_unlocked_with(&mut state, &StdFilesystem)
+            .expect("save with eligible delete");
+
+        let content = fs::read_to_string(trash_path(&dir)).expect("read trash");
+        let parsed: Vec<TrashLine> = content
+            .lines()
+            .map(|line| serde_json::from_str(line).expect("line parses"))
+            .collect();
+        assert_eq!(
+            parsed.len(),
+            2,
+            "the 31-day line and the torn line are gone"
+        );
+        assert_eq!(
+            parsed[0].task.number,
+            Some(91),
+            "the 29-day line stays, in order"
+        );
+        assert_eq!(parsed[1].task.id, id, "the fresh line is appended");
+    }
+
+    #[test]
+    fn trash_sync_failure_leaves_the_live_document_untouched() {
+        let dir = temp_dir("trash-sync-fails");
+        let _guard = TempDirGuard(dir.clone());
+        let store = TaskStore::new(&dir);
+        let mut seed = DomainState::new();
+        let deleted = seed
+            .create(
+                "delete me",
+                None,
+                TaskScope::Global,
+                ProvenanceOrigin::Manual,
+                None,
+            )
+            .expect("create");
+        let kept = seed
+            .create(
+                "keep me",
+                None,
+                TaskScope::Global,
+                ProvenanceOrigin::Manual,
+                None,
+            )
+            .expect("create");
+        store.save(&seed).expect("seed");
+        let before = fs::read(dir.join(STATE_FILE)).expect("read live");
+
+        let mut state = store.load().expect("load");
+        state.soft_delete(deleted).expect("soft delete");
+        state
+            .complete(kept)
+            .expect("later action makes the delete eligible");
+
+        let filesystem = RecordingFilesystem::new(Some(SaveStage::TrashFileSync));
+        let error = store
+            .save_unlocked_with(&mut state, &filesystem)
+            .expect_err("the injected trash sync failure must fail the save");
+        assert!(matches!(error, StoreError::Io(_)), "{error}");
+
+        assert_eq!(
+            fs::read(dir.join(STATE_FILE)).expect("read live"),
+            before,
+            "tsk.json must be unchanged"
+        );
+        let live: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(dir.join(STATE_FILE)).expect("read"))
+                .expect("json");
+        assert!(
+            live["tasks"]
+                .as_array()
+                .expect("tasks")
+                .iter()
+                .any(|task| task["id"] == deleted.to_string()),
+            "the task is still live"
+        );
     }
 
     fn round_tripped_v1_state(title: &str) -> DomainState {
