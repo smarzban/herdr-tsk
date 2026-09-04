@@ -32,6 +32,8 @@ pub enum BoardPopup {
     ProjectPicker,
     /// Board persistence failed; Retry or Cancel must resolve it before another mutation.
     SaveRecovery,
+    /// Two-choice card raised at launch when the cwd default is an archived project.
+    LaunchCard,
 }
 
 /// Labeled capture hit region.
@@ -782,6 +784,11 @@ pub fn map_board_mouse(
             _ => None,
         },
         BoardInputMode::SaveRecovery => None,
+        BoardInputMode::LaunchCard => match hit_at(hits, pos) {
+            Some(QueueHitTarget::LaunchOption(0)) => Some(BoardIntent::LaunchUnarchive),
+            Some(QueueHitTarget::LaunchOption(1)) => Some(BoardIntent::LaunchKeepArchived),
+            _ => None,
+        },
         BoardInputMode::Normal => match hit_at(hits, pos) {
             Some(QueueHitTarget::ProjectChip) => Some(BoardIntent::OpenProjectSelector),
             Some(QueueHitTarget::HomeTab(tab)) => Some(BoardIntent::SelectHomeTab(tab)),

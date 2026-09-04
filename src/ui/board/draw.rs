@@ -1,5 +1,6 @@
 //! Queue chrome, overlays, verb bar, and frame drawing hooks.
 
+use std::path::Path;
 use std::time::SystemTime;
 
 use ratatui::widgets::Paragraph;
@@ -661,6 +662,7 @@ struct OverlayPayloads<'a> {
     palette_commands: Vec<PaletteCommandRow<'a>>,
     scope_options: Vec<String>,
     scope_tabs: Option<render::PickerTabsPaint>,
+    launch_card_name: Option<String>,
     scope_selected: usize,
 }
 
@@ -724,6 +726,13 @@ impl<'a> OverlayPayloads<'a> {
                 .position(|scope| Some(scope) == model.form_scope_dropdown_choice())
                 .unwrap_or(0)
         };
+        let launch_card_name = model.launch_card.as_deref().map(|path| {
+            Path::new(path)
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or(&path.to_string_lossy())
+                .to_string()
+        });
         let scope_tabs = model.picker_tab().map(|tab| render::PickerTabsPaint {
             archived_active: tab == PickerTab::Archived,
             archived_count: model.archived_project_options().len(),
@@ -734,6 +743,7 @@ impl<'a> OverlayPayloads<'a> {
             scope_options,
             scope_selected,
             scope_tabs,
+            launch_card_name,
         }
     }
 
@@ -801,6 +811,9 @@ impl<'a> OverlayPayloads<'a> {
                 query: model.command_query(),
                 commands: &self.palette_commands,
             });
+        }
+        if let Some(name) = self.launch_card_name.as_deref() {
+            return Some(QueueOverlay::LaunchCard { name });
         }
         if model.popup() == BoardPopup::ProjectPicker {
             return Some(QueueOverlay::ScopeDropdown {

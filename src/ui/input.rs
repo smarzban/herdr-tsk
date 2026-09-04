@@ -291,6 +291,10 @@ pub enum BoardIntent {
     /// Picker `Tab` / `←` / `→`: flip the project selector between its main and
     /// archived tabs. Reducer lands in.
     ProjectPickerSwitchTab,
+    /// Launch card: unarchive the archived project the default pointed at.
+    LaunchUnarchive,
+    /// Launch card: keep the project archived; quick-add goes to the desk this session.
+    LaunchKeepArchived,
     /// Mouse route onto the picker's painted tab row.
     SelectPickerTab(PickerTab),
     /// Expand/collapse the done drawer's archived group (Enter or click on its header,
@@ -312,6 +316,7 @@ pub const COMMAND_SURFACE_HELP_LINE: &str =
 /// Compact legend shown while the help card is open.
 pub const HELP_SURFACE_HELP_LINE: &str = "any key closes";
 /// Compact legend shown while a failed board save is unresolved.
+pub const LAUNCH_CARD_HELP_LINE: &str = "y unarchive · n keep archived";
 pub const SAVE_RECOVERY_HELP_LINE: &str = "↑↓  ·  r retry  ·  c cancel";
 /// Compact legend shown while the first-use walkthrough is open.
 pub const WALKTHROUGH_HELP_LINE: &str = "Enter next  ·  Esc skip";
@@ -602,6 +607,7 @@ pub fn map_key(mode: BoardInputMode, key: KeyEvent) -> Option<BoardIntent> {
         BoardInputMode::TaskPage => map_task_page(key),
         BoardInputMode::ProjectPicker => map_project_picker(key),
         BoardInputMode::SaveRecovery => map_save_recovery(key),
+        BoardInputMode::LaunchCard => map_launch_card(key),
         BoardInputMode::Palette => map_palette(key),
         BoardInputMode::Help => map_help(key),
         BoardInputMode::QuickAdd => map_quick_add_key(key),
@@ -932,6 +938,7 @@ pub fn map_edit_paste(mode: BoardInputMode, text: &str) -> Option<BoardIntent> {
         BoardInputMode::SelectThread
         | BoardInputMode::EditScope
         | BoardInputMode::FormScopeDropdown
+        | BoardInputMode::LaunchCard
         | BoardInputMode::TaskPage => None,
         BoardInputMode::Palette => Some(BoardIntent::CommandQueryInsertText(text.to_string())),
         BoardInputMode::Normal
@@ -1042,6 +1049,8 @@ pub fn intent_primary_action(intent: &BoardIntent) -> Option<PrimaryBoardAction>
         | BoardIntent::ToggleArchivedGroup
         | BoardIntent::ProjectPickerSwitchTab
         | BoardIntent::SelectPickerTab(_)
+        | BoardIntent::LaunchUnarchive
+        | BoardIntent::LaunchKeepArchived
         | BoardIntent::File
         | BoardIntent::OpenHelp
         | BoardIntent::CloseLayer
@@ -1126,6 +1135,25 @@ fn map_task_page(key: KeyEvent) -> Option<BoardIntent> {
         }
         KeyCode::Up | KeyCode::Char('k') if !extra => Some(BoardIntent::PageScrollUp),
         KeyCode::Down | KeyCode::Char('j') if !extra => Some(BoardIntent::PageScrollDown),
+        _ => None,
+    }
+}
+
+/// Launch card: `y` unarchives, `n`/`Esc` keep archived. No `Enter` default (gate F-1):
+/// the choice must be explicit.
+fn map_launch_card(key: KeyEvent) -> Option<BoardIntent> {
+    if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+        return Some(BoardIntent::Quit);
+    }
+    if key
+        .modifiers
+        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER)
+    {
+        return None;
+    }
+    match key.code {
+        KeyCode::Char('y') => Some(BoardIntent::LaunchUnarchive),
+        KeyCode::Char('n') | KeyCode::Esc => Some(BoardIntent::LaunchKeepArchived),
         _ => None,
     }
 }

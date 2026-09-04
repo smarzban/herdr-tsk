@@ -13,7 +13,8 @@ use crate::domain::{DomainState, HumanStatus, Task, TaskScope};
 use crate::ui::capture::CaptureField;
 use crate::ui::edit::{seeded_draft, EditBuffer};
 use crate::ui::input::{
-    BOARD_HELP_LINE, COMMAND_SURFACE_HELP_LINE, HELP_SURFACE_HELP_LINE, SAVE_RECOVERY_HELP_LINE,
+    BOARD_HELP_LINE, COMMAND_SURFACE_HELP_LINE, HELP_SURFACE_HELP_LINE, LAUNCH_CARD_HELP_LINE,
+    SAVE_RECOVERY_HELP_LINE,
 };
 use crate::ui::mouse::BoardPopup;
 pub use crate::ui::queue::BoardTab;
@@ -55,6 +56,9 @@ pub enum BoardInputMode {
     EditScope,
     /// A task/capture form's transient scope chooser. It returns to its parent form on Esc.
     FormScopeDropdown,
+    /// The launch card owns input: a two-choice modal raised at most once per session
+    /// when the invocation default resolved to an archived project.
+    LaunchCard,
     /// The task page is open in view mode: the full-page surface shows the bound task and
     /// no field owns the cursor. Verbs act on the task; `e`/`n`/Tab enter field edits. A
     /// click does NOT: field regions are inert in this state, and only move focus once one
@@ -574,6 +578,12 @@ pub struct BoardModel {
     pub(super) drawer_open: bool,
     /// The done drawer's archived group starts collapsed on every launch. Session-only.
     pub(super) archived_collapsed: bool,
+    /// The archived project the launch card names, while the card is up.
+    pub(super) launch_card: Option<PathBuf>,
+    /// The launch card is shown at most once per session, whichever choice was made.
+    pub(super) launch_card_shown: bool,
+    /// Session quick-add default override (desk after "keep archived"). Session-only.
+    pub(super) session_default_scope: Option<TaskScope>,
     /// Accordion/takeover detail open on this task id, if any. Session-only.
     pub(super) detail_open: Option<Uuid>,
     /// Id-pinned selection into the queue-visible row set.
@@ -678,6 +688,9 @@ impl BoardModel {
             collapsed_thread_projects: HashSet::new(),
             drawer_open: false,
             archived_collapsed: true,
+            launch_card: None,
+            launch_card_shown: false,
+            session_default_scope: None,
             detail_open: None,
             selection_id: None,
             last_row_click: None,
@@ -870,6 +883,28 @@ impl BoardModel {
         model
     }
 
+    /// Raise the two-choice launch card when the invocation default resolves to an
+    /// archived project, at most once per session. Returns whether the card was raised.
+    pub fn offer_launch_card(
+        &mut self,
+        state: &DomainState,
+        snapshot: &InvocationSnapshot,
+    ) -> bool {
+        if self.launch_card_shown {
+            return false;
+        }
+        let TaskScope::Project { path } = &snapshot.default_scope else {
+            return false;
+        };
+        if !state.is_project_archived(path) {
+            return false;
+        }
+        self.launch_card_shown = true;
+        self.launch_card = Some(PathBuf::from(path));
+        self.popup = BoardPopup::LaunchCard;
+        true
+    }
+
     /// The one hidden predicate every working-lens surface filters on.
     fn is_hidden(&self, task: &Task) -> bool {
         if task.archived {
@@ -1009,7 +1044,7 @@ impl BoardModel {
     /// Home boards use the invocation default; project focus defaults to that project.
     pub(super) fn quick_add_scope(&self) -> Option<TaskScope> {
         match &self.board_location {
-            BoardLocation::Home { .. } => None,
+            BoardLocation::Home { .. } => self.session_default_scope.clone(),
             BoardLocation::Project(path) => Some(TaskScope::Project {
                 path: path.to_string_lossy().into_owned(),
             }),
@@ -1432,6 +1467,7 @@ impl BoardModel {
         }
         match self.popup {
             BoardPopup::SaveRecovery => BoardInputMode::SaveRecovery,
+            BoardPopup::LaunchCard => BoardInputMode::LaunchCard,
             _ if self.project_picker.is_some() => BoardInputMode::ProjectPicker,
             _ if self.focused_surface() == FocusedSurface::Board
                 && self.input_mode == BoardInputMode::TaskPage =>
@@ -1917,6 +1953,7 @@ impl BoardModel {
         match self.input_mode() {
             BoardInputMode::Palette => COMMAND_SURFACE_HELP_LINE,
             BoardInputMode::SaveRecovery => SAVE_RECOVERY_HELP_LINE,
+            BoardInputMode::LaunchCard => LAUNCH_CARD_HELP_LINE,
             BoardInputMode::Help => HELP_SURFACE_HELP_LINE,
             _ => BOARD_HELP_LINE,
         }

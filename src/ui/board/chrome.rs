@@ -69,6 +69,7 @@ fn edit_chrome_legends(mode: BoardInputMode) -> [&'static str; 3] {
         | BoardInputMode::Normal
         | BoardInputMode::ProjectPicker
         | BoardInputMode::SaveRecovery
+        | BoardInputMode::LaunchCard
         | BoardInputMode::Palette
         | BoardInputMode::Help
         | BoardInputMode::TaskPage => [

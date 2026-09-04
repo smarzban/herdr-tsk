@@ -434,6 +434,8 @@ pub enum QueueOverlay<'a> {
     },
     /// Help card (`?`).
     Help { lines: &'a [String] },
+    /// Launch card: the two-choice archived-project modal.
+    LaunchCard { name: &'a str },
     /// Project-scope dropdown from the selector chip.
     ScopeDropdown {
         options: &'a [String],
@@ -605,6 +607,8 @@ pub enum QueueHitTarget {
     ProjectOption(usize),
     /// One painted tab of the project picker's tab row.
     PickerTab(crate::ui::board::PickerTab),
+    /// One choice row of the launch card (0 = unarchive, 1 = keep archived).
+    LaunchOption(usize),
     /// One painted home tab on the selector row.
     HomeTab(BoardTab),
     /// One ON DECK project-group header on the Projects tab, indexed into sections.
@@ -1263,6 +1267,7 @@ fn paint_footer(
             // the board's verb bar stays blank underneath it.
             QueueOverlay::Palette { .. }
             | QueueOverlay::Help { .. }
+            | QueueOverlay::LaunchCard { .. }
             | QueueOverlay::ScopeDropdown { .. } => &[],
             QueueOverlay::QuickAdd { recovery, .. } if *recovery => &[],
             QueueOverlay::QuickAdd { .. } => QUICK_ADD_VERBS,
@@ -1528,6 +1533,9 @@ fn paint_overlay(
         }
         QueueOverlay::Help { lines } => {
             paint_help_overlay(frame, geo, surface, lines, hits);
+        }
+        QueueOverlay::LaunchCard { name } => {
+            paint_launch_card(frame, geo, surface, name, hits);
         }
         QueueOverlay::ScopeDropdown {
             options,
@@ -2937,6 +2945,68 @@ fn paint_page_scope_dropdown(
             Rect::new(0, y, width, 1),
         );
         hits.push_copyable(Rect::new(0, y, width, 1));
+    }
+}
+
+pub(crate) const LAUNCH_FOOTER: &[VerbEntry<'static>] = &[
+    VerbEntry {
+        key: "y",
+        label: "unarchive",
+    },
+    VerbEntry {
+        key: "n",
+        label: "keep archived",
+    },
+];
+
+/// The launch card: raised before the first keypress when the invocation default
+/// resolved to an archived project. Two explicit choices, no `Enter` default.
+fn paint_launch_card(
+    frame: &mut Frame<'_>,
+    geo: &TierGeometry,
+    surface: Rect,
+    name: &str,
+    hits: &mut QueueHitMap,
+) {
+    if geo.row_width == 0 {
+        return;
+    }
+    let bounds = Rect::new(0, 0, geo.row_width, geo.height);
+    let title = format!("project {name} is archived");
+    let content = paint_modal_card(
+        frame,
+        geo,
+        surface,
+        bounds,
+        ModalCardSpec {
+            title: &title,
+            content_rows: 2,
+            legend: LAUNCH_FOOTER,
+            dismiss: None,
+        },
+        hits,
+    );
+    if content.width == 0 || content.height == 0 {
+        return;
+    }
+    let options = [("unarchive", "y"), ("keep archived", "n")];
+    for (index, (label, key)) in options.iter().enumerate() {
+        let y = content.y.saturating_add(index as u16);
+        let marker = if index == 0 { "\u{25b8} " } else { "  " };
+        let text = format!("{marker}{label}  {key}");
+        let style = if index == 0 {
+            style_reverse()
+        } else {
+            style_plain()
+        };
+        let rect = Rect::new(content.x, y, content.width, 1);
+        put_line_at(
+            frame,
+            surface,
+            rect,
+            paint_bounded_line(&text, content.width, style),
+        );
+        hits.push(QueueHitTarget::LaunchOption(index), rect);
     }
 }
 

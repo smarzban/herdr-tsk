@@ -89,7 +89,8 @@ pub fn load_board() -> Result<(TaskStore, DomainState, BoardModel), Box<dyn Erro
     let store = TaskStore::new(default_state_dir());
     let state = store.load()?;
     let snapshot = load_snapshot();
-    let model = BoardModel::from_domain(&state, snapshot.this_repo.clone());
+    let mut model = BoardModel::from_domain(&state, snapshot.this_repo.clone());
+    model.offer_launch_card(&state, &snapshot);
     Ok((store, state, model))
 }
 

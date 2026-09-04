@@ -62,6 +62,7 @@ pub fn board_intent_may_persist(intent: &BoardIntent) -> bool {
             | BoardIntent::SoftDelete
             | BoardIntent::Undo
             | BoardIntent::File
+            | BoardIntent::LaunchUnarchive
             | BoardIntent::PrimaryVerb
             | BoardIntent::ToggleBlock
             | BoardIntent::QuickAddSave
@@ -1591,6 +1592,30 @@ fn apply_board_intent(
                     }
                 }
             }
+        }
+        BoardIntent::LaunchUnarchive => {
+            let Some(path) = model.launch_card.clone() else {
+                return Ok(IntentOutcome::None);
+            };
+            let scope_path = path.to_string_lossy().into_owned();
+            domain.unarchive_project(&scope_path)?;
+            // A failed save lands in Save Recovery via the existing boundary; the session
+            // default stays the project until the durable write lands.
+            model.launch_card = None;
+            model.popup = BoardPopup::None;
+            model.clear_message();
+        }
+        BoardIntent::LaunchKeepArchived => {
+            let Some(path) = model.launch_card.take() else {
+                return Ok(IntentOutcome::None);
+            };
+            model.popup = BoardPopup::None;
+            model.session_default_scope = Some(TaskScope::Global);
+            let lossy = path.to_string_lossy().into_owned();
+            let name = crate::ui::render::short_project(&lossy);
+            model.set_message(format!(
+                "project {name} is archived · quick-add goes to your desk this session"
+            ));
         }
         BoardIntent::File => {
             // Picker open: archive the selected main-tab project, or unarchive the
