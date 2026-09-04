@@ -25,8 +25,11 @@ The binary is `target/release/tsk`.
 ./target/release/tsk
 ```
 
-State lives in `~/.tsk/tsk.json`; walkthrough dismissal is kept beside it in
-`walkthrough.json`. Override with `TSK_STATE_DIR` / `TSK_CONFIG_DIR`.
+State lives in `~/.tsk/tsk.json`, with the previous version in `tsk.json.1` and a
+`tsk.json.lock` guarding writers. Override the directory with `TSK_STATE_DIR`
+(`TSK_CONFIG_DIR` for config). Board, CLI, and agents share the store safely:
+saves merge by task and revision, and an idle board picks up an outside change
+within a quarter of a second.
 
 ```bash
 tsk add -t "Draft release notes"
@@ -52,7 +55,8 @@ herdr plugin action invoke open-board --plugin herdr-tsk
 It opens a **tsk** split beside the current pane. Invoke it again to focus the
 board you already have.
 
-**Quick capture** opens the capture form without a persistent board:
+**Quick capture** opens the capture form without a persistent board. Selected text
+in the focused pane becomes the title:
 
 ```bash
 herdr plugin action invoke quick-capture --plugin herdr-tsk

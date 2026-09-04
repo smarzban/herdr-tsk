@@ -46,9 +46,14 @@
     window.setTimeout(() => root.classList.remove("theme-animating"), 500);
   }
 
-  // Ensure default is painted even if the head script was skipped.
+  // Ensure a theme is painted even if the head script was skipped: prefer the
+  // saved choice, then dark. Never overwrite a saved choice with the default.
   if (!document.documentElement.dataset.theme) {
-    applyTheme("dark");
+    let saved = null;
+    try {
+      saved = localStorage.getItem(KEY) || localStorage.getItem("starlight-theme");
+    } catch (_) {}
+    applyTheme(saved === "light" ? "light" : "dark");
   } else {
     applyTheme(currentTheme());
   }

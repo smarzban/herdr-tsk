@@ -2,23 +2,44 @@
 import { defineConfig } from 'astro/config';
 import sitemap from '@astrojs/sitemap';
 import starlight from '@astrojs/starlight';
+import { ExpressiveCodeTheme } from '@astrojs/starlight/expressive-code';
+
+import { rehypeKbd } from './src/plugins/rehype-kbd.mjs';
+
+// Code blocks stay mono like the landing page: ink, a dimmer ink, and weight. No hue.
+function codeTheme(name, type, palette) {
+  return new ExpressiveCodeTheme({
+    name,
+    type,
+    colors: {
+      'editor.background': palette.bg,
+      'editor.foreground': palette.ink,
+    },
+    tokenColors: [
+      { scope: ['comment', 'punctuation.definition.comment'], settings: { foreground: palette.dim } },
+      { scope: ['string', 'string.quoted', 'punctuation.definition.string'], settings: { foreground: palette.ink2 } },
+      { scope: ['constant.other.option', 'variable.parameter'], settings: { foreground: palette.ink2 } },
+      { scope: ['keyword', 'support.function', 'entity.name.function', 'support.type.property-name'], settings: { foreground: palette.ink, fontStyle: 'bold' } },
+    ],
+  });
+}
+
+const codeDark = codeTheme('tsk-dark', 'dark', { bg: '#171719', ink: '#ebe7dc', ink2: '#aca89e', dim: '#66635c' });
+const codeLight = codeTheme('tsk-light', 'light', { bg: '#faf8f3', ink: '#151517', ink2: '#4d4b46', dim: '#8b887f' });
 
 export default defineConfig({
   site: 'https://tsk-gules.vercel.app',
   // Keep inter-tag whitespace: the landing copy relies on spaces between text and inline tags.
   compressHTML: false,
+  markdown: {
+    rehypePlugins: [rehypeKbd],
+  },
   integrations: [
     sitemap(),
     starlight({
       title: 'tsk',
       description: 'A task board for you and your agents, in your terminal.',
       favicon: '/icon-dark.svg',
-      logo: {
-        light: './src/assets/wordmark-light.svg',
-        dark: './src/assets/wordmark-dark.svg',
-        alt: 'tsk',
-        replacesTitle: true,
-      },
       social: [
         {
           icon: 'github',
@@ -31,8 +52,35 @@ export default defineConfig({
       },
       lastUpdated: true,
       customCss: ['./src/styles/starlight.css'],
+      expressiveCode: {
+        themes: [codeDark, codeLight],
+        useStarlightDarkModeSwitch: true,
+        useStarlightUiThemeColors: false,
+        defaultProps: { wrap: true, preserveIndent: true },
+        styleOverrides: {
+          borderRadius: '4px',
+          borderColor: 'var(--sl-color-gray-5)',
+          codeFontFamily: 'var(--sl-font)',
+          codeFontSize: '0.82rem',
+          codeLineHeight: '1.7',
+          codePaddingBlock: '1rem',
+          codePaddingInline: '1.25rem',
+          frames: {
+            shadowColor: 'transparent',
+            editorBackground: 'var(--sl-color-bg-nav)',
+            terminalBackground: 'var(--sl-color-bg-nav)',
+            inlineButtonForeground: 'var(--sl-color-gray-2)',
+            inlineButtonBackground: 'var(--sl-color-gray-5)',
+            inlineButtonBorder: 'var(--sl-color-gray-5)',
+            tooltipSuccessBackground: 'var(--sl-color-accent)',
+            tooltipSuccessForeground: '#121214',
+          },
+        },
+      },
       components: {
+        SiteTitle: './src/components/DocsTitle.astro',
         ThemeSelect: './src/components/ThemeSelect.astro',
+        SocialIcons: './src/components/DocsLinks.astro',
       },
       sidebar: [
         {
@@ -51,13 +99,14 @@ export default defineConfig({
       ],
       head: [
         {
-          tag: 'script',
-          attrs: { src: '/theme.js' },
-        },
-        {
-          // Dark by default; respects saved tsk-theme / starlight-theme.
+          // Paint the saved theme before anything renders. Must run before theme.js,
+          // whose fallback would otherwise overwrite the saved choice.
           tag: 'script',
           content: `(function(){var k='tsk-theme';var t=null;try{t=localStorage.getItem(k)||localStorage.getItem('starlight-theme');}catch(e){}if(t!=='light'&&t!=='dark')t='dark';document.documentElement.dataset.theme=t;document.documentElement.style.colorScheme=t;try{localStorage.setItem(k,t);localStorage.setItem('starlight-theme',t);}catch(e){}})();`,
+        },
+        {
+          tag: 'script',
+          attrs: { src: '/theme.js' },
         },
         {
           tag: 'link',

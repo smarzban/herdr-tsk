@@ -14,8 +14,9 @@ beside the board without resetting page scroll or the step cursor; `→` brings 
 
 The dim `T30` prefix in the header copies that task identifier when clicked. A click
 inside the stage A task column moves to G before running the same action the control
-has in the single-pane page. The footer meta is `created … · updated …`; the project
-lives in the header slot.
+has in the single-pane page. The footer reads `scope · #thread · created … · updated …`. In a wide column
+the project lives in the header slot and the scope slot shows only while an edit
+session can change it.
 
 It is view-first. Nothing is in edit mode until you ask. `ctrl+e` edits the title,
 `ctrl+n` edits notes. In view, Tab and Shift+Tab loop only through stored steps and
@@ -49,6 +50,11 @@ insert a line.
 
 Thread uses the same name rules as capture `!t`. The field is optional.
 
+While an edit is unsaved, moving the selection to another task refuses with
+`save or cancel edits before switching tasks`. Saving a task that another writer
+deleted meanwhile answers `that task is deleted`. An empty step paints
+`text required` on its own row.
+
 ## Notes markdown
 
 View and peek style a small markdown subset. Edit is always the raw source. No
@@ -71,8 +77,9 @@ an L-shaped `└` connector.
 
 ## Peek vs page
 
-Below 110 columns, `→` or a row click peeks up to five wrapped note lines. At wide
-widths, selection updates the task column and no inline peek opens.
+Below 110 columns, `→` or a row click peeks up to five wrapped note lines, then
+`… N more lines` if there are more, or `no notes yet`. At wide widths, selection
+updates the task column and no inline peek opens.
 
 Text on the page wraps. It does not truncate.
 

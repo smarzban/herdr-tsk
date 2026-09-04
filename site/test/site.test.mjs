@@ -78,3 +78,37 @@ test("demo matches the quick-add, peek, and group-toggle contracts", async () =>
   assert.match(demo, /id: "groups", label: "toggle groups"/);
   assert.match(demo, /if \(e\.key === "g" && !e\.altKey && !e\.ctrlKey && !e\.metaKey\)/);
 });
+
+test("the saved theme survives a visit to the docs", async () => {
+  const config = await read("../astro.config.mjs");
+  const init = config.indexOf("var k='tsk-theme'");
+  const loader = config.indexOf("attrs: { src: '/theme.js' }");
+  assert.ok(init > 0 && loader > init, "the inline theme init must run before theme.js");
+  const theme = await read("../public/theme.js");
+  assert.match(theme, /saved = localStorage\.getItem\(KEY\)/);
+});
+
+test("docs paint keys as keycaps and leave flags as code", async () => {
+  const { isKeyName } = await import("../src/plugins/rehype-kbd.mjs");
+  for (const key of ["ctrl+s", "Shift+Enter", "Enter", "Esc", "→", "j", "P", "+", ":", "?"]) {
+    assert.ok(isKeyName(key), `${key} is a key`);
+  }
+  for (const code of ["--json", "-", "tsk add", "~/.tsk", "T30", "T", "i", "n", "global", "ctrl+"]) {
+    assert.ok(!isKeyName(code), `${code} is not a key`);
+  }
+});
+
+test("docs open on the two-party board and keep done human", async () => {
+  const overview = await read("../src/content/docs/docs/index.mdx");
+  assert.match(overview, /a task board for you and your agents/);
+  assert.match(overview, /Done is a human verb/);
+  const cli = await read("../src/content/docs/docs/cli.md");
+  assert.match(cli, /## For agents/);
+});
+
+test("docs keep the phone layout until the right TOC fits", async () => {
+  const css = await read("../src/styles/starlight.css");
+  assert.match(css, /@media \(min-width: 50rem\) and \(max-width: 71\.99rem\)/);
+  const links = await read("../src/components/DocsLinks.astro");
+  assert.doesNotMatch(links, /install/);
+});

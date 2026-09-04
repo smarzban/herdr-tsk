@@ -1,20 +1,35 @@
 ---
 title: Overview
-description: What tsk is and where to read how to use it.
+description: What tsk is, who moves the work, and where to read next.
 ---
 
-**tsk** is a task board for your terminal. Capture work, then move it through human
-status: ready, started, blocked, review, done.
+**tsk** is a task board for you and your agents, in your terminal. You both put
+work on one board and move it through human status: ready, started, blocked,
+review, done. Only a human marks a task done.
 
 It ships as the herdr plugin `herdr-tsk`. The `tsk` binary also runs standalone
-against `~/.tsk`. The pane, the capture overlay, and the CLI edit the same board.
+against `~/.tsk`. The pane, the capture overlay, and the CLI edit the same store.
 
 This site is the user guide. Maintainer internals live in the repo under
 [`docs/technical/`](https://github.com/smarzban/herdr-tsk/tree/main/docs/technical).
 
+## One board, two kinds of hands
+
+- **You** work the board: tabs, peek, the task page, and the status verbs behind
+  Ctrl.
+- **Agents** work the [CLI](/docs/cli/): `tsk add` puts work on the board,
+  `tsk steps` plans it, `tsk list` reads it back. Adding a task that already
+  exists returns the existing one, so a retried plan is safe.
+- **Done is a human verb.** Nothing in tsk completes a task on an agent's behalf,
+  and the CLI has no verb for it.
+
+Moving status from the CLI, assigning a task to an agent, and starting that agent
+from the board are in progress. They are not in the current build.
+
 ## What you can do
 
-- Keep a queue with **desk**, **projects**, and **threads**
+- Keep a queue with **desk**, **projects**, and **threads**. The desk is your own
+  planning space: general to-dos, future projects, anything outside a repository.
 - Capture with `+` on the board, or a herdr overlay
 - Open a task page for title, notes, thread, scope, and steps
 - Script the same store with `tsk add`, `tsk list`, and `tsk steps`
@@ -28,4 +43,4 @@ Park, resume, attention, linking, and dispatch are not in this product.
 3. [Keys](/docs/keys/) for the keymap
 4. [Capture](/docs/capture/) to add work
 5. [Task page](/docs/task-page/) and [steps](/docs/steps/) for detail
-6. [CLI](/docs/cli/) when you want the board without the TUI
+6. [CLI](/docs/cli/) for agents, scripts, and the board without the TUI

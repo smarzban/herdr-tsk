@@ -1329,3 +1329,47 @@ fn page_footer_thread_edit_operable_at_40x10() {
         .collect();
     assert!(painted.contains("tiny"), "thread input vanished: {painted}");
 }
+
+/// A paste into the task-page Thread editor flattens line breaks like Title: a thread name
+/// is one line by definition, so a multi-line clipboard must never land as a multi-line draft.
+#[test]
+fn thread_paste_flattens_line_breaks_like_title() {
+    let mut domain = DomainState::new();
+    domain
+        .create(
+            "Thread Paste",
+            None,
+            project(THIS_REPO),
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None).expect("open form");
+    apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None).expect("Notes");
+    apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None).expect("add target");
+    apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None).expect("Scope");
+    apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None).expect("select Thread");
+    assert_eq!(model.input_mode(), BoardInputMode::SelectThread);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ToggleThreadEditing,
+        None,
+    )
+    .expect("activate Thread editor");
+    assert_eq!(model.input_mode(), BoardInputMode::EditThread);
+
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::EditInsertText("release\n2026\r\nnotes".into()),
+        None,
+    )
+    .expect("paste into Thread");
+    assert_eq!(
+        model.edit_buffer(),
+        "release 2026 notes",
+        "Thread must flatten pasted line breaks like Title"
+    );
+}

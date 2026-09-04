@@ -21,8 +21,10 @@ Title is required.
 
 ## Title tokens
 
-`!p` and `!t` each consume one whitespace-delimited argument. Tokens are stripped
-from the saved title.
+`!p` and `!t` each consume one whitespace-delimited argument. They can sit anywhere
+in the line, in either order. A token followed by another token or by a `#word` is
+bare. Tokens are stripped from the saved title, and the remaining words are
+rejoined with single spaces.
 
 | Token | Effect |
 | --- | --- |
@@ -44,9 +46,17 @@ opening a split board:
 herdr plugin action invoke quick-capture --plugin herdr-tsk
 ```
 
-Tab through Title, Notes, Thread, Scope. `Enter` in Title saves. `Enter` in Notes
-inserts a line. `Ctrl+Enter` saves from any field, with `Alt+Enter` as the
-legacy-terminal fallback. `Esc` cancels and leaves.
+Tab through Title, Notes, Thread, Scope. `Enter` in Title or Thread saves. `Enter`
+in Notes inserts a line. `Ctrl+Enter` saves from Title, Notes, or Thread, with
+`Alt+Enter` as the legacy-terminal fallback; on Scope, plain `Enter` saves. `Esc`
+cancels and leaves.
+
+If text is selected in the pane you invoked it from, it arrives as the title.
+
+Scope is three chips: **This project** (the repo the focused pane is in; marked
+unavailable outside one), **Desk**, and **Other…**, which discloses a path field.
+`1` `2` `3` pick a chip, `s` or `Space` cycles, `p` or `e` edits the path and `Enter`
+confirms it. Refusals paint in the card: `Title required`, `invalid thread name`.
 
 An idle board watching the same `~/.tsk` picks up the new task on the next tick.
 

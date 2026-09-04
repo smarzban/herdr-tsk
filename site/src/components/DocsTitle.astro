@@ -1,0 +1,42 @@
+---
+/**
+ * Replaces Starlight's site title with the landing page's header: the inline
+ * wordmark (block in accent) and the version chip.
+ */
+import Wordmark from './Wordmark.astro';
+import { VERSION } from '../version.mjs';
+---
+
+<a href="/" class="docs-title" aria-label="tsk home">
+  <Wordmark />
+</a>
+<span class="docs-ver" title="crate and plugin version">v{VERSION}</span>
+
+<style>
+  .docs-title {
+    display: inline-flex;
+    align-items: center;
+    color: var(--sl-color-white);
+    text-decoration: none;
+  }
+
+  .docs-title :global(.wm) {
+    display: block;
+    height: 1.45rem;
+    width: auto;
+  }
+
+  .docs-title :global(.wm-block) {
+    fill: var(--sl-color-accent);
+  }
+
+  .docs-ver {
+    margin-inline-start: 0.9rem;
+    font-size: 0.72rem;
+    color: var(--sl-color-gray-3);
+    padding: 0.1rem 0.45rem;
+    border: 1px solid var(--sl-color-hairline);
+    border-radius: 4px;
+    white-space: nowrap;
+  }
+</style>

@@ -234,7 +234,7 @@ pub enum BoardIntent {
     RetrySave,
     /// Restore the last persisted board state and abandon the failed mutation.
     CancelSave,
-    /// Open the searchable command palette (`?`).
+    /// Open the searchable command palette (`:`).
     OpenCommandPalette,
     /// Move the command-surface selection.
     CommandNext,
@@ -261,9 +261,9 @@ pub enum BoardIntent {
     CommandQueryBackspace,
     /// Retained no-op seam for the non-live launch walkthrough helper.
     OpenWalkthrough,
-    /// `space` — state-mapped primary verb. Reducer lands in.
+    /// `ctrl+s` — state-mapped primary verb. Reducer lands in.
     PrimaryVerb,
-    /// `b` — toggle blocked ↔ doing. Reducer lands in.
+    /// `ctrl+b` — toggle blocked ↔ ready. Reducer lands in.
     ToggleBlock,
     /// `Enter` opens the selected task as a full-page view in single-pane presentation.
     OpenTaskPage,
@@ -518,7 +518,7 @@ pub fn normal_help_bindings() -> Vec<(&'static str, &'static str)> {
 }
 
 fn help_chord_shown(chord: &str) -> String {
-    const MUTATING: &[&str] = &["q", "s", "d", "o", "b", "a", "e", "x/Delete", "u"];
+    const MUTATING: &[&str] = &["q", "s", "d", "o", "b", "e", "x/Delete", "u"];
     if MUTATING.contains(&chord) {
         format!("ctrl+{chord}")
     } else {
@@ -526,29 +526,50 @@ fn help_chord_shown(chord: &str) -> String {
     }
 }
 
-/// Help-card body lines painted by the renderer (derived from [`normal_help_bindings`]).
+/// Task-page chords the help card lists under the board bindings. The page has no
+/// `?` of its own, so the board's card is the one place a user can read them.
+pub fn task_page_help_bindings() -> Vec<(&'static str, &'static str)> {
+    vec![
+        ("ctrl+e", "title"),
+        ("ctrl+n", "notes"),
+        ("ctrl+a", "step"),
+        ("tab/↓", "steps"),
+        ("shift+enter", "save edit"),
+        ("esc", "close"),
+    ]
+}
+
+/// Help-card body lines painted by the renderer (derived from [`normal_help_bindings`]
+/// and [`task_page_help_bindings`]).
 ///
 /// No heading or trailing close instruction: the shared modal card's own title (`help`)
 /// and footer legend (`any key close`) already say both.
 pub fn help_card_lines() -> Vec<String> {
-    let mut lines = Vec::new();
-    let bindings = normal_help_bindings();
-    let mut i = 0;
-    while i < bindings.len() {
-        let (c1, l1) = bindings[i];
-        let c1 = help_chord_shown(c1);
-        if i + 1 < bindings.len() {
-            let (c2, l2) = bindings[i + 1];
-            let c2 = help_chord_shown(c2);
-            // Compact's 40-column minimum needs both bindings on one line.
-            lines.push(format!(" {c1} {l1} | {c2} {l2}"));
-            i += 2;
-        } else {
-            lines.push(format!(" {c1} {l1}"));
-            i += 1;
-        }
-    }
+    let board: Vec<(String, &str)> = normal_help_bindings()
+        .into_iter()
+        .map(|(chord, label)| (help_chord_shown(chord), label))
+        .collect();
+    let page: Vec<(String, &str)> = task_page_help_bindings()
+        .into_iter()
+        .map(|(chord, label)| (chord.to_string(), label))
+        .collect();
+    let mut lines = paired_help_lines(&board);
+    lines.push(String::new());
+    lines.push(" task page".to_string());
+    lines.extend(paired_help_lines(&page));
     lines
+}
+
+fn paired_help_lines(bindings: &[(String, &str)]) -> Vec<String> {
+    bindings
+        .chunks(2)
+        .map(|pair| match pair {
+            // Compact's 40-column minimum needs both bindings on one line.
+            [(c1, l1), (c2, l2)] => format!(" {c1} {l1} | {c2} {l2}"),
+            [(c1, l1)] => format!(" {c1} {l1}"),
+            _ => String::new(),
+        })
+        .collect()
 }
 
 /// Map a key event to a board intent for the current input mode.
