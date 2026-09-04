@@ -76,7 +76,8 @@ Every regression test was watched failing with its fix hunk reverted by hand
 | T2 store signature | 71348e4 | AC-5, AC-6 | |
 | T3 undo cap + prune | e230894 | AC-7..AC-9 | prune lives in task.rs (needs the private fields); UNDO_CAP in undo.rs |
 | T4 trash file | 6303bd1 | AC-10..AC-16 | see the eligibility note; two existing cli_list --deleted expectations updated to the spec's new order |
-| T5 docs | (this commit) | docs items | README, install.md, cli.md, SKILL.md, CHANGELOG; site npm test green |
+| T5 docs | c2d5de8 | docs items | README, install.md, cli.md, SKILL.md, CHANGELOG; site npm test green |
+| live smoke | (this commit) | Done-means | herdr pane beside the agent; see below |
 
 ## Regression proofs (fix hunk reverted by hand, test watched failing, fix restored)
 
@@ -140,3 +141,29 @@ Every regression test was watched failing with its fix hunk reverted by hand
   Failed without the fix: `restore_refuses_when_the_task_is_already_live`
   (a crash-duplicated task restores a second copy instead of refusing).
   Restored.
+
+## Live smoke (HERDR_ENV=1)
+
+Pane `w1E:p2`, split right of the agent pane via `herdr pane split`, running
+`env TSK_STATE_DIR=/tmp/tsk-store-hardening ./target/release/tsk` from the
+worktree. State dir was emptied before the run; `~/.tsk` untouched.
+
+1. Quick-add (`+`, title, `Enter`) three tasks: T1 "smoke task one", T2
+   "smoke task two", T3 "smoke task three"; each painted under the
+   `feat-store-hardening` project group and became the selection.
+2. `ctrl+x` soft-deleted T1: the row left the board and the status row read
+   `Deleted "smoke task one" · u Undo`. (The selection had landed on T1 after
+   the add sequence, so the first `up` + `ctrl+x` hit T1 rather than T2; the
+   flow under test is unchanged.)
+3. `ctrl+d` completed T2: the open count dropped to 1 and the footer read
+   `1 done`.
+4. `ctrl+q` quit. On disk: `trash.jsonl` had exactly **one line** — T1, with
+   `deleted_at` `[1788523448, 940568000]` matching its `soft_deleted` history
+   event — beside `tsk.json`, `tsk.json.1`, and `tsk.json.lock`.
+5. `tsk list --deleted` printed `DELETED / - 1 smoke task one` (exit 0);
+   `tsk list` showed only T3.
+6. `tsk trash restore T1` printed `restored T1 smoke task one`, exit 0;
+   `trash.jsonl` went to 0 lines; `tsk list` showed T1 and T3 ready.
+7. Reopened the board in the same pane: T1 painted beside T3 under the
+   project group, `1 done` in the footer (`tsk list --done` shows T2).
+   `ctrl+q` quit cleanly.

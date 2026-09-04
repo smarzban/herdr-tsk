@@ -33,3 +33,13 @@ integration tests in `tests/`.
 | `tsk trash restore T<n>` | `site/src/content/docs/docs/cli.md` (trash section, commands table, exit contract), `skills/tsk-cli/SKILL.md` (Trash) |
 | `tsk list --deleted` includes trash for 30 days | `site/src/content/docs/docs/cli.md` (list), `skills/tsk-cli/SKILL.md` (listing filters) |
 | One CHANGELOG entry per user-visible item (trash, restore, undo cap, synced-folder note) | `CHANGELOG.md` Unreleased |
+
+## Done-means
+
+| Item | Status |
+| --- | --- |
+| Green bar in this worktree | `cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && cargo build --release` green; 756 tests (baseline 727) |
+| `cd site && npm test` | 10/10 pass |
+| Every AC maps to a named test | table above |
+| Every regression test watched failing without its fix | `build-report.md`, per-task revert notes |
+| Live smoke under HERDR_ENV=1 | `build-report.md` Live smoke section |
