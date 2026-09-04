@@ -41,6 +41,11 @@ pub fn resolve_project_path(
             candidates.insert(path.clone());
         }
     }
+    // Archived projects keep resolvable names even when every task of theirs is
+    // hidden, so `!p name` can address them for refusals and unarchive flows.
+    for path in domain.projects().keys() {
+        candidates.insert(path.clone());
+    }
     if let Some(snapshot) = snapshot {
         if let TaskScope::Project { path } = &snapshot.default_scope {
             candidates.insert(path.clone());

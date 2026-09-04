@@ -685,6 +685,57 @@ fn archive_flag_survives_save_and_load() {
 }
 
 #[test]
+fn reload_merge_save_keeps_a_sibling_writers_project_record_and_applies_the_local_intent() {
+    let dir = temp_state_dir();
+    let _guard = TempDirGuard(dir.clone());
+    let store = TaskStore::new(&dir);
+    let mut seed = DomainState::new();
+    for path in ["/repos/p", "/repos/q"] {
+        seed.create(
+            "seed",
+            None,
+            TaskScope::Project {
+                path: path.to_string(),
+            },
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create seed task");
+    }
+    store.save(&seed).expect("seed two projects");
+
+    // Writer A's snapshot is stale: taken before writer B archives Q on disk.
+    let mut a = store.load().expect("stale writer A");
+    let mut b = store.load().expect("writer B");
+    b.archive_project("/repos/q").expect("B archives Q");
+    store.save(&b).expect("B persists the Q record");
+
+    // A archives P against its stale (empty) map, then merge-saves: the disk map
+    // replaces A's, A's own intent is re-applied, and B's record survives.
+    a.archive_project("/repos/p").expect("A archives P");
+    store.reload_merge_save(&mut a).expect("A merge-save");
+    let disk = store.load().expect("reload");
+    assert_eq!(
+        disk.archived_projects(),
+        std::collections::BTreeSet::from(["/repos/p".to_string(), "/repos/q".to_string()]),
+        "both records are on disk after the merge"
+    );
+
+    // A unarchives P through a locked merge: a plain union would resurrect it, the
+    // recorded intent must win.
+    a.unarchive_project("/repos/p").expect("A unarchives P");
+    store
+        .reload_merge_save(&mut a)
+        .expect("A merge-save unarchive");
+    let disk = store.load().expect("reload");
+    assert_eq!(
+        disk.archived_projects(),
+        std::collections::BTreeSet::from(["/repos/q".to_string()]),
+        "only Q remains on disk"
+    );
+}
+
+#[test]
 fn noncurrent_store_is_refused_without_rewriting_the_file() {
     let dir = temp_state_dir();
     let _guard = TempDirGuard(dir.clone());

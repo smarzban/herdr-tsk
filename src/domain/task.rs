@@ -92,6 +92,8 @@ pub enum DomainError {
     EmptyStepText,
     /// No step with this id exists on the task.
     UnknownStep(Uuid),
+    /// No project record exists and no task carries this project scope path.
+    UnknownProject(String),
 }
 
 impl std::fmt::Display for DomainError {
@@ -105,6 +107,7 @@ impl std::fmt::Display for DomainError {
             }
             DomainError::EmptyStepText => write!(f, "step text must be non-empty after trim"),
             DomainError::UnknownStep(id) => write!(f, "unknown step id {id}"),
+            DomainError::UnknownProject(path) => write!(f, "unknown project {path}"),
         }
     }
 }
@@ -166,6 +169,12 @@ pub struct DomainState {
     /// writes `"projects": {}` so the v2 wire shape is pinned.
     #[serde(default)]
     projects: BTreeMap<String, ProjectRecord>,
+    /// This process's not-yet-confirmed project archive/unarchive intents, recorded
+    /// by the two verbs (true = archived, false = unarchived). Transient: skipped in
+    /// serialization, cleared with the merge bases, and re-applied after every disk
+    /// merge so a plain union can never resurrect a record this process just removed.
+    #[serde(skip)]
+    project_intents: BTreeMap<String, bool>,
     /// LIFO undo records for soft-delete and complete.
     undo_stack: Vec<UndoEntry>,
 }
@@ -183,6 +192,7 @@ impl DomainState {
             next_task_number: 1,
             tasks: Vec::new(),
             projects: BTreeMap::new(),
+            project_intents: BTreeMap::new(),
             undo_stack: Vec::new(),
         }
     }
@@ -208,6 +218,70 @@ impl DomainState {
     /// Per-project records keyed by scope path. Empty when no project is archived.
     pub fn projects(&self) -> &BTreeMap<String, ProjectRecord> {
         &self.projects
+    }
+
+    /// Whether the project record for `path` carries the archived flag.
+    pub fn is_project_archived(&self, path: &str) -> bool {
+        self.projects
+            .get(path)
+            .is_some_and(|record| record.archived)
+    }
+
+    /// Scope paths of every archived project, sorted.
+    pub fn archived_projects(&self) -> BTreeSet<String> {
+        self.projects
+            .iter()
+            .filter(|(_, record)| record.archived)
+            .map(|(path, _)| path.clone())
+            .collect()
+    }
+
+    /// The one hidden predicate every working lens filters on: the task is archived,
+    /// or its project is archived.
+    pub fn is_hidden(&self, task: &Task) -> bool {
+        match &task.scope {
+            TaskScope::Global => task.archived,
+            TaskScope::Project { path } => task.archived || self.is_project_archived(path),
+        }
+    }
+
+    /// Archive a project: write its lazy record. Tasks are untouched; their own
+    /// archived flags are independent of this. Records exist only while archived, so
+    /// unarchiving removes the record entirely.
+    ///
+    /// Returns `Ok(false)` when the requested state already holds: no record change,
+    /// no intent. Unknown when no task (any status, soft-deleted included) carries the
+    /// scope and no record exists. Neither verb touches tasks, history, or undo.
+    pub fn archive_project(&mut self, path: &str) -> Result<bool, DomainError> {
+        if self.is_project_archived(path) {
+            return Ok(false);
+        }
+        if !self.has_project_task(path) && !self.projects.contains_key(path) {
+            return Err(DomainError::UnknownProject(path.to_string()));
+        }
+        self.projects
+            .insert(path.to_string(), ProjectRecord { archived: true });
+        self.project_intents.insert(path.to_string(), true);
+        Ok(true)
+    }
+
+    /// Unarchive a project: remove its record. `Ok(false)` when no record exists but
+    /// tasks carry the scope (already unarchived); unknown when neither.
+    pub fn unarchive_project(&mut self, path: &str) -> Result<bool, DomainError> {
+        if self.projects.remove(path).is_some() {
+            self.project_intents.insert(path.to_string(), false);
+            return Ok(true);
+        }
+        if self.has_project_task(path) {
+            return Ok(false);
+        }
+        Err(DomainError::UnknownProject(path.to_string()))
+    }
+
+    fn has_project_task(&self, path: &str) -> bool {
+        self.tasks.iter().any(|task| {
+            matches!(&task.scope, TaskScope::Project { path: task_path } if task_path == path)
+        })
     }
 
     /// Lookup by id. Soft-deleted tasks remain findable.
@@ -543,6 +617,7 @@ impl DomainState {
                 None => self.tasks.push(incoming.clone()),
             }
         }
+        self.merge_project_records(&other.projects);
         self.drop_tasks_trashed_elsewhere(other);
         self.merge_undo_entries(other);
     }
@@ -567,9 +642,26 @@ impl DomainState {
             }
         }
         self.next_task_number = self.next_task_number.max(disk.next_task_number);
+        self.merge_project_records(&disk.projects);
         self.drop_tasks_trashed_elsewhere(disk);
         self.merge_undo_entries(disk);
         Ok(())
+    }
+
+    /// Replace the local project map with the disk map, then re-apply this process's
+    /// own recorded intents. Last writer wins for the map, but an intent this process
+    /// has not confirmed through a save yet must survive the merge: a plain union would
+    /// resurrect a record the process just removed (and an archive could be lost).
+    fn merge_project_records(&mut self, disk: &BTreeMap<String, ProjectRecord>) {
+        self.projects = disk.clone();
+        for (path, archived) in &self.project_intents {
+            if *archived {
+                self.projects
+                    .insert(path.clone(), ProjectRecord { archived: true });
+            } else {
+                self.projects.remove(path);
+            }
+        }
     }
 
     /// A local task absent from disk that is soft-deleted with no merge base was trashed
@@ -630,6 +722,7 @@ impl DomainState {
         for task in &mut self.tasks {
             task.merge_base_revision = None;
         }
+        self.project_intents.clear();
     }
 
     fn merge_undo_entries(&mut self, other: &DomainState) {
@@ -983,6 +1076,91 @@ mod tests {
             state.unarchive_task(gone),
             Err(DomainError::SoftDeleted(gone))
         );
+    }
+
+    #[test]
+    fn archive_project_writes_one_record_and_unarchive_removes_it() {
+        let mut state = DomainState::new();
+        let id = state
+            .create(
+                "In a",
+                None,
+                TaskScope::Project {
+                    path: "/repos/a".into(),
+                },
+                ProvenanceOrigin::Manual,
+                None,
+            )
+            .expect("create");
+        assert!(state.projects().is_empty());
+
+        assert_eq!(state.archive_project("/repos/a"), Ok(true));
+        let records = state.projects();
+        assert_eq!(
+            records.len(),
+            1,
+            "exactly one record for one archived project"
+        );
+        assert!(records.get("/repos/a").expect("record").archived);
+        assert!(state.is_project_archived("/repos/a"));
+        assert!(
+            state.is_hidden(state.get(id).expect("task exists")),
+            "a task of an archived project is hidden"
+        );
+
+        // Already archived: a no-op.
+        assert_eq!(state.archive_project("/repos/a"), Ok(false));
+
+        assert_eq!(state.unarchive_project("/repos/a"), Ok(true));
+        assert!(state.projects().is_empty());
+        assert!(!state.is_project_archived("/repos/a"));
+        assert!(!state.is_hidden(state.get(id).expect("task exists")));
+        // No record but tasks exist: a no-op, not an error.
+        assert_eq!(state.unarchive_project("/repos/a"), Ok(false));
+
+        // No task in the scope and no record: unknown.
+        assert_eq!(
+            state.archive_project("/nowhere"),
+            Err(DomainError::UnknownProject("/nowhere".into()))
+        );
+        assert_eq!(
+            state.unarchive_project("/nowhere"),
+            Err(DomainError::UnknownProject("/nowhere".into()))
+        );
+        assert!(state.projects().is_empty(), "refusals write no record");
+    }
+
+    #[test]
+    fn task_and_project_flags_are_independent() {
+        let mut state = DomainState::new();
+        let scope = TaskScope::Project {
+            path: "/repos/p".into(),
+        };
+        let t = state
+            .create("T", None, scope.clone(), ProvenanceOrigin::Manual, None)
+            .expect("create");
+        let other = state
+            .create("Other", None, scope, ProvenanceOrigin::Manual, None)
+            .expect("create");
+
+        state.archive_task(t).expect("archive task T");
+        state
+            .archive_project("/repos/p")
+            .expect("archive project P");
+        state
+            .unarchive_project("/repos/p")
+            .expect("unarchive project P");
+
+        let task_t = state.get(t).expect("task exists");
+        let task_other = state.get(other).expect("task exists");
+        assert!(
+            task_t.archived,
+            "T is still archived after the project round-trip"
+        );
+        assert!(!task_other.archived, "P's other task is untouched");
+        assert!(state.is_hidden(task_t), "T is hidden by its own flag");
+        assert!(!state.is_hidden(task_other));
+        assert!(state.projects().is_empty());
     }
 
     #[test]
