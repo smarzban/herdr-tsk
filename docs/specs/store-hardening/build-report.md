@@ -63,6 +63,10 @@ Every regression test was watched failing with its fix hunk reverted by hand
   replace loses the task rather than duplicating it; the reverse order is
   impossible inside one atomic transition. Readers dedupe by id with the
   live copy winning regardless.
+- **T5 site build.** `cd site && npm test` passes (10/10). `npm run build`
+  was not run locally: `site/node_modules` is not installed in this worktree
+  and the spec's Done-means names `npm test`; CI runs the full
+  `npm ci && npm test && npm run build`.
 
 ## Task ledger
 
@@ -71,8 +75,8 @@ Every regression test was watched failing with its fix hunk reverted by hand
 | T1 migration hook | f8340d8 | AC-1..AC-4 | chain empty at v1; seams `load_unlocked_supported` / `save_unlocked_supported` |
 | T2 store signature | 71348e4 | AC-5, AC-6 | |
 | T3 undo cap + prune | e230894 | AC-7..AC-9 | prune lives in task.rs (needs the private fields); UNDO_CAP in undo.rs |
-| T4 trash file | (pending) | AC-10..AC-16 | see the eligibility note; two existing cli_list --deleted expectations updated to the spec's new order |
-| T5 docs | | docs items | |
+| T4 trash file | 6303bd1 | AC-10..AC-16 | see the eligibility note; two existing cli_list --deleted expectations updated to the spec's new order |
+| T5 docs | (this commit) | docs items | README, install.md, cli.md, SKILL.md, CHANGELOG; site npm test green |
 
 ## Regression proofs (fix hunk reverted by hand, test watched failing, fix restored)
 

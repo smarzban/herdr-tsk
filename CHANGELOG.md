@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+Trash for deleted tasks: a soft-deleted task leaves the board store once it is
+no longer undoable (an undo entry no longer restores it) or once it has been
+deleted for 7 days, and moves to `trash.jsonl` beside `tsk.json`. The file is
+append-only, one line per task with its delete time; lines purge after 30
+days. `tsk list --deleted` now lists live soft-deleted tasks and trash entries
+together, newest deletion first, and `tsk trash restore <task>` puts a trashed
+task back on the board with its number.
+
+`tsk trash restore T<n>` restores a trashed task by number (or UUID):
+not soft-deleted, with a `restored` history event, a new revision, and its old
+number. Refusals (no such line, or the task already live) exit 1 with
+`T<n> is not in trash`; usage exits 2, store I/O exits 3.
+
+Bounded undo: the saved undo stack is capped at 50 entries, and entries whose
+task is gone or whose revision moved on are dropped at the save boundary.
+In-memory undo behaviour is unchanged.
+
+Synced-folder note: keep `~/.tsk` on a local disk. The writer lock is
+`flock`-style and every save is a rename-based atomic replace; NFS, Dropbox,
+iCloud Drive, and similar synced folders can break both. `TSK_STATE_DIR` is
+the escape hatch. Windows is not tested in CI.
+
 ## 0.4.0
 
 The landing page and docs live in `site/` again (Astro + Starlight, moved back

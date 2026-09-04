@@ -56,7 +56,9 @@ selection. An invalid thread name is a usage error (exit 2), not an empty result
 JSON rows always include `thread`, with `null` for unthreaded tasks. Use
 `--project=<scope>` or `--state-dir=<dir>` when either value begins with `-`,
 `-p -maintenance` is usage. `--done` lists done tasks only; `--deleted` lists
-soft-deleted tasks only, regardless of stored status. Scope selectors are mutually
+soft-deleted tasks only, regardless of stored status: live soft-deletes plus
+trash entries from `trash.jsonl` (kept 30 days), deduped by task with the live
+copy winning, newest deletion first. Scope selectors are mutually
 exclusive, as are `--done` and `--deleted`.
 
 A typo in a project name silently files the task under a new scope. Use
@@ -89,3 +91,19 @@ or toggled, 1 for a refusal (stable tokens `empty-step-text`,
 `invalid-step-text`, `unknown-task`, `soft-deleted-task`, `unknown-step`,
 `ambiguous-step`), 2 for a usage error, and 3 for store I/O — verify with
 `list` before retrying an exit 3, same as add.
+
+## Trash
+
+A soft-deleted task leaves the board store once it is no longer undoable, or
+after 7 days, and lives in `trash.jsonl` for 30 days. `tsk list --deleted`
+shows trash entries beside live soft-deletes, keeping their `T<n>` number.
+
+```sh
+tsk trash restore T12
+```
+
+`restore` puts the task back on the board: not soft-deleted, with a `restored`
+history event, a new revision, and its old number. A missing line, or a task
+that is already live, refuses with `T12 is not in trash` (exit 1). Usage
+errors exit 2; store I/O exits 3 — verify with `tsk list --deleted` before
+retrying an exit 3, same as add.

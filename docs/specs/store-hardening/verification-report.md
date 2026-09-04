@@ -22,3 +22,14 @@ integration tests in `tests/`.
 | AC-14 | process A does not resurrect a task B trashed | `trash_store::reload_merge_save_does_not_resurrect_a_task_another_process_trashed`, `trash_store::merge_tasks_from_disk_drops_a_locally_held_task_that_was_trashed_elsewhere` |
 | AC-15 | `list --deleted` shows trash; `trash restore` round-trip; refusals | `cli_trash::list_deleted_shows_a_trashed_task_with_its_number`, `cli_trash::trash_restore_round_trip_refusals_and_events`, `cli_trash::restore_accepts_the_bare_number_and_the_uuid`, `cli_trash::restore_refuses_when_the_task_is_already_live`, `cli::router::tests::trash_positional_selects_trash_surface`, `cli::parser::tests::trash_parse_accepts_restore_with_number_and_flags` |
 | AC-16 | trash sync failure leaves `tsk.json` unchanged, task live | `store::tests::trash_sync_failure_leaves_the_live_document_untouched` |
+
+## T5 docs items
+
+| Item | Where |
+| --- | --- |
+| `~/.tsk` must be on a local disk; flock-style lock + rename replace; NFS/Dropbox/iCloud break both; `TSK_STATE_DIR` escape hatch | `README.md` (store paragraph), `site/src/content/docs/docs/install.md` (Standalone) |
+| `trash.jsonl` beside `tsk.json`, `tsk.json.1`, `tsk.json.v<N>` | `README.md`, `site/src/content/docs/docs/install.md` |
+| Windows not tested in CI | `README.md`, `site/src/content/docs/docs/install.md` (Requirements) |
+| `tsk trash restore T<n>` | `site/src/content/docs/docs/cli.md` (trash section, commands table, exit contract), `skills/tsk-cli/SKILL.md` (Trash) |
+| `tsk list --deleted` includes trash for 30 days | `site/src/content/docs/docs/cli.md` (list), `skills/tsk-cli/SKILL.md` (listing filters) |
+| One CHANGELOG entry per user-visible item (trash, restore, undo cap, synced-folder note) | `CHANGELOG.md` Unreleased |
