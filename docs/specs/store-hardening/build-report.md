@@ -57,12 +57,17 @@ Every regression test was watched failing with its fix hunk reverted by hand
   trash), adding `TrashWrite`/`TrashFileSync` stages so AC-16 can fail the
   trash sync without failing the live sync. A plain `FileSync` injection
   cannot distinguish the two, and a revert proof showed it would pass for
-  the wrong reason.
-- **T4 restore crash window.** Per the spec's order (rewrite trash, then
-  insert, then replace live) a crash between the trash rewrite and the live
-  replace loses the task rather than duplicating it; the reverse order is
-  impossible inside one atomic transition. Readers dedupe by id with the
-  live copy winning regardless.
+  the wrong reason. Review K1 added `RealFilesystemWithFailure` (real file
+  operations with one injectable stage) because the recording seam performs
+  no disk writes, and K4 removed `open_append` from the seam entirely.
+- **T4 restore ordering (revised by review K1).** The first implementation
+  followed the spec order (rewrite trash, then insert, then replace live),
+  which loses the task from both files when the live save fails. Review K1
+  reversed it: insert, replace live, then rewrite trash without the line. A
+  crash between the live replace and the trash rewrite now leaves the task in
+  both places (readers dedupe by id, live wins) instead of in neither; the
+  rewrite failure is also cleaned by the next trash write, which drops lines
+  whose id is live and not soft-deleted.
 - **T5 site build.** `cd site && npm test` passes (10/10). `npm run build`
   was not run locally: `site/node_modules` is not installed in this worktree
   and the spec's Done-means names `npm test`; CI runs the full
@@ -78,6 +83,24 @@ Every regression test was watched failing with its fix hunk reverted by hand
 | T4 trash file | 6303bd1 | AC-10..AC-16 | see the eligibility note; two existing cli_list --deleted expectations updated to the spec's new order |
 | T5 docs | c2d5de8 | docs items | README, install.md, cli.md, SKILL.md, CHANGELOG; site npm test green |
 | live smoke | (this commit) | Done-means | herdr pane beside the agent; see below |
+
+## Review fixes
+
+All six kept findings fixed in this worktree, one commit each, each with a
+regression test watched failing against the hand-reverted fix. Durability rule
+held throughout: the trash is durable before the live document loses a task.
+
+| K | Commit | Fix | Revert proof |
+| --- | --- | --- | --- |
+| K1 restore ordering | 3ee0098 | insert, save live, then rewrite trash; `restore_from_trash_with` seam | revert put the trash rewrite before the live save; with `RealFilesystemWithFailure` failing only `FileSync` the rewrite genuinely landed and the line was lost: `failed_restore_live_save_keeps_the_trash_line_for_retry` failed; restored |
+| K2 torn non-UTF-8 tail | 1731052 | `load_trash_unlocked` reads bytes, splits on `b'\n'`, per-line UTF-8 then JSON, skips failures (`parse_trash_lines`) | reverted to `fs::read_to_string`: `load_trash_skips_a_torn_non_utf8_tail` failed (load errors instead of skipping); restored |
+| K3 dedupe by id | 362d247 | `parse_trash_lines` dedupes by task id, last line wins; rewrite re-serializes the deduped entries via `write_trash_atomic` | removed the dedupe: `trash_lines_dedupe_by_id_with_the_last_line_winning` and `cli_trash::list_deleted_dedupes_duplicate_trash_lines` failed; restored |
+| K4 torn-tail glue | b4bf6cb | dropped O_APPEND; trash is read tolerantly + deduped, purge-expired and live-restored lines dropped, eligible added (skipping present ids), whole file written via temp+sync+rename+dir-sync, then tasks removed, then live replaced; docs/comments updated away from "append-only" | restored the O_APPEND append-then-rewrite flow: `trash_rewrite_drops_torn_tails_instead_of_gluing_new_lines` failed (the torn tail glued the new line, purge deleted it); restored. AC-16 (`TrashFileSync` injection) still leaves tsk.json unchanged |
+| K5 future deleted_at | 464e9d6 | purge keeps a line when `duration_since` errs (clock step-back) | reverted to `is_ok_and(age <= cap)`: `trash_rewrite_keeps_lines_with_a_future_deleted_at` failed (future line purged); restored |
+| K6 local state after trash | 855e6dd | `reload_merge_save_with` removes from `local` every task `durable` no longer holds, plus their undo entries | removed the propagation: `reload_merge_save_drops_trashed_tasks_from_the_callers_state` failed (local kept the task and its entry); restored |
+
+Note: `trash_append_purges_expired_lines_and_drops_malformed_ones` was renamed
+to `trash_rewrite_purges_expired_lines_and_drops_malformed_ones` in K4.
 
 ## Regression proofs (fix hunk reverted by hand, test watched failing, fix restored)
 
@@ -123,7 +146,7 @@ Every regression test was watched failing with its fix hunk reverted by hand
   `save_unlocked_supported`. Failed without the fix:
   `soft_delete_moves_to_trash_once_a_later_undoable_action_is_on_top`,
   `eight_day_old_soft_delete_moves_to_trash_even_as_top_undo_entry`,
-  `trash_append_purges_expired_lines_and_drops_malformed_ones`, and the
+  `trash_rewrite_purges_expired_lines_and_drops_malformed_ones`, and the
   cli_trash round-trip/list tests. Restored.
 - Revert R2: disabled `drop_tasks_trashed_elsewhere` in both
   `merge_tasks_from_disk` and `merge_for_save`. Failed without the fix:

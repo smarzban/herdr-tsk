@@ -18,7 +18,7 @@ integration tests in `tests/`.
 | AC-10 | delete + later complete + save → trash with right `deleted_at` | `store::tests::soft_delete_moves_to_trash_once_a_later_undoable_action_is_on_top`, `cli_trash::trash_restore_round_trip_refusals_and_events` (trashing step) |
 | AC-11 | delete + immediate save stays live, undo restores | `store::tests::fresh_soft_delete_stays_live_while_the_top_undo_entry_restores_it` |
 | AC-12 | 8-day-old delete trashed even as top entry | `store::tests::eight_day_old_soft_delete_moves_to_trash_even_as_top_undo_entry` |
-| AC-13 | 31-day line purged on next append, 29-day stays, malformed dropped/skipped | `store::tests::trash_append_purges_expired_lines_and_drops_malformed_ones`, `cli_trash::list_deleted_skips_malformed_trash_lines` |
+| AC-13 | 31-day line purged on next trash write, 29-day stays, malformed dropped/skipped | `store::tests::trash_rewrite_purges_expired_lines_and_drops_malformed_ones`, `cli_trash::list_deleted_skips_malformed_trash_lines` |
 | AC-14 | process A does not resurrect a task B trashed | `trash_store::reload_merge_save_does_not_resurrect_a_task_another_process_trashed`, `trash_store::merge_tasks_from_disk_drops_a_locally_held_task_that_was_trashed_elsewhere` |
 | AC-15 | `list --deleted` shows trash; `trash restore` round-trip; refusals | `cli_trash::list_deleted_shows_a_trashed_task_with_its_number`, `cli_trash::trash_restore_round_trip_refusals_and_events`, `cli_trash::restore_accepts_the_bare_number_and_the_uuid`, `cli_trash::restore_refuses_when_the_task_is_already_live`, `cli::router::tests::trash_positional_selects_trash_surface`, `cli::parser::tests::trash_parse_accepts_restore_with_number_and_flags` |
 | AC-16 | trash sync failure leaves `tsk.json` unchanged, task live | `store::tests::trash_sync_failure_leaves_the_live_document_untouched` |
@@ -34,11 +34,22 @@ integration tests in `tests/`.
 | `tsk list --deleted` includes trash for 30 days | `site/src/content/docs/docs/cli.md` (list), `skills/tsk-cli/SKILL.md` (listing filters) |
 | One CHANGELOG entry per user-visible item (trash, restore, undo cap, synced-folder note) | `CHANGELOG.md` Unreleased |
 
+## Review fixes (K1..K6)
+
+| Finding | Fix test |
+| --- | --- |
+| K1 restore ordering | `store::tests::failed_restore_live_save_keeps_the_trash_line_for_retry` |
+| K2 torn non-UTF-8 tail | `store::tests::load_trash_skips_a_torn_non_utf8_tail` |
+| K3 dedupe by id | `store::tests::trash_lines_dedupe_by_id_with_the_last_line_winning`, `cli_trash::list_deleted_dedupes_duplicate_trash_lines` |
+| K4 torn-tail glue (no O_APPEND) | `store::tests::trash_rewrite_drops_torn_tails_instead_of_gluing_new_lines` (AC-16 `store::tests::trash_sync_failure_leaves_the_live_document_untouched` re-verified meaningful) |
+| K5 future deleted_at | `store::tests::trash_rewrite_keeps_lines_with_a_future_deleted_at` |
+| K6 local state after trash | `store::tests::reload_merge_save_drops_trashed_tasks_from_the_callers_state` |
+
 ## Done-means
 
 | Item | Status |
 | --- | --- |
-| Green bar in this worktree | `cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && cargo build --release` green; 756 tests (baseline 727) |
+| Green bar in this worktree | `cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && cargo build --release` green; 763 tests after review fixes (baseline 727) |
 | `cd site && npm test` | 10/10 pass |
 | Every AC maps to a named test | table above |
 | Every regression test watched failing without its fix | `build-report.md`, per-task revert notes |
