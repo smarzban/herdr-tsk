@@ -120,7 +120,16 @@ fn record_mutation(task: &mut Task, kind: TaskEventKind) {
 }
 
 /// Document version written by this binary.
-pub const STORE_FORMAT_VERSION: u32 = 1;
+pub const STORE_FORMAT_VERSION: u32 = 2;
+
+/// One per-project record, keyed by the project's scope path. Lazy: a project
+/// appears in the map only while it is archived; the set of projects the board
+/// shows is still derived from tasks.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectRecord {
+    pub archived: bool,
+}
 
 /// A soft-deleted task older than this moves to `trash.jsonl` at the next save
 /// even while its undo entry is still the top of the stack.
@@ -153,6 +162,10 @@ pub struct DomainState {
     /// The next store-global task number, allocated only while holding the store lock.
     pub next_task_number: u64,
     tasks: Vec<Task>,
+    /// Per-project records keyed by scope path. Always serialized: an empty map
+    /// writes `"projects": {}` so the v2 wire shape is pinned.
+    #[serde(default)]
+    projects: BTreeMap<String, ProjectRecord>,
     /// LIFO undo records for soft-delete and complete.
     undo_stack: Vec<UndoEntry>,
 }
@@ -169,6 +182,7 @@ impl DomainState {
             format_version: STORE_FORMAT_VERSION,
             next_task_number: 1,
             tasks: Vec::new(),
+            projects: BTreeMap::new(),
             undo_stack: Vec::new(),
         }
     }
@@ -189,6 +203,11 @@ impl DomainState {
 
     pub fn tasks(&self) -> &[Task] {
         &self.tasks
+    }
+
+    /// Per-project records keyed by scope path. Empty when no project is archived.
+    pub fn projects(&self) -> &BTreeMap<String, ProjectRecord> {
+        &self.projects
     }
 
     /// Lookup by id. Soft-deleted tasks remain findable.
