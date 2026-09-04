@@ -12,9 +12,9 @@ integration tests in `tests/`.
 | AC-4 | failing migration step surfaces from load, no file changes | `store::tests::failed_migration_step_surfaces_from_load_without_file_changes` |
 | AC-5 | equal mtime + equal length saves produce different signatures on Unix | `store::tests::signature_distinguishes_same_mtime_same_length_replaces`, `app::idle_store_revalidation_tests::idle_tick_sees_a_replace_that_keeps_mtime_and_length` |
 | AC-6 | missing file → None; unchanged file → equal signature twice | `store::tests::signature_missing_file_is_none_and_unchanged_file_is_stable` |
-| AC-7 | 51 undoable actions + save leaves exactly 50 | (T3 pending) |
-| AC-8 | stale entry pruned, live entry beneath kept | (T3 pending) |
-| AC-9 | existing undo tests stay green | full `cargo test` (undo module tests unchanged) |
+| AC-7 | 51 undoable actions + save leaves exactly 50 | `domain::undo::tests::save_keeps_exactly_fifty_undo_entries_and_evicts_the_oldest`, `domain::undo::tests::cap_runs_after_merge_undo_entries_union` |
+| AC-8 | stale entry pruned, live entry beneath kept | `domain::undo::tests::save_drops_stale_undo_entries_and_keeps_live_ones_beneath_them`, `domain::undo::tests::prune_runs_before_the_cap_so_a_dead_entry_never_evicts_a_live_one`, `domain::undo::tests::stale_top_entry_still_refuses_in_memory_because_pruning_runs_only_at_save` |
+| AC-9 | existing undo tests stay green | `domain::undo::tests::soft_delete_then_undo_clears_soft_deleted`, `domain::undo::tests::complete_then_undo_returns_status_ready`, `domain::undo::tests::undo_with_empty_stack_is_noop` (unchanged, green in full `cargo test`) |
 | AC-10 | delete + later complete + save → trash with right `deleted_at` | (T4 pending) |
 | AC-11 | delete + immediate save stays live, undo restores | (T4 pending) |
 | AC-12 | 8-day-old delete trashed even as top entry | (T4 pending) |

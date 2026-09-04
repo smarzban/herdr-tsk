@@ -8,7 +8,7 @@ use std::time::SystemTime;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::{ProvenanceOrigin, TaskEvent, TaskEventKind, UndoEntry};
+use super::{ProvenanceOrigin, TaskEvent, TaskEventKind, UndoEntry, UNDO_CAP};
 
 /// Human-facing task progress. Source of truth for board state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -543,6 +543,31 @@ impl DomainState {
             if !self.undo_stack.contains(incoming) {
                 self.undo_stack.push(incoming.clone());
             }
+        }
+    }
+
+    /// Persistence-boundary prune, run at the same locked boundary as number
+    /// assignment so every save path and `locked_transition` gets it.
+    ///
+    /// 1. Drop entries whose target task is missing, or whose `expected_revision`
+    ///    no longer matches the task's current revision (stale, can never succeed).
+    /// 2. Evict the oldest entries until the stack fits [`UNDO_CAP`].
+    ///
+    /// Order matters: stale entries go first so the cap never evicts a live entry
+    /// to keep a dead one. `merge_undo_entries` still unions; this runs after it.
+    /// In-memory `undo()` on a stale top entry is unchanged (refuse, retain)
+    /// because pruning happens only at save.
+    pub(crate) fn prune_undo_for_persistence(&mut self) {
+        self.undo_stack.retain(|entry| {
+            let (id, expected_revision) = entry.target();
+            self.tasks
+                .iter()
+                .find(|task| task.id == id)
+                .is_some_and(|task| task.revision == expected_revision)
+        });
+        if self.undo_stack.len() > UNDO_CAP {
+            let excess = self.undo_stack.len() - UNDO_CAP;
+            self.undo_stack.drain(..excess);
         }
     }
 }

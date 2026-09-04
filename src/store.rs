@@ -190,7 +190,7 @@ impl TaskStore {
         let mut durable = state.clone();
         durable.assign_numbers_for_persistence();
         durable.clear_merge_bases();
-        self.save_unlocked(&durable)
+        self.save_unlocked(&mut durable)
     }
 
     /// Hold the exclusive store lock across a state transition and its durable replacement.
@@ -203,7 +203,7 @@ impl TaskStore {
         let result = transition(&mut state)?;
         state.assign_numbers_for_persistence();
         state.clear_merge_bases();
-        self.save_unlocked(&state)
+        self.save_unlocked(&mut state)
             .map_err(|error| error.to_string())?;
         Ok(result)
     }
@@ -222,7 +222,7 @@ impl TaskStore {
         if changed {
             state.assign_numbers_for_persistence();
             state.clear_merge_bases();
-            self.save_unlocked(&state)
+            self.save_unlocked(&mut state)
                 .map_err(|error| error.to_string())?;
         }
         Ok(result)
@@ -254,7 +254,7 @@ impl TaskStore {
         let mut durable = local.clone();
         durable.assign_numbers_for_persistence();
         durable.clear_merge_bases();
-        self.save_unlocked_with(&durable, filesystem)?;
+        self.save_unlocked_with(&mut durable, filesystem)?;
         local.sync_numbers_from_persisted(&durable);
         local.clear_merge_bases();
         Ok(())
@@ -292,13 +292,13 @@ impl TaskStore {
         Ok(state)
     }
 
-    fn save_unlocked(&self, state: &DomainState) -> Result<(), StoreError> {
+    fn save_unlocked(&self, state: &mut DomainState) -> Result<(), StoreError> {
         self.save_unlocked_with(state, &StdFilesystem)
     }
 
     fn save_unlocked_with<F: AtomicFilesystem>(
         &self,
-        state: &DomainState,
+        state: &mut DomainState,
         filesystem: &F,
     ) -> Result<(), StoreError> {
         self.save_unlocked_supported(state, filesystem, STORE_FORMAT_VERSION)
@@ -308,11 +308,14 @@ impl TaskStore {
     /// above `supported`, but accept a live file below it after backing it up.
     fn save_unlocked_supported<F: AtomicFilesystem>(
         &self,
-        state: &DomainState,
+        state: &mut DomainState,
         filesystem: &F,
         supported: u32,
     ) -> Result<(), StoreError> {
         check_supported(state.format_version(), supported)?;
+        // Locked persistence boundary: every save path and locked_transition lands here,
+        // after number assignment and any merge-undo union.
+        state.prune_undo_for_persistence();
         fs::create_dir_all(&self.path)?;
         self.sweep_orphan_temps();
         let file = self.state_file();
@@ -633,13 +636,13 @@ mod tests {
 
         let filesystem = RecordingFilesystem::new(None);
         store
-            .save_unlocked_with(&DomainState::new(), &filesystem)
+            .save_unlocked_with(&mut DomainState::new(), &filesystem)
             .expect("all durable stages succeed");
         assert_eq!(filesystem.events(), expected);
 
         for (index, stage) in expected.iter().copied().enumerate() {
             let filesystem = RecordingFilesystem::new(Some(stage));
-            let error = store.save_unlocked_with(&DomainState::new(), &filesystem);
+            let error = store.save_unlocked_with(&mut DomainState::new(), &filesystem);
             assert!(
                 matches!(error, Err(StoreError::Io(_))),
                 "{stage:?} failure must be reported as a store I/O error"
@@ -1379,7 +1382,7 @@ mod tests {
         );
 
         store
-            .save_unlocked_supported(&state, &StdFilesystem, 2)
+            .save_unlocked_supported(&mut state, &StdFilesystem, 2)
             .expect("first save at v2");
         assert_eq!(
             fs::read(dir.join("tsk.json.v1")).expect("read version backup"),
@@ -1407,7 +1410,7 @@ mod tests {
             )
             .expect("create");
         store
-            .save_unlocked_supported(&state, &StdFilesystem, 2)
+            .save_unlocked_supported(&mut state, &StdFilesystem, 2)
             .expect("second save at v2");
         assert_eq!(
             fs::read(dir.join("tsk.json.v1")).expect("read version backup"),
@@ -1427,13 +1430,13 @@ mod tests {
         fs::write(dir.join(STATE_FILE), &original_bytes).expect("seed v1 file");
         fs::write(dir.join("tsk.json.v1"), b"existing backup").expect("seed existing backup");
 
-        let state = store
+        let mut state = store
             .load_unlocked_supported(2, |document, from| {
                 migrate_with(document, from, &[identity_v1_to_v2])
             })
             .expect("load");
         store
-            .save_unlocked_supported(&state, &StdFilesystem, 2)
+            .save_unlocked_supported(&mut state, &StdFilesystem, 2)
             .expect("save");
         assert_eq!(
             fs::read(dir.join("tsk.json.v1")).expect("read backup"),

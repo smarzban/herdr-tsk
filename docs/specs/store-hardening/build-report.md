@@ -28,14 +28,22 @@ Every regression test was watched failing with its fix hunk reverted by hand
   flattens errors to `String` and the CLI exit-code contract (1 refusal vs
   3 store I/O) needs a typed error. `restore_from_trash` holds the same
   exclusive lock across load, trash rewrite, state mutation, and replace.
+- **T3 prune placement.** `prune_undo_for_persistence` lives in
+  `src/domain/task.rs` (it needs the private `tasks`/`undo_stack` fields,
+  which undo.rs, a sibling module, cannot touch); `UNDO_CAP` lives in
+  `src/domain/undo.rs`, as the spec's file list says. The prune runs inside
+  `save_unlocked_supported`, the single funnel every save path and
+  `locked_transition` passes through, after number assignment at the callers
+  and after `merge_for_save`'s `merge_undo_entries` union, so the cap always
+  runs after the union.
 
 ## Task ledger
 
 | Task | Commit | ACs | Notes |
 | --- | --- | --- | --- |
 | T1 migration hook | f8340d8 | AC-1..AC-4 | chain empty at v1; seams `load_unlocked_supported` / `save_unlocked_supported` |
-| T2 store signature | (pending) | AC-5, AC-6 | |
-| T3 undo cap + prune | | AC-7..AC-9 | |
+| T2 store signature | 71348e4 | AC-5, AC-6 | |
+| T3 undo cap + prune | (pending) | AC-7..AC-9 | prune lives in task.rs (needs the private fields); UNDO_CAP in undo.rs |
 | T4 trash file | | AC-10..AC-16 | |
 | T5 docs | | docs items | |
 
@@ -61,3 +69,18 @@ Every regression test was watched failing with its fix hunk reverted by hand
   and the product-level
   `app::idle_store_revalidation_tests::idle_tick_sees_a_replace_that_keeps_mtime_and_length`
   (idle tick misses the replace). Restored.
+
+### T3
+
+- Revert A: removed the `state.prune_undo_for_persistence()` call from
+  `save_unlocked_supported` (the single funnel every save path and
+  `locked_transition` passes through). Failed without the fix:
+  `save_keeps_exactly_fifty_undo_entries_and_evicts_the_oldest`,
+  `save_drops_stale_undo_entries_and_keeps_live_ones_beneath_them`,
+  `prune_runs_before_the_cap_so_a_dead_entry_never_evicts_a_live_one`,
+  `cap_runs_after_merge_undo_entries_union`. Restored.
+- Revert B: swapped the order inside `prune_undo_for_persistence` so the cap
+  evicted before the stale prune. Failed without the fix:
+  `prune_runs_before_the_cap_so_a_dead_entry_never_evicts_a_live_one`
+  (a cap-first prune evicts the live oldest entry to keep a dead one).
+  Restored.
