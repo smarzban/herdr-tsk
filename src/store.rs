@@ -517,10 +517,12 @@ impl TaskStore {
         let existing = self.load_trash_unlocked()?;
         let mut kept: Vec<TrashLine> = existing
             .into_iter()
-            // Drop lines past the purge window.
-            .filter(|line| {
-                now.duration_since(line.deleted_at)
-                    .is_ok_and(|age| age <= TRASH_PURGE_AFTER)
+            // Drop lines past the purge window. A line whose deleted_at is after
+            // now (a clock step-back) fails duration_since and is kept, never
+            // purged by a skewed comparison.
+            .filter(|line| match now.duration_since(line.deleted_at) {
+                Ok(age) => age <= TRASH_PURGE_AFTER,
+                Err(_) => true,
             })
             // Drop lines whose id is live and not soft-deleted: a restore whose
             // trash rewrite failed must not leave the task listed as deleted.
@@ -2079,6 +2081,52 @@ mod tests {
         let titles: Vec<String> = lines.iter().map(|line| line.task.title.clone()).collect();
         assert!(titles.contains(&"already here".to_string()), "{titles:?}");
         assert!(titles.contains(&"fresh trash".to_string()), "{titles:?}");
+    }
+
+    #[test]
+    fn trash_rewrite_keeps_lines_with_a_future_deleted_at() {
+        let dir = temp_dir("trash-future-clock");
+        let _guard = TempDirGuard(dir.clone());
+        let store = TaskStore::new(&dir);
+        // A clock step-back can leave deleted_at after now; the line must survive.
+        let future_secs = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_secs()
+            + 24 * 60 * 60;
+        let future_line = trash_line("clock stepped back", future_secs);
+        fs::create_dir_all(&dir).expect("mkdir");
+        fs::write(
+            trash_path(&dir),
+            format!("{}\n", serde_json::to_string(&future_line).expect("encode")),
+        )
+        .expect("write future-dated trash");
+
+        let mut state = DomainState::new();
+        let id = state
+            .create(
+                "fresh trash",
+                None,
+                TaskScope::Global,
+                ProvenanceOrigin::Manual,
+                None,
+            )
+            .expect("create");
+        state.soft_delete(id).expect("soft delete");
+        state.pop_undo();
+        store.save(&state).expect("save");
+
+        let lines = read_trash_lines(&dir);
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.task.title == "clock stepped back"),
+            "a future deleted_at must not be purged"
+        );
+        assert!(
+            lines.iter().any(|line| line.task.title == "fresh trash"),
+            "the new line is still added"
+        );
     }
 
     fn round_tripped_v1_state(title: &str) -> DomainState {
