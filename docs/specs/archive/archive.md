@@ -291,6 +291,10 @@ responsibility, except the two picker/card surfaces which extend the existing po
    event and a new revision, push no undo entry, and are idempotent. Errors: unknown task,
    soft-deleted task, project with no tasks and no record. Inputs are ids or scope paths; output
    is the mutated state. The one place any other component learns whether something is archived.
+   Merge amendment (plan stage, 2026-09-04): the project record map is replaced by the disk map on
+   every merge, then this process's own not-yet-persisted archive/unarchive intents are re-applied
+   (a transient, non-serialised map, cleared with the merge bases). Without it a plain union would
+   resurrect a record the process had just removed.
 2. **Store format v2** — bumps the document version to 2 and adds the v1 → v2 chain step (empty
    project map, no archived tasks). Contract: a v1 document loads migrated in memory; the first
    save writes `tsk.json.v1` (spec A's rule); an unarchived task serialises with no archived key;
@@ -433,3 +437,247 @@ library. Adding anything would duplicate an existing capability, so none is just
 Green bar (unchanged): `cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && cargo build --release`; site: `cd site && npm test`.
 
 Unverified: nothing. Rejected: a `clap`-style argument parser for the new CLI verbs would duplicate the existing hand-rolled parser and its exit contract tests.
+
+## Plan
+
+Tasks are dependency-ordered vertical slices. Each leaves `cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && cargo build --release` green. Paths are relative to the repo root; "new" marks files that do not exist yet. Every test named under "Failing test first" is written before its code, watched failing, then made green.
+
+**T-1** Archived flag on `Task`, task verbs, history events
+
+Files: `src/domain/task.rs` (change), `src/domain/events.rs` (change), `src/ui/queue.rs` (change, test helper only), `tests/queue_board_render.rs` (change, `task()` helper), `tests/queue_board_model.rs` (change, `task()` helper).
+
+- `Task` gains `pub archived: bool` after `soft_deleted`, `#[serde(default, skip_serializing_if = "std::ops::Not::not")]`. `DomainState::create` sets `archived: false`. Compile fallout: the four `Task { .. }` literals (`src/domain/task.rs` create, `src/ui/queue.rs` test `task_with_thread`, `tests/queue_board_render.rs::task`, `tests/queue_board_model.rs::task`) add `archived: false`.
+- `TaskEventKind` gains `Archived` and `Unarchived` (serde `snake_case`, no exhaustive match exists on the kind outside tests).
+- `DomainState::archive_task(&mut self, id: Uuid) -> Result<bool, DomainError>` and `unarchive_task(...) -> Result<bool, DomainError>`: `UnknownId` when absent, `SoftDeleted` when soft-deleted; when the flag already has the requested value return `Ok(false)` with no `record_mutation`, no event, no revision change; otherwise set the flag, `record_mutation` with the matching kind, return `Ok(true)`. Status is untouched. Neither verb touches `undo_stack`.
+- Failing test first: `archive_task_sets_the_flag_keeps_status_journals_archived_and_pushes_no_undo` in `src/domain/task.rs` tests: archive a `Blocked` task, assert `archived == true`, status still `Blocked`, last event `Archived`, `last_undo()` unchanged from before; then `unarchive_task` clears it with an `Unarchived` event; a second `archive_task` returns `Ok(false)` and adds no event; a soft-deleted task returns `Err(SoftDeleted)`.
+- Also: `archive_flag_survives_save_and_load` in `tests/store_persist.rs` (archive, `store.save`, `store.load`, flag and status intact; unarchived task's JSON has no `archived` key).
+
+*Advances:* AC-7, AC-9, AC-34.
+*Component:* Archive domain.
+*Deps:* none.
+
+**T-2** Store format v2: `projects` map, `STORE_FORMAT_VERSION = 2`, v1 → v2 chain step
+
+Files: `src/domain/task.rs` (change), `src/store.rs` (change), `tests/store_persist.rs` (change), `tests/fixtures/current_store_v2.json` (new), `tests/fixtures/current_store_v1.json` (unchanged, becomes the migration input).
+
+- `src/domain/task.rs`: `pub struct ProjectRecord { pub archived: bool }` (`Serialize, Deserialize, deny_unknown_fields`); `DomainState` gains `#[serde(default)] projects: BTreeMap<String, ProjectRecord>` (always serialized, so an empty map writes `"projects": {}`); `DomainState::new()` initialises it empty; `pub fn projects(&self) -> &BTreeMap<String, ProjectRecord>`. `STORE_FORMAT_VERSION` becomes `2`.
+- `src/store.rs`: `fn migrate_v1_to_v2(document: serde_json::Value) -> Result<serde_json::Value, StoreError>` inserts `"projects": {}` when the key is absent; `const MIGRATIONS: &[MigrationStep] = &[migrate_v1_to_v2];` (`migrate_with` stamps the version). Update the module doc line "Empty while v1 is current".
+- Test retargeting in `src/store.rs` tests (each currently pins 1): `save_emits_format_version_one` → rename `save_emits_format_version_two`, assert 2; `load_refuses_missing_format_without_rewriting` (`supported: 2`); `load_refuses_noncurrent_format_without_rewriting` loop `[0, 3]`, `supported: 2`; `save_refuses_noncurrent_in_memory_state_without_writing` and `reload_merge_save_refuses_noncurrent_local_state_without_rewriting` use in-memory `format_version: 3` and expect `found: 3, supported: 2`; `save_refuses_newer_format_and_leaves_the_document` expects `supported: 2`; `load_refuses_a_higher_version_and_changes_nothing_in_the_state_dir` uses `[(4u32, 2u32), (4, 3)]` and `supported: 2`; the injected-step seam tests (`migrated_load_backs_up_the_original_before_the_first_higher_version_save`, `save_never_overwrites_an_existing_version_backup`, `failed_migration_step_surfaces_from_load_without_file_changes`) move up one level: seed via `DomainState::new()` (now v2), seam target `3`, injected `identity_v2_to_v3`, backup file `tsk.json.v2`; `v1_document_round_trips_byte_identical_for_an_unchanged_state` → rename `v2_document_round_trips_byte_identical_for_an_unchanged_state`.
+- `tests/store_persist.rs`: `literal_current_v1_fixture_pins_the_complete_store_wire_shape` now asserts the load migrated (`format_version() == 2`, `projects().is_empty()`, `task.archived == false`), everything else unchanged; `noncurrent_store_is_refused_without_rewriting_the_file` seeds `format_version: 3` and asserts `"expected 2"`.
+- Failing test first: `v1_document_loads_through_the_chain_and_first_save_leaves_tsk_json_v1_beside_the_live_file` in `tests/store_persist.rs`: install `current_store_v1.json` under a temp `TSK_STATE_DIR`, `store.load()` → version 2, no archived task, empty projects; `store.save` → `tsk.json.v1` byte-identical to the fixture, live file `format_version == 2` with `"projects": {}`.
+- Also: `literal_current_v2_fixture_round_trips_byte_identical` in `tests/store_persist.rs` against the new `current_store_v2.json` (same task as v1, `"format_version": 2`, `"projects": {}`, no `archived` key): load then save reproduces the fixture bytes.
+
+*Advances:* AC-33, AC-34.
+*Component:* Store format v2.
+*Deps:* T-1.
+
+**T-3** Project records: archive/unarchive project verbs, hidden predicate, merge rules, name resolution
+
+Files: `src/domain/task.rs` (change), `src/scope.rs` (change), `tests/store_persist.rs` (change).
+
+- `DomainError::UnknownProject(String)` (Display: `unknown project {path}`); `map_domain_error` in `src/cli/steps.rs` and `board_rejection_message` in `src/app.rs` already fall through on `other`, no fallout.
+- `DomainState::archive_project(&mut self, path: &str) -> Result<bool, DomainError>`: `UnknownProject` when no task (any status, soft-deleted included) has `TaskScope::Project { path }` and no record exists; `Ok(false)` when already archived; else insert `ProjectRecord { archived: true }`, return `Ok(true)`. `unarchive_project`: remove the record (`Ok(true)`), `Ok(false)` when no record but tasks exist, `UnknownProject` when neither. Neither touches tasks, history, or undo.
+- `pub fn is_project_archived(&self, path: &str) -> bool`, `pub fn archived_projects(&self) -> BTreeSet<String>`, `pub fn is_hidden(&self, task: &Task) -> bool` (archived, or scope path archived).
+- Merge: transient `#[serde(skip)] project_intents: BTreeMap<String, bool>` recorded by the two verbs (true = archived, false = unarchived), cleared in `clear_merge_bases`. `merge_for_save` and `merge_tasks_from_disk`: replace `self.projects` with the disk map, then re-apply `project_intents` (insert or remove). Last writer wins for the map, this process's own intent survives the locked merge.
+- `src/scope.rs::resolve_project_path`: add `domain.projects().keys()` to the basename candidates.
+- Failing test first: `archive_project_writes_one_record_and_unarchive_removes_it` in `src/domain/task.rs` tests: create a task in `/repos/a`; `archive_project("/repos/a")` → `projects()` has exactly that key with `archived: true`, `is_hidden(task)` true; `unarchive_project` → map empty; `archive_project("/nowhere")` → `Err(UnknownProject)`.
+- Also: `task_and_project_flags_are_independent` (archive task T in P, archive P, unarchive P: T still archived, P's other task not) in `src/domain/task.rs`; `reload_merge_save_keeps_a_sibling_writers_project_record_and_applies_the_local_intent` in `tests/store_persist.rs` (writer B archives Q on disk; writer A with a stale map archives P through `reload_merge_save` → both records on disk; A then unarchives P through `reload_merge_save` → only Q remains).
+
+*Advances:* AC-20, AC-21.
+*Component:* Archive domain.
+*Deps:* T-2.
+
+**T-4** Lens: hidden tasks and archived projects leave every working lens
+
+Files: `src/ui/queue.rs` (change), `src/ui/board/model.rs` (change), `tests/queue_board_render.rs` (change), `tests/queue_board_loop.rs` (change).
+
+- `src/ui/queue.rs`: `pub fn query_board(tasks: &[Task], archived_projects: &BTreeSet<String>, current_repo: Option<&Path>, lens: BoardLens<'_>, drawer_open: bool) -> QueueView`; `query_lens` keeps its signature and delegates with an empty set (every existing call site stays). Every `live` filter becomes `!soft_deleted && !archived && !archived_projects.contains(scope path)`; `open_project_paths`, thread groups, deck thread blocks, `append_done`, `status_counts` all derive from `live`, so thread headers and counts exclude archived tasks and archived projects vanish from the projects and threads tabs.
+- `src/ui/board/model.rs`: `BoardModel` gains `pub(super) archived_projects: BTreeSet<String>` (empty in `from_tasks`; set from `state.archived_projects()` in `from_domain` and `sync_from_domain`); `queue_view()` calls `query_board`; `project_options()` skips archived paths (including `this_repo`); `ensure_home_tab_has_visible_tasks` and `reveal_task_on_home` ignore hidden tasks (helper `fn is_hidden(&self, task: &Task) -> bool`).
+- Failing test first: `archived_task_paints_in_no_working_lens_in_any_status_at_any_tier` in `tests/queue_board_render.rs`: for each status and each lens (desk, projects, threads, project focus) render at 80×24, 40×10, and the 130×24 stage G rail, assert the archived title is absent from every row and `assert_buffer_mono` passes.
+- Also: `thread_header_and_open_count_exclude_an_archived_task` in `src/ui/queue.rs` tests (thread with one open task archived: no `ThreadBlock`, threads tab no section); `archived_project_hides_its_tasks_from_projects_threads_and_desk_in_motion` in `src/ui/queue.rs` tests; `idle_merge_hides_a_task_archived_by_another_process_without_moving_selection` in `tests/queue_board_loop.rs` (two `TaskStore`s on one temp dir, process B archives task X via `store.locked_transition`, process A with selection on Y runs `revalidate_board_from_store`, X gone from `visible_ids`, selection still Y).
+
+*Advances:* AC-5, AC-6, AC-9, AC-19.
+*Component:* Lens query.
+*Deps:* T-3.
+
+**T-5** Done drawer ARCHIVED group: collapsible selectable header, dim rows, mouse hits
+
+Files: `src/ui/queue.rs` (change), `src/ui/board/model.rs` (change), `src/ui/board/apply.rs` (change), `src/ui/board/draw.rs` (change), `src/ui/input.rs` (change), `src/ui/mouse.rs` (change), `src/ui/render.rs` (change), `src/app.rs` (change), `tests/queue_board_render.rs` (change), `tests/queue_board_verbs.rs` (change), `tests/queue_board_mouse.rs` (change), `tests/fixtures/queue_board/done_drawer_archived.txt` (new, generated).
+
+- `src/ui/queue.rs`: `SectionKind::Archived`; `pub const ARCHIVED_HEADER_ROW_ID: Uuid` (fixed `Uuid::from_u128` constant); `fn append_archived(sections, in_scope: &[&Task], drawer_open)` after `append_done`, listing `archived && !soft_deleted && project not archived` tasks in the drawer's scope (home lenses: all scopes; project focus: that project), sorted updated desc, pushed only when non-empty, `count = n`. `visible_task_ids(..., archived_collapsed: bool)`: for an `Archived` section push `ARCHIVED_HEADER_ROW_ID`, then its `task_ids` unless collapsed; call sites `src/ui/board/model.rs::visible_ids` and the three `visible_task_ids(` calls in `src/ui/queue.rs` tests.
+- `src/ui/board/model.rs`: `archived_collapsed: bool` (init `true`, session-only), `toggle_archived_collapsed()`, `pub fn archived_header_selected(&self) -> bool`, `selected_id()` returns `None` when `selection_id == Some(ARCHIVED_HEADER_ROW_ID)` (so `NO_SELECTION` refusals cover every verb on the header); `seed_selection` unchanged.
+- `src/ui/input.rs`: `BoardIntent::ToggleArchivedGroup`; arm in `intent_primary_action` (`None`); `src/app.rs::apply_board_intent_with_save_recovery` navigation allowlist gains it.
+- `src/ui/board/apply.rs`: `OpenTaskPage` with the header selected → toggle collapse, `reanchor_selection`, return `None`; `ToggleArchivedGroup` (mouse) → select the header row (`retarget_selection`), toggle, reanchor.
+- `src/ui/render.rs`: `ListRow::ArchivedHeader { line, selected }` (sticky); `build_list_rows` paints `paint_collapsible_header` with chevron, title `archived`, count, all spans `style_dim()` (selected row `style_reverse()`), rows skipped when collapsed, task rows painted with `TaskRowPaint { dim: true, .. }` (new field: every span dim, status glyph and `T<n>` kept); rail skips `Archived` like `Done`; `section_title` arm `archived`; `paint_list_row` pushes `QueueHitTarget::ArchivedHeader`; `QueueFrameModel` gains `archived_collapsed: bool` and `archived_header_selected: bool` (construct sites: `src/ui/board/draw.rs` ×5, `tests/queue_board_render.rs` ×3).
+- `src/ui/mouse.rs`: `Normal` arm `ArchivedHeader → ToggleArchivedGroup`. `src/ui/board/draw.rs::board_verb_items`: header selected → `enter expand` / `enter collapse`, then `:` `?` `+`.
+- Failing test first: `archived_group_paints_below_done_with_its_count_and_no_header_when_empty` in `tests/queue_board_render.rs`: drawer open with two archived tasks → a row reading `archived` with `2` after the DONE rows, no archived titles painted (collapsed); with zero archived → no such row.
+- Also (same task): golden scene `done_drawer_archived` added to `golden_scenes()` and regenerated with `cargo test --test queue_board_render regenerate_golden_fixtures -- --ignored` (existing goldens unchanged; verify with git diff); `archived_group_is_collapsed_on_a_fresh_model_and_enter_or_click_on_the_header_toggles_it` in `tests/queue_board_verbs.rs` + `tests/queue_board_mouse.rs` (`board_hit_map` → `ArchivedHeader` hit → `map_board_mouse` → toggle; `BoardModel::from_domain` again is collapsed); `expanded_archived_rows_are_dim_keep_glyph_and_identifier_and_are_selectable_and_hit_testable` in `tests/queue_board_render.rs` (check `Modifier::DIM` on every cell of the row, `T<n>` and glyph present, `Task(id)` hit exists, `SelectNext` lands on it, `assert_buffer_mono`); `archived_group_follows_the_drawer_scope` in `src/ui/queue.rs` tests (home lists both scopes; project focus lists only that project's).
+
+*Advances:* AC-10, AC-11, AC-12, AC-13, AC-14, AC-15.
+*Component:* Board model and intents.
+*Deps:* T-4.
+
+**T-6** `ctrl+f` File verb, `ctrl+u` on an archived selection, verb bar and help card
+
+Files: `src/ui/input.rs` (change), `src/ui/board/apply.rs` (change), `src/ui/board/draw.rs` (change), `src/ui/mouse.rs` (change), `tests/v1_keymap_guard.rs` (change), `tests/queue_board_verbs.rs` (change), `tests/fixtures/queue_board/help.txt` (regenerated).
+
+- `src/ui/input.rs`: `BoardIntent::File`; `NORMAL_KEYMAP` entry `{ code: Char('f'), intent: File, help_chord: "f", help_label: "file", verb: true }` after the `u` entry; `help_chord_shown` `MUTATING` adds `"f"`; `map_task_page`: `Char('f') if verb → File`; `map_project_picker`: check ctrl chords first, `ctrl+f → File`, `ctrl+u → Undo`, other modified keys still `None`; `intent_primary_action` arm (`None`); `primary_action_sample_key` untouched.
+- `src/ui/board/apply.rs`: `board_intent_may_persist` adds `File`; `File` arm: picker open → `Ok(None)` (filled by T-8); else `selected_id()` or `NO_SELECTION`; toggle via `archive_task` / `unarchive_task`; no message on success; `sync_from_domain` reanchors (existing rule keeps the pin off hidden rows). `Undo` arm: when the selected task is archived → `unarchive_task`, never `domain.undo()`; picker open → `Ok(None)` (T-8 refines); otherwise unchanged.
+- `src/ui/board/draw.rs`: `board_verb_items` and `task_page_verb_items` add `f archive` (unarchived task) or `f unarchive` (archived task). `src/ui/mouse.rs::verb_intent`: `"f" => File`.
+- `tests/v1_keymap_guard.rs::normal_mode_keymap_equals_the_readme_and_queue_board_v1_set`: add `(KeyCode::Char('f'), BoardIntent::File)` after `u`, add `Char('f')` to `mutating`, drop `'f'` from the retired list. Help golden regenerated (`help.txt` only; diff it).
+- No palette entry (the palette catalog is pinned by `palette_lists_exactly_m1_commands_for_selection_filters_by_subsequence_and_dispatches_same_intents_as_keys` and no criterion asks for one).
+- Failing test first: `ctrl_f_archives_the_selected_task_keeping_status_and_pushing_no_undo` in `tests/queue_board_verbs.rs`: `ctrl+f` on a `Review` task → archived, status `Review`, `domain.last_undo()` unchanged; select task B, `ctrl+u` → A still archived (AC-7).
+- Also: `ctrl_f_in_the_archived_group_unarchives_and_the_row_returns_to_the_deck` (drawer open, expand, select the row, `ctrl+f`); `ctrl_u_on_an_archived_selection_unarchives_without_popping_the_undo_stack` (undo stack length equal before and after, no `StaleUndo`); existing `u_undoes_with_domain_coverage_and_stale_undo_refused_visibly` stays untouched and green (AC-4); `help_card_lists_ctrl_f_and_the_verb_bar_shows_file_for_a_task_row_and_the_group` (extend `help_card_lists_every_active_tier_binding_and_closes_on_any_key`, plus `board_verb_items` assertions for a deck row and an expanded archived row).
+
+*Advances:* AC-1, AC-2, AC-3, AC-4, AC-7, AC-35.
+*Component:* Key and mouse mapping.
+*Deps:* T-5.
+
+**T-7** Task page header slot reads `archived`
+
+Files: `src/ui/board/draw.rs` (change), `tests/queue_board_render.rs` (change), `tests/queue_board_edit.rs` (change).
+
+- `task_header_state` (wide column header) and `build_task_page_overlay` (`status_word`) use `archived` in place of the status word when `task.archived`, so the slot reads `archived · <project>` and the single-pane header's right-aligned word is `archived`. Nothing else on the page changes; edit entry and save paths are untouched.
+- Failing test first: `task_page_header_slot_reads_archived_for_an_archived_task` in `tests/queue_board_render.rs`: open the page on an archived task at 80×24 and at 130×24 stage F, assert the header row contains `archived` and not the status word; an unarchived task still shows its status.
+- Also: `title_edit_on_an_archived_task_persists_and_keeps_the_flag` in `tests/queue_board_edit.rs` (ctrl+e, type, `ConfirmEdit`, `store.reload_merge_save`, reload: title changed, `archived == true`, status unchanged).
+
+*Advances:* AC-8.
+*Component:* Board renderer.
+*Deps:* T-6.
+
+**T-8** Project picker: main and archived tabs, archive and unarchive in place
+
+Files: `src/ui/board/model.rs` (change), `src/ui/board/apply.rs` (change), `src/ui/board/draw.rs` (change), `src/ui/input.rs` (change), `src/ui/mouse.rs` (change), `src/ui/render.rs` (change), `tests/queue_board_verbs.rs` (change), `tests/queue_board_mouse.rs` (change), `tests/queue_board_render.rs` (change).
+
+- `src/ui/board/model.rs`: `pub enum PickerTab { Main, Archived }`; `ProjectPickerState` gains `tab: PickerTab`, `archived: Vec<PathBuf>`, `archived_selected: usize`; `pub fn archived_project_options(&self) -> Vec<PathBuf>` (sorted from `archived_projects`); `move_project_picker` moves within the active tab; `pub fn picker_tab(&self) -> Option<PickerTab>`; `project_picker_index` returns the active tab's index.
+- `src/ui/input.rs`: `BoardIntent::ProjectPickerSwitchTab` (picker `Tab`, `←`, `→`) and `BoardIntent::SelectPickerTab(PickerTab)` (mouse); arms in `intent_primary_action`.
+- `src/ui/board/apply.rs`: `File` with picker open: Main + `Project(path)` → `archive_project`, rebuild `options`/`archived`, clamp selection, keep the picker open; if `board_location == Project(path)` set `board_location = Home { Desk }` and `reanchor_selection`; Main + `Home` → `Ok(None)`; Archived + entry → `unarchive_project`, rebuild, keep open. `Undo` with picker open: Archived tab → unarchive (same path); Main tab → `Ok(None)`. Both mutations return `Persist`. `ConfirmProjectChoice` / `SelectProjectOption` on the Archived tab are inert.
+- `src/ui/render.rs`: `QueueOverlay::ScopeDropdown` gains `tabs: Option<PickerTabsPaint { archived_active: bool, archived_count: usize }>`; `paint_scope_dropdown` paints a first content row `projects · archived (n)` (active bold, inactive dim) with `QueueHitTarget::PickerTab(PickerTab)` hits, then the active list; an empty archived list paints one dim row `no archived projects`; the `options.is_empty()` early return no longer applies to the picker. `SCOPE_VERBS` adds `f file`. `OverlayPayloads::collect` in `src/ui/board/draw.rs` supplies the active tab's labels. `src/ui/mouse.rs`: `PickerTab(tab) → SelectPickerTab(tab)`, `scope_dropdown_verb_intent` `"f" → File`.
+- Failing test first: `ctrl_f_in_the_picker_archives_the_selected_project_and_keeps_the_picker_open` in `tests/queue_board_verbs.rs`: open `P`, move to a project, `ctrl+f` → `domain.is_project_archived` true, `model.input_mode() == ProjectPicker`, main list no longer contains it, `archived_project_options()` does.
+- Also: `archived_tab_lists_exactly_the_archived_projects_and_paints_an_empty_state_line` in `tests/queue_board_render.rs` (mono); `ctrl_f_and_ctrl_u_on_the_archived_tab_unarchive_and_every_task_keeps_its_status` in `tests/queue_board_verbs.rs` (record statuses before, compare after; project back on the projects tab); `archived_project_paints_nowhere_on_home_tabs_or_the_picker_main_list` in `tests/queue_board_render.rs` (desk IN MOTION with a started task in the archived project, projects tab, threads tab, picker main list); picker tab click in `tests/queue_board_mouse.rs::the_modal_cards_close_control_and_chrome_behave_the_same_on_palette_help_and_project_picker` extended with a `PickerTab` hit.
+
+*Advances:* AC-16, AC-17, AC-18, AC-19.
+*Component:* Project picker.
+*Deps:* T-6.
+
+**T-9** Launch card inside an archived project's directory
+
+Files: `src/ui/board/model.rs` (change), `src/ui/mouse.rs` (change), `src/ui/input.rs` (change), `src/ui/board/apply.rs` (change), `src/ui/board/draw.rs` (change), `src/ui/board/chrome.rs` (change), `src/ui/render.rs` (change), `src/app.rs` (change), `tests/archive_launch_card.rs` (new).
+
+- `src/ui/mouse.rs`: `BoardPopup::LaunchCard`. `src/ui/board/model.rs`: `BoardInputMode::LaunchCard`; fields `launch_card: Option<PathBuf>`, `launch_card_shown: bool`, `session_default_scope: Option<TaskScope>`; `input_mode()` maps the popup; `help_line()` returns `LAUNCH_CARD_HELP_LINE` (`"y unarchive · n keep archived"`, new const in `src/ui/input.rs`); `quick_add_scope()` falls back to `session_default_scope` before the snapshot default; `pub fn offer_launch_card(&mut self, state: &DomainState, snapshot: &InvocationSnapshot) -> bool` (raises the card when `snapshot.default_scope` is an archived project and `!launch_card_shown`, sets the flag, returns whether it raised). Compile fallout for the new mode: `map_key` and `map_edit_paste` in `src/ui/input.rs`, `map_board_mouse` in `src/ui/mouse.rs`, `edit_chrome_legends` in `src/ui/board/chrome.rs`.
+- `src/app.rs::load_board`: call `model.offer_launch_card(&state, &snapshot)` after building the model.
+- `src/ui/input.rs`: `BoardIntent::LaunchUnarchive`, `BoardIntent::LaunchKeepArchived`; `fn map_launch_card`: `y`/`Enter` → unarchive, `n`/`Esc` → keep, `ctrl+c` → `Quit`, else `None`; `intent_primary_action` arms.
+- `src/ui/board/apply.rs`: `board_intent_may_persist` adds `LaunchUnarchive`; `LaunchUnarchive` → `unarchive_project(path)`, close the card, `Persist` (a failed save lands in Save Recovery via the existing boundary and the default stays the project); `LaunchKeepArchived` → close the card, `session_default_scope = Some(TaskScope::Global)`, `set_message(format!("project {name} is archived · quick-add goes to your desk this session"))`.
+- `src/ui/render.rs`: `QueueOverlay::LaunchCard { name: &str }` painted with `paint_modal_card` (title `project <name> is archived`, rows `▸ unarchive  y` and `  keep archived  n`, hits `QueueHitTarget::LaunchOption(usize)`, footer `LAUNCH_FOOTER`); arms in `paint_overlay` and the verb-items match near `QueueOverlay::Help`; `OverlayPayloads::modal` in `src/ui/board/draw.rs` returns it while the popup is up. `src/ui/mouse.rs` `LaunchCard` arm: `LaunchOption(0) → LaunchUnarchive`, `LaunchOption(1) → LaunchKeepArchived`, anything else `None`.
+- Failing test first: `launch_in_an_archived_project_paints_the_two_choice_card_before_any_key` in `tests/archive_launch_card.rs`: temp store with project `/tmp/x/proj` archived, snapshot `default_scope = Project(that path)`, `BoardModel::from_domain` + `offer_launch_card` → `input_mode() == LaunchCard`, `draw_board` rows contain `project proj is archived`, `unarchive`, `keep archived`, mono.
+- Also: `y_or_a_click_unarchives_durably_and_quick_add_defaults_to_the_project` (drive `apply_board_intent_with_save_recovery` with `store.reload_merge_save` as `persist`, reload store: record gone; `OpenCapture` scope is the project); `n_esc_or_click_keep_archived_defaults_quick_add_to_desk_with_a_status_line` (record still present, `OpenCapture` scope `Global`, `message()` names the project); `card_is_offered_once_per_session_whichever_choice` (second `offer_launch_card` returns false, mode `Normal`); `no_card_when_the_default_is_desk_or_an_unarchived_project`.
+
+*Advances:* AC-22, AC-23, AC-24, AC-25, AC-26.
+*Component:* Launch card.
+*Deps:* T-8.
+
+**T-10** Quick-add `!p name` to an archived project is refused on the open line
+
+Files: `src/ui/board/apply.rs` (change), `tests/quick_add_capture.rs` (change).
+
+- `lift_quick_add_tokens`: after resolving `!p <arg>` to a path, if `domain.is_project_archived(&path)` return `Err(format!("project {} is archived", short_project(&path)))`. Both `QuickAddSave`/`QuickAddSaveNext` and `ExpandQuickAdd` already route the `Err` to `set_message` and leave the line open; `CancelQuickAdd` clears it (existing status-slot rule).
+- Failing test first: `p_token_naming_an_archived_project_refuses_on_the_open_line_and_clears_on_close` in `tests/quick_add_capture.rs`: archive `/repos/other`, type `ship it !p other`, `QuickAddSave` → `IntentOutcome::None`, mode still `QuickAdd`, `message()` contains `other` and `archived`, `domain.tasks()` unchanged; `CancelQuickAdd` → message `None`. `!p /repos/other` behaves the same; `!p` bare and an unarchived name still save.
+
+*Advances:* AC-27.
+*Component:* Capture scope resolution.
+*Deps:* T-3.
+
+**T-11** CLI `tsk archive` / `tsk unarchive` and `tsk list --archived`
+
+Files: `src/cli/router.rs` (change), `src/main.rs` (change), `src/cli/mod.rs` (change), `src/cli/parser.rs` (change), `src/cli/archive.rs` (new), `src/cli/presenter.rs` (change), `src/cli/list.rs` (change), `tests/cli_archive.rs` (new), `tests/cli_list.rs` (change), `tests/cli_router_process.rs` (change).
+
+- `Surface::Archive`, `Surface::Unarchive` for positionals `archive` / `unarchive`; `src/main.rs` exhaustive match routes them to `headless_main`, global help and `usage_exit` list them; `run_with` dispatches `run_archive(args, archive: bool)`; `presenter::usage` wording becomes `expected add, steps, list, trash, archive, unarchive, or project command` (project lands in T-12, the wording is written once here).
+- `src/cli/parser.rs`: `FlagArchive { task: Option<TaskAddress>, state_dir, help }`, `parse_flag_archive(args, verb: &str)` (one positional, `--state-dir`, `--help`, same shape as `parse_flag_trash`).
+- `src/cli/archive.rs`: `ArchiveResult { number, title, archived: bool }`, `ArchiveCliError { UnknownTask(String), SoftDeleted(String), Store(String) }`, `run_task(target, archive: bool, state_dir)` inside `locked_transition_if_changed` calling `archive_task` / `unarchive_task` (the returned bool is `changed`). Presenter: `archive_help(verb)`, `archive_usage(verb, reason)` exit 2, `archived(result, verb)` prints `archived T7 title` / `unarchived T7 title` exit 0 (repeat prints the same, exit 0), `archive_rejected` exit 1 for unknown or soft-deleted (`T7 is not on the board`, `T7 is deleted`), exit 3 for store.
+- `src/cli/list.rs`: `--archived` flag → `ListView::Archived` (usage error with `--done`, `--deleted`, or a task operand); `Open` and `Done` views add `!domain.is_hidden(task)`; `Archived` rows are tasks with `archived || project archived`, not soft-deleted, one row per id, sorted by `status_group_rank`; `ListRow` gains `#[serde(skip_serializing_if = "Option::is_none")] archived: Option<&'static str>` (`"archived"` wins over `"project archived"`), set only in the archived view so existing JSON shapes are unchanged. Presenter: `ListView::Archived => &[(None, "ARCHIVED")]`, human rows end with ` · archived` / ` · project archived`; `list_help` and `list_usage` mention `--archived`.
+- Failing test first: `archive_and_unarchive_by_number_exit_0_and_repeat_is_idempotent` in `tests/cli_archive.rs` (helpers copied from `tests/cli_trash.rs`: `temp_state_dir`, `TempDirGuard`, `cli`): add a task, `tsk archive T1` twice (both exit 0, flag true, one `Archived` event), `tsk unarchive T1` twice (flag false).
+- Also: `archive_of_an_unknown_number_or_a_soft_deleted_task_exits_1_with_a_message` in `tests/cli_archive.rs`; `default_list_views_exclude_archived_tasks_and_tasks_of_archived_projects` and `list_archived_marks_task_and_project_rows_once_per_id` (human and `--json`) in `tests/cli_list.rs`; extend `top_level_help_names_subcommands_and_their_help` in `tests/cli_router_process.rs` with `archive`.
+
+*Advances:* AC-29, AC-31, AC-32.
+*Component:* CLI archive surfaces.
+*Deps:* T-3.
+
+**T-12** CLI `tsk project archive|unarchive <name>` and `tsk add` refusal `project-archived`
+
+Files: `src/cli/router.rs` (change), `src/main.rs` (change), `src/cli/mod.rs` (change), `src/cli/parser.rs` (change), `src/cli/archive.rs` (change), `src/cli/presenter.rs` (change), `src/cli/add.rs` (change), `tests/cli_archive.rs` (change), `tests/cli_add.rs` (change).
+
+- `Surface::Project` for positional `project`; `src/main.rs` match and help; `run_with` dispatches `run_project`. `src/cli/parser.rs`: `FlagProject { action: Option<ProjectAction>, state_dir, help }`, `enum ProjectAction { Archive { name: String }, Unarchive { name: String } }`, `parse_flag_project` (two positionals like `parse_flag_trash`). `src/cli/archive.rs::run_project(name, archive: bool, state_dir)`: inside `locked_transition_if_changed`, resolve with `crate::scope::resolve_project_path(&name, domain, Some(&snapshot_from_env()))`, then `archive_project` / `unarchive_project`; `UnknownProject` → `ArchiveCliError::UnknownProject(format!("no project named {name} has tasks"))` exit 1; success prints `archived project <short name>` / `unarchived project <short name>` exit 0, idempotent.
+- `src/cli/add.rs`: `AddError::ProjectArchived(String)` with `code()` `"project-archived"`; in `run`, after `resolve_flag_scope`, refuse when `domain.is_project_archived(path)` (covers cwd default and explicit `-p`); `rejected` prints `tsk add: project-archived: project <name> is archived. Use --desk, -p <other project>, or tsk project unarchive <name>` exit 1. Plan items in `run_plan`: `failed` row `code: "project-archived"`, `error: "project is archived: use --desk, -p, or tsk project unarchive"` (static text, `Failed.error` is `&'static str`). `add_help` names the code.
+- Failing test first: `project_archive_and_unarchive_resolve_basename_and_path_exit_0_and_are_idempotent` in `tests/cli_archive.rs`: tasks in `/tmp/x/widget`; `tsk project archive widget` and `WIDGET` (case-insensitive), then `/tmp/x/widget` verbatim, each exit 0 and idempotent; store has exactly one record; `unarchive` removes it; `tsk project archive nothing-here` exits 1.
+- Also: `add_into_an_archived_project_exits_1_with_project_archived_and_names_the_ways_out` in `tests/cli_add.rs`: seed a record for a temp git repo path, run `tsk add -t x -p <path>` and (with `HERDR_PLUGIN_CONTEXT_JSON` cwd inside that repo, using the file's existing env guard pattern) `tsk add -t x`; both exit 1, stderr contains `project-archived`, `--desk`, `-p`, `tsk project unarchive`; `list --all` shows nothing new; `--desk` still succeeds.
+
+*Advances:* AC-28, AC-30.
+*Component:* Capture scope resolution.
+*Deps:* T-11.
+
+**T-13** Docs, site, CLI skill, changelog
+
+Files: `site/src/content/docs/docs/keys.md` (change), `site/src/content/docs/docs/board.md` (change), `site/src/content/docs/docs/capture.md` (change), `site/src/content/docs/docs/cli.md` (change), `site/public/board-demo.js` (change), `site/public/llms.txt` (change), `skills/tsk-cli/SKILL.md` (change), `CHANGELOG.md` (change), `README.md` (change, one line beside the trash note), `CONTEXT.md` (unchanged, terms already present).
+
+- `keys.md`: `ctrl+f` file row (task row toggles archived; picker archives; archived tab unarchives; `ctrl+u` on an archived selection unarchives). `board.md`: done drawer `archived · n` group (closed by default, click or Enter toggles, dim rows), picker tabs, launch card and the keep-archived status line, `working lens` wording. `capture.md`: `!p name` refusal for an archived project. `cli.md` and `skills/tsk-cli/SKILL.md`: `tsk archive`, `tsk unarchive`, `tsk project archive|unarchive`, `tsk list --archived`, `project-archived` error code with its hint, exit contract lines. `board-demo.js`: bare `f` verb on a row and the drawer group (bare keys are deliberate in the demo). `CHANGELOG.md` Unreleased: archive paragraph plus the store format 2 note (`tsk.json.v1` backup on first save). Diff each page against `src/ui/input.rs`, `src/ui/board/commands.rs`, and `src/cli/` before calling it done.
+- Verification: reviewer-checked against AC-36 (no automated oracle; `cd site && npm test` must stay green as the parse check). Failing test first: not applicable; run `npm test` in `site/` as the explicit check.
+
+*Advances:* AC-36.
+*Component:* Docs and site.
+*Deps:* T-12.
+
+### Task-to-criterion coverage map
+
+| AC | Advanced by |
+| --- | --- |
+| AC-1 | T-6 |
+| AC-2 | T-6 |
+| AC-3 | T-6 |
+| AC-4 | T-6 |
+| AC-5 | T-4 |
+| AC-6 | T-4 |
+| AC-7 | T-1, T-6 |
+| AC-8 | T-7 |
+| AC-9 | T-1, T-4 |
+| AC-10 | T-5 |
+| AC-11 | T-5 |
+| AC-12 | T-5 |
+| AC-13 | T-5 |
+| AC-14 | T-5 |
+| AC-15 | T-5 |
+| AC-16 | T-8 |
+| AC-17 | T-8 |
+| AC-18 | T-8 |
+| AC-19 | T-4, T-8 |
+| AC-20 | T-3 |
+| AC-21 | T-3 |
+| AC-22 | T-9 |
+| AC-23 | T-9 |
+| AC-24 | T-9 |
+| AC-25 | T-9 |
+| AC-26 | T-9 |
+| AC-27 | T-10 |
+| AC-28 | T-12 |
+| AC-29 | T-11 |
+| AC-30 | T-12 |
+| AC-31 | T-11 |
+| AC-32 | T-11 |
+| AC-33 | T-2 |
+| AC-34 | T-1, T-2 |
+| AC-35 | T-6 |
+| AC-36 | T-13 |
+
+### Notes
+
+- Sequencing: T-1 and T-2 must land in the same PR, T-2 immediately after T-1. T-1 changes the on-disk task shape (`archived`) without bumping the version; a v1 binary refuses such a task under `deny_unknown_fields`, so the bump in T-2 is what makes the shape change safe. They are two tasks only because the checker needs one component per task (Archive domain vs Store format v2); they are one review unit.
+- `STORE_FORMAT_VERSION` goes to 2 in T-2 (the store task) with a real `v1 → v2` chain step in `MIGRATIONS` (`src/store.rs`); `migrate_with` and the chain scaffolding exist from spec A and are not rewritten. The injected-step seam tests move up one level (v2 seed, seam 3, `tsk.json.v2`) so they keep testing the seam rather than the shipped step.
+- The owner's `~/.tsk` is never touched. Every test and the live smoke use `TSK_STATE_DIR` under `/tmp` (per-binary atomic counter plus nanos for temp dir names, as the existing helpers do). Project paths in tests are temp dirs or literal `/repos/...` strings, never the owner's repos.
+- Regression tests are watched failing first: write the test, run it red, add the code, run it green; for the two "unchanged behaviour" criteria (AC-4 existing undo tests, AC-26 no card) the check is that the pre-existing tests stay green and the new negative test passes on the first run without product changes beyond the task.
+- Pairs merged from the suggested slicing: CLI task verbs and "default list excludes hidden" became one task (T-11) because both are verified by the same `run_with` e2e file and `list --archived` is meaningless without the exclusion; ctrl+f intent, ctrl+u re-route, verb bar and help card stay one task (T-6) because a chord with no reducer arm is not a useful state; the drawer group and the ARCHIVED `SectionKind` were kept together in T-5, so T-4 (lens) introduces no new section kind and needs no `section_title` arm. Split against the suggestion: the domain slice into T-1 and T-2, see the first note.
+- Selectable header: `visible_ids` carries `queue::ARCHIVED_HEADER_ROW_ID` as a row; `selected_id()` hides it, so every task verb on the header refuses with `select a task first`, and `seed_selection` (IN MOTION, then ON DECK) never lands there. `reanchor_selection` treats it like any id.
+- Project record merge: the transient `project_intents` map is the only way a single process's unarchive survives `merge_for_save` (a plain union would resurrect the record it just removed). It is `#[serde(skip)]` and cleared in `clear_merge_bases`.
+- Picker `ctrl+u`: Archived tab unarchives; Main tab is inert (it was unmapped before this feature, so "undo exactly as before" holds).
+- No palette command for archive: `palette_lists_exactly_m1_commands_for_selection_filters_by_subsequence_and_dispatches_same_intents_as_keys` pins the catalog and no criterion asks for one.
+- Goldens: T-5 adds `done_drawer_archived.txt`; T-6 changes `help.txt`. Both regenerate with `cargo test --test queue_board_render regenerate_golden_fixtures -- --ignored`; diff the output, never hand-edit. All other goldens must be byte-identical after every task.
+- `HANDOFF.md` is out of scope for this plan.
+- Live Herdr smoke is required at the end (after T-13), on an isolated store: `cargo build --release`, then `TSK_STATE_DIR=/tmp/tsk-archive-smoke` with a temp git repo as cwd. Flow: seed tasks with `tsk add` (one in the temp repo project, one desk); open the board; `ctrl+f` on a task row (row disappears, no undo entry); `z` opens the drawer, `archived · 1` header below DONE, collapsed; `Enter` on the header expands, rows dim with glyph and `T<n>`; select the row, `ctrl+u` unarchives (row returns to the deck); `P`, select the temp repo project, `ctrl+f` archives it (picker stays open, project gone from main); `Tab` to the archived tab, see it listed, `Esc`; projects tab shows no group; quit; relaunch `tsk` from inside that repo directory, see the card `project <name> is archived`, press `n`, see the dim desk status line, `+` shows a desk-scoped draft; type `x !p <name>` and `Enter`, see the refusal naming the project, `Esc`; quit; CLI: `tsk list` (excludes), `tsk list --archived` (marks `project archived`), `tsk add -t y` from inside the repo (exit 1, `project-archived` hint), `tsk project unarchive <name>`, `tsk archive T1`, `tsk list --archived` (marks `archived`), `tsk unarchive T1`. Read the pane after each step; fix anything that only fails live. If `HERDR_ENV` is unset, say so in the build report instead.
