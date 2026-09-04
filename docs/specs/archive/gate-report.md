@@ -92,3 +92,14 @@ the plan stage (merge rule), not an external source.
 
 **Ready to build.** Two Low findings, neither blocking. F-1 should be resolved by the build
 conductor before T-9 (one line either way).
+
+## Delta gate: owner-smoke amendment (2026-09-04)
+
+Amendment ingested into `## Acceptance Criteria` (AC-13 and AC-22 amended, AC-37..AC-45 added) and
+`## Plan` (T-14..T-17, provenance-marked) after the T-13 build and the owner's live smoke on
+`/tmp/tsk-b-try`. Walk: every new AC → component (design map rows added) → in-stack product →
+task (coverage rows added); T-14..T-17 each advance ≥ 1 AC; no orphan. `sdlc-check` trace and
+coverage rules: 0 findings. Its `green-bar-evidence` and `artifact-parse` findings concern the
+ledger and verification-report *shape* (`### T-N (@ SHA)` evidence headings, `Criterion | Type |
+Proof` table), to be reshaped at close-out; they do not touch the chain. Verdict for the delta:
+**ready to build**.

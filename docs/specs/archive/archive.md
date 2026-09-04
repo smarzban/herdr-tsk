@@ -155,6 +155,9 @@ and default `tsk list` views. "Session" means one board process from launch to q
   *(Verification type: **test-backed**, integration)*
 - **AC-13** Expanded rows paint dim, keep the task's status glyph and its `T<n>` prefix, and are
   selectable and hit-testable like done rows. *(Verification type: **test-backed**, render)*
+  Amended 2026-09-04 (owner smoke): the header row reads `▾ archived · n` (chevron, word, ` · `,
+  count) with no rule; when selected it paints the word bold, never a reverse block; unselected
+  it is dim.
 - **AC-14** The archived group follows the drawer's scope: at home it lists archived tasks the
   home drawer would list if they were done; in project focus only that project's.
   *(Verification type: **test-backed**, unit)*
@@ -184,8 +187,10 @@ and default `tsk list` views. "Session" means one board process from launch to q
 ### Launch inside an archived project
 
 - **AC-22** Given the board launched with a cwd-derived quick-add default resolving to an archived
-  project, then before the first keypress a two-choice card paints reading
-  `project <name> is archived` with options `unarchive` and `keep archived`.
+  project, then before the first keypress a two-choice card paints. Amended 2026-09-04 (owner
+  smoke): the card has no title row and no option rows; its body is one line
+  `project <name> is archived, would you like to unarchive it?` and its footer reads
+  `y unarchive · n keep archived`, with both footer entries clickable.
   *(Verification type: **test-backed**, render)*
 - **AC-23** Given the card, when `y` is pressed or `unarchive` is clicked, then the project is
   unarchived durably and the quick-add default for the session is that project.
@@ -243,6 +248,38 @@ and default `tsk list` views. "Session" means one board process from launch to q
   page state the behaviour the criteria above define, with no stale keymap? Justification: prose
   accuracy is not cheaply automatable; `npm test` only checks the pages parse.)*
 
+### Owner smoke amendments (2026-09-04)
+
+<!-- source: owner live smoke on /tmp/tsk-b-try · ingested 2026-09-04 -->
+
+- **AC-37** The `P` picker paints a dim `─` rule row directly under its tabs row, like the
+  board's rule under its tabs. *(Verification type: **test-backed**, render)*
+- **AC-38** `ctrl+g` toggles the archived group between collapsed and expanded from any board
+  selection while the drawer is open; with the drawer closed it opens the drawer and expands the
+  group. `Enter` and click on the header keep working. The verb bar shows `ctrl+g expand` or
+  `ctrl+g collapse` whenever the drawer is open and the group has rows.
+  *(Verification type: **test-backed**, integration)*
+- **AC-39** No scope dropdown offers an archived project: the task-page scope footer in edit
+  mode, the expanded quick-add draft's scope, and the capture surface's scope list. A task that
+  already sits in an archived project still shows that scope as its current value.
+  *(Verification type: **test-backed**, render)*
+- **AC-40** On the picker's archived tab the verb bar reads `ctrl+u unarchive · enter open ·
+  esc close`; `ctrl+f` still unarchives. *(Verification type: **test-backed**, render)*
+- **AC-41** `Enter` on an archived project in the picker opens that project in read-only focus:
+  the chip reads `<name> · archived`, its tasks paint dim, and nothing is persisted by entering.
+  *(Verification type: **test-backed**, integration)*
+- **AC-42** In read-only focus every mutating verb (`ctrl+s`, `ctrl+d`, `ctrl+o`, `ctrl+b`,
+  `ctrl+e`, `ctrl+n`, `ctrl+x`, `ctrl+f`, quick-add `+`, step toggles) refuses with
+  `project <name> is archived · ctrl+u unarchive` on the status slot and changes nothing.
+  *(Verification type: **test-backed**, integration)*
+- **AC-43** In read-only focus `ctrl+u` unarchives the project in place; the focus becomes a
+  normal project focus (chip without `· archived`, rows not dim, verbs work).
+  *(Verification type: **test-backed**, integration)*
+- **AC-44** In read-only focus the task page opens view-only: `ctrl+e`, `ctrl+n` and `Tab` do not
+  enter edit mode and paint the same refusal. *(Verification type: **test-backed**, integration)*
+- **AC-45** Read-only focus is the only working lens that paints an archived project's tasks;
+  leaving it (`Esc`, `P`, `1`/`2`/`3`) hides them again. *(Verification type: **test-backed**, render)*
+
 ### Negative criteria (out of bounds)
 
 - **NC-1** No task is archived automatically, by age, count, or status change.
@@ -263,6 +300,8 @@ and default `tsk list` views. "Session" means one board process from launch to q
 | AC-8, AC-9, AC-12, AC-16, AC-18, AC-23, AC-24, AC-27 | integration |
 | AC-28, AC-29, AC-30, AC-31, AC-32 | e2e (CLI process) |
 | AC-36 | reviewer-checked, Spec Conformance |
+| AC-37, AC-39, AC-40, AC-45 | render |
+| AC-38, AC-41, AC-42, AC-43, AC-44 | integration |
 
 ### Deferred
 
@@ -407,6 +446,15 @@ responsibility, except the two picker/card surfaces which extend the existing po
 | AC-34 | Store format v2 |
 | AC-35 | Board renderer, Key and mouse mapping |
 | AC-36 | Docs and site |
+| AC-37 | Project picker, Board renderer |
+| AC-38 | Key and mouse mapping, Board model and intents |
+| AC-39 | Capture scope resolution, Board renderer |
+| AC-40 | Project picker, Board renderer |
+| AC-41 | Project picker, Board model and intents |
+| AC-42 | Board model and intents |
+| AC-43 | Board model and intents, Archive domain |
+| AC-44 | Board model and intents |
+| AC-45 | Lens query, Board model and intents |
 
 ### ADRs created
 
@@ -626,6 +674,54 @@ Files: `site/src/content/docs/docs/keys.md` (change), `site/src/content/docs/doc
 *Component:* Docs and site.
 *Deps:* T-12.
 
+<!-- source: mid-build amendment (owner live smoke on the T-13 build, five UX changes plus read-only archived focus) · ingested 2026-09-04 -->
+
+**T-14** Archived header paint, `ctrl+g` toggle, picker rule
+
+Files: `src/ui/render.rs` (change: `paint_archived_header`, `paint_scope_dropdown`), `src/ui/input.rs` (change: `BoardIntent::ToggleArchivedGroup` mapped to `ctrl+g` in Normal mode, help card entry), `src/ui/board/apply.rs` (change: `ToggleArchivedGroup` from keyboard opens the drawer when closed), `src/ui/board/draw.rs` (change: verb bar `ctrl+g expand`/`collapse`), `tests/queue_board_render.rs`, `tests/queue_board_verbs.rs`, `tests/fixtures/queue_board/done_drawer_archived.txt` (regenerated), `tests/fixtures/queue_board/help.txt` (regenerated), `tests/v1_keymap_guard.rs` (change: `g` added).
+
+- Header: `{chevron} archived · {n}`, no rule; selected → word bold, rest dim; unselected → all dim.
+- Failing test first: `archived_header_reads_chevron_word_dot_count_and_selection_is_bold_not_reverse` in `tests/queue_board_render.rs` (asserts the row text and that no cell of the row carries `Modifier::REVERSED` when selected; the word carries `BOLD`).
+- Also: `ctrl_g_toggles_the_archived_group_from_any_selection_and_opens_the_drawer_when_closed` in `tests/queue_board_verbs.rs`; `picker_paints_a_dim_rule_under_its_tabs` in `tests/queue_board_render.rs`.
+
+*Advances:* AC-13, AC-37, AC-38.
+*Component:* Board renderer.
+*Deps:* T-13.
+
+**T-15** Launch card body and footer
+
+Files: `src/ui/render.rs` (change: `QueueOverlay::LaunchCard` paint), `src/ui/mouse.rs` (change: footer hits `LaunchOption`), `tests/archive_launch_card.rs` (change).
+
+- No title row, no option rows; body line `project <name> is archived, would you like to unarchive it?`; footer `y unarchive · n keep archived` with both entries hit-testable.
+- Failing test first: `launch_card_is_one_message_line_with_choices_in_the_footer` in `tests/archive_launch_card.rs` (asserts absence of the old title and option rows, presence of the message, footer text, and that clicking each footer entry dispatches the right intent).
+
+*Advances:* AC-22.
+*Component:* Launch card.
+*Deps:* T-13.
+
+**T-16** Scope dropdowns hide archived projects
+
+Files: `src/ui/board/model.rs` or `src/ui/board/apply.rs` (change: wherever `FormScopeDropdown` options are built), `src/ui/capture.rs` (change: capture scope options), `tests/queue_board_edit.rs`, `tests/quick_add_capture.rs`, `tests/capture_*.rs` (whichever covers the capture scope list; verify the file).
+
+- Failing test first: `task_page_scope_dropdown_omits_archived_projects_but_keeps_the_current_scope` in `tests/queue_board_edit.rs`.
+- Also: `expanded_quick_add_scope_omits_archived_projects` in `tests/quick_add_capture.rs`; the capture surface equivalent in its test file.
+
+*Advances:* AC-39.
+*Component:* Capture scope resolution.
+*Deps:* T-13.
+
+**T-17** Read-only archived project focus from the picker
+
+Files: `src/ui/board/model.rs` (change: `BoardLocation::Project` gains a read-only flag or a sibling `ArchivedProject(PathBuf)` variant, chip label, dim rows), `src/ui/board/apply.rs` (change: `ConfirmProjectChoice` on the archived tab opens the focus; every mutating arm checks `model.focus_is_archived()` first and refuses; `Undo` in that focus unarchives the project; task-page edit entry refuses), `src/ui/queue.rs` (change: a lens for the archived project paints its tasks), `src/ui/board/draw.rs` (change: archived-tab verb bar `ctrl+u unarchive · enter open · esc close`, focus verb bar), `src/ui/render.rs` (change: chip `<name> · archived`, dim rows), `src/ui/board/chrome.rs` as needed, `tests/queue_board_verbs.rs`, `tests/queue_board_render.rs`, `tests/queue_board_edit.rs`.
+
+- Failing test first: `enter_on_the_archived_tab_opens_a_read_only_focus_that_persists_nothing` in `tests/queue_board_verbs.rs` (chip text, dim rows, store bytes unchanged).
+- Also: `every_mutating_verb_in_read_only_focus_refuses_with_the_archived_message` (table-driven over the chords in AC-42, plus `+`), `ctrl_u_in_read_only_focus_unarchives_in_place`, `task_page_in_read_only_focus_refuses_edit_mode` (`tests/queue_board_edit.rs`), `leaving_read_only_focus_hides_the_archived_projects_tasks_again`, `archived_tab_verb_bar_advertises_ctrl_u_enter_esc` (`tests/queue_board_render.rs`).
+- Docs: `site/src/content/docs/docs/{keys,board}.md` and `CHANGELOG.md` gain the `ctrl+g` chord, the read-only focus, and the new card wording (folded here as this is the last task).
+
+*Advances:* AC-40, AC-41, AC-42, AC-43, AC-44, AC-45, AC-36.
+*Component:* Project picker.
+*Deps:* T-14, T-16.
+
 ### Task-to-criterion coverage map
 
 | AC | Advanced by |
@@ -642,7 +738,7 @@ Files: `site/src/content/docs/docs/keys.md` (change), `site/src/content/docs/doc
 | AC-10 | T-5 |
 | AC-11 | T-5 |
 | AC-12 | T-5 |
-| AC-13 | T-5 |
+| AC-13 | T-5, T-14 |
 | AC-14 | T-5 |
 | AC-15 | T-5 |
 | AC-16 | T-8 |
@@ -651,7 +747,7 @@ Files: `site/src/content/docs/docs/keys.md` (change), `site/src/content/docs/doc
 | AC-19 | T-4, T-8 |
 | AC-20 | T-3 |
 | AC-21 | T-3 |
-| AC-22 | T-9 |
+| AC-22 | T-9, T-15 |
 | AC-23 | T-9 |
 | AC-24 | T-9 |
 | AC-25 | T-9 |
@@ -665,7 +761,16 @@ Files: `site/src/content/docs/docs/keys.md` (change), `site/src/content/docs/doc
 | AC-33 | T-2 |
 | AC-34 | T-1, T-2 |
 | AC-35 | T-6 |
-| AC-36 | T-13 |
+| AC-36 | T-13, T-17 |
+| AC-37 | T-14 |
+| AC-38 | T-14 |
+| AC-39 | T-16 |
+| AC-40 | T-17 |
+| AC-41 | T-17 |
+| AC-42 | T-17 |
+| AC-43 | T-17 |
+| AC-44 | T-17 |
+| AC-45 | T-17 |
 
 ### Notes
 
