@@ -9,6 +9,8 @@ pub enum Surface {
     Steps,
     List,
     Trash,
+    Archive,
+    Unarchive,
     FindBoardPane,
     GlobalHelp,
     Usage,
@@ -50,6 +52,8 @@ pub fn route<S: AsRef<str>>(
             "steps" => Surface::Steps,
             "list" => Surface::List,
             "trash" => Surface::Trash,
+            "archive" => Surface::Archive,
+            "unarchive" => Surface::Unarchive,
             _ => Surface::Usage,
         };
     }

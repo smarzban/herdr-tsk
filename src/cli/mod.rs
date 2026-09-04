@@ -6,6 +6,7 @@ use std::io::Read;
 use serde_json::Value;
 
 pub mod add;
+pub mod archive;
 pub mod list;
 pub mod parser;
 pub mod presenter;
@@ -37,7 +38,17 @@ where
         Some("steps") => run_steps(args),
         Some("list") => run_list(args),
         Some("trash") => run_trash(args),
-        _ => presenter::usage("expected add, steps, list, or trash command"),
+        verb @ (Some("archive") | Some("unarchive")) => {
+            let (verb, archive) = if verb == Some("archive") {
+                ("archive", true)
+            } else {
+                ("unarchive", false)
+            };
+            run_archive(args, verb, archive)
+        }
+        _ => presenter::usage(
+            "expected add, steps, list, trash, archive, unarchive, or project command",
+        ),
     }
 }
 
@@ -55,6 +66,23 @@ fn run_steps(args: Vec<String>) -> CliOutput {
     match steps::run(task, action, input.state_dir) {
         Ok(result) => presenter::steps(result),
         Err(error) => presenter::steps_rejected(error),
+    }
+}
+
+fn run_archive(args: Vec<String>, verb: &'static str, archive: bool) -> CliOutput {
+    let input = match parser::parse_flag_archive(&args, verb) {
+        Ok(input) => input,
+        Err(reason) => return presenter::archive_usage(verb, &reason),
+    };
+    if input.help {
+        return presenter::archive_help(verb);
+    }
+    let Some(task) = input.task else {
+        return presenter::archive_usage(verb, "task number is required");
+    };
+    match archive::run_task(task, archive, input.state_dir) {
+        Ok(result) => presenter::archived(result, verb),
+        Err(error) => presenter::archive_rejected(error),
     }
 }
 

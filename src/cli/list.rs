@@ -20,6 +20,7 @@ pub struct ListInput {
     pub all: bool,
     pub done: bool,
     pub deleted: bool,
+    pub archived: bool,
     /// Normalized at the argv boundary so filtering only compares valid names.
     pub thread: Option<String>,
     /// One task addressed by UUID or human number: single-task listing with step lines.
@@ -34,6 +35,7 @@ pub(crate) enum ListView {
     Open,
     Done,
     Deleted,
+    Archived,
 }
 
 /// A list failure after parsing and before presenting output.
@@ -53,6 +55,9 @@ pub(crate) struct ListRow {
     pub(crate) status: HumanStatus,
     pub(crate) project: Option<String>,
     pub(crate) thread: Option<String>,
+    /// `archived` / `project archived` mark, set only in the archived view.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) archived: Option<&'static str>,
 }
 
 /// Read-only result for the list command.
@@ -78,6 +83,7 @@ pub fn parse(args: &[String]) -> Result<ListInput, String> {
         all: false,
         done: false,
         deleted: false,
+        archived: false,
         thread: None,
         task: None,
         state_dir: None,
@@ -130,6 +136,10 @@ pub fn parse(args: &[String]) -> Result<ListInput, String> {
             }
             "--deleted" => {
                 input.deleted = true;
+                index += 1;
+            }
+            "--archived" => {
+                input.archived = true;
                 index += 1;
             }
             "--help" => {
@@ -216,6 +226,8 @@ pub fn run(input: ListInput) -> Result<ListResult, ListError> {
         ListView::Deleted
     } else if input.done {
         ListView::Done
+    } else if input.archived {
+        ListView::Archived
     } else {
         ListView::Open
     };
@@ -233,11 +245,32 @@ pub fn run(input: ListInput) -> Result<ListResult, ListError> {
                 .is_none_or(|thread| task.thread.as_deref() == Some(thread))
         })
         .filter(|task| match view {
-            ListView::Open => !task.soft_deleted && is_open(task.status),
-            ListView::Done => !task.soft_deleted && task.status == HumanStatus::Done,
+            ListView::Open => !task.soft_deleted && !domain.is_hidden(task) && is_open(task.status),
+            ListView::Done => {
+                !task.soft_deleted && !domain.is_hidden(task) && task.status == HumanStatus::Done
+            }
             ListView::Deleted => task.soft_deleted,
+            ListView::Archived => {
+                !task.soft_deleted
+                    && (task.archived
+                        || domain.is_project_archived(match &task.scope {
+                            TaskScope::Project { path } => path,
+                            TaskScope::Global => "",
+                        }))
+            }
         })
-        .map(row_for)
+        .map(|task| {
+            let mut row = row_for(task);
+            if view == ListView::Archived {
+                // "archived" wins over "project archived".
+                row.archived = Some(if task.archived {
+                    "archived"
+                } else {
+                    "project archived"
+                });
+            }
+            row
+        })
         .collect::<Vec<_>>();
     rows.sort_by_key(|row| status_group_rank(row.status));
     Ok(ListResult {
@@ -307,6 +340,7 @@ fn row_for(task: &crate::domain::Task) -> ListRow {
             TaskScope::Project { path } => Some(path.clone()),
         },
         thread: task.thread.clone(),
+        archived: None,
     }
 }
 

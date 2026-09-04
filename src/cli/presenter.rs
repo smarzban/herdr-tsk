@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 
 use super::CliOutput;
 use crate::cli::add::{AddError, FlagAddResult};
+use crate::cli::archive::{ArchiveCliError, ArchiveResult};
 use crate::cli::list::{ListError, ListResult, ListRow, ListView};
 use crate::cli::steps::{StepLine, StepsError, StepsResult};
 use crate::cli::trash::{TrashCliError, TrashRestoreResult};
@@ -19,11 +20,11 @@ pub fn add_help() -> CliOutput {
 pub fn list_help() -> CliOutput {
     CliOutput {
         stdout: concat!(
-            "usage: tsk list [<task>] [-p <project> | --desk | --all] [--thread <name>] [--done | --deleted] [--json] [--state-dir <dir>]\n\n",
+            "usage: tsk list [<task>] [-p <project> | --desk | --all] [--thread <name>] [--done | --deleted | --archived] [--json] [--state-dir <dir>]\n\n",
             "Lists ready, started, blocked, and review tasks in the invocation project by default, or your desk outside a repository.\n",
             "With a task number (bare digits) or UUID from add --json or list --json, lists that one task alone and prints its steps: one line per step with its [x]/[ ] state and step short id. Direct lookup ignores cwd. A task operand cannot be combined with scope, thread, or status filters.\n",
             "--project uses the same basename-or-path scope resolution as add; --desk selects your desk, tasks not tied to a project; --all selects every scope. --thread normalizes a thread name and filters within the selected scope; an invalid name is a usage error (exit 2). For dash-leading project and state-directory values, use --project=<scope> and --state-dir=<dir>.\n",
-            "--done lists done tasks only. --deleted lists soft-deleted tasks only, regardless of status: live soft-deletes plus trash entries from trash.jsonl (kept 30 days), deduped by task with the live copy winning, newest deletion first.\n",
+            "--archived lists archived tasks only: individually archived tasks plus tasks of archived projects, each row marked `archived` or `project archived`. --done lists done tasks only. --deleted lists soft-deleted tasks only, regardless of status: live soft-deletes plus trash entries from trash.jsonl (kept 30 days), deduped by task with the live copy winning, newest deletion first.\n",
             "To recover a typo scope, use tsk list --all --json.\n",
             "--json emits a flat array of id, number, title, status, project, and thread (or null) in displayed group order. Human --all groups rows by status, then project scope, using a unique concise trailing path or desk.\n\n",
             "Exit contract:\n",
@@ -155,6 +156,7 @@ fn list_human(result: &ListResult) -> String {
         ],
         ListView::Done => &[(None, "DONE")],
         ListView::Deleted => &[(None, "DELETED")],
+        ListView::Archived => &[(None, "ARCHIVED")],
     };
     let mut output = String::new();
     let labels = result.include_scope.then(|| scope_labels(&result.rows));
@@ -223,6 +225,10 @@ fn append_rows(output: &mut String, rows: &[&ListRow], indent: &str) {
         if let Some(thread) = row.thread.as_deref() {
             output.push_str(" #");
             output.push_str(&terminal_text(thread));
+        }
+        if let Some(mark) = row.archived {
+            output.push_str(" · ");
+            output.push_str(mark);
         }
         output.push('\n');
     }
@@ -491,11 +497,64 @@ pub fn trash_rejected(error: TrashCliError) -> CliOutput {
     }
 }
 
+pub fn archive_help(verb: &str) -> CliOutput {
+    let antiverb = if verb == "archive" {
+        "unarchive"
+    } else {
+        "archive"
+    };
+    let body = format!(
+        "{verb} sets the task's archived flag. The task is a task number (T<number>, or bare digits) or UUID, as shown by tsk list. An archived task keeps its human status and leaves every working view; it is visible again with tsk list --archived and returns with tsk {antiverb}. Repeating the verb is idempotent: the same output prints and nothing changes.",
+    );
+    CliOutput {
+        stdout: format!(
+            "usage: tsk {verb} <task> [--state-dir <dir>]\n\n{body}\n\nExit contract:\n  exit 0: the flag was set, or it already had the value\n  exit 1: unknown task, or the task is deleted\n  exit 2: usage or parse error, nothing persisted\n  exit 3: store I/O, commit indeterminate, verify with tsk list before retrying\n"
+        ),
+        stderr: String::new(),
+        code: 0,
+    }
+}
+
+pub fn archive_usage(verb: &str, reason: &str) -> CliOutput {
+    CliOutput {
+        stdout: String::new(),
+        stderr: format!("tsk {verb}: {reason}\nusage: tsk {verb} <task> [--state-dir <dir>]\n"),
+        code: 2,
+    }
+}
+
+pub fn archived(result: ArchiveResult, verb: &str) -> CliOutput {
+    // The row reads in the past tense: `archived T7 title` / `unarchived T7 title`.
+    let past = if verb == "archive" {
+        "archived"
+    } else {
+        "unarchived"
+    };
+    CliOutput {
+        stdout: format!("{past} T{} {}\n", result.number, result.title),
+        stderr: String::new(),
+        code: 0,
+    }
+}
+
+pub fn archive_rejected(error: ArchiveCliError) -> CliOutput {
+    let (verb, detail, code) = match error {
+        ArchiveCliError::Store(detail) => ("archive", detail, 3),
+        ArchiveCliError::UnknownTask(detail) => ("archive", detail, 1),
+        ArchiveCliError::SoftDeleted(detail) => ("archive", detail, 1),
+    };
+    CliOutput {
+        stdout: String::new(),
+        stderr: format!("tsk {verb}: {detail}\n"),
+        code,
+    }
+}
+
 pub fn list_usage(reason: &str) -> CliOutput {
     CliOutput {
         stdout: String::new(),
         stderr: format!(
-            "tsk list: {reason}\nusage: tsk list [<task>] [-p <project> | --desk | --all] [--thread <name>] [--done | --deleted] [--json] [--state-dir <dir>]\n"
+            "tsk list: {reason}\nusage: tsk list [<task>] [-p <project> | --desk | --all] [--thread <name>] [--done | --deleted | --archived] [--json] [--state-dir <dir>]\n"
         ),
         code: 2,
     }
