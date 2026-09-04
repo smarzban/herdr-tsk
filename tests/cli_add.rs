@@ -1867,3 +1867,117 @@ fn state_dir_flag_wins_over_environment() {
     let _ = std::fs::remove_dir_all(environment_dir);
     let _ = std::fs::remove_dir_all(argument_dir);
 }
+
+#[test]
+fn add_into_an_archived_project_exits_1_with_project_archived_and_names_the_ways_out() {
+    let _env = env_lock();
+    let repo = temp_state_dir("archived-repo");
+    std::fs::create_dir(repo.join(".git")).expect("create git marker");
+    let dir = temp_state_dir("archived-add");
+    // Seed a task in the repo scope and archive the project.
+    let seeded = run_with(
+        [
+            "tsk",
+            "add",
+            "--state-dir",
+            &state_dir_arg(&dir),
+            "-t",
+            "seed",
+            "-p",
+            &repo.to_string_lossy(),
+        ],
+        Cursor::new(Vec::<u8>::new()),
+        true,
+    );
+    assert_eq!(seeded.code, 0, "{:?}", seeded.stderr);
+    let mut writable = TaskStore::new(&dir).load().expect("load store");
+    writable
+        .archive_project(&repo.to_string_lossy())
+        .expect("archive the repo project");
+    TaskStore::new(&dir)
+        .save(&writable)
+        .expect("persist record");
+
+    let prior = std::env::var_os("HERDR_PLUGIN_CONTEXT_JSON");
+    let context = format!(
+        r#"{{"focused_pane_cwd":{}}}"#,
+        serde_json::to_string(&repo).expect("serialize repo")
+    );
+    // SAFETY: ENV_LOCK serializes this test's process-wide environment mutation.
+    unsafe { std::env::set_var("HERDR_PLUGIN_CONTEXT_JSON", context) };
+
+    // Explicit -p into the archived project: exit 1, the refusal names the ways out.
+    let explicit = run_with(
+        [
+            "tsk",
+            "add",
+            "--state-dir",
+            &state_dir_arg(&dir),
+            "-t",
+            "x",
+            "-p",
+            &repo.to_string_lossy(),
+        ],
+        Cursor::new(Vec::<u8>::new()),
+        true,
+    );
+    assert_eq!(explicit.code, 1, "{explicit:?}");
+    for needle in ["project-archived", "--desk", "-p", "tsk project unarchive"] {
+        assert!(
+            explicit.stderr.contains(needle),
+            "stderr must contain {needle:?}: {:?}",
+            explicit.stderr
+        );
+    }
+
+    // The cwd default resolves to the same archived project: same refusal.
+    let from_cwd = run_with(
+        ["tsk", "add", "--state-dir", &state_dir_arg(&dir), "-t", "x"],
+        Cursor::new(Vec::<u8>::new()),
+        true,
+    );
+    assert_eq!(from_cwd.code, 1);
+    assert!(from_cwd.stderr.contains("project-archived"));
+
+    // Nothing was persisted.
+    let listed = run_with(
+        [
+            "tsk",
+            "list",
+            "--all",
+            "--json",
+            "--state-dir",
+            &state_dir_arg(&dir),
+        ],
+        Cursor::new(Vec::<u8>::new()),
+        true,
+    );
+    assert_eq!(listed.code, 0);
+    assert!(
+        !listed.stdout.contains("\"x\""),
+        "no refused draft persisted: {listed:?}"
+    );
+
+    // --desk still succeeds.
+    let desk = run_with(
+        [
+            "tsk",
+            "add",
+            "--state-dir",
+            &state_dir_arg(&dir),
+            "-t",
+            "desk side task",
+            "--desk",
+        ],
+        Cursor::new(Vec::<u8>::new()),
+        true,
+    );
+    assert_eq!(desk.code, 0, "{desk:?}");
+
+    match prior {
+        Some(value) => unsafe { std::env::set_var("HERDR_PLUGIN_CONTEXT_JSON", value) },
+        None => unsafe { std::env::remove_var("HERDR_PLUGIN_CONTEXT_JSON") },
+    }
+    let _ = std::fs::remove_dir_all(repo);
+    let _ = std::fs::remove_dir_all(dir);
+}

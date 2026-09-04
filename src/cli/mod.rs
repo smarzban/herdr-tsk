@@ -38,6 +38,7 @@ where
         Some("steps") => run_steps(args),
         Some("list") => run_list(args),
         Some("trash") => run_trash(args),
+        Some("project") => run_project(args),
         verb @ (Some("archive") | Some("unarchive")) => {
             let (verb, archive) = if verb == Some("archive") {
                 ("archive", true)
@@ -82,6 +83,27 @@ fn run_archive(args: Vec<String>, verb: &'static str, archive: bool) -> CliOutpu
     };
     match archive::run_task(task, archive, input.state_dir) {
         Ok(result) => presenter::archived(result, verb),
+        Err(error) => presenter::archive_rejected(error),
+    }
+}
+
+fn run_project(args: Vec<String>) -> CliOutput {
+    let input = match parser::parse_flag_project(&args) {
+        Ok(input) => input,
+        Err(reason) => return presenter::project_usage(&reason),
+    };
+    if input.help {
+        return presenter::project_help();
+    }
+    let Some(action) = input.action else {
+        return presenter::project_usage("project action is required");
+    };
+    let (verb, name, archive) = match action {
+        parser::ProjectAction::Archive { name } => ("archive", name, true),
+        parser::ProjectAction::Unarchive { name } => ("unarchive", name, false),
+    };
+    match archive::run_project(name, archive, input.state_dir) {
+        Ok(result) => presenter::project_archived(result, verb),
         Err(error) => presenter::archive_rejected(error),
     }
 }

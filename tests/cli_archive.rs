@@ -155,3 +155,75 @@ fn archive_of_an_unknown_number_or_a_soft_deleted_task_exits_1_with_a_message() 
     let unarchived_deleted = archive(&dir, "unarchive", "T2");
     assert_eq!(unarchived_deleted.code, 1);
 }
+
+#[test]
+fn project_archive_and_unarchive_resolve_basename_and_path_exit_0_and_are_idempotent() {
+    let dir = temp_state_dir("project-verbs");
+    let _guard = TempDirGuard(dir.clone());
+    let added = cli(vec![
+        "tsk".into(),
+        "add".into(),
+        "-t".into(),
+        "widget task".into(),
+        "-p".into(),
+        "/tmp/x/widget".into(),
+        "--state-dir".into(),
+        dir.to_string_lossy().into_owned(),
+    ]);
+    assert_eq!(added.code, 0, "{:?}", added.stderr);
+
+    let store = || TaskStore::new(&dir).load().expect("load store");
+    let project = |verb: &str, name: &str| {
+        cli(vec![
+            "tsk".into(),
+            "project".into(),
+            verb.into(),
+            name.into(),
+            "--state-dir".into(),
+            dir.to_string_lossy().into_owned(),
+        ])
+    };
+
+    // Basename, case-insensitive.
+    let out = project("archive", "widget");
+    assert_eq!(out.code, 0, "{:?}", out.stderr);
+    assert_eq!(out.stdout, "archived project widget\n");
+    assert!(store().is_project_archived("/tmp/x/widget"));
+
+    // Idempotent repeat.
+    let again = project("archive", "widget");
+    assert_eq!(again.code, 0);
+    assert_eq!(again.stdout, "archived project widget\n");
+    assert_eq!(store().projects().len(), 1, "exactly one record");
+
+    // Case-insensitive basename is the same project.
+    let upper = project("archive", "WIDGET");
+    assert_eq!(upper.code, 0, "{:?}", upper.stderr);
+    assert_eq!(store().projects().len(), 1);
+
+    // Verbatim path addresses the same project.
+    let verbatim = project("archive", "/tmp/x/widget");
+    assert_eq!(verbatim.code, 0, "{:?}", verbatim.stderr);
+    assert_eq!(store().projects().len(), 1);
+
+    // Unarchive removes the record.
+    let un = project("unarchive", "widget");
+    assert_eq!(un.code, 0, "{:?}", un.stderr);
+    assert_eq!(un.stdout, "unarchived project widget\n");
+    assert!(
+        !store().is_project_archived("/tmp/x/widget"),
+        "the record is gone"
+    );
+    assert_eq!(store().projects().len(), 0);
+
+    // An unknown name exits 1.
+    let unknown = project("archive", "nothing-here");
+    assert_eq!(unknown.code, 1, "{:?}", unknown.stdout);
+    assert!(
+        unknown
+            .stderr
+            .contains("no project named nothing-here has tasks"),
+        "{:?}",
+        unknown.stderr
+    );
+}

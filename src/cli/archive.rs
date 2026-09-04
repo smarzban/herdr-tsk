@@ -21,6 +21,8 @@ pub enum ArchiveCliError {
     UnknownTask(String),
     /// The addressed task is soft-deleted.
     SoftDeleted(String),
+    /// No project with that name has tasks (project verbs).
+    UnknownProject(String),
     Store(String),
 }
 
@@ -29,6 +31,56 @@ fn display_for(target: &TaskAddress) -> String {
         TaskAddress::Number(number) => format!("T{number}"),
         TaskAddress::Id(id) => id.to_string(),
     }
+}
+
+/// A successful project archive/unarchive.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProjectResult {
+    /// The resolved project's short (basename) name.
+    pub name: String,
+    pub archived: bool,
+}
+
+/// Archive or unarchive one project by `!p` name rules (basename case-insensitive or
+/// a `/path` verbatim). Idempotent: the domain verb's bool is the `changed` flag.
+pub fn run_project(
+    name: String,
+    archive: bool,
+    state_dir: Option<PathBuf>,
+) -> Result<ProjectResult, ArchiveCliError> {
+    let store = TaskStore::new(state_dir.unwrap_or_else(default_state_dir));
+    store
+        .locked_transition_if_changed(|domain: &mut DomainState| {
+            let resolved = crate::scope::resolve_project_path(
+                &name,
+                domain,
+                Some(&crate::context::snapshot_from_env()),
+            );
+            let result = if archive {
+                domain.archive_project(&resolved)
+            } else {
+                domain.unarchive_project(&resolved)
+            };
+            match result {
+                Ok(changed) => {
+                    let short = crate::ui::render::short_project(&resolved).to_string();
+                    Ok((
+                        Ok(ProjectResult {
+                            name: short,
+                            archived: archive,
+                        }),
+                        changed,
+                    ))
+                }
+                Err(_) => Ok((
+                    Err(ArchiveCliError::UnknownProject(format!(
+                        "no project named {name} has tasks"
+                    ))),
+                    false,
+                )),
+            }
+        })
+        .map_err(ArchiveCliError::Store)?
 }
 
 /// Archive or unarchive one task by address.

@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use super::CliOutput;
 use crate::cli::add::{AddError, FlagAddResult};
-use crate::cli::archive::{ArchiveCliError, ArchiveResult};
+use crate::cli::archive::{ArchiveCliError, ArchiveResult, ProjectResult};
 use crate::cli::list::{ListError, ListResult, ListRow, ListView};
 use crate::cli::steps::{StepLine, StepsError, StepsResult};
 use crate::cli::trash::{TrashCliError, TrashRestoreResult};
@@ -523,6 +523,37 @@ pub fn archive_usage(verb: &str, reason: &str) -> CliOutput {
     }
 }
 
+pub fn project_help() -> CliOutput {
+    CliOutput {
+        stdout: "usage: tsk project archive <name> | tsk project unarchive <name> [--state-dir <dir>]\n\nproject archive keeps a whole project off the working views; project unarchive brings it back with every task in the status it had. <name> follows the same rules as add -p: a project basename (case-insensitive) or a /path verbatim. A name matching no project that has tasks exits 1. Repeating the action is idempotent.\n\nExit contract:\n  exit 0: the record was written, or it already had the value\n  exit 1: no project with that name has tasks\n  exit 2: usage or parse error, nothing persisted\n  exit 3: store I/O, commit indeterminate\n".into(),
+        stderr: String::new(),
+        code: 0,
+    }
+}
+
+pub fn project_usage(reason: &str) -> CliOutput {
+    CliOutput {
+        stdout: String::new(),
+        stderr: format!(
+            "tsk project: {reason}\nusage: tsk project archive <name> | tsk project unarchive <name> [--state-dir <dir>]\n"
+        ),
+        code: 2,
+    }
+}
+
+pub fn project_archived(result: ProjectResult, verb: &str) -> CliOutput {
+    let past = if verb == "archive" {
+        "archived"
+    } else {
+        "unarchived"
+    };
+    CliOutput {
+        stdout: format!("{past} project {}\n", result.name),
+        stderr: String::new(),
+        code: 0,
+    }
+}
+
 pub fn archived(result: ArchiveResult, verb: &str) -> CliOutput {
     // The row reads in the past tense: `archived T7 title` / `unarchived T7 title`.
     let past = if verb == "archive" {
@@ -542,6 +573,7 @@ pub fn archive_rejected(error: ArchiveCliError) -> CliOutput {
         ArchiveCliError::Store(detail) => ("archive", detail, 3),
         ArchiveCliError::UnknownTask(detail) => ("archive", detail, 1),
         ArchiveCliError::SoftDeleted(detail) => ("archive", detail, 1),
+        ArchiveCliError::UnknownProject(detail) => ("project", detail, 1),
     };
     CliOutput {
         stdout: String::new(),
@@ -573,8 +605,14 @@ pub fn list_rejected(error: ListError) -> CliOutput {
 }
 
 pub fn rejected(error: AddError) -> CliOutput {
-    let (detail, code) = match error {
-        AddError::Store(detail) => (detail, 3),
+    let (detail, code) = match &error {
+        AddError::ProjectArchived(name) => (
+            format!(
+                "project-archived: project {name} is archived. Use --desk, -p <other project>, or tsk project unarchive <name>"
+            ),
+            1,
+        ),
+        AddError::Store(detail) => (detail.clone(), 3),
         other => (other.code().into(), 1),
     };
     CliOutput {
