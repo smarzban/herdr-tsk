@@ -25,17 +25,17 @@ cargo build --release: finished release profile
 | --- | --- | --- | --- | --- | --- |
 | T-1 | done | 100b321 | AC-7, AC-9, AC-34 | conductor spot-check | one review unit with T-2, commits adjacent as the plan requires; revert proofs in `T-1+T-2-implementer-report.md` |
 | T-2 | done | d076d93 | AC-33, AC-34 | conductor spot-check | `STORE_FORMAT_VERSION = 2`, chain `[migrate_v1_to_v2]`, `current_store_v2.json` fixture added, `current_store_v1.json` byte-unchanged |
-| T-3 | in progress | | AC-20, AC-21 | | |
-| T-4 | in progress | | AC-5, AC-6, AC-9, AC-19 | | |
-| T-5 | in progress | | AC-10..AC-15 | | |
-| T-6 | in progress | | AC-1..AC-4, AC-7, AC-35 | | |
-| T-7 | in progress | | AC-8 | | |
-| T-8 | in progress | | AC-16..AC-19 | | |
-| T-9 | in progress | | AC-22..AC-26 | | |
-| T-10 | in progress | | AC-27 | | |
-| T-11 | in progress | | AC-29, AC-31, AC-32 | | |
-| T-12 | in progress | | AC-28, AC-30 | | |
-| T-13 | in progress | | AC-36 | | |
+| T-3 | done | e912bb0 | AC-20, AC-21 | conductor spot-check | project verbs, `is_hidden`, transient project intents merge |
+| T-4 | done | ffa848c | AC-5, AC-6, AC-9, AC-19 | conductor spot-check | `query_board` with archived project set |
+| T-5 | done | 809cf5b | AC-10..AC-15 | conductor spot-check | ARCHIVED drawer group, sentinel header row, `done_drawer_archived` golden; golden-count guard 6→7 |
+| T-6 | done | fce4211 + 4fd23f8 + conductor fix | AC-1..AC-4, AC-7, AC-35 | conductor spot-check | remediation: `f` verb moved last on the board bar (implementer) and the task-page bar (conductor) so `+ capture` and `ctrl+a step` stay on the 80-col bar; guards restored to `main` assertions; board goldens differ from main only by the clipped ` · f…` tail |
+| T-7 | done | 3792793 | AC-8 | conductor spot-check | header slot `archived` |
+| T-8 | done | 2863b96 | AC-16..AC-19 | conductor spot-check | picker tabs, `ProjectPickerSwitchTab` / `SelectPickerTab` |
+| T-9 | done | d8d3dbb | AC-22..AC-26 | conductor spot-check | launch card, no `Enter` default (gate F-1) |
+| T-10 | done | 1456b86 | AC-27 | conductor spot-check | quick-add `!p` refusal |
+| T-11 | done | 263ce1c | AC-29, AC-31, AC-32 | conductor spot-check | `tsk archive|unarchive`, `list --archived` |
+| T-12 | done | 521e39e | AC-28, AC-30 | conductor spot-check | `tsk project archive|unarchive`, `project-archived` error code |
+| T-13 | done | a3886a3 | AC-36 | conductor spot-check | docs, site, skill, changelog, verification-report |
 
 ## Evidence
 
@@ -48,3 +48,18 @@ $ cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
 exit 0
 cargo test: 768 passed, 0 failed (baseline 764, +4)
 ```
+
+### T-3 .. T-13 plus remediation (conductor run, head after `fix(T-6)` task-page commit)
+
+```text
+$ cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && cargo build --release
+exit 0
+cargo test: 803 passed, 0 failed (baseline 764, +39)
+cargo build --release: finished release profile
+$ cd site && npm test
+pass 10, fail 0
+```
+
+Live smoke: `.agent-sdlc/briefs/archive/SMOKE-report.md` (implementer, `HERDR_ENV=1`,
+`TSK_STATE_DIR=/tmp/tsk-archive-smoke`, 23 steps, nothing failed live). Conductor did not re-drive
+the smoke; the review panel runs next on the whole change.
