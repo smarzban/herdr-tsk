@@ -615,10 +615,9 @@ fn click_and_wheel_match_keyboard_effects_for_each_control() {
     assert_verb_parity("d", HumanStatus::Ready, "d", KeyCode::Char('d'));
     assert_verb_parity("b", HumanStatus::Ready, "b", KeyCode::Char('b'));
     assert_verb_parity("colon", HumanStatus::Ready, ":", KeyCode::Char(':'));
-    // `?` paints for a Started selection (a Ready bar's 8 entries clip the tail at
-    // 80 columns, exactly as `+ capture` already clipped there before the file verb).
-    assert_verb_parity("question", HumanStatus::Started, "?", KeyCode::Char('?'));
+    assert_verb_parity("question", HumanStatus::Ready, "?", KeyCode::Char('?'));
     assert_verb_parity("capture", HumanStatus::Started, "+", KeyCode::Char('+'));
+    // The file verb is last, so a Ready bar's budget trims it; a Started bar shows it.
     assert_verb_parity("file", HumanStatus::Started, "f", KeyCode::Char('f'));
     assert_verb_parity("reopen", HumanStatus::Done, "o", KeyCode::Char('o'));
 

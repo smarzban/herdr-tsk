@@ -566,11 +566,9 @@ fn standard_78x24_fixture_has_selector_list_rule_status_verb_and_no_other_chrome
     // Imp-3 (round 2): `space` is context-dependent -- this fixture's selection is a Doing
     // task, and `PrimaryVerb` is a silent no-op there, so a correct legend omits the entry
     // rather than advertise a no-op. `enter`/`?` are always present regardless of selection.
-    // T-6 (archive): the `f archive` entry joins the bar (AC-35), so `+ capture`'s label
-    // tail now ellipsizes at the 78-column floor; the entry itself stays last.
     assert!(
-        verbs.contains("enter") && verbs.contains('?') && verbs.contains("+"),
-        "standard verb bar must retain open and help, with capture's tail: {verbs:?}"
+        verbs.contains("enter") && verbs.contains('?') && verbs.contains("+ capture"),
+        "standard verb bar must retain open, help, and capture: {verbs:?}"
     );
 
     // Chrome is exactly selector + rule + status + verb. Viewport rows are list content only
@@ -2616,10 +2614,11 @@ fn palette_golden_scene_commands_are_bound_to_the_real_m1_catalog_and_exclude_di
 /// bound task has steps steps (view mode). A task with no steps keeps the
 /// pre-T-7 verb bar exactly: the with-steps bar is the without-steps bar plus the
 /// one step-add entry — modifier implied by the bar's prefix convention — and
-/// nothing else. The full listing is asserted at a width the whole bar fits; at
-/// the 78-column standard floor the bar's width clipping may take whole tail
-/// entries (the file verb joined the bar, so `esc close` is now the tail that
-/// ellipsizes there) but the row itself never overflows.
+/// nothing else. The full listing is asserted at a width the whole bar fits. At
+/// the 78-column standard floor the file verb (kept in the page bar) pushes the
+/// step-add chord past the clip entirely, so the floor case pins the real tail
+/// and the never-overflow rule instead; the chord itself is covered at full
+/// width above and by the mouse chip test.
 #[test]
 fn footer_lists_the_step_add_verb() {
     let page_verb_row_with = |steps: &[&str], width: u16| -> String {
@@ -2663,8 +2662,13 @@ fn footer_lists_the_step_add_verb() {
     );
 
     let floor = page_verb_row_with(&["only step"], 78);
+    // T-6 remediation: with `f archive` kept in the page bar (before `esc close`), the
+    // step-add chord starts past the 78-column floor and clips away entirely, so the
+    // original `ctrl+a…` assertion is unsatisfiable at this width. The chord still
+    // paints and routes in full at 100 columns (asserted above, and by the mouse
+    // chip test); here the floor pins the real tail and the no-overflow rule.
     assert!(
-        floor.contains("esc cl"),
+        floor.contains("esc cl") && floor.contains("f archive"),
         "the compact verb-bar budget may ellipsize the tail entry's label, without making the bar overflow:\n{floor}"
     );
     assert!(

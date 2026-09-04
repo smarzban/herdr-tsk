@@ -133,14 +133,6 @@ pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
                 },
             });
         }
-        entries.push(VerbEntry {
-            key: "f",
-            label: if task.archived {
-                "unarchive"
-            } else {
-                "archive"
-            },
-        });
     }
     entries.push(VerbEntry {
         key: ":",
@@ -150,11 +142,23 @@ pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
         key: "?",
         label: help("?", "help"),
     });
-    // Capture is last so the compact budget preserves the established board verbs.
+    // Capture and file are last so the compact budget preserves the established board
+    // verbs; the file verb trails capture because the established verbs win the
+    // standard width first.
     entries.push(VerbEntry {
         key: "+",
         label: "capture",
     });
+    if let Some(task) = selected_task {
+        entries.push(VerbEntry {
+            key: "f",
+            label: if task.archived {
+                "unarchive"
+            } else {
+                "archive"
+            },
+        });
+    }
     entries
 }
 
