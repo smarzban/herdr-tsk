@@ -21,6 +21,42 @@ const BACKUP_FILE: &str = "tsk.json.1";
 /// Inter-process exclusive lock file (sibling of the state document).
 const LOCK_FILE: &str = "tsk.json.lock";
 
+/// One document-format migration step.
+type MigrationStep = fn(serde_json::Value) -> Result<serde_json::Value, StoreError>;
+
+/// Document-format migrations: the index `i` step converts version `i + 1` to `i + 2`.
+///
+/// Empty while v1 is current; a later format lands its steps here and rides the
+/// load/save seam already wired below.
+const MIGRATIONS: &[MigrationStep] = &[];
+
+/// Walk the shipped migration chain from `from` up to the current format.
+fn migrate(document: serde_json::Value, from: u32) -> Result<serde_json::Value, StoreError> {
+    migrate_with(document, from, MIGRATIONS)
+}
+
+/// Walk `steps` from `from`, applying the step at index `i` to a version `i + 1`
+/// document. `migrate` fixes the chain to [`MIGRATIONS`]; tests inject fake steps.
+/// Each applied step stamps the version it produces.
+fn migrate_with(
+    mut document: serde_json::Value,
+    from: u32,
+    steps: &[MigrationStep],
+) -> Result<serde_json::Value, StoreError> {
+    let start = usize::try_from(from.saturating_sub(1)).expect("u32 fits usize");
+    let Some(steps) = steps.get(start..) else {
+        return Err(StoreError::Io(io::Error::other(
+            "migration chain is shorter than the document version",
+        )));
+    };
+    for (offset, step) in steps.iter().enumerate() {
+        document = step(document)?;
+        let produced = from + offset as u32 + 1;
+        document["format_version"] = serde_json::json!(produced);
+    }
+    Ok(document)
+}
+
 /// Filesystem operations that make atomic replacement durable.
 ///
 /// Keeping the stages separate lets tests verify their ordering and failure propagation.
@@ -180,13 +216,33 @@ impl TaskStore {
     }
 
     fn load_unlocked(&self) -> Result<DomainState, StoreError> {
+        self.load_unlocked_supported(STORE_FORMAT_VERSION, migrate)
+    }
+
+    /// Load path parameterized for tests: `supported` is the target format and
+    /// `migrations` walks an older document up to it. The live file is never
+    /// rewritten by load; the migrated state exists in memory until the first save.
+    fn load_unlocked_supported(
+        &self,
+        supported: u32,
+        migrations: fn(serde_json::Value, u32) -> Result<serde_json::Value, StoreError>,
+    ) -> Result<DomainState, StoreError> {
         self.sweep_orphan_temps();
         let file = self.state_file();
         if !file.exists() {
             return Ok(DomainState::new());
         }
         let data = fs::read_to_string(&file)?;
-        check_format_version(peek_format_version(&data)?)?;
+        let found = peek_format_version(&data)?;
+        // Pre-versioned (0) and newer-than-supported documents are both refused.
+        if found == 0 || found > supported {
+            return Err(StoreError::UnsupportedFormat { found, supported });
+        }
+        if found < supported {
+            let document: serde_json::Value = serde_json::from_str(&data)?;
+            let migrated = migrations(document, found)?;
+            return Ok(serde_json::from_value(migrated)?);
+        }
         let state = serde_json::from_str(&data)?;
         Ok(state)
     }
@@ -200,13 +256,39 @@ impl TaskStore {
         state: &DomainState,
         filesystem: &F,
     ) -> Result<(), StoreError> {
+        self.save_unlocked_supported(state, filesystem, STORE_FORMAT_VERSION)
+    }
+
+    /// Save path parameterized for tests: refuse an in-memory state or a live file
+    /// above `supported`, but accept a live file below it after backing it up.
+    fn save_unlocked_supported<F: AtomicFilesystem>(
+        &self,
+        state: &DomainState,
+        filesystem: &F,
+        supported: u32,
+    ) -> Result<(), StoreError> {
+        check_supported(state.format_version(), supported)?;
         fs::create_dir_all(&self.path)?;
         self.sweep_orphan_temps();
         let file = self.state_file();
         if file.exists() {
             match peek_format_version(&fs::read_to_string(&file)?) {
+                Ok(0) => {
+                    return Err(StoreError::UnsupportedFormat {
+                        found: 0,
+                        supported,
+                    });
+                }
+                Ok(version) if version > supported => {
+                    return Err(StoreError::UnsupportedFormat {
+                        found: version,
+                        supported,
+                    });
+                }
                 Ok(version) => {
-                    check_format_version(version)?;
+                    if version < supported {
+                        retain_version_backup(&file, version)?;
+                    }
                     retain_last_good(&file)?;
                 }
                 // A corrupt live document is replaced. Leave any last-good copy alone.
@@ -317,14 +399,27 @@ fn peek_format_version(data: &str) -> Result<u32, StoreError> {
 }
 
 fn check_format_version(found: u32) -> Result<(), StoreError> {
-    if found != STORE_FORMAT_VERSION {
-        Err(StoreError::UnsupportedFormat {
-            found,
-            supported: STORE_FORMAT_VERSION,
-        })
+    check_supported(found, STORE_FORMAT_VERSION)
+}
+
+fn check_supported(found: u32, supported: u32) -> Result<(), StoreError> {
+    if found != supported {
+        Err(StoreError::UnsupportedFormat { found, supported })
     } else {
         Ok(())
     }
+}
+
+/// Copy the live document to `tsk.json.v<version>` before the first save that
+/// replaces a lower format version. Never overwrites an existing copy: the first
+/// backup of a given version is the one that matters.
+fn retain_version_backup(live: &Path, version: u32) -> Result<(), StoreError> {
+    let backup = live.with_file_name(format!("{STATE_FILE}.v{version}"));
+    if backup.exists() {
+        return Ok(());
+    }
+    fs::copy(live, &backup)?;
+    Ok(())
 }
 
 /// Keep the previous live document under `tsk.json.1` via hard-link so a crash
@@ -1064,6 +1159,260 @@ mod tests {
         assert!(
             !dir.join("tasks.json.lock").exists(),
             "the pre-rebrand lock name must not be written"
+        );
+    }
+
+    fn round_tripped_v1_state(title: &str) -> DomainState {
+        let mut state = DomainState::new();
+        state
+            .create(
+                title,
+                None,
+                TaskScope::Global,
+                ProvenanceOrigin::Manual,
+                None,
+            )
+            .expect("create task");
+        state
+    }
+
+    fn dir_listing_with_bytes(dir: &Path) -> Vec<(String, Vec<u8>)> {
+        let mut entries = Vec::new();
+        for entry in fs::read_dir(dir).expect("read dir").flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let bytes = if entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+                fs::read(entry.path()).expect("read entry")
+            } else {
+                Vec::new()
+            };
+            entries.push((name, bytes));
+        }
+        entries.sort();
+        entries
+    }
+
+    #[test]
+    fn v1_document_round_trips_byte_identical_for_an_unchanged_state() {
+        let dir = temp_dir("round-trip-bytes");
+        let _guard = TempDirGuard(dir.clone());
+        let store = TaskStore::new(&dir);
+        let state = round_tripped_v1_state("unchanged");
+        store.save(&state).expect("first save");
+        let first_bytes = fs::read(dir.join(STATE_FILE)).expect("read first");
+
+        let loaded = store.load().expect("load");
+        store.save(&loaded).expect("save loaded state");
+
+        assert_eq!(
+            fs::read(dir.join(STATE_FILE)).expect("read second"),
+            first_bytes,
+            "an unchanged v1 state must serialize byte-identically"
+        );
+    }
+
+    /// Injected v1 -> v2 step for the migration seam tests.
+    fn identity_v1_to_v2(document: serde_json::Value) -> Result<serde_json::Value, StoreError> {
+        Ok(document)
+    }
+
+    #[test]
+    fn migrate_with_walks_the_chain_from_the_given_version() {
+        fn add_marker_one(document: serde_json::Value) -> Result<serde_json::Value, StoreError> {
+            let mut document = document;
+            document["marker_one"] = serde_json::json!(true);
+            Ok(document)
+        }
+        fn add_marker_two(document: serde_json::Value) -> Result<serde_json::Value, StoreError> {
+            let mut document = document;
+            document["marker_two"] = serde_json::json!(true);
+            Ok(document)
+        }
+        let steps: &[MigrationStep] = &[add_marker_one, add_marker_two];
+        let base = serde_json::json!({ "format_version": 1 });
+
+        let from_one = migrate_with(base.clone(), 1, steps).expect("migrate from v1");
+        assert_eq!(from_one["format_version"], 3);
+        assert_eq!(from_one["marker_one"], true);
+        assert_eq!(from_one["marker_two"], true);
+
+        let from_two = migrate_with(base.clone(), 2, steps).expect("migrate from v2");
+        assert_eq!(from_two["format_version"], 3);
+        assert!(from_two.get("marker_one").is_none(), "v1 step must not run");
+        assert_eq!(from_two["marker_two"], true);
+
+        let at_three = serde_json::json!({ "format_version": 3 });
+        let from_three = migrate_with(at_three, 3, steps).expect("migrate from v3");
+        assert_eq!(from_three["format_version"], 3);
+        assert!(
+            from_three.get("marker_one").is_none() && from_three.get("marker_two").is_none(),
+            "no step runs when the document is already past the chain"
+        );
+
+        let failing: &[MigrationStep] = &[|_| Err(StoreError::Io(io::Error::other("boom")))];
+        assert!(
+            migrate_with(serde_json::json!({"format_version": 1}), 1, failing).is_err(),
+            "a failing step must surface its error"
+        );
+    }
+
+    #[test]
+    fn migrated_load_backs_up_the_original_before_the_first_higher_version_save() {
+        let dir = temp_dir("migrated-load-save");
+        let _guard = TempDirGuard(dir.clone());
+        let store = TaskStore::new(&dir);
+        let original = round_tripped_v1_state("migrate me");
+        let original_bytes = serde_json::to_vec_pretty(&original).expect("encode v1");
+        fs::create_dir_all(&dir).expect("mkdir");
+        fs::write(dir.join(STATE_FILE), &original_bytes).expect("seed v1 file");
+
+        let mut state = store
+            .load_unlocked_supported(2, |document, from| {
+                migrate_with(document, from, &[identity_v1_to_v2])
+            })
+            .expect("v1 file loads through the injected v1 -> v2 step");
+        assert_eq!(state.format_version(), 2);
+        assert_eq!(
+            state.tasks()[0].title,
+            "migrate me",
+            "migration must preserve the task content"
+        );
+
+        store
+            .save_unlocked_supported(&state, &StdFilesystem, 2)
+            .expect("first save at v2");
+        assert_eq!(
+            fs::read(dir.join("tsk.json.v1")).expect("read version backup"),
+            original_bytes,
+            "the first backup of the pre-migration version is byte-identical"
+        );
+        let live: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(dir.join(STATE_FILE)).expect("read live"))
+                .expect("json");
+        assert_eq!(live["format_version"], 2);
+        assert_eq!(live["tasks"][0]["title"], "migrate me");
+        assert_eq!(
+            fs::read(dir.join("tsk.json.1")).expect("last-good holds the v1 original"),
+            original_bytes,
+            "tsk.json.1 semantics are unchanged"
+        );
+
+        state
+            .create(
+                "second task",
+                None,
+                TaskScope::Global,
+                ProvenanceOrigin::Manual,
+                None,
+            )
+            .expect("create");
+        store
+            .save_unlocked_supported(&state, &StdFilesystem, 2)
+            .expect("second save at v2");
+        assert_eq!(
+            fs::read(dir.join("tsk.json.v1")).expect("read version backup"),
+            original_bytes,
+            "a second save must not touch tsk.json.v1"
+        );
+    }
+
+    #[test]
+    fn save_never_overwrites_an_existing_version_backup() {
+        let dir = temp_dir("version-backup-kept");
+        let _guard = TempDirGuard(dir.clone());
+        let store = TaskStore::new(&dir);
+        let original = round_tripped_v1_state("first backup wins");
+        let original_bytes = serde_json::to_vec_pretty(&original).expect("encode v1");
+        fs::create_dir_all(&dir).expect("mkdir");
+        fs::write(dir.join(STATE_FILE), &original_bytes).expect("seed v1 file");
+        fs::write(dir.join("tsk.json.v1"), b"existing backup").expect("seed existing backup");
+
+        let state = store
+            .load_unlocked_supported(2, |document, from| {
+                migrate_with(document, from, &[identity_v1_to_v2])
+            })
+            .expect("load");
+        store
+            .save_unlocked_supported(&state, &StdFilesystem, 2)
+            .expect("save");
+        assert_eq!(
+            fs::read(dir.join("tsk.json.v1")).expect("read backup"),
+            b"existing backup",
+            "the first backup of a given version is the one that matters"
+        );
+    }
+
+    #[test]
+    fn load_refuses_a_higher_version_and_changes_nothing_in_the_state_dir() {
+        for (format_version, supported) in [(3u32, 1u32), (3, 2)] {
+            let dir = temp_dir("format-higher");
+            let _guard = TempDirGuard(dir.clone());
+            let document = serde_json::json!({
+                "format_version": format_version,
+                "tasks": [],
+                "undo_stack": []
+            });
+            write_state_json(&dir, document.clone());
+            fs::write(dir.join("tsk.json.1"), b"bystander").expect("bystander file");
+            // Pre-create the lock plumbing so the listing comparison only sees store content:
+            // lock_exclusive creates tsk.json.lock on the first locked load.
+            fs::write(dir.join("tsk.json.lock"), []).expect("pre-create lock file");
+            let before = dir_listing_with_bytes(&dir);
+
+            let error = TaskStore::new(&dir)
+                .load()
+                .expect_err("a newer store must be refused");
+            assert!(
+                matches!(
+                    error,
+                    StoreError::UnsupportedFormat { found, supported: 1 } if found == format_version
+                ),
+                "{error}"
+            );
+
+            let error = TaskStore::new(&dir)
+                .load_unlocked_supported(supported, |document, from| {
+                    migrate_with(document, from, &[])
+                })
+                .expect_err("a version above the seam target must also be refused");
+            assert!(
+                matches!(
+                    error,
+                    StoreError::UnsupportedFormat { found, supported: seam } if found == format_version && seam == supported
+                ),
+                "{error}"
+            );
+
+            assert_eq!(
+                dir_listing_with_bytes(&dir),
+                before,
+                "no file in the state dir may change on a refused load"
+            );
+        }
+    }
+
+    #[test]
+    fn failed_migration_step_surfaces_from_load_without_file_changes() {
+        fn failing_step(_: serde_json::Value) -> Result<serde_json::Value, StoreError> {
+            Err(StoreError::Io(io::Error::other("migration exploded")))
+        }
+        let dir = temp_dir("migration-fails");
+        let _guard = TempDirGuard(dir.clone());
+        let original = round_tripped_v1_state("fragile");
+        let original_bytes = serde_json::to_vec_pretty(&original).expect("encode v1");
+        fs::create_dir_all(&dir).expect("mkdir");
+        fs::write(dir.join(STATE_FILE), &original_bytes).expect("seed v1 file");
+        let before = dir_listing_with_bytes(&dir);
+
+        let error = TaskStore::new(&dir)
+            .load_unlocked_supported(2, |document, from| {
+                migrate_with(document, from, &[failing_step])
+            })
+            .expect_err("a failing migration step must fail the load");
+        assert!(error.to_string().contains("migration exploded"), "{error}");
+        assert_eq!(
+            dir_listing_with_bytes(&dir),
+            before,
+            "a failed migration must not change any file"
         );
     }
 

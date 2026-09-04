@@ -1,0 +1,24 @@
+# Store hardening verification report
+
+Maps every AC in `store-hardening.md` to named tests. Unit tests live in
+`src/store.rs`, `src/domain/task.rs`, `src/domain/undo.rs`, `src/app.rs`;
+integration tests in `tests/`.
+
+| AC | Requirement | Test |
+| --- | --- | --- |
+| AC-1 | v1 loads/saves exactly as before, byte-identical | `store::tests::v1_document_round_trips_byte_identical_for_an_unchanged_state` (plus the pre-existing format/save tests that stay green) |
+| AC-2 | injected v1→v2 step loads migrated; first save leaves `tsk.json.v1` byte-identical, live at v2; second save leaves it alone | `store::tests::migrate_with_walks_the_chain_from_the_given_version`, `store::tests::migrated_load_backs_up_the_original_before_the_first_higher_version_save`, `store::tests::save_never_overwrites_an_existing_version_backup` |
+| AC-3 | higher version refused, no state-dir change (listing + bytes) | `store::tests::load_refuses_a_higher_version_and_changes_nothing_in_the_state_dir` |
+| AC-4 | failing migration step surfaces from load, no file changes | `store::tests::failed_migration_step_surfaces_from_load_without_file_changes` |
+| AC-5 | equal mtime + equal length saves produce different signatures on Unix | (T2 pending) |
+| AC-6 | missing file → None; unchanged file → equal signature twice | (T2 pending) |
+| AC-7 | 51 undoable actions + save leaves exactly 50 | (T3 pending) |
+| AC-8 | stale entry pruned, live entry beneath kept | (T3 pending) |
+| AC-9 | existing undo tests stay green | full `cargo test` (undo module tests unchanged) |
+| AC-10 | delete + later complete + save → trash with right `deleted_at` | (T4 pending) |
+| AC-11 | delete + immediate save stays live, undo restores | (T4 pending) |
+| AC-12 | 8-day-old delete trashed even as top entry | (T4 pending) |
+| AC-13 | 31-day line purged on next append, 29-day stays, malformed dropped/skipped | (T4 pending) |
+| AC-14 | process A does not resurrect a task B trashed | (T4 pending) |
+| AC-15 | `list --deleted` shows trash; `trash restore` round-trip; refusals | (T4 pending) |
+| AC-16 | trash sync failure leaves `tsk.json` unchanged, task live | (T4 pending) |
