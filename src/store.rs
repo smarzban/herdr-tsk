@@ -23,9 +23,10 @@ const STATE_FILE: &str = "tsk.json";
 const BACKUP_FILE: &str = "tsk.json.1";
 /// Inter-process exclusive lock file (sibling of the state document).
 const LOCK_FILE: &str = "tsk.json.lock";
-/// Append-only trash file for tasks removed from the live store.
+/// Trash file for tasks removed from the live store, rewritten atomically on
+/// each change and bounded by the 30-day purge.
 const TRASH_FILE: &str = "trash.jsonl";
-/// Trash lines older than this are dropped on the next trash append.
+/// Trash lines older than this are dropped on the next trash rewrite.
 const TRASH_PURGE_AFTER: Duration = Duration::from_secs(30 * 24 * 60 * 60);
 
 /// One document-format migration step.
@@ -134,7 +135,6 @@ trait AtomicFilesystem {
     fn rename(&self, from: &Path, to: &Path) -> io::Result<()>;
     fn sync_directory(&self, path: &Path) -> io::Result<()>;
     fn remove_file(&self, path: &Path) -> io::Result<()>;
-    fn open_append(&self, path: &Path) -> io::Result<Self::File>;
 }
 
 struct StdFilesystem;
@@ -171,10 +171,6 @@ impl AtomicFilesystem for StdFilesystem {
 
     fn remove_file(&self, path: &Path) -> io::Result<()> {
         fs::remove_file(path)
-    }
-
-    fn open_append(&self, path: &Path) -> io::Result<Self::File> {
-        OpenOptions::new().append(true).create(true).open(path)
     }
 }
 
@@ -264,7 +260,7 @@ impl TaskStore {
     }
 
     /// Read the trash lines, skipping any line that fails to parse (a torn tail
-    /// after a crash). Takes the exclusive lock so a read never races an append.
+    /// after a crash). Takes the exclusive lock so a read never races a rewrite.
     pub fn load_trash(&self) -> Result<Vec<TrashLine>, StoreError> {
         let _guard = self.lock_exclusive()?;
         self.load_trash_unlocked()
@@ -498,10 +494,13 @@ impl TaskStore {
     /// Move soft-deleted tasks undo can no longer reach (or that aged past the
     /// trash window) into `trash.jsonl` before the live document is replaced.
     ///
-    /// Durability order under the lock: append every eligible task to the trash and
-    /// sync it, rewrite the trash purged, then remove the tasks from the live state
-    /// and replace the live document. A crash between trash write and live replace
-    /// leaves a task in both places; readers dedupe by id with the live copy winning.
+    /// Durability order under the lock: rewrite the whole trash file atomically
+    /// (temp + sync_all + rename + dir sync) with the purge-expired lines dropped,
+    /// the eligible tasks added, and stale restored lines removed; only then remove
+    /// the tasks from the live state and replace the live document. A crash between
+    /// the trash rewrite and the live replace leaves a task in both places; readers
+    /// dedupe by id with the live copy winning. Rewriting (never appending) means a
+    /// torn tail can no longer be created.
     fn move_eligible_to_trash<F: AtomicFilesystem>(
         &self,
         state: &mut DomainState,
@@ -512,25 +511,40 @@ impl TaskStore {
         if eligible.is_empty() {
             return Ok(());
         }
-        let trash = self.path.join(TRASH_FILE);
-        let mut appended = String::new();
-        for (deleted_at, task) in &eligible {
-            let line = TrashLine {
+        // Tolerant, deduped read of the existing trash. Rewrites are atomic, so a
+        // torn tail can no longer be created; this is defence for files written by
+        // older versions or interrupted by an external crash.
+        let existing = self.load_trash_unlocked()?;
+        let mut kept: Vec<TrashLine> = existing
+            .into_iter()
+            // Drop lines past the purge window.
+            .filter(|line| {
+                now.duration_since(line.deleted_at)
+                    .is_ok_and(|age| age <= TRASH_PURGE_AFTER)
+            })
+            // Drop lines whose id is live and not soft-deleted: a restore whose
+            // trash rewrite failed must not leave the task listed as deleted.
+            .filter(|line| state.get(line.task.id).is_none_or(|task| task.soft_deleted))
+            .collect();
+        // Add the eligible tasks, skipping ids already present so a task is never
+        // written twice.
+        for (deleted_at, task) in eligible.iter() {
+            if kept.iter().any(|line| line.task.id == task.id) {
+                continue;
+            }
+            kept.push(TrashLine {
                 deleted_at: *deleted_at,
                 task: task.clone(),
-            };
-            appended.push_str(&serde_json::to_string(&line)?);
-            appended.push('\n');
+            });
         }
-        let mut file = filesystem.open_append(&trash)?;
-        filesystem.write_all(&mut file, appended.as_bytes())?;
-        filesystem.sync_file(&file)?;
-        drop(file);
-        // Every append also rewrites the trash without lines past the purge window.
-        self.rewrite_trash_filtered(filesystem, |line| {
-            now.duration_since(line.deleted_at)
-                .is_ok_and(|age| age <= TRASH_PURGE_AFTER)
-        })?;
+        let mut content = String::new();
+        for line in &kept {
+            content.push_str(&serde_json::to_string(line)?);
+            content.push('\n');
+        }
+        // The whole file is rewritten atomically before the live state loses the
+        // tasks: trash durable first, then removal, then the live replace.
+        self.write_trash_atomic(filesystem, &content)?;
         let ids = eligible
             .iter()
             .map(|(_, task)| task.id)
@@ -871,10 +885,6 @@ mod tests {
 
         fn remove_file(&self, _path: &Path) -> io::Result<()> {
             Ok(())
-        }
-
-        fn open_append(&self, path: &Path) -> io::Result<Self::File> {
-            Ok(is_trash_path(path))
         }
     }
 
@@ -1731,7 +1741,7 @@ mod tests {
     }
 
     #[test]
-    fn trash_append_purges_expired_lines_and_drops_malformed_ones() {
+    fn trash_rewrite_purges_expired_lines_and_drops_malformed_ones() {
         let dir = temp_dir("trash-purge");
         let _guard = TempDirGuard(dir.clone());
         let store = TaskStore::new(&dir);
@@ -1771,7 +1781,7 @@ mod tests {
         )
         .expect("seed trash");
 
-        // Trigger an append: an eligible soft-deleted task saves.
+        // Trigger a trash rewrite: an eligible soft-deleted task saves.
         let mut state = DomainState::new();
         let id = state
             .create(
@@ -1803,7 +1813,7 @@ mod tests {
             Some(91),
             "the 29-day line stays, in order"
         );
-        assert_eq!(parsed[1].task.id, id, "the fresh line is appended");
+        assert_eq!(parsed[1].task.id, id, "the fresh line is present");
     }
 
     #[test]
@@ -1915,15 +1925,6 @@ mod tests {
         fn remove_file(&self, path: &Path) -> io::Result<()> {
             fs::remove_file(path)
         }
-
-        fn open_append(&self, path: &Path) -> io::Result<Self::File> {
-            let trash = is_trash_path(path);
-            OpenOptions::new()
-                .append(true)
-                .create(true)
-                .open(path)
-                .map(|file| LabeledFile { file, trash })
-        }
     }
 
     /// Seed one live task and one trashed task; returns the trashed task's id.
@@ -2032,6 +2033,52 @@ mod tests {
         let rewritten = read_trash_lines(&dir);
         assert_eq!(rewritten.len(), 1, "the rewrite leaves one line");
         assert_eq!(rewritten[0].deleted_at, second.deleted_at);
+    }
+
+    #[test]
+    fn trash_rewrite_drops_torn_tails_instead_of_gluing_new_lines() {
+        let dir = temp_dir("trash-torn-glue");
+        let _guard = TempDirGuard(dir.clone());
+        let store = TaskStore::new(&dir);
+        // Seed one valid line (recent, inside the purge window), then a torn
+        // partial line with NO trailing newline.
+        let recent = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_secs()
+            - 60;
+        let valid = trash_line("already here", recent);
+        let mut content = serde_json::to_vec(&valid).expect("encode");
+        content.push(b'\n');
+        content.extend_from_slice(b"{\"deleted_at\":[200,0],\"task\":{\"ti");
+        fs::create_dir_all(&dir).expect("mkdir");
+        fs::write(trash_path(&dir), &content).expect("write torn trash");
+
+        // Save with one eligible soft-deleted task.
+        let mut state = DomainState::new();
+        let id = state
+            .create(
+                "fresh trash",
+                None,
+                TaskScope::Global,
+                ProvenanceOrigin::Manual,
+                None,
+            )
+            .expect("create");
+        state.soft_delete(id).expect("soft delete");
+        state.pop_undo();
+        store.save(&state).expect("save");
+
+        // Exactly the valid old line plus the new one; every line parses.
+        let lines = read_trash_lines(&dir);
+        assert_eq!(
+            lines.len(),
+            2,
+            "torn tail dropped, not glued to the new line"
+        );
+        let titles: Vec<String> = lines.iter().map(|line| line.task.title.clone()).collect();
+        assert!(titles.contains(&"already here".to_string()), "{titles:?}");
+        assert!(titles.contains(&"fresh trash".to_string()), "{titles:?}");
     }
 
     fn round_tripped_v1_state(title: &str) -> DomainState {

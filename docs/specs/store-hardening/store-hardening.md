@@ -102,8 +102,8 @@ is unchanged in memory (refuse, retain) because pruning happens only at save.
 
 ## T4 · Trash file
 
-**Model.** `trash.jsonl` in the state dir, one JSON object per line, append-only, written only
-under the store lock. Line shape:
+**Model.** `trash.jsonl` in the state dir, one JSON object per line, rewritten atomically on
+each change and bounded by the 30-day purge, written only under the store lock. Line shape:
 
 ```json
 {"deleted_at": <time_serde value>, "task": <Task as in tsk.json>}
@@ -119,16 +119,17 @@ under the store lock. Line shape:
   stack moves), or
 - `deleted_at` is more than 7 days before now.
 
-**Move order** under the lock: append every eligible task to `trash.jsonl` and `sync_all` the
-trash file, then remove those tasks from the live state and drop any undo entry targeting them,
-then replace the live file as today. A crash between the two steps leaves a task in both places;
-readers dedupe by task id with the live copy winning. Never the reverse order.
+**Move order** under the lock: rewrite `trash.jsonl` atomically with the eligible tasks added
+(temp file in the same dir, `sync_all`, rename, dir sync), then remove those tasks from the live
+state and drop any undo entry targeting them, then replace the live file as today. A crash
+between the two steps leaves a task in both places; readers dedupe by task id with the live copy
+winning. Never the reverse order.
 
-**Purge.** On every trash append, also rewrite `trash.jsonl` without lines whose `deleted_at` is
-more than 30 days before now. Rewrite is temp file in the same dir, `sync_all`, rename, dir sync,
-the same durability as the live file. Lines that fail to parse (a torn tail after a crash) are
-dropped on rewrite and skipped on read. If nothing is eligible to append and nothing is due to
-purge, do not touch the file.
+**Purge.** Every trash rewrite drops lines whose `deleted_at` is more than 30 days before now,
+and lines whose task is live again (a restore whose trash rewrite failed). Lines that fail to
+parse or are duplicate task ids are dropped on rewrite (last line for an id wins) and skipped on
+read; the tolerant reader is defence only, since atomic rewrites can no longer create torn
+tails. If nothing is eligible to add, the file is not touched.
 
 **Merge rules** (`src/domain/task.rs`), needed because a second process may have trashed a task
 this process still holds:
@@ -161,11 +162,11 @@ this process still holds:
   `undo` still restores it.
 - AC-12 A soft-deleted task whose `deleted_at` is 8 days old moves to trash on save even while
   it is the top undo entry.
-- AC-13 A trash line with `deleted_at` 31 days old is gone after the next append; a 29-day line
+- AC-13 A trash line with `deleted_at` 31 days old is gone after the next trash write; a 29-day line
   stays. A malformed line is dropped by the rewrite and skipped by `tsk list --deleted`.
 - AC-14 Process A holds a soft-deleted task in memory; process B (a second `TaskStore` on the
   same dir) trashes it; A's next `reload_merge_save` does not resurrect it in `tsk.json` and
-  does not append a second trash line.
+  does not write a second trash line.
 - AC-15 `tsk list --deleted` lists a trashed task with its number; `tsk trash restore T<n>`
   brings it back as `ready`, not soft-deleted, with a `restored` event, and the line is gone from
   `trash.jsonl`. Restoring an unknown number or a live number is refused with a message and a
