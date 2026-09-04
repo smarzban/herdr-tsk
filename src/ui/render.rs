@@ -1958,11 +1958,18 @@ fn modal_title_border_row(title: &str, card_w: u16) -> (Line<'static>, u16) {
     let fill = inner.saturating_sub(FIXED + title_w).max(1);
     let close_x = (1 + 2 + title_w + 1 + fill + 1) as u16;
 
+    // A titleless card (the launch card) keeps the rule continuous: the two pad cells around
+    // the empty title become rule cells so the top border has no gap.
+    let (lead, pad) = if shown_title.is_empty() {
+        ("──".to_string(), "─".to_string())
+    } else {
+        ("─ ".to_string(), " ".to_string())
+    };
     let spans = vec![
         Span::styled("┌".to_string(), style_dim()),
-        Span::styled("─ ".to_string(), style_dim()),
+        Span::styled(lead, style_dim()),
         Span::styled(shown_title, style_bold()),
-        Span::styled(" ".to_string(), style_dim()),
+        Span::styled(pad, style_dim()),
         Span::styled("─".repeat(fill), style_dim()),
         Span::styled(" ".to_string(), style_dim()),
         Span::styled("[x]".to_string(), style_bold()),

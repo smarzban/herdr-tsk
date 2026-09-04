@@ -396,6 +396,16 @@ fn launch_card_is_one_message_line_with_choices_in_the_footer() {
         .filter(|row| row.contains("project proj is archived"))
         .count();
     assert_eq!(title_rows, 1, "no separate title row:\n{frame}");
+    // A titleless card keeps its top border continuous: no `─  ─` gap where a title would sit.
+    let top = rows
+        .iter()
+        .find(|row| row.contains("┌") && row.contains("[x]"))
+        .expect("card top border");
+    let card_border = top.trim();
+    assert!(
+        !card_border.contains("┌─ ") && !card_border.contains("  "),
+        "the top border has no title gap:\n{top}"
+    );
     // No option rows.
     assert!(
         !rows.iter().any(|row| row.contains("\u{25b8} unarchive")),
