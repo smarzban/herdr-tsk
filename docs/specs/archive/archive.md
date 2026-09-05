@@ -254,11 +254,15 @@ and default `tsk list` views. "Session" means one board process from launch to q
 
 - **AC-37** The `P` picker paints a dim `─` rule row directly under its tabs row, like the
   board's rule under its tabs. *(Verification type: **test-backed**, render)*
-- **AC-38** `ctrl+g` toggles the archived group between collapsed and expanded from any board
-  selection while the drawer is open; with the drawer closed it opens the drawer and expands the
-  group. `Enter` and click on the header keep working. The verb bar shows `ctrl+g expand` or
-  `ctrl+g collapse` whenever the drawer is open and the group has rows.
+- **AC-38** The archived group is one of the board's collapsible groups: `ctrl+g` keeps its
+  existing meaning (toggle all groups) and, while the drawer is open, folds and unfolds the archived
+  group together with the project and thread groups; with the drawer closed it leaves the archived
+  group alone. `Enter` and click on the header toggle it on its own. The verb bar shows the
+  existing `ctrl+g groups` entry as before; no separate archived chord.
   *(Verification type: **test-backed**, integration)*
+  Reworded 2026-09-05 (owner): supersedes the earlier "ctrl+g toggles the archived group from any
+  selection, opens the drawer when closed, `ctrl+g expand/collapse` in the bar" wording; `ctrl+g`
+  is not reassigned.
 - **AC-39** No scope dropdown offers an archived project: the task-page scope footer in edit
   mode, the expanded quick-add draft's scope, and the capture surface's scope list. A task that
   already sits in an archived project still shows that scope as its current value.
