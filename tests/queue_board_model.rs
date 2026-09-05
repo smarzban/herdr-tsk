@@ -411,13 +411,7 @@ fn unthreaded_tasks_list_after_thread_blocks() {
             20,
             "release",
         ),
-        task(
-            3,
-            "loose older",
-            HumanStatus::Blocked,
-            project(THIS_REPO),
-            10,
-        ),
+        task(3, "loose older", HumanStatus::Ready, project(THIS_REPO), 10),
     ];
 
     let view = query_lens(
@@ -453,7 +447,7 @@ fn thread_blocks_order_by_recency_and_tasks_within_by_updated_desc() {
         threaded_task(
             2,
             "alpha newer",
-            HumanStatus::Blocked,
+            HumanStatus::Ready,
             project(THIS_REPO),
             50,
             "alpha",
@@ -461,7 +455,7 @@ fn thread_blocks_order_by_recency_and_tasks_within_by_updated_desc() {
         threaded_task(
             3,
             "beta",
-            HumanStatus::Review,
+            HumanStatus::Ready,
             project(THIS_REPO),
             40,
             "beta",

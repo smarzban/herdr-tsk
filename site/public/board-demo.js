@@ -70,7 +70,7 @@ import { parseCapture } from "./capture.js";
       task({
         title: "Check the landing copy once more",
         status: "review",
-        notes: "Global review sits on desk ON DECK with blocked and ready.",
+        notes: "Global review sits on desk NEEDS YOU with blocked.",
         createdAt: NOW - 5 * HOUR,
         updatedAt: NOW - 20 * MIN,
       }),
@@ -259,12 +259,14 @@ import { parseCapture } from "./capture.js";
     if (state.tab === "desk") {
       return {
         started: open.filter((t) => t.status === "started").sort(byUpdated),
-        desk: open
+        need: open
           .filter(
             (t) =>
-              !t.project &&
-              (t.status === "ready" || t.status === "blocked" || t.status === "review"),
+              !t.project && (t.status === "blocked" || t.status === "review"),
           )
+          .sort(byUpdated),
+        desk: open
+          .filter((t) => !t.project && t.status === "ready")
           .sort(byUpdated),
         done,
       };
@@ -283,6 +285,10 @@ import { parseCapture } from "./capture.js";
 
     if (state.tab === "desk" && !state.focusProject) {
       const v = visibleTasks();
+      if (v.need.length) {
+        pushHeader("section", "NEEDS YOU", v.need.length);
+        v.need.forEach((t) => pushTask(t));
+      }
       pushHeader("section", "IN MOTION", v.started.length);
       v.started.forEach((t) => pushTask(t));
       pushHeader("section", "desk", v.desk.length);
@@ -301,17 +307,14 @@ import { parseCapture } from "./capture.js";
 
     if (state.focusProject) {
       const v = visibleTasks();
+      const need = [...v.review, ...v.blocked].sort(byUpdated);
+      if (need.length) {
+        pushHeader("section", "NEEDS YOU", need.length);
+        need.forEach((t) => pushTask(t));
+      }
       pushHeader("section", "IN MOTION", v.started.length);
       v.started.forEach((t) => pushTask(t));
-      pushHeader("section", "ON DECK", v.review.length + v.blocked.length + v.ready.length);
-      if (v.review.length) {
-        pushHeader("sub", "review", v.review.length);
-        v.review.forEach((t) => pushTask(t, 1));
-      }
-      if (v.blocked.length) {
-        pushHeader("sub", "blocked", v.blocked.length);
-        v.blocked.forEach((t) => pushTask(t, 1));
-      }
+      pushHeader("section", "ON DECK", v.ready.length);
       v.ready.forEach((t) => pushTask(t));
       if (state.drawer) {
         pushHeader("section", "DONE", v.done.length);

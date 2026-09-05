@@ -540,7 +540,7 @@ fn standard_78x24_fixture_has_selector_list_rule_status_verb_and_no_other_chrome
     );
     assert!(
         !list.contains("need you") && !list.contains("NEEDS YOU"),
-        "M1 must not paint NEEDS YOU:\n{list}"
+        "default desk fixture has no global blocked/review, so no NEEDS YOU:\n{list}"
     );
     assert!(
         !list.contains("claude") && !list.contains("grok") && !list.contains("agent"),
@@ -598,6 +598,118 @@ fn standard_78x24_fixture_has_selector_list_rule_status_verb_and_no_other_chrome
     for row in &rows {
         assert_eq!(row_display_width(row), 78);
     }
+}
+
+#[test]
+fn desk_and_project_focus_paint_needs_you_above_in_motion() {
+    let mut domain = DomainState::new();
+    let started = domain
+        .create(
+            "started work",
+            None,
+            TaskScope::Global,
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("started");
+    domain
+        .set_status(started, HumanStatus::Started)
+        .expect("start");
+    let blocked = domain
+        .create(
+            "blocked desk",
+            None,
+            TaskScope::Global,
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("blocked");
+    domain
+        .set_status(blocked, HumanStatus::Blocked)
+        .expect("block");
+    let review = domain
+        .create(
+            "review desk",
+            None,
+            TaskScope::Global,
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("review");
+    domain
+        .set_status(review, HumanStatus::Review)
+        .expect("review");
+    let desk = BoardModel::from_domain(&domain, None);
+    let desk_rows = board_rows(&desk, 78, 24).join("\n");
+    let needs = desk_rows.find("NEEDS YOU");
+    let motion = desk_rows.find("IN MOTION");
+    assert!(needs.is_some(), "desk must paint NEEDS YOU:\n{desk_rows}");
+    assert!(
+        motion.is_some(),
+        "desk must still paint IN MOTION:\n{desk_rows}"
+    );
+    assert!(
+        needs.expect("needs") < motion.expect("motion"),
+        "NEEDS YOU must sit above IN MOTION:\n{desk_rows}"
+    );
+    assert!(desk_rows.contains("blocked desk") && desk_rows.contains("review desk"));
+
+    let mut domain = DomainState::new();
+    let project = TaskScope::Project {
+        path: "/repos/tsk".into(),
+    };
+    let started = domain
+        .create(
+            "started project",
+            None,
+            project.clone(),
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("started");
+    domain
+        .set_status(started, HumanStatus::Started)
+        .expect("start");
+    let blocked = domain
+        .create(
+            "blocked project",
+            None,
+            project.clone(),
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("blocked");
+    domain
+        .set_status(blocked, HumanStatus::Blocked)
+        .expect("block");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/tsk")));
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenProjectSelector,
+        None,
+    )
+    .expect("open picker");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ProjectPickerNext,
+        None,
+    )
+    .expect("next");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ConfirmProjectChoice,
+        None,
+    )
+    .expect("focus project");
+    let project_rows = board_rows(&model, 78, 24).join("\n");
+    assert!(
+        project_rows.contains("NEEDS YOU"),
+        "project focus must paint NEEDS YOU:\n{project_rows}"
+    );
+    assert!(project_rows.contains("blocked project"));
 }
 
 fn assert_visible_chrome(rows: &[String], geo: TierGeometry, dimensions: &str) {

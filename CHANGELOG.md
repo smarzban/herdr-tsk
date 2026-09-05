@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+NEEDS YOU section: blocked and review tasks sit above IN MOTION on desk and on a
+project board. Desk ON DECK / project ON DECK keep ready work.
+
 Agent CLI mutations: `tsk status T<n> <status>` sets ready, started, blocked, or
 review, or done (`start` is an alias for `started`; idempotent on repeat), `tsk edit T<n>`
 updates title and/or notes, and `tsk steps` gains `rename` and `remove`.

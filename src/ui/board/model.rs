@@ -2226,14 +2226,18 @@ impl BoardModel {
     /// Browse), and the notice is stated **without** its `u Undo` control, because `u` types
     /// a `u` into the draft here and there is no hit region on this row. The deletion stays
     /// visible; the route it names comes back with the row when the edit closes.
-    /// Seed selection on open: first visible IN MOTION id, else first visible ON DECK id.
+    /// Seed selection on open: first visible NEEDS YOU id, else IN MOTION, else ON DECK.
     ///
     /// Honors collapse state via [`Self::visible_ids`]: a seeded row must be one the
     /// renderer painted, or verbs would mutate a task the user cannot see.
     pub(super) fn seed_selection(&mut self) {
         let visible: HashSet<Uuid> = self.visible_ids().into_iter().collect();
         let view = self.queue_view();
-        for kind in [SectionKind::InMotion, SectionKind::OnDeck] {
+        for kind in [
+            SectionKind::NeedsYou,
+            SectionKind::InMotion,
+            SectionKind::OnDeck,
+        ] {
             if let Some(id) = view
                 .sections
                 .iter()

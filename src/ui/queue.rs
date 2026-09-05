@@ -21,6 +21,8 @@ pub enum BoardTab {
 /// Which list region a section belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SectionKind {
+    /// Blocked and review tasks that need a human.
+    NeedsYou,
     InMotion,
     OnDeck,
     Done,
@@ -69,7 +71,7 @@ pub struct ThreadProjectSubgroup {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QueueSection {
     pub kind: SectionKind,
-    /// Project path for a project-group section. `None` for IN MOTION, DONE, desk ON DECK, and
+    /// Project path for a project-group section. `None` for NEEDS YOU, IN MOTION, DONE, desk ON DECK, and
     /// thread-group sections.
     pub project_label: Option<String>,
     /// Thread name for a thread-group section on the Threads tab.
@@ -265,12 +267,14 @@ fn query_home_desk(
         })
         .collect();
     sort_by_updated_desc(&mut desk);
+    let (need, ready) = split_needs_you(&desk);
 
     let mut sections = Vec::new();
+    push_needs_you(&mut sections, &need);
     if !motion.is_empty() {
         sections.push(section_from(SectionKind::InMotion, None, None, &motion));
     }
-    sections.push(deck_section(None, &desk));
+    sections.push(deck_section(None, &ready));
 
     append_done(&mut sections, &live, drawer_open);
     append_archived(&mut sections, &archived_pool, drawer_open);
@@ -398,6 +402,7 @@ fn query_project_focus(
         .filter(|t| !matches!(t.status, HumanStatus::Started | HumanStatus::Done))
         .collect();
     sort_by_updated_desc(&mut open);
+    let (need, ready) = split_needs_you(&open);
 
     let (label, _) = live
         .iter()
@@ -411,10 +416,11 @@ fn query_project_focus(
         .unwrap_or_else(|| (path.to_string_lossy().into_owned(), ()));
 
     let mut sections = Vec::new();
+    push_needs_you(&mut sections, &need);
     if !motion.is_empty() {
         sections.push(section_from(SectionKind::InMotion, None, None, &motion));
     }
-    sections.push(deck_section(Some(label), &open));
+    sections.push(deck_section(Some(label), &ready));
     append_done(&mut sections, &live, drawer_open);
     let in_scope: Vec<&Task> = tasks
         .iter()
@@ -556,10 +562,37 @@ fn status_counts(live: &[&Task], drawer_open: bool) -> StatusCounts {
             .filter(|t| t.status == HumanStatus::Done)
             .count()
     };
+    let need = live
+        .iter()
+        .filter(|t| is_needs_you_status(t.status))
+        .count();
     StatusCounts {
         in_motion,
         done,
-        need: 0,
+        need,
+    }
+}
+
+fn is_needs_you_status(status: HumanStatus) -> bool {
+    matches!(status, HumanStatus::Blocked | HumanStatus::Review)
+}
+
+fn split_needs_you<'a>(tasks: &[&'a Task]) -> (Vec<&'a Task>, Vec<&'a Task>) {
+    let mut need = Vec::new();
+    let mut rest = Vec::new();
+    for task in tasks {
+        if is_needs_you_status(task.status) {
+            need.push(*task);
+        } else {
+            rest.push(*task);
+        }
+    }
+    (need, rest)
+}
+
+fn push_needs_you(sections: &mut Vec<QueueSection>, need: &[&Task]) {
+    if !need.is_empty() {
+        sections.push(section_from(SectionKind::NeedsYou, None, None, need));
     }
 }
 
@@ -945,6 +978,62 @@ mod tests {
         assert_eq!(ids(desk[0]), vec![Uuid::from_u128(4)]);
         assert!(section_ids(&view, SectionKind::InMotion).contains(&Uuid::from_u128(2)));
         assert!(!section_ids(&view, SectionKind::OnDeck).contains(&Uuid::from_u128(2)));
+    }
+
+    #[test]
+    fn home_desk_puts_global_blocked_and_review_in_needs_you() {
+        let tasks = vec![
+            task(1, HumanStatus::Blocked, TaskScope::Global, false, 10),
+            task(2, HumanStatus::Review, TaskScope::Global, false, 30),
+            task(3, HumanStatus::Ready, TaskScope::Global, false, 20),
+            task(4, HumanStatus::Blocked, project("/repos/a"), false, 40),
+            task(5, HumanStatus::Started, TaskScope::Global, false, 50),
+        ];
+
+        let view = query_lens(&tasks, None, BoardLens::Home(BoardTab::Desk), false);
+        assert_eq!(
+            section_ids(&view, SectionKind::NeedsYou),
+            vec![Uuid::from_u128(2), Uuid::from_u128(1)]
+        );
+        assert_eq!(
+            section_ids(&view, SectionKind::OnDeck),
+            vec![Uuid::from_u128(3)]
+        );
+        assert!(!section_ids(&view, SectionKind::NeedsYou).contains(&Uuid::from_u128(4)));
+        assert_eq!(view.counts.need, 3);
+        assert_eq!(
+            view.sections[0].kind,
+            SectionKind::NeedsYou,
+            "NEEDS YOU sits above IN MOTION"
+        );
+    }
+
+    #[test]
+    fn project_focus_puts_blocked_and_review_in_needs_you() {
+        let tasks = vec![
+            task(1, HumanStatus::Started, project("/repos/a"), false, 100),
+            task(2, HumanStatus::Blocked, project("/repos/a"), false, 80),
+            task(3, HumanStatus::Review, project("/repos/a"), false, 90),
+            task(4, HumanStatus::Ready, project("/repos/a"), false, 70),
+            task(5, HumanStatus::Blocked, project("/repos/b"), false, 60),
+        ];
+
+        let view = query_lens(
+            &tasks,
+            None,
+            BoardLens::Project(Path::new("/repos/a")),
+            false,
+        );
+        assert_eq!(
+            section_ids(&view, SectionKind::NeedsYou),
+            vec![Uuid::from_u128(3), Uuid::from_u128(2)]
+        );
+        assert_eq!(
+            section_ids(&view, SectionKind::OnDeck),
+            vec![Uuid::from_u128(4)]
+        );
+        assert!(!all_listed_ids(&view).contains(&Uuid::from_u128(5)));
+        assert_eq!(view.sections[0].kind, SectionKind::NeedsYou);
     }
 
     #[test]

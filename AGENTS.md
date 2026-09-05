@@ -31,11 +31,11 @@ For scriptable board work, use `tsk add` and `tsk list`; read
 - Home is a tabbed board: **desk** · **projects** · **threads** (`1`/`2`/`3`). Tabs
   show only at home; project focus (`P` → project) hides them and paints the project
   name chip (`P ▾` on the right). At home the chip is hidden — tabs already say where
-  you are; `P` still opens the scope picker from the keyboard. **desk**: global IN MOTION
-  plus desk/global ON DECK. **projects**: one collapsible group per project (single-click
+  you are; `P` still opens the scope picker from the keyboard. **desk**: NEEDS YOU (desk
+  blocked and review), global IN MOTION, then desk/global ON DECK (ready). **projects**: one collapsible group per project (single-click
   collapse, double-click → project focus); in motion under each project, then review,
   blocked, open. **threads**: cross-project thread names with collapsible project
-  sub-groups; same status order. Collapse state is session-only. IN MOTION · ON DECK when
+  sub-groups; same status order. Collapse state is session-only. NEEDS YOU · IN MOTION · ON DECK when
   project-scoped · done drawer (`z`). Scoped ON DECK thread blocks paint dim `#name`
   headers with open counts; headers consume row budget but are not selectable or
   hit-testable. The done drawer ends with a collapsible `▾ archived · n` group (closed by
