@@ -992,6 +992,12 @@ fn apply_board_intent(
             if matches!(model.popup, BoardPopup::SaveRecovery) {
                 return Ok(IntentOutcome::None);
             }
+            // AC-45: `P` leaves the read-only archived lens before the picker paints, so
+            // its tasks are hidden again and Esc from the picker lands home, not back in
+            // a lens the user thought they had left.
+            if model.focus_is_archived() {
+                model.leave_archived_focus();
+            }
             let options = model.project_options();
             // Highlight the option that matches the current deck scope (session filter).
             let selected = match &model.board_location {

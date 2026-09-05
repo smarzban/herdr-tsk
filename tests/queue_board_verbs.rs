@@ -4116,3 +4116,32 @@ fn esc_leaves_read_only_focus_and_never_quits() {
         "the archived project's tasks are hidden again"
     );
 }
+
+#[test]
+fn opening_the_picker_from_read_only_focus_lands_home_on_cancel() {
+    let (mut domain, mut model, inside) = read_only_focus();
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenProjectSelector,
+        None,
+    )
+    .expect("picker opens");
+    assert_eq!(model.input_mode(), BoardInputMode::ProjectPicker);
+    assert!(
+        !model.focus_is_archived(),
+        "P leaves the read-only lens before the picker paints (AC-45)"
+    );
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::CancelProjectPicker,
+        None,
+    )
+    .expect("cancel");
+    assert!(model.at_home(), "cancelling the picker lands on the desk");
+    assert!(
+        !model.visible_ids().contains(&inside),
+        "the archived project's tasks are hidden again"
+    );
+}
