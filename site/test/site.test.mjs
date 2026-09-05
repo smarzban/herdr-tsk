@@ -12,9 +12,9 @@ test("Vercel ignores unchanged files relative to the site root", async () => {
 });
 
 test("demo capture keeps an absolute project path verbatim", () => {
-  assert.deepEqual(parseCapture("Ship it !p /Users/saeed/Workspace/herdr-tasks !t Site-Docs", null), {
+  assert.deepEqual(parseCapture("Ship it !p /workspace/herdr-tsk !t Site-Docs", null), {
     title: "Ship it",
-    project: "/Users/saeed/Workspace/herdr-tasks",
+    project: "/workspace/herdr-tsk",
     thread: "site-docs",
   });
 });

@@ -42,7 +42,7 @@ For scriptable board work, use `tsk add` and `tsk list`; read
   default, session-only): its header is the one selectable header (`Enter`/click toggles it, the
   word paints bold when selected, never reverse), its rows paint dim, and it folds with `ctrl+g`
   toggle-all like any other group while the drawer is open.
-- Archive is a flag, not a place (ADR-0004). `archived` on a task, and a lazy project record
+- Archive is a flag, not a place. `archived` on a task, and a lazy project record
   (`projects` map keyed by scope path, present only while archived) for projects. Neither leaves
   `tsk.json`. A *hidden* task (archived, or in an archived project) paints in no working lens;
   `open task` excludes archived. `ctrl+f` ("file") toggles the selected task; in the `P` picker

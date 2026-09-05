@@ -75,6 +75,5 @@ docs/technical/
 ## Related trees
 
 - User docs: [`site/src/content/docs/docs/`](../../site/src/content/docs/docs/)
-- ADRs: [`docs/specs/adr/`](../specs/adr/)
 - Glossary: [`CONTEXT.md`](../../CONTEXT.md)
 - Standing agent rules: [`AGENTS.md`](../../AGENTS.md)

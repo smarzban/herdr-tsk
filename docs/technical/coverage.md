@@ -96,7 +96,7 @@ self/special docs repo.
 | `site/dist/` | excluded | generated Astro build |
 | `#[cfg(test)]` modules and `tests/` | excluded | test-only; they *exercise* the surface, they are not product API |
 | `skills/` | excluded | operator skill docs, not crate internals |
-| `docs/specs/` (except ADRs linked from architecture) | excluded | feature-spec artifacts; ADRs are linked, not duplicated |
+| `docs/specs/` | excluded | private feature-spec artifacts; the directory is not part of the repository |
 | `archive/dark-engine-pre-v1` | excluded | not present in this tree; historical engines |
 | `src/host`, `src/dispatch`, `src/attention`, `src/resume` | excluded | not in this tree (stale `target/doc/herdr_tasks/` rustdoc is from an old crate name — ignore it) |
 | Adding `cargo doc` to CI / green bar | excluded | owner-approved change, not a docs-task default |

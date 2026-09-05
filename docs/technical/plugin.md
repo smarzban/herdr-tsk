@@ -66,8 +66,7 @@ from a previous crate name; they are not in `src/` now.
 ## Invariants
 
 [Invariants](invariants.md) §34. Rebuild `target/release/tsk` before live smoke;
-a running pane keeps the old binary until quit. Do not `herdr plugin link` a
-worktree over the owner's daily Tasks link unless asked (`AGENTS.local.md`).
+a running pane keeps the old binary until quit.
 
 ## Error paths
 
