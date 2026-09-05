@@ -12,7 +12,7 @@ description: Build tsk and open the board.
 ## Build
 
 ```bash
-git clone git@github.com:smarzban/herdr-tsk.git
+git clone https://github.com/smarzban/herdr-tsk.git
 cd herdr-tsk
 cargo build --release
 ```
@@ -27,15 +27,19 @@ The binary is `target/release/tsk`.
 
 State lives in `~/.tsk/tsk.json`, with the previous version in `tsk.json.1`, a
 pre-format-version backup in `tsk.json.v<N>` after a format migration, deleted
-tasks in `trash.jsonl`, and a `tsk.json.lock` guarding writers. Override the
-directory with `TSK_STATE_DIR` (`TSK_CONFIG_DIR` for config). Board, CLI, and
-agents share the store safely: saves merge by task and revision, and an idle
-board picks up an outside change within a quarter of a second.
+tasks in `trash.jsonl`, and a `tsk.json.lock` guarding writers. Everything there
+is user-private on Unix: the directory is `0700` and the files `0600`. Looser
+modes left by an older version are tightened on the next launch; stricter ones
+are kept. Override the directory with `TSK_STATE_DIR` (`TSK_CONFIG_DIR` for
+config). Board, CLI, and agents share the store safely: saves merge by task and
+revision, and an idle board picks up an outside change within a quarter of a
+second.
 
 Keep `~/.tsk` on a local disk. The writer lock is `flock`-style and every save
 is a rename-based atomic replace; NFS, Dropbox, iCloud Drive, and similar
 synced folders can break both. `TSK_STATE_DIR` is the escape hatch: point it
-at a directory on a local disk.
+at a directory on a local disk. State and config directory roots must be real
+directories, not symlinks.
 
 ```bash
 tsk add -t "Draft release notes"

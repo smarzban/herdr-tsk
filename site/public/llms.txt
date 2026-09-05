@@ -2,16 +2,15 @@
 
 > A task board for you and your agents, in your terminal. Both put work on one board and move it through ready, started, blocked, review, done. Agents reach it through the CLI; only a human marks done.
 
-User guide: https://tsk-gules.vercel.app/docs/
+User guide: https://gettsk.sh/docs/
 
-- [Overview](https://tsk-gules.vercel.app/docs/)
-- [Install](https://tsk-gules.vercel.app/docs/install/)
-- [Board](https://tsk-gules.vercel.app/docs/board/)
-- [Keys](https://tsk-gules.vercel.app/docs/keys/)
-- [Capture](https://tsk-gules.vercel.app/docs/capture/)
-- [Task page](https://tsk-gules.vercel.app/docs/task-page/)
-- [Steps](https://tsk-gules.vercel.app/docs/steps/)
-- [CLI](https://tsk-gules.vercel.app/docs/cli/)
+- [Overview](https://gettsk.sh/docs/)
+- [Install](https://gettsk.sh/docs/install/)
+- [Board](https://gettsk.sh/docs/board/)
+- [Keys](https://gettsk.sh/docs/keys/)
+- [Capture](https://gettsk.sh/docs/capture/)
+- [Task page](https://gettsk.sh/docs/task-page/)
+- [Steps](https://gettsk.sh/docs/steps/)
+- [CLI](https://gettsk.sh/docs/cli/)
 
 Source: https://github.com/smarzban/herdr-tsk
-Maintainer internals: https://github.com/smarzban/herdr-tsk/tree/main/docs/technical

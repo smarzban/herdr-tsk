@@ -17,7 +17,7 @@ Park, resume, attention, linking, and dispatch are not part of this tree.
 ## Quickstart
 
 ```bash
-git clone git@github.com:smarzban/herdr-tsk.git
+git clone https://github.com/smarzban/herdr-tsk.git
 cd herdr-tsk
 cargo build --release
 ./target/release/tsk add -t "Draft release notes"
@@ -29,19 +29,19 @@ then **Open tsk board**. Rebuild after you pull. A running board keeps the old
 binary until you quit it.
 
 Full install (standalone vs plugin, env vars, quick capture):
-[Install](https://tsk-gules.vercel.app/docs/install/).
+[Install](https://gettsk.sh/docs/install/).
 
 ## Usage
 
 How to use the board and CLI lives on the site, not in this file:
 
-- [Overview](https://tsk-gules.vercel.app/docs/)
-- [Board](https://tsk-gules.vercel.app/docs/board/)
-- [Keys](https://tsk-gules.vercel.app/docs/keys/)
-- [Capture](https://tsk-gules.vercel.app/docs/capture/)
-- [Task page](https://tsk-gules.vercel.app/docs/task-page/)
-- [Steps](https://tsk-gules.vercel.app/docs/steps/)
-- [CLI](https://tsk-gules.vercel.app/docs/cli/)
+- [Overview](https://gettsk.sh/docs/)
+- [Board](https://gettsk.sh/docs/board/)
+- [Keys](https://gettsk.sh/docs/keys/)
+- [Capture](https://gettsk.sh/docs/capture/)
+- [Task page](https://gettsk.sh/docs/task-page/)
+- [Steps](https://gettsk.sh/docs/steps/)
+- [CLI](https://gettsk.sh/docs/cli/)
 
 The store is `~/.tsk/tsk.json`; walkthrough dismissal is kept beside it in
 `walkthrough.json`. Deleted tasks live in `trash.jsonl` beside the store; the
@@ -55,16 +55,14 @@ the board but out of every working view (`ctrl+f`, `tsk archive`,
 Keep `~/.tsk` on a local disk. The writer lock is `flock`-style and every save
 is a rename-based atomic replace; NFS, Dropbox, iCloud Drive, and similar
 synced folders can break both. Point `TSK_STATE_DIR` at a local disk instead.
+State and config directory roots must be real directories, not symlinks.
 Windows is not tested in CI.
 
 Mutating keys need Ctrl. Bare letters do nothing. Legacy modifier settings are ignored.
 
 ## Docs
 
-| Audience | Where |
-| --- | --- |
-| Using tsk | https://tsk-gules.vercel.app/docs/ (`site/`) |
-| Changing tsk | [`docs/technical/`](docs/technical/) |
+The user guide lives at https://gettsk.sh/docs/ and is built from `site/`.
 
 ```bash
 cd site
@@ -82,6 +80,11 @@ cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && 
 
 Site-only: `cd site && npm ci && npm test && npm run build`.
 
+## Contributing and security
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development and pull-request guidance.
+Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
+
 ## License
 
-[GPL-3.0](LICENSE)
+[MIT](LICENSE)

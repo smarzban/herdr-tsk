@@ -28,7 +28,7 @@ const codeDark = codeTheme('tsk-dark', 'dark', { bg: '#171719', ink: '#ebe7dc', 
 const codeLight = codeTheme('tsk-light', 'light', { bg: '#faf8f3', ink: '#151517', ink2: '#4d4b46', dim: '#8b887f' });
 
 export default defineConfig({
-  site: 'https://tsk-gules.vercel.app',
+  site: 'https://gettsk.sh',
   // Keep inter-tag whitespace: the landing copy relies on spaces between text and inline tags.
   compressHTML: false,
   markdown: {

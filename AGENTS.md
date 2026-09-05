@@ -42,7 +42,7 @@ For scriptable board work, use `tsk add` and `tsk list`; read
   default, session-only): its header is the one selectable header (`Enter`/click toggles it, the
   word paints bold when selected, never reverse), its rows paint dim, and it folds with `ctrl+g`
   toggle-all like any other group while the drawer is open.
-- Archive is a flag, not a place (ADR-0004). `archived` on a task, and a lazy project record
+- Archive is a flag, not a place. `archived` on a task, and a lazy project record
   (`projects` map keyed by scope path, present only while archived) for projects. Neither leaves
   `tsk.json`. A *hidden* task (archived, or in an archived project) paints in no working lens;
   `open task` excludes archived. `ctrl+f` ("file") toggles the selected task; in the `P` picker
@@ -140,7 +140,7 @@ For scriptable board work, use `tsk add` and `tsk list`; read
   (`paths-ignore: site/**`). Site CI is `.github/workflows/site.yml`:
   `npm ci && npm test && npm run build` in `site/`.
 - Landing page and Starlight docs live in `site/` (Astro). They are not part of
-  the `tsk` binary. Production: https://tsk-gules.vercel.app. Point Vercel at
+  the `tsk` binary. Production: https://gettsk.sh. Point Vercel at
   this repo with Root Directory `site`.
 - The docs and the website ship with the feature. Any change that adds, removes, or
   alters user-visible behaviour (a key, verb, palette command, mouse target, status
@@ -190,7 +190,8 @@ If `HERDR_ENV` is unset, say that live smoke was not run.
   `tsk project archive|unarchive <name>`, `tsk list --archived`; `tsk add` into an archived
   project refuses with error code `project-archived`.
 - `~/.tsk` must live on a local disk (flock plus rename-based replace); synced folders are
-  unsupported, `TSK_STATE_DIR` is the escape hatch.
+  unsupported, `TSK_STATE_DIR` is the escape hatch. State/config directory roots must be real
+  directories, not symlinks; permission hardening refuses a symlink instead of chmodding its target.
 - Golden fixtures regenerate via `cargo test --test queue_board_render regenerate_golden_fixtures -- --ignored`; never hand-edit the `.txt` files.
 - Pane label matching is exact against `board_pane::BOARD_PANE_LABEL`; the manifest pane title must equal it.
 - UI chrome lives in `src/ui/` (`board/` model·apply·commands·chrome·draw,

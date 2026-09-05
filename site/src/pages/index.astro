@@ -3,7 +3,7 @@ import Wordmark from '../components/Wordmark.astro';
 import '../styles/landing.css';
 
 import { VERSION } from '../version.mjs';
-const SITE = 'https://tsk-gules.vercel.app';
+const SITE = 'https://gettsk.sh';
 const REPO = 'https://github.com/smarzban/herdr-tsk';
 ---
 
@@ -147,7 +147,7 @@ const REPO = 'https://github.com/smarzban/herdr-tsk';
               <div><dt>done is</dt><dd>a human verb</dd></div>
               <div><dt>built with</dt><dd>Rust 1.96</dd></div>
               <div><dt>runs on</dt><dd>Linux · macOS</dd></div>
-              <div><dt>license</dt><dd>GPL-3.0</dd></div>
+              <div><dt>license</dt><dd>MIT</dd></div>
             </dl>
             <div class="cta">
               <a class="btn btn-primary" href="#install">Install</a>
@@ -583,7 +583,7 @@ const REPO = 'https://github.com/smarzban/herdr-tsk';
 
             <div class="tabpanel" role="tabpanel" id="panel-standalone" aria-labelledby="tab-standalone" data-install-panel="standalone">
               <div class="shell-wrap">
-                <pre class="shell" data-copy-source><span class="prompt">$</span> git clone git@github.com:smarzban/herdr-tsk.git
+                <pre class="shell" data-copy-source><span class="prompt">$</span> git clone https://github.com/smarzban/herdr-tsk.git
 <span class="prompt">$</span> cd herdr-tsk
 <span class="prompt">$</span> cargo build --release
 <span class="prompt">$</span> ./target/release/tsk</pre>
@@ -623,7 +623,7 @@ const REPO = 'https://github.com/smarzban/herdr-tsk';
       <div class="foot-inner">
         <p>
           <span class="wordmark wordmark-foot"><Wordmark /></span>
-          <span class="dim">· a task board for you and your agents · v{VERSION} · GPL-3.0</span>
+          <span class="dim">· a task board for you and your agents · v{VERSION} · MIT</span>
         </p>
         <p class="foot-links">
           <a href="/docs/" aria-label="Documentation" title="docs">
