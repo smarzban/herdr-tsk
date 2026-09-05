@@ -3081,8 +3081,9 @@ fn paint_scope_dropdown(
     let capacity = bounds
         .height
         .saturating_sub(modal_chrome_rows(geo.tier, true));
-    // The tab row shares the card's content area with the list.
-    let list_capacity = (capacity.max(1) as usize).saturating_sub(tabs_rows);
+    // The tab row and the dim rule under it (AC-37) share the card's content area with
+    // the list, so both come off the capacity or the last row is clipped.
+    let list_capacity = (capacity.max(1) as usize).saturating_sub(tabs_rows * 2);
     let max_n = if geo.tier == Tier::Compact {
         list_capacity.max(1)
     } else {

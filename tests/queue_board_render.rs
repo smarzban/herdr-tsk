@@ -4301,3 +4301,65 @@ fn archived_tab_verb_bar_advertises_ctrl_u_enter_esc() {
         "the archived tab's footer reads its own verbs:\n{frame}"
     );
 }
+
+#[test]
+fn picker_list_capacity_counts_the_rule_row_on_a_short_frame() {
+    let mut domain = DomainState::new();
+    for index in 0..10 {
+        domain
+            .create(
+                format!("task {index}"),
+                None,
+                TaskScope::Project {
+                    path: format!("/repos/p{index}"),
+                },
+                ProvenanceOrigin::Manual,
+                None,
+            )
+            .expect("create");
+    }
+    let mut model = BoardModel::from_domain(&domain, None);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenProjectSelector,
+        None,
+    )
+    .expect("picker");
+    // Walk the selection onto the last option: it must stay painted, not clipped by the
+    // rule row the card also spends a content row on.
+    let last = model.project_options().len() - 1;
+    let label = match &model.project_options()[last] {
+        tsk_tui::ui::board::ProjectScopeOption::Home => "desk".to_string(),
+        tsk_tui::ui::board::ProjectScopeOption::Project(path) => {
+            tsk_tui::ui::board::project_option_label(path.as_path())
+        }
+    };
+    while model.project_picker_index() != Some(last) {
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::ProjectPickerNext,
+            None,
+        )
+        .expect("next");
+    }
+
+    let backend = TestBackend::new(78, 12);
+    let mut terminal = Terminal::new(backend).expect("terminal");
+    terminal
+        .draw(|frame| {
+            let _ = draw_board(frame, &model);
+        })
+        .expect("draw");
+    let buffer = terminal.backend().buffer();
+    assert_buffer_mono(buffer);
+    let frame: String = (0..12)
+        .map(|y| (0..78).map(|x| buffer[(x, y)].symbol()).collect::<String>())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        frame.contains(&format!("\u{25b8} {label}")),
+        "the selected last option paints on a short frame:\n{frame}"
+    );
+}
