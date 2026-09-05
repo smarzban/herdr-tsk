@@ -13,6 +13,10 @@ use crate::cli::trash::{TrashCliError, TrashRestoreResult};
 use crate::domain::HumanStatus;
 use crate::ui::terminal_text;
 
+fn human_reason(reason: &str) -> String {
+    terminal_text(reason)
+}
+
 pub fn add_help() -> CliOutput {
     help_output(
         "usage: tsk add -t <title> [-n <notes>] [-p <project> | --desk] [--thread <name>] [--json] [--state-dir <dir>]\n       tsk add [--file <path|->] [--state-dir <dir>]",
@@ -108,7 +112,8 @@ pub fn usage(reason: &str) -> CliOutput {
     CliOutput {
         stdout: String::new(),
         stderr: format!(
-            "tsk add: {reason}\nusage: tsk add -t <title> [-n <notes>] [-p <project> | --desk] [--thread <name>] [--json] [--state-dir <dir>]\n"
+            "tsk add: {}\nusage: tsk add -t <title> [-n <notes>] [-p <project> | --desk] [--thread <name>] [--json] [--state-dir <dir>]\n",
+            human_reason(reason)
         ),
         code: 2,
     }
@@ -445,7 +450,8 @@ pub fn steps_usage(reason: &str) -> CliOutput {
     CliOutput {
         stdout: String::new(),
         stderr: format!(
-            "tsk steps: {reason}\nusage: tsk steps <task> add <text> | toggle <step-short-id> | rename <step-short-id> <text> | remove <step-short-id> [--state-dir <dir>]\n"
+            "tsk steps: {}\nusage: tsk steps <task> add <text> | toggle <step-short-id> | rename <step-short-id> <text> | remove <step-short-id> [--state-dir <dir>]\n",
+            human_reason(reason)
         ),
         code: 2,
     }
@@ -508,7 +514,8 @@ pub fn status_usage(reason: &str) -> CliOutput {
     CliOutput {
         stdout: String::new(),
         stderr: format!(
-            "tsk status: {reason}\nusage: tsk status <task> <status> [--state-dir <dir>]\n"
+            "tsk status: {}\nusage: tsk status <task> <status> [--state-dir <dir>]\n",
+            human_reason(reason)
         ),
         code: 2,
     }
@@ -562,7 +569,8 @@ pub fn edit_usage(reason: &str) -> CliOutput {
     CliOutput {
         stdout: String::new(),
         stderr: format!(
-            "tsk edit: {reason}\nusage: tsk edit <task> [--title <title>] [--notes <notes>] [--state-dir <dir>]\n"
+            "tsk edit: {}\nusage: tsk edit <task> [--title <title>] [--notes <notes>] [--state-dir <dir>]\n",
+            human_reason(reason)
         ),
         code: 2,
     }
@@ -602,7 +610,8 @@ pub fn trash_usage(reason: &str) -> CliOutput {
     CliOutput {
         stdout: String::new(),
         stderr: format!(
-            "tsk trash: {reason}\nusage: tsk trash restore <task> [--state-dir <dir>]\n"
+            "tsk trash: {}\nusage: tsk trash restore <task> [--state-dir <dir>]\n",
+            human_reason(reason)
         ),
         code: 2,
     }
@@ -653,7 +662,10 @@ pub fn archive_help(verb: &str) -> CliOutput {
 pub fn archive_usage(verb: &str, reason: &str) -> CliOutput {
     CliOutput {
         stdout: String::new(),
-        stderr: format!("tsk {verb}: {reason}\nusage: tsk {verb} <task> [--state-dir <dir>]\n"),
+        stderr: format!(
+            "tsk {verb}: {}\nusage: tsk {verb} <task> [--state-dir <dir>]\n",
+            human_reason(reason)
+        ),
         code: 2,
     }
 }
@@ -670,7 +682,8 @@ pub fn project_usage(reason: &str) -> CliOutput {
     CliOutput {
         stdout: String::new(),
         stderr: format!(
-            "tsk project: {reason}\nusage: tsk project archive <name> | tsk project unarchive <name> [--state-dir <dir>]\n"
+            "tsk project: {}\nusage: tsk project archive <name> | tsk project unarchive <name> [--state-dir <dir>]\n",
+            human_reason(reason)
         ),
         code: 2,
     }
@@ -729,7 +742,8 @@ pub fn list_usage(reason: &str) -> CliOutput {
     CliOutput {
         stdout: String::new(),
         stderr: format!(
-            "tsk list: {reason}\nusage: tsk list [<task>] [-p <project> | --desk | --all] [--thread <name>] [--done | --deleted | --archived] [--json] [--state-dir <dir>]\n"
+            "tsk list: {}\nusage: tsk list [<task>] [-p <project> | --desk | --all] [--thread <name>] [--done | --deleted | --archived] [--json] [--state-dir <dir>]\n",
+            human_reason(reason)
         ),
         code: 2,
     }

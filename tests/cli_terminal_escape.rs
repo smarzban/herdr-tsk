@@ -282,3 +282,30 @@ fn json_list_keeps_raw_control_values() {
     let rows: Vec<serde_json::Value> = serde_json::from_str(&json.stdout).expect("json");
     assert_eq!(rows[0]["title"], TITLE);
 }
+
+#[test]
+fn status_usage_escapes_control_status_operands() {
+    let output = cli(vec![
+        "tsk".into(),
+        "status".into(),
+        "T1".into(),
+        "bad\u{001b}[2J".into(),
+    ]);
+    assert_eq!(output.code, 2);
+    assert!(output.stdout.is_empty());
+    assert!(
+        output.stderr.contains("unknown status bad\\u{001b}[2J"),
+        "escaped operand missing: {}",
+        output.stderr
+    );
+    assert!(
+        !output.stderr.contains('\u{001b}'),
+        "raw ESC in stderr: {:?}",
+        output.stderr.as_bytes()
+    );
+    assert!(
+        output.stderr.contains("unknown status"),
+        "ordinary usage text should stay readable: {}",
+        output.stderr
+    );
+}
