@@ -47,12 +47,17 @@ jobs:
           VERCEL_ORG_ID: team_eErh7AfvdjecAyy2gaZkY76Q
           VERCEL_PROJECT_ID: prj_CNHAMn4BHWAvMCIasGuOhVHu9jZy
         run: |
+          set -o pipefail
           if [ "$GITHUB_EVENT_NAME" != "pull_request" ] && [ "$GITHUB_REF_NAME" = "main" ]; then
-            vercel deploy --prod --yes --token "$VERCEL_TOKEN" > deploy.log 2>&1
-          else
-            vercel deploy --yes --token "$VERCEL_TOKEN" > deploy.log 2>&1
+            prod=--prod
           fi
-          cat deploy.log
+          if vercel deploy $prod --yes --token "$VERCEL_TOKEN" > deploy.log 2>&1; then
+            cat deploy.log
+          else
+            status=$?
+            cat deploy.log
+            exit "$status"
+          fi
           url=$(grep -oE 'https://[a-zA-Z0-9.-]+\.vercel\.app' deploy.log | tail -1)
           echo "url=$url" >> "$GITHUB_OUTPUT"
 
