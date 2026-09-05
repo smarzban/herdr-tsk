@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.5.0
+
+Wide task view: at 110 usable columns or wider, the board and task page form a
+four-stage slider. Arrow keys move between the full board, board plus task,
+rail plus task, and full task page while preserving drafts and focus across
+resizes. Narrow layouts retain the existing board, peek, and page behavior.
+
 Private state permissions: on Unix the state/config directory (`~/.tsk` by
 default) is `0700` and every file in it — `tsk.json`, `tsk.json.1`,
 `tsk.json.v<N>`, `trash.jsonl`, `tsk.json.lock`, `walkthrough.json`, and any
@@ -55,6 +62,9 @@ Synced-folder note: keep `~/.tsk` on a local disk. The writer lock is
 `flock`-style and every save is a rename-based atomic replace; NFS, Dropbox,
 iCloud Drive, and similar synced folders can break both. `TSK_STATE_DIR` is
 the escape hatch. Windows is not tested in CI.
+
+The landing page and complete user guide now ship from this repository at
+https://gettsk.sh. Current code and release metadata use the MIT license.
 
 ## 0.4.0
 

@@ -1,10 +1,8 @@
 name: Site
 
 on:
+  # Run on every PR so `build` can be a stable required check on main.
   pull_request:
-    paths:
-      - "site/**"
-      - ".github/workflows/site.yml"
   push:
     paths:
       - "site/**"

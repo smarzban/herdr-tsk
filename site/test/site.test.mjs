@@ -33,6 +33,21 @@ test("no tracked file still points at the old preview domain", async () => {
   assert.deepEqual(offenders, [], "stale preview-domain references remain");
 });
 
+test("crate, plugin, lockfile, and site share one release version", async () => {
+  const [cargo, plugin, lockfile, siteVersion] = await Promise.all([
+    read("../../Cargo.toml"),
+    read("../../herdr-plugin.toml"),
+    read("../../Cargo.lock"),
+    read("../src/version.mjs"),
+  ]);
+  const cargoVersion = cargo.match(/^version = "([^"]+)"/m)?.[1];
+  const pluginVersion = plugin.match(/^version = "([^"]+)"/m)?.[1];
+  const lockVersion = lockfile.match(/\[\[package\]\]\nname = "tsk-tui"\nversion = "([^"]+)"/)?.[1];
+  const renderedVersion = siteVersion.match(/VERSION = '([^']+)'/)?.[1];
+  assert.equal(cargoVersion, "0.5.0");
+  assert.deepEqual([pluginVersion, lockVersion, renderedVersion], [cargoVersion, cargoVersion, cargoVersion]);
+});
+
 test("the Astro site and sitemap build on the canonical URL", async () => {
   const config = await read("../astro.config.mjs");
   assert.match(config, /site: 'https:\/\/gettsk\.sh'/);
