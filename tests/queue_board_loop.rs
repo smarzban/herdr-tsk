@@ -547,3 +547,90 @@ fn idle_merge_leaves_a_project_focus_archived_by_another_process() {
         "quick-add must not resolve to the archived project after the merge"
     );
 }
+
+#[test]
+fn idle_merge_converts_a_read_only_focus_whose_project_was_unarchived() {
+    use tsk_tui::app::{revalidate_board_from_store, StoreWatch};
+    use tsk_tui::save_recovery::SaveRecovery;
+    use tsk_tui::store::TaskStore;
+
+    let focus_path = "/repos/refiled";
+    let dir = temp_state_dir("idle-readonly-unarchived");
+    let _guard = TempDirGuard(dir.clone());
+    let store = TaskStore::new(&dir);
+
+    let mut seed = DomainState::new();
+    let inside = seed
+        .create(
+            "filed task",
+            None,
+            TaskScope::Project {
+                path: focus_path.to_string(),
+            },
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create");
+    seed.archive_project(focus_path).expect("archive");
+    store.save(&seed).expect("seed");
+
+    // Process A opens the read-only focus from the picker's archived tab.
+    let mut domain = store.load().expect("load A");
+    let mut model = BoardModel::from_domain(&domain, None);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenProjectSelector,
+        None,
+    )
+    .expect("picker");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ProjectPickerSwitchTab,
+        None,
+    )
+    .expect("archived tab");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ConfirmProjectChoice,
+        None,
+    )
+    .expect("read-only focus");
+    assert!(model.focus_is_archived());
+    let mut watch = StoreWatch::seeded(&store);
+
+    // Process B unarchives it on disk.
+    store
+        .locked_transition(|state| {
+            state
+                .unarchive_project(focus_path)
+                .map_err(|error| error.to_string())?;
+            Ok(())
+        })
+        .expect("B unarchives");
+
+    let changed = revalidate_board_from_store(
+        &store,
+        &mut domain,
+        &mut model,
+        &mut watch,
+        &SaveRecovery::new(),
+    );
+    assert!(changed, "the sibling write must be picked up");
+
+    assert!(
+        !model.focus_is_archived(),
+        "a read-only focus whose project came back is an ordinary project focus"
+    );
+    assert_eq!(
+        model.selected_project(),
+        Some(std::path::Path::new(focus_path)),
+        "on the same project"
+    );
+    assert!(
+        model.visible_ids().contains(&inside),
+        "its tasks stay on the board"
+    );
+}

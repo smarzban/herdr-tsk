@@ -986,6 +986,16 @@ impl BoardModel {
         // focused on: reset the focus to home desk and name the project on the status row.
         // The quick-add default is guarded at `OpenCapture`, which never resolves to an
         // archived project, so the session default is left alone here.
+        // A read-only focus whose project came back (picker, CLI, or a sibling process)
+        // becomes an ordinary project focus: chip, dim rows and verbs all follow.
+        if let BoardLocation::ArchivedProject(path) = &self.board_location {
+            if !self
+                .archived_projects
+                .contains(path.to_string_lossy().as_ref())
+            {
+                self.board_location = BoardLocation::Project(path.clone());
+            }
+        }
         let focus_archived = match &self.board_location {
             BoardLocation::Project(path) => self
                 .archived_projects

@@ -4145,3 +4145,55 @@ fn opening_the_picker_from_read_only_focus_lands_home_on_cancel() {
         "the archived project's tasks are hidden again"
     );
 }
+
+#[test]
+fn unarchiving_from_the_picker_converts_a_read_only_focus_in_place() {
+    let (mut domain, mut model, inside) = read_only_focus();
+    // The picker leaves the lens (D3), but the focus is restored to prove the conversion
+    // path rather than the exit path: unarchive through the picker's archived tab.
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenProjectSelector,
+        None,
+    )
+    .expect("picker");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ProjectPickerSwitchTab,
+        None,
+    )
+    .expect("archived tab");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ConfirmProjectChoice,
+        None,
+    )
+    .expect("back into the read-only focus");
+    assert!(model.focus_is_archived());
+
+    // Unarchive it by any other route: the stale read-only lens must convert.
+    domain.unarchive_project(THIS_REPO).expect("unarchive");
+    model.sync_from_domain(&domain);
+
+    assert!(
+        !model.focus_is_archived(),
+        "the read-only lens converts once its project is live again"
+    );
+    assert_eq!(
+        model.selected_project(),
+        Some(Path::new(THIS_REPO)),
+        "on the same project"
+    );
+    assert!(
+        model.visible_ids().contains(&inside),
+        "its tasks stay on the board"
+    );
+    let frame = rendered_board(&model, 80, 24);
+    assert!(
+        !frame.contains("app \u{b7} archived"),
+        "the chip drops the archived suffix:\n{frame}"
+    );
+}
