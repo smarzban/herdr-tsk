@@ -4094,3 +4094,25 @@ fn leaving_read_only_focus_hides_the_archived_projects_tasks_again() {
         );
     }
 }
+
+#[test]
+fn esc_leaves_read_only_focus_and_never_quits() {
+    let (mut domain, mut model, inside) = read_only_focus();
+    assert!(model.focus_is_archived());
+    let esc = map_key(BoardInputMode::Normal, press(KeyCode::Esc)).expect("Esc maps");
+    let outcome = apply_intent(&mut domain, &mut model, esc, None).expect("esc applies");
+    assert_eq!(
+        outcome,
+        IntentOutcome::None,
+        "Esc in read-only focus never quits the board"
+    );
+    assert!(
+        !model.focus_is_archived(),
+        "Esc leaves the read-only focus (AC-45)"
+    );
+    assert!(model.at_home(), "and lands on the desk");
+    assert!(
+        !model.visible_ids().contains(&inside),
+        "the archived project's tasks are hidden again"
+    );
+}

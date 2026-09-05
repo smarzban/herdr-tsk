@@ -1569,6 +1569,12 @@ fn apply_board_intent(
                 model.detail_open = None;
                 return Ok(IntentOutcome::None);
             }
+            // AC-45: with no layer above it, Esc leaves the read-only archived focus for
+            // the desk, which hides that project's tasks again. It never quits from there.
+            if model.focus_is_archived() {
+                model.leave_archived_focus();
+                return Ok(IntentOutcome::None);
+            }
             return Ok(IntentOutcome::Quit);
         }
         // The five intents below aim at the selection, and an empty board has none. Each
