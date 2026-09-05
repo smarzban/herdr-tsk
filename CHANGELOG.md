@@ -6,8 +6,8 @@ Archive for tasks and projects: `ctrl+f` on a board row toggles a task's
 archived flag (no undo entry), and archived tasks keep their human status while
 leaving every working lens — desk, projects, threads, project focus, and the
 default `tsk list` views. The done drawer gains a collapsible `archived · n`
-group (closed on launch, dim rows) that `ctrl+g` expands or collapses from any
-row, the project picker gains main/archived tabs with in-place archive and
+group (closed on launch, dim rows) that a click or `Enter` on its header toggles
+and that `ctrl+g` folds with every other group while the drawer is open, the project picker gains main/archived tabs with in-place archive and
 unarchive, and launching inside an archived project raises a one-time card
 asking `project <name> is archived, would you like to unarchive it?` (`y`
 unarchives, `n` keeps archived and sends quick-add to the desk for the
@@ -15,7 +15,7 @@ session). `Enter` on the picker's archived tab opens that project in read-only
 focus: its tasks paint dim under a `<name> · archived` chip, every mutating verb
 refuses with `project <name> is archived · ctrl+u unarchive`, and `ctrl+u`
 unarchives in place. No scope dropdown offers an archived project.
-`ctrl+g` no longer toggles all groups; the palette's `toggle groups` still does. Quick-add `!p <name>`
+Quick-add `!p <name>`
 and `tsk add` into an archived project refuse with code `project-archived`. New
 CLI: `tsk archive T<n>`, `tsk unarchive T<n>`,
 `tsk project archive|unarchive <name>` (all idempotent), and

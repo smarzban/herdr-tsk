@@ -9,9 +9,9 @@
 │         │  →/← peek | + capture                                      │         │
 │ desk ───│  ctrl+e title | ctrl+x/Delete delete                       │───────1 │
 │         │  ctrl+u undo | ctrl+f file                                 │         │
-│  ○ T7 Gl│  ctrl+g archived group | z drawer                          │      2d │
-│         │  : palette | ? help                                        │         │
-│         │  P project                                                 │         │
+│  ○ T7 Gl│  z drawer | : palette                                      │      2d │
+│         │  ? help | P project                                        │         │
+│         │  ctrl+g groups                                             │         │
 │         │                                                            │         │
 │         │  task page                                                 │         │
 │         │  ctrl+e title | ctrl+n notes                               │         │

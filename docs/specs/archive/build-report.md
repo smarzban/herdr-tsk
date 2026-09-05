@@ -253,15 +253,16 @@ cargo test: 821 passed, 0 failed
 ### T-17 (@ ded748a)
 
 Conductor capture at the branch head `61a6e45` (T-17 plus the border fix), the full bar;
-re-captured at `dbfac56` after the delta-review fixes D1..D8, whose regression tests are
-appended to the same run below:
+re-captured after the delta-review fixes D1..D8 and the owner's AC-38 remediation, whose
+regression tests are appended to the same run below (the superseded dedicated-chord tests
+were deleted with their code):
 
 ```text
 $ cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo build --release
 exit 0
 $ cargo test > /tmp/archive-final-test.txt 2>&1; rc=$?
 rc=0
-cargo test: 836 passed, 0 failed (sum over 30 test binaries, re-captured at dbfac56)
+cargo test: 832 passed, 0 failed (sum over 30 test binaries, re-captured after the AC-38 remediation)
 test domain::task::tests::archive_project_writes_one_record_and_unarchive_removes_it ... ok
 test domain::task::tests::archive_task_sets_the_flag_keeps_status_journals_archived_and_pushes_no_undo ... ok
 test domain::task::tests::task_and_project_flags_are_independent ... ok
@@ -309,8 +310,6 @@ test ctrl_f_and_ctrl_u_on_the_archived_tab_unarchive_and_every_task_keeps_its_st
 test ctrl_f_in_the_archived_group_unarchives_and_the_row_returns_to_the_deck ... ok
 test ctrl_f_in_the_picker_archives_the_selected_project_and_keeps_the_picker_open ... ok
 test ctrl_f_archives_the_selected_task_keeping_status_and_pushing_no_undo ... ok
-test ctrl_g_maps_to_the_archived_group_and_the_palette_keeps_group_toggle ... ok
-test ctrl_g_toggles_the_archived_group_from_any_selection_and_opens_the_drawer_when_closed ... ok
 test ctrl_u_on_an_archived_selection_unarchives_without_popping_the_undo_stack ... ok
 test ctrl_u_in_read_only_focus_unarchives_in_place ... ok
 test enter_on_the_archived_tab_opens_a_read_only_focus_that_persists_nothing ... ok
@@ -330,13 +329,12 @@ test normal_mode_keymap_equals_the_readme_and_queue_board_v1_set ... ok
 test esc_leaves_read_only_focus_and_never_quits ... ok
 test opening_the_picker_from_read_only_focus_lands_home_on_cancel ... ok
 test unarchiving_from_the_picker_converts_a_read_only_focus_in_place ... ok
-test ctrl_g_with_no_archived_rows_in_scope_says_so_and_moves_nothing ... ok
 test ctrl_f_on_the_archived_tab_still_unarchives_from_read_only_focus ... ok
 test tab_and_field_focus_on_a_read_only_task_page_stay_in_view_mode ... ok
 test picker_list_capacity_counts_the_rule_row_on_a_short_frame ... ok
-test verb_bar_shows_ctrl_g_for_any_selection_while_the_drawer_has_archived_rows ... ok
-test clicking_the_ctrl_g_verb_chip_toggles_the_archived_group ... ok
 test idle_merge_converts_a_read_only_focus_whose_project_was_unarchived ... ok
+test toggle_all_groups_folds_and_unfolds_the_archived_group_with_the_others_when_the_drawer_is_open ... ok
+test ui::board::model::tests::toggle_all_groups_toggles_only_the_active_home_tabs_top_level_groups ... ok
 ```
 
 ## Delta review fixes (two panel runs on 55addf3..3b46eb0, eight kept findings)
@@ -353,4 +351,15 @@ test idle_merge_converts_a_read_only_focus_whose_project_was_unarchived ... ok
 | D8 | `dbfac56` fix(D8): ctrl+g verb entry for any selection and a clickable chip | `queue_board_render::verb_bar_shows_ctrl_g_for_any_selection_while_the_drawer_has_archived_rows` + `queue_board_mouse::clicking_the_ctrl_g_verb_chip_toggles_the_archived_group` (red: no entry for a task row; no `g` arm in `verb_intent`) |
 
 Final: `cargo test` **836 passed, 0 failed**; `cd site && npm test` 10/10; clippy
+`-D warnings` clean; fmt clean; release build ok.
+
+## Owner decision (AC-38 reworded at `3a8bcb7`)
+
+| Decision | Commit | Regression test (watched failing first) |
+| --- | --- | --- |
+| `ctrl+g` keeps `ToggleAllGroups`; the archived group joins toggle-all while the drawer is open, and is left alone while it is shut. The dedicated archived chord, its verb-bar entry, its `no archived tasks here` refusal, and the `"g"` mouse arm are gone; `Enter`/click on the header still toggles the group alone. | `1dec377` fix(AC-38): archived group joins toggle-all-groups, ctrl+g keeps its meaning | `queue_board_verbs::toggle_all_groups_folds_and_unfolds_the_archived_group_with_the_others_when_the_drawer_is_open` (red: `ctrl+g` mapped to `ToggleArchivedGroup`; then with `archived_joins` hand-forced to `false`, red again on "the archived group folded with it") |
+
+Deleted with the superseded design: `ctrl_g_toggles_the_archived_group_from_any_selection_and_opens_the_drawer_when_closed`, `ctrl_g_maps_to_the_archived_group_and_the_palette_keeps_group_toggle`, `ctrl_g_with_no_archived_rows_in_scope_says_so_and_moves_nothing` (D6), `verb_bar_shows_ctrl_g_for_any_selection_while_the_drawer_has_archived_rows` and `clicking_the_ctrl_g_verb_chip_toggles_the_archived_group` (D8). `tests/v1_keymap_guard.rs` is back to main's expectation for `g`; `tests/fixtures/queue_board/help.txt` regenerated (`ctrl+g groups`).
+
+Final: `cargo test` **832 passed, 0 failed**; `cd site && npm test` 10/10; clippy
 `-D warnings` clean; fmt clean; release build ok.

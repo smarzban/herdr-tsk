@@ -41,7 +41,6 @@ fn normal_mode_keymap_equals_the_readme_and_queue_board_v1_set() {
         (KeyCode::Delete, BoardIntent::SoftDelete),
         (KeyCode::Char('u'), BoardIntent::Undo),
         (KeyCode::Char('f'), BoardIntent::File),
-        (KeyCode::Char('g'), BoardIntent::ToggleArchivedGroup),
         (KeyCode::Char('z'), BoardIntent::ToggleDoneDrawer),
         (KeyCode::Char(':'), BoardIntent::OpenCommandPalette),
         (KeyCode::Char('?'), BoardIntent::OpenHelp),
@@ -63,7 +62,6 @@ fn normal_mode_keymap_equals_the_readme_and_queue_board_v1_set() {
         KeyCode::Delete,
         KeyCode::Char('u'),
         KeyCode::Char('f'),
-        KeyCode::Char('g'),
     ];
     for (key, intent) in documented {
         if mutating.contains(&key) {

@@ -1376,22 +1376,6 @@ impl BoardModel {
         )
     }
 
-    /// Archived rows the drawer would show in the current scope, whether or not the
-    /// drawer is open. `ctrl+g` has nothing to toggle when this is zero.
-    pub(super) fn archived_rows_in_scope(&self) -> usize {
-        queue::query_board(
-            &self.tasks,
-            &self.archived_projects,
-            self.this_repo.as_deref(),
-            self.board_location.lens(),
-            true,
-        )
-        .sections
-        .iter()
-        .find(|section| section.kind == SectionKind::Archived)
-        .map_or(0, |section| section.count)
-    }
-
     pub(super) fn toggle_project_collapsed(&mut self, path: &str) {
         if self.collapsed_projects.contains(path) {
             self.collapsed_projects.remove(path);
@@ -1421,6 +1405,19 @@ impl BoardModel {
     /// named thread groups the Threads tab presents at its top level.
     pub(super) fn toggle_all_groups(&mut self) -> bool {
         let view = self.queue_view();
+        // AC-38: the archived group is one of the board's groups. While the drawer is
+        // open it votes on the direction and folds with the rest; with the drawer shut
+        // toggle-all never touches its state.
+        let archived_joins = self.drawer_open
+            && view
+                .sections
+                .iter()
+                .any(|section| section.kind == SectionKind::Archived);
+        let fold_archived = |model: &mut Self, collapsed: bool| {
+            if archived_joins {
+                model.archived_collapsed = collapsed;
+            }
+        };
         match self.board_location {
             BoardLocation::Home {
                 tab: BoardTab::Projects,
@@ -1430,17 +1427,19 @@ impl BoardModel {
                     .iter()
                     .filter_map(|section| section.project_label.clone())
                     .collect();
-                if paths.is_empty() {
+                if paths.is_empty() && !archived_joins {
                     return false;
                 }
-                if paths
+                let all_collapsed = paths
                     .iter()
                     .all(|path| self.collapsed_projects.contains(path))
-                {
+                    && (!archived_joins || self.archived_collapsed);
+                if all_collapsed {
                     self.collapsed_projects.clear();
                 } else {
                     self.collapsed_projects.extend(paths);
                 }
+                fold_archived(self, !all_collapsed);
                 true
             }
             BoardLocation::Home {
@@ -1451,20 +1450,32 @@ impl BoardModel {
                     .iter()
                     .filter_map(|section| section.thread_label.clone())
                     .collect();
-                if threads.is_empty() {
+                if threads.is_empty() && !archived_joins {
                     return false;
                 }
-                if threads
+                let all_collapsed = threads
                     .iter()
                     .all(|thread| self.collapsed_threads.contains(thread))
-                {
+                    && (!archived_joins || self.archived_collapsed);
+                if all_collapsed {
                     self.collapsed_threads.clear();
                 } else {
                     self.collapsed_threads.extend(threads);
                 }
+                fold_archived(self, !all_collapsed);
                 true
             }
-            _ => false,
+            // Desk and project focus have no top-level groups of their own, but the open
+            // drawer's archived group still answers the chord.
+            _ => {
+                if archived_joins {
+                    let collapsed = self.archived_collapsed;
+                    fold_archived(self, !collapsed);
+                    true
+                } else {
+                    false
+                }
+            }
         }
     }
 

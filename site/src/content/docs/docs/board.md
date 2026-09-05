@@ -42,13 +42,12 @@ One urgency-ordered list. Sections are computed, not navigated.
 An archived task keeps its human status and leaves every working lens (desk,
 projects, threads, project focus, and default `tsk list` views). The done
 drawer lists archived tasks in its scope under an `▾ archived · n` group below
-DONE: closed on every launch, one click, `Enter` on the header, or `ctrl+g` from
-any row toggles it, and expanded rows paint dim with their status glyph and
-`T<n>`. The header paints the word bold when it holds the selection, never a
-reverse block. With the drawer closed, `ctrl+g` opens the drawer and expands the
-group; with nothing archived in this scope it says `no archived tasks here` and leaves
-the board alone. The verb bar carries `ctrl+g expand` / `ctrl+g collapse` whenever the
-drawer is open and the group has rows, and that chip is clickable. `ctrl+f` on a row
+DONE: closed on every launch, one click or `Enter` on the header toggles it on its
+own, and expanded rows paint dim with their status glyph and `T<n>`. The header
+paints the word bold when it holds the selection, never a reverse block. It is one
+of the board's groups: while the drawer is open, `ctrl+g` (toggle all groups) folds
+and unfolds it along with the project and thread groups; with the drawer closed
+`ctrl+g` leaves it alone. `ctrl+f` on a row
 files it, and `ctrl+f` or `ctrl+u` on an archived
 selection brings it back; neither writes an undo entry.
 

@@ -4254,7 +4254,7 @@ fn paint_selector_row(
 fn mutating_verb_key(key: &str) -> bool {
     matches!(
         key,
-        "s" | "d" | "o" | "b" | "x" | "a" | "e" | "u" | "n" | "q" | "g"
+        "s" | "d" | "o" | "b" | "x" | "a" | "e" | "u" | "n" | "q"
     )
 }
 

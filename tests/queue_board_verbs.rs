@@ -1497,50 +1497,6 @@ fn ctrl_s_replaces_ctrl_space_as_the_primary_verb() {
     );
 }
 
-#[test]
-fn ctrl_g_maps_to_the_archived_group_and_the_palette_keeps_group_toggle() {
-    let (mut domain, mut model, _) = board_with_task("Grouped task", HumanStatus::Ready);
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::SelectHomeTab(BoardTab::Projects),
-        None,
-    )
-    .expect("projects tab");
-    assert!(
-        model
-            .visible_commands()
-            .iter()
-            .any(|command| command.label == "toggle groups"),
-        "the active grouped lens exposes the palette command"
-    );
-    // AC-38: the ctrl+g chord now toggles the archived group; group toggling stays
-    // reachable through the palette's `toggle groups` command.
-    let toggle = map_key(BoardInputMode::Normal, ctrl(KeyCode::Char('g'))).expect("Ctrl+G maps");
-    assert_eq!(toggle, BoardIntent::ToggleArchivedGroup);
-    apply_intent(&mut domain, &mut model, BoardIntent::ToggleAllGroups, None)
-        .expect("collapse groups");
-    assert!(model.visible_ids().is_empty());
-    apply_intent(&mut domain, &mut model, BoardIntent::ToggleAllGroups, None)
-        .expect("expand groups");
-    assert_eq!(model.visible_ids().len(), 1);
-
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::SelectHomeTab(BoardTab::Desk),
-        None,
-    )
-    .expect("desk tab");
-    assert!(
-        !model
-            .visible_commands()
-            .iter()
-            .any(|command| command.label == "toggle groups"),
-        "the palette must not advertise a no-op on Desk"
-    );
-}
-
 // ---------------------------------------------------------------------------
 // T-3: page step cursor and modifier-protected steps verbs. Bare arrows own
 // the cursor lifecycle (first Down activates, Up from the first step
@@ -3711,103 +3667,6 @@ fn picker_archive_of_the_focused_project_keeps_an_unarchived_cwd_default_for_qui
     );
 }
 
-#[test]
-fn ctrl_g_toggles_the_archived_group_from_any_selection_and_opens_the_drawer_when_closed() {
-    let mut domain = DomainState::new();
-    let archived = domain
-        .create(
-            "ctrl+g target",
-            None,
-            project(THIS_REPO),
-            ProvenanceOrigin::Manual,
-            None,
-        )
-        .expect("create archived");
-    domain.archive_task(archived).expect("archive it");
-    let live = domain
-        .create(
-            "live row",
-            None,
-            project(THIS_REPO),
-            ProvenanceOrigin::Manual,
-            None,
-        )
-        .expect("create live");
-    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
-
-    // Drawer closed: ctrl+g opens the drawer and expands the group.
-    assert!(!model.drawer_open());
-    let intent = map_key(BoardInputMode::Normal, ctrl(KeyCode::Char('g')))
-        .expect("ctrl+g is bound in normal mode");
-    assert_eq!(intent, BoardIntent::ToggleArchivedGroup);
-    apply_intent(&mut domain, &mut model, intent, None).expect("ctrl+g opens the drawer");
-    assert!(model.drawer_open(), "the drawer opened");
-    assert!(
-        model.visible_ids().contains(&archived),
-        "the group expanded"
-    );
-
-    // Header selected after the keyboard toggle, and the verb bar advertises the chord
-    // while the drawer is open and the group has rows (AC-38).
-    assert!(model.archived_header_selected());
-    let bar = board_verb_items(&model);
-    let entry = bar
-        .iter()
-        .find(|entry| entry.key == "g")
-        .expect("the verb bar carries the ctrl+g entry");
-    assert_eq!(entry.label, "collapse", "expanded group offers collapse");
-
-    // From a task row with the drawer open: ctrl+g collapses, again expands.
-    let idx = model
-        .visible_ids()
-        .iter()
-        .position(|&v| v == live)
-        .expect("live row");
-    apply_intent(&mut domain, &mut model, BoardIntent::SelectIndex(idx), None)
-        .expect("select live");
-    apply_intent(
-        &mut domain,
-        &mut model,
-        map_key(BoardInputMode::Normal, ctrl(KeyCode::Char('g'))).expect("bound"),
-        None,
-    )
-    .expect("collapse from a task row");
-    assert!(
-        !model.visible_ids().contains(&archived),
-        "ctrl+g collapsed the group from a task row"
-    );
-    let bar = board_verb_items(&model);
-    assert_eq!(
-        bar.iter().find(|entry| entry.key == "g").map(|e| e.label),
-        Some("expand"),
-        "collapsed group offers expand"
-    );
-    apply_intent(
-        &mut domain,
-        &mut model,
-        map_key(BoardInputMode::Normal, ctrl(KeyCode::Char('g'))).expect("bound"),
-        None,
-    )
-    .expect("expand again from a task row");
-    assert!(
-        model.visible_ids().contains(&archived),
-        "ctrl+g expanded the group again"
-    );
-
-    // Enter on the header keeps working: collapse.
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::ToggleArchivedGroup,
-        None,
-    )
-    .expect("select header + collapse");
-    assert!(
-        !model.visible_ids().contains(&archived),
-        "enter on the header collapses the group"
-    );
-}
-
 /// A board focused (read-only) on an archived project holding one Ready task.
 fn read_only_focus() -> (DomainState, BoardModel, uuid::Uuid) {
     let mut domain = DomainState::new();
@@ -4199,37 +4058,6 @@ fn unarchiving_from_the_picker_converts_a_read_only_focus_in_place() {
 }
 
 #[test]
-fn ctrl_g_with_no_archived_rows_in_scope_says_so_and_moves_nothing() {
-    let (mut domain, mut model, id) = board_with_task("only live task", HumanStatus::Ready);
-    assert!(!model.drawer_open());
-    let selection_before = model.selected_id();
-    assert_eq!(selection_before, Some(id));
-
-    apply_intent(
-        &mut domain,
-        &mut model,
-        map_key(BoardInputMode::Normal, ctrl(KeyCode::Char('g'))).expect("bound"),
-        None,
-    )
-    .expect("ctrl+g applies");
-
-    assert!(
-        !model.drawer_open(),
-        "with nothing archived in scope the drawer stays shut"
-    );
-    assert_eq!(
-        model.selected_id(),
-        selection_before,
-        "the selection does not move"
-    );
-    assert!(
-        !model.archived_header_selected(),
-        "no header to select either"
-    );
-    assert_eq!(model.message(), Some("no archived tasks here"));
-}
-
-#[test]
 fn ctrl_f_on_the_archived_tab_still_unarchives_from_read_only_focus() {
     let (mut domain, mut model, inside) = read_only_focus();
     // `P` leaves the lens (D3); step back into it so the picker is reached from the
@@ -4296,4 +4124,84 @@ fn ctrl_f_on_the_archived_tab_still_unarchives_from_read_only_focus() {
     .expect("close");
     assert!(!model.focus_is_archived());
     let _ = inside;
+}
+
+#[test]
+fn toggle_all_groups_folds_and_unfolds_the_archived_group_with_the_others_when_the_drawer_is_open()
+{
+    let mut domain = DomainState::new();
+    let live = domain
+        .create(
+            "live row",
+            None,
+            project("/repos/app"),
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create live");
+    let filed = domain
+        .create(
+            "filed row",
+            None,
+            project("/repos/app"),
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create filed");
+    domain.archive_task(filed).expect("archive");
+    let mut model = BoardModel::from_domain(&domain, None);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::SelectHomeTab(BoardTab::Projects),
+        None,
+    )
+    .expect("projects tab");
+    apply_intent(&mut domain, &mut model, BoardIntent::ToggleDoneDrawer, None).expect("drawer");
+    // Expand the archived group on its own, the way Enter on the header does.
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ToggleArchivedGroup,
+        None,
+    )
+    .expect("expand archived");
+    assert!(model.visible_ids().contains(&live), "project group open");
+    assert!(model.visible_ids().contains(&filed), "archived group open");
+
+    let toggle_all =
+        map_key(BoardInputMode::Normal, ctrl(KeyCode::Char('g'))).expect("ctrl+g is bound");
+    assert_eq!(
+        toggle_all,
+        BoardIntent::ToggleAllGroups,
+        "ctrl+g keeps its meaning"
+    );
+
+    apply_intent(&mut domain, &mut model, toggle_all.clone(), None).expect("fold all");
+    let visible = model.visible_ids();
+    assert!(!visible.contains(&live), "the project group folded");
+    assert!(
+        !visible.contains(&filed),
+        "and the archived group folded with it"
+    );
+
+    apply_intent(&mut domain, &mut model, toggle_all.clone(), None).expect("unfold all");
+    let visible = model.visible_ids();
+    assert!(visible.contains(&live), "the project group unfolded");
+    assert!(
+        visible.contains(&filed),
+        "and the archived group unfolded with it"
+    );
+
+    // Drawer closed: toggle-all leaves the archived group's own state alone.
+    apply_intent(&mut domain, &mut model, BoardIntent::ToggleDoneDrawer, None)
+        .expect("close drawer");
+    apply_intent(&mut domain, &mut model, toggle_all.clone(), None).expect("fold all");
+    apply_intent(&mut domain, &mut model, toggle_all, None).expect("unfold all");
+    apply_intent(&mut domain, &mut model, BoardIntent::ToggleDoneDrawer, None)
+        .expect("reopen drawer");
+    assert!(
+        model.visible_ids().contains(&filed),
+        "the archived group is still expanded, untouched while the drawer was shut"
+    );
 }

@@ -1,8 +1,8 @@
 # Verification report: archive (spec B)
 
 Every criterion of `docs/specs/archive/archive.md` (AC-1..AC-45, including the
-2026-09-04 owner-smoke amendments) mapped to its proof. Suite after the delta-review fixes D1..D8: `cargo test`
-**836 passed / 0 failed**; `cd site && npm test` **10/10** (the parse check behind AC-36).
+2026-09-04 owner-smoke amendments) mapped to its proof. Suite after the owner's AC-38 remediation: `cargo test`
+**832 passed / 0 failed**; `cd site && npm test` **10/10** (the parse check behind AC-36).
 
 Type is the criterion's own verification type. Proof names the test(s) exactly as `cargo test` prints them (module path for unit tests,
 bare name for integration tests), or the pass/fail answer for the one reviewer-checked criterion.
@@ -46,7 +46,7 @@ bare name for integration tests), or the pass/fail answer for the one reviewer-c
 | AC-35 | test-backed | help_card_lists_ctrl_f_and_the_verb_bar_shows_file_for_a_task_row_and_the_group, normal_mode_keymap_equals_the_readme_and_queue_board_v1_set |
 | AC-36 | reviewer-checked | **Pass.** `site/src/content/docs/docs/{keys,board,capture,cli}.md`, `site/public/board-demo.js`, `site/public/llms.txt`, `skills/tsk-cli/SKILL.md`, `CHANGELOG.md`, `README.md` diffed against `src/ui/input.rs`, `src/ui/board/commands.rs` (no palette entry, per plan) and `src/cli/`; the T-14..T-17 amendments (`ctrl+g` reassignment, header paint, picker rule, card wording, read-only focus, scope-dropdown rule) landed in `keys.md`, `board.md` and `CHANGELOG.md`; `cd site && npm test` 10/10 |
 | AC-37 | test-backed | picker_paints_a_dim_rule_under_its_tabs, picker_list_capacity_counts_the_rule_row_on_a_short_frame |
-| AC-38 | test-backed | ctrl_g_toggles_the_archived_group_from_any_selection_and_opens_the_drawer_when_closed, ctrl_g_maps_to_the_archived_group_and_the_palette_keeps_group_toggle, archived_group_is_collapsed_on_a_fresh_model_and_enter_or_click_on_the_header_toggles_it, ctrl_g_toggles_the_archived_group_from_any_selection_and_opens_the_drawer_when_closed, ctrl_g_with_no_archived_rows_in_scope_says_so_and_moves_nothing, verb_bar_shows_ctrl_g_for_any_selection_while_the_drawer_has_archived_rows, clicking_the_ctrl_g_verb_chip_toggles_the_archived_group |
+| AC-38 | test-backed | toggle_all_groups_folds_and_unfolds_the_archived_group_with_the_others_when_the_drawer_is_open, archived_group_is_collapsed_on_a_fresh_model_and_enter_or_click_on_the_header_toggles_it, normal_mode_keymap_equals_the_readme_and_queue_board_v1_set, ui::board::model::tests::toggle_all_groups_toggles_only_the_active_home_tabs_top_level_groups |
 | AC-39 | test-backed | task_page_scope_dropdown_omits_archived_projects_but_keeps_the_current_scope, expanded_quick_add_scope_omits_archived_projects, ui::capture::tests::capture_scope_never_offers_an_archived_this_project |
 | AC-40 | test-backed | archived_tab_verb_bar_advertises_ctrl_u_enter_esc, ctrl_f_and_ctrl_u_on_the_archived_tab_unarchive_and_every_task_keeps_its_status, ctrl_f_on_the_archived_tab_still_unarchives_from_read_only_focus |
 | AC-41 | test-backed | enter_on_the_archived_tab_opens_a_read_only_focus_that_persists_nothing, unarchiving_from_the_picker_converts_a_read_only_focus_in_place |
@@ -57,9 +57,13 @@ bare name for integration tests), or the pass/fail answer for the one reviewer-c
 
 ## Notes
 
-- Delta-review fixes D1..D8 are folded into the rows above (AC-9, AC-37, AC-38, AC-40,
+- Delta-review fixes D1..D8 are folded into the rows above (AC-9, AC-37, AC-40,
   AC-41, AC-43, AC-44, AC-45); their commit-by-commit ledger is in
   `docs/specs/archive/build-report.md`.
+- AC-38 was reworded by the owner on 2026-09-05 (`3a8bcb7`): `ctrl+g` keeps its
+  toggle-all-groups meaning and the archived group joins it while the drawer is open. The
+  D6 and D8 proofs of the superseded dedicated-chord design were deleted with the code
+  they pinned.
 - Review-panel fixes K1..K8 and verify regressions V1..V2 are folded into the rows above
   (AC-28, AC-29, AC-32, AC-33, AC-9, AC-12, AC-16, AC-24); the commit-by-commit ledger is
   in `docs/specs/archive/build-report.md`.
