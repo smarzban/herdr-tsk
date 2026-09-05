@@ -13,19 +13,18 @@ pins `npm ci`, `npm run build`, output `dist`, framework `astro`, and
 | Path | Role |
 | --- | --- |
 | `src/pages/index.astro` | Custom homepage (not the Starlight index) |
-| `src/pages/privacy.astro`, `terms.astro` | Legal pages |
 | `src/content/docs/docs/` | User guide (Starlight): install, board, keys, capture, task page, steps, CLI |
-| `src/content/docs/404.md` | Docs 404 |
 | `public/board-demo.js`, `capture.js`, `landing.js`, `theme.js` | Interactive demo + chrome |
 | `src/styles/landing.css`, `starlight.css` | Page styles |
 | `src/components/ThemeSelect.astro` | Starlight `ThemeSelect` slot (`astro.config.mjs`) |
-| `src/components/Wordmark.astro` | Landing/legal pages only (not a Starlight override) |
+| `src/components/Wordmark.astro` | Landing header/footer wordmark (not a Starlight override) |
 | `scripts/generate-apple-touch.mjs` | Apple touch icons; run before `dev`/`build` |
 | `test/site.test.mjs` | `node --test` |
 
 Site config (`astro.config.mjs`): `site: 'https://gettsk.sh'`, sitemap,
-Starlight title `tsk`, GitHub edit links under `.../edit/main/site/`, sidebar
-Overview / Install / Board / Keys / Capture / CLI. Default theme script prefers
+Starlight title `tsk`, GitHub edit links under `.../edit/main/site/`, a single
+"Start here" sidebar (Overview / Install / Board / Keys / Capture / Task page /
+Steps / CLI). Default theme script prefers
 dark (`tsk-theme` / `starlight-theme` in localStorage).
 
 CI: `.github/workflows/site.yml` runs `npm ci && npm test && npm run build` in

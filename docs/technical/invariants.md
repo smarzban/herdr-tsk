@@ -57,8 +57,10 @@ what fails if it is violated. Subsystem pages restate the subset they own.
 11. **`TaskScope::Global` serializes as `"global"` and displays as desk.** Do not rename
     either without a store migration.
 
-12. **`STORE_FORMAT_VERSION` is 1.** `format_version` is required and must be 1.
-    Missing or non-1 documents are refused without rewrite (`StoreError::UnsupportedFormat`).
+12. **`STORE_FORMAT_VERSION` is 2.** `format_version` is required and must be 2 on
+    disk. Missing, `0`, and newer documents are refused without rewrite
+    (`StoreError::UnsupportedFormat`); a v1 document loads through the `MIGRATIONS`
+    chain in memory, and its first save backs the original up as `tsk.json.v1`.
 
 ## Persistence
 
@@ -72,7 +74,13 @@ what fails if it is violated. Subsystem pages restate the subset they own.
 15. **Atomic replace is temp + fsync + rename + directory fsync.** Unique temp
     (`.tsk.json.tmp.{pid}.{nanos}`). Success retains the previous live file as
     `tsk.json.1` via hard-link *before* replace. A corrupt live JSON must not overwrite
-    that backup.
+    that backup. A live file below the current format is copied to `tsk.json.v<N>`
+    (never overwritten) before the first replacing save.
+
+15a. **Trash is durable before the live document loses a task.** `trash.jsonl` is
+    rewritten atomically (never appended) before the live replace, so a crash can
+    only leave a task in both places; readers dedupe by id with the live copy
+    winning. Lines expire after 30 days. Nothing on the board reads trash.
 
 16. **Idle merge is disk-wins on revision mismatch, and must not move the user's place.**
     `merge_tasks_from_disk` replaces a task when revisions differ (no wall-clock).
