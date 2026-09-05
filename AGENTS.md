@@ -136,10 +136,10 @@ For scriptable board work, use `tsk add` and `tsk list`; read
 - Temp state dirs need a per-binary atomic counter, not just `SystemTime::now()`.
 - Green bar: `cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && cargo build --release`
 - CI installs Rust **1.96.0** with `rustfmt` + `clippy` on ubuntu and macos. The
-  frame-time bench is Linux-only. Site-only pushes skip that matrix
-  (`paths-ignore: site/**`). Site CI runs on every pull request so its `build`
-  job can be required, and on site-only pushes: `npm ci && npm test && npm run build`
-  in `site/` (`.github/workflows/site.yml`).
+  frame-time bench is Linux-only. While the repository is private, workflows run
+  automatically only on pushes to `main` to conserve Actions usage; PR checks are
+  not required. Site-only pushes skip the Rust matrix (`paths-ignore: site/**`).
+  Site CI is `npm ci && npm test && npm run build` in `site/`.
 - Landing page and Starlight docs live in `site/` (Astro). They are not part of
   the `tsk` binary. Production: https://gettsk.sh. Point Vercel at
   this repo with Root Directory `site`.
