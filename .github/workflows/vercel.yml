@@ -29,15 +29,24 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+    # Trusted refs only: fork pull requests skip the deploy (their VERCEL_TOKEN
+    # would be empty) and can never post comments. Production stays on pushes to
+    # main; same-repository pull requests keep getting previews. Plain
+    # pull_request checkout only — never pull_request_target.
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
 
       - name: Install Vercel CLI
-        run: npm install -g vercel@58
+        run: npm install -g vercel@58.11.0
 
       - name: Deploy
         id: deploy

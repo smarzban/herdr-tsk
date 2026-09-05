@@ -7,6 +7,12 @@ on:
       - "site/**"
       - ".github/workflows/site.yml"
 
+# Validation never needs more than reading the repo. Fork PRs run under this
+# token too (read-only, no secrets), and checkout leaves no credentials behind
+# for later steps.
+permissions:
+  contents: read
+
 jobs:
   verify:
     name: Verify (${{ matrix.os }})
@@ -17,6 +23,8 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       # Install the channel from rust-toolchain.toml with fmt/clippy components.
       # Using @stable alone leaves 1.96.0 (from rust-toolchain.toml) without rustfmt.
