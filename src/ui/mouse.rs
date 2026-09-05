@@ -315,6 +315,7 @@ fn verb_intent(model: &BoardModel, index: usize) -> Option<BoardIntent> {
         "x" => Some(BoardIntent::SoftDelete),
         "u" => Some(BoardIntent::Undo),
         "f" => Some(BoardIntent::File),
+        "g" => Some(BoardIntent::ToggleArchivedGroup),
         "e" => Some(BoardIntent::BeginEditTitle),
         "n" => Some(BoardIntent::BeginEditNotes),
         "a" => Some(BoardIntent::BeginAddStep),
@@ -363,6 +364,7 @@ fn scope_dropdown_verb_intent(index: usize) -> Option<BoardIntent> {
     match SCOPE_VERBS.get(index)?.key {
         "enter" => Some(BoardIntent::ConfirmProjectChoice),
         "f" => Some(BoardIntent::File),
+        "g" => Some(BoardIntent::ToggleArchivedGroup),
         "esc" => Some(BoardIntent::CancelProjectPicker),
         _ => None,
     }

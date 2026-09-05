@@ -168,6 +168,18 @@ pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
             });
         }
     }
+    // AC-38: whenever the drawer is open and the group has rows in scope, the bar
+    // advertises the chord from any selection, not only from the header.
+    if model.drawer_open() && model.archived_rows_in_scope() > 0 {
+        entries.push(VerbEntry {
+            key: "g",
+            label: if model.archived_collapsed {
+                "expand"
+            } else {
+                "collapse"
+            },
+        });
+    }
     entries.push(VerbEntry {
         key: ":",
         label: help(":", "palette"),

@@ -4363,3 +4363,88 @@ fn picker_list_capacity_counts_the_rule_row_on_a_short_frame() {
         "the selected last option paints on a short frame:\n{frame}"
     );
 }
+
+#[test]
+fn verb_bar_shows_ctrl_g_for_any_selection_while_the_drawer_has_archived_rows() {
+    let mut domain = DomainState::new();
+    let live = domain
+        .create(
+            "live row",
+            None,
+            TaskScope::Global,
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create live");
+    let filed = domain
+        .create(
+            "filed row",
+            None,
+            TaskScope::Global,
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create filed");
+    domain.archive_task(filed).expect("archive");
+    let mut model = BoardModel::from_domain(&domain, None);
+    apply_intent(&mut domain, &mut model, BoardIntent::ToggleDoneDrawer, None).expect("drawer");
+    let index = model
+        .visible_ids()
+        .iter()
+        .position(|&id| id == live)
+        .expect("live row");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::SelectIndex(index),
+        None,
+    )
+    .expect("select");
+    assert!(!model.archived_header_selected(), "a task row is selected");
+
+    let backend = TestBackend::new(80, 24);
+    let mut terminal = Terminal::new(backend).expect("terminal");
+    terminal
+        .draw(|frame| {
+            let _ = draw_board(frame, &model);
+        })
+        .expect("draw");
+    let buffer = terminal.backend().buffer();
+    let frame: String = (0..24)
+        .map(|y| (0..80).map(|x| buffer[(x, y)].symbol()).collect::<String>())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        frame.contains("ctrl+g expand"),
+        "the collapsed group advertises ctrl+g from a task row (AC-38):\n{frame}"
+    );
+
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ToggleArchivedGroup,
+        None,
+    )
+    .expect("expand");
+    // Walk back to a task row with the keyboard: a second SelectIndex on the same row is
+    // the mouse's open-page gesture.
+    while model.archived_header_selected() {
+        apply_intent(&mut domain, &mut model, BoardIntent::SelectPrev, None).expect("up");
+    }
+    assert_eq!(model.selected_id(), Some(live));
+    let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("terminal");
+    terminal
+        .draw(|frame| {
+            let _ = draw_board(frame, &model);
+        })
+        .expect("draw");
+    let buffer = terminal.backend().buffer();
+    let frame: String = (0..24)
+        .map(|y| (0..80).map(|x| buffer[(x, y)].symbol()).collect::<String>())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        frame.contains("ctrl+g collapse"),
+        "and the expanded group advertises collapse:\n{frame}"
+    );
+}
