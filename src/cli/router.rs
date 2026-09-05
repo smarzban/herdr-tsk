@@ -8,6 +8,8 @@ pub enum Surface {
     Add,
     Steps,
     List,
+    Status,
+    Edit,
     Trash,
     Archive,
     Unarchive,
@@ -52,6 +54,8 @@ pub fn route<S: AsRef<str>>(
             "add" => Surface::Add,
             "steps" => Surface::Steps,
             "list" => Surface::List,
+            "status" => Surface::Status,
+            "edit" => Surface::Edit,
             "trash" => Surface::Trash,
             "archive" => Surface::Archive,
             "unarchive" => Surface::Unarchive,
@@ -125,6 +129,22 @@ mod tests {
         assert_eq!(
             route(["tsk", "trash", "restore", "T3"], None),
             Surface::Trash
+        );
+    }
+
+    #[test]
+    fn status_positional_selects_status_surface() {
+        assert_eq!(
+            route(["tsk", "status", "T3", "started"], None),
+            Surface::Status
+        );
+    }
+
+    #[test]
+    fn edit_positional_selects_edit_surface() {
+        assert_eq!(
+            route(["tsk", "edit", "T3", "--title", "new"], None),
+            Surface::Edit
         );
     }
 

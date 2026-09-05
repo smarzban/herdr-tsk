@@ -1,6 +1,6 @@
 # tsk
 
-> A task board for you and your agents, in your terminal. Both put work on one board and move it through ready, started, blocked, review, done. Agents reach it through the CLI; only a human marks done.
+> A task board for you and your agents, in your terminal. Both put work on one board and move it through ready, started, blocked, review, done. Agents reach it through the CLI.
 
 User guide: https://gettsk.sh/docs/
 

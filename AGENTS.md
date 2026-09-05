@@ -187,9 +187,10 @@ If `HERDR_ENV` is unset, say that live smoke was not run.
   dedupe by id and skip torn lines, and trash is always durable before the live document loses
   a task. `tsk list --deleted` reads it; `tsk trash restore T<n>` brings a task back. Nothing on
   the board reads trash.
-- CLI verbs beyond add/list/steps: `tsk trash restore`, `tsk archive|unarchive T<n>`,
+- CLI verbs beyond add/list/steps: `tsk status T<n> <status>`, `tsk edit T<n>`, `tsk trash restore`, `tsk archive|unarchive T<n>`,
   `tsk project archive|unarchive <name>`, `tsk list --archived`; `tsk add` into an archived
-  project refuses with error code `project-archived`.
+  project refuses with error code `project-archived`. `tsk status` accepts ready, started
+  (or start), blocked, review, or done. `tsk steps` also renames and removes.
 - `~/.tsk` must live on a local disk (flock plus rename-based replace); synced folders are
   unsupported, `TSK_STATE_DIR` is the escape hatch. State/config directory roots must be real
   directories, not symlinks; permission hardening refuses a symlink instead of chmodding its target.

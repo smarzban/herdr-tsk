@@ -5,11 +5,17 @@ use std::collections::BTreeMap;
 use super::CliOutput;
 use crate::cli::add::{AddError, FlagAddResult};
 use crate::cli::archive::{ArchiveCliError, ArchiveResult, ProjectResult};
+use crate::cli::edit::{EditError, EditResult};
 use crate::cli::list::{ListError, ListResult, ListRow, ListView};
+use crate::cli::status::{StatusError, StatusResult};
 use crate::cli::steps::{StepLine, StepsError, StepsResult};
 use crate::cli::trash::{TrashCliError, TrashRestoreResult};
 use crate::domain::HumanStatus;
 use crate::ui::terminal_text;
+
+fn human_reason(reason: &str) -> String {
+    terminal_text(reason)
+}
 
 pub fn add_help() -> CliOutput {
     help_output(
@@ -22,7 +28,7 @@ pub fn list_help() -> CliOutput {
         stdout: concat!(
             "usage: tsk list [<task>] [-p <project> | --desk | --all] [--thread <name>] [--done | --deleted | --archived] [--json] [--state-dir <dir>]\n\n",
             "Lists ready, started, blocked, and review tasks in the invocation project by default, or your desk outside a repository.\n",
-            "With a task number (bare digits) or UUID from add --json or list --json, lists that one task alone and prints its steps: one line per step with its [x]/[ ] state and step short id. Direct lookup ignores cwd. A task operand cannot be combined with scope, thread, or status filters.\n",
+            "With a task number (bare digits) or UUID from add --json or list --json, lists that one task alone and prints its steps: one line per step with its [x]/[ ] state and step short id. Direct lookup ignores cwd and searches the live store, including done and live soft-deleted tasks. Tasks that have moved to trash.jsonl need tsk list --deleted. A task operand cannot be combined with scope, thread, or status filters.\n",
             "--project uses the same basename-or-path scope resolution as add; --desk selects your desk, tasks not tied to a project; --all selects every scope. --thread normalizes a thread name and filters within the selected scope; an invalid name is a usage error (exit 2). For dash-leading project and state-directory values, use --project=<scope> and --state-dir=<dir>.\n",
             "--archived lists archived tasks only: individually archived tasks plus tasks of archived projects, each row marked `archived` or `project archived`. --done lists done tasks only. --deleted lists soft-deleted tasks only, regardless of status: live soft-deletes plus trash entries from trash.jsonl (kept 30 days), deduped by task with the live copy winning, newest deletion first.\n",
             "To recover a typo scope, use tsk list --all --json.\n",
@@ -80,7 +86,7 @@ pub fn added(result: FlagAddResult, json: bool) -> CliOutput {
                 "project": project,
             })
         ),
-        FlagAddResult::Created { title, .. } => format!("added {title}\n"),
+        FlagAddResult::Created { title, .. } => format!("added {}\n", terminal_text(&title)),
         FlagAddResult::Existing { .. } => "task already exists\n".into(),
     };
     CliOutput {
@@ -106,7 +112,8 @@ pub fn usage(reason: &str) -> CliOutput {
     CliOutput {
         stdout: String::new(),
         stderr: format!(
-            "tsk add: {reason}\nusage: tsk add -t <title> [-n <notes>] [-p <project> | --desk] [--thread <name>] [--json] [--state-dir <dir>]\n"
+            "tsk add: {}\nusage: tsk add -t <title> [-n <notes>] [-p <project> | --desk] [--thread <name>] [--json] [--state-dir <dir>]\n",
+            human_reason(reason)
         ),
         code: 2,
     }
@@ -391,13 +398,16 @@ pub fn steps_help() -> CliOutput {
     CliOutput {
         stdout: concat!(
             "usage: tsk steps <task> add <text> [--state-dir <dir>]\n",
-            "       tsk steps <task> toggle <step-short-id> [--state-dir <dir>]\n\n",
-            "steps adds one step to a task or toggles one step's done flag. The task is a bare task number or UUID from tsk list --json; direct lookup ignores cwd.\n",
+            "       tsk steps <task> toggle <step-short-id> [--state-dir <dir>]\n",
+            "       tsk steps <task> rename <step-short-id> <text> [--state-dir <dir>]\n",
+            "       tsk steps <task> remove <step-short-id> [--state-dir <dir>]\n\n",
+            "steps adds, toggles, renames, or removes one step on a task. The task is a bare task number or UUID from tsk list --json; direct lookup ignores cwd.\n",
             "A step short id is the shortest unambiguous prefix of the step id, as printed by tsk list <task>.\n",
-            "toggle flips the step state: a blind retry after an unseen success flips it back, so verify with tsk list <task> before retrying.\n\n",
+            "toggle flips the step state: a blind retry after an unseen success flips it back, so verify with tsk list <task> before retrying.\n",
+            "rename is idempotent on the trimmed text. remove is not: a retry after an unseen success is unknown-step, so verify with list before retrying.\n\n",
             "Refusal tokens (exit 1): empty-step-text, invalid-step-text, unknown-task, soft-deleted-task, unknown-step, ambiguous-step.\n\n",
             "Exit contract:\n",
-            "  exit 0: step created or toggled\n",
+            "  exit 0: step created, toggled, renamed, or removed\n",
             "  exit 1: step refusal; verify state with list before retrying\n",
             "  exit 2: usage or parse error, nothing persisted\n",
             "  exit 3: store I/O, commit indeterminate, verify with list before retrying\n"
@@ -410,15 +420,24 @@ pub fn steps_help() -> CliOutput {
 
 pub fn steps(result: StepsResult) -> CliOutput {
     let stdout = match result {
-        StepsResult::Added { short_id, text } => format!("added {short_id} {text}\n"),
+        StepsResult::Added { short_id, text } => {
+            format!("added {short_id} {}\n", terminal_text(&text))
+        }
         StepsResult::Toggled {
             short_id,
             text,
             done,
         } => format!(
-            "toggled {short_id} [{}] {text}\n",
-            if done { "x" } else { " " }
+            "toggled {short_id} [{}] {}\n",
+            if done { "x" } else { " " },
+            terminal_text(&text)
         ),
+        StepsResult::Renamed { short_id, text } => {
+            format!("renamed {short_id} {}\n", terminal_text(&text))
+        }
+        StepsResult::Removed { short_id, text } => {
+            format!("removed {short_id} {}\n", terminal_text(&text))
+        }
     };
     CliOutput {
         stdout,
@@ -431,7 +450,8 @@ pub fn steps_usage(reason: &str) -> CliOutput {
     CliOutput {
         stdout: String::new(),
         stderr: format!(
-            "tsk steps: {reason}\nusage: tsk steps <task> add <text> | toggle <step-short-id> [--state-dir <dir>]\n"
+            "tsk steps: {}\nusage: tsk steps <task> add <text> | toggle <step-short-id> | rename <step-short-id> <text> | remove <step-short-id> [--state-dir <dir>]\n",
+            human_reason(reason)
         ),
         code: 2,
     }
@@ -445,6 +465,125 @@ pub fn steps_rejected(error: StepsError) -> CliOutput {
     CliOutput {
         stdout: String::new(),
         stderr: format!("tsk steps: {detail}\n"),
+        code,
+    }
+}
+
+fn status_name(status: HumanStatus) -> &'static str {
+    match status {
+        HumanStatus::Ready => "ready",
+        HumanStatus::Started => "started",
+        HumanStatus::Blocked => "blocked",
+        HumanStatus::Review => "review",
+        HumanStatus::Done => "done",
+    }
+}
+
+pub fn status_help() -> CliOutput {
+    CliOutput {
+        stdout: concat!(
+            "usage: tsk status <task> <status> [--state-dir <dir>]\n\n",
+            "status sets a task's human status to ready, started, blocked, review, or done. start is accepted as an alias for started. The task is a task number (T<number>, or bare digits) or UUID, as shown by tsk list. Repeating the same status is idempotent: the same output prints and nothing changes.\n\n",
+            "Refusal tokens (exit 1): unknown-task, soft-deleted-task.\n\n",
+            "Exit contract:\n",
+            "  exit 0: status set, or it already had the value\n",
+            "  exit 1: status refusal; verify state with list before retrying\n",
+            "  exit 2: usage or parse error, nothing persisted\n",
+            "  exit 3: store I/O, commit indeterminate, verify with list before retrying\n"
+        )
+        .into(),
+        stderr: String::new(),
+        code: 0,
+    }
+}
+
+pub fn status(result: StatusResult) -> CliOutput {
+    CliOutput {
+        stdout: format!(
+            "status T{} {} {}\n",
+            result.number,
+            status_name(result.status),
+            terminal_text(&result.title)
+        ),
+        stderr: String::new(),
+        code: 0,
+    }
+}
+
+pub fn status_usage(reason: &str) -> CliOutput {
+    CliOutput {
+        stdout: String::new(),
+        stderr: format!(
+            "tsk status: {}\nusage: tsk status <task> <status> [--state-dir <dir>]\n",
+            human_reason(reason)
+        ),
+        code: 2,
+    }
+}
+
+pub fn status_rejected(error: StatusError) -> CliOutput {
+    let (detail, code) = match error {
+        StatusError::Store(detail) => (detail, 3),
+        other => (other.code().into(), 1),
+    };
+    CliOutput {
+        stdout: String::new(),
+        stderr: format!("tsk status: {detail}\n"),
+        code,
+    }
+}
+
+pub fn edit_help() -> CliOutput {
+    CliOutput {
+        stdout: concat!(
+            "usage: tsk edit <task> [--title <title>] [--notes <notes>] [--state-dir <dir>]\n\n",
+            "edit updates a task's title and/or notes. Scope and thread are unchanged. The task is a task number (T<number>, or bare digits) or UUID, as shown by tsk list. At least one of --title or --notes is required.\n",
+            "Notes that trim to nothing are cleared. Repeating the stored values is idempotent: the same output prints and nothing changes.\n",
+            "Values beginning with - must use --title=<value> or --notes=<value>.\n\n",
+            "Refusal tokens (exit 1): unknown-task, soft-deleted-task, empty-title, invalid-title, invalid-notes.\n\n",
+            "Exit contract:\n",
+            "  exit 0: fields written, or they already had the values\n",
+            "  exit 1: edit refusal; verify state with list before retrying\n",
+            "  exit 2: usage or parse error, nothing persisted\n",
+            "  exit 3: store I/O, commit indeterminate, verify with list before retrying\n"
+        )
+        .into(),
+        stderr: String::new(),
+        code: 0,
+    }
+}
+
+pub fn edited(result: EditResult) -> CliOutput {
+    CliOutput {
+        stdout: format!(
+            "edited T{} {}\n",
+            result.number,
+            terminal_text(&result.title)
+        ),
+        stderr: String::new(),
+        code: 0,
+    }
+}
+
+pub fn edit_usage(reason: &str) -> CliOutput {
+    CliOutput {
+        stdout: String::new(),
+        stderr: format!(
+            "tsk edit: {}\nusage: tsk edit <task> [--title <title>] [--notes <notes>] [--state-dir <dir>]\n",
+            human_reason(reason)
+        ),
+        code: 2,
+    }
+}
+
+pub fn edit_rejected(error: EditError) -> CliOutput {
+    let (detail, code) = match error {
+        EditError::Store(detail) => (detail, 3),
+        other => (other.code().into(), 1),
+    };
+    CliOutput {
+        stdout: String::new(),
+        stderr: format!("tsk edit: {detail}\n"),
         code,
     }
 }
@@ -471,7 +610,8 @@ pub fn trash_usage(reason: &str) -> CliOutput {
     CliOutput {
         stdout: String::new(),
         stderr: format!(
-            "tsk trash: {reason}\nusage: tsk trash restore <task> [--state-dir <dir>]\n"
+            "tsk trash: {}\nusage: tsk trash restore <task> [--state-dir <dir>]\n",
+            human_reason(reason)
         ),
         code: 2,
     }
@@ -479,7 +619,11 @@ pub fn trash_usage(reason: &str) -> CliOutput {
 
 pub fn trash_restored(result: TrashRestoreResult) -> CliOutput {
     CliOutput {
-        stdout: format!("restored T{} {}\n", result.number, result.title),
+        stdout: format!(
+            "restored T{} {}\n",
+            result.number,
+            terminal_text(&result.title)
+        ),
         stderr: String::new(),
         code: 0,
     }
@@ -518,7 +662,10 @@ pub fn archive_help(verb: &str) -> CliOutput {
 pub fn archive_usage(verb: &str, reason: &str) -> CliOutput {
     CliOutput {
         stdout: String::new(),
-        stderr: format!("tsk {verb}: {reason}\nusage: tsk {verb} <task> [--state-dir <dir>]\n"),
+        stderr: format!(
+            "tsk {verb}: {}\nusage: tsk {verb} <task> [--state-dir <dir>]\n",
+            human_reason(reason)
+        ),
         code: 2,
     }
 }
@@ -535,7 +682,8 @@ pub fn project_usage(reason: &str) -> CliOutput {
     CliOutput {
         stdout: String::new(),
         stderr: format!(
-            "tsk project: {reason}\nusage: tsk project archive <name> | tsk project unarchive <name> [--state-dir <dir>]\n"
+            "tsk project: {}\nusage: tsk project archive <name> | tsk project unarchive <name> [--state-dir <dir>]\n",
+            human_reason(reason)
         ),
         code: 2,
     }
@@ -548,7 +696,7 @@ pub fn project_archived(result: ProjectResult, verb: &str) -> CliOutput {
         "unarchived"
     };
     CliOutput {
-        stdout: format!("{past} project {}\n", result.name),
+        stdout: format!("{past} project {}\n", terminal_text(&result.name)),
         stderr: String::new(),
         code: 0,
     }
@@ -562,7 +710,11 @@ pub fn archived(result: ArchiveResult, verb: &str) -> CliOutput {
         "unarchived"
     };
     CliOutput {
-        stdout: format!("{past} T{} {}\n", result.number, result.title),
+        stdout: format!(
+            "{past} T{} {}\n",
+            result.number,
+            terminal_text(&result.title)
+        ),
         stderr: String::new(),
         code: 0,
     }
@@ -575,7 +727,9 @@ pub fn archive_rejected(error: ArchiveCliError, verb: &str) -> CliOutput {
         ArchiveCliError::Store(detail) => (verb.to_string(), detail, 3),
         ArchiveCliError::UnknownTask(detail) => (verb.to_string(), detail, 1),
         ArchiveCliError::SoftDeleted(detail) => (verb.to_string(), detail, 1),
-        ArchiveCliError::UnknownProject(detail) => ("project".to_string(), detail, 1),
+        ArchiveCliError::UnknownProject(detail) => {
+            ("project".to_string(), terminal_text(&detail), 1)
+        }
     };
     CliOutput {
         stdout: String::new(),
@@ -588,7 +742,8 @@ pub fn list_usage(reason: &str) -> CliOutput {
     CliOutput {
         stdout: String::new(),
         stderr: format!(
-            "tsk list: {reason}\nusage: tsk list [<task>] [-p <project> | --desk | --all] [--thread <name>] [--done | --deleted | --archived] [--json] [--state-dir <dir>]\n"
+            "tsk list: {}\nusage: tsk list [<task>] [-p <project> | --desk | --all] [--thread <name>] [--done | --deleted | --archived] [--json] [--state-dir <dir>]\n",
+            human_reason(reason)
         ),
         code: 2,
     }
@@ -608,12 +763,15 @@ pub fn list_rejected(error: ListError) -> CliOutput {
 
 pub fn rejected(error: AddError) -> CliOutput {
     let (detail, code) = match &error {
-        AddError::ProjectArchived(name) => (
-            format!(
-                "project-archived: project {name} is archived. Use --desk, -p <other project>, or tsk project unarchive <name>"
-            ),
-            1,
-        ),
+        AddError::ProjectArchived(name) => {
+            let name = terminal_text(name);
+            (
+                format!(
+                    "project-archived: project {name} is archived. Use --desk, -p <other project>, or tsk project unarchive {name}"
+                ),
+                1,
+            )
+        }
         AddError::Store(detail) => (detail.clone(), 3),
         other => (other.code().into(), 1),
     };

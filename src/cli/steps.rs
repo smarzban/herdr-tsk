@@ -1,4 +1,4 @@
-//! Headless step creation and toggling by step short id.
+//! Headless step creation, toggling, rename, and remove by step short id.
 
 use std::path::PathBuf;
 
@@ -15,6 +15,8 @@ use uuid::Uuid;
 pub enum StepsAction {
     Add { text: String },
     Toggle { short_id: String },
+    Rename { short_id: String, text: String },
+    Remove { short_id: String },
 }
 
 /// A steps failure after parsing and before presenting output.
@@ -55,6 +57,14 @@ pub enum StepsResult {
         text: String,
         done: bool,
     },
+    Renamed {
+        short_id: String,
+        text: String,
+    },
+    Removed {
+        short_id: String,
+        text: String,
+    },
 }
 
 /// Add one step or toggle one step, refusing before any mutation.
@@ -77,7 +87,8 @@ pub fn run(
             let outcome = task_id.map_or(Err(StepsError::UnknownTask), |task_id| {
                 apply(domain, task_id, &action)
             });
-            let changed = outcome.is_ok();
+            let changed = outcome.as_ref().is_ok_and(|(_, changed)| *changed);
+            let outcome = outcome.map(|(result, _)| result);
             Ok((outcome, changed))
         })
         .map_err(StepsError::Store)?
@@ -87,7 +98,7 @@ fn apply(
     domain: &mut DomainState,
     task_id: Uuid,
     action: &StepsAction,
-) -> Result<StepsResult, StepsError> {
+) -> Result<(StepsResult, bool), StepsError> {
     // A deleted task's steps are not scriptable (park/link discipline, not edit's).
     match domain.get(task_id) {
         None => return Err(StepsError::UnknownTask),
@@ -106,18 +117,17 @@ fn apply(
             }
             let step_id = domain.add_step(task_id, text).map_err(map_domain_error)?;
             let steps = &domain.get(task_id).expect("task exists").steps;
-            Ok(StepsResult::Added {
-                short_id: step_short_id(steps, step_id),
-                text: text.to_owned(),
-            })
+            Ok((
+                StepsResult::Added {
+                    short_id: step_short_id(steps, step_id),
+                    text: text.to_owned(),
+                },
+                true,
+            ))
         }
         StepsAction::Toggle { short_id } => {
             let steps = domain.get(task_id).expect("task exists").steps.clone();
-            let step_id = match resolve_step_short_id(&steps, short_id) {
-                ShortIdResolution::One(id) => id,
-                ShortIdResolution::Ambiguous => return Err(StepsError::AmbiguousStep),
-                ShortIdResolution::None => return Err(StepsError::UnknownStep),
-            };
+            let step_id = resolve_existing_step(&steps, short_id)?;
             domain
                 .toggle_step(task_id, step_id)
                 .map_err(map_domain_error)?;
@@ -127,17 +137,80 @@ fn apply(
                 .steps
                 .iter()
                 .any(|step| step.id == step_id && step.done);
-            Ok(StepsResult::Toggled {
-                short_id: step_short_id(&steps, step_id),
-                text: steps
-                    .iter()
-                    .find(|step| step.id == step_id)
-                    .expect("toggled step exists")
-                    .text
-                    .clone(),
-                done,
-            })
+            Ok((
+                StepsResult::Toggled {
+                    short_id: step_short_id(&steps, step_id),
+                    text: steps
+                        .iter()
+                        .find(|step| step.id == step_id)
+                        .expect("toggled step exists")
+                        .text
+                        .clone(),
+                    done,
+                },
+                true,
+            ))
         }
+        StepsAction::Rename { short_id, text } => {
+            if has_c0_control(text) {
+                return Err(StepsError::InvalidStepText);
+            }
+            let text = text.trim();
+            if text.is_empty() {
+                return Err(StepsError::EmptyStepText);
+            }
+            let steps = domain.get(task_id).expect("task exists").steps.clone();
+            let step_id = resolve_existing_step(&steps, short_id)?;
+            let printed = step_short_id(&steps, step_id);
+            let current = steps
+                .iter()
+                .find(|step| step.id == step_id)
+                .expect("renamed step exists")
+                .text
+                .as_str();
+            let changed = current != text;
+            if changed {
+                domain
+                    .rename_step(task_id, step_id, text)
+                    .map_err(map_domain_error)?;
+            }
+            Ok((
+                StepsResult::Renamed {
+                    short_id: printed,
+                    text: text.to_owned(),
+                },
+                changed,
+            ))
+        }
+        StepsAction::Remove { short_id } => {
+            let steps = domain.get(task_id).expect("task exists").steps.clone();
+            let step_id = resolve_existing_step(&steps, short_id)?;
+            let text = steps
+                .iter()
+                .find(|step| step.id == step_id)
+                .expect("removed step exists")
+                .text
+                .clone();
+            let printed = step_short_id(&steps, step_id);
+            domain
+                .remove_step(task_id, step_id)
+                .map_err(map_domain_error)?;
+            Ok((
+                StepsResult::Removed {
+                    short_id: printed,
+                    text,
+                },
+                true,
+            ))
+        }
+    }
+}
+
+fn resolve_existing_step(steps: &[Step], short_id: &str) -> Result<Uuid, StepsError> {
+    match resolve_step_short_id(steps, short_id) {
+        ShortIdResolution::One(id) => Ok(id),
+        ShortIdResolution::Ambiguous => Err(StepsError::AmbiguousStep),
+        ShortIdResolution::None => Err(StepsError::UnknownStep),
     }
 }
 

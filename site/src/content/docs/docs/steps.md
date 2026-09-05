@@ -50,6 +50,8 @@ without closing or trapping that row.
 ```bash
 tsk steps <task> add "Write the failing test"
 tsk steps <task> toggle <step-short-id>
+tsk steps <task> rename <step-short-id> "Pin the saved id"
+tsk steps <task> remove <step-short-id>
 tsk list <task>
 ```
 
@@ -60,7 +62,9 @@ A step short id is the shortest unambiguous prefix of that step's id, as printed
 by `tsk list <task>`.
 
 `toggle` flips the flag. A blind retry after an unseen success flips it back.
-Verify with `tsk list <task>` before retrying.
+`rename` is idempotent on the trimmed text. `remove` is not: a retry after an
+unseen success is `unknown-step`. Verify with `tsk list <task>` before retrying
+toggle or remove.
 
 Soft-deleted tasks refuse step changes.
 

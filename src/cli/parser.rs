@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use uuid::Uuid;
 
 use super::steps::StepsAction;
-use crate::domain::normalize_thread;
+use crate::domain::{normalize_thread, HumanStatus};
 
 /// A direct task operand, either the internal UUID or its human task number.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -19,6 +19,13 @@ impl TaskAddress {
         match self {
             Self::Id(id) => task.id == id,
             Self::Number(number) => task.number == Some(number),
+        }
+    }
+
+    pub fn display(self) -> String {
+        match self {
+            Self::Number(number) => format!("T{number}"),
+            Self::Id(id) => id.to_string(),
         }
     }
 }
@@ -256,15 +263,172 @@ pub fn parse_flag_trash(args: &[String]) -> Result<FlagTrash, String> {
     Ok(parsed)
 }
 
+/// Parsed `status` input. Positionals are the task address then the status name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FlagStatus {
+    pub task: Option<TaskAddress>,
+    pub status: Option<HumanStatus>,
+    pub state_dir: Option<PathBuf>,
+    pub help: bool,
+}
+
+/// Parse `tsk status <task> <status>` arguments, including argv0.
+pub fn parse_flag_status(args: &[String]) -> Result<FlagStatus, String> {
+    if args.get(1).map(String::as_str) != Some("status") {
+        return Err("expected status command".into());
+    }
+
+    let mut parsed = FlagStatus {
+        task: None,
+        status: None,
+        state_dir: None,
+        help: false,
+    };
+    let mut positionals: Vec<&str> = Vec::new();
+    let mut index = 2;
+    while let Some(flag) = args.get(index).map(String::as_str) {
+        let value = |name: &str| match args.get(index + 1) {
+            Some(value) if !value.starts_with('-') => Ok(value.clone()),
+            _ => Err(format!("missing value for {name}")),
+        };
+        match flag {
+            "--help" => {
+                parsed.help = true;
+                index += 1;
+            }
+            flag if flag.starts_with("--state-dir=") => {
+                parsed.state_dir = Some(PathBuf::from(flag["--state-dir=".len()..].to_owned()));
+                index += 1;
+            }
+            "--state-dir" => {
+                parsed.state_dir = Some(PathBuf::from(value(flag)?));
+                index += 2;
+            }
+            flag if flag.starts_with('-') => return Err(format!("unknown status argument {flag}")),
+            positional => {
+                if positionals.len() == 2 {
+                    return Err(format!("unexpected status argument {positional}"));
+                }
+                positionals.push(positional);
+                index += 1;
+            }
+        }
+    }
+
+    if parsed.help {
+        return Ok(parsed);
+    }
+    match positionals.as_slice() {
+        [] => {}
+        [task] => {
+            parsed.task = Some(parse_task_address(task)?);
+        }
+        [task, status] => {
+            parsed.task = Some(parse_task_address(task)?);
+            parsed.status = Some(parse_human_status(status)?);
+        }
+        _ => unreachable!("positionals are capped at two"),
+    }
+    Ok(parsed)
+}
+
+fn parse_human_status(value: &str) -> Result<HumanStatus, String> {
+    match value {
+        "ready" => Ok(HumanStatus::Ready),
+        "start" | "started" => Ok(HumanStatus::Started),
+        "blocked" => Ok(HumanStatus::Blocked),
+        "review" => Ok(HumanStatus::Review),
+        "done" => Ok(HumanStatus::Done),
+        other => Err(format!("unknown status {other}")),
+    }
+}
+
+/// Parsed `edit` input. One positional task address, then title/notes flags.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FlagEdit {
+    pub task: Option<TaskAddress>,
+    pub title: Option<String>,
+    pub notes: Option<String>,
+    pub state_dir: Option<PathBuf>,
+    pub help: bool,
+}
+
+/// Parse `tsk edit <task> [--title <title>] [--notes <notes>]` arguments, including argv0.
+pub fn parse_flag_edit(args: &[String]) -> Result<FlagEdit, String> {
+    if args.get(1).map(String::as_str) != Some("edit") {
+        return Err("expected edit command".into());
+    }
+
+    let mut parsed = FlagEdit {
+        task: None,
+        title: None,
+        notes: None,
+        state_dir: None,
+        help: false,
+    };
+    let mut index = 2;
+    while let Some(flag) = args.get(index).map(String::as_str) {
+        let value = |name: &str| match args.get(index + 1) {
+            Some(value) if !value.starts_with('-') => Ok(value.clone()),
+            _ => Err(format!("missing value for {name}")),
+        };
+        match flag {
+            flag if flag.starts_with("--title=") => {
+                parsed.title = Some(flag["--title=".len()..].to_owned());
+                index += 1;
+            }
+            flag if flag.starts_with("--notes=") => {
+                parsed.notes = Some(flag["--notes=".len()..].to_owned());
+                index += 1;
+            }
+            "-t" | "--title" => {
+                parsed.title = Some(value(flag)?);
+                index += 2;
+            }
+            "-n" | "--notes" => {
+                parsed.notes = Some(value(flag)?);
+                index += 2;
+            }
+            "--help" => {
+                parsed.help = true;
+                index += 1;
+            }
+            flag if flag.starts_with("--state-dir=") => {
+                parsed.state_dir = Some(PathBuf::from(flag["--state-dir=".len()..].to_owned()));
+                index += 1;
+            }
+            "--state-dir" => {
+                parsed.state_dir = Some(PathBuf::from(value(flag)?));
+                index += 2;
+            }
+            flag if flag.starts_with('-') => return Err(format!("unknown edit argument {flag}")),
+            flag => {
+                if parsed.task.is_some() {
+                    return Err(format!("unknown edit argument {flag}"));
+                }
+                parsed.task = Some(parse_task_address(flag)?);
+                index += 1;
+            }
+        }
+    }
+    Ok(parsed)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{parse_flag_trash, parse_task_address, TaskAddress, TrashAction};
+    use super::{
+        parse_flag_edit, parse_flag_status, parse_flag_steps, parse_flag_trash, parse_task_address,
+        FlagEdit, FlagStatus, TaskAddress, TrashAction,
+    };
+    use crate::cli::steps::StepsAction;
+    use crate::domain::HumanStatus;
 
     #[test]
     fn task_addresses_accept_the_displayed_identifier_case_insensitively() {
         assert_eq!(parse_task_address("T30"), Ok(TaskAddress::Number(30)));
         assert_eq!(parse_task_address("t30"), Ok(TaskAddress::Number(30)));
         assert_eq!(parse_task_address("30"), Ok(TaskAddress::Number(30)));
+        assert_eq!(TaskAddress::Number(30).display(), "T30");
         assert!(parse_task_address("T-30").is_err());
     }
 
@@ -304,6 +468,119 @@ mod tests {
             "restore".into(),
             "T1".into(),
             "extra".into()
+        ])
+        .is_err());
+    }
+
+    #[test]
+    fn status_parse_accepts_task_and_status() {
+        let parsed = parse_flag_status(&[
+            "tsk".into(),
+            "status".into(),
+            "T4".into(),
+            "blocked".into(),
+            "--state-dir".into(),
+            "/tmp/dir".into(),
+        ])
+        .expect("parse");
+        assert_eq!(
+            parsed,
+            FlagStatus {
+                task: Some(TaskAddress::Number(4)),
+                status: Some(HumanStatus::Blocked),
+                state_dir: Some(std::path::PathBuf::from("/tmp/dir")),
+                help: false,
+            }
+        );
+        assert!(
+            parse_flag_status(&["tsk".into(), "status".into(), "T4".into(), "nope".into()])
+                .is_err()
+        );
+        assert!(parse_flag_status(&[
+            "tsk".into(),
+            "status".into(),
+            "T4".into(),
+            "blocked".into(),
+            "extra".into()
+        ])
+        .is_err());
+        let parsed =
+            parse_flag_status(&["tsk".into(), "status".into(), "T4".into(), "start".into()])
+                .expect("start alias");
+        assert_eq!(parsed.status, Some(HumanStatus::Started));
+    }
+
+    #[test]
+    fn edit_parse_accepts_equals_forms_for_dash_leading_values() {
+        let parsed = parse_flag_edit(&[
+            "tsk".into(),
+            "edit".into(),
+            "12".into(),
+            "--title=-fix parser".into(),
+            "--notes=-5 degrees".into(),
+        ])
+        .expect("parse");
+        assert_eq!(
+            parsed,
+            FlagEdit {
+                task: Some(TaskAddress::Number(12)),
+                title: Some("-fix parser".into()),
+                notes: Some("-5 degrees".into()),
+                state_dir: None,
+                help: false,
+            }
+        );
+    }
+
+    #[test]
+    fn steps_parse_accepts_rename_and_remove() {
+        let parsed = parse_flag_steps(&[
+            "tsk".into(),
+            "steps".into(),
+            "T2".into(),
+            "rename".into(),
+            "ab".into(),
+            "new text".into(),
+        ])
+        .expect("parse rename");
+        assert_eq!(parsed.task, Some(TaskAddress::Number(2)));
+        assert_eq!(
+            parsed.action,
+            Some(StepsAction::Rename {
+                short_id: "ab".into(),
+                text: "new text".into(),
+            })
+        );
+
+        let parsed = parse_flag_steps(&[
+            "tsk".into(),
+            "steps".into(),
+            "T2".into(),
+            "remove".into(),
+            "ab".into(),
+        ])
+        .expect("parse remove");
+        assert_eq!(
+            parsed.action,
+            Some(StepsAction::Remove {
+                short_id: "ab".into(),
+            })
+        );
+        assert!(parse_flag_steps(&[
+            "tsk".into(),
+            "steps".into(),
+            "T2".into(),
+            "rename".into(),
+            "ab".into()
+        ])
+        .is_err());
+        assert!(parse_flag_steps(&[
+            "tsk".into(),
+            "steps".into(),
+            "T2".into(),
+            "add".into(),
+            "one".into(),
+            "two".into()
         ])
         .is_err());
     }
@@ -489,7 +766,7 @@ pub fn parse_flag_steps(args: &[String]) -> Result<FlagSteps, String> {
             }
             flag if flag.starts_with('-') => return Err(format!("unknown steps argument {flag}")),
             positional => {
-                if positionals.len() == 3 {
+                if positionals.len() == 4 {
                     return Err(format!("unexpected steps argument {positional}"));
                 }
                 positionals.push(positional);
@@ -506,19 +783,63 @@ pub fn parse_flag_steps(args: &[String]) -> Result<FlagSteps, String> {
                 "steps action is required".into()
             });
         }
+        let extra = |index: usize| {
+            positionals
+                .get(index)
+                .copied()
+                .map(|positional| format!("unexpected steps argument {positional}"))
+        };
         let task = parse_task_address(positionals[0])?;
-        let operand = positionals
-            .get(2)
-            .copied()
-            .map(str::to_owned)
-            .ok_or_else(|| match positionals[1] {
-                "add" => "step text is required".to_owned(),
-                "toggle" => "step short id is required".to_owned(),
-                other => format!("unknown steps action {other}"),
-            })?;
         parsed.action = Some(match positionals[1] {
-            "add" => StepsAction::Add { text: operand },
-            "toggle" => StepsAction::Toggle { short_id: operand },
+            "add" => {
+                if let Some(reason) = extra(3) {
+                    return Err(reason);
+                }
+                StepsAction::Add {
+                    text: positionals
+                        .get(2)
+                        .copied()
+                        .map(str::to_owned)
+                        .ok_or_else(|| "step text is required".to_owned())?,
+                }
+            }
+            "toggle" => {
+                if let Some(reason) = extra(3) {
+                    return Err(reason);
+                }
+                StepsAction::Toggle {
+                    short_id: positionals
+                        .get(2)
+                        .copied()
+                        .map(str::to_owned)
+                        .ok_or_else(|| "step short id is required".to_owned())?,
+                }
+            }
+            "remove" => {
+                if let Some(reason) = extra(3) {
+                    return Err(reason);
+                }
+                StepsAction::Remove {
+                    short_id: positionals
+                        .get(2)
+                        .copied()
+                        .map(str::to_owned)
+                        .ok_or_else(|| "step short id is required".to_owned())?,
+                }
+            }
+            "rename" => {
+                let short_id = positionals
+                    .get(2)
+                    .copied()
+                    .map(str::to_owned)
+                    .ok_or_else(|| "step short id is required".to_owned())?;
+                let text = positionals
+                    .get(3)
+                    .copied()
+                    .map(str::to_owned)
+                    .ok_or_else(|| "step text is required".to_owned())?;
+                StepsAction::Rename { short_id, text }
+            }
             other => return Err(format!("unknown steps action {other}")),
         });
         parsed.task = Some(task);

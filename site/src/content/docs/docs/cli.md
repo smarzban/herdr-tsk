@@ -1,6 +1,6 @@
 ---
 title: CLI
-description: Headless tsk add, list, steps, trash, and archive. The agents' door to the board.
+description: Headless tsk add, list, steps, status, edit, trash, and archive. The agents' door to the board.
 ---
 
 The same `~/.tsk` store backs the board, herdr, and these commands. The board
@@ -19,11 +19,11 @@ The CLI is how an agent reaches the board. The rules that matter:
   `--file`. A repeat of the same title, project, and thread returns the existing
   task, so a retried plan is safe.
 - Plan with `tsk steps <task> add`. Read back with `tsk list <task>` before a
-  toggle, because toggle is not idempotent.
+  toggle or remove, because those are not idempotent.
+- Move work with `tsk status <task> start` (or `started`, `blocked`, `review`, `ready`, `done`).
+  Repeating the same status is safe. Rewrite title or notes with `tsk edit`.
 - Prefer `--json` and read the exit code. Exit 1 means retry only the failed
   items. Exit 3 means list before retrying.
-- Done is a human verb on the board. The CLI has no verb for it, and no status
-  verb yet.
 
 The repo ships the same rules as an agent skill in
 [`skills/tsk-cli/SKILL.md`](https://github.com/smarzban/herdr-tsk/blob/main/skills/tsk-cli/SKILL.md).
@@ -34,11 +34,14 @@ The repo ships the same rules as an agent skill in
 | --- | --- |
 | `tsk` | opens the board |
 | `tsk capture` | opens the capture form (also `TSK_MODE=capture`) |
-| `tsk add` · `tsk list` · `tsk steps` · `tsk trash` · `tsk archive` · `tsk unarchive` · `tsk project` | headless; below |
+| `tsk add` · `tsk list` · `tsk steps` · `tsk status` · `tsk edit` · `tsk trash` · `tsk archive` · `tsk unarchive` · `tsk project` | headless; below |
 | `tsk --help` | usage, exit 0 |
 | `tsk --find-board-pane` | herdr helper: reads `pane list` JSON on stdin, prints the id of the pane labelled `tsk`; exit 1 when none |
 
 Every headless command takes `--state-dir <dir>` to work against another store.
+
+Human-readable stdout and stderr escape C0/C1 controls in stored titles, step
+text, and project names as `\u{00xx}`. JSON keeps the underlying values.
 
 ## add
 
@@ -110,8 +113,11 @@ trailing scope label (`desk` or `project: <path>`) tells the groups apart.
 
 A store-global task number (`T12`, `t12`, or bare `12`) or a task UUID lists
 that one task and its steps (`[x]` / `[ ]` plus the step short id). Direct lookup
-ignores cwd. A task operand cannot combine with scope, thread, or status
-filters. An address that matches nothing is a usage error (exit 2).
+ignores cwd and searches the live store, including done and live soft-deleted
+tasks. A task that has moved to `trash.jsonl` is not found by `tsk list T12`;
+use `tsk list --deleted`, then `tsk trash restore T12`. A task operand cannot
+combine with scope, thread, or status filters. An address that matches nothing
+is a usage error (exit 2).
 
 `--json` is a flat array of `id`, `number`, `title`, `status`, `project`, and
 `thread`. Single-task JSON also attaches `steps`.
@@ -123,12 +129,42 @@ To recover a typo scope: `tsk list --all --json`.
 ```
 tsk steps <task> add <text> [--state-dir <dir>]
 tsk steps <task> toggle <step-short-id> [--state-dir <dir>]
+tsk steps <task> rename <step-short-id> <text> [--state-dir <dir>]
+tsk steps <task> remove <step-short-id> [--state-dir <dir>]
 ```
 
-Output is `added <short-id> <text>` or `toggled <short-id> [x] <text>`.
+Output is `added <short-id> <text>`, `toggled <short-id> [x] <text>`,
+`renamed <short-id> <text>`, or `removed <short-id> <text>`.
 
-See [steps](/docs/steps/) for the board side. `toggle` is not idempotent. Verify
-with `tsk list <task>` before a retry.
+See [steps](/docs/steps/) for the board side. `toggle` and `remove` are not
+idempotent. `rename` is idempotent on the trimmed text. Verify with
+`tsk list <task>` before a retry of toggle or remove.
+
+## status
+
+```
+tsk status <task> <status> [--state-dir <dir>]
+```
+
+`<status>` is `ready`, `started` (or `start`), `blocked`, `review`, or `done` (`tsk status <task> done`). Output is
+`status T<n> <status> <title>` and always uses the stored name (`started`). Repeating the same status is idempotent.
+
+Unknown task: `unknown-task`. Soft-deleted: `soft-deleted-task`.
+
+## edit
+
+```
+tsk edit <task> [--title <title>] [--notes <notes>] [--state-dir <dir>]
+```
+
+At least one of `--title` or `--notes` is required. Scope and thread are
+unchanged. Notes that trim to nothing are cleared. Output is
+`edited T<n> <title>`. Repeating the stored values is idempotent.
+
+Values that start with `-` need `--title=…` or `--notes=…`.
+
+Refusal tokens: `unknown-task`, `soft-deleted-task`, `empty-title`,
+`invalid-title`, `invalid-notes`.
 
 ## trash
 
@@ -176,8 +212,8 @@ idempotent on repeat. A name matching no project that has tasks exits 1 with
 
 | Exit | Meaning |
 | --- | --- |
-| 0 | listed, every add item created/existed, the step applied, the task restored, or the archive flag written (or already had the value) |
-| 1 | one or more item refusals (add/steps), a trash restore with no matching line, an unknown or deleted `archive`/`unarchive` task, or a project action matching nothing. Retry only the failed subset. For toggle, list first. |
+| 0 | listed, every add item created/existed, the step applied, status or edit written (or already had the value), the task restored, or the archive flag written (or already had the value) |
+| 1 | one or more item refusals (add/steps/status/edit), a trash restore with no matching line, an unknown or deleted `archive`/`unarchive` task, or a project action matching nothing. Retry only the failed subset. For toggle and remove, list first. |
 | 2 | usage or parse error, including a `list` address that matches nothing. Nothing persisted. |
 | 3 | store I/O. Commit is indeterminate. `tsk list` before retrying. |
 
@@ -190,3 +226,8 @@ before trimming.
 
 Steps refusals (exit 1): `empty-step-text`, `invalid-step-text`, `unknown-task`,
 `soft-deleted-task`, `unknown-step`, `ambiguous-step`.
+
+Status refusals (exit 1): `unknown-task`, `soft-deleted-task`.
+
+Edit refusals (exit 1): `unknown-task`, `soft-deleted-task`, `empty-title`,
+`invalid-title`, `invalid-notes`.

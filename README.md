@@ -4,13 +4,13 @@
 
 You and your agents put work on one board and move it through human status:
 ready, started, blocked, review, done. Agents reach the board through the CLI.
-Only a human marks a task done. It ships as a [herdr](https://herdr.dev) plugin,
-and the `tsk` binary also runs standalone against `~/.tsk`.
+It ships as a [herdr](https://herdr.dev) plugin, and the `tsk` binary also runs
+standalone against `~/.tsk`.
 
 - Queue board with desk · projects · threads
 - Quick-add on the board, plus a herdr capture overlay
 - Task page for notes, thread, scope, and steps
-- Headless `tsk add`, `tsk list`, and `tsk steps`
+- Headless `tsk add`, `tsk list`, `tsk status`, `tsk edit`, and `tsk steps`
 
 Park, resume, attention, linking, and dispatch are not part of this tree.
 
@@ -23,6 +23,8 @@ cargo build --release
 ./target/release/tsk add -t "Draft release notes"
 ./target/release/tsk
 ```
+
+To run `tsk` without the path, `export PATH="$PWD/target/release:$PATH"`.
 
 As a herdr plugin: `cargo build --release`, then `herdr plugin link "$PWD"`,
 then **Open tsk board**. Rebuild after you pull. A running board keeps the old

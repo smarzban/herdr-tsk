@@ -17,7 +17,12 @@ cd herdr-tsk
 cargo build --release
 ```
 
-The binary is `target/release/tsk`.
+The binary is `target/release/tsk`. Run it with that path, or put the directory
+on `PATH` for this shell:
+
+```bash
+export PATH="$PWD/target/release:$PATH"
+```
 
 ## Standalone
 
@@ -42,9 +47,12 @@ at a directory on a local disk. State and config directory roots must be real
 directories, not symlinks.
 
 ```bash
-tsk add -t "Draft release notes"
-tsk list
+./target/release/tsk add -t "Draft release notes"
+./target/release/tsk list
 ```
+
+After `export PATH="$PWD/target/release:$PATH"`, the same commands work as
+`tsk add` and `tsk list`.
 
 ## As a herdr plugin
 
