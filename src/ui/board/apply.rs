@@ -136,6 +136,12 @@ fn read_only_focus_refuses(intent: &BoardIntent) -> bool {
             | BoardIntent::BeginAddStep
             | BoardIntent::ToggleThreadEditing
             | BoardIntent::FormCycleScope
+            // AC-44: Tab, shift+Tab, a field click, and the step cursor are edit
+            // entries on the task page, so the read-only page refuses them too.
+            | BoardIntent::FormFocusNext
+            | BoardIntent::FormFocusPrev
+            | BoardIntent::FocusFormField(_)
+            | BoardIntent::SelectStep(_)
     )
 }
 
