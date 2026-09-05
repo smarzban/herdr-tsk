@@ -158,13 +158,13 @@ tsk edit <task> [--title <title>] [--notes <notes>] [--state-dir <dir>]
 ```
 
 At least one of `--title` or `--notes` is required. Scope and thread are
-unchanged. Notes that trim to nothing are cleared. Output is
+unchanged. Notes that trim to nothing are cleared. Newlines and tabs in notes are kept, same as add. Output is
 `edited T<n> <title>`. Repeating the stored values is idempotent.
 
 Values that start with `-` need `--title=…` or `--notes=…`.
 
 Refusal tokens: `unknown-task`, `soft-deleted-task`, `empty-title`,
-`invalid-title`, `invalid-notes`.
+`invalid-title`.
 
 ## trash
 
@@ -230,4 +230,4 @@ Steps refusals (exit 1): `empty-step-text`, `invalid-step-text`, `unknown-task`,
 Status refusals (exit 1): `unknown-task`, `soft-deleted-task`.
 
 Edit refusals (exit 1): `unknown-task`, `soft-deleted-task`, `empty-title`,
-`invalid-title`, `invalid-notes`.
+`invalid-title`.

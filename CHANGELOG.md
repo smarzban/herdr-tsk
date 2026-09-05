@@ -3,7 +3,10 @@
 ## Unreleased
 
 NEEDS YOU section: blocked and review tasks sit above IN MOTION on desk and on a
-project board. Desk ON DECK / project ON DECK keep ready work.
+project board. Desk ON DECK / project ON DECK keep ready work. An empty deck
+header is omitted while NEEDS YOU has rows.
+
+`tsk edit --notes` keeps newlines and tabs, same as `tsk add -n`.
 
 Agent CLI mutations: `tsk status T<n> <status>` sets ready, started, blocked, or
 review, or done (`start` is an alias for `started`; idempotent on repeat), `tsk edit T<n>`

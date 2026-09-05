@@ -121,12 +121,13 @@ Output always uses the stored name (`started`, not `start`). Repeating the same
 status is idempotent.
 
 `edit` needs at least one of `--title` or `--notes`. Scope and thread stay as
-they are. Notes that trim to nothing are cleared. Repeating the stored values
+they are. Notes that trim to nothing are cleared. Newlines and tabs in notes are
+kept, same as add. Repeating the stored values
 is idempotent. Values that start with `-` need `--title=<value>` or
 `--notes=<value>`.
 
 Both exit 0 on success, 1 for a refusal (`unknown-task`, `soft-deleted-task`,
-and for edit also `empty-title`, `invalid-title`, `invalid-notes`), 2 for usage,
+and for edit also `empty-title`, `invalid-title`), 2 for usage,
 and 3 for store I/O. Verify with `tsk list T12` before retrying an exit 3.
 
 ## Archived tasks and projects

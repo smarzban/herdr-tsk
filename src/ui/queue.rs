@@ -274,7 +274,7 @@ fn query_home_desk(
     if !motion.is_empty() {
         sections.push(section_from(SectionKind::InMotion, None, None, &motion));
     }
-    sections.push(deck_section(None, &ready));
+    push_deck(&mut sections, None, &ready, &need);
 
     append_done(&mut sections, &live, drawer_open);
     append_archived(&mut sections, &archived_pool, drawer_open);
@@ -420,7 +420,7 @@ fn query_project_focus(
     if !motion.is_empty() {
         sections.push(section_from(SectionKind::InMotion, None, None, &motion));
     }
-    sections.push(deck_section(Some(label), &ready));
+    push_deck(&mut sections, Some(label), &ready, &need);
     append_done(&mut sections, &live, drawer_open);
     let in_scope: Vec<&Task> = tasks
         .iter()
@@ -594,6 +594,19 @@ fn push_needs_you(sections: &mut Vec<QueueSection>, need: &[&Task]) {
     if !need.is_empty() {
         sections.push(section_from(SectionKind::NeedsYou, None, None, need));
     }
+}
+
+/// Keep an empty desk/ON DECK header only when NEEDS YOU is also empty.
+fn push_deck(
+    sections: &mut Vec<QueueSection>,
+    project_label: Option<String>,
+    ready: &[&Task],
+    need: &[&Task],
+) {
+    if ready.is_empty() && !need.is_empty() {
+        return;
+    }
+    sections.push(deck_section(project_label, ready));
 }
 
 fn task_matches_scope(task: &Task, scope: DeckScope<'_>) -> bool {
@@ -1034,6 +1047,27 @@ mod tests {
         );
         assert!(!all_listed_ids(&view).contains(&Uuid::from_u128(5)));
         assert_eq!(view.sections[0].kind, SectionKind::NeedsYou);
+    }
+
+    #[test]
+    fn empty_deck_is_omitted_when_needs_you_has_rows() {
+        let desk_tasks = vec![task(1, HumanStatus::Blocked, TaskScope::Global, false, 10)];
+        let desk = query_lens(&desk_tasks, None, BoardLens::Home(BoardTab::Desk), false);
+        assert!(desk.sections.iter().all(|s| s.kind != SectionKind::OnDeck));
+        assert!(!desk.sections.iter().any(|s| s.empty_hint));
+
+        let project_tasks = vec![task(2, HumanStatus::Review, project("/repos/a"), false, 10)];
+        let project = query_lens(
+            &project_tasks,
+            None,
+            BoardLens::Project(Path::new("/repos/a")),
+            false,
+        );
+        assert!(project
+            .sections
+            .iter()
+            .all(|s| s.kind != SectionKind::OnDeck));
+        assert!(!project.sections.iter().any(|s| s.empty_hint));
     }
 
     #[test]

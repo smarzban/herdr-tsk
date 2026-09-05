@@ -538,9 +538,9 @@ pub fn edit_help() -> CliOutput {
         stdout: concat!(
             "usage: tsk edit <task> [--title <title>] [--notes <notes>] [--state-dir <dir>]\n\n",
             "edit updates a task's title and/or notes. Scope and thread are unchanged. The task is a task number (T<number>, or bare digits) or UUID, as shown by tsk list. At least one of --title or --notes is required.\n",
-            "Notes that trim to nothing are cleared. Repeating the stored values is idempotent: the same output prints and nothing changes.\n",
+            "Notes that trim to nothing are cleared. Newlines and tabs in notes are kept, same as add. Repeating the stored values is idempotent: the same output prints and nothing changes.\n",
             "Values beginning with - must use --title=<value> or --notes=<value>.\n\n",
-            "Refusal tokens (exit 1): unknown-task, soft-deleted-task, empty-title, invalid-title, invalid-notes.\n\n",
+            "Refusal tokens (exit 1): unknown-task, soft-deleted-task, empty-title, invalid-title.\n\n",
             "Exit contract:\n",
             "  exit 0: fields written, or they already had the values\n",
             "  exit 1: edit refusal; verify state with list before retrying\n",
