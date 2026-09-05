@@ -8,10 +8,10 @@ home (`1` / `2` / `3`). `P` opens the project picker from the keyboard.
 
 ## Tabs
 
-- **desk**: your own planning space. IN MOTION is every started task, from any
-  project. ON DECK is desk work that is ready, blocked, or review: general to-dos,
-  future projects, anything that belongs to no repository. Thread headers sit
-  above those open desk tasks.
+- **desk**: your own planning space. NEEDS YOU is desk work that is blocked or
+  review. IN MOTION is every started task, from any project. ON DECK is desk work
+  that is ready: general to-dos, future projects, anything that belongs to no
+  repository. Thread headers sit above those open ready desk tasks.
 - **projects**: one collapsible group per project. Single-click a header to
   collapse it. Double-click a header to focus that project. Inside a group:
   started, then review, blocked, ready.
@@ -34,9 +34,11 @@ group with nothing open reads `no open tasks here — P rescope or + capture`.
 
 One urgency-ordered list. Sections are computed, not navigated.
 
+- **NEEDS YOU**: blocked and review, on desk (desk/global tasks) and on a project
+  board (that project). Omitted when empty. Sits above IN MOTION.
 - **IN MOTION**: work you have started
-- **ON DECK** when you are on a project board: that project's ready, blocked, and
-  review tasks, with thread headers above their open rows
+- **ON DECK** when you are on a project board: that project's ready tasks, with
+  thread headers above their open rows
 - **z** opens the done drawer
 
 An archived task keeps its human status and leaves every working lens (desk,

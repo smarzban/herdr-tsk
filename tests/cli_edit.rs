@@ -144,6 +144,18 @@ fn edit_clears_notes_and_keeps_scope_and_thread() {
 }
 
 #[test]
+fn edit_notes_keeps_newlines_and_tabs_like_add() {
+    let dir = temp_state_dir("multiline");
+    let _guard = TempDirGuard(dir.clone());
+    assert_eq!(add_task(&dir, "keep me").code, 0);
+    let notes = "line one\nline\ttwo";
+    let output = edit(&dir, &["T1", "--notes", notes]);
+    assert_eq!(output.code, 0, "{:?}", output.stderr);
+    let task = TaskStore::new(&dir).load().expect("load").tasks()[0].clone();
+    assert_eq!(task.notes.as_deref(), Some(notes));
+}
+
+#[test]
 fn edit_refuses_empty_title_and_control_chars_without_mutation() {
     let dir = temp_state_dir("refusals");
     let _guard = TempDirGuard(dir.clone());
@@ -154,7 +166,6 @@ fn edit_refuses_empty_title_and_control_chars_without_mutation() {
     for (args, token) in [
         (["T1", "--title", "   "].as_slice(), "empty-title"),
         (["T1", "--title", "line\nbreak"].as_slice(), "invalid-title"),
-        (["T1", "--notes", "line\nbreak"].as_slice(), "invalid-notes"),
     ] {
         let output = edit(&dir, args);
         assert_eq!(output.code, 1, "{token}: {:?}", output.stderr);
@@ -210,7 +221,6 @@ fn edit_help_names_title_notes_and_equals_forms() {
         "idempotent",
         "empty-title",
         "invalid-title",
-        "invalid-notes",
         "exit 0",
         "exit 1",
         "exit 2",

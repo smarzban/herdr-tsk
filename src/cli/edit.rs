@@ -29,7 +29,6 @@ pub enum EditError {
     SoftDeletedTask,
     EmptyTitle,
     InvalidTitle,
-    InvalidNotes,
     Store(String),
 }
 
@@ -40,7 +39,6 @@ impl EditError {
             Self::SoftDeletedTask => "soft-deleted-task",
             Self::EmptyTitle => "empty-title",
             Self::InvalidTitle => "invalid-title",
-            Self::InvalidNotes => "invalid-notes",
             Self::Store(_) => "store-error",
         }
     }
@@ -60,11 +58,6 @@ pub fn run(
         }
         if title.trim().is_empty() {
             return Err(EditError::EmptyTitle);
-        }
-    }
-    if let Some(notes) = fields.notes.as_deref() {
-        if has_c0_control(notes) {
-            return Err(EditError::InvalidNotes);
         }
     }
 

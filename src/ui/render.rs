@@ -3930,6 +3930,7 @@ fn paint_section_header(
 
 fn section_title(section: &QueueSection, at_home: bool, home_tab: BoardTab) -> String {
     match section.kind {
+        SectionKind::NeedsYou => "NEEDS YOU".to_string(),
         SectionKind::InMotion => "IN MOTION".to_string(),
         SectionKind::Done => "DONE".to_string(),
         SectionKind::Archived => "archived".to_string(),
