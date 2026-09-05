@@ -55,6 +55,7 @@ the board but out of every working view (`ctrl+f`, `tsk archive`,
 Keep `~/.tsk` on a local disk. The writer lock is `flock`-style and every save
 is a rename-based atomic replace; NFS, Dropbox, iCloud Drive, and similar
 synced folders can break both. Point `TSK_STATE_DIR` at a local disk instead.
+State and config directory roots must be real directories, not symlinks.
 Windows is not tested in CI.
 
 Mutating keys need Ctrl. Bare letters do nothing. Legacy modifier settings are ignored.

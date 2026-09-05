@@ -190,7 +190,8 @@ If `HERDR_ENV` is unset, say that live smoke was not run.
   `tsk project archive|unarchive <name>`, `tsk list --archived`; `tsk add` into an archived
   project refuses with error code `project-archived`.
 - `~/.tsk` must live on a local disk (flock plus rename-based replace); synced folders are
-  unsupported, `TSK_STATE_DIR` is the escape hatch.
+  unsupported, `TSK_STATE_DIR` is the escape hatch. State/config directory roots must be real
+  directories, not symlinks; permission hardening refuses a symlink instead of chmodding its target.
 - Golden fixtures regenerate via `cargo test --test queue_board_render regenerate_golden_fixtures -- --ignored`; never hand-edit the `.txt` files.
 - Pane label matching is exact against `board_pane::BOARD_PANE_LABEL`; the manifest pane title must equal it.
 - UI chrome lives in `src/ui/` (`board/` model·apply·commands·chrome·draw,

@@ -34,6 +34,7 @@ use crate::store::StoreError;
 
 /// On-disk document name under the config directory (distinct from the task store's).
 const CONFIG_FILE: &str = "walkthrough.json";
+const CONFIG_TEMP_PREFIX: &str = ".walkthrough.json.tmp.";
 
 /// The persisted document. A named field, so it can gain siblings without a migration.
 ///
@@ -97,9 +98,9 @@ impl WalkthroughRecord {
     /// Any unusable document reads as not dismissed: the board must open whatever the
     /// state of this file.
     pub fn is_dismissed(&self) -> bool {
-        // An older, looser version may have left the record world-readable; a
-        // launch repairs it. The tighten is best effort and never fails the read.
-        fsperm::tighten_file(&self.document_path());
+        // An older, looser version may have left the directory, record, or a
+        // stale temp world-readable. Repairs are best effort and never fail the read.
+        self.tighten_existing_paths();
         fs::read_to_string(self.document_path())
             .ok()
             .and_then(|data| serde_json::from_str::<WalkthroughDocument>(&data).ok())
@@ -132,6 +133,7 @@ impl WalkthroughRecord {
     /// guarantees this does *not* carry (no directory fsync, no lock).
     pub fn record_dismissed(&self) -> Result<(), StoreError> {
         fsperm::ensure_private_dir(&self.dir)?;
+        self.tighten_existing_paths();
         let document = self.document_path();
         let tmp = self.unique_tmp_path();
         let data = serde_json::to_string_pretty(&WalkthroughDocument { dismissed: true })?;
@@ -151,6 +153,23 @@ impl WalkthroughRecord {
 
     fn document_path(&self) -> PathBuf {
         self.dir.join(CONFIG_FILE)
+    }
+
+    fn tighten_existing_paths(&self) {
+        fsperm::tighten_dir(&self.dir);
+        fsperm::tighten_file(&self.document_path());
+        let Ok(entries) = fs::read_dir(&self.dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            if entry
+                .file_name()
+                .to_str()
+                .is_some_and(|name| name.starts_with(CONFIG_TEMP_PREFIX))
+            {
+                fsperm::tighten_file(&entry.path());
+            }
+        }
     }
 
     /// Unique temp path so concurrent writers never share `.walkthrough.json.tmp`.
@@ -372,9 +391,37 @@ mod tests {
         );
 
         assert_eq!(
+            file_mode(&dir),
+            0o700,
+            "an existing config directory must be tightened to 0700"
+        );
+        assert_eq!(
             file_mode(&dir.join(CONFIG_FILE)),
             0o600,
             "an existing walkthrough.json must be tightened to 0600"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn existing_loose_walkthrough_temp_is_tightened_to_private() {
+        let (dir, _guard) = seed("private-stale-temp", "{\"dismissed\": true}");
+        let stale = dir.join(format!(".{CONFIG_FILE}.tmp.stale"));
+        fs::write(&stale, "{\"dismissed\": true}").expect("seed stale temp");
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&stale, fs::Permissions::from_mode(0o644))
+                .expect("chmod stale temp");
+        }
+
+        WalkthroughRecord::new(&dir)
+            .record_dismissed()
+            .expect("record dismissal");
+
+        assert_eq!(
+            file_mode(&stale),
+            0o600,
+            "an existing walkthrough temp must be tightened to 0600"
         );
     }
 

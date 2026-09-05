@@ -19,13 +19,50 @@ use std::path::Path;
 pub fn ensure_private_dir(path: &Path) -> io::Result<()> {
     fs::create_dir_all(path)?;
     #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let metadata = fs::symlink_metadata(path)?;
-        let mode = metadata.permissions().mode();
-        fs::set_permissions(path, fs::Permissions::from_mode(mode & 0o700))?;
-    }
+    tighten_private_dir(path)?;
     Ok(())
+}
+
+/// Tighten an existing state/config directory without creating it. This is
+/// best effort for read paths, which must remain usable when config is absent
+/// or permissions cannot be repaired.
+pub fn tighten_dir(path: &Path) {
+    #[cfg(unix)]
+    {
+        let _ = tighten_private_dir(path);
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+    }
+}
+
+#[cfg(unix)]
+fn tighten_private_dir(path: &Path) -> io::Result<()> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+    let path_metadata = fs::symlink_metadata(path)?;
+    if !path_metadata.file_type().is_dir() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "state/config directory must be a directory, not a symlink",
+        ));
+    }
+
+    // Apply chmod through a verified open handle. This prevents a final-path
+    // symlink, or a directory swapped between metadata and open, from redirecting
+    // the permission change to another target.
+    let directory = File::open(path)?;
+    let opened_metadata = directory.metadata()?;
+    if path_metadata.dev() != opened_metadata.dev() || path_metadata.ino() != opened_metadata.ino()
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "state/config directory changed while permissions were checked",
+        ));
+    }
+    let mode = opened_metadata.permissions().mode();
+    directory.set_permissions(fs::Permissions::from_mode(mode & 0o700))
 }
 
 /// Create a file holding owner-only content (`0600` on Unix when created),
@@ -63,16 +100,74 @@ pub fn open_lock_file(path: &Path) -> io::Result<File> {
 pub fn tighten_file(path: &Path) {
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        if let Ok(metadata) = fs::symlink_metadata(path) {
-            if metadata.is_file() {
-                let mode = metadata.permissions().mode();
-                let _ = fs::set_permissions(path, fs::Permissions::from_mode(mode & 0o600));
-            }
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+        let Ok(path_metadata) = fs::symlink_metadata(path) else {
+            return;
+        };
+        if !path_metadata.file_type().is_file() {
+            return;
         }
+        let Ok(file) = File::open(path) else {
+            return;
+        };
+        let Ok(opened_metadata) = file.metadata() else {
+            return;
+        };
+        if path_metadata.dev() != opened_metadata.dev()
+            || path_metadata.ino() != opened_metadata.ino()
+        {
+            return;
+        }
+        let mode = opened_metadata.permissions().mode();
+        let _ = file.set_permissions(fs::Permissions::from_mode(mode & 0o600));
     }
     #[cfg(not(unix))]
     {
         let _ = path;
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::{symlink, PermissionsExt};
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static TEMP_SEQ: AtomicU64 = AtomicU64::new(0);
+
+    struct TempDirGuard(std::path::PathBuf);
+
+    impl Drop for TempDirGuard {
+        fn drop(&mut self) {
+            let _ = fs::set_permissions(self.0.join("target"), fs::Permissions::from_mode(0o700));
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn ensure_private_dir_rejects_a_symlink_without_chmodding_its_target() {
+        let seq = TEMP_SEQ.fetch_add(1, Ordering::Relaxed);
+        let root =
+            std::env::temp_dir().join(format!("tsk-fsperm-symlink-{}-{seq}", std::process::id()));
+        fs::create_dir_all(&root).expect("mkdir root");
+        let _guard = TempDirGuard(root.clone());
+        let target = root.join("target");
+        let link = root.join("state");
+        fs::create_dir(&target).expect("mkdir target");
+        fs::set_permissions(&target, fs::Permissions::from_mode(0o500)).expect("chmod target");
+        symlink(&target, &link).expect("symlink state dir");
+
+        ensure_private_dir(&link).expect_err("a state/config directory symlink must be rejected");
+
+        assert_eq!(
+            fs::metadata(&target)
+                .expect("target metadata")
+                .permissions()
+                .mode()
+                & 0o7777,
+            0o500,
+            "rejecting the symlink must not grant permissions on its target"
+        );
     }
 }

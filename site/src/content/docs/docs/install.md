@@ -38,7 +38,8 @@ second.
 Keep `~/.tsk` on a local disk. The writer lock is `flock`-style and every save
 is a rename-based atomic replace; NFS, Dropbox, iCloud Drive, and similar
 synced folders can break both. `TSK_STATE_DIR` is the escape hatch: point it
-at a directory on a local disk.
+at a directory on a local disk. State and config directory roots must be real
+directories, not symlinks.
 
 ```bash
 tsk add -t "Draft release notes"

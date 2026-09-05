@@ -13,11 +13,11 @@ test("no tracked file still points at the old preview domain", async () => {
   // local-only trees whose contents never ship.
   const skipDirs = new Set([
     ".git", ".review-panel", ".astro", "node_modules", "target", "dist",
-    ".vercel", "specs",
+    ".vercel", "specs", "technical",
   ]);
   const skipExt = new Set([".png", ".svg", ".ico", ".jpg", ".lock"]);
   // Assembled so this file itself does not contain the literal domain.
-  const oldDomain = ["tsk-gules", "vercel"].join("-") + "." + "vercel.app";
+  const oldDomain = ["tsk-gules", "vercel", "app"].join(".");
   const offenders = [];
   const walk = async (dir) => {
     for (const entry of await readdir(dir, { withFileTypes: true })) {
