@@ -1,12 +1,14 @@
 ---
 name: tsk-cli
-description: Use when asked to add tasks, a task list, or a plan to the Tasks board, or to inspect Tasks board items. Use `tsk add` and `tsk list`, never the TUI.
+description: Use when asked to add, list, edit, or change status of Tasks board items. Use `tsk add`, `tsk list`, `tsk status`, `tsk edit`, and `tsk steps`, never the TUI.
 ---
 
 # tsk CLI
 
-Use `tsk add` to create a task or JSON plan, and `tsk list` to
-inspect the shared board store before and after adding work.
+Use `tsk add` to create a task or JSON plan, `tsk list` to inspect the shared
+board store, `tsk status` to set human status, `tsk edit` to change title or
+notes, and `tsk steps` to add, toggle, rename, or remove steps. Human output
+escapes terminal controls in titles, step text, and project names; JSON does not.
 
 ## Adding
 
@@ -69,13 +71,19 @@ A typo in a project name silently files the task under a new scope. Use
 A task number is the human handle: resolve `T12` with `tsk list T12`.
 `T12`, `t12`, bare digits, and UUIDs are valid task operands. Direct lookup ignores cwd,
 invocation default, and task scope: `tsk list T12` finds its one task even in
-another project, including done and soft-deleted tasks. JSON list rows include
+another project, including done and live soft-deleted tasks still in `tsk.json`.
+A task that has left the live store for `trash.jsonl` is not found that way; use
+`tsk list --deleted` and `tsk trash restore T12`. JSON list rows include
 numeric `number` beside `id`. Do not combine a direct task operand with scope,
 thread, or status filters.
 
 ```sh
+tsk status T12 start
+tsk edit T12 --title "Draft outline" --notes "Scope note"
 tsk steps 12 add "Draft outline"
 tsk steps 12 toggle <step-short-id>
+tsk steps 12 rename <step-short-id> "Write the failing test"
+tsk steps 12 remove <step-short-id>
 tsk list 12
 ```
 
@@ -85,12 +93,41 @@ the row's `steps` array carries each step's `id`, `text`, `done`, and
 `short_id`. UUID remains valid in each command where a task number is shown.
 
 `toggle` flips the step state: a retry after an unseen success flips it back.
-Never blind-retry a `steps` invocation, run `tsk list 12`
-first and retry only a real refusal. `steps` exits 0 when the step was created
-or toggled, 1 for a refusal (stable tokens `empty-step-text`,
-`invalid-step-text`, `unknown-task`, `soft-deleted-task`, `unknown-step`,
-`ambiguous-step`), 2 for a usage error, and 3 for store I/O — verify with
-`list` before retrying an exit 3, same as add.
+`rename` is idempotent on the trimmed text. `remove` is not: a retry after an
+unseen success is `unknown-step`. Never blind-retry a `steps` invocation, run
+`tsk list 12` first and retry only a real refusal. `steps` exits 0 when the
+step was created, toggled, renamed, or removed, 1 for a refusal (stable tokens
+`empty-step-text`, `invalid-step-text`, `unknown-task`, `soft-deleted-task`,
+`unknown-step`, `ambiguous-step`), 2 for a usage error, and 3 for store I/O —
+verify with `list` before retrying an exit 3, same as add.
+
+## Status and edit
+
+Agents set human status and rewrite title or notes by task address. Direct
+lookup ignores cwd, same as `tsk list T12`.
+
+```sh
+tsk status T12 start
+tsk status T12 blocked
+tsk status T12 review
+tsk status T12 done
+tsk edit T12 --title "New title"
+tsk edit T12 --notes "Replacement notes"
+tsk edit T12 --title="-fix parser" --notes="-5 degrees"
+```
+
+`status` accepts `ready`, `started` (or `start`), `blocked`, `review`, or `done`.
+Output always uses the stored name (`started`, not `start`). Repeating the same
+status is idempotent.
+
+`edit` needs at least one of `--title` or `--notes`. Scope and thread stay as
+they are. Notes that trim to nothing are cleared. Repeating the stored values
+is idempotent. Values that start with `-` need `--title=<value>` or
+`--notes=<value>`.
+
+Both exit 0 on success, 1 for a refusal (`unknown-task`, `soft-deleted-task`,
+and for edit also `empty-title`, `invalid-title`, `invalid-notes`), 2 for usage,
+and 3 for store I/O. Verify with `tsk list T12` before retrying an exit 3.
 
 ## Archived tasks and projects
 

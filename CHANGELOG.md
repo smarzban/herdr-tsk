@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+Agent CLI mutations: `tsk status T<n> <status>` sets ready, started, blocked, or
+review, or done (`start` is an alias for `started`; idempotent on repeat), `tsk edit T<n>`
+updates title and/or notes, and `tsk steps` gains `rename` and `remove`.
+
+Human CLI output escapes C0/C1 controls in titles, step text, and project names.
+`tsk list T<n>` documents live-store lookup vs `trash.jsonl`. Install docs keep
+`./target/release/tsk` after build, with an optional PATH export.
+
 ## 0.5.0
 
 Wide task view: at 110 usable columns or wider, the board and task page form a

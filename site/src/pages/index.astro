@@ -526,9 +526,9 @@ const REPO = 'https://github.com/smarzban/herdr-tsk';
             <span class="index">05 <span class="index-label">cli</span></span>
             <h2 id="cli-heading">Built for agents from the first commit.</h2>
             <p class="band-lede">
-              Headless <code>add</code>, <code>list</code>, and <code>steps</code> against the
+              Headless <code>add</code>, <code>list</code>, <code>status</code>, <code>edit</code>, and <code>steps</code> against the
               same store. An agent drops a plan in as JSON and it lands as <b>ready</b> tasks. It
-              can check off steps and report progress. It cannot mark anything done.
+              can move status, rewrite notes, check off steps, and mark work done.
             </p>
           </header>
 
@@ -537,8 +537,10 @@ const REPO = 'https://github.com/smarzban/herdr-tsk';
 <span class="dim">&#123;"outcome":"created","id":"5c1e…","number":32,"title":"Draft release notes","project":"tsk"&#125;</span>
 <span class="prompt">$</span> tsk steps T32 add "Write the failing test"
 <span class="dim">added 9f Write the failing test</span>
+<span class="prompt">$</span> tsk status T32 start
+<span class="dim">status T32 started Draft release notes</span>
 <span class="prompt">$</span> tsk list T32
-<span class="dim">READY
+<span class="dim">STARTED
  - 32 Draft release notes #release
    [ ] 9f Write the failing test</span>
 <span class="prompt">$</span> cat plan.json | tsk add

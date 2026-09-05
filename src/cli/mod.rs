@@ -7,10 +7,12 @@ use serde_json::Value;
 
 pub mod add;
 pub mod archive;
+pub mod edit;
 pub mod list;
 pub mod parser;
 pub mod presenter;
 pub mod router;
+pub mod status;
 pub mod steps;
 pub mod trash;
 
@@ -37,6 +39,8 @@ where
         Some("add") => run_add(args, &mut stdin, stdin_is_tty),
         Some("steps") => run_steps(args),
         Some("list") => run_list(args),
+        Some("status") => run_status(args),
+        Some("edit") => run_edit(args),
         Some("trash") => run_trash(args),
         Some("project") => run_project(args),
         verb @ (Some("archive") | Some("unarchive")) => {
@@ -48,7 +52,7 @@ where
             run_archive(args, verb, archive)
         }
         _ => presenter::usage(
-            "expected add, steps, list, trash, archive, unarchive, or project command",
+            "expected add, steps, list, status, edit, trash, archive, unarchive, or project command",
         ),
     }
 }
@@ -67,6 +71,54 @@ fn run_steps(args: Vec<String>) -> CliOutput {
     match steps::run(task, action, input.state_dir) {
         Ok(result) => presenter::steps(result),
         Err(error) => presenter::steps_rejected(error),
+    }
+}
+
+fn run_status(args: Vec<String>) -> CliOutput {
+    let input = match parser::parse_flag_status(&args) {
+        Ok(input) => input,
+        Err(reason) => return presenter::status_usage(&reason),
+    };
+    if input.help {
+        return presenter::status_help();
+    }
+    let (Some(task), Some(status)) = (input.task, input.status) else {
+        return presenter::status_usage(if input.task.is_none() {
+            "task number is required"
+        } else {
+            "status is required"
+        });
+    };
+    match status::run(task, status, input.state_dir) {
+        Ok(result) => presenter::status(result),
+        Err(error) => presenter::status_rejected(error),
+    }
+}
+
+fn run_edit(args: Vec<String>) -> CliOutput {
+    let input = match parser::parse_flag_edit(&args) {
+        Ok(input) => input,
+        Err(reason) => return presenter::edit_usage(&reason),
+    };
+    if input.help {
+        return presenter::edit_help();
+    }
+    let Some(task) = input.task else {
+        return presenter::edit_usage("task number is required");
+    };
+    if input.title.is_none() && input.notes.is_none() {
+        return presenter::edit_usage("title or notes is required");
+    }
+    match edit::run(
+        task,
+        edit::EditFields {
+            title: input.title,
+            notes: input.notes,
+        },
+        input.state_dir,
+    ) {
+        Ok(result) => presenter::edited(result),
+        Err(error) => presenter::edit_rejected(error),
     }
 }
 

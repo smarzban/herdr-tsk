@@ -430,9 +430,12 @@ fn steps_help_documents_toggle_flip_and_verify_guidance() {
     for term in [
         "usage: tsk steps",
         "toggle",
+        "rename",
+        "remove",
         "flips",
         "verify",
         "list",
+        "idempotent",
         "exit 0",
         "exit 1",
         "exit 2",
@@ -445,4 +448,129 @@ fn steps_help_documents_toggle_flip_and_verify_guidance() {
             "steps help should contain {term:?}"
         );
     }
+}
+
+#[test]
+fn steps_rename_then_remove_round_trips() {
+    let dir = temp_state_dir("rename-remove");
+    let task = seed_task(&dir, "rename target");
+
+    let mut add = steps_args(&dir, task);
+    add.extend(["add".into(), "  first draft  ".into()]);
+    let add = steps(&add);
+    assert_eq!(add.code, 0, "{}", add.stderr);
+
+    let listed = steps(&[
+        "tsk".into(),
+        "list".into(),
+        task.to_string(),
+        "--state-dir".into(),
+        state_dir_arg(&dir),
+    ]);
+    let lines = step_lines(&listed.stdout);
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0].text, "first draft");
+
+    let mut rename = steps_args(&dir, task);
+    rename.extend([
+        "rename".into(),
+        lines[0].short_id.clone(),
+        "  renamed step  ".into(),
+    ]);
+    let rename = steps(&rename);
+    assert_eq!(rename.code, 0, "{}", rename.stderr);
+    assert_eq!(
+        rename.stdout,
+        format!("renamed {} renamed step\n", lines[0].short_id)
+    );
+
+    let after_rename = TaskStore::new(&dir)
+        .load()
+        .expect("reload")
+        .get(task)
+        .expect("task")
+        .steps[0]
+        .text
+        .clone();
+    assert_eq!(after_rename, "renamed step");
+
+    let mut again = steps_args(&dir, task);
+    again.extend([
+        "rename".into(),
+        lines[0].short_id.clone(),
+        "renamed step".into(),
+    ]);
+    let again = steps(&again);
+    assert_eq!(again.code, 0, "{}", again.stderr);
+    let events = TaskStore::new(&dir)
+        .load()
+        .expect("reload")
+        .get(task)
+        .expect("task")
+        .history
+        .iter()
+        .filter(|event| event.kind == tsk_tui::domain::TaskEventKind::StepRenamed)
+        .count();
+    assert_eq!(events, 1, "a repeat rename writes no second event");
+
+    let mut remove = steps_args(&dir, task);
+    remove.extend(["remove".into(), lines[0].short_id.clone()]);
+    let remove = steps(&remove);
+    assert_eq!(remove.code, 0, "{}", remove.stderr);
+    assert_eq!(
+        remove.stdout,
+        format!("removed {} renamed step\n", lines[0].short_id)
+    );
+    assert!(TaskStore::new(&dir)
+        .load()
+        .expect("reload")
+        .get(task)
+        .expect("task")
+        .steps
+        .is_empty());
+
+    let mut missing = steps_args(&dir, task);
+    missing.extend(["remove".into(), lines[0].short_id.clone()]);
+    let missing = steps(&missing);
+    assert_eq!(missing.code, 1);
+    assert!(missing.stderr.contains("unknown-step"));
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn steps_rename_refuses_empty_and_control_char_text_without_mutation() {
+    let dir = temp_state_dir("rename-text");
+    let task = seed_task(&dir, "rename refusal");
+    let mut add = steps_args(&dir, task);
+    add.extend(["add".into(), "keep me".into()]);
+    assert_eq!(steps(&add).code, 0);
+    let listed = steps(&[
+        "tsk".into(),
+        "list".into(),
+        task.to_string(),
+        "--state-dir".into(),
+        state_dir_arg(&dir),
+    ]);
+    let short_id = step_lines(&listed.stdout)[0].short_id.clone();
+    let state_file = dir.join("tsk.json");
+    let before = std::fs::read(&state_file).expect("read seeded state");
+
+    for (text, token) in [
+        ("", "empty-step-text"),
+        ("   ", "empty-step-text"),
+        ("   \t ", "invalid-step-text"),
+        ("line\nbreak", "invalid-step-text"),
+    ] {
+        let mut args = steps_args(&dir, task);
+        args.extend(["rename".into(), short_id.clone(), text.into()]);
+        let output = steps(&args);
+        assert_eq!(output.code, 1, "refuse {text:?}");
+        assert!(output.stderr.contains(token), "{token}: {}", output.stderr);
+    }
+    assert_eq!(
+        std::fs::read(&state_file).expect("read after refusals"),
+        before
+    );
+    let _ = std::fs::remove_dir_all(dir);
 }

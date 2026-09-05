@@ -5,7 +5,7 @@ description: What tsk is, who moves the work, and where to read next.
 
 **tsk** is a task board for you and your agents, in your terminal. You both put
 work on one board and move it through human status: ready, started, blocked,
-review, done. Only a human marks a task done.
+review, done.
 
 It ships as the herdr plugin `herdr-tsk`. The `tsk` binary also runs standalone
 against `~/.tsk`. The pane, the capture overlay, and the CLI edit the same store.
@@ -17,13 +17,14 @@ This site is the user guide.
 - **You** work the board: tabs, peek, the task page, and the status verbs behind
   Ctrl.
 - **Agents** work the [CLI](/docs/cli/): `tsk add` puts work on the board,
-  `tsk steps` plans it, `tsk list` reads it back. Adding a task that already
-  exists returns the existing one, so a retried plan is safe.
-- **Done is a human verb.** Nothing in tsk completes a task on an agent's behalf,
-  and the CLI has no verb for it.
+  `tsk steps` plans it, `tsk status` and `tsk edit` move it, `tsk list` reads it
+  back. Adding a task that already exists returns the existing one, so a retried
+  plan is safe.
+- **Status is shared.** Agents set ready, started, blocked, review, or done with
+  `tsk status`. Nothing auto-completes a task from agent lifecycle.
 
-Moving status from the CLI, assigning a task to an agent, and starting that agent
-from the board are in progress. They are not in the current build.
+Assigning a task to an agent, and starting that agent from the board, are in
+progress. They are not in the current build.
 
 ## What you can do
 
@@ -31,7 +32,7 @@ from the board are in progress. They are not in the current build.
   planning space: general to-dos, future projects, anything outside a repository.
 - Capture with `+` on the board, or a herdr overlay
 - Open a task page for title, notes, thread, scope, and steps
-- Script the same store with `tsk add`, `tsk list`, and `tsk steps`
+- Script the same store with `tsk add`, `tsk list`, `tsk status`, `tsk edit`, and `tsk steps`
 
 Park, resume, attention, linking, and dispatch are not in this product.
 
