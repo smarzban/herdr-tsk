@@ -38,7 +38,24 @@ For scriptable board work, use `tsk add` and `tsk list`; read
   sub-groups; same status order. Collapse state is session-only. IN MOTION · ON DECK when
   project-scoped · done drawer (`z`). Scoped ON DECK thread blocks paint dim `#name`
   headers with open counts; headers consume row budget but are not selectable or
-  hit-testable.
+  hit-testable. The done drawer ends with a collapsible `▾ archived · n` group (closed by
+  default, session-only): its header is the one selectable header (`Enter`/click toggles it, the
+  word paints bold when selected, never reverse), its rows paint dim, and it folds with `ctrl+g`
+  toggle-all like any other group while the drawer is open.
+- Archive is a flag, not a place (ADR-0004). `archived` on a task, and a lazy project record
+  (`projects` map keyed by scope path, present only while archived) for projects. Neither leaves
+  `tsk.json`. A *hidden* task (archived, or in an archived project) paints in no working lens;
+  `open task` excludes archived. `ctrl+f` ("file") toggles the selected task; in the `P` picker
+  it archives the selected project, on the picker's archived tab it unarchives. `ctrl+u` on an
+  archived selection unarchives, otherwise it is undo. No undo entry for archive.
+- The `P` picker has two tabs (main · archived) with a dim rule under them. `Enter` on an
+  archived project opens a **read-only focus**: chip `name · archived`, dim rows, every
+  mutating verb refuses with `project <name> is archived · ctrl+u unarchive`, task page is
+  view-only, `ctrl+u` unarchives in place, `Esc`/`P`/`1`-`3` leave. The only lens that paints an
+  archived project's tasks. Scope dropdowns (task page, quick-add, capture) never offer an
+  archived project. Launching inside an archived project's directory shows a once-per-session
+  card (`project <name> is archived, would you like to unarchive it?`, `y`/`n`/`Esc`); keep →
+  quick-add defaults to the desk for the session. `!p name` to an archived project refuses.
 - Standard ≥78×24, compact below, operable to 40×10. At 110 usable columns or wider the
   board is a four-stage slider, and focus is the stage: **0** board full width · **A** board
   `floor(w*0.4)` beside the task page (board focus) · **G** a dim 32-column rail beside the
@@ -60,7 +77,7 @@ For scriptable board work, use `tsk add` and `tsk list`; read
   and done drawer; clicking that prefix copies it. Peek relies on its parent row's prefix.
   Drafts without a number paint none.
 - Human status: `ready` · `started` · `blocked` · `review` · `done`.
-- Mutating verbs (`s` `d` `o` `b` `e` `n` `x` `u` `q`) need Ctrl. Bare
+- Mutating verbs (`s` `d` `o` `b` `e` `n` `x` `u` `f` `q`) need Ctrl. Bare
   letters do nothing. Nav, peek,
   `Enter`, `P`, `1`/`2`/`3`, `z`, `:`, `?`, `+`, and `Esc` stay bare.
 - Task creation is the quick-add bar, never a form takeover. `+` opens a one-line
@@ -159,6 +176,21 @@ If `HERDR_ENV` is unset, say that live smoke was not run.
 - State is `$HOME/.tsk/tsk.json`, walkthrough dismissal is
   `$HOME/.tsk/walkthrough.json`, overridable with `TSK_STATE_DIR` / `TSK_CONFIG_DIR`.
   Host-injected `HERDR_PLUGIN_*` dirs are ignored. Mutating verbs always use Ctrl.
+- Store format is versioned (`STORE_FORMAT_VERSION`, currently 2). Any schema change bumps it
+  and adds a `vN → vN+1` step to `MIGRATIONS` in `src/store.rs`; `deny_unknown_fields` stays on
+  `Task` and `DomainState` so an older binary refuses a newer file instead of dropping fields.
+  A lower version loads migrated in memory and the first save writes `tsk.json.v<N>` beside the
+  live file (never overwritten). Higher or missing versions are refused.
+- Deleted tasks leave `tsk.json` for `trash.jsonl` once undo can no longer reach them (or after
+  7 days) and are purged 30 days after deletion. The trash is rewritten atomically, readers
+  dedupe by id and skip torn lines, and trash is always durable before the live document loses
+  a task. `tsk list --deleted` reads it; `tsk trash restore T<n>` brings a task back. Nothing on
+  the board reads trash.
+- CLI verbs beyond add/list/steps: `tsk trash restore`, `tsk archive|unarchive T<n>`,
+  `tsk project archive|unarchive <name>`, `tsk list --archived`; `tsk add` into an archived
+  project refuses with error code `project-archived`.
+- `~/.tsk` must live on a local disk (flock plus rename-based replace); synced folders are
+  unsupported, `TSK_STATE_DIR` is the escape hatch.
 - Golden fixtures regenerate via `cargo test --test queue_board_render regenerate_golden_fixtures -- --ignored`; never hand-edit the `.txt` files.
 - Pane label matching is exact against `board_pane::BOARD_PANE_LABEL`; the manifest pane title must equal it.
 - UI chrome lives in `src/ui/` (`board/` model·apply·commands·chrome·draw,
