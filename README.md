@@ -17,7 +17,7 @@ Park, resume, attention, linking, and dispatch are not part of this tree.
 ## Quickstart
 
 ```bash
-git clone git@github.com:smarzban/herdr-tsk.git
+git clone https://github.com/smarzban/herdr-tsk.git
 cd herdr-tsk
 cargo build --release
 ./target/release/tsk add -t "Draft release notes"
@@ -81,6 +81,11 @@ cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && 
 ```
 
 Site-only: `cd site && npm ci && npm test && npm run build`.
+
+## Contributing and security
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development and pull-request guidance.
+Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
 
 ## License
 

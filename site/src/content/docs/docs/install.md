@@ -12,7 +12,7 @@ description: Build tsk and open the board.
 ## Build
 
 ```bash
-git clone git@github.com:smarzban/herdr-tsk.git
+git clone https://github.com/smarzban/herdr-tsk.git
 cd herdr-tsk
 cargo build --release
 ```
