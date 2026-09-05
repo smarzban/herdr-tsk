@@ -14,4 +14,3 @@ User guide: https://gettsk.sh/docs/
 - [CLI](https://gettsk.sh/docs/cli/)
 
 Source: https://github.com/smarzban/herdr-tsk
-Maintainer internals: https://github.com/smarzban/herdr-tsk/tree/main/docs/technical

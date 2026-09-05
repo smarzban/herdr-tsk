@@ -61,10 +61,7 @@ Mutating keys need Ctrl. Bare letters do nothing. Legacy modifier settings are i
 
 ## Docs
 
-| Audience | Where |
-| --- | --- |
-| Using tsk | https://gettsk.sh/docs/ (`site/`) |
-| Changing tsk | [`docs/technical/`](docs/technical/) |
+The user guide lives at https://gettsk.sh/docs/ and is built from `site/`.
 
 ```bash
 cd site

@@ -1298,18 +1298,6 @@ mod tests {
         assert_eq!(value["format_version"], 2);
     }
 
-    /// The technical docs drifted from the source's format version once; pin the
-    /// invariant doc to the constant so a bump cannot land without the doc.
-    #[test]
-    fn technical_docs_state_the_current_store_format() {
-        let invariants = include_str!("../docs/technical/invariants.md");
-        let expected = format!("**`STORE_FORMAT_VERSION` is {STORE_FORMAT_VERSION}.**");
-        assert!(
-            invariants.contains(&expected),
-            "docs/technical/invariants.md must state the current store format: {expected}"
-        );
-    }
-
     #[test]
     fn load_refuses_missing_format_without_rewriting() {
         let dir = temp_dir("format-missing");

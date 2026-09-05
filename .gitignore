@@ -1,7 +1,5 @@
 AGENTS.local.md
 /HANDOFF.md
-/.agent-sdlc/
-/docs/specs/
 /target/
 **/*.rs.bk
 Cargo.lock.bak
