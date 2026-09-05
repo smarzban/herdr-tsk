@@ -4,7 +4,7 @@
 0.41 in `site/`. **Not** packaged into the `tsk` binary. `cargo build` ignores it.
 
 **Public surface (product, not rustdoc).** Production
-https://tsk-gules.vercel.app. Vercel root directory `site`. `site/vercel.json`
+https://gettsk.sh. Vercel root directory `site`. `site/vercel.json`
 pins `npm ci`, `npm run build`, output `dist`, framework `astro`, and
 `ignoreCommand` so a commit that does not touch `site/**` skips the deploy.
 
@@ -23,7 +23,7 @@ pins `npm ci`, `npm run build`, output `dist`, framework `astro`, and
 | `scripts/generate-apple-touch.mjs` | Apple touch icons; run before `dev`/`build` |
 | `test/site.test.mjs` | `node --test` |
 
-Site config (`astro.config.mjs`): `site: 'https://tsk-gules.vercel.app'`, sitemap,
+Site config (`astro.config.mjs`): `site: 'https://gettsk.sh'`, sitemap,
 Starlight title `tsk`, GitHub edit links under `.../edit/main/site/`, sidebar
 Overview / Install / Board / Keys / Capture / CLI. Default theme script prefers
 dark (`tsk-theme` / `starlight-theme` in localStorage).

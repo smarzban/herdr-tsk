@@ -4,7 +4,7 @@ Maintainer-grade map of **tsk**: how it works, why it is shaped this way, and a 
 surface inventory. This tree is the internals.
 
 The **user guide** is the Starlight site (`site/src/content/docs/docs/`), published at
-https://tsk-gules.vercel.app/docs/. The repo README is the front door and points there.
+https://gettsk.sh/docs/. The repo README is the front door and points there.
 
 Crate: `tsk-tui` 0.4.0. Binary: `tsk`. Plugin: `herdr-tsk`.
 

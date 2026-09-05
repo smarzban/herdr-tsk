@@ -86,7 +86,7 @@ A running pane keeps the old binary until it is quit.
 
 ## Site (separate process)
 
-Astro app in `site/`. Production: `https://tsk-gules.vercel.app` (Vercel root
+Astro app in `site/`. Production: `https://gettsk.sh` (Vercel root
 directory `site`). Dev: `npm run dev` in `site/`. Not loaded by `tsk`. See
 [site](site.md).
 

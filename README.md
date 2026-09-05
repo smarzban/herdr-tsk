@@ -29,19 +29,19 @@ then **Open tsk board**. Rebuild after you pull. A running board keeps the old
 binary until you quit it.
 
 Full install (standalone vs plugin, env vars, quick capture):
-[Install](https://tsk-gules.vercel.app/docs/install/).
+[Install](https://gettsk.sh/docs/install/).
 
 ## Usage
 
 How to use the board and CLI lives on the site, not in this file:
 
-- [Overview](https://tsk-gules.vercel.app/docs/)
-- [Board](https://tsk-gules.vercel.app/docs/board/)
-- [Keys](https://tsk-gules.vercel.app/docs/keys/)
-- [Capture](https://tsk-gules.vercel.app/docs/capture/)
-- [Task page](https://tsk-gules.vercel.app/docs/task-page/)
-- [Steps](https://tsk-gules.vercel.app/docs/steps/)
-- [CLI](https://tsk-gules.vercel.app/docs/cli/)
+- [Overview](https://gettsk.sh/docs/)
+- [Board](https://gettsk.sh/docs/board/)
+- [Keys](https://gettsk.sh/docs/keys/)
+- [Capture](https://gettsk.sh/docs/capture/)
+- [Task page](https://gettsk.sh/docs/task-page/)
+- [Steps](https://gettsk.sh/docs/steps/)
+- [CLI](https://gettsk.sh/docs/cli/)
 
 The store is `~/.tsk/tsk.json`; walkthrough dismissal is kept beside it in
 `walkthrough.json`. Deleted tasks live in `trash.jsonl` beside the store; the
@@ -63,7 +63,7 @@ Mutating keys need Ctrl. Bare letters do nothing. Legacy modifier settings are i
 
 | Audience | Where |
 | --- | --- |
-| Using tsk | https://tsk-gules.vercel.app/docs/ (`site/`) |
+| Using tsk | https://gettsk.sh/docs/ (`site/`) |
 | Changing tsk | [`docs/technical/`](docs/technical/) |
 
 ```bash

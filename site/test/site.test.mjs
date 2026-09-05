@@ -1,10 +1,42 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
+import { extname, join } from "node:path";
 import test from "node:test";
 
 import { parseCapture } from "../public/capture.js";
 
 const read = (path) => readFile(new URL(path, import.meta.url), "utf8");
+
+test("no tracked file still points at the old preview domain", async () => {
+  const repoRoot = new URL("../../", import.meta.url).pathname;
+  // docs/specs is intentionally out of scope; the rest are untracked build or
+  // local-only trees whose contents never ship.
+  const skipDirs = new Set([
+    ".git", ".review-panel", ".astro", "node_modules", "target", "dist",
+    ".vercel", "specs",
+  ]);
+  const skipExt = new Set([".png", ".svg", ".ico", ".jpg", ".lock"]);
+  // Assembled so this file itself does not contain the literal domain.
+  const oldDomain = ["tsk-gules", "vercel"].join("-") + "." + "vercel.app";
+  const offenders = [];
+  const walk = async (dir) => {
+    for (const entry of await readdir(dir, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        if (!skipDirs.has(entry.name)) await walk(join(dir, entry.name));
+      } else if (!skipExt.has(extname(entry.name))) {
+        const text = await readFile(join(dir, entry.name), "utf8").catch(() => "");
+        if (text.includes(oldDomain)) offenders.push(join(dir, entry.name));
+      }
+    }
+  };
+  await walk(repoRoot);
+  assert.deepEqual(offenders, [], "stale preview-domain references remain");
+});
+
+test("the Astro site and sitemap build on the canonical URL", async () => {
+  const config = await read("../astro.config.mjs");
+  assert.match(config, /site: 'https:\/\/gettsk\.sh'/);
+});
 
 test("Vercel ignores unchanged files relative to the site root", async () => {
   const config = JSON.parse(await read("../vercel.json"));

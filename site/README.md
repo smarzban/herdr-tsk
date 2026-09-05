@@ -39,7 +39,7 @@ Output is `site/dist/`.
 
 Vercel should use this repository with **Root Directory** `site`.
 `vercel.json` pins install / build / output. Production is
-https://tsk-gules.vercel.app.
+https://gettsk.sh.
 
 Ignore builds that do not touch `site/**` so a Rust-only commit does not
 rebuild the landing page.

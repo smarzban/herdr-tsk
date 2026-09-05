@@ -140,7 +140,7 @@ For scriptable board work, use `tsk add` and `tsk list`; read
   (`paths-ignore: site/**`). Site CI is `.github/workflows/site.yml`:
   `npm ci && npm test && npm run build` in `site/`.
 - Landing page and Starlight docs live in `site/` (Astro). They are not part of
-  the `tsk` binary. Production: https://tsk-gules.vercel.app. Point Vercel at
+  the `tsk` binary. Production: https://gettsk.sh. Point Vercel at
   this repo with Root Directory `site`.
 - The docs and the website ship with the feature. Any change that adds, removes, or
   alters user-visible behaviour (a key, verb, palette command, mouse target, status
