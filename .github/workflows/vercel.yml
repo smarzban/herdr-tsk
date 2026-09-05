@@ -41,7 +41,8 @@ jobs:
 
       - name: Deploy
         id: deploy
-        working-directory: site
+        # Run from the repo root: the Vercel project's Root Directory is
+        # site/, so the CLI resolves the path itself and would double it.
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_ORG_ID: team_eErh7AfvdjecAyy2gaZkY76Q
