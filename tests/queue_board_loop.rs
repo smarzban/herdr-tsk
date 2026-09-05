@@ -352,3 +352,285 @@ fn threshold_crossings_without_task_verbs_leave_domain_unchanged() {
 
     assert_eq!(domain.get(id), Some(&before));
 }
+
+#[test]
+fn idle_merge_hides_a_task_archived_by_another_process_without_moving_selection() {
+    use tsk_tui::app::{revalidate_board_from_store, StoreWatch};
+    use tsk_tui::save_recovery::SaveRecovery;
+    use tsk_tui::store::TaskStore;
+
+    let dir = temp_state_dir("idle-archive");
+    let _guard = TempDirGuard(dir.clone());
+    let store = TaskStore::new(&dir);
+
+    let mut seed = DomainState::new();
+    seed.create(
+        "Merge archived X",
+        None,
+        TaskScope::Global,
+        ProvenanceOrigin::Manual,
+        None,
+    )
+    .expect("create X");
+    let y = seed
+        .create(
+            "Stay selected Y",
+            None,
+            TaskScope::Global,
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create Y");
+    store.save(&seed).expect("seed two tasks");
+
+    // Process A: newest task (Y) sorts first, so the seeded selection rests on it.
+    let mut domain = store.load().expect("load A");
+    let mut model = BoardModel::from_domain(&domain, None);
+    assert_eq!(model.selected_id(), Some(y), "selection starts on Y");
+    let mut watch = StoreWatch::seeded(&store);
+
+    // Process B archives X behind A's back.
+    store
+        .locked_transition(|state| {
+            state
+                .archive_task(x_id(&seed))
+                .map_err(|error| error.to_string())?;
+            Ok(())
+        })
+        .expect("B archives X");
+
+    let changed = revalidate_board_from_store(
+        &store,
+        &mut domain,
+        &mut model,
+        &mut watch,
+        &SaveRecovery::new(),
+    );
+    assert!(changed, "the sibling write must be picked up");
+
+    let visible = model.visible_ids();
+    assert!(
+        !visible.contains(&x_id(&seed)),
+        "archived X must leave the visible rows: {visible:?}"
+    );
+    assert!(visible.contains(&y), "Y stays visible");
+    assert_eq!(
+        model.selected_id(),
+        Some(y),
+        "the selection must not move for a task it never held"
+    );
+}
+
+fn x_id(seed: &DomainState) -> uuid::Uuid {
+    seed.tasks()
+        .iter()
+        .find(|task| task.title == "Merge archived X")
+        .expect("seeded task X")
+        .id
+}
+
+#[test]
+fn idle_merge_leaves_a_project_focus_archived_by_another_process() {
+    use tsk_tui::app::{revalidate_board_from_store, StoreWatch};
+    use tsk_tui::save_recovery::SaveRecovery;
+    use tsk_tui::store::TaskStore;
+
+    let focus_path = "/repos/focus";
+    let dir = temp_state_dir("idle-focus-archived");
+    let _guard = TempDirGuard(dir.clone());
+    let store = TaskStore::new(&dir);
+
+    let mut seed = DomainState::new();
+    seed.create(
+        "focus task",
+        None,
+        TaskScope::Project {
+            path: focus_path.to_string(),
+        },
+        ProvenanceOrigin::Manual,
+        None,
+    )
+    .expect("create focus task");
+    seed.create(
+        "desk task",
+        None,
+        TaskScope::Global,
+        ProvenanceOrigin::Manual,
+        None,
+    )
+    .expect("create desk task");
+    store.save(&seed).expect("seed");
+
+    // Process A focuses the project.
+    let mut domain = store.load().expect("load A");
+    let mut model = BoardModel::from_domain(&domain, None);
+    model.set_selected_project(Some(std::path::PathBuf::from(focus_path)));
+    assert_eq!(
+        model.selected_project(),
+        Some(std::path::Path::new(focus_path))
+    );
+    let mut watch = StoreWatch::seeded(&store);
+
+    // Process B archives the focused project on disk.
+    store
+        .locked_transition(|state| {
+            state
+                .archive_project(focus_path)
+                .map_err(|error| error.to_string())?;
+            Ok(())
+        })
+        .expect("B archives the focus project");
+
+    let changed = revalidate_board_from_store(
+        &store,
+        &mut domain,
+        &mut model,
+        &mut watch,
+        &SaveRecovery::new(),
+    );
+    assert!(changed, "the sibling write must be picked up");
+
+    // The focus reset: home desk, a dim status line naming the project, and the
+    // archived task stays hidden.
+    assert_eq!(
+        model.selected_project(),
+        None,
+        "project focus must reset to home desk"
+    );
+    let message = model.message().expect("a status line names the project");
+    assert!(
+        message.contains("focus"),
+        "message names the project: {message:?}"
+    );
+    assert!(
+        !model.visible_ids().iter().any(|id| {
+            domain
+                .get(*id)
+                .is_some_and(|task| task.title == "focus task")
+        }),
+        "the archived project's task stays hidden"
+    );
+
+    // The quick-add default never resolves to the archived project after the merge.
+    let snapshot = tsk_tui::context::InvocationSnapshot {
+        default_scope: TaskScope::Project {
+            path: focus_path.to_string(),
+        },
+        this_repo: Some(std::path::PathBuf::from(focus_path)),
+        title_prefill: None,
+        provenance: ProvenanceOrigin::Capture,
+    };
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenCapture,
+        Some(&snapshot),
+    )
+    .expect("open capture");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::QuickAddInsertText("probe".into()),
+        None,
+    )
+    .expect("type");
+    apply_intent(&mut domain, &mut model, BoardIntent::QuickAddSave, None).expect("save");
+    model.sync_from_domain(&domain);
+    let probe = domain
+        .tasks()
+        .iter()
+        .find(|task| task.title == "probe")
+        .expect("probe saved");
+    assert_eq!(
+        probe.scope,
+        TaskScope::Global,
+        "quick-add must not resolve to the archived project after the merge"
+    );
+}
+
+#[test]
+fn idle_merge_converts_a_read_only_focus_whose_project_was_unarchived() {
+    use tsk_tui::app::{revalidate_board_from_store, StoreWatch};
+    use tsk_tui::save_recovery::SaveRecovery;
+    use tsk_tui::store::TaskStore;
+
+    let focus_path = "/repos/refiled";
+    let dir = temp_state_dir("idle-readonly-unarchived");
+    let _guard = TempDirGuard(dir.clone());
+    let store = TaskStore::new(&dir);
+
+    let mut seed = DomainState::new();
+    let inside = seed
+        .create(
+            "filed task",
+            None,
+            TaskScope::Project {
+                path: focus_path.to_string(),
+            },
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create");
+    seed.archive_project(focus_path).expect("archive");
+    store.save(&seed).expect("seed");
+
+    // Process A opens the read-only focus from the picker's archived tab.
+    let mut domain = store.load().expect("load A");
+    let mut model = BoardModel::from_domain(&domain, None);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenProjectSelector,
+        None,
+    )
+    .expect("picker");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ProjectPickerSwitchTab,
+        None,
+    )
+    .expect("archived tab");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ConfirmProjectChoice,
+        None,
+    )
+    .expect("read-only focus");
+    assert!(model.focus_is_archived());
+    let mut watch = StoreWatch::seeded(&store);
+
+    // Process B unarchives it on disk.
+    store
+        .locked_transition(|state| {
+            state
+                .unarchive_project(focus_path)
+                .map_err(|error| error.to_string())?;
+            Ok(())
+        })
+        .expect("B unarchives");
+
+    let changed = revalidate_board_from_store(
+        &store,
+        &mut domain,
+        &mut model,
+        &mut watch,
+        &SaveRecovery::new(),
+    );
+    assert!(changed, "the sibling write must be picked up");
+
+    assert!(
+        !model.focus_is_archived(),
+        "a read-only focus whose project came back is an ordinary project focus"
+    );
+    assert_eq!(
+        model.selected_project(),
+        Some(std::path::Path::new(focus_path)),
+        "on the same project"
+    );
+    assert!(
+        model.visible_ids().contains(&inside),
+        "its tasks stay on the board"
+    );
+}

@@ -89,7 +89,8 @@ pub fn load_board() -> Result<(TaskStore, DomainState, BoardModel), Box<dyn Erro
     let store = TaskStore::new(default_state_dir());
     let state = store.load()?;
     let snapshot = load_snapshot();
-    let model = BoardModel::from_domain(&state, snapshot.this_repo.clone());
+    let mut model = BoardModel::from_domain(&state, snapshot.this_repo.clone());
+    model.offer_launch_card(&state, &snapshot);
     Ok((store, state, model))
 }
 
@@ -276,6 +277,8 @@ fn run_capture() -> Result<(), Box<dyn Error>> {
     let mut domain = store.load()?;
     let snapshot = load_snapshot();
     let mut model = CaptureModel::from_snapshot(&snapshot);
+    // AC-39: an archived invocation repository is not on offer as a scope.
+    model.mark_archived_projects(&domain.archived_projects());
 
     // Query before the alternate screen is entered: it can block on a terminal round-trip,
     // and a blank alternate screen is what the user would be staring at meanwhile.
@@ -1047,7 +1050,8 @@ pub fn apply_board_intent_with_save_recovery(
             | BoardIntent::PageScrollDown
             | BoardIntent::PageWheelScrollUp
             | BoardIntent::PageWheelScrollDown
-            | BoardIntent::ToggleDoneDrawer => return apply_intent(domain, model, intent, None),
+            | BoardIntent::ToggleDoneDrawer
+            | BoardIntent::ToggleArchivedGroup => return apply_intent(domain, model, intent, None),
             _ => {
                 model.begin_save_recovery(recovery.error().unwrap_or("save failed"));
                 return Ok(IntentOutcome::None);

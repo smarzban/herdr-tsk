@@ -11,12 +11,18 @@ fn main() -> ExitCode {
         Surface::FindBoardPane => find_board_pane_main(),
         Surface::GlobalHelp => {
             println!(
-                "usage: tsk [capture] | add | steps | list | trash | --find-board-pane | --help\n\nCommands:\n  add    create one task or apply a JSON plan\n  steps  add or toggle one step on a task\n  list   inspect tasks\n  trash  restore a trashed task\n\nRun `tsk add --help`, `tsk steps --help`, `tsk list --help`, or `tsk trash --help` for command details."
+                "usage: tsk [capture] | add | steps | list | trash | archive | unarchive | project | --find-board-pane | --help\n\nCommands:\n  add    create one task or apply a JSON plan\n  steps  add or toggle one step on a task\n  list   inspect tasks\n  trash  restore a trashed task\n  archive    keep a task off the working views\n  unarchive  put an archived task back\n  project    archive or unarchive a project\n\nRun `tsk add --help`, `tsk steps --help`, `tsk list --help`, `tsk trash --help`, `tsk archive --help`, `tsk unarchive --help`, or `tsk project --help` for command details."
             );
             ExitCode::SUCCESS
         }
         Surface::Usage => usage_exit(),
-        Surface::Add | Surface::Steps | Surface::List | Surface::Trash => headless_main(args),
+        Surface::Add
+        | Surface::Steps
+        | Surface::List
+        | Surface::Trash
+        | Surface::Archive
+        | Surface::Unarchive
+        | Surface::Project => headless_main(args),
         Surface::Board | Surface::Capture => match tsk_tui::run(args) {
             Ok(()) => ExitCode::SUCCESS,
             Err(err) => {
@@ -28,7 +34,9 @@ fn main() -> ExitCode {
 }
 
 fn usage_exit() -> ExitCode {
-    eprintln!("usage: tsk [capture] | add | steps | list | trash | --find-board-pane | --help");
+    eprintln!(
+        "usage: tsk [capture] | add | steps | list | trash | archive | unarchive | project | --find-board-pane | --help"
+    );
     ExitCode::from(2)
 }
 

@@ -57,6 +57,7 @@ fn task(id: u128, title: &str, status: HumanStatus, scope: TaskScope, secs_ago: 
         }],
         steps: Vec::new(),
         soft_deleted: false,
+        archived: false,
         created_at: at,
         updated_at: at,
     }
@@ -341,6 +342,9 @@ fn fixture_model_on_tab<'a>(
         detail_open: None,
         list_scroll: 0,
         follow_list: true,
+        archived_collapsed: true,
+        archived_header_selected: false,
+        rows_dim: false,
     }
 }
 
@@ -838,6 +842,7 @@ fn overlay_rows_are_padded_exact_no_base_bleed() {
         model.overlay = QueueOverlay::ScopeDropdown {
             options: &scope_opts,
             selected: 0,
+            tabs: None,
         };
         let (rows, _geo) = paint(80, 24, &model);
         let desk_row = rows
@@ -2435,6 +2440,34 @@ fn golden_scenes() -> Vec<GoldenScene> {
     let done_model = fixture_model(&tasks, &done_view);
     let (done_rows, _) = paint(80, 24, &done_model);
 
+    // `done_drawer_archived`: the drawer open with an expanded archived group below the
+    // DONE rows -- the dim header with its count and the dim rows (glyph + T<n> kept).
+    let mut archived_tasks = fixture_tasks();
+    let mut archived_one = task(
+        7301,
+        "Archived receipt sweep",
+        HumanStatus::Ready,
+        project("/repos/tsk"),
+        45 * 60,
+    );
+    archived_one.number = Some(31);
+    archived_one.archived = true;
+    let mut archived_two = task(
+        7302,
+        "Archived vendored spike",
+        HumanStatus::Blocked,
+        TaskScope::Global,
+        50 * 60,
+    );
+    archived_two.number = Some(32);
+    archived_two.archived = true;
+    archived_tasks.push(archived_one);
+    archived_tasks.push(archived_two);
+    let archived_view = fixture_view(&archived_tasks, true);
+    let mut archived_model = fixture_model(&archived_tasks, &archived_view);
+    archived_model.archived_collapsed = false;
+    let (archived_rows, _) = paint(80, 24, &archived_model);
+
     vec![
         GoldenScene {
             name: "board",
@@ -2464,6 +2497,11 @@ fn golden_scenes() -> Vec<GoldenScene> {
         GoldenScene {
             name: "done_drawer",
             rows: done_rows,
+            width: 80,
+        },
+        GoldenScene {
+            name: "done_drawer_archived",
+            rows: archived_rows,
             width: 80,
         },
     ]
@@ -2577,9 +2615,7 @@ fn palette_golden_scene_commands_are_bound_to_the_real_m1_catalog_and_exclude_di
 /// bound task has steps steps (view mode). A task with no steps keeps the
 /// pre-T-7 verb bar exactly: the with-steps bar is the without-steps bar plus the
 /// one step-add entry — modifier implied by the bar's prefix convention — and
-/// nothing else. The full listing is asserted at a width the whole bar fits; at
-/// the 78-column standard floor the bar's existing width clipping may take the
-/// entry's label tail but never its key chord.
+/// nothing else. The full listing is asserted at a width the whole bar fits. At
 #[test]
 fn footer_lists_the_step_add_verb() {
     let page_verb_row_with = |steps: &[&str], width: u16| -> String {
@@ -2995,8 +3031,9 @@ fn all_golden_frames_pass_no_color_sgr_scan() {
         scanned += 1;
     }
     assert_eq!(
-        scanned, 6,
-        "expected the six board surface goldens (board, board_default_split_78, accordion, palette, help, done_drawer) in {dir:?}"
+        scanned, 7,
+        "expected the seven board surface goldens (board, board_default_split_78, accordion, \
+         palette, help, done_drawer, done_drawer_archived) in {dir:?}"
     );
 }
 
@@ -3445,5 +3482,884 @@ fn scrolled_done_section_pins_done_under_the_tabs() {
         header.contains("DONE"),
         "DONE header must pin under the tabs once that section reaches the top:\n{header}\n{}",
         rows.join("\n")
+    );
+}
+
+#[test]
+fn archived_task_paints_in_no_working_lens_in_any_status_at_any_tier() {
+    for status in [
+        HumanStatus::Ready,
+        HumanStatus::Started,
+        HumanStatus::Blocked,
+        HumanStatus::Review,
+        HumanStatus::Done,
+    ] {
+        let mut domain = DomainState::new();
+        let project = TaskScope::Project {
+            path: "/repos/lens".into(),
+        };
+        domain
+            .create(
+                "visible row task",
+                None,
+                project.clone(),
+                ProvenanceOrigin::Manual,
+                None,
+            )
+            .expect("create live task");
+        let archived_title = format!("archived-{status:?} row");
+        let archived_id = domain
+            .create(
+                archived_title.clone(),
+                None,
+                project,
+                ProvenanceOrigin::Manual,
+                None,
+            )
+            .expect("create archived task");
+        domain.archive_task(archived_id).expect("archive it");
+        let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/lens")));
+
+        // Lens setups: desk, projects, threads (home tabs) and project focus.
+        let lens_names = ["desk", "projects", "threads", "project focus"];
+        for (lens_index, lens) in lens_names.iter().enumerate() {
+            match lens_index {
+                0 => {
+                    apply_intent(
+                        &mut domain,
+                        &mut model,
+                        BoardIntent::SelectHomeTab(BoardTab::Desk),
+                        None,
+                    )
+                    .expect("desk tab");
+                }
+                1 => {
+                    apply_intent(
+                        &mut domain,
+                        &mut model,
+                        BoardIntent::SelectHomeTab(BoardTab::Projects),
+                        None,
+                    )
+                    .expect("projects tab");
+                }
+                2 => {
+                    apply_intent(
+                        &mut domain,
+                        &mut model,
+                        BoardIntent::SelectHomeTab(BoardTab::Threads),
+                        None,
+                    )
+                    .expect("threads tab");
+                }
+                _ => {
+                    apply_intent(
+                        &mut domain,
+                        &mut model,
+                        BoardIntent::OpenProjectSelector,
+                        None,
+                    )
+                    .expect("open picker");
+                    apply_intent(
+                        &mut domain,
+                        &mut model,
+                        BoardIntent::SelectProjectOption(1),
+                        None,
+                    )
+                    .expect("focus the project");
+                }
+            }
+
+            for (width, height) in [(80u16, 24u16), (40u16, 10u16)] {
+                let rows = board_rows(&model, width, height);
+                assert!(
+                    !rows.iter().any(|row| row.contains(&archived_title)),
+                    "archived {status:?} task painted at {width}x{height} in {lens}:\n{}",
+                    rows.join("\n")
+                );
+            }
+
+            // Stage G rail at a wide width: the board column is a 32-cell rail.
+            for _ in 0..2 {
+                apply_intent(&mut domain, &mut model, BoardIntent::StageRight, None)
+                    .expect("stage right");
+            }
+            let rows = board_rows(&model, 130, 24);
+            assert!(
+                !rows.iter().any(|row| row.contains(&archived_title)),
+                "archived {status:?} task painted on the stage G rail in {lens}:\n{}",
+                rows.join("\n")
+            );
+            for _ in 0..2 {
+                apply_intent(&mut domain, &mut model, BoardIntent::StageLeft, None)
+                    .expect("stage left");
+            }
+        }
+    }
+}
+
+#[test]
+fn archived_group_paints_below_done_with_its_count_and_no_header_when_empty() {
+    let mut domain = DomainState::new();
+    let project = TaskScope::Project {
+        path: "/repos/tsk".into(),
+    };
+    domain
+        .create(
+            "done row task",
+            None,
+            project.clone(),
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create done task");
+    let done_id = domain.tasks()[0].id;
+    domain.complete(done_id).expect("complete it");
+    let a = domain
+        .create(
+            "archived alpha",
+            None,
+            project.clone(),
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create a");
+    let b = domain
+        .create(
+            "archived beta",
+            None,
+            project,
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create b");
+    domain.archive_task(a).expect("archive a");
+    domain.archive_task(b).expect("archive b");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/tsk")));
+    apply_intent(&mut domain, &mut model, BoardIntent::ToggleDoneDrawer, None).expect("drawer");
+
+    let rows = board_rows(&model, 80, 24);
+    let done_row = rows
+        .iter()
+        .position(|row| row.contains("DONE"))
+        .expect("DONE header paints with the drawer open");
+    let archived_row = rows
+        .iter()
+        .position(|row| row.contains("archived") && row.contains('2'))
+        .expect("an `archived 2` header row must paint below DONE");
+    assert!(
+        archived_row > done_row,
+        "the archived group paints below DONE"
+    );
+    assert!(
+        !rows.iter().any(|row| row.contains("archived alpha")),
+        "collapsed: archived titles stay hidden:\n{}",
+        rows.join("\n")
+    );
+    assert!(!rows.iter().any(|row| row.contains("archived beta")));
+
+    // Zero archived: no archived header row at all.
+    domain.unarchive_task(a).expect("unarchive a");
+    domain.unarchive_task(b).expect("unarchive b");
+    model.sync_from_domain(&domain);
+    let rows = board_rows(&model, 80, 24);
+    assert!(
+        !rows.iter().any(|row| row.contains("archived")),
+        "no archived group with zero archived tasks:\n{}",
+        rows.join("\n")
+    );
+}
+
+#[test]
+fn expanded_archived_rows_are_dim_keep_glyph_and_identifier_and_are_selectable_and_hit_testable() {
+    use tsk_tui::ui::board::board_hit_map;
+    use tsk_tui::ui::render::QueueHitTarget;
+
+    let mut domain = DomainState::new();
+    domain
+        .create(
+            "live open task",
+            None,
+            TaskScope::Global,
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create live task");
+    let archived_id = domain
+        .create(
+            "archived deep work",
+            None,
+            TaskScope::Global,
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create archived task");
+    domain.archive_task(archived_id).expect("archive it");
+    // Numbers are assigned at the persistence boundary: round-trip through a store so
+    // the archived row carries its `T<n>` like a real session's rows do.
+    let dir = std::env::temp_dir().join(format!("tsk-render-archived-{}", Uuid::new_v4()));
+    let store = tsk_tui::store::TaskStore::new(&dir);
+    store.save(&domain).expect("save for numbers");
+    domain = store.load().expect("reload with numbers");
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(domain
+        .get(archived_id)
+        .and_then(|task| task.number)
+        .is_some());
+    let mut model = BoardModel::from_domain(&domain, None);
+    apply_intent(&mut domain, &mut model, BoardIntent::ToggleDoneDrawer, None).expect("drawer");
+    // The toggle intent selects the header row and expands the group.
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ToggleArchivedGroup,
+        None,
+    )
+    .expect("expand archived group");
+
+    // Paint BEFORE selecting the row: unselected archived rows are all-dim.
+    let backend = TestBackend::new(80, 24);
+    let mut terminal = Terminal::new(backend).expect("terminal");
+    terminal
+        .draw(|frame| {
+            let _ = draw_board(frame, &model);
+        })
+        .expect("draw board");
+    let buffer = terminal.backend().buffer();
+    assert_buffer_mono(buffer);
+    let row_y = (0..24)
+        .map(|y| {
+            let row: String = (0..80).map(|x| buffer[(x, y)].symbol()).collect();
+            (y, row)
+        })
+        .find(|(_, row)| row.contains("archived deep work"))
+        .expect("expanded archived row paints")
+        .0;
+    let row_text: String = (0..80).map(|x| buffer[(x, row_y)].symbol()).collect();
+    assert!(
+        row_text.contains("T2"),
+        "identifier prefix paints: {row_text}"
+    );
+    assert!(row_text.contains('○'), "status glyph is kept: {row_text}");
+    for x in 0..80 {
+        let symbol = buffer[(x, row_y)].symbol();
+        if symbol == " " {
+            continue;
+        }
+        assert!(
+            buffer[(x, row_y)]
+                .style()
+                .add_modifier
+                .contains(Modifier::DIM),
+            "every cell of the archived row is dim (cell {x}): {row_text}"
+        );
+    }
+
+    // Selectable: SelectNext from the header lands on the archived row.
+    apply_intent(&mut domain, &mut model, BoardIntent::SelectNext, None).expect("select next");
+    assert_eq!(
+        model.selected_id(),
+        Some(archived_id),
+        "SelectNext must land on the archived row"
+    );
+
+    // Hit-testable: the painted row carries the task's hit target.
+    let hits = board_hit_map(ratatui::layout::Rect::new(0, 0, 80, 24), &model);
+    assert!(
+        hits.regions
+            .iter()
+            .any(|hit| matches!(hit.target, QueueHitTarget::Task(t) if t == archived_id)),
+        "the archived row is hit-testable: {hits:?}"
+    );
+}
+
+#[test]
+fn task_page_header_slot_reads_archived_for_an_archived_task() {
+    let mut domain = DomainState::new();
+    domain
+        .create(
+            "live row task",
+            None,
+            TaskScope::Global,
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create live");
+    let archived_id = domain
+        .create(
+            "archived page task",
+            None,
+            TaskScope::Global,
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create archived");
+    domain.archive_task(archived_id).expect("archive it");
+
+    let open_page = |domain: &mut DomainState| -> BoardModel {
+        let mut model = BoardModel::from_domain(domain, None);
+        apply_intent(domain, &mut model, BoardIntent::ToggleDoneDrawer, None).expect("drawer");
+        apply_intent(domain, &mut model, BoardIntent::ToggleArchivedGroup, None)
+            .expect("expand archived group");
+        let idx = model
+            .visible_ids()
+            .iter()
+            .position(|&visible| visible == archived_id)
+            .expect("archived row visible");
+        apply_intent(domain, &mut model, BoardIntent::SelectIndex(idx), None)
+            .expect("select the archived row");
+        apply_intent(domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
+        model
+    };
+
+    // Single-pane 80x24: the header slot reads `archived`, not the status word.
+    let model = open_page(&mut domain);
+    let rows = board_rows(&model, 80, 24);
+    assert!(
+        rows.iter().any(|row| row.contains("archived")),
+        "header slot must read archived:\n{}",
+        rows.join("\n")
+    );
+    assert!(
+        !rows.iter().any(|row| row.contains("ready")),
+        "the status word must give way to archived:\n{}",
+        rows.join("\n")
+    );
+
+    // Wide 130x24 stage F: same header contract.
+    let model = open_page(&mut domain);
+    let rows = board_rows(&model, 130, 24);
+    assert!(
+        rows.iter().any(|row| row.contains("archived")),
+        "wide header slot must read archived:\n{}",
+        rows.join("\n")
+    );
+    assert!(
+        !rows.iter().any(|row| row.contains("ready")),
+        "wide status word must give way to archived:\n{}",
+        rows.join("\n")
+    );
+
+    // An unarchived task still shows its status word.
+    let mut model = BoardModel::from_domain(&domain, None);
+    apply_intent(&mut domain, &mut model, BoardIntent::SelectIndex(0), None).expect("select live");
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
+    let rows = board_rows(&model, 80, 24);
+    assert!(
+        rows.iter().any(|row| row.contains("ready")),
+        "unarchived task keeps its status word:\n{}",
+        rows.join("\n")
+    );
+}
+
+#[test]
+fn archived_tab_lists_exactly_the_archived_projects_and_paints_an_empty_state_line() {
+    let mut domain = DomainState::new();
+    domain
+        .create(
+            "app task",
+            None,
+            TaskScope::Project {
+                path: "/repos/zebra".into(),
+            },
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/zebra")));
+
+    // Empty archived tab: the tabs row paints and an empty-state line names the gap.
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenProjectSelector,
+        None,
+    )
+    .expect("open picker");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ProjectPickerSwitchTab,
+        None,
+    )
+    .expect("switch to the archived tab");
+    let rows = board_rows(&model, 80, 24);
+    assert!(
+        rows.iter()
+            .any(|row| row.contains("projects") && row.contains("archived")),
+        "the tabs row paints:\n{}",
+        rows.join("\n")
+    );
+    assert!(
+        rows.iter().any(|row| row.contains("no archived projects")),
+        "an empty archived tab paints an empty-state line:\n{}",
+        rows.join("\n")
+    );
+
+    // Archive the project elsewhere, reopen, switch: the tab lists exactly it.
+    domain
+        .archive_project("/repos/zebra")
+        .expect("archive zebra");
+    model = BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/zebra")));
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenProjectSelector,
+        None,
+    )
+    .expect("open picker");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ProjectPickerSwitchTab,
+        None,
+    )
+    .expect("switch to the archived tab");
+    let rows = board_rows(&model, 80, 24);
+    assert!(
+        rows.iter().any(|row| row.contains("zebra")),
+        "the archived tab lists the archived project:\n{}",
+        rows.join("\n")
+    );
+    assert!(
+        !rows.iter().any(|row| row.contains("no archived projects")),
+        "the empty-state line yields to the entry:\n{}",
+        rows.join("\n")
+    );
+}
+
+#[test]
+fn archived_project_paints_nowhere_on_home_tabs_or_the_picker_main_list() {
+    let mut domain = DomainState::new();
+    domain
+        .create(
+            "gone started task",
+            None,
+            TaskScope::Project {
+                path: "/repos/gone".into(),
+            },
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create");
+    domain
+        .set_status(domain.tasks()[0].id, HumanStatus::Started)
+        .expect("started");
+    domain
+        .create(
+            "here task",
+            None,
+            TaskScope::Project {
+                path: "/repos/here".into(),
+            },
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create");
+    domain.archive_project("/repos/gone").expect("archive gone");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/here")));
+
+    for tab in [BoardTab::Desk, BoardTab::Projects, BoardTab::Threads] {
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::SelectHomeTab(tab),
+            None,
+        )
+        .expect("switch tab");
+        let rows = board_rows(&model, 80, 24);
+        assert!(
+            !rows.iter().any(|row| row.contains("gone started task")),
+            "{tab:?}: the archived project's task paints:\n{}",
+            rows.join("\n")
+        );
+        if tab == BoardTab::Projects {
+            assert!(
+                !rows.iter().any(|row| row.contains("gone")),
+                "{tab:?}: the archived project paints a group:\n{}",
+                rows.join("\n")
+            );
+        }
+    }
+
+    // The picker's main list skips it too.
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenProjectSelector,
+        None,
+    )
+    .expect("open picker");
+    let rows = board_rows(&model, 80, 24);
+    // The picker paints basenames: the archived project's basename must be gone while
+    // the live project's stays.
+    assert!(
+        !rows.iter().any(|row| row.contains("gone")),
+        "picker main list paints the archived project:\n{}",
+        rows.join("\n")
+    );
+    assert!(
+        rows.iter().any(|row| row.contains("here")),
+        "picker main list keeps the live project:\n{}",
+        rows.join("\n")
+    );
+}
+
+#[test]
+fn archived_header_selection_follows_the_viewport() {
+    use ratatui::style::Modifier;
+
+    let mut domain = DomainState::new();
+    for i in 0..30u128 {
+        let id = domain
+            .create(
+                format!("done filler {i}"),
+                None,
+                TaskScope::Global,
+                ProvenanceOrigin::Manual,
+                None,
+            )
+            .expect("create done filler");
+        domain.complete(id).expect("complete filler");
+    }
+    let archived_id = domain
+        .create(
+            "archived below the fold",
+            None,
+            TaskScope::Global,
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create archived");
+    domain.archive_task(archived_id).expect("archive it");
+    let mut model = BoardModel::from_domain(&domain, None);
+    apply_intent(&mut domain, &mut model, BoardIntent::ToggleDoneDrawer, None).expect("drawer");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ToggleArchivedGroup,
+        None,
+    )
+    .expect("expand archived group");
+
+    // The toggle intent selects the header while the group expands; the header sits
+    // below 30 done rows, so without viewport follow it stays below the fold.
+    assert!(
+        model.archived_header_selected(),
+        "selection rests on the archived header"
+    );
+
+    let backend = TestBackend::new(80, 24);
+    let mut terminal = Terminal::new(backend).expect("terminal");
+    terminal
+        .draw(|frame| {
+            let _ = draw_board(frame, &model);
+        })
+        .expect("draw board");
+    let buffer = terminal.backend().buffer();
+    assert_buffer_mono(buffer);
+    let header_visible = (0..24).any(|y| {
+        let row: String = (0..80).map(|x| buffer[(x, y)].symbol()).collect();
+        if !(row.contains("archived") && row.contains('\u{25be}')) {
+            return false;
+        }
+        // Selected paint: the word `archived` is bold (AC-13 amended), never reverse.
+        (0..20).any(|x| {
+            buffer[(x, y)].symbol() == "a"
+                && buffer[(x, y)].style().add_modifier.contains(Modifier::BOLD)
+        })
+    });
+    assert!(
+        header_visible,
+        "the selected archived header must scroll into view, word bold:\n{}",
+        (0..24)
+            .map(|y| {
+                let row: String = (0..80).map(|x| buffer[(x, y)].symbol()).collect();
+                format!("{y:02} {row}")
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+}
+
+#[test]
+fn archived_header_reads_chevron_word_dot_count_and_selection_is_bold_not_reverse() {
+    use ratatui::style::Modifier;
+
+    let mut domain = DomainState::new();
+    let archived_id = domain
+        .create(
+            "archived header paint",
+            None,
+            TaskScope::Global,
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create archived");
+    domain.archive_task(archived_id).expect("archive it");
+    let mut model = BoardModel::from_domain(&domain, None);
+    apply_intent(&mut domain, &mut model, BoardIntent::ToggleDoneDrawer, None).expect("drawer");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ToggleArchivedGroup,
+        None,
+    )
+    .expect("expand and select the header");
+
+    let paint = |model: &BoardModel| {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        terminal
+            .draw(|frame| {
+                let _ = draw_board(frame, model);
+            })
+            .expect("draw board");
+        terminal.backend().buffer().clone()
+    };
+
+    // Selected: `▾ archived · 1`, the word bold, nothing reversed.
+    let buffer = paint(&model);
+    assert_buffer_mono(&buffer);
+    let header_y = (0..24)
+        .map(|y| {
+            let row: String = (0..80).map(|x| buffer[(x, y)].symbol()).collect();
+            (y, row)
+        })
+        .find(|(_, row)| row.contains("archived") && row.contains('▾'))
+        .expect("header row paints")
+        .0;
+    let row: String = (0..80).map(|x| buffer[(x, header_y)].symbol()).collect();
+    assert!(
+        row.contains("▾ archived · 1"),
+        "header reads chevron, word, dot, count: {row:?}"
+    );
+    let mut rule_cells = 0;
+    let mut word_bold = false;
+    let mut any_reverse = false;
+    for x in 0..80 {
+        let cell = buffer[(x, header_y)].clone();
+        let symbol = cell.symbol().to_string();
+        if symbol == "─" {
+            rule_cells += 1;
+        }
+        if cell.style().add_modifier.contains(Modifier::REVERSED) {
+            any_reverse = true;
+        }
+        let style = cell.style().add_modifier;
+        if style.contains(Modifier::BOLD) && symbol == "a" {
+            word_bold = true;
+        }
+    }
+    assert_eq!(rule_cells, 0, "the header has no rule row cells: {row:?}");
+    assert!(!any_reverse, "selected header never paints a reverse block");
+    assert!(
+        word_bold,
+        "the word `archived` is bold when selected: {row:?}"
+    );
+
+    // Unselected: all dim, no bold.
+    apply_intent(&mut domain, &mut model, BoardIntent::SelectIndex(1), None)
+        .expect("select the archived task row (index 0 is the header)");
+    let buffer = paint(&model);
+    assert_buffer_mono(&buffer);
+    let header_y = (0..24)
+        .map(|y| {
+            let row: String = (0..80).map(|x| buffer[(x, y)].symbol()).collect();
+            (y, row)
+        })
+        .find(|(_, row)| row.contains("archived") && row.contains('▾'))
+        .expect("header row still paints when unselected")
+        .0;
+    let row: String = (0..80).map(|x| buffer[(x, header_y)].symbol()).collect();
+    assert!(
+        row.contains("▾ archived · 1"),
+        "unselected header keeps its text: {row:?}"
+    );
+    for x in 0..80 {
+        let cell = buffer[(x, header_y)].clone();
+        if cell.symbol() == " " {
+            continue;
+        }
+        let style = cell.style().add_modifier;
+        assert!(
+            !style.contains(Modifier::BOLD),
+            "unselected header has no bold (cell {x}): {row:?}"
+        );
+        assert!(
+            !style.contains(Modifier::REVERSED),
+            "unselected header has no reverse (cell {x}): {row:?}"
+        );
+    }
+}
+
+#[test]
+fn picker_paints_a_dim_rule_under_its_tabs() {
+    let mut domain = DomainState::new();
+    domain
+        .create(
+            "picker task",
+            None,
+            TaskScope::Global,
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create");
+    let mut model = BoardModel::from_domain(&domain, None);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenProjectSelector,
+        None,
+    )
+    .expect("open picker");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ProjectPickerSwitchTab,
+        None,
+    )
+    .expect("switch to the archived tab");
+
+    let backend = TestBackend::new(80, 24);
+    let mut terminal = Terminal::new(backend).expect("terminal");
+    terminal
+        .draw(|frame| {
+            let _ = draw_board(frame, &model);
+        })
+        .expect("draw board");
+    let buffer = terminal.backend().buffer();
+    assert_buffer_mono(buffer);
+    let tabs_y = (0..24)
+        .map(|y| {
+            let row: String = (0..80).map(|x| buffer[(x, y)].symbol()).collect();
+            (y, row)
+        })
+        .find(|(_, row)| row.contains("projects") && row.contains("archived"))
+        .expect("tabs row paints")
+        .0;
+    let rule_row: String = (0..80).map(|x| buffer[(x, tabs_y + 1)].symbol()).collect();
+    let rule_cells = rule_row.matches('─').count();
+    assert!(
+        rule_cells >= 4,
+        "a dim rule row paints directly under the tabs: {rule_row:?}"
+    );
+    assert!(
+        buffer[(20, tabs_y + 1)]
+            .style()
+            .add_modifier
+            .contains(ratatui::style::Modifier::DIM),
+        "the rule is dim: {rule_row:?}"
+    );
+}
+
+#[test]
+fn archived_tab_verb_bar_advertises_ctrl_u_enter_esc() {
+    let mut domain = DomainState::new();
+    domain
+        .create(
+            "filed task",
+            None,
+            TaskScope::Project {
+                path: "/repos/filed".into(),
+            },
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create");
+    domain.archive_project("/repos/filed").expect("archive");
+    let mut model = BoardModel::from_domain(&domain, None);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenProjectSelector,
+        None,
+    )
+    .expect("picker");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ProjectPickerSwitchTab,
+        None,
+    )
+    .expect("archived tab");
+
+    let backend = TestBackend::new(80, 24);
+    let mut terminal = Terminal::new(backend).expect("terminal");
+    terminal
+        .draw(|frame| {
+            let _ = draw_board(frame, &model);
+        })
+        .expect("draw");
+    let buffer = terminal.backend().buffer();
+    assert_buffer_mono(buffer);
+    let frame: String = (0..24)
+        .map(|y| (0..80).map(|x| buffer[(x, y)].symbol()).collect::<String>())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        frame.contains("ctrl+u unarchive \u{b7} enter open \u{b7} esc close"),
+        "the archived tab's footer reads its own verbs:\n{frame}"
+    );
+}
+
+#[test]
+fn picker_list_capacity_counts_the_rule_row_on_a_short_frame() {
+    let mut domain = DomainState::new();
+    for index in 0..10 {
+        domain
+            .create(
+                format!("task {index}"),
+                None,
+                TaskScope::Project {
+                    path: format!("/repos/p{index}"),
+                },
+                ProvenanceOrigin::Manual,
+                None,
+            )
+            .expect("create");
+    }
+    let mut model = BoardModel::from_domain(&domain, None);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenProjectSelector,
+        None,
+    )
+    .expect("picker");
+    // Walk the selection onto the last option: it must stay painted, not clipped by the
+    // rule row the card also spends a content row on.
+    let last = model.project_options().len() - 1;
+    let label = match &model.project_options()[last] {
+        tsk_tui::ui::board::ProjectScopeOption::Home => "desk".to_string(),
+        tsk_tui::ui::board::ProjectScopeOption::Project(path) => {
+            tsk_tui::ui::board::project_option_label(path.as_path())
+        }
+    };
+    while model.project_picker_index() != Some(last) {
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::ProjectPickerNext,
+            None,
+        )
+        .expect("next");
+    }
+
+    let backend = TestBackend::new(78, 12);
+    let mut terminal = Terminal::new(backend).expect("terminal");
+    terminal
+        .draw(|frame| {
+            let _ = draw_board(frame, &model);
+        })
+        .expect("draw");
+    let buffer = terminal.backend().buffer();
+    assert_buffer_mono(buffer);
+    let frame: String = (0..12)
+        .map(|y| (0..78).map(|x| buffer[(x, y)].symbol()).collect::<String>())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        frame.contains(&format!("\u{25b8} {label}")),
+        "the selected last option paints on a short frame:\n{frame}"
     );
 }

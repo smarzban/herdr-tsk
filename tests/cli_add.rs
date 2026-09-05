@@ -1867,3 +1867,283 @@ fn state_dir_flag_wins_over_environment() {
     let _ = std::fs::remove_dir_all(environment_dir);
     let _ = std::fs::remove_dir_all(argument_dir);
 }
+
+#[test]
+fn add_into_an_archived_project_exits_1_with_project_archived_and_names_the_ways_out() {
+    let _env = env_lock();
+    let repo = temp_state_dir("archived-repo");
+    std::fs::create_dir(repo.join(".git")).expect("create git marker");
+    let dir = temp_state_dir("archived-add");
+    // Seed a task in the repo scope and archive the project.
+    let seeded = run_with(
+        [
+            "tsk",
+            "add",
+            "--state-dir",
+            &state_dir_arg(&dir),
+            "-t",
+            "seed",
+            "-p",
+            &repo.to_string_lossy(),
+        ],
+        Cursor::new(Vec::<u8>::new()),
+        true,
+    );
+    assert_eq!(seeded.code, 0, "{:?}", seeded.stderr);
+    let mut writable = TaskStore::new(&dir).load().expect("load store");
+    writable
+        .archive_project(&repo.to_string_lossy())
+        .expect("archive the repo project");
+    TaskStore::new(&dir)
+        .save(&writable)
+        .expect("persist record");
+
+    let prior = std::env::var_os("HERDR_PLUGIN_CONTEXT_JSON");
+    let context = format!(
+        r#"{{"focused_pane_cwd":{}}}"#,
+        serde_json::to_string(&repo).expect("serialize repo")
+    );
+    // SAFETY: ENV_LOCK serializes this test's process-wide environment mutation.
+    unsafe { std::env::set_var("HERDR_PLUGIN_CONTEXT_JSON", context) };
+
+    // Explicit -p into the archived project: exit 1, the refusal names the ways out.
+    let explicit = run_with(
+        [
+            "tsk",
+            "add",
+            "--state-dir",
+            &state_dir_arg(&dir),
+            "-t",
+            "x",
+            "-p",
+            &repo.to_string_lossy(),
+        ],
+        Cursor::new(Vec::<u8>::new()),
+        true,
+    );
+    assert_eq!(explicit.code, 1, "{explicit:?}");
+    for needle in ["project-archived", "--desk", "-p", "tsk project unarchive"] {
+        assert!(
+            explicit.stderr.contains(needle),
+            "stderr must contain {needle:?}: {:?}",
+            explicit.stderr
+        );
+    }
+
+    // The cwd default resolves to the same archived project: same refusal.
+    let from_cwd = run_with(
+        ["tsk", "add", "--state-dir", &state_dir_arg(&dir), "-t", "x"],
+        Cursor::new(Vec::<u8>::new()),
+        true,
+    );
+    assert_eq!(from_cwd.code, 1);
+    assert!(from_cwd.stderr.contains("project-archived"));
+
+    // Nothing was persisted.
+    let listed = run_with(
+        [
+            "tsk",
+            "list",
+            "--all",
+            "--json",
+            "--state-dir",
+            &state_dir_arg(&dir),
+        ],
+        Cursor::new(Vec::<u8>::new()),
+        true,
+    );
+    assert_eq!(listed.code, 0);
+    assert!(
+        !listed.stdout.contains("\"x\""),
+        "no refused draft persisted: {listed:?}"
+    );
+
+    // --desk still succeeds.
+    let desk = run_with(
+        [
+            "tsk",
+            "add",
+            "--state-dir",
+            &state_dir_arg(&dir),
+            "-t",
+            "desk side task",
+            "--desk",
+        ],
+        Cursor::new(Vec::<u8>::new()),
+        true,
+    );
+    assert_eq!(desk.code, 0, "{desk:?}");
+
+    match prior {
+        Some(value) => unsafe { std::env::set_var("HERDR_PLUGIN_CONTEXT_JSON", value) },
+        None => unsafe { std::env::remove_var("HERDR_PLUGIN_CONTEXT_JSON") },
+    }
+    let _ = std::fs::remove_dir_all(repo);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn plan_items_resolving_to_an_archived_project_refuse_with_project_archived() {
+    let _env = env_lock();
+    let repo = temp_state_dir("plan-archived-repo");
+    std::fs::create_dir(repo.join(".git")).expect("create git marker");
+    let dir = temp_state_dir("plan-archived");
+    let seeded = run_with(
+        [
+            "tsk",
+            "add",
+            "--state-dir",
+            &state_dir_arg(&dir),
+            "-t",
+            "seed",
+            "-p",
+            &repo.to_string_lossy(),
+        ],
+        Cursor::new(Vec::<u8>::new()),
+        true,
+    );
+    assert_eq!(seeded.code, 0, "{:?}", seeded.stderr);
+    let mut writable = TaskStore::new(&dir).load().expect("load store");
+    writable
+        .archive_project(&repo.to_string_lossy())
+        .expect("archive the repo project");
+    TaskStore::new(&dir)
+        .save(&writable)
+        .expect("persist record");
+
+    let prior = std::env::var_os("HERDR_PLUGIN_CONTEXT_JSON");
+    let context = format!(
+        r#"{{"focused_pane_cwd":{}}}"#,
+        serde_json::to_string(&repo).expect("serialize repo")
+    );
+    // SAFETY: ENV_LOCK serializes this test's process-wide environment mutation.
+    unsafe { std::env::set_var("HERDR_PLUGIN_CONTEXT_JSON", context) };
+
+    // Item 0 omits `project` and resolves to the archived cwd default; item 1 names it
+    // explicitly; item 2 is a desk item and must persist.
+    let output = run_with(
+        [
+            "tsk",
+            "add",
+            "--state-dir",
+            &state_dir_arg(&dir),
+            "--file",
+            "-",
+        ],
+        Cursor::new(
+            format!(
+                r#"[{{"title":"plan default"}},{{"title":"plan explicit","project":{}}},{{"title":"plan desk","project":null}}]"#,
+                serde_json::to_string(&repo.to_string_lossy()).expect("serialize path")
+            )
+            .into_bytes(),
+        ),
+        true,
+    );
+
+    match prior {
+        Some(value) => unsafe { std::env::set_var("HERDR_PLUGIN_CONTEXT_JSON", value) },
+        None => unsafe { std::env::remove_var("HERDR_PLUGIN_CONTEXT_JSON") },
+    }
+
+    assert_eq!(output.code, 1, "{output:?}");
+    let report: serde_json::Value = serde_json::from_str(&output.stdout).expect("plan report JSON");
+    let failed = report["failed"].as_array().expect("failed rows");
+    assert_eq!(
+        failed.len(),
+        2,
+        "both archived-project items refuse: {report}"
+    );
+    assert_eq!(failed[0]["code"], "project-archived");
+    assert_eq!(failed[0]["title"], "plan default");
+    assert_eq!(
+        failed[0]["error"],
+        "project is archived: use --desk, -p, or tsk project unarchive"
+    );
+    assert_eq!(failed[1]["code"], "project-archived");
+    assert_eq!(failed[1]["title"], "plan explicit");
+    let created = report["created"].as_array().expect("created rows");
+    assert_eq!(created.len(), 1);
+    assert_eq!(created[0]["title"], "plan desk");
+
+    let store = TaskStore::new(&dir).load().expect("load store");
+    assert!(
+        store
+            .tasks()
+            .iter()
+            .all(|task| task.title != "plan default" && task.title != "plan explicit"),
+        "refused plan items persisted nothing"
+    );
+    assert!(
+        store.tasks().iter().any(|task| task.title == "plan desk"),
+        "the desk item persisted"
+    );
+    let _ = std::fs::remove_dir_all(repo);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn plan_failed_rows_keep_item_order_when_an_archived_refusal_precedes_a_parse_failure() {
+    let _env = env_lock();
+    let repo = temp_state_dir("plan-archived-order-repo");
+    std::fs::create_dir(repo.join(".git")).expect("create git marker");
+    let dir = temp_state_dir("plan-archived-order");
+    let seeded = run_with(
+        [
+            "tsk",
+            "add",
+            "--state-dir",
+            &state_dir_arg(&dir),
+            "-t",
+            "seed",
+            "-p",
+            &repo.to_string_lossy(),
+        ],
+        Cursor::new(Vec::<u8>::new()),
+        true,
+    );
+    assert_eq!(seeded.code, 0, "{:?}", seeded.stderr);
+    let mut writable = TaskStore::new(&dir).load().expect("load store");
+    writable
+        .archive_project(&repo.to_string_lossy())
+        .expect("archive the repo project");
+    TaskStore::new(&dir)
+        .save(&writable)
+        .expect("persist record");
+
+    // Item 0 is an archived-project refusal (decided inside the transaction), item 1 is a
+    // parse failure (decided before it), item 2 persists. `failed` must still read 0, 1.
+    let output = run_with(
+        [
+            "tsk",
+            "add",
+            "--state-dir",
+            &state_dir_arg(&dir),
+            "--file",
+            "-",
+        ],
+        Cursor::new(
+            format!(
+                r#"[{{"title":"archived first","project":{}}},{{"title":"   "}},{{"title":"desk last","project":null}}]"#,
+                serde_json::to_string(&repo.to_string_lossy()).expect("serialize path")
+            )
+            .into_bytes(),
+        ),
+        true,
+    );
+    assert_eq!(output.code, 1, "{output:?}");
+    let report: serde_json::Value = serde_json::from_str(&output.stdout).expect("plan report JSON");
+    let failed = report["failed"].as_array().expect("failed rows");
+    let indices: Vec<u64> = failed
+        .iter()
+        .map(|row| row["i"].as_u64().expect("index"))
+        .collect();
+    assert_eq!(
+        indices,
+        vec![0, 1],
+        "failed rows are in item order: {report}"
+    );
+    assert_eq!(failed[0]["code"], "project-archived");
+    assert_eq!(failed[1]["code"], "empty-title");
+    let _ = std::fs::remove_dir_all(repo);
+    let _ = std::fs::remove_dir_all(dir);
+}

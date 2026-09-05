@@ -1805,3 +1805,260 @@ fn human_output_appends_thread_marker_iff_row_threaded_snapshots() {
     let _ = std::fs::remove_dir_all(repo);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn default_list_views_exclude_archived_tasks_and_tasks_of_archived_projects() {
+    let dir = temp_state_dir("archived-excluded");
+    let mut state = DomainState::new();
+    create_task(
+        &mut state,
+        "archived open task",
+        TaskScope::Global,
+        HumanStatus::Ready,
+    );
+    create_task(
+        &mut state,
+        "visible open task",
+        TaskScope::Global,
+        HumanStatus::Ready,
+    );
+    create_task(
+        &mut state,
+        "archived done task",
+        TaskScope::Global,
+        HumanStatus::Done,
+    );
+    create_task(
+        &mut state,
+        "visible done task",
+        TaskScope::Global,
+        HumanStatus::Done,
+    );
+    let project_archived_id = state
+        .create(
+            "project archived open",
+            None,
+            TaskScope::Project {
+                path: "/repos/gone".into(),
+            },
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create");
+    state
+        .archive_project("/repos/gone")
+        .expect("archive project");
+    for title in ["archived open task", "archived done task"] {
+        let id = state
+            .tasks()
+            .iter()
+            .find(|task| task.title == title)
+            .expect("created task")
+            .id;
+        state.archive_task(id).expect("archive task");
+    }
+    let _ = project_archived_id;
+    TaskStore::new(&dir).save(&state).expect("seed store");
+
+    let output = list(&[
+        "tsk".into(),
+        "list".into(),
+        "--all".into(),
+        "--state-dir".into(),
+        state_dir_arg(&dir),
+    ]);
+    assert_eq!(output.code, 0);
+    assert!(
+        output.stdout.contains("visible open task"),
+        "the live task lists: {output:?}"
+    );
+    for absent in [
+        "archived open task",
+        "archived done task",
+        "project archived open",
+    ] {
+        assert!(
+            !output.stdout.contains(absent),
+            "the open view must exclude {absent:?}: {output:?}"
+        );
+    }
+
+    let done = list(&[
+        "tsk".into(),
+        "list".into(),
+        "--done".into(),
+        "--all".into(),
+        "--state-dir".into(),
+        state_dir_arg(&dir),
+    ]);
+    assert_eq!(done.code, 0);
+    assert!(
+        done.stdout.contains("visible done task") && !done.stdout.contains("archived done task"),
+        "the done view excludes archived tasks: {done:?}"
+    );
+}
+
+#[test]
+fn list_archived_marks_task_and_project_rows_once_per_id() {
+    let dir = temp_state_dir("archived-view");
+    let mut state = DomainState::new();
+    create_task(
+        &mut state,
+        "individually archived",
+        TaskScope::Global,
+        HumanStatus::Ready,
+    );
+    let individually = state
+        .tasks()
+        .iter()
+        .find(|task| task.title == "individually archived")
+        .expect("created")
+        .id;
+    state.archive_task(individually).expect("archive it");
+    create_task(
+        &mut state,
+        "in archived project",
+        TaskScope::Project {
+            path: "/repos/gone".into(),
+        },
+        HumanStatus::Started,
+    );
+    let _in_project = state
+        .tasks()
+        .iter()
+        .find(|task| task.title == "in archived project")
+        .expect("created")
+        .id;
+    let both_id = state
+        .create(
+            "archived in archived project",
+            None,
+            TaskScope::Project {
+                path: "/repos/gone".into(),
+            },
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create");
+    state.archive_task(both_id).expect("archive it");
+    state
+        .archive_project("/repos/gone")
+        .expect("archive project");
+    // One soft-deleted archived task never lists.
+    let deleted_id = state
+        .create(
+            "archived deleted",
+            None,
+            TaskScope::Global,
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create");
+    state.archive_task(deleted_id).expect("archive it");
+    state.soft_delete(deleted_id).expect("soft delete it");
+    TaskStore::new(&dir).save(&state).expect("seed store");
+
+    let human = list(&[
+        "tsk".into(),
+        "list".into(),
+        "--archived".into(),
+        "--all".into(),
+        "--state-dir".into(),
+        state_dir_arg(&dir),
+    ]);
+    assert_eq!(human.code, 0, "{:?}", human.stderr);
+    let listed: Vec<&str> = human
+        .stdout
+        .lines()
+        .filter(|line| line.trim_start().starts_with("- "))
+        .collect();
+    assert_eq!(listed.len(), 3, "one row per archived task id: {human:?}");
+    assert!(
+        human.stdout.contains("individually archived · archived"),
+        "{human:?}"
+    );
+    assert!(
+        human
+            .stdout
+            .contains("in archived project · project archived"),
+        "{human:?}"
+    );
+    assert!(
+        human
+            .stdout
+            .contains("archived in archived project · archived"),
+        "{human:?}"
+    );
+    assert!(
+        !human.stdout.contains("archived deleted"),
+        "soft-deleted archived tasks never list: {human:?}"
+    );
+
+    let json = list(&[
+        "tsk".into(),
+        "list".into(),
+        "--archived".into(),
+        "--all".into(),
+        "--json".into(),
+        "--state-dir".into(),
+        state_dir_arg(&dir),
+    ]);
+    assert_eq!(json.code, 0);
+    let rows: Vec<serde_json::Value> = serde_json::from_str(&json.stdout).expect("JSON rows");
+    assert_eq!(rows.len(), 3, "one row per id");
+    let row_for = |title: &str| {
+        rows.iter()
+            .find(|row| row["title"] == title)
+            .unwrap_or_else(|| panic!("no row for {title}"))
+    };
+    assert_eq!(row_for("individually archived")["archived"], "archived");
+    assert_eq!(
+        row_for("in archived project")["archived"],
+        "project archived"
+    );
+    assert_eq!(
+        row_for("archived in archived project")["archived"],
+        "archived",
+        "the task flag wins over the project mark"
+    );
+}
+
+#[test]
+fn archived_conflicts_are_usage_errors() {
+    let dir = temp_state_dir("archived-conflicts");
+    for (extra, label) in [
+        (vec!["--done".to_string()], "--done"),
+        (vec!["--deleted".to_string()], "--deleted"),
+    ] {
+        let mut args = vec![
+            "tsk".to_string(),
+            "list".to_string(),
+            "--archived".to_string(),
+            "--state-dir".to_string(),
+            state_dir_arg(&dir),
+        ];
+        args.extend(extra);
+        let output = list(&args);
+        assert_eq!(output.code, 2, "{label}: {output:?}");
+        assert!(
+            output.stderr.contains("--archived"),
+            "{label} conflict must name --archived: {:?}",
+            output.stderr
+        );
+    }
+
+    let with_task = list(&[
+        "tsk".into(),
+        "list".into(),
+        "--archived".into(),
+        "T1".into(),
+        "--state-dir".into(),
+        state_dir_arg(&dir),
+    ]);
+    assert_eq!(with_task.code, 2, "{with_task:?}");
+    assert!(
+        with_task.stderr.contains("--archived"),
+        "task-operand conflict must name --archived: {:?}",
+        with_task.stderr
+    );
+}

@@ -1,6 +1,6 @@
 ---
 title: CLI
-description: Headless tsk add, list, steps, and trash. The agents' door to the board.
+description: Headless tsk add, list, steps, trash, and archive. The agents' door to the board.
 ---
 
 The same `~/.tsk` store backs the board, herdr, and these commands. The board
@@ -34,7 +34,7 @@ The repo ships the same rules as an agent skill in
 | --- | --- |
 | `tsk` | opens the board |
 | `tsk capture` | opens the capture form (also `TSK_MODE=capture`) |
-| `tsk add` · `tsk list` · `tsk steps` · `tsk trash` | headless; below |
+| `tsk add` · `tsk list` · `tsk steps` · `tsk trash` · `tsk archive` · `tsk unarchive` · `tsk project` | headless; below |
 | `tsk --help` | usage, exit 0 |
 | `tsk --find-board-pane` | herdr helper: reads `pane list` JSON on stdin, prints the id of the pane labelled `tsk`; exit 1 when none |
 
@@ -98,6 +98,10 @@ desk outside a repository.
 - `--deleted` soft-deleted only: live soft-deletes plus trash entries from
   `trash.jsonl` (kept 30 days), deduped by task with the live copy winning,
   newest deletion first
+- `--archived` archived only: individually archived tasks plus tasks of
+  archived projects, one row per id, each marked `archived` or
+  `project archived`; JSON rows carry the mark in `archived`. Default views
+  never list archived tasks or tasks of archived projects
 - `--thread` filters within the selected scope
 
 Human output groups rows under `STARTED`, `READY`, `BLOCKED`, `REVIEW`, then
@@ -141,16 +145,46 @@ with a `restored` history event, a new revision, and its old number. A missing
 line, or a task that is already live, refuses with `T<n> is not in trash`
 (exit 1). Usage errors exit 2; store I/O exits 3.
 
+## archive and unarchive
+
+```
+tsk archive <task> [--state-dir <dir>]
+tsk unarchive <task> [--state-dir <dir>]
+```
+
+`archive` sets a task's archived flag; `unarchive` clears it. The task keeps its
+human status and its `T<n>`. Repeating the verb is idempotent: the same
+`archived T7 <title>` / `unarchived T7 <title>` line prints and nothing changes.
+An unknown task refuses with `T<n> is not on the board` and a soft-deleted task
+with `T<n> is deleted` (both exit 1); usage errors exit 2; store I/O exits 3.
+
+## project archive / unarchive
+
+```
+tsk project archive <name> [--state-dir <dir>]
+tsk project unarchive <name> [--state-dir <dir>]
+```
+
+`<name>` follows the `!p` rules: a project basename (case-insensitive) or a
+`/path` verbatim. Archiving writes one lazy project record; unarchiving removes
+it, and every task returns in the status it had — a task's own archived flag is
+independent. Output is `archived project <short>` / `unarchived project <short>`,
+idempotent on repeat. A name matching no project that has tasks exits 1 with
+`no project named <name> has tasks`.
+
 ## Exit contract
 
 | Exit | Meaning |
 | --- | --- |
-| 0 | listed, every add item created/existed, the step applied, or the task restored |
-| 1 | one or more item refusals (add/steps), or a trash restore with no matching line. Retry only the failed subset. For toggle, list first. |
+| 0 | listed, every add item created/existed, the step applied, the task restored, or the archive flag written (or already had the value) |
+| 1 | one or more item refusals (add/steps), a trash restore with no matching line, an unknown or deleted `archive`/`unarchive` task, or a project action matching nothing. Retry only the failed subset. For toggle, list first. |
 | 2 | usage or parse error, including a `list` address that matches nothing. Nothing persisted. |
 | 3 | store I/O. Commit is indeterminate. `tsk list` before retrying. |
 
-Add refusal codes: `empty-title`, `invalid-title`, `invalid-thread`, `invalid-item`.
+Add refusal codes: `empty-title`, `invalid-title`, `invalid-thread`, `invalid-item`,
+`project-archived`. `project-archived` prints `project <name> is archived. Use
+--desk, -p <other project>, or tsk project unarchive <name>` and persists
+nothing — it covers the cwd default and an explicit `-p`.
 Any C0 control in a title or step text is `invalid-title` / `invalid-step-text`
 before trimming.
 

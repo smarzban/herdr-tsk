@@ -22,5 +22,5 @@
 │                                                                              │
 │──────────────────────────────────────────────────────────────────────────────│
 │ 2 done                                                                       │
-│ enter open · ctrl+d done · ctrl+b block · : palette · ? help · + capture     │
+│ enter open · ctrl+d done · ctrl+b block · : palette · ? help · + capture · f…│
 └──────────────────────────────────────────────────────────────────────────────┘

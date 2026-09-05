@@ -47,12 +47,15 @@ moves to G, then runs the control you clicked.
 | `+` | [capture](/docs/capture/) |
 | `ctrl+e` | edit title |
 | `ctrl+x` or `ctrl+Delete` | delete (`ctrl+u` undoes) |
+| `ctrl+f` | file: toggle the task's archived flag. No undo entry. In the picker, archives the selected project; on the picker's archived tab (or `ctrl+u` on an archived selection) it unarchives |
+| `Enter` on the picker's archived tab | open that project in read-only focus |
+| `ctrl+u` in read-only focus | unarchive that project in place |
 | `z` | done drawer |
 | `:` | command palette |
 | `?` | help |
 | `P` | project picker |
 | `1` `2` `3` | home tabs: desk · projects · threads |
-| `ctrl+g` | expand or collapse all visible groups |
+| `ctrl+g` | expand or collapse all visible groups; while the done drawer is open the `archived` group folds and unfolds with them |
 | `Esc` | close one layer |
 | `ctrl+q` or `ctrl+c` | quit |
 
@@ -102,7 +105,8 @@ only typing, arrows, Tab, Enter, Esc, and Backspace.
 | Surface | Keys |
 | --- | --- |
 | `:` palette | type to filter · `↑` `↓` or `Tab` / `Shift+Tab` move · `Enter` run · `Esc` close |
-| `P` project picker | `j` `k` or arrows · `Enter` choose · `Esc` or `q` cancel |
+| `P` project picker | `j` `k` or arrows · `Tab` main/archived tabs · `Enter` choose · `ctrl+f` archive (archived tab: unarchive) · `Esc` or `q` cancel |
+| launch card | `y` unarchive · `n` or `Esc` keep archived |
 | `?` help | any key closes |
 | save failed | `r` or `Enter` retry · `c` or `Esc` cancel |
 

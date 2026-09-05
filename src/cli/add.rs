@@ -15,6 +15,8 @@ use crate::store::{default_state_dir, TaskStore};
 pub enum AddError {
     EmptyTitle,
     InvalidTitle,
+    /// The resolved scope is an archived project (cwd default or explicit `-p`).
+    ProjectArchived(String),
     Store(String),
 }
 
@@ -23,6 +25,7 @@ impl AddError {
         match self {
             Self::EmptyTitle => "empty-title",
             Self::InvalidTitle => "invalid-title",
+            Self::ProjectArchived(_) => "project-archived",
             Self::Store(_) => "store-error",
         }
     }
@@ -123,39 +126,49 @@ pub fn run(input: FlagAdd) -> Result<FlagAddResult, AddError> {
     store
         .locked_transition_if_changed(|domain| {
             let scope = resolve_flag_scope(project.as_deref(), global, domain, &snapshot);
-            if let Some(task) = existing_task(domain, &title, &scope, thread.as_deref()) {
-                return Ok((
-                    FlagAddResult::Existing {
-                        id: task.id,
-                        number: task
-                            .number
-                            .expect("loaded tasks receive a number before CLI presentation"),
-                        title: task.title.clone(),
-                        project: scope_project(&task.scope),
-                    },
-                    false,
-                ));
+            if let TaskScope::Project { path } = &scope {
+                if domain.is_project_archived(path) {
+                    let short = crate::ui::render::short_project(path).to_string();
+                    return Ok((Err(AddError::ProjectArchived(short)), false));
+                }
             }
-            let project = scope_project(&scope);
-            let id = domain
-                .create(&title, notes, scope, ProvenanceOrigin::Capture, thread)
-                .map_err(|error| error.to_string())?;
-            domain.assign_numbers_for_persistence();
-            let number = domain
-                .get(id)
-                .and_then(|task| task.number)
-                .expect("new tasks receive a number while the store lock is held");
-            Ok((
-                FlagAddResult::Created {
+            let outcome = if let Some(task) =
+                existing_task(domain, &title, &scope, thread.as_deref())
+            {
+                Ok(FlagAddResult::Existing {
+                    id: task.id,
+                    number: task
+                        .number
+                        .expect("loaded tasks receive a number before CLI presentation"),
+                    title: task.title.clone(),
+                    project: scope_project(&task.scope),
+                })
+            } else {
+                let project = scope_project(&scope);
+                let id =
+                    match domain.create(&title, notes, scope, ProvenanceOrigin::Capture, thread) {
+                        Ok(id) => id,
+                        Err(error) => {
+                            return Ok((Err(AddError::Store(error.to_string())), false));
+                        }
+                    };
+                domain.assign_numbers_for_persistence();
+                let number = domain
+                    .get(id)
+                    .and_then(|task| task.number)
+                    .expect("new tasks receive a number while the store lock is held");
+                Ok(FlagAddResult::Created {
                     id,
                     number,
                     title,
                     project,
-                },
-                true,
-            ))
+                })
+            };
+            let changed = matches!(outcome, Ok(FlagAddResult::Created { .. }));
+            Ok((outcome, changed))
         })
         .map_err(AddError::Store)
+        .and_then(|outcome| outcome)
 }
 
 /// Create every valid item from a parsed JSON plan in one durable write.
@@ -188,6 +201,17 @@ pub fn run_plan(
             let mut created = Vec::with_capacity(resolved.len());
             let mut existing = Vec::new();
             for item in resolved {
+                if let TaskScope::Project { path } = &item.scope {
+                    if domain.is_project_archived(path) {
+                        failed.push(Failed {
+                            i: item.i,
+                            title: Some(item.title),
+                            code: "project-archived",
+                            error: "project is archived: use --desk, -p, or tsk project unarchive",
+                        });
+                        continue;
+                    }
+                }
                 if let Some(task) =
                     existing_task(domain, &item.title, &item.scope, item.thread.as_deref())
                 {
@@ -223,6 +247,9 @@ pub fn run_plan(
                 });
             }
             let changed = !created.is_empty();
+            // Archived-project refusals join the parse failures inside the transaction, so
+            // restore item order before reporting.
+            failed.sort_by_key(|failure| failure.i);
             Ok((
                 PlanResult {
                     created,

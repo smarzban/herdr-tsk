@@ -92,6 +92,39 @@ or toggled, 1 for a refusal (stable tokens `empty-step-text`,
 `ambiguous-step`), 2 for a usage error, and 3 for store I/O — verify with
 `list` before retrying an exit 3, same as add.
 
+## Archived tasks and projects
+
+An archived task keeps its human status and leaves every working view. Archive
+by task address and bring it back the same way:
+
+```sh
+tsk archive T12
+tsk unarchive T12
+```
+
+Both are idempotent and exit 0 on repeat with the same line
+(`archived T12 <title>` / `unarchived T12 <title>`). An unknown task refuses
+with `T12 is not on the board` and a soft-deleted task with `T12 is deleted`
+(exit 1).
+
+Whole projects archive too, by `!p` name rules (basename case-insensitive or a
+`/path` verbatim):
+
+```sh
+tsk project archive widget
+tsk project unarchive widget
+```
+
+Unarchiving returns every task in the status it had; a task's own archived flag
+is independent. A name matching no project that has tasks exits 1 with
+`no project named <name> has tasks`.
+
+`tsk list --archived` lists archived tasks and tasks of archived projects, one
+row per id, marked `archived` or `project archived`; default list views exclude
+both. `tsk add` into an archived project exits 1 with code `project-archived`
+and the hint names `--desk`, `-p <other project>`, and
+`tsk project unarchive <name>` — nothing persists.
+
 ## Trash
 
 A soft-deleted task leaves the board store once it is no longer undoable, or

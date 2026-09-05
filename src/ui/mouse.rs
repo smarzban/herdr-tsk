@@ -32,6 +32,8 @@ pub enum BoardPopup {
     ProjectPicker,
     /// Board persistence failed; Retry or Cancel must resolve it before another mutation.
     SaveRecovery,
+    /// Two-choice card raised at launch when the cwd default is an archived project.
+    LaunchCard,
 }
 
 /// Labeled capture hit region.
@@ -312,6 +314,7 @@ fn verb_intent(model: &BoardModel, index: usize) -> Option<BoardIntent> {
         "b" => Some(BoardIntent::ToggleBlock),
         "x" => Some(BoardIntent::SoftDelete),
         "u" => Some(BoardIntent::Undo),
+        "f" => Some(BoardIntent::File),
         "e" => Some(BoardIntent::BeginEditTitle),
         "n" => Some(BoardIntent::BeginEditNotes),
         "a" => Some(BoardIntent::BeginAddStep),
@@ -359,6 +362,7 @@ fn form_verb_intent(model: &BoardModel, index: usize) -> Option<BoardIntent> {
 fn scope_dropdown_verb_intent(index: usize) -> Option<BoardIntent> {
     match SCOPE_VERBS.get(index)?.key {
         "enter" => Some(BoardIntent::ConfirmProjectChoice),
+        "f" => Some(BoardIntent::File),
         "esc" => Some(BoardIntent::CancelProjectPicker),
         _ => None,
     }
@@ -671,6 +675,7 @@ pub fn map_board_mouse(
             Some(QueueHitTarget::ProjectOption(index)) => {
                 Some(BoardIntent::SelectProjectOption(index))
             }
+            Some(QueueHitTarget::PickerTab(tab)) => Some(BoardIntent::SelectPickerTab(tab)),
             Some(QueueHitTarget::ModalChrome) => None,
             Some(QueueHitTarget::ModalClose) => Some(BoardIntent::CancelProjectPicker),
             Some(QueueHitTarget::Verb(index)) => scope_dropdown_verb_intent(index),
@@ -779,6 +784,11 @@ pub fn map_board_mouse(
             _ => None,
         },
         BoardInputMode::SaveRecovery => None,
+        BoardInputMode::LaunchCard => match hit_at(hits, pos) {
+            Some(QueueHitTarget::LaunchOption(0)) => Some(BoardIntent::LaunchUnarchive),
+            Some(QueueHitTarget::LaunchOption(1)) => Some(BoardIntent::LaunchKeepArchived),
+            _ => None,
+        },
         BoardInputMode::Normal => match hit_at(hits, pos) {
             Some(QueueHitTarget::ProjectChip) => Some(BoardIntent::OpenProjectSelector),
             Some(QueueHitTarget::HomeTab(tab)) => Some(BoardIntent::SelectHomeTab(tab)),
@@ -796,6 +806,7 @@ pub fn map_board_mouse(
                 subgroup_idx,
             }),
             Some(QueueHitTarget::Drawer) => Some(BoardIntent::ToggleDoneDrawer),
+            Some(QueueHitTarget::ArchivedHeader) => Some(BoardIntent::ToggleArchivedGroup),
             Some(QueueHitTarget::TaskNumber(id)) => Some(BoardIntent::CopyTaskNumber(id)),
             Some(QueueHitTarget::Task(id)) => model
                 .visible_ids()

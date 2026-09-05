@@ -55,6 +55,144 @@ pub enum TrashAction {
 }
 
 /// Parse `tsk trash` arguments, including argv0 and the `trash` subcommand.
+/// One project archive action.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProjectAction {
+    Archive { name: String },
+    Unarchive { name: String },
+}
+
+/// Parsed `tsk project archive|unarchive <name>` input.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FlagProject {
+    pub action: Option<ProjectAction>,
+    pub state_dir: Option<PathBuf>,
+    pub help: bool,
+}
+
+/// Parse `tsk project <action> <name>` arguments, including argv0. Mirrors the
+/// two-positional shape of `parse_flag_trash`.
+pub fn parse_flag_project(args: &[String]) -> Result<FlagProject, String> {
+    if args.get(1).map(String::as_str) != Some("project") {
+        return Err("expected project command".into());
+    }
+
+    let mut parsed = FlagProject {
+        action: None,
+        state_dir: None,
+        help: false,
+    };
+    let mut positionals: Vec<&str> = Vec::new();
+    let mut index = 2;
+    while let Some(flag) = args.get(index).map(String::as_str) {
+        let value = |name: &str| match args.get(index + 1) {
+            Some(value) if !value.starts_with('-') => Ok(value.clone()),
+            _ => Err(format!("missing value for {name}")),
+        };
+        match flag {
+            "--help" => {
+                parsed.help = true;
+                index += 1;
+            }
+            flag if flag.starts_with("--state-dir=") => {
+                parsed.state_dir = Some(PathBuf::from(flag["--state-dir=".len()..].to_owned()));
+                index += 1;
+            }
+            "--state-dir" => {
+                parsed.state_dir = Some(PathBuf::from(value(flag)?));
+                index += 2;
+            }
+            flag if flag.starts_with('-') => {
+                return Err(format!("unknown project argument {flag}"))
+            }
+            positional => {
+                if positionals.len() == 2 {
+                    return Err(format!("unexpected project argument {positional}"));
+                }
+                positionals.push(positional);
+                index += 1;
+            }
+        }
+    }
+
+    if parsed.help {
+        return Ok(parsed);
+    }
+    match positionals.as_slice() {
+        [] => {}
+        ["archive", name] => {
+            parsed.action = Some(ProjectAction::Archive {
+                name: (*name).to_string(),
+            });
+        }
+        ["unarchive", name] => {
+            parsed.action = Some(ProjectAction::Unarchive {
+                name: (*name).to_string(),
+            });
+        }
+        [action, _] => return Err(format!("unknown project action {action}")),
+        [action] => {
+            return Err(match *action {
+                "archive" | "unarchive" => "project name is required".into(),
+                other => format!("unknown project action {other}"),
+            })
+        }
+        _ => unreachable!("positionals are capped at two"),
+    }
+    Ok(parsed)
+}
+
+/// Parsed `archive` / `unarchive` input.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FlagArchive {
+    pub task: Option<TaskAddress>,
+    pub state_dir: Option<PathBuf>,
+    pub help: bool,
+}
+
+/// Parse `tsk archive <task>` / `tsk unarchive <task>` arguments, including argv0.
+pub fn parse_flag_archive(args: &[String], verb: &str) -> Result<FlagArchive, String> {
+    if args.get(1).map(String::as_str) != Some(verb) {
+        return Err(format!("expected {verb} command"));
+    }
+
+    let mut parsed = FlagArchive {
+        task: None,
+        state_dir: None,
+        help: false,
+    };
+    let mut index = 2;
+    while let Some(flag) = args.get(index).map(String::as_str) {
+        let value = |name: &str| match args.get(index + 1) {
+            Some(value) if !value.starts_with('-') => Ok(value.clone()),
+            _ => Err(format!("missing value for {name}")),
+        };
+        match flag {
+            "--help" => {
+                parsed.help = true;
+                index += 1;
+            }
+            flag if flag.starts_with("--state-dir=") => {
+                parsed.state_dir = Some(PathBuf::from(flag["--state-dir=".len()..].to_owned()));
+                index += 1;
+            }
+            "--state-dir" => {
+                parsed.state_dir = Some(PathBuf::from(value(flag)?));
+                index += 2;
+            }
+            flag if flag.starts_with('-') => return Err(format!("unknown {verb} argument {flag}")),
+            flag => {
+                if parsed.task.is_some() {
+                    return Err(format!("unknown {verb} argument {flag}"));
+                }
+                parsed.task = Some(parse_task_address(flag)?);
+                index += 1;
+            }
+        }
+    }
+    Ok(parsed)
+}
+
 pub fn parse_flag_trash(args: &[String]) -> Result<FlagTrash, String> {
     if args.get(1).map(String::as_str) != Some("trash") {
         return Err("expected trash command".into());

@@ -106,6 +106,9 @@ pub struct CaptureModel {
     /// Scope that will be saved (starts as snapshot default; user may override).
     scope: TaskScope,
     this_repo: Option<PathBuf>,
+    /// True when the invocation repository is an archived project. AC-39: the surface
+    /// then never offers it as a scope, exactly as if there were no repository.
+    this_repo_archived: bool,
     focused: CaptureField,
     /// When `Some`, scope row is editing an arbitrary project path.
     scope_path_edit: Option<String>,
@@ -139,6 +142,7 @@ impl CaptureModel {
             thread_refusal: None,
             scope: Self::default_scope(snapshot),
             this_repo: snapshot.this_repo.clone(),
+            this_repo_archived: false,
             focused: CaptureField::Title,
             scope_path_edit: None,
             message: None,
@@ -200,9 +204,24 @@ impl CaptureModel {
         }
     }
 
-    /// Whether a current repository exists to name as This project.
+    /// Whether a current repository exists to name as This project. An archived
+    /// invocation repository reads as unavailable (AC-39).
     pub fn this_project_available(&self) -> bool {
-        self.this_repo.is_some()
+        self.this_repo.is_some() && !self.this_repo_archived
+    }
+
+    /// Tell the draft which projects are archived. When the invocation repository is one
+    /// of them, This project stops being on offer and a scope already pointing at it
+    /// falls back to the desk.
+    pub fn mark_archived_projects(&mut self, archived: &std::collections::BTreeSet<String>) {
+        let Some(repo) = self.this_repo.as_deref() else {
+            return;
+        };
+        let path = repo.to_string_lossy().into_owned();
+        self.this_repo_archived = archived.contains(&path);
+        if self.this_repo_archived && self.scope == (TaskScope::Project { path }) {
+            self.scope = TaskScope::Global;
+        }
     }
 
     /// Whether the full project path may be shown: only while Other is selected or edited.
@@ -296,7 +315,11 @@ impl CaptureModel {
 
     fn cycle_scope(&mut self) {
         self.scope_path_edit = None;
-        self.scope = match (&self.scope, self.this_repo.as_deref()) {
+        let repo = self
+            .this_project_available()
+            .then_some(self.this_repo.as_deref())
+            .flatten();
+        self.scope = match (&self.scope, repo) {
             (TaskScope::Global, Some(repo)) => TaskScope::Project {
                 path: repo.to_string_lossy().into_owned(),
             },
@@ -309,7 +332,11 @@ impl CaptureModel {
     fn select_scope(&mut self, choice: CaptureScopeChoice) {
         self.focused = CaptureField::Scope;
         match choice {
-            CaptureScopeChoice::ThisProject => match self.this_repo.as_deref() {
+            CaptureScopeChoice::ThisProject => match self
+                .this_project_available()
+                .then_some(self.this_repo.as_deref())
+                .flatten()
+            {
                 Some(repo) => {
                     self.scope_path_edit = None;
                     self.scope = TaskScope::Project {
@@ -2516,5 +2543,50 @@ mod tests {
         assert!(domain.tasks().is_empty());
         assert_eq!(model.thread_refusal.as_deref(), Some("invalid thread name"));
         assert!(render_plain(&model, 80, 16).contains("invalid thread name"));
+    }
+
+    #[test]
+    fn capture_scope_never_offers_an_archived_this_project() {
+        let snapshot = InvocationSnapshot {
+            default_scope: TaskScope::Project {
+                path: "/repos/filed".into(),
+            },
+            this_repo: Some(PathBuf::from("/repos/filed")),
+            title_prefill: None,
+            provenance: ProvenanceOrigin::Capture,
+        };
+        let mut model = CaptureModel::from_snapshot(&snapshot);
+        assert!(model.this_project_available());
+
+        let mut archived = std::collections::BTreeSet::new();
+        archived.insert("/repos/filed".to_string());
+        model.mark_archived_projects(&archived);
+
+        assert!(
+            !model.this_project_available(),
+            "an archived invocation repo is not on offer"
+        );
+        assert_eq!(
+            model.scope(),
+            &TaskScope::Global,
+            "a scope pointing at it falls back to the desk"
+        );
+        model.select_scope(CaptureScopeChoice::ThisProject);
+        assert_eq!(
+            model.scope(),
+            &TaskScope::Global,
+            "choosing This project cannot select the archived repo"
+        );
+        assert_eq!(
+            model.message(),
+            Some(CAPTURE_THIS_PROJECT_UNAVAILABLE),
+            "and it says so"
+        );
+        model.cycle_scope();
+        assert_eq!(
+            model.scope(),
+            &TaskScope::Global,
+            "cycling never lands on the archived repo either"
+        );
     }
 }

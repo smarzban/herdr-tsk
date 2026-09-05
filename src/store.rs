@@ -34,9 +34,32 @@ type MigrationStep = fn(serde_json::Value) -> Result<serde_json::Value, StoreErr
 
 /// Document-format migrations: the index `i` step converts version `i + 1` to `i + 2`.
 ///
-/// Empty while v1 is current; a later format lands its steps here and rides the
-/// load/save seam already wired below.
-const MIGRATIONS: &[MigrationStep] = &[];
+/// v1 documents gain the empty per-project record map; a later format lands its
+/// steps here and rides the load/save seam already wired below.
+const MIGRATIONS: &[MigrationStep] = &[migrate_v1_to_v2];
+
+/// v1 -> v2: a v1 store has no archived projects, so it gains an empty project map.
+/// A v1 binary never wrote an `archived` task key either; one is stripped defensively
+/// so a migrated document holds no archived tasks.
+fn migrate_v1_to_v2(mut document: serde_json::Value) -> Result<serde_json::Value, StoreError> {
+    let object = document
+        .as_object_mut()
+        .ok_or_else(|| StoreError::Io(io::Error::other("store document must be a JSON object")))?;
+    object
+        .entry("projects".to_string())
+        .or_insert_with(|| serde_json::json!({}));
+    for task in object
+        .get_mut("tasks")
+        .and_then(|tasks| tasks.as_array_mut())
+        .into_iter()
+        .flatten()
+    {
+        if let Some(task_object) = task.as_object_mut() {
+            task_object.remove("archived");
+        }
+    }
+    Ok(document)
+}
 
 /// Walk the shipped migration chain from `from` up to the current format.
 fn migrate(document: serde_json::Value, from: u32) -> Result<serde_json::Value, StoreError> {
@@ -1229,7 +1252,7 @@ mod tests {
     }
 
     #[test]
-    fn save_emits_format_version_one() {
+    fn save_emits_format_version_two() {
         let dir = temp_dir("format-stamp");
         let _guard = TempDirGuard(dir.clone());
         let store = TaskStore::new(&dir);
@@ -1238,7 +1261,7 @@ mod tests {
         let value: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(dir.join(STATE_FILE)).expect("read"))
                 .expect("json");
-        assert_eq!(value["format_version"], 1);
+        assert_eq!(value["format_version"], 2);
     }
 
     #[test]
@@ -1255,7 +1278,7 @@ mod tests {
             error,
             StoreError::UnsupportedFormat {
                 found: 0,
-                supported: 1
+                supported: 2
             }
         ));
         let on_disk: serde_json::Value =
@@ -1266,7 +1289,7 @@ mod tests {
 
     #[test]
     fn load_refuses_noncurrent_format_without_rewriting() {
-        for format_version in [0, 2] {
+        for format_version in [0, 3] {
             let dir = temp_dir("format-noncurrent");
             let _guard = TempDirGuard(dir.clone());
             let document = serde_json::json!({
@@ -1284,7 +1307,7 @@ mod tests {
                     error,
                     StoreError::UnsupportedFormat {
                         found,
-                        supported: 1
+                        supported: 2
                     } if found == format_version
                 ),
                 "{error}"
@@ -1301,7 +1324,7 @@ mod tests {
         let dir = temp_dir("format-save-state");
         let _guard = TempDirGuard(dir.clone());
         let state: DomainState = serde_json::from_value(serde_json::json!({
-            "format_version": 2,
+            "format_version": 3,
             "next_task_number": 1,
             "tasks": [],
             "undo_stack": []
@@ -1314,8 +1337,8 @@ mod tests {
         assert!(matches!(
             error,
             StoreError::UnsupportedFormat {
-                found: 2,
-                supported: 1
+                found: 3,
+                supported: 2
             }
         ));
         assert!(!dir.join(STATE_FILE).exists());
@@ -1326,10 +1349,10 @@ mod tests {
         let dir = temp_dir("format-merge-local");
         let _guard = TempDirGuard(dir.clone());
         let store = TaskStore::new(&dir);
-        store.save(&DomainState::new()).expect("seed v1 store");
-        let before = fs::read(dir.join(STATE_FILE)).expect("read v1 store");
+        store.save(&DomainState::new()).expect("seed v2 store");
+        let before = fs::read(dir.join(STATE_FILE)).expect("read v2 store");
         let mut local: DomainState = serde_json::from_value(serde_json::json!({
-            "format_version": 2,
+            "format_version": 3,
             "next_task_number": 1,
             "tasks": [],
             "undo_stack": []
@@ -1342,8 +1365,8 @@ mod tests {
         assert!(matches!(
             error,
             StoreError::UnsupportedFormat {
-                found: 2,
-                supported: 1
+                found: 3,
+                supported: 2
             }
         ));
         assert_eq!(
@@ -1371,7 +1394,7 @@ mod tests {
                 error,
                 StoreError::UnsupportedFormat {
                     found: 3,
-                    supported: 1
+                    supported: 2
                 }
             ),
             "{error}"
@@ -1504,7 +1527,7 @@ mod tests {
         let dir = temp_dir("signature-inode");
         let _guard = TempDirGuard(dir.clone());
         let store = TaskStore::new(&dir);
-        let state = round_tripped_v1_state("same bytes");
+        let state = round_tripped_current_state("same bytes");
         store.save(&state).expect("first save");
         let first = store.state_signature().expect("first signature");
 
@@ -2242,7 +2265,7 @@ mod tests {
         );
     }
 
-    fn round_tripped_v1_state(title: &str) -> DomainState {
+    fn round_tripped_current_state(title: &str) -> DomainState {
         let mut state = DomainState::new();
         state
             .create(
@@ -2272,11 +2295,11 @@ mod tests {
     }
 
     #[test]
-    fn v1_document_round_trips_byte_identical_for_an_unchanged_state() {
+    fn v2_document_round_trips_byte_identical_for_an_unchanged_state() {
         let dir = temp_dir("round-trip-bytes");
         let _guard = TempDirGuard(dir.clone());
         let store = TaskStore::new(&dir);
-        let state = round_tripped_v1_state("unchanged");
+        let state = round_tripped_current_state("unchanged");
         store.save(&state).expect("first save");
         let first_bytes = fs::read(dir.join(STATE_FILE)).expect("read first");
 
@@ -2286,12 +2309,14 @@ mod tests {
         assert_eq!(
             fs::read(dir.join(STATE_FILE)).expect("read second"),
             first_bytes,
-            "an unchanged v1 state must serialize byte-identically"
+            "an unchanged v2 state must serialize byte-identically"
         );
     }
 
-    /// Injected v1 -> v2 step for the migration seam tests.
-    fn identity_v1_to_v2(document: serde_json::Value) -> Result<serde_json::Value, StoreError> {
+    /// Injected v2 -> v3 step for the migration seam tests. It sits at chain index 1
+    /// (next to the shipped v1 -> v2 step, which a v2 document never reaches), so a
+    /// seam load stamped from v2 applies exactly this step.
+    fn identity_v2_to_v3(document: serde_json::Value) -> Result<serde_json::Value, StoreError> {
         Ok(document)
     }
 
@@ -2340,17 +2365,17 @@ mod tests {
         let dir = temp_dir("migrated-load-save");
         let _guard = TempDirGuard(dir.clone());
         let store = TaskStore::new(&dir);
-        let original = round_tripped_v1_state("migrate me");
-        let original_bytes = serde_json::to_vec_pretty(&original).expect("encode v1");
+        let original = round_tripped_current_state("migrate me");
+        let original_bytes = serde_json::to_vec_pretty(&original).expect("encode v2");
         fs::create_dir_all(&dir).expect("mkdir");
-        fs::write(dir.join(STATE_FILE), &original_bytes).expect("seed v1 file");
+        fs::write(dir.join(STATE_FILE), &original_bytes).expect("seed v2 file");
 
         let mut state = store
-            .load_unlocked_supported(2, |document, from| {
-                migrate_with(document, from, &[identity_v1_to_v2])
+            .load_unlocked_supported(3, |document, from| {
+                migrate_with(document, from, &[migrate_v1_to_v2, identity_v2_to_v3])
             })
-            .expect("v1 file loads through the injected v1 -> v2 step");
-        assert_eq!(state.format_version(), 2);
+            .expect("v2 file loads through the injected v2 -> v3 step");
+        assert_eq!(state.format_version(), 3);
         assert_eq!(
             state.tasks()[0].title,
             "migrate me",
@@ -2358,20 +2383,20 @@ mod tests {
         );
 
         store
-            .save_unlocked_supported(&mut state, &StdFilesystem, 2)
-            .expect("first save at v2");
+            .save_unlocked_supported(&mut state, &StdFilesystem, 3)
+            .expect("first save at v3");
         assert_eq!(
-            fs::read(dir.join("tsk.json.v1")).expect("read version backup"),
+            fs::read(dir.join("tsk.json.v2")).expect("read version backup"),
             original_bytes,
             "the first backup of the pre-migration version is byte-identical"
         );
         let live: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(dir.join(STATE_FILE)).expect("read live"))
                 .expect("json");
-        assert_eq!(live["format_version"], 2);
+        assert_eq!(live["format_version"], 3);
         assert_eq!(live["tasks"][0]["title"], "migrate me");
         assert_eq!(
-            fs::read(dir.join("tsk.json.1")).expect("last-good holds the v1 original"),
+            fs::read(dir.join("tsk.json.1")).expect("last-good holds the v2 original"),
             original_bytes,
             "tsk.json.1 semantics are unchanged"
         );
@@ -2386,12 +2411,12 @@ mod tests {
             )
             .expect("create");
         store
-            .save_unlocked_supported(&mut state, &StdFilesystem, 2)
-            .expect("second save at v2");
+            .save_unlocked_supported(&mut state, &StdFilesystem, 3)
+            .expect("second save at v3");
         assert_eq!(
-            fs::read(dir.join("tsk.json.v1")).expect("read version backup"),
+            fs::read(dir.join("tsk.json.v2")).expect("read version backup"),
             original_bytes,
-            "a second save must not touch tsk.json.v1"
+            "a second save must not touch tsk.json.v2"
         );
     }
 
@@ -2400,22 +2425,22 @@ mod tests {
         let dir = temp_dir("version-backup-kept");
         let _guard = TempDirGuard(dir.clone());
         let store = TaskStore::new(&dir);
-        let original = round_tripped_v1_state("first backup wins");
-        let original_bytes = serde_json::to_vec_pretty(&original).expect("encode v1");
+        let original = round_tripped_current_state("first backup wins");
+        let original_bytes = serde_json::to_vec_pretty(&original).expect("encode v2");
         fs::create_dir_all(&dir).expect("mkdir");
-        fs::write(dir.join(STATE_FILE), &original_bytes).expect("seed v1 file");
-        fs::write(dir.join("tsk.json.v1"), b"existing backup").expect("seed existing backup");
+        fs::write(dir.join(STATE_FILE), &original_bytes).expect("seed v2 file");
+        fs::write(dir.join("tsk.json.v2"), b"existing backup").expect("seed existing backup");
 
         let mut state = store
-            .load_unlocked_supported(2, |document, from| {
-                migrate_with(document, from, &[identity_v1_to_v2])
+            .load_unlocked_supported(3, |document, from| {
+                migrate_with(document, from, &[migrate_v1_to_v2, identity_v2_to_v3])
             })
             .expect("load");
         store
-            .save_unlocked_supported(&mut state, &StdFilesystem, 2)
+            .save_unlocked_supported(&mut state, &StdFilesystem, 3)
             .expect("save");
         assert_eq!(
-            fs::read(dir.join("tsk.json.v1")).expect("read backup"),
+            fs::read(dir.join("tsk.json.v2")).expect("read backup"),
             b"existing backup",
             "the first backup of a given version is the one that matters"
         );
@@ -2423,7 +2448,7 @@ mod tests {
 
     #[test]
     fn load_refuses_a_higher_version_and_changes_nothing_in_the_state_dir() {
-        for (format_version, supported) in [(3u32, 1u32), (3, 2)] {
+        for (format_version, supported) in [(4u32, 2u32), (4, 3)] {
             let dir = temp_dir("format-higher");
             let _guard = TempDirGuard(dir.clone());
             let document = serde_json::json!({
@@ -2444,7 +2469,7 @@ mod tests {
             assert!(
                 matches!(
                     error,
-                    StoreError::UnsupportedFormat { found, supported: 1 } if found == format_version
+                    StoreError::UnsupportedFormat { found, supported: 2 } if found == format_version
                 ),
                 "{error}"
             );
@@ -2477,15 +2502,15 @@ mod tests {
         }
         let dir = temp_dir("migration-fails");
         let _guard = TempDirGuard(dir.clone());
-        let original = round_tripped_v1_state("fragile");
-        let original_bytes = serde_json::to_vec_pretty(&original).expect("encode v1");
+        let original = round_tripped_current_state("fragile");
+        let original_bytes = serde_json::to_vec_pretty(&original).expect("encode v2");
         fs::create_dir_all(&dir).expect("mkdir");
-        fs::write(dir.join(STATE_FILE), &original_bytes).expect("seed v1 file");
+        fs::write(dir.join(STATE_FILE), &original_bytes).expect("seed v2 file");
         let before = dir_listing_with_bytes(&dir);
 
         let error = TaskStore::new(&dir)
-            .load_unlocked_supported(2, |document, from| {
-                migrate_with(document, from, &[failing_step])
+            .load_unlocked_supported(3, |document, from| {
+                migrate_with(document, from, &[migrate_v1_to_v2, failing_step])
             })
             .expect_err("a failing migration step must fail the load");
         assert!(error.to_string().contains("migration exploded"), "{error}");

@@ -1373,3 +1373,308 @@ fn thread_paste_flattens_line_breaks_like_title() {
         "Thread must flatten pasted line breaks like Title"
     );
 }
+
+#[test]
+fn title_edit_on_an_archived_task_persists_and_keeps_the_flag() {
+    let mut domain = DomainState::new();
+    let id = domain
+        .create(
+            "Archived editable",
+            None,
+            project(THIS_REPO),
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create");
+    domain.archive_task(id).expect("archive it");
+    // Persist first so the task carries a number like a real session's rows do.
+    let dir = std::env::temp_dir().join(format!(
+        "tsk-edit-archived-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
+    ));
+    let store = tsk_tui::store::TaskStore::new(&dir);
+    store.save(&domain).expect("seed store");
+    domain = store.load().expect("reload persisted");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
+
+    // Open the archived task's page through the drawer's archived group.
+    apply_intent(&mut domain, &mut model, BoardIntent::ToggleDoneDrawer, None).expect("drawer");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ToggleArchivedGroup,
+        None,
+    )
+    .expect("expand");
+    let idx = model
+        .visible_ids()
+        .iter()
+        .position(|&visible| visible == id)
+        .expect("archived row visible");
+    apply_intent(&mut domain, &mut model, BoardIntent::SelectIndex(idx), None)
+        .expect("select the archived row");
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
+
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None).expect("edit title");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::EditInsertText(" (kept)".to_string()),
+        None,
+    )
+    .expect("type");
+    let outcome = apply_intent(&mut domain, &mut model, BoardIntent::ConfirmEdit, None)
+        .expect("confirm title edit");
+    assert_eq!(outcome, IntentOutcome::Persist);
+
+    store.reload_merge_save(&mut domain).expect("durable save");
+    let reloaded = store.load().expect("reload");
+    let task = reloaded.get(id).expect("task survives");
+    assert_eq!(task.title, "Archived editable (kept)");
+    assert!(task.archived, "the archived flag survives the save");
+    assert_eq!(task.status, HumanStatus::Ready, "status is unchanged");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn task_page_scope_dropdown_omits_archived_projects_but_keeps_the_current_scope() {
+    // Three projects: the invocation repo (live), a live one, and an archived one.
+    let mut domain = DomainState::new();
+    let live = domain
+        .create(
+            "live project task",
+            None,
+            project("/repos/other"),
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create live");
+    let stranded = domain
+        .create(
+            "task inside the archived project",
+            None,
+            project("/repos/filed"),
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create stranded");
+    domain.archive_project("/repos/filed").expect("archive it");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
+
+    // Editing a live task: the archived project is not on offer.
+    let index = model
+        .visible_ids()
+        .iter()
+        .position(|&id| id == live)
+        .expect("live row");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::SelectIndex(index),
+        None,
+    )
+    .expect("select live");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None).expect("edit");
+    let options = model.form_scope_options();
+    assert!(
+        !options.contains(&project("/repos/filed")),
+        "an archived project is never offered: {options:?}"
+    );
+    assert!(
+        options.contains(&project("/repos/other")) && options.contains(&TaskScope::Global),
+        "live projects and desk stay: {options:?}"
+    );
+    apply_intent(&mut domain, &mut model, BoardIntent::CancelEdit, None).expect("cancel");
+
+    // A form whose initial scope IS the archived project keeps it as the current value
+    // (the stranded task's own scope is never dropped from under it).
+    let snapshot = tsk_tui::context::InvocationSnapshot {
+        default_scope: project("/repos/filed"),
+        this_repo: Some(PathBuf::from("/repos/filed")),
+        title_prefill: None,
+        provenance: ProvenanceOrigin::Capture,
+    };
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/filed")));
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenCapture,
+        Some(&snapshot),
+    )
+    .expect("open capture");
+    apply_intent(&mut domain, &mut model, BoardIntent::ExpandQuickAdd, None).expect("expand");
+    let options = model.form_scope_options();
+    assert_eq!(
+        options.first(),
+        Some(&project("/repos/filed")),
+        "the form's own archived scope stays as its current value: {options:?}"
+    );
+    assert_eq!(
+        options
+            .iter()
+            .filter(|scope| **scope == project("/repos/filed"))
+            .count(),
+        1,
+        "and it is offered exactly once: {options:?}"
+    );
+    let _ = stranded;
+}
+
+#[test]
+fn task_page_in_read_only_focus_refuses_edit_mode() {
+    let mut domain = DomainState::new();
+    let inside = domain
+        .create(
+            "read-only page task",
+            None,
+            project(THIS_REPO),
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create");
+    domain.archive_project(THIS_REPO).expect("archive project");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenProjectSelector,
+        None,
+    )
+    .expect("picker");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ProjectPickerSwitchTab,
+        None,
+    )
+    .expect("archived tab");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ConfirmProjectChoice,
+        None,
+    )
+    .expect("read-only focus");
+    let index = model
+        .visible_ids()
+        .iter()
+        .position(|&id| id == inside)
+        .expect("row");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::SelectIndex(index),
+        None,
+    )
+    .expect("select");
+
+    // The page opens: it is view-only, not shut.
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("page opens");
+    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+
+    let refusal = "project app is archived \u{b7} ctrl+u unarchive";
+    for intent in [
+        BoardIntent::BeginEditTitle,
+        BoardIntent::BeginEditNotes,
+        BoardIntent::ExpandQuickAdd,
+        BoardIntent::BeginAddStep,
+    ] {
+        apply_intent(&mut domain, &mut model, intent.clone(), None)
+            .unwrap_or_else(|error| panic!("{intent:?} applies: {error}"));
+        assert_eq!(
+            model.input_mode(),
+            BoardInputMode::TaskPage,
+            "{intent:?} must not enter edit mode"
+        );
+        assert_eq!(
+            model.message(),
+            Some(refusal),
+            "{intent:?} paints the archived refusal"
+        );
+        assert!(
+            !model.task_session_dirty(),
+            "{intent:?} started no edit session"
+        );
+    }
+}
+
+#[test]
+fn tab_and_field_focus_on_a_read_only_task_page_stay_in_view_mode() {
+    let mut domain = DomainState::new();
+    let inside = domain
+        .create(
+            "read-only tab task",
+            None,
+            project(THIS_REPO),
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create");
+    domain.archive_project(THIS_REPO).expect("archive project");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenProjectSelector,
+        None,
+    )
+    .expect("picker");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ProjectPickerSwitchTab,
+        None,
+    )
+    .expect("archived tab");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ConfirmProjectChoice,
+        None,
+    )
+    .expect("read-only focus");
+    let index = model
+        .visible_ids()
+        .iter()
+        .position(|&id| id == inside)
+        .expect("row");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::SelectIndex(index),
+        None,
+    )
+    .expect("select");
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("page");
+    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+
+    let refusal = "project app is archived \u{b7} ctrl+u unarchive";
+    for intent in [
+        BoardIntent::FormFocusNext,
+        BoardIntent::FormFocusPrev,
+        BoardIntent::FocusFormField(CaptureField::Notes),
+        BoardIntent::FocusFormField(CaptureField::Title),
+        BoardIntent::SelectStep(0),
+    ] {
+        apply_intent(&mut domain, &mut model, intent.clone(), None)
+            .unwrap_or_else(|error| panic!("{intent:?} applies: {error}"));
+        assert_eq!(
+            model.input_mode(),
+            BoardInputMode::TaskPage,
+            "{intent:?} must not enter edit mode (AC-44)"
+        );
+        assert_eq!(
+            model.message(),
+            Some(refusal),
+            "{intent:?} paints the archived refusal"
+        );
+        assert!(
+            !model.task_session_dirty(),
+            "{intent:?} started no edit session"
+        );
+    }
+}

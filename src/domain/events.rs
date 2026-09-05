@@ -24,6 +24,8 @@ pub enum TaskEventKind {
     Reopened,
     SoftDeleted,
     Restored,
+    Archived,
+    Unarchived,
     StepAdded,
     StepChecked,
     StepUnchecked,

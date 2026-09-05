@@ -1,5 +1,6 @@
 //! Queue chrome, overlays, verb bar, and frame drawing hooks.
 
+use std::path::Path;
 use std::time::SystemTime;
 
 use ratatui::widgets::Paragraph;
@@ -20,7 +21,7 @@ use super::chrome::{notice_framed, row_width, DELETE_NOTICE_UNDO};
 use super::commands::CommandSurface;
 use super::model::{
     project_option_label, project_scope_option_label, BoardForm, BoardInputMode, BoardLocation,
-    BoardModel,
+    BoardModel, PickerTab, ProjectScopeOption,
 };
 
 /// Verb bar for the base board list: labels follow the selected task.
@@ -46,6 +47,32 @@ pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
         ];
     }
 
+    // AC-41/AC-43: the read-only archived focus offers only what works there.
+    if model.focus_is_archived() {
+        return vec![
+            VerbEntry {
+                key: "u",
+                label: "unarchive",
+            },
+            VerbEntry {
+                key: "enter",
+                label: "open",
+            },
+            VerbEntry {
+                key: "esc",
+                label: "back",
+            },
+            VerbEntry {
+                key: ":",
+                label: "palette",
+            },
+            VerbEntry {
+                key: "?",
+                label: "help",
+            },
+        ];
+    }
+
     // The task page's view mode: its own legend, true for the bound task.
     let page_task = if model.input_mode() == BoardInputMode::TaskPage {
         model
@@ -62,6 +89,31 @@ pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
     }
 
     let mut entries = Vec::with_capacity(7);
+    // The archived header holds the selection: its own verbs only.
+    if model.archived_header_selected() {
+        return vec![
+            VerbEntry {
+                key: "enter",
+                label: if model.archived_collapsed {
+                    "expand"
+                } else {
+                    "collapse"
+                },
+            },
+            VerbEntry {
+                key: ":",
+                label: help(":", "palette"),
+            },
+            VerbEntry {
+                key: "?",
+                label: help("?", "help"),
+            },
+            VerbEntry {
+                key: "+",
+                label: "capture",
+            },
+        ];
+    }
     let selected_task = model
         .selected_id()
         .and_then(|id| model.tasks.iter().find(|t| t.id == id));
@@ -116,11 +168,23 @@ pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
         key: "?",
         label: help("?", "help"),
     });
-    // Capture is last so the compact budget preserves the established board verbs.
+    // Capture and file are last so the compact budget preserves the established board
+    // verbs; the file verb trails capture because the established verbs win the
+    // standard width first.
     entries.push(VerbEntry {
         key: "+",
         label: "capture",
     });
+    if let Some(task) = selected_task {
+        entries.push(VerbEntry {
+            key: "f",
+            label: if task.archived {
+                "unarchive"
+            } else {
+                "archive"
+            },
+        });
+    }
     entries
 }
 
@@ -185,6 +249,15 @@ fn task_page_verb_items(model: &BoardModel, task: &crate::domain::Task) -> Vec<V
             label: "step",
         });
     }
+    // The file verb is last so the width budget clips it before the established page verbs.
+    entries.push(VerbEntry {
+        key: "f",
+        label: if task.archived {
+            "unarchive"
+        } else {
+            "archive"
+        },
+    });
     entries
 }
 
@@ -320,12 +393,16 @@ fn build_task_page_overlay<'a>(
     let status = bound_task
         .map(|task| task.status)
         .unwrap_or(HumanStatus::Ready);
-    let status_word = match status {
-        HumanStatus::Ready => "ready",
-        HumanStatus::Started => "started",
-        HumanStatus::Blocked => "blocked",
-        HumanStatus::Review => "review",
-        HumanStatus::Done => "done",
+    // AC-8: an archived task's header slot reads `archived` in place of the status word.
+    let status_word = match bound_task {
+        Some(task) if task.archived => "archived",
+        _ => match status {
+            HumanStatus::Ready => "ready",
+            HumanStatus::Started => "started",
+            HumanStatus::Blocked => "blocked",
+            HumanStatus::Review => "review",
+            HumanStatus::Done => "done",
+        },
     };
     let glyph = render::status_glyph(status);
 
@@ -615,6 +692,8 @@ struct OverlayPayloads<'a> {
     help_lines: Vec<String>,
     palette_commands: Vec<PaletteCommandRow<'a>>,
     scope_options: Vec<String>,
+    scope_tabs: Option<render::PickerTabsPaint>,
+    launch_card_name: Option<String>,
     scope_selected: usize,
 }
 
@@ -641,11 +720,21 @@ impl<'a> OverlayPayloads<'a> {
                 Vec::new()
             };
         let scope_options: Vec<String> = if model.popup() == BoardPopup::ProjectPicker {
-            model
-                .project_options()
-                .iter()
-                .map(project_scope_option_label)
-                .collect()
+            let labels = match model.picker_tab() {
+                Some(PickerTab::Archived) => model
+                    .archived_project_options()
+                    .iter()
+                    .map(|path| {
+                        project_scope_option_label(&ProjectScopeOption::Project(path.clone()))
+                    })
+                    .collect(),
+                _ => model
+                    .project_options()
+                    .iter()
+                    .map(project_scope_option_label)
+                    .collect(),
+            };
+            labels
         } else if model.input_mode() == BoardInputMode::FormScopeDropdown {
             // Short project names: the dropdown lists scopes, not filesystem paths.
             model
@@ -668,11 +757,24 @@ impl<'a> OverlayPayloads<'a> {
                 .position(|scope| Some(scope) == model.form_scope_dropdown_choice())
                 .unwrap_or(0)
         };
+        let launch_card_name = model.launch_card.as_deref().map(|path| {
+            Path::new(path)
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or(&path.to_string_lossy())
+                .to_string()
+        });
+        let scope_tabs = model.picker_tab().map(|tab| render::PickerTabsPaint {
+            archived_active: tab == PickerTab::Archived,
+            archived_count: model.archived_project_options().len(),
+        });
         Self {
             help_lines,
             palette_commands,
             scope_options,
             scope_selected,
+            scope_tabs,
+            launch_card_name,
         }
     }
 
@@ -741,10 +843,14 @@ impl<'a> OverlayPayloads<'a> {
                 commands: &self.palette_commands,
             });
         }
+        if let Some(name) = self.launch_card_name.as_deref() {
+            return Some(QueueOverlay::LaunchCard { name });
+        }
         if model.popup() == BoardPopup::ProjectPicker {
             return Some(QueueOverlay::ScopeDropdown {
                 options: &self.scope_options,
                 selected: self.scope_selected,
+                tabs: self.scope_tabs,
             });
         }
         None
@@ -817,12 +923,16 @@ fn task_header_state(model: &BoardModel, form: &BoardForm, task: &crate::domain:
     if is_retained && model.task_session_dirty() {
         return "unsaved".to_string();
     }
-    let status = match task.status {
-        HumanStatus::Ready => "ready",
-        HumanStatus::Started => "started",
-        HumanStatus::Blocked => "blocked",
-        HumanStatus::Review => "review",
-        HumanStatus::Done => "done",
+    let status = if task.archived {
+        "archived"
+    } else {
+        match task.status {
+            HumanStatus::Ready => "ready",
+            HumanStatus::Started => "started",
+            HumanStatus::Blocked => "blocked",
+            HumanStatus::Review => "review",
+            HumanStatus::Done => "done",
+        }
     };
     let project = match &task.scope {
         TaskScope::Project { path } => render::short_project(path).to_string(),
@@ -860,6 +970,10 @@ fn draw_board_impl(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap
     let scope_label = match &model.board_location {
         BoardLocation::Home { .. } => String::new(),
         BoardLocation::Project(path) => project_option_label(path.as_path()),
+        // AC-41: the read-only focus says so on the chip.
+        BoardLocation::ArchivedProject(path) => {
+            format!("{} \u{b7} archived", project_option_label(path.as_path()))
+        }
     };
     let (status_owned, status_undo_offset) = status_row_content(model);
     // The verb bar entries: computed from the selection and the open surface so the label
@@ -898,6 +1012,9 @@ fn draw_board_impl(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap
         detail_open: model.detail_open,
         list_scroll: model.list_scroll.get(),
         follow_list: model.follow_list.get(),
+        archived_collapsed: model.archived_collapsed,
+        archived_header_selected: model.archived_header_selected(),
+        rows_dim: model.focus_is_archived(),
     };
     let (hits, painted_list_scroll) = render::draw_queue_frame(frame, &frame_model, &geo, area);
     if let Some((scroll, max_scroll)) = painted_list_scroll {
@@ -953,6 +1070,10 @@ fn draw_wide_board(
     let scope_label = match &model.board_location {
         BoardLocation::Home { .. } => String::new(),
         BoardLocation::Project(path) => project_option_label(path.as_path()),
+        // AC-41: the read-only focus says so on the chip.
+        BoardLocation::ArchivedProject(path) => {
+            format!("{} \u{b7} archived", project_option_label(path.as_path()))
+        }
     };
     let (status_owned, status_undo_offset) = status_row_content(model);
     let verbs = board_verb_items(model);
@@ -985,6 +1106,7 @@ fn draw_wide_board(
                     model.this_repo.as_deref(),
                     &model.tasks,
                     CaptureField::Title,
+                    &model.archived_projects,
                 )
             })
         })
@@ -1064,6 +1186,9 @@ fn draw_wide_board(
         detail_open: None,
         list_scroll: model.list_scroll.get(),
         follow_list: model.follow_list.get(),
+        archived_collapsed: model.archived_collapsed,
+        archived_header_selected: model.archived_header_selected(),
+        rows_dim: model.focus_is_archived(),
     };
     let task_frame = QueueFrameModel {
         overlay: task_overlay.clone(),

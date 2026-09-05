@@ -58,9 +58,8 @@ fn ctrl(code: KeyCode) -> KeyEvent {
 
 fn mapped_key(code: KeyCode) -> KeyEvent {
     match code {
-        KeyCode::Char('s' | 'd' | 'o' | 'b' | 'a' | 'e' | 'x' | 'u' | 'q') | KeyCode::Delete => {
-            ctrl(code)
-        }
+        KeyCode::Char('s' | 'd' | 'o' | 'b' | 'a' | 'e' | 'x' | 'u' | 'f' | 'q')
+        | KeyCode::Delete => ctrl(code),
         _ => press(code),
     }
 }
@@ -618,6 +617,8 @@ fn click_and_wheel_match_keyboard_effects_for_each_control() {
     assert_verb_parity("colon", HumanStatus::Ready, ":", KeyCode::Char(':'));
     assert_verb_parity("question", HumanStatus::Ready, "?", KeyCode::Char('?'));
     assert_verb_parity("capture", HumanStatus::Started, "+", KeyCode::Char('+'));
+    // The file verb is last, so a Ready bar's budget trims it; a Started bar shows it.
+    assert_verb_parity("file", HumanStatus::Started, "f", KeyCode::Char('f'));
     assert_verb_parity("reopen", HumanStatus::Done, "o", KeyCode::Char('o'));
 
     // Drawer toggle: open it by keyboard on both boards first (a shared start state), then
@@ -2801,5 +2802,85 @@ fn task_page_autoscroll_tick_moves_notes() {
         before,
         "task-page autoscroll tick must move notes:\n{}",
         after.join("\n")
+    );
+}
+
+#[test]
+fn archived_group_is_collapsed_on_a_fresh_model_and_enter_or_click_on_the_header_toggles_it() {
+    let mut domain = DomainState::new();
+    let archived = domain
+        .create(
+            "archived click me",
+            None,
+            project(THIS_REPO),
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create archived");
+    domain.archive_task(archived).expect("archive it");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
+    apply_intent(&mut domain, &mut model, BoardIntent::ToggleDoneDrawer, None).expect("drawer");
+
+    let hits = board_hit_map(STANDARD, &model);
+    let header = hits
+        .regions
+        .iter()
+        .find(|hit| matches!(hit.target, QueueHitTarget::ArchivedHeader))
+        .expect("the archived header paints a hit region");
+    let intent = map_board_mouse(&model, &hits, left_click(header.area.x, header.area.y))
+        .expect("a header click maps to an intent");
+    assert_eq!(intent, BoardIntent::ToggleArchivedGroup);
+    apply_intent(&mut domain, &mut model, intent, None).expect("toggle");
+
+    assert!(
+        model.visible_ids().contains(&archived),
+        "the click expanded the group: archived row visible"
+    );
+
+    // Click again: collapses.
+    let hits = board_hit_map(STANDARD, &model);
+    let header = hits
+        .regions
+        .iter()
+        .find(|hit| matches!(hit.target, QueueHitTarget::ArchivedHeader))
+        .expect("header hit after expand");
+    let intent = map_board_mouse(&model, &hits, left_click(header.area.x, header.area.y))
+        .expect("header click maps after expand");
+    apply_intent(&mut domain, &mut model, intent, None).expect("toggle closed");
+    assert!(
+        !model.visible_ids().contains(&archived),
+        "the second click collapsed the group"
+    );
+}
+
+#[test]
+fn the_project_picker_tab_row_click_selects_the_tab() {
+    let (mut domain, mut model, _id) = board_with_task("tab click", HumanStatus::Ready);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenProjectSelector,
+        None,
+    )
+    .expect("open picker");
+    let hits = board_hit_map(STANDARD, &model);
+    let tab_hit = hits
+        .regions
+        .iter()
+        .find(|hit| {
+            matches!(hit.target, QueueHitTarget::PickerTab(t) if t == tsk_tui::ui::board::PickerTab::Archived)
+        })
+        .expect("the picker paints tab hit regions");
+    let intent = map_board_mouse(&model, &hits, left_click(tab_hit.area.x, tab_hit.area.y))
+        .expect("a tab click maps to an intent");
+    assert_eq!(
+        intent,
+        BoardIntent::SelectPickerTab(tsk_tui::ui::board::PickerTab::Archived)
+    );
+    apply_intent(&mut domain, &mut model, intent, None).expect("switch via click");
+    assert_eq!(
+        model.picker_tab(),
+        Some(tsk_tui::ui::board::PickerTab::Archived),
+        "the click switched to the archived tab"
     );
 }

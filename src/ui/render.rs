@@ -110,6 +110,8 @@ pub struct TaskRowPaint<'a> {
     pub selected: bool,
     /// Bold the title when unselected (e.g. attention emphasis).
     pub title_bold: bool,
+    /// Dim every span (the archived group's rows). Glyph and identifier are kept.
+    pub dim: bool,
 }
 
 /// One painted task-row line plus the title-content cells a text selection may copy.
@@ -168,6 +170,8 @@ pub fn paint_task_row_lines(
     let indent = " ".repeat(title_x);
     let continuation_style = if row.selected {
         style_reverse()
+    } else if row.dim {
+        style_dim()
     } else if row.title_bold {
         style_bold()
     } else {
@@ -247,6 +251,8 @@ fn paint_task_row_with_indent(
             style_reverse_dim(),
             style_reverse_dim(),
         )
+    } else if row.dim {
+        (style_dim(), style_dim(), style_dim(), style_dim())
     } else {
         (
             if row.title_bold {
@@ -428,10 +434,14 @@ pub enum QueueOverlay<'a> {
     },
     /// Help card (`?`).
     Help { lines: &'a [String] },
+    /// Launch card: the two-choice archived-project modal.
+    LaunchCard { name: &'a str },
     /// Project-scope dropdown from the selector chip.
     ScopeDropdown {
         options: &'a [String],
         selected: usize,
+        /// Picker tabs (main/archived). None for non-picker uses.
+        tabs: Option<PickerTabsPaint>,
     },
     /// Inline title edit surface (accordion row on standard; full takeover on compact).
     EditTitle { draft: String, cursor_col: u16 },
@@ -554,6 +564,20 @@ pub struct QueueFrameModel<'a> {
     pub list_scroll: usize,
     /// Nudge `list_scroll` so the selection (or its peek) stays on screen.
     pub follow_list: bool,
+    /// The archived group starts collapsed (session-only).
+    pub archived_collapsed: bool,
+    /// The archived header row holds the selection.
+    pub archived_header_selected: bool,
+    /// Every task row paints dim: the read-only archived focus (AC-41).
+    pub rows_dim: bool,
+}
+
+/// The project picker's tab row: which list is active and how many entries the
+/// archived one carries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PickerTabsPaint {
+    pub archived_active: bool,
+    pub archived_count: usize,
 }
 
 /// Logical control under a painted rectangle (rebuilt every frame).
@@ -573,6 +597,8 @@ pub enum QueueHitTarget {
     ///
     /// [`BoardIntent::ToggleDoneDrawer`]: crate::ui::input::BoardIntent::ToggleDoneDrawer
     Drawer,
+    /// The done drawer's archived group header: selects the row and toggles the group.
+    ArchivedHeader,
     /// One painted row of the open palette, indexed exactly as
     /// `BoardModel::visible_commands()` orders them, so a click resolves straight to that
     /// command's own intent ( residual: mapped through the model's command list, never
@@ -581,6 +607,10 @@ pub enum QueueHitTarget {
     /// One painted row of the open project-scope dropdown, indexed exactly as
     /// `BoardModel::project_options()` orders them.
     ProjectOption(usize),
+    /// One painted tab of the project picker's tab row.
+    PickerTab(crate::ui::board::PickerTab),
+    /// One choice row of the launch card (0 = unarchive, 1 = keep archived).
+    LaunchOption(usize),
     /// One painted home tab on the selector row.
     HomeTab(BoardTab),
     /// One ON DECK project-group header on the Projects tab, indexed into sections.
@@ -1239,6 +1269,7 @@ fn paint_footer(
             // the board's verb bar stays blank underneath it.
             QueueOverlay::Palette { .. }
             | QueueOverlay::Help { .. }
+            | QueueOverlay::LaunchCard { .. }
             | QueueOverlay::ScopeDropdown { .. } => &[],
             QueueOverlay::QuickAdd { recovery, .. } if *recovery => &[],
             QueueOverlay::QuickAdd { .. } => QUICK_ADD_VERBS,
@@ -1474,6 +1505,10 @@ pub(crate) const SCOPE_VERBS: &[VerbEntry<'static>] = &[
         label: "choose",
     },
     VerbEntry {
+        key: "f",
+        label: "file",
+    },
+    VerbEntry {
         key: "enter",
         label: "scope",
     },
@@ -1501,8 +1536,15 @@ fn paint_overlay(
         QueueOverlay::Help { lines } => {
             paint_help_overlay(frame, geo, surface, lines, hits);
         }
-        QueueOverlay::ScopeDropdown { options, selected } => {
-            paint_scope_dropdown(frame, geo, surface, options, *selected, hits);
+        QueueOverlay::LaunchCard { name } => {
+            paint_launch_card(frame, geo, surface, name, hits);
+        }
+        QueueOverlay::ScopeDropdown {
+            options,
+            selected,
+            tabs,
+        } => {
+            paint_scope_dropdown(frame, geo, surface, options, *selected, *tabs, hits);
         }
         QueueOverlay::EditTitle {
             ref draft,
@@ -1719,6 +1761,9 @@ struct ModalCardSpec<'a> {
     legend: &'a [VerbEntry<'a>],
     /// A full-frame dismiss hit to push first, before the card's own chrome (see below).
     dismiss: Option<QueueHitTarget>,
+    /// Per-entry hit targets for the footer legend, for cards whose choices live there
+    /// (the launch card, AC-22). `None` leaves the legend inert, as every other card.
+    legend_hits: Option<fn(usize) -> QueueHitTarget>,
 }
 
 /// Fixed row overhead a [`paint_modal_card`] with a footer legend (or not) spends on its
@@ -1748,6 +1793,7 @@ fn paint_modal_card(
         content_rows,
         legend,
         dismiss,
+        legend_hits,
     } = spec;
     if geo.row_width == 0 || geo.height == 0 || bounds.width == 0 || bounds.height == 0 {
         return Rect::default();
@@ -1811,6 +1857,28 @@ fn paint_modal_card(
             legend_offset,
             modal_legend_line(legend, card_w as usize),
         );
+        if let Some(target_for) = legend_hits {
+            // Mirror `modal_legend_line`'s layout: two leading pad cells, then
+            // `key label` per entry with ` · ` between them.
+            let mut cursor = x0.saturating_add(2);
+            let legend_y = y0.saturating_add(legend_offset);
+            for (index, entry) in legend.iter().enumerate() {
+                if index > 0 {
+                    cursor = cursor.saturating_add(3);
+                }
+                let entry_w = display_width(&format!("{} {}", entry.key, entry.label)) as u16;
+                let right = x0.saturating_add(card_w).saturating_sub(1);
+                if cursor >= right {
+                    break;
+                }
+                let width = entry_w.min(right.saturating_sub(cursor));
+                hits.push(
+                    target_for(index),
+                    Rect::new(cursor, legend_y, width.max(1), 1),
+                );
+                cursor = cursor.saturating_add(entry_w);
+            }
+        }
     }
 
     // Side borders for every middle row that is not already a full `├─┤` / top / bottom
@@ -1890,11 +1958,18 @@ fn modal_title_border_row(title: &str, card_w: u16) -> (Line<'static>, u16) {
     let fill = inner.saturating_sub(FIXED + title_w).max(1);
     let close_x = (1 + 2 + title_w + 1 + fill + 1) as u16;
 
+    // A titleless card (the launch card) keeps the rule continuous: the two pad cells around
+    // the empty title become rule cells so the top border has no gap.
+    let (lead, pad) = if shown_title.is_empty() {
+        ("──".to_string(), "─".to_string())
+    } else {
+        ("─ ".to_string(), " ".to_string())
+    };
     let spans = vec![
         Span::styled("┌".to_string(), style_dim()),
-        Span::styled("─ ".to_string(), style_dim()),
+        Span::styled(lead, style_dim()),
         Span::styled(shown_title, style_bold()),
-        Span::styled(" ".to_string(), style_dim()),
+        Span::styled(pad, style_dim()),
         Span::styled("─".repeat(fill), style_dim()),
         Span::styled(" ".to_string(), style_dim()),
         Span::styled("[x]".to_string(), style_bold()),
@@ -1949,6 +2024,23 @@ const PALETTE_FOOTER: &[VerbEntry<'static>] = &[
 ];
 
 /// Legend footer for the project-scope card.
+/// AC-40: the picker's archived tab has its own verbs. `ctrl+f` still unarchives, it is
+/// simply not advertised beside the chord that reads as the undo of filing.
+const ARCHIVED_TAB_FOOTER: &[VerbEntry<'static>] = &[
+    VerbEntry {
+        key: "ctrl+u",
+        label: "unarchive",
+    },
+    VerbEntry {
+        key: "enter",
+        label: "open",
+    },
+    VerbEntry {
+        key: "esc",
+        label: "close",
+    },
+];
+
 const SCOPE_FOOTER: &[VerbEntry<'static>] = &[
     VerbEntry {
         key: "↑/↓",
@@ -2029,6 +2121,7 @@ fn paint_palette_overlay(
             content_rows: rows as u16,
             legend: PALETTE_FOOTER,
             dismiss: None,
+            legend_hits: None,
         },
         hits,
     );
@@ -2139,6 +2232,7 @@ fn paint_help_overlay(
             content_rows: shown.len() as u16,
             legend: HELP_FOOTER,
             dismiss: Some(QueueHitTarget::HelpDismiss),
+            legend_hits: None,
         },
         hits,
     );
@@ -2908,6 +3002,58 @@ fn paint_page_scope_dropdown(
     }
 }
 
+pub(crate) const LAUNCH_FOOTER: &[VerbEntry<'static>] = &[
+    VerbEntry {
+        key: "y",
+        label: "unarchive",
+    },
+    VerbEntry {
+        key: "n",
+        label: "keep archived",
+    },
+];
+
+/// The launch card: raised before the first keypress when the invocation default
+/// resolved to an archived project. Two explicit choices, no `Enter` default.
+fn paint_launch_card(
+    frame: &mut Frame<'_>,
+    geo: &TierGeometry,
+    surface: Rect,
+    name: &str,
+    hits: &mut QueueHitMap,
+) {
+    if geo.row_width == 0 {
+        return;
+    }
+    let bounds = Rect::new(0, 0, geo.row_width, geo.height);
+    // AC-22 (amended): no title row and no option rows. One body line asks the
+    // question; the two choices live in the footer legend and are clickable there.
+    let content = paint_modal_card(
+        frame,
+        geo,
+        surface,
+        bounds,
+        ModalCardSpec {
+            title: "",
+            content_rows: 1,
+            legend: LAUNCH_FOOTER,
+            dismiss: None,
+            legend_hits: Some(QueueHitTarget::LaunchOption),
+        },
+        hits,
+    );
+    if content.width == 0 || content.height == 0 {
+        return;
+    }
+    let message = format!("project {name} is archived, would you like to unarchive it?");
+    put_line_at(
+        frame,
+        surface,
+        Rect::new(content.x, content.y, content.width, 1),
+        paint_bounded_line(&message, content.width, style_plain()),
+    );
+}
+
 /// The board's `P` project-scope picker: a centered modal card, not the chip-anchored
 /// dropdown this used to paint. [`paint_page_scope_dropdown`] (the task-page form's own
 /// scope control) is a separate, unrelated painter and keeps its chip-anchored panel.
@@ -2917,11 +3063,15 @@ fn paint_scope_dropdown(
     surface: Rect,
     options: &[String],
     selected: usize,
+    tabs: Option<PickerTabsPaint>,
     hits: &mut QueueHitMap,
 ) {
-    if geo.row_width == 0 || options.is_empty() {
+    if geo.row_width == 0 || (tabs.is_none() && options.is_empty()) {
         return;
     }
+    let tabs_rows = usize::from(tabs.is_some());
+    // An empty archived list still paints its empty-state row.
+    let empty_state = tabs.is_some() && options.is_empty();
     // Help/project-scope have nothing worth preserving underneath (no query row like the
     // palette), so the full frame is the ceiling: a narrow compact terminal gets every row
     // the border+footer would otherwise leave idle.
@@ -2931,12 +3081,19 @@ fn paint_scope_dropdown(
     let capacity = bounds
         .height
         .saturating_sub(modal_chrome_rows(geo.tier, true));
+    // The tab row and the dim rule under it (AC-37) share the card's content area with
+    // the list, so both come off the capacity or the last row is clipped.
+    let list_capacity = (capacity.max(1) as usize).saturating_sub(tabs_rows * 2);
     let max_n = if geo.tier == Tier::Compact {
-        capacity.max(1) as usize
+        list_capacity.max(1)
     } else {
-        options.len().min(12).min(capacity.max(1) as usize)
+        options.len().min(12).min(list_capacity.max(1))
     };
-    let rows = max_n.min(options.len());
+    let rows = if empty_state {
+        1
+    } else {
+        max_n.min(options.len())
+    };
     let selected = selected.min(options.len().saturating_sub(1));
     let scroll = if selected < rows {
         0
@@ -2954,18 +3111,80 @@ fn paint_scope_dropdown(
         bounds,
         ModalCardSpec {
             title: &title,
-            content_rows: rows as u16,
-            legend: SCOPE_FOOTER,
+            content_rows: (rows + tabs_rows + usize::from(tabs.is_some())) as u16,
+            legend: if tabs.is_some_and(|tabs| tabs.archived_active) {
+                ARCHIVED_TAB_FOOTER
+            } else {
+                SCOPE_FOOTER
+            },
             dismiss: None,
+            legend_hits: None,
         },
         hits,
     );
     if content.width == 0 || content.height == 0 {
         return;
     }
-    let paintable = rows.min(content.height as usize);
+    // The picker's tab row: `projects · archived (n)`, active bold, inactive dim.
+    if let Some(tabs) = tabs {
+        let y = content.y;
+        let main = " projects ";
+        let archived = format!(" archived ({}) ", tabs.archived_count);
+        let main_w = display_width(main) as u16;
+        let archived_w = display_width(&archived) as u16;
+        let (main_style, archived_style) = if tabs.archived_active {
+            (style_dim(), style_bold())
+        } else {
+            (style_bold(), style_dim())
+        };
+        put_line_at(
+            frame,
+            surface,
+            Rect::new(content.x, y, content.width, 1),
+            Line::from(vec![
+                Span::styled(main.to_string(), main_style),
+                Span::styled("·".to_string(), style_dim()),
+                Span::styled(archived, archived_style),
+            ]),
+        );
+        hits.push(
+            QueueHitTarget::PickerTab(crate::ui::board::PickerTab::Main),
+            Rect::new(content.x, y, main_w, 1),
+        );
+        hits.push(
+            QueueHitTarget::PickerTab(crate::ui::board::PickerTab::Archived),
+            Rect::new(content.x.saturating_add(main_w + 1), y, archived_w, 1),
+        );
+    }
+    // AC-37: a dim rule row sits directly under the picker's tabs row, like the
+    // board's rule under its tabs.
+    let rule_rows = usize::from(tabs.is_some());
+    if tabs.is_some() {
+        let y = content.y.saturating_add(1);
+        let rule = "\u{2500}".repeat(content.width as usize);
+        put_line_at(
+            frame,
+            surface,
+            Rect::new(content.x, y, content.width, 1),
+            Line::from(Span::styled(rule, style_dim())),
+        );
+    }
+    if empty_state {
+        let y = content.y.saturating_add((tabs_rows + rule_rows) as u16);
+        put_line_at(
+            frame,
+            surface,
+            Rect::new(content.x, y, content.width, 1),
+            paint_bounded_line("  no archived projects", content.width, style_dim()),
+        );
+        return;
+    }
+    let paintable = rows.min((content.height as usize).saturating_sub(tabs_rows + rule_rows));
     for (j, opt) in options.iter().enumerate().skip(scroll).take(paintable) {
-        let y = content.y.saturating_add((j - scroll) as u16);
+        let y = content
+            .y
+            .saturating_add((tabs_rows + rule_rows) as u16)
+            .saturating_add((j - scroll) as u16);
         let marker = if j == selected { "▸ " } else { "  " };
         let text = format!("{marker}{opt}");
         let style = if j == selected {
@@ -3007,6 +3226,11 @@ enum ListRow {
         subgroup_idx: usize,
         line: Line<'static>,
     },
+    /// The done drawer's archived group header (sticky, selectable, hits map to the
+    /// toggle intent). Selection styling is baked into the line.
+    ArchivedHeader {
+        line: Line<'static>,
+    },
     Hint(Line<'static>),
     /// Decorative scoped ON DECK thread-block label inside project focus.
     ThreadHeader(Line<'static>),
@@ -3037,6 +3261,7 @@ impl ListRow {
                 | ListRow::ProjectGroupHeader { .. }
                 | ListRow::ThreadGroupHeader { .. }
                 | ListRow::ThreadProjectHeader { .. }
+                | ListRow::ArchivedHeader { .. }
                 | ListRow::ThreadHeader(_)
         )
     }
@@ -3115,6 +3340,15 @@ fn paint_list_row(
                         section_idx: *section_idx,
                         subgroup_idx: *subgroup_idx,
                     },
+                    Rect::new(0, y, content_width, 1),
+                );
+            }
+        }
+        ListRow::ArchivedHeader { line } => {
+            put_line(frame, surface, y, content_width, line.clone());
+            if base_list_interactive {
+                hits.push(
+                    QueueHitTarget::ArchivedHeader,
                     Rect::new(0, y, content_width, 1),
                 );
             }
@@ -3244,7 +3478,8 @@ fn build_list_rows(
                      selected_idx: &mut Option<usize>,
                      anchor_last_idx: &mut Option<usize>,
                      in_project_section: bool,
-                     indented_under_thread: bool| {
+                     indented_under_thread: bool,
+                     dim: bool| {
         let Some(task) = model.tasks.iter().find(|task| task.id == id) else {
             // Stale ids may outlive a snapshot refresh. Skip them without inventing a row.
             return;
@@ -3272,6 +3507,8 @@ fn build_list_rows(
                     meta: &meta,
                     selected,
                     title_bold: false,
+                    // AC-41: every row of a read-only archived focus paints dim.
+                    dim: dim || model.rows_dim,
                 },
                 geo,
                 usize::from(indented_under_thread) * 2,
@@ -3307,8 +3544,41 @@ fn build_list_rows(
     };
 
     for (section_idx, section) in model.view.sections.iter().enumerate() {
-        // The rail drops the done drawer: it is a navigation strip for open work.
-        if rail && section.kind == SectionKind::Done {
+        // The rail drops the done drawer and its archived group: it is a navigation
+        // strip for open work.
+        if rail && matches!(section.kind, SectionKind::Done | SectionKind::Archived) {
+            continue;
+        }
+        // The archived group paints its own selectable header, dim rows under it.
+        if section.kind == SectionKind::Archived {
+            out.push(ListRow::Blank);
+            out.push(ListRow::ArchivedHeader {
+                line: paint_archived_header(
+                    section.count,
+                    geo.row_width,
+                    model.archived_header_selected,
+                    model.archived_collapsed,
+                ),
+            });
+            // The header pin must drive viewport follow exactly like a task row.
+            if model.archived_header_selected {
+                selected_idx = Some(out.len() - 1);
+            }
+            out.push(ListRow::Blank);
+            if model.archived_collapsed {
+                continue;
+            }
+            for id in section.task_ids.iter().copied() {
+                push_task(
+                    id,
+                    &mut out,
+                    &mut selected_idx,
+                    &mut anchor_last_idx,
+                    false,
+                    false,
+                    true,
+                );
+            }
             continue;
         }
         if !matches!(out.last(), Some(&ListRow::Blank)) {
@@ -3338,6 +3608,7 @@ fn build_list_rows(
                     &mut selected_idx,
                     &mut anchor_last_idx,
                     true,
+                    false,
                     false,
                 );
             }
@@ -3386,6 +3657,7 @@ fn build_list_rows(
                         &mut anchor_last_idx,
                         true,
                         true,
+                        false,
                     );
                 }
                 out.push(ListRow::Blank);
@@ -3420,6 +3692,7 @@ fn build_list_rows(
                         &mut anchor_last_idx,
                         in_project_section,
                         true,
+                        false,
                     );
                 }
                 out.push(ListRow::Blank);
@@ -3432,6 +3705,7 @@ fn build_list_rows(
                     &mut anchor_last_idx,
                     in_project_section,
                     false,
+                    false,
                 );
             }
         } else {
@@ -3442,6 +3716,7 @@ fn build_list_rows(
                     &mut selected_idx,
                     &mut anchor_last_idx,
                     in_project_section,
+                    false,
                     false,
                 );
             }
@@ -3604,6 +3879,27 @@ fn paint_collapsible_header(chevron: &str, title: &str, count: usize, width: u16
     )
 }
 
+/// The archived group's header: `{chevron} archived · {n}` with no rule. Selected,
+/// the word is bold and the rest dim; unselected, everything is dim. Never reverse.
+fn paint_archived_header(
+    count: usize,
+    width: u16,
+    selected: bool,
+    collapsed: bool,
+) -> Line<'static> {
+    let word_style = if selected { style_bold() } else { style_dim() };
+    let rest_style = style_dim();
+    let chevron = if collapsed { "\u{25b8}" } else { "\u{25be}" };
+    bound_line(
+        Line::from(vec![
+            Span::styled(format!(" {chevron} "), rest_style),
+            Span::styled("archived".to_string(), word_style),
+            Span::styled(format!(" \u{b7} {count}"), rest_style),
+        ]),
+        width as usize,
+    )
+}
+
 fn paint_section_header(
     section: &QueueSection,
     width: u16,
@@ -3636,6 +3932,7 @@ fn section_title(section: &QueueSection, at_home: bool, home_tab: BoardTab) -> S
     match section.kind {
         SectionKind::InMotion => "IN MOTION".to_string(),
         SectionKind::Done => "DONE".to_string(),
+        SectionKind::Archived => "archived".to_string(),
         SectionKind::OnDeck
             if at_home && home_tab == BoardTab::Desk && section.project_label.is_none() =>
         {
@@ -4212,6 +4509,8 @@ mod tests {
                 meta: long_meta,
                 selected: false,
                 title_bold: false,
+
+                dim: false,
             },
             &geo,
         );
@@ -4258,6 +4557,8 @@ mod tests {
                 meta: "1h",
                 selected: false,
                 title_bold: false,
+
+                dim: false,
             },
             &geo,
         );
@@ -4274,6 +4575,8 @@ mod tests {
                 meta: long_meta,
                 selected: false,
                 title_bold: false,
+
+                dim: false,
             },
             &geo,
         );
@@ -4321,6 +4624,8 @@ mod tests {
                                 meta,
                                 selected,
                                 title_bold: selected,
+
+                                dim: false,
                             },
                             &geo,
                         );
@@ -4370,6 +4675,8 @@ mod tests {
                 meta: "1m",
                 selected: false,
                 title_bold: false,
+
+                dim: false,
             },
             &geo,
         );
@@ -4389,6 +4696,8 @@ mod tests {
                 meta: "1m",
                 selected: true,
                 title_bold: false,
+
+                dim: false,
             },
             &geo,
         );
@@ -4437,6 +4746,8 @@ mod tests {
                 meta: "1h",
                 selected: false,
                 title_bold: false,
+
+                dim: false,
             },
             TaskRowPaint {
                 glyph: "▲",
@@ -4445,6 +4756,8 @@ mod tests {
                 meta: "tsk · 2m",
                 selected: false,
                 title_bold: true,
+
+                dim: false,
             },
             TaskRowPaint {
                 glyph: "◓",
@@ -4453,6 +4766,8 @@ mod tests {
                 meta: "3d",
                 selected: true,
                 title_bold: false,
+
+                dim: false,
             },
         ];
 

@@ -62,7 +62,8 @@ fn literal_current_v1_fixture_pins_the_complete_store_wire_shape() {
     .expect("install current fixture");
 
     let mut state = TaskStore::new(&dir).load().expect("load current fixture");
-    assert_eq!(state.format_version(), 1);
+    assert_eq!(state.format_version(), 2, "the v1 fixture loads migrated");
+    assert!(state.projects().is_empty());
     assert_eq!(state.next_task_number, 8);
     let task = state.tasks().first().expect("fixture task");
     assert_eq!(task.id.to_string(), "11111111-1111-4111-8111-111111111111");
@@ -75,6 +76,7 @@ fn literal_current_v1_fixture_pins_the_complete_store_wire_shape() {
     assert_eq!(task.notes.as_deref(), Some("Line one\nLine two"));
     assert_eq!(task.thread.as_deref(), Some("release-2026"));
     assert_eq!(task.status, HumanStatus::Done);
+    assert!(!task.archived);
     assert_eq!(
         task.scope,
         TaskScope::Project {
@@ -118,6 +120,58 @@ fn literal_current_v1_fixture_pins_the_complete_store_wire_shape() {
             .expect("fixture task after undo")
             .status,
         HumanStatus::Ready
+    );
+}
+
+#[test]
+fn v1_document_loads_through_the_chain_and_first_save_leaves_tsk_json_v1_beside_the_live_file() {
+    let dir = temp_state_dir();
+    let _guard = TempDirGuard(dir.clone());
+    fs::write(
+        dir.join("tsk.json"),
+        include_bytes!("fixtures/current_store_v1.json"),
+    )
+    .expect("install v1 fixture");
+    let store = TaskStore::new(&dir);
+
+    let state = store.load().expect("v1 document loads through the chain");
+    assert_eq!(state.format_version(), 2);
+    assert!(state.projects().is_empty(), "v1 has no archived projects");
+    assert!(state.tasks().iter().all(|task| !task.archived));
+
+    store.save(&state).expect("first save after migration");
+    assert_eq!(
+        fs::read(dir.join("tsk.json.v1")).expect("read version backup"),
+        include_bytes!("fixtures/current_store_v1.json").as_slice(),
+        "the pre-migration document is backed up byte-identically"
+    );
+    let live: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(dir.join("tsk.json")).expect("read live"))
+            .expect("json");
+    assert_eq!(live["format_version"], 2);
+    assert_eq!(live["projects"], serde_json::json!({}));
+}
+
+#[test]
+fn literal_current_v2_fixture_round_trips_byte_identical() {
+    let dir = temp_state_dir();
+    let _guard = TempDirGuard(dir.clone());
+    fs::write(
+        dir.join("tsk.json"),
+        include_bytes!("fixtures/current_store_v2.json"),
+    )
+    .expect("install current v2 fixture");
+    let store = TaskStore::new(&dir);
+
+    let loaded = store.load().expect("load current v2 fixture");
+    assert_eq!(loaded.format_version(), 2);
+    assert!(loaded.projects().is_empty());
+
+    store.save(&loaded).expect("save loaded state");
+    assert_eq!(
+        fs::read(dir.join("tsk.json")).expect("read resaved live document"),
+        include_bytes!("fixtures/current_store_v2.json").as_slice(),
+        "an unchanged v2 state must serialize byte-identically"
     );
 }
 
@@ -580,15 +634,147 @@ fn overlapping_creates_under_lock_receive_distinct_numbers() {
 }
 
 #[test]
+fn archive_flag_survives_save_and_load() {
+    let dir = temp_state_dir();
+    let _guard = TempDirGuard(dir.clone());
+    let store = TaskStore::new(&dir);
+    let mut state = DomainState::new();
+    let kept = state
+        .create(
+            "Kept open",
+            None,
+            TaskScope::Global,
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create kept task");
+    let filed = state
+        .create(
+            "Filed away",
+            None,
+            TaskScope::Global,
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create filed task");
+    state.archive_task(filed).expect("archive one task");
+
+    store.save(&state).expect("save archived state");
+    let loaded = store.load().expect("reload archived state");
+    let filed_task = loaded.get(filed).expect("archived task survives reload");
+    assert!(filed_task.archived);
+    assert_eq!(filed_task.status, HumanStatus::Ready, "status is untouched");
+    assert!(
+        !loaded
+            .get(kept)
+            .expect("kept task survives reload")
+            .archived
+    );
+
+    // An unarchived task serialises without an archived key.
+    let document: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(dir.join("tsk.json")).expect("read live"))
+            .expect("json");
+    let tasks = document["tasks"].as_array().expect("tasks array");
+    assert_eq!(tasks.len(), 2);
+    assert!(!tasks[0]
+        .as_object()
+        .expect("task object")
+        .contains_key("archived"));
+    assert_eq!(tasks[1]["archived"], serde_json::json!(true));
+}
+
+#[test]
+fn reload_merge_save_keeps_a_sibling_writers_project_record_and_applies_the_local_intent() {
+    let dir = temp_state_dir();
+    let _guard = TempDirGuard(dir.clone());
+    let store = TaskStore::new(&dir);
+    let mut seed = DomainState::new();
+    for path in ["/repos/p", "/repos/q"] {
+        seed.create(
+            "seed",
+            None,
+            TaskScope::Project {
+                path: path.to_string(),
+            },
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create seed task");
+    }
+    store.save(&seed).expect("seed two projects");
+
+    // Writer A's snapshot is stale: taken before writer B archives Q on disk.
+    let mut a = store.load().expect("stale writer A");
+    let mut b = store.load().expect("writer B");
+    b.archive_project("/repos/q").expect("B archives Q");
+    store.save(&b).expect("B persists the Q record");
+
+    // A archives P against its stale (empty) map, then merge-saves: the disk map
+    // replaces A's, A's own intent is re-applied, and B's record survives.
+    a.archive_project("/repos/p").expect("A archives P");
+    store.reload_merge_save(&mut a).expect("A merge-save");
+    let disk = store.load().expect("reload");
+    assert_eq!(
+        disk.archived_projects(),
+        std::collections::BTreeSet::from(["/repos/p".to_string(), "/repos/q".to_string()]),
+        "both records are on disk after the merge"
+    );
+
+    // A unarchives P through a locked merge: a plain union would resurrect it, the
+    // recorded intent must win.
+    a.unarchive_project("/repos/p").expect("A unarchives P");
+    store
+        .reload_merge_save(&mut a)
+        .expect("A merge-save unarchive");
+    let disk = store.load().expect("reload");
+    assert_eq!(
+        disk.archived_projects(),
+        std::collections::BTreeSet::from(["/repos/q".to_string()]),
+        "only Q remains on disk"
+    );
+}
+
+#[test]
 fn noncurrent_store_is_refused_without_rewriting_the_file() {
     let dir = temp_state_dir();
     let _guard = TempDirGuard(dir.clone());
-    let document = serde_json::json!({ "format_version": 2, "next_task_number": 2, "tasks": [], "undo_stack": [] });
+    let document = serde_json::json!({ "format_version": 3, "next_task_number": 2, "tasks": [], "undo_stack": [] });
     let bytes = serde_json::to_vec_pretty(&document).expect("json");
     fs::write(dir.join("tsk.json"), &bytes).expect("write noncurrent store");
     let error = TaskStore::new(&dir)
         .save(&DomainState::new())
         .expect_err("current writer refuses noncurrent store");
-    assert!(error.to_string().contains("expected 1"));
+    assert!(error.to_string().contains("expected 2"));
     assert_eq!(fs::read(dir.join("tsk.json")).expect("read"), bytes);
+}
+
+#[test]
+fn v1_migration_strips_defensive_archived_keys() {
+    // A v1 binary never wrote an archived key; the chain removes one defensively so
+    // "a v1 document has no archived tasks" holds literally after the load.
+    let mut document: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/current_store_v1.json"))
+            .expect("v1 fixture is valid JSON");
+    assert_eq!(document["format_version"], 1);
+    document["tasks"][0]["archived"] = serde_json::json!(true);
+
+    let dir = temp_state_dir();
+    let _guard = TempDirGuard(dir.clone());
+    fs::write(
+        dir.join("tsk.json"),
+        serde_json::to_vec_pretty(&document).expect("encode v1 with archived key"),
+    )
+    .expect("install document");
+
+    let state = TaskStore::new(&dir)
+        .load()
+        .expect("load v1 through the chain");
+    assert_eq!(state.format_version(), 2);
+    let task = state.tasks().first().expect("fixture task");
+    assert!(
+        !task.archived,
+        "migration must strip the defensive archived key"
+    );
+    assert_eq!(task.status, HumanStatus::Done, "status is untouched");
 }
