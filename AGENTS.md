@@ -19,7 +19,7 @@ The committed `.gitignore` already covers it.
 board for capture and human-status verbs. It ships as the herdr plugin
 `herdr-tsk`, and the built binary (`tsk`) also runs standalone. Attention,
 park/resume, linking, and dispatch are not in this tree; reference lives on
-`archive/dark-engine-pre-v1`. Crate (`tsk-tui`) and plugin are `0.4.0`.
+`archive/dark-engine-pre-v1`. Crate (`tsk-tui`) and plugin are `0.5.0`.
 
 A gitignored `HANDOFF.md` may hold this clone’s live working state.
 
