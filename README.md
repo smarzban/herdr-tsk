@@ -84,4 +84,4 @@ Site-only: `cd site && npm ci && npm test && npm run build`.
 
 ## License
 
-[GPL-3.0](LICENSE)
+[MIT](LICENSE)
