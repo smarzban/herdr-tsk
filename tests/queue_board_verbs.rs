@@ -4193,11 +4193,15 @@ fn toggle_all_groups_folds_and_unfolds_the_archived_group_with_the_others_when_t
         "and the archived group unfolded with it"
     );
 
-    // Drawer closed: toggle-all leaves the archived group's own state alone.
+    // Drawer closed: a single toggle-all folds the project group but leaves the archived
+    // group's own state alone (one press, so a regression cannot cancel itself out).
     apply_intent(&mut domain, &mut model, BoardIntent::ToggleDoneDrawer, None)
         .expect("close drawer");
-    apply_intent(&mut domain, &mut model, toggle_all.clone(), None).expect("fold all");
-    apply_intent(&mut domain, &mut model, toggle_all, None).expect("unfold all");
+    apply_intent(&mut domain, &mut model, toggle_all, None).expect("fold all");
+    assert!(
+        !model.visible_ids().contains(&live),
+        "the project group folded with the drawer shut"
+    );
     apply_intent(&mut domain, &mut model, BoardIntent::ToggleDoneDrawer, None)
         .expect("reopen drawer");
     assert!(
