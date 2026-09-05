@@ -1,8 +1,8 @@
 # Verification report: archive (spec B)
 
 Every criterion of `docs/specs/archive/archive.md` (AC-1..AC-45, including the
-2026-09-04 owner-smoke amendments) mapped to its proof. Suite at T-17: `cargo test`
-**826 passed / 0 failed**; `cd site && npm test` **10/10** (the parse check behind AC-36).
+2026-09-04 owner-smoke amendments) mapped to its proof. Suite after the delta-review fixes D1..D8: `cargo test`
+**836 passed / 0 failed**; `cd site && npm test` **10/10** (the parse check behind AC-36).
 
 Type is the criterion's own verification type. Proof names the test(s) exactly as `cargo test` prints them (module path for unit tests,
 bare name for integration tests), or the pass/fail answer for the one reviewer-checked criterion.
@@ -17,7 +17,7 @@ bare name for integration tests), or the pass/fail answer for the one reviewer-c
 | AC-6 | test-backed | ui::queue::tests::thread_header_and_open_count_exclude_an_archived_task |
 | AC-7 | test-backed | ctrl_f_archives_the_selected_task_keeping_status_and_pushing_no_undo, domain::task::tests::archive_task_sets_the_flag_keeps_status_journals_archived_and_pushes_no_undo |
 | AC-8 | test-backed | task_page_header_slot_reads_archived_for_an_archived_task, title_edit_on_an_archived_task_persists_and_keeps_the_flag |
-| AC-9 | test-backed | archive_flag_survives_save_and_load, idle_merge_hides_a_task_archived_by_another_process_without_moving_selection, idle_merge_leaves_a_project_focus_archived_by_another_process |
+| AC-9 | test-backed | archive_flag_survives_save_and_load, idle_merge_hides_a_task_archived_by_another_process_without_moving_selection, idle_merge_leaves_a_project_focus_archived_by_another_process, idle_merge_converts_a_read_only_focus_whose_project_was_unarchived |
 | AC-10 | test-backed | archived_group_paints_below_done_with_its_count_and_no_header_when_empty |
 | AC-11 | test-backed | archived_group_is_collapsed_on_a_fresh_model_and_enter_or_click_on_the_header_toggles_it |
 | AC-12 | test-backed | archived_group_is_collapsed_on_a_fresh_model_and_enter_or_click_on_the_header_toggles_it, archived_group_is_collapsed_on_a_fresh_model_and_enter_or_click_on_the_header_toggles_it, archived_header_selection_follows_the_viewport |
@@ -45,18 +45,21 @@ bare name for integration tests), or the pass/fail answer for the one reviewer-c
 | AC-34 | test-backed | literal_current_v2_fixture_round_trips_byte_identical, archive_flag_survives_save_and_load, archived |
 | AC-35 | test-backed | help_card_lists_ctrl_f_and_the_verb_bar_shows_file_for_a_task_row_and_the_group, normal_mode_keymap_equals_the_readme_and_queue_board_v1_set |
 | AC-36 | reviewer-checked | **Pass.** `site/src/content/docs/docs/{keys,board,capture,cli}.md`, `site/public/board-demo.js`, `site/public/llms.txt`, `skills/tsk-cli/SKILL.md`, `CHANGELOG.md`, `README.md` diffed against `src/ui/input.rs`, `src/ui/board/commands.rs` (no palette entry, per plan) and `src/cli/`; the T-14..T-17 amendments (`ctrl+g` reassignment, header paint, picker rule, card wording, read-only focus, scope-dropdown rule) landed in `keys.md`, `board.md` and `CHANGELOG.md`; `cd site && npm test` 10/10 |
-| AC-37 | test-backed | picker_paints_a_dim_rule_under_its_tabs |
-| AC-38 | test-backed | ctrl_g_toggles_the_archived_group_from_any_selection_and_opens_the_drawer_when_closed, ctrl_g_maps_to_the_archived_group_and_the_palette_keeps_group_toggle, archived_group_is_collapsed_on_a_fresh_model_and_enter_or_click_on_the_header_toggles_it, ctrl_g_toggles_the_archived_group_from_any_selection_and_opens_the_drawer_when_closed |
+| AC-37 | test-backed | picker_paints_a_dim_rule_under_its_tabs, picker_list_capacity_counts_the_rule_row_on_a_short_frame |
+| AC-38 | test-backed | ctrl_g_toggles_the_archived_group_from_any_selection_and_opens_the_drawer_when_closed, ctrl_g_maps_to_the_archived_group_and_the_palette_keeps_group_toggle, archived_group_is_collapsed_on_a_fresh_model_and_enter_or_click_on_the_header_toggles_it, ctrl_g_toggles_the_archived_group_from_any_selection_and_opens_the_drawer_when_closed, ctrl_g_with_no_archived_rows_in_scope_says_so_and_moves_nothing, verb_bar_shows_ctrl_g_for_any_selection_while_the_drawer_has_archived_rows, clicking_the_ctrl_g_verb_chip_toggles_the_archived_group |
 | AC-39 | test-backed | task_page_scope_dropdown_omits_archived_projects_but_keeps_the_current_scope, expanded_quick_add_scope_omits_archived_projects, ui::capture::tests::capture_scope_never_offers_an_archived_this_project |
-| AC-40 | test-backed | archived_tab_verb_bar_advertises_ctrl_u_enter_esc, ctrl_f_and_ctrl_u_on_the_archived_tab_unarchive_and_every_task_keeps_its_status |
-| AC-41 | test-backed | enter_on_the_archived_tab_opens_a_read_only_focus_that_persists_nothing |
+| AC-40 | test-backed | archived_tab_verb_bar_advertises_ctrl_u_enter_esc, ctrl_f_and_ctrl_u_on_the_archived_tab_unarchive_and_every_task_keeps_its_status, ctrl_f_on_the_archived_tab_still_unarchives_from_read_only_focus |
+| AC-41 | test-backed | enter_on_the_archived_tab_opens_a_read_only_focus_that_persists_nothing, unarchiving_from_the_picker_converts_a_read_only_focus_in_place |
 | AC-42 | test-backed | every_mutating_verb_in_read_only_focus_refuses_with_the_archived_message |
-| AC-43 | test-backed | ctrl_u_in_read_only_focus_unarchives_in_place |
-| AC-44 | test-backed | task_page_in_read_only_focus_refuses_edit_mode |
-| AC-45 | test-backed | leaving_read_only_focus_hides_the_archived_projects_tasks_again, archived_project_paints_nowhere_on_home_tabs_or_the_picker_main_list |
+| AC-43 | test-backed | ctrl_u_in_read_only_focus_unarchives_in_place, unarchiving_from_the_picker_converts_a_read_only_focus_in_place, idle_merge_converts_a_read_only_focus_whose_project_was_unarchived |
+| AC-44 | test-backed | task_page_in_read_only_focus_refuses_edit_mode, tab_and_field_focus_on_a_read_only_task_page_stay_in_view_mode |
+| AC-45 | test-backed | leaving_read_only_focus_hides_the_archived_projects_tasks_again, archived_project_paints_nowhere_on_home_tabs_or_the_picker_main_list, esc_leaves_read_only_focus_and_never_quits, opening_the_picker_from_read_only_focus_lands_home_on_cancel |
 
 ## Notes
 
+- Delta-review fixes D1..D8 are folded into the rows above (AC-9, AC-37, AC-38, AC-40,
+  AC-41, AC-43, AC-44, AC-45); their commit-by-commit ledger is in
+  `docs/specs/archive/build-report.md`.
 - Review-panel fixes K1..K8 and verify regressions V1..V2 are folded into the rows above
   (AC-28, AC-29, AC-32, AC-33, AC-9, AC-12, AC-16, AC-24); the commit-by-commit ledger is
   in `docs/specs/archive/build-report.md`.

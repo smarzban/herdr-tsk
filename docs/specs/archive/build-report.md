@@ -252,14 +252,16 @@ cargo test: 821 passed, 0 failed
 
 ### T-17 (@ ded748a)
 
-Conductor capture at the branch head `61a6e45` (T-17 plus the border fix), the full bar:
+Conductor capture at the branch head `61a6e45` (T-17 plus the border fix), the full bar;
+re-captured at `dbfac56` after the delta-review fixes D1..D8, whose regression tests are
+appended to the same run below:
 
 ```text
 $ cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo build --release
 exit 0
 $ cargo test > /tmp/archive-final-test.txt 2>&1; rc=$?
 rc=0
-cargo test: 826 passed, 0 failed (sum over 30 test binaries)
+cargo test: 836 passed, 0 failed (sum over 30 test binaries, re-captured at dbfac56)
 test domain::task::tests::archive_project_writes_one_record_and_unarchive_removes_it ... ok
 test domain::task::tests::archive_task_sets_the_flag_keeps_status_journals_archived_and_pushes_no_undo ... ok
 test domain::task::tests::task_and_project_flags_are_independent ... ok
@@ -325,4 +327,30 @@ test v1_migration_strips_defensive_archived_keys ... ok
 test v1_document_loads_through_the_chain_and_first_save_leaves_tsk_json_v1_beside_the_live_file ... ok
 test reload_merge_save_keeps_a_sibling_writers_project_record_and_applies_the_local_intent ... ok
 test normal_mode_keymap_equals_the_readme_and_queue_board_v1_set ... ok
+test esc_leaves_read_only_focus_and_never_quits ... ok
+test opening_the_picker_from_read_only_focus_lands_home_on_cancel ... ok
+test unarchiving_from_the_picker_converts_a_read_only_focus_in_place ... ok
+test ctrl_g_with_no_archived_rows_in_scope_says_so_and_moves_nothing ... ok
+test ctrl_f_on_the_archived_tab_still_unarchives_from_read_only_focus ... ok
+test tab_and_field_focus_on_a_read_only_task_page_stay_in_view_mode ... ok
+test picker_list_capacity_counts_the_rule_row_on_a_short_frame ... ok
+test verb_bar_shows_ctrl_g_for_any_selection_while_the_drawer_has_archived_rows ... ok
+test clicking_the_ctrl_g_verb_chip_toggles_the_archived_group ... ok
+test idle_merge_converts_a_read_only_focus_whose_project_was_unarchived ... ok
 ```
+
+## Delta review fixes (two panel runs on 55addf3..3b46eb0, eight kept findings)
+
+| D | Commit | Regression test (watched failing first) |
+| --- | --- | --- |
+| D1 | `0d48521` fix(D1): esc leaves the read-only archived focus instead of quitting | `queue_board_verbs::esc_leaves_read_only_focus_and_never_quits` (red: `left: Quit`) |
+| D2 | `52447fe` fix(D2): read-only task page refuses tab and field-focus edit entries | `queue_board_edit::tab_and_field_focus_on_a_read_only_task_page_stay_in_view_mode` (red: no refusal, Tab entered edit) |
+| D3 | `b94dd35` fix(D3): P leaves the read-only archived lens before opening the picker | `queue_board_verbs::opening_the_picker_from_read_only_focus_lands_home_on_cancel` (red: still in the lens) |
+| D4 | `f29ecd2` fix(D4): picker list capacity counts its rule row | `queue_board_render::picker_list_capacity_counts_the_rule_row_on_a_short_frame` (red at 78x12: selected last option clipped) |
+| D5 | `966458a` fix(D5): a read-only focus converts when its project is unarchived elsewhere | `queue_board_loop::idle_merge_converts_a_read_only_focus_whose_project_was_unarchived` + `queue_board_verbs::unarchiving_from_the_picker_converts_a_read_only_focus_in_place` (both red: focus stayed archived) |
+| D6 | `09ea780` fix(D6): ctrl+g with no archived rows in scope refuses instead of moving the selection | `queue_board_verbs::ctrl_g_with_no_archived_rows_in_scope_says_so_and_moves_nothing` (red: drawer opened, selection moved) |
+| D7 | `7bc084e` fix(D7): the read-only gate stands down while a popup owns its intents | `queue_board_verbs::ctrl_f_on_the_archived_tab_still_unarchives_from_read_only_focus` (red with D3's exit hand-reverted: `left: None, right: Persist`, so the gate alone carries the flow) |
+| D8 | `dbfac56` fix(D8): ctrl+g verb entry for any selection and a clickable chip | `queue_board_render::verb_bar_shows_ctrl_g_for_any_selection_while_the_drawer_has_archived_rows` + `queue_board_mouse::clicking_the_ctrl_g_verb_chip_toggles_the_archived_group` (red: no entry for a task row; no `g` arm in `verb_intent`) |
+
+Final: `cargo test` **836 passed, 0 failed**; `cd site && npm test` 10/10; clippy
+`-D warnings` clean; fmt clean; release build ok.
