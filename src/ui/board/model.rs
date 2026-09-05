@@ -1376,6 +1376,22 @@ impl BoardModel {
         )
     }
 
+    /// Archived rows the drawer would show in the current scope, whether or not the
+    /// drawer is open. `ctrl+g` has nothing to toggle when this is zero.
+    pub(super) fn archived_rows_in_scope(&self) -> usize {
+        queue::query_board(
+            &self.tasks,
+            &self.archived_projects,
+            self.this_repo.as_deref(),
+            self.board_location.lens(),
+            true,
+        )
+        .sections
+        .iter()
+        .find(|section| section.kind == SectionKind::Archived)
+        .map_or(0, |section| section.count)
+    }
+
     pub(super) fn toggle_project_collapsed(&mut self, path: &str) {
         if self.collapsed_projects.contains(path) {
             self.collapsed_projects.remove(path);

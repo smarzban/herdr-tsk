@@ -145,6 +145,9 @@ fn read_only_focus_refuses(intent: &BoardIntent) -> bool {
     )
 }
 
+/// Refusal when `ctrl+g` has no archived rows to toggle in the current scope.
+const NO_ARCHIVED_ROWS: &str = "no archived tasks here";
+
 pub fn apply_intent(
     domain: &mut DomainState,
     model: &mut BoardModel,
@@ -1489,6 +1492,13 @@ fn apply_board_intent(
             return Ok(IntentOutcome::None);
         }
         BoardIntent::ToggleArchivedGroup => {
+            // Nothing archived in this scope: say so and leave the board exactly as it
+            // was. Opening an empty drawer and moving the selection to its first row is
+            // not what the chord asked for.
+            if model.archived_rows_in_scope() == 0 {
+                model.set_message(NO_ARCHIVED_ROWS);
+                return Ok(IntentOutcome::None);
+            }
             // From the keyboard with the drawer closed: open the drawer and expand the
             // group. Otherwise flip the group. Either way the header row is selected.
             let previous_visible = model.visible_ids();

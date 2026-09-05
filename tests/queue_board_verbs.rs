@@ -4197,3 +4197,34 @@ fn unarchiving_from_the_picker_converts_a_read_only_focus_in_place() {
         "the chip drops the archived suffix:\n{frame}"
     );
 }
+
+#[test]
+fn ctrl_g_with_no_archived_rows_in_scope_says_so_and_moves_nothing() {
+    let (mut domain, mut model, id) = board_with_task("only live task", HumanStatus::Ready);
+    assert!(!model.drawer_open());
+    let selection_before = model.selected_id();
+    assert_eq!(selection_before, Some(id));
+
+    apply_intent(
+        &mut domain,
+        &mut model,
+        map_key(BoardInputMode::Normal, ctrl(KeyCode::Char('g'))).expect("bound"),
+        None,
+    )
+    .expect("ctrl+g applies");
+
+    assert!(
+        !model.drawer_open(),
+        "with nothing archived in scope the drawer stays shut"
+    );
+    assert_eq!(
+        model.selected_id(),
+        selection_before,
+        "the selection does not move"
+    );
+    assert!(
+        !model.archived_header_selected(),
+        "no header to select either"
+    );
+    assert_eq!(model.message(), Some("no archived tasks here"));
+}
