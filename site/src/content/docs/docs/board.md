@@ -46,7 +46,10 @@ DONE: closed on every launch, one click, `Enter` on the header, or `ctrl+g` from
 any row toggles it, and expanded rows paint dim with their status glyph and
 `T<n>`. The header paints the word bold when it holds the selection, never a
 reverse block. With the drawer closed, `ctrl+g` opens the drawer and expands the
-group. `ctrl+f` on a row files it, and `ctrl+f` or `ctrl+u` on an archived
+group; with nothing archived in this scope it says `no archived tasks here` and leaves
+the board alone. The verb bar carries `ctrl+g expand` / `ctrl+g collapse` whenever the
+drawer is open and the group has rows, and that chip is clickable. `ctrl+f` on a row
+files it, and `ctrl+f` or `ctrl+u` on an archived
 selection brings it back; neither writes an undo entry.
 
 Thread headers on a scoped deck show `#name` and an open count. They take a list
@@ -142,7 +145,9 @@ archived tab's footer reads `ctrl+u unarchive · enter open · esc close`.
 `Enter` on an archived-tab entry opens that project in read-only focus: the chip
 reads `<name> · archived`, its tasks paint dim, and nothing is written by
 entering. It is the only lens that paints an archived project's tasks; `Esc`,
-`P`, or `1`/`2`/`3` leave it and hide them again. Every mutating verb (`ctrl+s`,
+`P`, or `1`/`2`/`3` leave it for your desk and hide them again (`Esc` there never quits,
+and `P` leaves the lens before the picker paints). If the project is unarchived by any
+other route while you sit in it, the focus becomes an ordinary project focus. Every mutating verb (`ctrl+s`,
 `ctrl+d`, `ctrl+o`, `ctrl+b`, `ctrl+e`, `ctrl+n`, `ctrl+x`, `ctrl+f`, `+`, and
 step toggles) refuses with `project <name> is archived · ctrl+u unarchive` and
 changes nothing; the task page opens view-only for the same reason. `ctrl+u`

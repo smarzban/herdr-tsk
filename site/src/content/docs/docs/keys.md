@@ -55,7 +55,7 @@ moves to G, then runs the control you clicked.
 | `?` | help |
 | `P` | project picker |
 | `1` `2` `3` | home tabs: desk · projects · threads |
-| `ctrl+g` | expand or collapse the done drawer's `archived` group. With the drawer closed it opens the drawer and expands the group. `toggle groups` in the palette expands or collapses all visible groups |
+| `ctrl+g` | expand or collapse the done drawer's `archived` group (refuses with `no archived tasks here` when this scope has none). With the drawer closed it opens the drawer and expands the group. `toggle groups` in the palette expands or collapses all visible groups |
 | `Esc` | close one layer |
 | `ctrl+q` or `ctrl+c` | quit |
 
