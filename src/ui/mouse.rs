@@ -364,7 +364,6 @@ fn scope_dropdown_verb_intent(index: usize) -> Option<BoardIntent> {
     match SCOPE_VERBS.get(index)?.key {
         "enter" => Some(BoardIntent::ConfirmProjectChoice),
         "f" => Some(BoardIntent::File),
-        "g" => Some(BoardIntent::ToggleArchivedGroup),
         "esc" => Some(BoardIntent::CancelProjectPicker),
         _ => None,
     }
