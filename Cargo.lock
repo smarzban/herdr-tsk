@@ -1429,6 +1429,7 @@ name = "tsk-tui"
 version = "0.4.0"
 dependencies = [
  "crossterm",
+ "libc",
  "ratatui",
  "serde",
  "serde_json",

@@ -33,12 +33,19 @@ directory, written and synced, renamed over `tsk.json`, then the directory is sy
 on Linux and macOS. A valid live document is hard-linked to `tsk.json.1` before
 replacement. Corrupt JSON is replaced without changing an existing backup.
 
+**Permissions.** On Unix every file is owner-only: temp files are created `0600`, the
+state directory is `0700`, and a load or save tightens any state file already on disk
+(`tsk.json`, `tsk.json.1`, `tsk.json.v<N>`, `trash.jsonl`, the lock, leftover temps)
+that an older version or looser umask left readable. Tightening only strips bits
+(`fsperm`); a stricter existing mode is kept. Other platforms claim no mode.
+
 ## Invariants
 
 - Format version is exactly 1, never upgraded automatically.
 - A refused document is never rewritten.
 - Temp sweeping runs only under the exclusive lock.
 - The state directory never falls back to a shared temporary path.
+- State files are owner-only on Unix; tightening strips bits and never grants them.
 
 ## Error paths
 

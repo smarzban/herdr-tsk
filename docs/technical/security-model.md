@@ -56,6 +56,16 @@ Config's lack of lock/directory-fsync is a durability trade, not an access-contr
 trade. Anyone who can write `~/.tsk` can change the board; that is the single-user
 model.
 
+## File permissions
+
+State and config are user-private. On Unix the state/config directory is `0700` and
+every file under it — `tsk.json`, `tsk.json.1`, `tsk.json.v<N>`, `trash.jsonl`,
+`tsk.json.lock`, `walkthrough.json`, and any temp file — is created `0600`
+(`fsperm`). Existing paths an older version or a looser umask left readable are
+tightened on load and save; tightening only ever strips bits, never grants them, so a
+deliberate stricter mode (a `0400` file, a read-only directory) survives. Non-Unix
+platforms claim no mode.
+
 ## Process and host
 
 - Plugin actions are explicit (`open-board`, `quick-capture`). No background host

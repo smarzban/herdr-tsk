@@ -22,13 +22,14 @@
 
 use std::env;
 use std::ffi::OsStr;
-use std::fs::{self, File};
+use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
+use crate::fsperm;
 use crate::store::StoreError;
 
 /// On-disk document name under the config directory (distinct from the task store's).
@@ -96,6 +97,9 @@ impl WalkthroughRecord {
     /// Any unusable document reads as not dismissed: the board must open whatever the
     /// state of this file.
     pub fn is_dismissed(&self) -> bool {
+        // An older, looser version may have left the record world-readable; a
+        // launch repairs it. The tighten is best effort and never fails the read.
+        fsperm::tighten_file(&self.document_path());
         fs::read_to_string(self.document_path())
             .ok()
             .and_then(|data| serde_json::from_str::<WalkthroughDocument>(&data).ok())
@@ -127,12 +131,12 @@ impl WalkthroughRecord {
     /// the target, with the temp removed on failure. See the module doc for the two
     /// guarantees this does *not* carry (no directory fsync, no lock).
     pub fn record_dismissed(&self) -> Result<(), StoreError> {
-        fs::create_dir_all(&self.dir)?;
+        fsperm::ensure_private_dir(&self.dir)?;
         let document = self.document_path();
         let tmp = self.unique_tmp_path();
         let data = serde_json::to_string_pretty(&WalkthroughDocument { dismissed: true })?;
         let write_result = (|| -> Result<(), StoreError> {
-            let mut temp_file = File::create(&tmp)?;
+            let mut temp_file = fsperm::create_private_file(&tmp)?;
             temp_file.write_all(data.as_bytes())?;
             temp_file.sync_all()?;
             drop(temp_file);
@@ -300,6 +304,77 @@ mod tests {
         assert!(
             temp_files(&dir).is_empty(),
             "a successful write must leave no temp file behind"
+        );
+    }
+
+    /// Low 12 permission bits of the path's metadata.
+    #[cfg(unix)]
+    fn file_mode(path: &Path) -> u32 {
+        use std::os::unix::fs::PermissionsExt;
+        fs::metadata(path)
+            .unwrap_or_else(|error| panic!("{} must exist: {error}", path.display()))
+            .permissions()
+            .mode()
+            & 0o7777
+    }
+
+    /// Set the process umask and return the previous value.
+    #[cfg(unix)]
+    fn set_umask(mask: libc::mode_t) -> libc::mode_t {
+        unsafe { libc::umask(mask) }
+    }
+
+    /// Restores the previous umask on drop. umask is process-wide and tests run in
+    /// parallel; sibling threads see the conventional 022 default meanwhile.
+    #[cfg(unix)]
+    struct UmaskGuard(libc::mode_t);
+    #[cfg(unix)]
+    impl Drop for UmaskGuard {
+        fn drop(&mut self) {
+            set_umask(self.0);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn walkthrough_record_writes_dirs_0700_and_files_0600_under_umask_022() {
+        let _umask = UmaskGuard(set_umask(0o022));
+        // The directory does not exist yet: record_dismissed creates it.
+        let dir = temp_dir("private-fresh");
+        let _guard = TempDirGuard(dir.clone());
+        WalkthroughRecord::new(&dir)
+            .record_dismissed()
+            .expect("record dismissal");
+
+        assert_eq!(file_mode(&dir), 0o700, "config directory must be 0700");
+        assert_eq!(
+            file_mode(&dir.join(CONFIG_FILE)),
+            0o600,
+            "walkthrough.json must be 0600"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn existing_loose_walkthrough_record_is_tightened_to_private() {
+        let (dir, _guard) = seed("private-loose", "{\"dismissed\": true}");
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).expect("chmod dir");
+            fs::set_permissions(dir.join(CONFIG_FILE), fs::Permissions::from_mode(0o644))
+                .expect("chmod file");
+        }
+
+        let record = WalkthroughRecord::new(&dir);
+        assert!(
+            record.is_dismissed(),
+            "the record must still read as dismissed"
+        );
+
+        assert_eq!(
+            file_mode(&dir.join(CONFIG_FILE)),
+            0o600,
+            "an existing walkthrough.json must be tightened to 0600"
         );
     }
 

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+Private state permissions: on Unix the state/config directory (`~/.tsk` by
+default) is `0700` and every file in it — `tsk.json`, `tsk.json.1`,
+`tsk.json.v<N>`, `trash.jsonl`, `tsk.json.lock`, `walkthrough.json`, and any
+temp file — is `0600`, for fresh writes and tightened after the fact for paths
+an older version left readable. Tightening only strips bits; stricter modes an
+owner chose are kept. Other platforms claim no mode.
+
 Archive for tasks and projects: `ctrl+f` on a board row toggles a task's
 archived flag (no undo entry), and archived tasks keep their human status while
 leaving every working lens — desk, projects, threads, project focus, and the

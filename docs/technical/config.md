@@ -22,7 +22,8 @@ file parses and `dismissed` is true. Every other failure mode is not dismissed.
 `record_dismissed` writes `dismissed: true` via temp+rename+file sync. It does **not**
 lock and does **not** fsync the directory. A crash can lose a just-recorded dismissal,
 so the card may reappear once. The payload is a constant, making concurrent writers
-harmless.
+harmless. The directory is `0700` and the document `0600` on Unix; an existing looser
+mode is tightened (bits stripped only) when the record is read or written.
 
 `run_board` does not call `open_walkthrough_for_launch`. That helper remains for tests:
 if the record is not dismissed it dispatches `BoardIntent::OpenWalkthrough`, the same

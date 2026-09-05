@@ -7,6 +7,7 @@ pub mod cli;
 pub mod config;
 pub mod context;
 pub mod domain;
+pub(crate) mod fsperm;
 pub mod save_recovery;
 pub mod scope;
 pub mod store;

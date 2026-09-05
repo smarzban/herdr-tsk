@@ -7,7 +7,7 @@
 //! Each successful replace retains the previous document as `tsk.json.1`.
 
 use std::env;
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::domain::{DomainState, Task, STORE_FORMAT_VERSION};
+use crate::fsperm;
 
 /// On-disk document name under the state directory.
 const STATE_FILE: &str = "tsk.json";
@@ -166,7 +167,7 @@ impl AtomicFilesystem for StdFilesystem {
     type File = File;
 
     fn create_file(&self, path: &Path) -> io::Result<Self::File> {
-        File::create(path)
+        fsperm::create_private_file(path)
     }
 
     fn write_all(&self, file: &mut Self::File, data: &[u8]) -> io::Result<()> {
@@ -443,6 +444,7 @@ impl TaskStore {
         migrations: fn(serde_json::Value, u32) -> Result<serde_json::Value, StoreError>,
     ) -> Result<DomainState, StoreError> {
         self.sweep_orphan_temps();
+        self.tighten_state_files();
         let file = self.state_file();
         if !file.exists() {
             return Ok(DomainState::new());
@@ -487,8 +489,9 @@ impl TaskStore {
         // after number assignment and any merge-undo union.
         state.prune_undo_for_persistence();
         self.move_eligible_to_trash(state, filesystem)?;
-        fs::create_dir_all(&self.path)?;
+        fsperm::ensure_private_dir(&self.path)?;
         self.sweep_orphan_temps();
+        self.tighten_state_files();
         let file = self.state_file();
         if file.exists() {
             match peek_format_version(&fs::read_to_string(&file)?) {
@@ -656,14 +659,11 @@ impl TaskStore {
 
     /// Exclusive lock held for the duration of load-modify-save critical sections.
     fn lock_exclusive(&self) -> Result<StoreLockGuard, StoreError> {
-        fs::create_dir_all(&self.path)?;
+        fsperm::ensure_private_dir(&self.path)?;
         let lock_path = self.path.join(LOCK_FILE);
-        let file = OpenOptions::new()
-            .create(true)
-            .read(true)
-            .write(true)
-            .truncate(false)
-            .open(&lock_path)?;
+        let file = fsperm::open_lock_file(&lock_path)?;
+        // Creation above used 0600; tighten one an older, looser version left behind.
+        fsperm::tighten_file(&lock_path);
         file.lock()?;
         Ok(StoreLockGuard { file })
     }
@@ -692,6 +692,34 @@ impl TaskStore {
             .unwrap_or(0);
         self.path.join(format!(".{STATE_FILE}.tmp.{pid}.{nanos}"))
     }
+
+    /// Tighten every state file already on disk to owner-only (0600 on Unix):
+    /// the live document, last-good and version backups, trash, the lock file,
+    /// and any orphaned temp an older, looser version left behind. Runs under
+    /// the exclusive lock, so no concurrent writer is mid-write on a file here.
+    fn tighten_state_files(&self) {
+        let Ok(entries) = fs::read_dir(&self.path) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if is_private_state_name(&name) {
+                fsperm::tighten_file(&entry.path());
+            }
+        }
+    }
+}
+
+/// Whether a state-directory entry name holds owner-only content.
+fn is_private_state_name(name: &str) -> bool {
+    name == STATE_FILE
+        || name == BACKUP_FILE
+        || name == LOCK_FILE
+        || name == TRASH_FILE
+        || name.starts_with(&format!("{STATE_FILE}.v"))
+        || name.starts_with(&format!(".{STATE_FILE}.tmp."))
+        || name.starts_with(&format!(".{TRASH_FILE}.tmp."))
 }
 
 /// RAII exclusive lock on the store lock file (released on drop via `File::unlock`).
@@ -760,6 +788,9 @@ fn retain_version_backup(live: &Path, version: u32) -> Result<(), StoreError> {
         return Ok(());
     }
     fs::copy(live, &backup)?;
+    // A copy inherits the source's mode; the live file an older, looser version
+    // wrote must not leak that looseness into the backup.
+    fsperm::tighten_file(&backup);
     Ok(())
 }
 
@@ -773,6 +804,9 @@ fn retain_last_good(live: &Path) -> Result<(), StoreError> {
         Err(error) => return Err(error.into()),
     }
     fs::hard_link(live, &backup)?;
+    // The link shares the old live file's inode (and its mode); tighten both
+    // sides of the link before the rename replaces the live path.
+    fsperm::tighten_file(&backup);
     Ok(())
 }
 
@@ -1518,6 +1552,142 @@ mod tests {
         assert!(
             !dir.join("tasks.json.lock").exists(),
             "the pre-rebrand lock name must not be written"
+        );
+    }
+
+    /// Set the process umask and return the previous value.
+    #[cfg(unix)]
+    fn set_umask(mask: libc::mode_t) -> libc::mode_t {
+        unsafe { libc::umask(mask) }
+    }
+
+    /// Restores the previous umask on drop, even when an expect panics.
+    /// umask is process-wide and tests run in parallel, so the two umask tests
+    /// serialize on `env_lock`; sibling threads see the conventional 022 default.
+    #[cfg(unix)]
+    struct UmaskGuard(libc::mode_t);
+    #[cfg(unix)]
+    impl Drop for UmaskGuard {
+        fn drop(&mut self) {
+            set_umask(self.0);
+        }
+    }
+
+    /// Low 12 permission bits of the path's metadata.
+    #[cfg(unix)]
+    fn file_mode(path: &Path) -> u32 {
+        use std::os::unix::fs::PermissionsExt;
+        fs::metadata(path)
+            .unwrap_or_else(|error| panic!("{} must exist: {error}", path.display()))
+            .permissions()
+            .mode()
+            & 0o7777
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fresh_store_writes_dirs_0700_and_files_0600_under_umask_022() {
+        let _lock = env_lock();
+        let _umask = UmaskGuard(set_umask(0o022));
+        let dir = temp_dir("private-fresh");
+        let _guard = TempDirGuard(dir.clone());
+        let store = TaskStore::new(&dir);
+        let mut seed = DomainState::new();
+        let keep = seed
+            .create(
+                "keep",
+                None,
+                TaskScope::Global,
+                ProvenanceOrigin::Manual,
+                None,
+            )
+            .expect("create keep");
+        let gone = seed
+            .create(
+                "gone",
+                None,
+                TaskScope::Global,
+                ProvenanceOrigin::Manual,
+                None,
+            )
+            .expect("create gone");
+        store.save(&seed).expect("first save");
+
+        // A trash-eligible delete writes trash.jsonl; the next save hard-links tsk.json.1.
+        let mut state = store.load().expect("load");
+        state.soft_delete(gone).expect("soft delete");
+        state.complete(keep).expect("complete keep");
+        store.save(&state).expect("second save");
+
+        assert_eq!(file_mode(&dir), 0o700, "state directory must be 0700");
+        for name in [STATE_FILE, LOCK_FILE, TRASH_FILE, BACKUP_FILE] {
+            assert_eq!(file_mode(&dir.join(name)), 0o600, "{name} must be 0600");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn existing_loose_state_files_are_tightened_to_private() {
+        let dir = temp_dir("private-tighten");
+        let _guard = TempDirGuard(dir.clone());
+        let store = TaskStore::new(&dir);
+        let mut seed = DomainState::new();
+        seed.create(
+            "seed",
+            None,
+            TaskScope::Global,
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create");
+        store.save(&seed).expect("seed");
+
+        // Loosen every state path the way an older version under a permissive
+        // umask could have left them, plus a version backup. The live document
+        // keeps its content; only its mode changes.
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).expect("chmod dir");
+            for name in [STATE_FILE, LOCK_FILE] {
+                fs::set_permissions(dir.join(name), fs::Permissions::from_mode(0o644))
+                    .expect("chmod file");
+            }
+            for name in [BACKUP_FILE, "tsk.json.v1", TRASH_FILE] {
+                fs::write(dir.join(name), b"{}").expect("seed file");
+                fs::set_permissions(dir.join(name), fs::Permissions::from_mode(0o644))
+                    .expect("chmod file");
+            }
+        }
+
+        // A plain read must repair the loose modes.
+        store.load().expect("load");
+
+        assert_eq!(file_mode(&dir), 0o700, "state directory must be tightened");
+        for name in [
+            STATE_FILE,
+            LOCK_FILE,
+            BACKUP_FILE,
+            "tsk.json.v1",
+            TRASH_FILE,
+        ] {
+            assert_eq!(
+                file_mode(&dir.join(name)),
+                0o600,
+                "existing {name} must be tightened to 0600"
+            );
+        }
+
+        // Tightening strips bits only: a stricter mode the owner chose stays.
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(dir.join(STATE_FILE), fs::Permissions::from_mode(0o400))
+                .expect("chmod strict");
+        }
+        store.load().expect("reload past the strict file");
+        assert_eq!(
+            file_mode(&dir.join(STATE_FILE)),
+            0o400,
+            "an existing stricter mode must not be loosened"
         );
     }
 
