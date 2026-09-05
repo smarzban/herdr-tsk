@@ -26,3 +26,5 @@ tmp/
 public/apple-touch-icon.png
 public/apple-touch-icon-dark.png
 public/apple-touch-icon-light.png
+.vercel
+.env*
