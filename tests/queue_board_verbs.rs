@@ -4228,3 +4228,72 @@ fn ctrl_g_with_no_archived_rows_in_scope_says_so_and_moves_nothing() {
     );
     assert_eq!(model.message(), Some("no archived tasks here"));
 }
+
+#[test]
+fn ctrl_f_on_the_archived_tab_still_unarchives_from_read_only_focus() {
+    let (mut domain, mut model, inside) = read_only_focus();
+    // `P` leaves the lens (D3); step back into it so the picker is reached from the
+    // read-only focus exactly as a user would.
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenProjectSelector,
+        None,
+    )
+    .expect("picker");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ProjectPickerSwitchTab,
+        None,
+    )
+    .expect("archived tab");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ConfirmProjectChoice,
+        None,
+    )
+    .expect("read-only focus");
+    assert!(model.focus_is_archived());
+
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenProjectSelector,
+        None,
+    )
+    .expect("picker again");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ProjectPickerSwitchTab,
+        None,
+    )
+    .expect("archived tab");
+    let outcome = apply_intent(&mut domain, &mut model, BoardIntent::File, None)
+        .expect("ctrl+f on the archived entry");
+    assert_eq!(
+        outcome,
+        IntentOutcome::Persist,
+        "the picker owns ctrl+f while it is open"
+    );
+    assert!(
+        !domain.is_project_archived(THIS_REPO),
+        "the entry was unarchived"
+    );
+    assert_ne!(
+        model.message(),
+        Some("project app is archived \u{b7} ctrl+u unarchive"),
+        "the read-only refusal must not fire for a picker verb"
+    );
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::CancelProjectPicker,
+        None,
+    )
+    .expect("close");
+    assert!(!model.focus_is_archived());
+    let _ = inside;
+}

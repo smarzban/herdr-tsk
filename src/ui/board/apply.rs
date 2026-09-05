@@ -181,7 +181,15 @@ pub fn apply_intent(
     // AC-42: the read-only archived focus refuses every mutating verb before the reducer
     // sees it. `Undo` is the one way out (it unarchives, AC-43), and navigation, peek,
     // the drawer, the palette, help and the picker all stay live.
-    if model.focus_is_archived() && read_only_focus_refuses(&intent) {
+    // An open popup owns its own intents (the picker's ctrl+f/ctrl+u, the palette, the
+    // launch card, help), so the read-only gate stands down while one is up: otherwise it
+    // would refuse a picker verb in the name of the project behind the card.
+    if model.focus_is_archived()
+        && model.popup() == BoardPopup::None
+        && model.project_picker.is_none()
+        && model.surface == CommandSurface::None
+        && read_only_focus_refuses(&intent)
+    {
         if let Some(refusal) = model.archived_focus_refusal() {
             model.set_message(refusal);
         }
