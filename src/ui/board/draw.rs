@@ -429,6 +429,7 @@ fn build_task_page_overlay<'a>(
             cursor_col,
             placeholder: "thread…   enter close · shift+enter save · esc cancel",
             refusal: None,
+            hint: None,
             above_rows: Vec::new(),
             cursor_row_offset: 0,
             message: form.thread_refusal.as_deref(),
@@ -920,6 +921,11 @@ impl<'a> OverlayPayloads<'a> {
                     placeholder: "search projects…   enter open · esc close",
                     refusal: None,
                     message: None,
+                    // The status row is the input while searching, so the selected
+                    // row's path moves to the reserved row above it.
+                    hint: model
+                        .selected_project_row()
+                        .map(|row| format!(" {}", row.path)),
                     above_rows: Vec::new(),
                     cursor_row_offset: 0,
                 },
@@ -969,6 +975,7 @@ impl<'a> OverlayPayloads<'a> {
                     message: (!multiline && model.input_mode() != BoardInputMode::SaveRecovery)
                         .then(|| model.message())
                         .flatten(),
+                    hint: None,
                     above_rows,
                     cursor_row_offset: u16::try_from(
                         window.len().saturating_sub(1).saturating_sub(caret_index),

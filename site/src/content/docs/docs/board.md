@@ -20,7 +20,8 @@ from the keyboard.
   remaining width; one blank row separates the legend from the first project. A zero
   paints as a dim `·`; a live NEEDS YOU count paints bold. Rows show the project's
   basename only, with a dim `here` after the project you launched from. The status row
-  names the selected row's full path, which is how same-named projects are told apart.
+  names the selected row's full path, which is how same-named projects are told apart;
+  while the `/` search is open that path moves to the row above the query.
   At 100 columns or wider a dim THREADS column lists that project's open threads, most
   recently touched first, ending in `+n` when they do not all fit. Enter opens the
   selected project in slot 2; a click selects a row and a fast second click on it opens it.

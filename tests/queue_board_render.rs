@@ -974,6 +974,7 @@ fn quick_add_refusal_message_uses_the_reserved_blank_row_without_color_or_overfl
                 placeholder: "title…",
                 refusal: None,
                 message: Some("Title required"),
+                hint: None,
                 above_rows: Vec::new(),
                 cursor_row_offset: 0,
             },
@@ -5027,6 +5028,21 @@ fn projects_index_paints_aligned_counts_search_hint_and_selected_path() {
             .iter()
             .any(|row| row.contains("search projects")),
         "search hint must not remain above the project table:\n{text}"
+    );
+    // The status row is the input now, so the selected path moves to the reserved row
+    // directly above it (the query reset the cursor to the first match).
+    let input_index = rows
+        .iter()
+        .position(|row| row.contains("▎ alpha"))
+        .expect("input row");
+    assert_eq!(
+        rows[input_index - 1].trim(),
+        "/one/alpha",
+        "selected path paints above the search input:\n{text}"
+    );
+    assert!(
+        !rows[..input_index - 1].iter().any(|row| row.contains('/')),
+        "no path anywhere else while searching:\n{text}"
     );
 
     for width in [40, 52, 79, 100, 162] {

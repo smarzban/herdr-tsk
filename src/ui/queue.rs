@@ -115,8 +115,6 @@ pub struct ProjectRow {
     pub in_motion: usize,
     /// Ready count.
     pub ready: usize,
-    /// Done count (live, unarchived). Feeds the index summary, never a column.
-    pub done: usize,
     /// Distinct thread names on this project's open tasks, ordered by most recently
     /// updated task first. Painted as the wide-width THREADS column.
     pub threads: Vec<String>,
@@ -322,7 +320,6 @@ struct ProjectCounts {
     needs_you: usize,
     in_motion: usize,
     ready: usize,
-    done: usize,
     threads: Vec<String>,
 }
 
@@ -372,17 +369,15 @@ fn query_projects_index(
                 let mut owned_tasks: Vec<&Task> =
                     live.iter().copied().filter(|task| owned(task)).collect();
                 sort_by_updated_desc(&mut owned_tasks);
-                let mut threads: Vec<String> = Vec::new();
-                for task in owned_tasks
+                // Insertion order is recency; the set only guards uniqueness.
+                let mut seen: BTreeSet<&str> = BTreeSet::new();
+                let threads: Vec<String> = owned_tasks
                     .iter()
                     .filter(|task| task.status != HumanStatus::Done)
-                {
-                    if let Some(thread) = &task.thread {
-                        if !threads.iter().any(|seen| seen == thread) {
-                            threads.push(thread.clone());
-                        }
-                    }
-                }
+                    .filter_map(|task| task.thread.as_deref())
+                    .filter(|thread| seen.insert(thread))
+                    .map(str::to_string)
+                    .collect();
                 ProjectCounts {
                     needs_you: owned_tasks
                         .iter()
@@ -395,10 +390,6 @@ fn query_projects_index(
                     ready: owned_tasks
                         .iter()
                         .filter(|task| task.status == HumanStatus::Ready)
-                        .count(),
-                    done: owned_tasks
-                        .iter()
-                        .filter(|task| task.status == HumanStatus::Done)
                         .count(),
                     threads,
                 }
@@ -425,7 +416,6 @@ fn query_projects_index(
                 needs_you,
                 in_motion,
                 ready,
-                done,
                 threads,
             } = counts[*index].clone();
             ProjectRow {
@@ -433,7 +423,6 @@ fn query_projects_index(
                 needs_you,
                 in_motion,
                 ready,
-                done,
                 threads,
                 current: current_repo.is_some_and(|repo| {
                     identities.equivalent(&paths[*index], &repo.to_string_lossy())
@@ -1333,11 +1322,6 @@ mod tests {
         assert_eq!(launch.needs_you, 1, "blocked counts as needs-you");
         assert_eq!(launch.in_motion, 1);
         assert_eq!(launch.ready, 2, "done tasks never count");
-        assert_eq!(launch.done, 0);
-        assert_eq!(
-            view.projects[0].done, 1,
-            "done feeds the row's summary count"
-        );
 
         assert!(
             view.sections.is_empty(),

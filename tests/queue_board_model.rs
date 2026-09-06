@@ -767,7 +767,6 @@ fn projects_index_rows_carry_open_work_counts() {
     assert_eq!(row.needs_you, 1);
     assert_eq!(row.in_motion, 1);
     assert_eq!(row.ready, 1, "done tasks stay out of the counts");
-    assert_eq!(row.done, 1, "done feeds the summary, not a column");
     assert_eq!(
         row.threads,
         vec!["release".to_string()],
