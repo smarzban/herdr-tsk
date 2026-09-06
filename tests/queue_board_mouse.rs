@@ -1289,6 +1289,7 @@ fn wheel_scrolls_the_open_command_surface_so_every_command_becomes_reachable() {
 #[test]
 fn delete_notice_undo_control_is_clickable_and_matches_the_keyboard() {
     let (mut domain, mut model, id) = board_with_task("doomed", HumanStatus::Ready);
+    apply_intent(&mut domain, &mut model, BoardIntent::SoftDelete, None).expect("arm delete");
     apply_intent(&mut domain, &mut model, BoardIntent::SoftDelete, None).expect("soft delete");
     assert!(
         model.delete_notice().is_some(),
@@ -1323,6 +1324,7 @@ fn delete_notice_undo_control_is_clickable_and_matches_the_keyboard() {
 #[test]
 fn delete_notice_undo_region_survives_a_title_containing_the_literal_u_undo() {
     let (mut domain, mut model, id) = board_with_task("u Undo now", HumanStatus::Ready);
+    apply_intent(&mut domain, &mut model, BoardIntent::SoftDelete, None).expect("arm delete");
     apply_intent(&mut domain, &mut model, BoardIntent::SoftDelete, None).expect("soft delete");
     assert!(
         model.delete_notice().is_some(),

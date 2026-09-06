@@ -911,6 +911,50 @@ fn page_thread_field_refuses_invalid_name_without_persisting() {
 }
 
 #[test]
+fn page_thread_field_accepts_version_dots() {
+    let mut domain = DomainState::new();
+    let id = domain
+        .create(
+            "Task",
+            None,
+            project(THIS_REPO),
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None).expect("open");
+    for _ in 0..4 {
+        apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None).expect("focus");
+    }
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ToggleThreadEditing,
+        None,
+    )
+    .expect("activate thread editor");
+    for character in "V0.0.6".chars() {
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::EditInsert(character),
+            None,
+        )
+        .expect("type");
+    }
+    assert_eq!(
+        apply_intent(&mut domain, &mut model, BoardIntent::ConfirmEdit, None).expect("save"),
+        IntentOutcome::Persist
+    );
+    model.sync_from_domain(&domain);
+    assert_eq!(
+        domain.get(id).expect("task").thread.as_deref(),
+        Some("v0.0.6")
+    );
+}
+
+#[test]
 fn canceling_thread_edit_keeps_the_task_page_and_resets_the_thread_draft() {
     let mut domain = DomainState::new();
     domain
@@ -1117,7 +1161,7 @@ fn thread_refusal_paints_inline_and_clears_without_status_leak() {
         .map(|cell| cell.symbol())
         .collect();
     assert!(
-        painted.contains("invalid thread name"),
+        painted.contains("start with a letter"),
         "missing inline refusal: {painted}"
     );
     assert_eq!(
@@ -1277,7 +1321,7 @@ fn long_invalid_thread_refusal_remains_visible_at_40x10() {
         .map(|cell| cell.symbol())
         .collect();
     assert!(
-        painted.contains("invalid thread name"),
+        painted.contains("hyphens") || painted.contains("dots"),
         "thread refusal vanished at 40x10: {painted}"
     );
 }

@@ -2260,6 +2260,7 @@ fn soft_delete_from_a_task_stage_returns_the_board_to_a_board_stage() {
         to_stage(&mut domain, &mut model, stage);
         let deleted = model.selected_id().unwrap();
         go(&mut domain, &mut model, BoardIntent::SoftDelete);
+        go(&mut domain, &mut model, BoardIntent::SoftDelete);
         assert!(!model.visible_ids().contains(&deleted));
         assert_eq!(
             model.wide_stage(),
@@ -2282,6 +2283,7 @@ fn soft_delete_from_a_task_stage_returns_the_board_to_a_board_stage() {
     let (mut domain, mut model) = fixture();
     go(&mut domain, &mut model, BoardIntent::OpenTaskPage);
     assert_eq!(model.wide_stage(), WideStage::FullTask);
+    go(&mut domain, &mut model, BoardIntent::SoftDelete);
     go(&mut domain, &mut model, BoardIntent::SoftDelete);
     assert_eq!(model.wide_stage(), WideStage::FullBoard);
 }

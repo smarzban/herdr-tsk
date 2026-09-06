@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use crate::cli::parser::{parse_task_address, TaskAddress};
 use crate::context::snapshot_from_env;
-use crate::domain::{normalize_thread, HumanStatus, TaskScope};
+use crate::domain::{normalize_thread, thread_refusal_message, HumanStatus, TaskScope};
 use crate::scope::resolve_flag_scope;
 use crate::store::{default_state_dir, TaskStore};
 
@@ -101,10 +101,9 @@ pub fn parse(args: &[String]) -> Result<ListInput, String> {
                 index += 1;
             }
             flag if flag.starts_with("--thread=") => {
-                input.thread = Some(
-                    normalize_thread(&flag["--thread=".len()..])
-                        .map_err(|_| "invalid thread name".to_owned())?,
-                );
+                input.thread = Some(normalize_thread(&flag["--thread=".len()..]).map_err(
+                    |error| format!("invalid thread name · {}", thread_refusal_message(error)),
+                )?);
                 index += 1;
             }
             "--json" => {
@@ -116,10 +115,9 @@ pub fn parse(args: &[String]) -> Result<ListInput, String> {
                 index += 2;
             }
             "--thread" => {
-                input.thread = Some(
-                    normalize_thread(&value(flag)?)
-                        .map_err(|_| "invalid thread name".to_owned())?,
-                );
+                input.thread = Some(normalize_thread(&value(flag)?).map_err(|error| {
+                    format!("invalid thread name · {}", thread_refusal_message(error))
+                })?);
                 index += 2;
             }
             "--desk" => {

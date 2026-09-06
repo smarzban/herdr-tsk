@@ -32,7 +32,7 @@ rejoined with single spaces.
 | `!p name` | project by basename (case-insensitive) |
 | `!p /path` | that path verbatim |
 | `!t` | unthread |
-| `!t name` | normalized thread (lowercase ASCII alphanumerics and hyphens, first character alphanumeric, at most 32 characters) |
+| `!t name` | normalized thread (lowercase ASCII alphanumerics, hyphens, and dots, first character alphanumeric, at most 32 characters) |
 
 An ambiguous project basename is stored as typed. `tsk list --all --json` is how
 you find a typo scope later.
@@ -61,12 +61,12 @@ If text is selected in the pane you invoked it from, it arrives as the title.
 Scope is three chips: **This project** (the repo the focused pane is in; marked
 unavailable outside one), **Desk**, and **Other…**, which discloses a path field.
 `1` `2` `3` pick a chip, `s` or `Space` cycles, `p` or `e` edits the path and `Enter`
-confirms it. Refusals paint in the card: `Title required`, `invalid thread name`.
+confirms it. Refusals paint in the card: `Title required`, or a thread rule (`thread must start with a letter or number`, `thread: use letters, numbers, hyphens, and dots`, `thread is at most 32 characters`).
 
 An idle board watching the same `~/.tsk` picks up the new task on the next tick.
 
 ## Expanded form
 
 From the `+` line, `Tab` opens the task page in notes edit because a draft has
-nothing to view yet. `Esc` returns to the line. A second `Tab` restores what you
-typed.
+nothing to view yet. Thread and `+ step` are on that page. `Esc` returns to the
+line. A second `Tab` restores what you typed.

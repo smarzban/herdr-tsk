@@ -33,11 +33,11 @@ The section is labelled `steps <done>/<total>`. Rows paint `▪` open, `✓` don
 
 A new-step draft lives in the steps section. From view or task edit, it persists
 independently: it never joins the enclosing task edit session. Plain `Enter` saves one new
-step and selects that new stored step. `Shift+Enter` saves one and opens the next
-empty editor. Existing-step renames and removals are staged with Title, Notes,
-Thread, and Scope. Plain `Enter` parks an existing-step rename in that session,
-then `Shift+Enter` saves all staged changes (`Alt+Enter` is the legacy-terminal
-fallback). `Esc` cancels a field; Esc from task
+step and opens the next empty editor. `Shift+Enter` saves that step and the enclosing
+task-edit session. An empty new-step row discards if you click elsewhere. Existing-step
+renames and removals are staged with Title, Notes, Thread, and Scope. Plain `Enter` parks
+an existing-step rename in that session, then `Shift+Enter` saves all staged changes
+(`Alt+Enter` is the legacy-terminal fallback). `Esc` cancels a field; Esc from task
 editing restores staged removals. A failed save keeps its drafts until you retry or cancel.
 
 Wheel still scrolls the page. Bare `↓` activates the first stored step, then arrows

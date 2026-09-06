@@ -41,8 +41,9 @@ Plain `Enter` parks an existing-step rename without saving the task session.
 Scope, staged existing-step edits, and staged removals, then exits editing. `Alt+Enter`
 is the legacy-terminal fallback. A staged
 `ctrl+x` removal disappears immediately and returns if task editing is cancelled. New
-steps save independently from view or task edit: Enter saves one and selects it,
-Shift+Enter saves one and opens the next empty editor. Field `Esc` cancels that
+steps save independently from view or task edit: Enter saves one and opens the next empty
+editor, Shift+Enter saves that step and the task-edit session. An empty new-step row
+discards if you click elsewhere. Field `Esc` cancels that
 field, while Esc from task editing restores staged removals.
 
 Notes are multiline, so `Enter` inserts a line. `Shift+Enter` saves and does not

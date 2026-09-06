@@ -73,13 +73,13 @@ The page is view-first. Verbs still need the modifier, except Tab and arrows.
 | `ctrl+n` | edit notes |
 | `Tab` / `Shift+Tab` | in view, loop forward or backward through stored steps and `+ step`; in task editing, loop Title, Notes, stored steps, `+ step`, Scope, Thread |
 | `ctrl+a` | open an independent inline [step](/docs/steps/) editor from view or any task-edit focus |
-| `Enter` | opens or saves selected `+ step`, parks an existing-step rename, opens Scope's picker, or toggles Thread's selected text editor |
+| `Enter` | saves a new step and opens the next empty row, parks an existing-step rename, opens Scope's picker, or toggles Thread's selected text editor |
 | click a step | selects it in view, opens it inline only during task editing; click `   + step` to add from any page edit state |
 | `↓` `↑` | Down activates the first stored step, then arrows move selected steps; an open add row scrolls the page |
 | `ctrl+s` | toggle the selected step, otherwise start or reopen the task |
 | `ctrl+d` / `ctrl+o` | complete / reopen the selected step, otherwise act on the task |
-| `ctrl+x` | in view, first mark then remove a selected step on a second press; in task edit immediately hide and stage its removal, otherwise delete the task |
-| `Shift+Enter` | task-edit save, or save a step and open the next empty step editor (`Alt+Enter` is the legacy-terminal save fallback) |
+| `ctrl+x` | in view, first mark then remove a selected step on a second press; in task edit immediately hide and stage its removal, otherwise ask once then delete the task |
+| `Shift+Enter` | task-edit save, or save a new step and exit task editing (`Alt+Enter` is the legacy-terminal save fallback) |
 | `Esc` | cancel the field, restore staged task-edit changes, or close the page |
 
 Title, Notes, Thread, and Scope clicks are inert until task editing starts. Once it

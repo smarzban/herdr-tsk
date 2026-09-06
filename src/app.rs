@@ -2580,6 +2580,7 @@ mod tests {
                 .expect("create task");
             let mut model = BoardModel::from_domain(&domain, None);
             drive(&mut domain, &mut model, area, ctrl(KeyCode::Char('x')));
+            drive(&mut domain, &mut model, area, ctrl(KeyCode::Char('x')));
             assert!(
                 domain.get(id).expect("task").soft_deleted,
                 "{area:?}: 'x' must actually soft-delete the task through the live route"
@@ -3096,8 +3097,8 @@ mod tests {
         assert!(!recovery.is_pending());
         assert_eq!(
             model.input_mode(),
-            BoardInputMode::EditStep,
-            "successful Shift+Enter reopens add editor"
+            BoardInputMode::TaskPage,
+            "successful Shift+Enter saves the step and exits task editing"
         );
     }
 

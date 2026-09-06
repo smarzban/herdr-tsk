@@ -1200,3 +1200,52 @@ fn expanded_quick_add_scope_omits_archived_projects() {
         "desk stays on offer: {options:?}"
     );
 }
+
+#[test]
+fn expanded_quick_add_sets_thread_and_steps() {
+    let mut domain = DomainState::new();
+    let mut model = BoardModel::from_domain(&domain, None);
+    let snap = snapshot();
+    open(&mut domain, &mut model, &snap);
+    type_title(&mut domain, &mut model, "capture with extras");
+    apply(&mut domain, &mut model, BoardIntent::ExpandQuickAdd, None);
+    let page = render_text(&model, 80, 24);
+    assert!(
+        page.contains("thread"),
+        "expanded capture paints a thread slot:\n{page}"
+    );
+    assert!(
+        page.contains("+ step"),
+        "expanded capture paints + step:\n{page}"
+    );
+    apply(&mut domain, &mut model, BoardIntent::FormFocusNext, None);
+    assert_eq!(model.input_mode(), BoardInputMode::EditThread);
+    for character in "V0.0.6".chars() {
+        apply(
+            &mut domain,
+            &mut model,
+            BoardIntent::EditInsert(character),
+            None,
+        );
+    }
+    apply(&mut domain, &mut model, BoardIntent::BeginAddStep, None);
+    assert_eq!(model.input_mode(), BoardInputMode::EditStep);
+    for character in "first step".chars() {
+        apply(
+            &mut domain,
+            &mut model,
+            BoardIntent::EditInsert(character),
+            None,
+        );
+    }
+    assert_eq!(
+        apply(&mut domain, &mut model, BoardIntent::ConfirmEditNext, None),
+        IntentOutcome::Persist
+    );
+    model.sync_from_domain(&domain);
+    let task = domain.tasks().last().expect("created");
+    assert_eq!(task.title, "capture with extras");
+    assert_eq!(task.thread.as_deref(), Some("v0.0.6"));
+    assert_eq!(task.steps.len(), 1);
+    assert_eq!(task.steps[0].text, "first step");
+}

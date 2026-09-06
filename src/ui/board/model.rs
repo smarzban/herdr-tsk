@@ -486,6 +486,8 @@ pub(super) struct StepEditorSave {
     pub(super) step: Uuid,
     pub(super) text: String,
     pub(super) reopen: bool,
+    /// Leave the task-edit session after this add lands (Shift+Enter on a new step).
+    pub(super) exit_editing: bool,
 }
 
 /// Page-session steps state for the task page, never persisted.
@@ -516,6 +518,8 @@ pub(super) struct StepsPageState {
     pub(super) drafts: BTreeMap<Uuid, EditBuffer>,
     /// Existing steps removed only when the enclosing task form saves. Esc drops this set.
     pub(super) removals: BTreeSet<Uuid>,
+    /// Capture-form steps staged until the create saves. Task pages persist adds immediately.
+    pub(super) pending_adds: Vec<String>,
     /// An editor apply the save boundary has not confirmed yet (AC-14). While it is
     /// set, the editor and its input mode are held exactly as the user left them.
     pub(super) pending_save: Option<StepEditorSave>,
@@ -648,6 +652,8 @@ pub struct BoardModel {
     /// it; but Retry can still make it durable, and then the way back has to come with it.
     /// See [`BoardModel::begin_save_recovery`] and [`BoardModel::end_save_recovery`].
     pub(super) suspended_delete_notice: Option<String>,
+    /// First ctrl+x on a task arms this id; a second press on the same task deletes it.
+    pub(super) pending_delete: Option<Uuid>,
     /// Open project-picker or save-recovery presentation.
     pub(super) popup: BoardPopup,
     /// Open session project selector; never persisted.
@@ -727,6 +733,7 @@ impl BoardModel {
             message: None,
             delete_notice: None,
             suspended_delete_notice: None,
+            pending_delete: None,
             popup: BoardPopup::None,
             project_picker: None,
             surface: CommandSurface::None,
@@ -1825,7 +1832,12 @@ impl BoardModel {
         let form = self.form.as_mut().expect("task form checked above");
         form.steps.pending_save = None;
         form.task_snapshot = saved_snapshot.map(Box::new);
-        if pending.reopen {
+        if pending.exit_editing {
+            form.editing = false;
+            form.steps.editor = None;
+            form.steps.add_selected = false;
+            self.input_mode = BoardInputMode::TaskPage;
+        } else if pending.reopen {
             // The rapid-capture loop: the in-place row reopens empty for the next step, its
             // mode never having left it.
             form.steps.add_selected = false;
@@ -1909,13 +1921,24 @@ impl BoardModel {
         self.input_mode = form.parent_mode();
     }
 
-    /// Park an existing-step draft before another task field becomes active. New-step add keeps
-    /// its focused save-and-next workflow, so it deliberately cannot leave its inline row.
+    /// Park an existing-step draft before another task field becomes active. An empty new-step
+    /// add is discarded so a click or Tab can leave it. A typed add stays on its row.
     pub(super) fn park_rename_step_draft(&mut self) -> bool {
         if self.input_mode != BoardInputMode::EditStep {
             return true;
         }
-        let Some(form) = self.form.as_mut().filter(|form| form.is_task()) else {
+        if self.empty_add_step_editor() {
+            if let Some(form) = self.form.as_mut() {
+                form.steps.editor = None;
+            }
+            self.input_mode = match self.form.as_ref() {
+                Some(form) if form.is_task() => BoardInputMode::TaskPage,
+                Some(form) => form.parent_mode(),
+                None => BoardInputMode::TaskPage,
+            };
+            return true;
+        }
+        let Some(form) = self.form.as_mut() else {
             return false;
         };
         let Some(editor) = form.steps.editor.take() else {
@@ -1925,8 +1948,22 @@ impl BoardModel {
             form.steps.editor = Some(editor);
             return false;
         };
+        if !form.is_task() {
+            form.steps.editor = Some(editor);
+            return false;
+        }
         form.steps.drafts.insert(step_id, editor.buffer);
         true
+    }
+
+    /// True when the inline add row is open and still empty after trim.
+    pub fn empty_add_step_editor(&self) -> bool {
+        self.input_mode == BoardInputMode::EditStep
+            && self.form.as_ref().is_some_and(|form| {
+                form.steps.editor.as_ref().is_some_and(|editor| {
+                    editor.rename.is_none() && editor.buffer.value().trim().is_empty()
+                })
+            })
     }
 
     /// Copy the active existing-step buffer into the task session without releasing its row.

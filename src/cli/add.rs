@@ -6,7 +6,9 @@ use uuid::Uuid;
 
 use crate::cli::parser::FlagAdd;
 use crate::context::snapshot_from_env;
-use crate::domain::{normalize_thread, DomainState, ProvenanceOrigin, TaskScope};
+use crate::domain::{
+    normalize_thread, thread_refusal_message, DomainState, ProvenanceOrigin, TaskScope,
+};
 use crate::scope::{resolve_flag_scope, resolve_project_path};
 use crate::store::{default_state_dir, TaskStore};
 
@@ -67,7 +69,7 @@ struct Failed {
     i: usize,
     title: Option<String>,
     code: &'static str,
-    error: &'static str,
+    error: String,
 }
 
 struct PlanItem {
@@ -203,12 +205,12 @@ pub fn run_plan(
             for item in resolved {
                 if let TaskScope::Project { path } = &item.scope {
                     if domain.is_project_archived(path) {
-                        failed.push(Failed {
-                            i: item.i,
-                            title: Some(item.title),
-                            code: "project-archived",
-                            error: "project is archived: use --desk, -p, or tsk project unarchive",
-                        });
+                        failed.push(fail_item(
+                            item.i,
+                            Some(item.title),
+                            "project-archived",
+                            "project is archived: use --desk, -p, or tsk project unarchive",
+                        ));
                         continue;
                     }
                 }
@@ -308,16 +310,16 @@ fn existing_task<'a>(
 
 fn parse_plan_item(i: usize, value: Value) -> Result<PlanItem, Failed> {
     let Some(object) = value.as_object() else {
-        return Err(failed(i, None, "invalid-item", "item must be an object"));
+        return Err(fail_item(i, None, "invalid-item", "item must be an object"));
     };
     let title = match object.get("title") {
-        None => return Err(failed(i, None, "empty-title", "title is required")),
+        None => return Err(fail_item(i, None, "empty-title", "title is required")),
         Some(Value::String(title)) => title,
-        Some(_) => return Err(failed(i, None, "invalid-item", "title must be a string")),
+        Some(_) => return Err(fail_item(i, None, "invalid-item", "title must be a string")),
     };
     let trimmed_title = title.trim().to_string();
     if has_c0_control(title) {
-        return Err(failed(
+        return Err(fail_item(
             i,
             Some(trimmed_title),
             "invalid-title",
@@ -325,7 +327,7 @@ fn parse_plan_item(i: usize, value: Value) -> Result<PlanItem, Failed> {
         ));
     }
     if trimmed_title.is_empty() {
-        return Err(failed(
+        return Err(fail_item(
             i,
             Some(trimmed_title),
             "empty-title",
@@ -338,7 +340,7 @@ fn parse_plan_item(i: usize, value: Value) -> Result<PlanItem, Failed> {
         Some(Value::String(notes)) if notes.trim().is_empty() => None,
         Some(Value::String(notes)) => Some(notes.clone()),
         Some(_) => {
-            return Err(failed(
+            return Err(fail_item(
                 i,
                 Some(trimmed_title),
                 "invalid-item",
@@ -351,7 +353,7 @@ fn parse_plan_item(i: usize, value: Value) -> Result<PlanItem, Failed> {
         Some(Value::Null) => Some(None),
         Some(Value::String(project)) => Some(Some(project.clone())),
         Some(_) => {
-            return Err(failed(
+            return Err(fail_item(
                 i,
                 Some(trimmed_title),
                 "invalid-item",
@@ -361,16 +363,16 @@ fn parse_plan_item(i: usize, value: Value) -> Result<PlanItem, Failed> {
     };
     let thread = match object.get("thread") {
         None | Some(Value::Null) => None,
-        Some(Value::String(thread)) => normalize_thread(thread).map(Some).map_err(|_| {
-            failed(
+        Some(Value::String(thread)) => normalize_thread(thread).map(Some).map_err(|error| {
+            fail_item(
                 i,
                 Some(trimmed_title.clone()),
                 "invalid-thread",
-                "thread is invalid",
+                thread_refusal_message(error),
             )
         })?,
         Some(_) => {
-            return Err(failed(
+            return Err(fail_item(
                 i,
                 Some(trimmed_title),
                 "invalid-thread",
@@ -388,12 +390,17 @@ fn parse_plan_item(i: usize, value: Value) -> Result<PlanItem, Failed> {
     })
 }
 
-fn failed(i: usize, title: Option<String>, code: &'static str, error: &'static str) -> Failed {
+fn fail_item(
+    i: usize,
+    title: Option<String>,
+    code: &'static str,
+    error: impl Into<String>,
+) -> Failed {
     Failed {
         i,
         title,
         code,
-        error,
+        error: error.into(),
     }
 }
 

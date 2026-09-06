@@ -999,6 +999,7 @@ fn a_failed_delete_save_reports_exactly_what_a_failed_complete_save_reports() {
         let (mut domain, mut model, doomed) = board_with_two_tasks();
         let baseline = snapshot_of(&domain);
         assert_eq!(model.selected_id(), Some(doomed));
+        apply_intent(&mut domain, &mut model, BoardIntent::SoftDelete, None).expect("arm delete");
         let mut recovery = SaveRecovery::new();
         let mut saves = 0;
 
@@ -1385,7 +1386,7 @@ fn cancelled_failed_step_editor_save_leaves_no_orphan_edit_mode() {
     )
     .expect("fresh editor save");
     assert_eq!(saved, IntentOutcome::Persisted);
-    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+    assert_eq!(model.input_mode(), BoardInputMode::EditStep);
     let texts: Vec<&str> = domain
         .get(id)
         .expect("task")
@@ -1448,14 +1449,10 @@ fn retried_step_editor_save_applies_and_closes() {
     assert_eq!(texts, vec!["alpha step", "zed step"], "the step lands");
     assert_eq!(
         model.input_mode(),
-        BoardInputMode::TaskPage,
-        "the editor closes cleanly once the boundary confirms"
+        BoardInputMode::EditStep,
+        "Enter reopens the empty next row once the boundary confirms"
     );
     let page = board_painted(&model);
-    assert!(
-        !page.lines().any(|row| row.contains("▎")),
-        "the editor line is gone after the retried save:\n{page}"
-    );
     assert!(
         page.contains("zed step"),
         "the retried step paints on the page:\n{page}"

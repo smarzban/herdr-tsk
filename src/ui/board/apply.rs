@@ -6,7 +6,10 @@ use std::time::Instant;
 use uuid::Uuid;
 
 use crate::context::InvocationSnapshot;
-use crate::domain::{normalize_thread, DomainError, DomainState, HumanStatus, TaskScope};
+use crate::domain::{
+    normalize_thread, thread_refusal_message, DomainError, DomainState, HumanStatus, TaskScope,
+    ThreadError,
+};
 use crate::ui::capture::{CaptureField, TITLE_REQUIRED_MESSAGE};
 use crate::ui::edit::{flatten_line_breaks, EditBuffer};
 use crate::ui::input::BoardIntent;
@@ -157,6 +160,35 @@ pub fn apply_intent(
     // confirmation routes clears an armed steps delete mark. Command confirmations
     // are excluded here because they recurse below as the intent they resolved to, which
     // then faces this same rule as itself.
+    if model.pending_delete.is_some()
+        && !matches!(
+            intent,
+            BoardIntent::SoftDelete | BoardIntent::ConfirmCommand | BoardIntent::SelectCommand(_)
+        )
+    {
+        model.pending_delete = None;
+    }
+    if model.empty_add_step_editor()
+        && !matches!(
+            intent,
+            BoardIntent::EditInsert(_)
+                | BoardIntent::EditInsertText(_)
+                | BoardIntent::EditBackspace
+                | BoardIntent::EditDeleteForward
+                | BoardIntent::EditMoveLeft
+                | BoardIntent::EditMoveRight
+                | BoardIntent::EditMoveLineStart
+                | BoardIntent::EditMoveLineEnd
+                | BoardIntent::EditMoveWordLeft
+                | BoardIntent::EditMoveWordRight
+                | BoardIntent::ConfirmEdit
+                | BoardIntent::ConfirmEditNext
+                | BoardIntent::CancelEdit
+                | BoardIntent::BeginAddStep
+        )
+    {
+        let _ = model.park_rename_step_draft();
+    }
     if !model.task_editing()
         && model
             .form
@@ -688,11 +720,10 @@ fn apply_board_intent(
         }
         BoardIntent::BeginAddStep => {
             model.close_popup();
-            // Ctrl+A and the trailing target both open the independent add row from task view
-            // or an active task edit. Park a rename first, so Ctrl+A never drops an existing
-            // staged rename while replacing its cursor with the add row.
-            if model.form.as_ref().is_some_and(BoardForm::is_task) && model.park_rename_step_draft()
-            {
+            // Ctrl+A and the trailing target both open the independent add row from a task
+            // page or an expanded capture. Park a rename first, so Ctrl+A never drops an
+            // existing staged rename while replacing its cursor with the add row.
+            if model.form.is_some() && model.park_rename_step_draft() {
                 open_step_editor(model, "", None);
             }
             return Ok(IntentOutcome::None);
@@ -913,28 +944,29 @@ fn apply_board_intent(
             return Ok(IntentOutcome::None);
         }
         BoardIntent::ConfirmEditNext => {
-            // Shift+Enter on an existing step commits the complete task edit session. Keep the
-            // active row allocated until persistence confirms, while an add remains its own
-            // save-and-next operation.
+            // Shift+Enter on an existing step, or on a typed new step, commits the complete
+            // task edit session. Keep the active row allocated until persistence confirms.
             if model.input_mode == BoardInputMode::EditStep {
                 if model.stage_active_rename_draft() {
                     let outcome = confirm_edit(domain, model)?;
                     model.sync_from_domain(domain);
                     return Ok(outcome);
                 }
-                return confirm_step_editor(domain, model, true);
+                return confirm_add_step(domain, model, snapshot, true);
             }
             return apply_intent(domain, model, BoardIntent::ConfirmEdit, snapshot);
         }
         BoardIntent::ConfirmEdit => {
             if model.input_mode == BoardInputMode::EditStep {
-                // Plain Enter closes an existing-step editor into the task session without
-                // crossing the persistence boundary. New-step adds still save independently.
-                if model.park_rename_step_draft() {
-                    model.input_mode = BoardInputMode::TaskPage;
+                // Plain Enter parks an existing-step rename. New-step adds save and open the
+                // next empty row, including an empty draft which stays on the line as a refusal.
+                if model.has_active_step_rename() {
+                    if model.park_rename_step_draft() {
+                        model.input_mode = BoardInputMode::TaskPage;
+                    }
                     return Ok(IntentOutcome::None);
                 }
-                return confirm_step_editor(domain, model, false);
+                return confirm_add_step(domain, model, snapshot, false);
             }
             if model.form.as_ref().is_some_and(|form| !form.is_task()) {
                 // Capture keeps its immutable invocation snapshot in the shared form. Without
@@ -950,13 +982,14 @@ fn apply_board_intent(
                 let scope_override = Some(form.scope.clone());
                 let thread = match normalize_optional_thread(form.thread.value()) {
                     Ok(thread) => thread,
-                    Err(()) => {
+                    Err(error) => {
                         if let Some(form) = model.form.as_mut() {
-                            form.thread_refusal = Some("invalid thread name".into());
+                            form.thread_refusal = Some(thread_refusal_message(error));
                         }
                         return Ok(IntentOutcome::None);
                     }
                 };
+                let pending_adds = form.steps.pending_adds.clone();
                 return match crate::capture::capture_save(
                     domain,
                     None,
@@ -967,6 +1000,9 @@ fn apply_board_intent(
                     thread,
                 ) {
                     Ok(id) => {
+                        for text in &pending_adds {
+                            domain.add_step(id, text)?;
+                        }
                         let expanded_quick_add = model.quick_add.is_some();
                         if expanded_quick_add {
                             // The app save boundary still owns this create. Retain the expanded
@@ -1653,6 +1689,12 @@ fn apply_board_intent(
                         model.set_message(NO_SELECTION);
                         return Ok(IntentOutcome::None);
                     };
+                    if model.pending_delete != Some(id) {
+                        model.pending_delete = Some(id);
+                        model.set_message("press ctrl+x again to delete");
+                        return Ok(IntentOutcome::None);
+                    }
+                    model.pending_delete = None;
                     // Read the title before the delete, and only arm the notice once the delete
                     // itself succeeded: a refused delete has nothing to recover from.
                     let title = domain.get(id).map(|task| task.title.clone());
@@ -2093,9 +2135,7 @@ fn lift_quick_add_tokens(
             "!t" => {
                 let argument = quick_add_token_argument(&words, index);
                 thread = match argument {
-                    Some(name) => Some(
-                        normalize_thread(name).map_err(|_| "invalid thread name".to_string())?,
-                    ),
+                    Some(name) => Some(normalize_thread(name).map_err(thread_refusal_message)?),
                     None => None,
                 };
                 index += usize::from(argument.is_some()) + 1;
@@ -2123,12 +2163,12 @@ fn quick_add_token_argument<'a>(words: &'a [&str], index: usize) -> Option<&'a s
         .filter(|word| *word != "!p" && *word != "!t" && !word.starts_with('#'))
 }
 
-fn normalize_optional_thread(value: &str) -> Result<Option<String>, ()> {
+fn normalize_optional_thread(value: &str) -> Result<Option<String>, ThreadError> {
     let value = value.trim();
     if value.is_empty() {
         Ok(None)
     } else {
-        normalize_thread(value).map(Some).map_err(|_| ())
+        normalize_thread(value).map(Some)
     }
 }
 
@@ -2147,9 +2187,9 @@ fn confirm_edit(
     let scope = form.scope.clone();
     let thread = match normalize_optional_thread(form.thread.value()) {
         Ok(thread) => thread,
-        Err(()) => {
+        Err(error) => {
             if let Some(form) = model.form.as_mut() {
-                form.thread_refusal = Some("invalid thread name".into());
+                form.thread_refusal = Some(thread_refusal_message(error));
             }
             return Ok(IntentOutcome::None);
         }
@@ -2557,7 +2597,7 @@ fn page_step_delete(
 /// Open an in-place step row seeded with `text`, renaming `step` when given and adding
 /// a transient row when `None`.
 fn open_step_editor(model: &mut BoardModel, text: &str, rename: Option<Uuid>) {
-    if let Some(form) = model.form.as_mut().filter(|form| form.is_task()) {
+    if let Some(form) = model.form.as_mut() {
         form.steps.add_selected = false;
         if form
             .steps
@@ -2599,6 +2639,63 @@ fn close_step_editor(model: &mut BoardModel) {
 /// on the row itself, never the board status row.
 const STEP_TEXT_REQUIRED: &str = "text required";
 
+/// Enter saves a new step and opens the next empty row. Shift+Enter saves it and
+/// then the enclosing form (task session or expanded capture).
+fn confirm_add_step(
+    domain: &mut DomainState,
+    model: &mut BoardModel,
+    snapshot: Option<&InvocationSnapshot>,
+    save_session: bool,
+) -> Result<IntentOutcome, DomainError> {
+    if !save_session {
+        return confirm_step_editor(domain, model, true, false);
+    }
+    if model.form.as_ref().is_some_and(|form| !form.is_task()) {
+        let outcome = confirm_step_editor(domain, model, false, false)?;
+        if model
+            .form
+            .as_ref()
+            .is_some_and(|form| form.steps.editor.is_some())
+        {
+            return Ok(outcome);
+        }
+        return apply_intent(domain, model, BoardIntent::ConfirmEdit, snapshot);
+    }
+    confirm_step_editor(domain, model, false, true)
+}
+
+fn stage_capture_step(
+    model: &mut BoardModel,
+    keep_open: bool,
+) -> Result<IntentOutcome, DomainError> {
+    let Some(form) = model.form.as_mut().filter(|form| !form.is_task()) else {
+        return Ok(IntentOutcome::None);
+    };
+    let Some(editor) = form.steps.editor.as_ref() else {
+        return Ok(IntentOutcome::None);
+    };
+    let text = editor.buffer.value().trim().to_string();
+    if text.is_empty() {
+        if let Some(editor) = form.steps.editor.as_mut() {
+            editor.refusal = Some(STEP_TEXT_REQUIRED.to_string());
+        }
+        return Ok(IntentOutcome::None);
+    }
+    form.steps.pending_adds.push(text);
+    if keep_open {
+        form.steps.editor = Some(StepEditor {
+            buffer: crate::ui::edit::seeded_draft(""),
+            rename: None,
+            refusal: None,
+        });
+        model.input_mode = BoardInputMode::EditStep;
+    } else {
+        form.steps.editor = None;
+        model.input_mode = form.parent_mode();
+    }
+    Ok(IntentOutcome::None)
+}
+
 /// Persist a new-step editor draft through the domain command.
 ///
 /// Existing-step editors are parked into the enclosing task session before this function is
@@ -2615,7 +2712,11 @@ fn confirm_step_editor(
     domain: &mut DomainState,
     model: &mut BoardModel,
     keep_open: bool,
+    exit_editing: bool,
 ) -> Result<IntentOutcome, DomainError> {
+    if model.form.as_ref().is_some_and(|form| !form.is_task()) {
+        return stage_capture_step(model, keep_open);
+    }
     let Some(form) = model.form.as_ref().filter(|form| form.is_task()) else {
         return Ok(IntentOutcome::None);
     };
@@ -2649,6 +2750,7 @@ fn confirm_step_editor(
         step: touched,
         text: text.trim().to_string(),
         reopen: keep_open,
+        exit_editing,
     });
     Ok(IntentOutcome::Persist)
 }
