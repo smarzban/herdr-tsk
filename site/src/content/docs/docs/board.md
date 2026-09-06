@@ -3,46 +3,69 @@ title: Board
 description: Tabs, sections, status, peek, and the done drawer.
 ---
 
-Home is a tabbed board: **desk** · **projects** · **threads**. Tabs show only at
-home (`1` / `2` / `3`). `P` opens the project picker from the keyboard.
+The board keeps three navigation destinations visible: **desk** · **selected project** ·
+**projects**. Use `1` / `2` / `3` from normal board mode. `P` opens the project picker
+from the keyboard.
 
 ## Tabs
 
-- **desk**: your own planning space. NEEDS YOU is desk work that is blocked or
-  review. IN MOTION is every started task, from any project. ON DECK is desk work
+- **desk**: your overview. NEEDS YOU is blocked or review work across all live
+  projects and your desk. IN MOTION is every started task, from any project. ON DECK is desk work
   that is ready: general to-dos, future projects, anything that belongs to no
-  repository. Thread headers sit above those open ready desk tasks.
-- **projects**: one collapsible group per project. Single-click a header to
-  collapse it. Double-click a header to focus that project. Inside a group:
-  started, then review, blocked, ready.
-- **threads**: thread names across projects, with collapsible project sub-groups
-  under each name. Same status order.
+  repository, with project attribution on other work.
+- **selected project**: the project board for slot 2. Its local thread filter (shown as
+  `all` or `#name`) can narrow every status section.
+- **projects**: one selectable overview row per live project, with needs-you,
+  in-motion, and ready counts. Enter or clicking a row opens that project in slot 2.
+  Press `/` or click the footer's `/ search projects` affordance, type a project name
+  (paste works too), then press Enter to open the match. Esc clears the query and
+  returns to navigation. The `Overview` selector (`v`) can replace the index with a
+  flat cross-project thread board, with project attribution (including `desk`).
 
-The board opens on desk. If desk would be empty while open tasks exist elsewhere,
-it opens on projects instead, then threads.
+At startup, a pane inside a repository opens that project, including when it is
+empty. Outside a repository it opens Desk. Reopening tsk from another project
+updates the existing board to that invocation project, or Desk outside a repository.
 
-Project focus (`P` → a project) hides the tabs and paints the project name chip
-on the right (`P ▾`). At home the chip is hidden. Collapse state is session-only.
-It does not persist.
+The three navigation slots stay visible everywhere as **desk** · **selected project** ·
+**projects**. Their keyboard shortcuts remain `1`, `2`, and `3`. The selected-project
+slot keeps its identity while Desk or Projects is active; if it is empty, `2` opens the
+project picker. The active destination's chip shows only its selected value, such as
+`all ▾`, `#release ▾`, or `Overview ▾`, and opens its picker. A selector that wraps below
+the tabs has one blank line above it. Both project and cross-project thread views go
+straight to the status sections, without a separate task-count summary.
+Collapse state is session-only.
+
+Thread selectors (`t` within a project, `v` on Projects) accept typing and paste.
+All letters, including `j` and `k`, are search text; use arrows or Tab to move between
+options. An unmatched query stays visible with `no matching options` so you can edit
+it or press Esc to close.
+
+The projects search opens in the shared footer slot: closed it reads `/ search projects`,
+while focused it shows the query and caret there. Letters, digits, Backspace, and
+bracketed paste edit the query, while Enter opens the selected match and Esc clears and
+closes it. No search row appears above the project table.
 
 Each persisted row begins with a dim store-global identifier such as
 `T30`. Click the identifier to copy it (`copy sent: T30`). At standard size a row
-ends with `project · age`, where age reads `40s`, `12m`, `3h`, or `5d`. A scoped
+ends with its project name on global rows, or its `#thread` attribution on project
+rows. Task-page informational dates remain in the footer. A scoped
 group with nothing open reads `no open tasks here — P rescope or + capture`.
 
 ## Sections
 
-One urgency-ordered list. Sections are computed, not navigated.
+One urgency-ordered list. Sections are computed, not navigated. Desk NEEDS YOU contains
+blocked and review tasks from all live projects and the desk; project boards contain
+only that project's tasks.
 
 - **NEEDS YOU**: blocked and review, on desk (desk/global tasks) and on a project
   board (that project). Omitted when empty. Sits above IN MOTION.
 - **IN MOTION**: work you have started
 - **ON DECK** when you are on a project board: that project's ready tasks, with
-  thread headers above their open rows
+  thread labels beside their rows
 - **z** opens the done drawer
 
 An archived task keeps its human status and leaves every working lens (desk,
-projects, threads, project focus, and default `tsk list` views). The done
+projects, project focus, and default `tsk list` views). The done
 drawer lists archived tasks in its scope under an `▾ archived · n` group below
 DONE: closed on every launch, one click or `Enter` on the header toggles it on its
 own, and expanded rows paint dim with their status glyph and `T<n>`. The header
@@ -121,14 +144,12 @@ to peek, and click the same row again to close. At wide widths a board or rail r
 click selects it in place and a fast double-click opens the
 [task page](/docs/task-page/). The wheel scrolls the list.
 
-Everything painted as a control is clickable: the tabs, the project chip, the
-verb-bar entries, `u Undo` on a delete notice, and the DONE header (which closes
-the drawer). Group headers collapse on click and focus their project on a fast
-double-click; a project sub-header under a thread does the same. When the list
-overflows, a scrollbar appears on the right: click the track to jump, drag the thumb
-to scroll. Dragging across text selects it and copies on release (`copied`), using
-the terminal's clipboard protocol. With the quick-add line open, clicking a task row
-discards the draft and selects that row.
+Everything painted as a control is clickable: the tabs, destination chips, picker
+options, verb-bar entries, `u Undo` on a delete notice, and the DONE header (which
+closes the drawer). When the list overflows, a scrollbar appears on the right: click
+the track to jump, drag the thumb to scroll. Dragging across text selects it and copies
+on release (`copied`), using the terminal's clipboard protocol. With the quick-add line
+open, clicking a task row discards the draft and selects that row.
 
 ## Project picker
 
@@ -136,7 +157,7 @@ discards the draft and selects that row.
 Home) and archived. `Tab` or the arrows flip tabs; the archived tab lists every
 archived project and reads `no archived projects` when empty. `ctrl+f` on a
 main-tab project archives it in place — the picker stays open and the project
-leaves the main list, the projects tab, threads, desk IN MOTION, and the rail.
+leaves the main list, the projects index, desk IN MOTION, and the rail.
 `ctrl+f` or `ctrl+u` on an archived-tab entry unarchives it, and every task
 returns in the status it had. A dim rule sits under the tabs row, and the
 archived tab's footer reads `ctrl+u unarchive · enter open · esc close`.
@@ -174,7 +195,7 @@ shows at most once per session, and launching anywhere else paints nothing.
 | --- | --- |
 | at least 110 columns | wide stage slider: board, board beside page, rail beside page, or page. The rail paints no meta, done drawer, or peek |
 | at least 78×24 and below 110 columns | standard single-pane board: section headers, row meta, full verb legend |
-| smaller | compact: glyph, `T<number>` identifier, and title; help, palette, and the task page take the full pane |
+| smaller | compact: glyph, `T<number>` identifier, and wrapped title; short panes still show project/thread attribution when at least 78 columns wide; help, palette, and the task page take the full pane |
 | down to 40×10 | still operable |
 
 A typical herdr split is 78 columns, which is the standard board.
@@ -194,7 +215,7 @@ letters appear in order anywhere in a label, so `ssr` finds `set status: review`
 | `delete` | a task is selected |
 | `reopen` | the selected task is done |
 | `undo` · `done drawer` | always |
-| `toggle groups` | on the projects or threads tab |
+| `toggle groups` | on the projects index |
 | `help` · `quit` | always |
 | `Retry save` · `Cancel save` | a save is waiting on you (the only two entries then) |
 

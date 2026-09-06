@@ -218,8 +218,8 @@ fn hit_map_covers_selection_rows_verbs_drawer_selector_chip_dropdown_palette_row
     assert!(
         hits.regions
             .iter()
-            .any(|hit| matches!(hit.target, QueueHitTarget::ProjectChip)),
-        "no selector chip hit region: {hits:?}"
+            .any(|hit| matches!(hit.target, QueueHitTarget::NavTab(_))),
+        "no navigation tab hit region: {hits:?}"
     );
 
     // Drawer: only painted while the done drawer is open.
@@ -281,54 +281,46 @@ fn hit_map_covers_selection_rows_verbs_drawer_selector_chip_dropdown_palette_row
 }
 
 #[test]
-fn projects_tab_group_header_double_click_scopes_the_board_to_that_project() {
+fn projects_index_row_click_selects_and_opens_the_project() {
     let (mut domain, mut model, _id) = scoped_board();
-    assert_eq!(model.selected_project(), None, "fixture starts at home");
     apply_intent(
         &mut domain,
         &mut model,
-        BoardIntent::SelectHomeTab(tsk_tui::ui::board::BoardTab::Projects),
+        BoardIntent::SelectNavTab(tsk_tui::ui::queue::NavTab::Desk),
         None,
     )
-    .expect("open projects tab");
+    .expect("start from the desk");
+    assert_eq!(
+        model.selected_project(),
+        Some(Path::new("/repos/app")),
+        "slot 2 retains its project while Desk is active"
+    );
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::SelectNavTab(tsk_tui::ui::queue::NavTab::Projects),
+        None,
+    )
+    .expect("open projects index");
     let hits = board_hit_map(STANDARD, &model);
     let view = model.queue_view();
-    let header = hits
+    let row = hits
         .regions
         .iter()
         .find(|hit| match hit.target {
-            QueueHitTarget::SectionProject(index) => {
-                view.sections
-                    .get(index)
-                    .and_then(|section| section.project_label.as_deref())
-                    == Some(OTHER_REPO)
-            }
+            QueueHitTarget::ProjectRow(index) => view
+                .projects
+                .get(index)
+                .is_some_and(|row| row.path == OTHER_REPO),
             _ => false,
         })
-        .unwrap_or_else(|| panic!("no group header hit region for {OTHER_REPO}: {hits:?}"));
-    let intent = click(header, &model, &hits).expect("header click maps to an intent");
-    apply_intent(&mut domain, &mut model, intent.clone(), None).expect("apply first header click");
-    assert_eq!(
-        model.selected_project(),
-        None,
-        "one header click collapses the group but stays at home"
-    );
-    apply_intent(&mut domain, &mut model, intent, None).expect("apply second header click");
+        .unwrap_or_else(|| panic!("no index row hit region for {OTHER_REPO}: {hits:?}"));
+    let intent = click(row, &model, &hits).expect("row click maps to an intent");
+    apply_intent(&mut domain, &mut model, intent, None).expect("apply row click");
     assert_eq!(
         model.selected_project(),
         Some(Path::new(OTHER_REPO)),
-        "header double-click narrows the session deck scope to the clicked project"
-    );
-
-    // Scoped to one project the header reads plain ON DECK, so it stops being a scope
-    // control: no SectionProject target may be pushed at all.
-    let hits = board_hit_map(STANDARD, &model);
-    assert!(
-        !hits
-            .regions
-            .iter()
-            .any(|hit| matches!(hit.target, QueueHitTarget::SectionProject(_))),
-        "scoped view must not offer group-header scope controls: {hits:?}"
+        "a direct index-row click opens that project in slot 2"
     );
 }
 
@@ -353,8 +345,8 @@ fn scoped_project_named_all_projects_has_no_group_header_hit_target() {
         !hits
             .regions
             .iter()
-            .any(|hit| matches!(hit.target, QueueHitTarget::SectionProject(_))),
-        "actual scoped state, not its colliding display label, must keep ON DECK inert: {hits:?}"
+            .any(|hit| matches!(hit.target, QueueHitTarget::ProjectRow(_))),
+        "project focus is a task board: it must offer no index rows at all: {hits:?}"
     );
 }
 
@@ -687,13 +679,22 @@ fn click_and_wheel_match_keyboard_effects_for_each_control() {
     )
     .expect("direct open");
     let hits = board_hit_map(STANDARD, &model_mouse);
-    let chip_hit = hits
+    let tab_hit = hits
         .regions
         .iter()
-        .find(|hit| matches!(hit.target, QueueHitTarget::ProjectChip))
-        .expect("selector chip hit region");
-    let mouse_intent = click(chip_hit, &model_mouse, &hits).expect("chip click intent");
-    assert_eq!(mouse_intent, BoardIntent::OpenProjectSelector);
+        .find(|hit| {
+            matches!(
+                hit.target,
+                QueueHitTarget::NavTab(tsk_tui::ui::queue::NavTab::ProjectBoard)
+            )
+        })
+        .expect("slot-2 tab hit region");
+    let mouse_intent = click(tab_hit, &model_mouse, &hits).expect("tab click intent");
+    assert_eq!(
+        mouse_intent,
+        BoardIntent::SelectNavTab(tsk_tui::ui::queue::NavTab::ProjectBoard),
+        "slot 2's click routes through the tab intent; the reducer opens the picker"
+    );
     apply_intent(&mut domain_mouse, &mut model_mouse, mouse_intent, None).expect("mouse open");
     assert_eq!(
         model_direct.project_picker_index(),
@@ -724,7 +725,13 @@ fn click_and_wheel_match_keyboard_effects_for_each_control() {
     );
     let next_key = map_key(BoardInputMode::ProjectPicker, press(KeyCode::Down))
         .expect("project picker down key");
-    for _ in 0..target_index {
+    // The picker opens highlighting the current destination; step from there.
+    let start = model_key
+        .project_picker_index()
+        .expect("highlighted option");
+    let options_len = model_key.project_options().len();
+    let steps = (target_index + options_len - start) % options_len;
+    for _ in 0..steps {
         apply_intent(&mut domain_key, &mut model_key, next_key.clone(), None)
             .expect("step to option");
     }
@@ -918,6 +925,19 @@ fn a_dropdown_option_over_a_task_row_still_selects_that_option_not_the_task_unde
             None,
         )
         .expect("create third project for a longer selector");
+    // The project board lists only its own rows; fill it deep enough that the picker's
+    // later options sit over real task rows.
+    for i in 0..12 {
+        domain
+            .create(
+                format!("filler {i}"),
+                None,
+                project(THIS_REPO),
+                ProvenanceOrigin::Manual,
+                None,
+            )
+            .expect("create filler rows");
+    }
     model.sync_from_domain(&domain);
     apply_intent(
         &mut domain,
@@ -1201,9 +1221,9 @@ fn wheel_scrolls_the_open_command_surface_so_every_command_becomes_reachable() {
     let commands = model.visible_commands();
     assert_eq!(
         commands.len(),
-        13,
-        "this ready fixture must expose all 13 M1 palette commands (reopen needs a done \
-         selection, AC-17): {commands:?}"
+        12,
+        "this ready fixture must expose every palette command a ready selection has \
+         (reopen joins only for a done selection, AC-17): {commands:?}"
     );
     let last = commands.len() - 1;
     assert_eq!(commands[last].label, "quit");
@@ -1413,7 +1433,7 @@ fn non_left_clicks_over_a_live_control_are_ignored() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn header_line_registers_no_hit_target() {
+fn section_header_rows_register_no_hit_target_and_thread_labels_stay_in_task_rows() {
     let mut domain = DomainState::new();
     domain
         .create(
@@ -1427,20 +1447,32 @@ fn header_line_registers_no_hit_target() {
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
     model.set_selected_project(Some(PathBuf::from(THIS_REPO)));
     let rows = page_rows(&model);
+    // The thread label is part of the task row's meta now, not a header of its own.
+    let task_row = rows
+        .iter()
+        .position(|row| row.contains("threaded row") && row.contains("#release"))
+        .expect("thread label paints beside its task row");
     let header_y = rows
         .iter()
-        .position(|row| row.contains("#release"))
-        .expect("thread header paints");
+        .position(|row| row.contains("ON DECK"))
+        .expect("the ON DECK header paints");
     let hits = board_hit_map(STANDARD, &model);
 
     assert!(
         hits.regions.iter().all(|hit| hit.area.y != header_y as u16),
-        "decorative thread header must register no hit target: {hits:?}"
+        "section header rows must register no hit target: {hits:?}"
     );
     assert_eq!(
         map_board_mouse(&model, &hits, left_click(0, header_y as u16)),
         None,
         "clicking the decorative header must be inert"
+    );
+    assert!(
+        hits.regions
+            .iter()
+            .any(|hit| matches!(hit.target, QueueHitTarget::Task(_))
+                && hit.area.y == task_row as u16),
+        "the row carrying the thread label is the task row itself"
     );
 }
 
@@ -1489,7 +1521,8 @@ fn task_identifier_click_copies_without_falling_through_to_row_or_page_actions()
     let (domain, _model, id) = board_with_task("Copy this identifier", HumanStatus::Ready);
     let mut task = domain.get(id).expect("task").clone();
     task.number = Some(30);
-    let model = BoardModel::from_tasks(vec![task], Some(PathBuf::from(THIS_REPO)));
+    let mut model = BoardModel::from_tasks(vec![task], Some(PathBuf::from(THIS_REPO)));
+    model.set_selected_project(Some(PathBuf::from(THIS_REPO)));
 
     let hits = board_hit_map(STANDARD, &model);
     let identifier = hits
@@ -1515,6 +1548,7 @@ fn quick_add_identifier_click_copies_without_discarding_the_draft() {
     let mut task = domain.get(id).expect("task").clone();
     task.number = Some(30);
     let mut model = BoardModel::from_tasks(vec![task], Some(PathBuf::from(THIS_REPO)));
+    model.set_selected_project(Some(PathBuf::from(THIS_REPO)));
     apply_intent(&mut domain, &mut model, BoardIntent::OpenCapture, None).expect("open draft");
 
     let hits = board_hit_map(STANDARD, &model);
@@ -1566,6 +1600,7 @@ fn task_page_identifier_click_copies_instead_of_hitting_the_title_region() {
     let mut task = domain.get(id).expect("task").clone();
     task.number = Some(31);
     let mut model = BoardModel::from_tasks(vec![task], Some(PathBuf::from(THIS_REPO)));
+    model.set_selected_project(Some(PathBuf::from(THIS_REPO)));
     apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
     assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
 
@@ -1795,7 +1830,7 @@ fn page_step_add_footer_chip_routes_to_begin_add_step() {
     let (mut domain, mut model) = deck_of(1);
     let id = model.selected_id().expect("task");
     domain.add_step(id, "existing step").expect("add step");
-    model = BoardModel::from_domain(&domain, None);
+    model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
     apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open");
     apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
         .expect("enter task edit mode");
@@ -1882,7 +1917,7 @@ fn step_editor_verb_chips_follow_their_keyboard_intents() {
     let (mut domain, mut model) = deck_of(1);
     let id = model.selected_id().expect("task");
     domain.add_step(id, "existing step").expect("add step");
-    model = BoardModel::from_domain(&domain, None);
+    model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
     apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open");
     apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
         .expect("enter edit session");

@@ -1,22 +1,22 @@
 ┌────────────────────────────────────────────────────────────────────────────────┐
 │                                                                                │
-│ desk  ·  projects  ·  threads                                                  │
+│ desk  ·  tsk ▾  ·  projects                                              all ▾ │
+│                                                                                │
+│ NEEDS YOU ───────────────────────────────────────────────────────────────────2 │
+│                                                                                │
+│  ■ T5 Wire dispatch cleanup receipts                                     herdr │
+│  ▲ T6 Docs refresh pass after F9 ships                                   herdr │
 │                                                                                │
 │ IN MOTION ───────────────────────────────────────────────────────────────────2 │
 │                                                                                │
-│  ▸ T1 Smoke-test worktree dispatch                                    tsk · 3m │
+│  ▸ T1 Smoke-test worktree dispatch                                         tsk │
 │    │ no notes yet                                                              │
 │    └                                                                           │
-│  ▸ T2 Edit target binding pin                                      herdr · 12m │
+│  ▸ T2 Edit target binding pin                                            herdr │
 │                                                                                │
-│ desk ────────────────────────────────────────────────────────────────────────1 │
+│ ON DECK · desk ──────────────────────────────────────────────────────────────1 │
 │                                                                                │
-│  ○ T7 Global backlog note                                                   2d │
-│                                                                                │
-│                                                                                │
-│                                                                                │
-│                                                                                │
-│                                                                                │
+│  ○ T7 Global backlog note                                                 desk │
 │                                                                                │
 │                                                                                │
 │                                                                                │

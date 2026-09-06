@@ -10,7 +10,7 @@ use tsk_tui::context::InvocationSnapshot;
 use tsk_tui::domain::{DomainState, HumanStatus, ProvenanceOrigin, TaskEventKind, TaskScope};
 use tsk_tui::ui::board::{
     apply_intent, board_hit_map, board_intent_may_persist, board_verb_items, draw_board,
-    resolve_board_command, BoardInputMode, BoardModel, BoardTab, CommandSurface, IntentOutcome,
+    resolve_board_command, BoardInputMode, BoardModel, CommandSurface, IntentOutcome,
     ProjectScopeOption,
 };
 use tsk_tui::ui::capture::CaptureField;
@@ -372,9 +372,12 @@ fn esc_closes_transient_then_detail_then_quit_and_q_quits_only_in_normal() {
     assert_eq!(outcome, IntentOutcome::None);
     assert_eq!(model.detail_open(), None);
 
-    // Nothing open → quit
+    // Nothing open → the board-level Esc is a no-op; quitting is explicit (ctrl+q).
     let outcome =
-        apply_intent(&mut domain, &mut model, BoardIntent::CloseLayer, None).expect("esc quit");
+        apply_intent(&mut domain, &mut model, BoardIntent::CloseLayer, None).expect("esc no-op");
+    assert_eq!(outcome, IntentOutcome::None);
+    let outcome =
+        apply_intent(&mut domain, &mut model, BoardIntent::Quit, None).expect("ctrl+q quits");
     assert_eq!(outcome, IntentOutcome::Quit);
 
     // ctrl+q quits from normal only; bare q is dead
@@ -469,13 +472,13 @@ fn palette_lists_exactly_m1_commands_for_selection_filters_by_subsequence_and_di
         "delete",
         "undo",
         "done drawer",
-        "toggle groups",
         "help",
         "quit",
     ];
     assert_eq!(
         labels, expected,
-        "M1 palette catalog with a selection must match AC-17 exactly"
+        "palette catalog with a selection must match exactly (no toggle-groups entry: \
+         the destinations have no collapsible task groups)"
     );
     // / the `o` key: reopen is only valid for a done selection, so a ready selection's
     // catalog must not offer it at all (not merely filtered out above by the exact-match).
@@ -836,17 +839,23 @@ fn project_scope_chip_and_dropdown_filter_all_visible_sections_matching_ac5() {
     assert_eq!(model.popup(), BoardPopup::ProjectPicker);
 
     let frame = rendered_board(&model, 80, 24);
-    let home_row = frame
+    // The dropdown marks its highlighted option (the current project at open) and
+    // paints the desk choice plus every project option around it.
+    let marked_row = frame
         .lines()
-        .position(|line| line.contains("desk") && line.contains('▸'))
-        .expect("scope dropdown must paint the home/desk option");
+        .position(|line| line.contains('▸'))
+        .expect("scope dropdown must mark the highlighted option");
+    assert!(
+        frame.lines().any(|line| line.contains("desk")),
+        "scope dropdown must paint the home/desk option: {frame:?}"
+    );
     assert!(
         frame
             .lines()
-            .skip(home_row + 1)
-            .take(3)
+            .skip(marked_row.saturating_sub(2))
+            .take(5)
             .any(|line| line.contains("other") || line.contains("app") || line.contains("empty")),
-        "scope dropdown must paint project options after home: {frame:?}"
+        "scope dropdown must paint the project options: {frame:?}"
     );
 
     // Move to /repos/other and confirm (session-only deck scope).
@@ -930,7 +939,7 @@ fn project_scope_chip_and_dropdown_filter_all_visible_sections_matching_ac5() {
     )
     .expect("scope home");
     assert!(model.at_home());
-    assert_eq!(model.home_tab(), tsk_tui::ui::board::BoardTab::Desk);
+    assert_eq!(model.nav_tab(), tsk_tui::ui::queue::NavTab::Desk);
     let home_view = model.queue_view();
     assert_eq!(home_view.counts.in_motion, 3);
     assert!(model.visible_ids().contains(&motion_global));
@@ -3939,8 +3948,8 @@ fn ctrl_u_in_read_only_focus_unarchives_in_place() {
 fn leaving_read_only_focus_hides_the_archived_projects_tasks_again() {
     for leave in [
         BoardIntent::CancelEdit,
-        BoardIntent::SelectHomeTab(BoardTab::Desk),
-        BoardIntent::SelectHomeTab(BoardTab::Projects),
+        BoardIntent::SelectNavTab(tsk_tui::ui::queue::NavTab::Desk),
+        BoardIntent::SelectNavTab(tsk_tui::ui::queue::NavTab::Projects),
     ] {
         let (mut domain, mut model, inside) = read_only_focus();
         assert!(model.visible_ids().contains(&inside));
@@ -4152,14 +4161,7 @@ fn toggle_all_groups_folds_and_unfolds_the_archived_group_with_the_others_when_t
         )
         .expect("create filed");
     domain.archive_task(filed).expect("archive");
-    let mut model = BoardModel::from_domain(&domain, None);
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::SelectHomeTab(BoardTab::Projects),
-        None,
-    )
-    .expect("projects tab");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/app")));
     apply_intent(&mut domain, &mut model, BoardIntent::ToggleDoneDrawer, None).expect("drawer");
     // Expand the archived group on its own, the way Enter on the header does.
     apply_intent(
@@ -4169,7 +4171,7 @@ fn toggle_all_groups_folds_and_unfolds_the_archived_group_with_the_others_when_t
         None,
     )
     .expect("expand archived");
-    assert!(model.visible_ids().contains(&live), "project group open");
+    assert!(model.visible_ids().contains(&live), "live rows open");
     assert!(model.visible_ids().contains(&filed), "archived group open");
 
     let toggle_all =
@@ -4182,29 +4184,26 @@ fn toggle_all_groups_folds_and_unfolds_the_archived_group_with_the_others_when_t
 
     apply_intent(&mut domain, &mut model, toggle_all.clone(), None).expect("fold all");
     let visible = model.visible_ids();
-    assert!(!visible.contains(&live), "the project group folded");
     assert!(
         !visible.contains(&filed),
-        "and the archived group folded with it"
+        "the archived group folded with the drawer open"
+    );
+    assert!(
+        visible.contains(&live),
+        "live rows never fold; they are not a group"
     );
 
     apply_intent(&mut domain, &mut model, toggle_all.clone(), None).expect("unfold all");
-    let visible = model.visible_ids();
-    assert!(visible.contains(&live), "the project group unfolded");
     assert!(
-        visible.contains(&filed),
-        "and the archived group unfolded with it"
+        model.visible_ids().contains(&filed),
+        "and the archived group unfolded again"
     );
 
-    // Drawer closed: a single toggle-all folds the project group but leaves the archived
-    // group's own state alone (one press, so a regression cannot cancel itself out).
+    // Drawer closed: no group answers the chord, and the archived group's own state
+    // is left alone (one press, so a regression cannot cancel itself out).
     apply_intent(&mut domain, &mut model, BoardIntent::ToggleDoneDrawer, None)
         .expect("close drawer");
-    apply_intent(&mut domain, &mut model, toggle_all, None).expect("fold all");
-    assert!(
-        !model.visible_ids().contains(&live),
-        "the project group folded with the drawer shut"
-    );
+    apply_intent(&mut domain, &mut model, toggle_all, None).expect("inert with the drawer shut");
     apply_intent(&mut domain, &mut model, BoardIntent::ToggleDoneDrawer, None)
         .expect("reopen drawer");
     assert!(

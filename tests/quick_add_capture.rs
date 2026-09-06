@@ -273,10 +273,31 @@ fn expanded_quick_add_keeps_the_selected_project_scope_through_esc_and_tab() {
 fn quick_add_save_selects_the_new_task_and_navigation_stays_relative_to_it() {
     let mut domain = DomainState::new();
     create_project_fixture(&mut domain, "/repos/existing");
+    domain
+        .create(
+            "desk fixture",
+            None,
+            TaskScope::Global,
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("desk fixture");
     let mut model = BoardModel::from_domain(&domain, None);
-    let prior_selection = model.selected_id().expect("fixture is selected");
+    let prior_selection = model.selected_id().expect("desk fixture is selected");
 
-    save_quick_add(&mut domain, &mut model, "new task");
+    let desk_snapshot = InvocationSnapshot {
+        default_scope: TaskScope::Global,
+        this_repo: None,
+        title_prefill: None,
+        provenance: ProvenanceOrigin::Capture,
+    };
+    open(&mut domain, &mut model, &desk_snapshot);
+    type_title(&mut domain, &mut model, "new task");
+    assert_eq!(
+        apply(&mut domain, &mut model, BoardIntent::QuickAddSave, None),
+        IntentOutcome::Persist
+    );
+    model.sync_from_domain(&domain);
     let saved = domain.tasks().last().expect("saved task").id;
     assert_eq!(model.selected_id(), Some(saved));
     assert_ne!(saved, prior_selection);
@@ -451,7 +472,11 @@ fn shift_enter_uses_the_same_project_basename_resolution() {
             path: "/work/ctrl-target".into()
         }
     );
-    assert_eq!(model.selected_id(), Some(task.id));
+    assert_eq!(
+        model.selected_id(),
+        None,
+        "saved project task is outside the desk lens"
+    );
     assert_eq!(model.message(), None);
 }
 
@@ -1039,7 +1064,7 @@ fn capture_bar_renders_spaced_three_row_block_and_stays_bounded_without_color_sg
     for text in [
         "visible task",
         "title…   !p = desk · !p name = project · !t name = thread",
-        "enter save · shift+enter save+next · tab details · esc close",
+        "Enter save · esc cancel · tab expand · add to invocation",
     ] {
         assert!(standard.contains(text), "missing {text:?}: {standard}");
     }
@@ -1057,7 +1082,7 @@ fn capture_bar_renders_spaced_three_row_block_and_stays_bounded_without_color_sg
 
     let compact_rows = render_rows(&model, 40, 10);
     let compact = compact_rows.concat();
-    for text in ["visible task", "title…", "enter save"] {
+    for text in ["visible task", "title…", "save"] {
         assert!(compact.contains(text), "missing {text:?}: {compact}");
     }
     assert!(compact_rows.iter().all(|row| row.chars().count() == 40));

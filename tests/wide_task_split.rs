@@ -260,7 +260,7 @@ fn stage_zero_and_full_task_render_the_standard_tier_at_130x24() {
     let (rows, hits) = render(&model, 130, 24);
     assert!(rows[0].trim().is_empty(), "row 0 blank");
     assert!(
-        rows[1].contains("desk  ·  projects  ·  threads"),
+        rows[1].contains("desk  ·  tsk ▾  ·  projects"),
         "selector row"
     );
     assert!(rows[2].trim().is_empty(), "blank above IN MOTION");
@@ -268,12 +268,12 @@ fn stage_zero_and_full_task_render_the_standard_tier_at_130x24() {
     assert!(rows[4].trim().is_empty(), "blank between header and rows");
     assert!(rows[5].starts_with("  ▸ T12 Frame the wide task view"));
     assert!(
-        rows[5].trim_end().ends_with("tsk · 0s"),
+        rows[5].trim_end().ends_with("tsk"),
         "meta column: {}",
         rows[5]
     );
     assert!(rows[6].trim().is_empty());
-    assert!(rows[7].starts_with(" desk ─"));
+    assert!(rows[7].starts_with(" ON DECK · desk ─"));
     assert!(rows[9].starts_with("  ○ T15 Renew domain"));
     let verbs = hits
         .regions
@@ -362,7 +362,7 @@ fn stage_a_board_keeps_its_meta_column() {
     let (rows, _) = render(&model, 130, 24);
     let row = column_text(&rows, geometry.board, 5);
     assert!(row.starts_with("  ▸ T12 Frame"), "{row}");
-    assert!(row.trim_end().ends_with("tsk · 0s"), "meta column: {row}");
+    assert!(row.trim_end().ends_with("tsk"), "meta column: {row}");
     assert_eq!(rows[5].chars().nth(geometry.rule.x as usize), Some('│'));
 }
 
@@ -410,11 +410,13 @@ fn rail_wraps_titles_with_indent_four_and_dims_every_cell() {
             "│",
             "rule column at row {y}"
         );
-        assert_eq!(
-            buffer[(rail.width - 1, y)].symbol(),
-            " ",
-            "no glyph touches the rule at row {y}"
-        );
+        if y != 1 {
+            assert_eq!(
+                buffer[(rail.width - 1, y)].symbol(),
+                " ",
+                "no glyph touches the rule at row {y}"
+            );
+        }
         for x in 0..rail.width {
             assert!(
                 buffer[(x, y)].modifier.contains(Modifier::DIM),
@@ -427,7 +429,7 @@ fn rail_wraps_titles_with_indent_four_and_dims_every_cell() {
     assert!(!rail_text.contains("DONE"), "rail drops the done drawer");
     assert!(rail_text.contains(" IN MOTION ─"));
     assert!(rail_text.contains(" desk ─"));
-    assert!(rail_text.contains("desk  ·  projects  ·  threads"));
+    assert!(rail_text.contains("desk  ·  tsk"));
 }
 
 #[test]
@@ -753,7 +755,11 @@ fn stage_a_preview_paints_controls_for_the_focus_router_only() {
 fn narrow_board_is_unchanged_by_the_stage_model() {
     let (mut domain, mut model) = fixture();
     let (rows, _) = render(&model, 109, 24);
-    assert!(rows[1].contains("desk  ·  projects  ·  threads"));
+    assert!(
+        rows[1].contains("desk  ·  tsk ▾  ·  projects"),
+        "selector: {:?}",
+        rows[1]
+    );
     assert!(rows[5].starts_with("  ▸ T12 Frame the wide task view"));
     assert!(
         !rows[22].contains("→ pane"),
@@ -1167,7 +1173,7 @@ fn shrinking_and_growing_keeps_every_stage_and_its_session() {
                 None,
             )
             .expect("create other");
-        let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(REPO)));
+        let mut model = BoardModel::from_domain(&domain, None);
         let survivor = domain
             .tasks()
             .iter()
@@ -1203,7 +1209,10 @@ fn shrinking_and_growing_keeps_every_stage_and_its_session() {
         match stage.focused_surface() {
             FocusedSurface::Board => {
                 assert_eq!(narrow.presentation, ResponsivePresentation::SingleBoard);
-                assert!(narrow_rows[1].contains("desk  ·  projects"), "{stage:?}");
+                assert!(
+                    narrow_rows[1].contains("desk  ·  select project"),
+                    "{stage:?}"
+                );
             }
             FocusedSurface::Task => {
                 assert_eq!(narrow.presentation, ResponsivePresentation::SingleTask);

@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::{ProvenanceOrigin, TaskEvent, TaskEventKind, UndoEntry, UNDO_CAP};
+use crate::scope::paths_equivalent;
 
 /// Human-facing task progress. Source of truth for board state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -223,8 +224,8 @@ impl DomainState {
     /// Whether the project record for `path` carries the archived flag.
     pub fn is_project_archived(&self, path: &str) -> bool {
         self.projects
-            .get(path)
-            .is_some_and(|record| record.archived)
+            .iter()
+            .any(|(stored, record)| record.archived && paths_equivalent(stored, path))
     }
 
     /// Scope paths of every archived project, sorted.
@@ -259,17 +260,29 @@ impl DomainState {
         if !self.has_project_task(path) && !self.projects.contains_key(path) {
             return Err(DomainError::UnknownProject(path.to_string()));
         }
+        let stored_path = self
+            .projects
+            .keys()
+            .find(|stored| paths_equivalent(stored, path))
+            .cloned()
+            .unwrap_or_else(|| path.to_string());
         self.projects
-            .insert(path.to_string(), ProjectRecord { archived: true });
-        self.project_intents.insert(path.to_string(), true);
+            .insert(stored_path.clone(), ProjectRecord { archived: true });
+        self.project_intents.insert(stored_path, true);
         Ok(true)
     }
 
     /// Unarchive a project: remove its record. `Ok(false)` when no record exists but
     /// tasks carry the scope (already unarchived); unknown when neither.
     pub fn unarchive_project(&mut self, path: &str) -> Result<bool, DomainError> {
-        if self.projects.remove(path).is_some() {
-            self.project_intents.insert(path.to_string(), false);
+        if let Some(stored_path) = self
+            .projects
+            .keys()
+            .find(|stored| paths_equivalent(stored, path))
+            .cloned()
+        {
+            self.projects.remove(&stored_path);
+            self.project_intents.insert(stored_path, false);
             return Ok(true);
         }
         if self.has_project_task(path) {
@@ -280,7 +293,7 @@ impl DomainState {
 
     fn has_project_task(&self, path: &str) -> bool {
         self.tasks.iter().any(|task| {
-            matches!(&task.scope, TaskScope::Project { path: task_path } if task_path == path)
+            matches!(&task.scope, TaskScope::Project { path: task_path } if paths_equivalent(task_path, path))
         })
     }
 

@@ -23,6 +23,16 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Same relative layout as other herdr plugins: scripts/ next to target/release/.
 plugin_bin="${TSK_BIN:-$script_dir/../target/release/tsk}"
 
+# A focused existing pane keeps its process environment, so hand the fresh host
+# context to the board through the private one-shot request file before focusing it.
+# A new pane still receives HERDR_PLUGIN_CONTEXT_JSON directly from herdr.
+if [ -x "$plugin_bin" ] && [ -n "${HERDR_PLUGIN_CONTEXT_JSON:-}" ]; then
+  if ! printf '%s' "$HERDR_PLUGIN_CONTEXT_JSON" | "$plugin_bin" --resolve-context; then
+    printf 'tsk: could not hand off the board context, existing pane was not focused\n' >&2
+    exit 1
+  fi
+fi
+
 open_board() {
   exec "$herdr_bin" plugin pane open \
     --plugin "$plugin_id" \

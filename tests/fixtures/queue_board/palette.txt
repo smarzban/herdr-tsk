@@ -1,20 +1,20 @@
 ┌────────────────────────────────────────────────────────────────────────────────┐
 │                                                                                │
-│ desk  ·  projects  ·  threads                                                  │
+│ desk  ·  tsk ▾  ·  projects                                              all ▾ │
 │                                                                                │
-│ IN MOTION ───────────────────────────────────────────────────────────────────2 │
+│ NEEDS YOU ───────────────────────────────────────────────────────────────────2 │
 │                                                                                │
-│  ▸ T1 Sm┌─ command ───────────────────────────────────────────── [x]─┐tsk · 3m │
-│  ▸ T2 Ed│                                                            │dr · 12m │
+│  ■ T5 Wi┌─ command ───────────────────────────────────────────── [x]─┐   herdr │
+│  ▲ T6 Do│                                                            │   herdr │
 │         │   set status: ready                                        │         │
-│ desk ───│   set status: started                                      │───────1 │
+│ IN MOTIO│   set status: started                                      │───────2 │
 │         │ ▸ set status: blocked                                      │         │
-│  ○ T7 Gl│   set status: review                                       │      2d │
-│         │                                                            │         │
+│  ▸ T1 Sm│   set status: review                                       │     tsk │
+│  ▸ T2 Ed│                                                            │   herdr │
 │         ├────────────────────────────────────────────────────────────┤         │
-│         │ ↑/↓ move · enter run · esc close                           │         │
+│ ON DECK │ ↑/↓ move · enter run · esc close                           │───────1 │
 │         └────────────────────────────────────────────────────────────┘         │
-│                                                                                │
+│  ○ T7 Global backlog note                                                 desk │
 │                                                                                │
 │                                                                                │
 │                                                                                │

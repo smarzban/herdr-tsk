@@ -1,6 +1,5 @@
 //! Queue Board Renderer frame goldens.
 
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::{Duration, SystemTime};
@@ -14,10 +13,10 @@ use tsk_tui::domain::{
     DomainState, HumanStatus, ProvenanceOrigin, Task, TaskEvent, TaskEventKind, TaskScope,
 };
 use tsk_tui::ui::input::map_key;
-use tsk_tui::ui::queue::{self, BoardLens, BoardTab, QueueView, ThreadProjectCollapseKey};
+use tsk_tui::ui::queue::{self, BoardLens, NavTab, QueueView, ThreadFilter};
 use tsk_tui::ui::render::{
-    assert_buffer_mono, assert_no_color_sgr, draw_queue_frame, BottomInputSlot, PaletteCommandRow,
-    QueueFrameModel, QueueOverlay, VerbEntry,
+    assert_buffer_mono, assert_no_color_sgr, draw_queue_frame, BottomInputSlot, NavChipPaint,
+    NavPaint, PaletteCommandRow, QueueFrameModel, QueueOverlay, VerbEntry,
 };
 use tsk_tui::ui::tier::{self, Tier, TierGeometry};
 use tsk_tui::ui::{
@@ -146,13 +145,22 @@ fn fixture_tasks() -> Vec<Task> {
 /// task 1 ("Smoke-test worktree dispatch", Doing) [`fixture_model`] hardcodes as its
 /// selection.
 fn base_board_model() -> BoardModel {
-    let model = BoardModel::from_tasks(fixture_tasks(), Some(PathBuf::from("/repos/tsk")));
-    assert_eq!(
-        model.selected_id(),
-        Some(Uuid::from_u128(1)),
-        "base_board_model's auto-selection drifted from the render fixture's hardcoded \
-         selection -- keep them in sync or `fixture_verbs` binds the wrong row's legend"
-    );
+    let mut model = BoardModel::from_tasks(fixture_tasks(), Some(PathBuf::from("/repos/tsk")));
+    // The desk's NEEDS YOU lane is global now, so seeding no longer lands on task 1
+    // (the started /repos/tsk row): the render fixtures pin task 1's legend explicitly.
+    let pinned_index = model
+        .visible_ids()
+        .iter()
+        .position(|&id| id == Uuid::from_u128(1))
+        .expect("fixture task 1 must be visible for the pinned selection");
+    apply_intent(
+        &mut DomainState::new(),
+        &mut model,
+        BoardIntent::SelectIndex(pinned_index),
+        None,
+    )
+    .expect("pin task 1");
+    assert_eq!(model.selected_id(), Some(Uuid::from_u128(1)));
     model
 }
 
@@ -174,13 +182,7 @@ fn fixture_verbs() -> &'static [VerbEntry<'static>] {
 fn todo_verbs() -> Vec<VerbEntry<'static>> {
     let mut model = base_board_model();
     let mut domain = DomainState::new();
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::SelectHomeTab(BoardTab::Projects),
-        None,
-    )
-    .expect("projects tab for fixture todo task");
+    model.set_selected_project(Some(PathBuf::from("/repos/tsk")));
     let target = Uuid::from_u128(10);
     let visible = model.visible_ids();
     for _ in 0..visible.len() {
@@ -282,58 +284,58 @@ fn palette_commands() -> Vec<PaletteCommandRow<'static>> {
         .collect()
 }
 
-fn empty_projects() -> &'static HashSet<String> {
-    static SET: OnceLock<HashSet<String>> = OnceLock::new();
-    SET.get_or_init(HashSet::new)
-}
-
-fn empty_threads() -> &'static HashSet<String> {
-    static SET: OnceLock<HashSet<String>> = OnceLock::new();
-    SET.get_or_init(HashSet::new)
-}
-
-fn empty_thread_projects() -> &'static HashSet<ThreadProjectCollapseKey> {
-    static SET: OnceLock<HashSet<ThreadProjectCollapseKey>> = OnceLock::new();
-    SET.get_or_init(HashSet::new)
-}
-
 fn fixture_view(tasks: &[Task], drawer_open: bool) -> QueueView {
-    queue::query_lens(
+    queue::query_board(
         tasks,
+        &std::collections::BTreeSet::new(),
         Some(Path::new("/repos/tsk")),
-        BoardLens::Home(BoardTab::Desk),
+        BoardLens::Desk,
         drawer_open,
+        &ThreadFilter::All,
     )
 }
 
 fn fixture_view_projects(tasks: &[Task], drawer_open: bool) -> QueueView {
-    queue::query_lens(
+    queue::query_board(
         tasks,
+        &std::collections::BTreeSet::new(),
         Some(Path::new("/repos/tsk")),
-        BoardLens::Home(BoardTab::Projects),
+        BoardLens::Project(Path::new("/repos/tsk")),
         drawer_open,
+        &ThreadFilter::All,
     )
 }
 
 fn fixture_model<'a>(tasks: &'a [Task], view: &'a QueueView) -> QueueFrameModel<'a> {
-    fixture_model_on_tab(tasks, view, BoardTab::Desk)
+    fixture_model_on_tab(tasks, view, NavTab::Desk)
 }
 
 fn fixture_model_on_tab<'a>(
     tasks: &'a [Task],
     view: &'a QueueView,
-    home_tab: BoardTab,
+    active: NavTab,
 ) -> QueueFrameModel<'a> {
     QueueFrameModel {
         tasks,
         view,
         selection_id: Some(Uuid::from_u128(1)),
-        at_home: true,
-        home_tab,
-        scope_label: "",
-        collapsed_projects: empty_projects(),
-        collapsed_threads: empty_threads(),
-        collapsed_thread_projects: empty_thread_projects(),
+        nav: NavPaint {
+            active,
+            slot2_label: "tsk".to_string(),
+            slot2_project: true,
+            chip: Some(NavChipPaint {
+                label: "all".to_string(),
+                kind: tsk_tui::ui::render::NavChipKind::ThreadFilter,
+            }),
+        },
+        surface: tsk_tui::ui::render::BoardSurface::Desk,
+        thread_labels: false,
+        show_project_meta: true,
+        projects: &[],
+        projects_index: false,
+        projects_cursor: 0,
+        projects_query: "",
+        summary: None,
         status_message: None,
         status_undo_offset: None,
         verb_items: fixture_verbs(),
@@ -416,17 +418,124 @@ fn inactive_home_tabs_are_dimmed() {
             (y, row)
         })
         .find(|(_, row)| {
-            row.contains("desk") && row.contains("projects") && row.contains("threads")
+            row.contains("desk") && row.contains("projects") && !row.contains("1 desk")
         })
-        .expect("tab row");
-    for label in ["projects", "threads"] {
-        let x = row.find(label).expect("tab label") as u16;
+        .expect("tab row without visible shortcut digits");
+    let label = "projects";
+    let x = row.find(label).expect("tab label") as u16;
+    assert!(
+        buffer[(x, tab_y)]
+            .style()
+            .add_modifier
+            .contains(Modifier::DIM),
+        "inactive {label} tab must be dimmed"
+    );
+}
+
+#[test]
+fn project_rows_show_full_thread_metadata_without_relative_age() {
+    let mut tasks = fixture_tasks();
+    tasks[0].thread = Some("a".repeat(32));
+    let mut model = BoardModel::from_tasks(tasks, Some(PathBuf::from("/repos/tsk")));
+    model.apply_reopen_project(Some(PathBuf::from("/repos/tsk")));
+    let rows = board_rows(&model, 80, 24);
+    let joined = rows.join("\n");
+    assert!(
+        joined.contains("#aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+        "full thread attribution missing: {joined}"
+    );
+    assert!(
+        !joined.contains("ago"),
+        "task rows must not paint relative ages: {joined}"
+    );
+}
+
+#[test]
+fn full_thread_selector_and_dropdown_values_are_not_capped_to_the_old_prefix_budget() {
+    let tasks = fixture_tasks();
+    let view = fixture_view_projects(&tasks, false);
+    let thread = "a".repeat(32);
+    for (width, height) in [(40, 10), (40, 24), (78, 24), (110, 24), (162, 24)] {
+        let mut model = fixture_model_on_tab(&tasks, &view, NavTab::ProjectBoard);
+        model.nav.chip = Some(NavChipPaint {
+            label: format!("#{thread}"),
+            kind: tsk_tui::ui::render::NavChipKind::ThreadFilter,
+        });
+        let body_rows = paint(width, height, &model).0;
+        if width == 40 {
+            let tabs_y = body_rows
+                .iter()
+                .position(|row| row.contains("desk"))
+                .expect("tabs");
+            let thread_y = body_rows
+                .iter()
+                .position(|row| row.contains(&format!("#{thread}")))
+                .expect("thread selector");
+            assert_eq!(
+                thread_y,
+                tabs_y + 2,
+                "wrapped selector needs one blank row above it"
+            );
+            assert!(body_rows[tabs_y + 1].trim().is_empty());
+        }
+        let body = body_rows.join("\n");
         assert!(
-            buffer[(x, tab_y)]
-                .style()
-                .add_modifier
-                .contains(Modifier::DIM),
-            "inactive {label} tab must be dimmed"
+            body.contains(&format!("#{thread}")),
+            "active selector clipped at {width} columns:\n{body}"
+        );
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("terminal");
+        let mut hits = None;
+        terminal
+            .draw(|frame| {
+                hits = Some(
+                    draw_queue_frame(
+                        frame,
+                        &model,
+                        &tier::resolve(width, height),
+                        Rect::new(0, 0, width, height),
+                    )
+                    .0,
+                );
+            })
+            .expect("draw selector hit map");
+        let chip_hit = hits
+            .expect("hit map")
+            .regions
+            .into_iter()
+            .find(|hit| hit.target == tsk_tui::ui::render::QueueHitTarget::NavChip)
+            .expect("active selector hit");
+        assert!(
+            chip_hit.area.width >= 33,
+            "active selector hit must cover the full valid thread at {width}: {:?}",
+            chip_hit.area
+        );
+        if width == 40 {
+            assert_eq!(
+                chip_hit.area.y,
+                tier::resolve(width, height).selector_row.expect("tabs") + 2,
+                "mouse target must follow the spaced selector"
+            );
+        }
+
+        let options = vec![
+            "All tasks".to_string(),
+            format!("#{thread}  1"),
+            "Without a thread".to_string(),
+        ];
+        // Do not let the already-tested selector behind the popup satisfy this
+        // assertion: the option inside the popup must paint the whole name itself.
+        model.nav.chip = None;
+        model.overlay = QueueOverlay::ScopeDropdown {
+            options: &options,
+            selected: 1,
+            tabs: None,
+            title: Some("thread"),
+            query: None,
+        };
+        let dropdown = paint(width, height, &model).0.join("\n");
+        assert!(
+            dropdown.contains(&format!("#{thread}")),
+            "dropdown clipped the full thread at {width} columns:\n{dropdown}"
         );
     }
 }
@@ -491,8 +600,8 @@ fn standard_78x24_fixture_has_selector_list_rule_status_verb_and_no_other_chrome
     assert_eq!(geo.verb_row, Some(23));
     assert_eq!(geo.viewport_top, 2);
     assert_eq!(geo.viewport_height, 19);
-    assert_eq!(geo.meta_column_width, 28);
-    assert_eq!(geo.title_width, 50);
+    assert_eq!(geo.meta_column_width, 36);
+    assert_eq!(geo.title_width, 42);
 
     assert!(trimmed(&rows[0]).is_empty(), "row above tabs stays blank");
 
@@ -502,12 +611,16 @@ fn standard_78x24_fixture_has_selector_list_rule_status_verb_and_no_other_chrome
         "selector must not paint a view switcher: {selector:?}"
     );
     assert!(
-        selector.contains("desk") && selector.contains("projects") && selector.contains("threads"),
-        "selector must show home tabs: {selector:?}"
+        selector.contains("desk")
+            && selector.contains("projects")
+            && !selector.contains("1 desk")
+            && !selector.contains("2 tsk")
+            && !selector.contains("3 projects"),
+        "selector must show the persistent tabs without shortcut digits: {selector:?}"
     );
     assert!(
-        !selector.contains('▾'),
-        "home tabs do not paint the project chip: {selector:?}"
+        selector.contains("tsk"),
+        "slot 2 names the selected project: {selector:?}"
     );
 
     let list: String = rows
@@ -522,7 +635,7 @@ fn standard_78x24_fixture_has_selector_list_rule_status_verb_and_no_other_chrome
     );
     assert!(
         list.lines()
-            .any(|line| line.trim_start().starts_with("desk ─")),
+            .any(|line| line.trim_start().starts_with("ON DECK · desk ─")),
         "desk tab must include the desk ON DECK header:\n{list}"
     );
     assert!(
@@ -533,14 +646,26 @@ fn standard_78x24_fixture_has_selector_list_rule_status_verb_and_no_other_chrome
         list.contains("Smoke-test worktree dispatch"),
         "task titles must appear:\n{list}"
     );
-    // Standard trailing meta includes ages (fixture ages are known).
+    // Standard trailing meta keeps scope/thread identity without relative ages.
     assert!(
-        list.contains("3m") || list.contains("1h") || list.contains("1d"),
-        "standard tier must paint age meta:\n{list}"
+        list.contains("herdr") && list.contains("tsk") && list.contains("desk"),
+        "standard tier must paint task attribution:\n{list}"
     );
     assert!(
-        !list.contains("need you") && !list.contains("NEEDS YOU"),
-        "default desk fixture has no global blocked/review, so no NEEDS YOU:\n{list}"
+        !list.contains("ago"),
+        "task rows must not paint relative ages:\n{list}"
+    );
+    // NEEDS YOU is the desk's global attention lane: the fixture's blocked/review
+    // rows from /repos/herdr paint here with project attribution.
+    assert!(
+        list.contains("NEEDS YOU")
+            && list.contains("Wire dispatch cleanup receipts")
+            && list.contains("herdr"),
+        "desk NEEDS YOU must gather blocked/review from every live scope:\n{list}"
+    );
+    assert!(
+        list.contains("Docs refresh pass after F9 ships"),
+        "review rows join blocked rows in the global lane:\n{list}"
     );
     assert!(
         !list.contains("claude") && !list.contains("grok") && !list.contains("agent"),
@@ -741,11 +866,16 @@ fn every_section_header_has_symmetric_spacing_and_scrolls_with_its_selected_task
     let projects_view = fixture_view_projects(&tasks, true);
     let desk_cases = [
         (
+            "NEEDS YOU",
+            Uuid::from_u128(20),
+            "Wire dispatch cleanup receipts",
+        ),
+        (
             "IN MOTION",
             Uuid::from_u128(1),
             "Smoke-test worktree dispatch",
         ),
-        ("desk", Uuid::from_u128(30), "Global backlog note"),
+        ("ON DECK · desk", Uuid::from_u128(30), "Global backlog note"),
         (
             "DONE",
             Uuid::from_u128(40),
@@ -753,8 +883,16 @@ fn every_section_header_has_symmetric_spacing_and_scrolls_with_its_selected_task
         ),
     ];
     let project_cases = [
-        ("tsk", Uuid::from_u128(1), "Smoke-test worktree dispatch"),
-        ("herdr", Uuid::from_u128(2), "Edit target binding pin"),
+        (
+            "IN MOTION",
+            Uuid::from_u128(1),
+            "Smoke-test worktree dispatch",
+        ),
+        (
+            "ON DECK",
+            Uuid::from_u128(10),
+            "Prototype the queue-style board UI",
+        ),
     ];
 
     for &(width, height) in &[(78u16, 24u16), (77u16, 24u16), (40u16, 10u16)] {
@@ -779,7 +917,12 @@ fn every_section_header_has_symmetric_spacing_and_scrolls_with_its_selected_task
             assert_visible_chrome(&rows, geo, &dimensions);
         }
         for &(header, selected_id, selected_title) in &project_cases {
-            let mut model = fixture_model_on_tab(&tasks, &projects_view, BoardTab::Projects);
+            if width == 40 && header == "ON DECK" {
+                // The fixture's long project titles wrap at 40 columns, which is the
+                // compact wrap test's own subject, not header spacing.
+                continue;
+            }
+            let mut model = fixture_model_on_tab(&tasks, &projects_view, NavTab::ProjectBoard);
             model.selection_id = Some(selected_id);
             let (rows, geo) = paint(width, height, &model);
             assert_exact_header_spacing(&rows, geo, header, selected_title, &dimensions);
@@ -834,7 +977,7 @@ fn quick_add_refusal_message_uses_the_reserved_blank_row_without_color_or_overfl
                 above_rows: Vec::new(),
                 cursor_row_offset: 0,
             },
-            project_scope: false,
+            destination: "desk".to_string(),
             recovery: false,
         };
         let (rows, geo) = paint(width, height, &model);
@@ -955,6 +1098,8 @@ fn overlay_rows_are_padded_exact_no_base_bleed() {
             options: &scope_opts,
             selected: 0,
             tabs: None,
+            title: None,
+            query: None,
         };
         let (rows, _geo) = paint(80, 24, &model);
         let desk_row = rows
@@ -1096,7 +1241,7 @@ fn board_row_leads_title_with_uppercase_t_identifier() {
 }
 
 #[test]
-fn standard_row_meta_keeps_age_when_long_project_competes() {
+fn standard_row_meta_keeps_full_project_without_relative_age() {
     let mut tasks = fixture_tasks();
     tasks[0].number = Some(7);
     tasks[0].scope = project("/src/customer-portal-api");
@@ -1110,8 +1255,12 @@ fn standard_row_meta_keeps_age_when_long_project_competes() {
         .expect("started fixture row");
     assert!(row.contains('7'), "number must remain visible:\n{row}");
     assert!(
-        row.contains("12m"),
-        "age must remain visible when a long project shares the meta column:\n{row}"
+        row.contains("customer-portal-api"),
+        "full project attribution must remain visible:\n{row}"
+    );
+    assert!(
+        !row.contains("12m"),
+        "task rows must not paint relative ages:\n{row}"
     );
 }
 
@@ -2287,7 +2436,7 @@ fn standard_accordion_on_a_task_below_the_fold_scrolls_the_whole_block_into_view
     }
     let last_id = Uuid::from_u128(2000 + 29);
     let view = fixture_view_projects(&tasks, false);
-    let mut model = fixture_model_on_tab(&tasks, &view, BoardTab::Projects);
+    let mut model = fixture_model_on_tab(&tasks, &view, NavTab::ProjectBoard);
     model.detail_open = Some(last_id);
 
     let (rows, geo) = paint(80, 24, &model);
@@ -2330,7 +2479,7 @@ fn plain_selection_on_a_task_below_the_fold_scrolls_it_into_view_in_both_tiers()
         .collect();
     let last_id = Uuid::from_u128(5000 + 39);
     let view = fixture_view_projects(&tasks, false);
-    let mut model = fixture_model_on_tab(&tasks, &view, BoardTab::Projects);
+    let mut model = fixture_model_on_tab(&tasks, &view, NavTab::ProjectBoard);
     model.selection_id = Some(last_id);
 
     for &(width, height) in &[(80u16, 24u16), (77u16, 24u16), (40u16, 10u16)] {
@@ -2468,8 +2617,13 @@ fn compact_paints_no_takeover_for_a_detail_open_task_excluded_by_the_current_sco
     );
     let model = QueueFrameModel {
         detail_open: Some(excluded_id),
-        at_home: false,
-        scope_label: "tsk",
+        surface: tsk_tui::ui::render::BoardSurface::Project,
+        nav: NavPaint {
+            active: NavTab::ProjectBoard,
+            slot2_label: "tsk".to_string(),
+            slot2_project: true,
+            chip: None,
+        },
         ..fixture_model(&tasks, &scoped_view)
     };
 
@@ -2777,33 +2931,10 @@ fn footer_lists_the_step_add_verb() {
     );
 }
 
-/// T-4: scoped ON DECK thread blocks paint one dim decorative header before their task rows.
+/// Thread labels are row meta on the project board: they paint beside their own task
+/// row, never as a decorative header block, and rows stay flush left.
 #[test]
-fn scoped_board_paints_thread_header_above_its_tasks() {
-    let mut tasks = fixture_tasks();
-    tasks[2].thread = Some("release".to_string());
-    tasks[3].thread = Some("release".to_string());
-    let mut model = BoardModel::from_tasks(tasks, Some(PathBuf::from("/repos/tsk")));
-    model.set_selected_project(Some(PathBuf::from("/repos/tsk")));
-
-    let rows = board_rows(&model, 80, 24);
-    let header = rows
-        .iter()
-        .position(|row| row.contains("#release"))
-        .expect("scoped thread block must paint its header");
-    let first_task = rows
-        .iter()
-        .position(|row| row.contains("Prototype the queue-style board UI"))
-        .expect("threaded task must paint");
-    assert!(
-        header < first_task,
-        "the thread header must precede its task rows:\n{}",
-        rows.join("\n")
-    );
-}
-
-#[test]
-fn threaded_task_rows_indent_under_headers_while_unthreaded_rows_stay_flush() {
+fn thread_labels_paint_beside_rows_without_headers_or_indent() {
     let mut tasks = fixture_tasks();
     tasks[2].thread = Some("release".to_string());
     tasks[3].thread = Some("release".to_string());
@@ -2818,15 +2949,6 @@ fn threaded_task_rows_indent_under_headers_while_unthreaded_rows_stay_flush() {
     model.set_selected_project(Some(PathBuf::from("/repos/tsk")));
 
     let rows = board_rows(&model, 80, 24);
-    let leading_spaces = |row: &str| {
-        row.chars()
-            .take_while(|character| *character == ' ')
-            .count()
-    };
-    let header = rows
-        .iter()
-        .find(|row| row.contains("#release"))
-        .expect("thread header paints");
     let threaded = rows
         .iter()
         .find(|row| row.contains("Prototype the queue-style board UI"))
@@ -2836,123 +2958,81 @@ fn threaded_task_rows_indent_under_headers_while_unthreaded_rows_stay_flush() {
         .find(|row| row.contains("Loose project task"))
         .expect("unthreaded task paints");
 
-    assert_eq!(
-        leading_spaces(header),
-        leading_spaces(loose),
-        "headers and loose rows keep their existing left edge"
+    assert!(
+        threaded.contains("#release"),
+        "the thread label paints on its task row's meta:\n{threaded:?}"
     );
+    assert!(
+        rows.iter()
+            .all(|row| !row.trim_start().starts_with("#release")),
+        "no decorative thread header row paints:\n{}",
+        rows.join("\n")
+    );
+    let leading_spaces = |row: &str| {
+        row.chars()
+            .take_while(|character| *character == ' ')
+            .count()
+    };
     assert_eq!(
         leading_spaces(threaded),
-        leading_spaces(loose) + 2,
-        "threaded rows indent beneath their header:\n{}",
+        leading_spaces(loose),
+        "threaded and unthreaded rows stay flush left:\n{}",
         rows.join("\n")
     );
 }
 
+/// Selecting a thread filter removes the labels (every row would carry the same word)
+/// and narrows the rows to that thread across statuses.
 #[test]
-fn thread_blocks_leave_a_blank_row_before_loose_tasks() {
-    let mut tasks = fixture_tasks();
-    tasks[2].thread = Some("release".to_string());
-    tasks[3].thread = Some("release".to_string());
-    tasks.push(task(
-        12,
-        "Loose project task",
-        HumanStatus::Ready,
-        project("/repos/tsk"),
-        30,
-    ));
-    let mut model = BoardModel::from_tasks(tasks, Some(PathBuf::from("/repos/tsk")));
-    model.set_selected_project(Some(PathBuf::from("/repos/tsk")));
-
-    let rows = board_rows(&model, 80, 24);
-    let last_threaded_task = rows
-        .iter()
-        .position(|row| row.contains("Cut rust-toolchain pin into CI docs"))
-        .expect("last threaded task paints");
-    let loose_task = rows
-        .iter()
-        .position(|row| row.contains("Loose project task"))
-        .expect("loose task paints");
-
-    assert!(
-        rows[last_threaded_task + 1].trim().is_empty(),
-        "a thread block leaves a spacer before following content:\n{}",
-        rows.join("\n")
-    );
-    assert!(
-        last_threaded_task + 1 < loose_task,
-        "the loose task follows the thread spacer:\n{}",
-        rows.join("\n")
-    );
-}
-
-#[test]
-fn every_thread_block_leaves_a_spacer_before_following_content() {
-    let mut tasks = fixture_tasks();
-    tasks[2].thread = Some("alpha".to_string());
-    tasks[3].thread = Some("beta".to_string());
-    tasks.push(task(
-        12,
-        "Loose project task",
-        HumanStatus::Ready,
-        project("/repos/tsk"),
-        30,
-    ));
-    let mut model = BoardModel::from_tasks(tasks, Some(PathBuf::from("/repos/tsk")));
-    model.set_selected_project(Some(PathBuf::from("/repos/tsk")));
-
-    let rows = board_rows(&model, 80, 24);
-    for title in [
-        "Prototype the queue-style board UI",
-        "Cut rust-toolchain pin into CI docs",
-    ] {
-        let task = rows
-            .iter()
-            .position(|row| row.contains(title))
-            .unwrap_or_else(|| panic!("threaded task {title:?} paints"));
-        assert!(
-            rows[task + 1].trim().is_empty(),
-            "each thread block leaves a spacer after {title:?}:\n{}",
-            rows.join("\n")
-        );
-    }
-}
-
-#[test]
-fn header_shows_name_and_open_count() {
+fn a_selected_thread_filter_hides_redundant_labels_and_narrows_the_board() {
     let mut tasks = fixture_tasks();
     tasks[2].thread = Some("release".to_string());
     tasks[3].thread = Some("release".to_string());
     let mut model = BoardModel::from_tasks(tasks, Some(PathBuf::from("/repos/tsk")));
     model.set_selected_project(Some(PathBuf::from("/repos/tsk")));
-    let deck_index = model
-        .visible_ids()
-        .iter()
-        .position(|id| *id == Uuid::from_u128(10))
-        .expect("threaded task is visible");
     let mut domain = DomainState::new();
     apply_intent(
         &mut domain,
         &mut model,
-        BoardIntent::SelectIndex(deck_index),
+        BoardIntent::OpenThreadFilterPicker,
         None,
     )
-    .expect("select threaded task");
+    .expect("open the thread filter");
+    apply_intent(&mut domain, &mut model, BoardIntent::ListPickerNext, None)
+        .expect("select the release thread");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ConfirmListPicker,
+        None,
+    )
+    .expect("apply the filter");
 
-    let standard = board_rows(&model, 80, 24).join("\n");
+    let rows = board_rows(&model, 80, 24);
+    let joined = rows.join("\n");
     assert!(
-        standard.contains("#release") && standard.contains("2 open"),
-        "standard thread header must name its block and its open count:\n{standard}"
+        joined.contains("Prototype the queue-style board UI"),
+        "matching rows stay visible:\n{joined}"
     );
-    let compact = board_rows(&model, 40, 12).join("\n");
+    // The chip names the active filter; the task rows drop the redundant labels.
     assert!(
-        compact.contains("#release 2") && !compact.contains("2 open"),
-        "compact thread header must retain name/count in its compressed form:\n{compact}"
+        joined.contains("#release ▾"),
+        "the selector chip names the active filter:\n{joined}"
+    );
+    assert!(
+        rows.iter()
+            .filter(|row| row.contains("Prototype") || row.contains("rust-toolchain"))
+            .all(|row| !row.contains("#release")),
+        "a selected thread filter drops the now-redundant labels:\n{joined}"
+    );
+    assert!(
+        !joined.contains("Loose project task"),
+        "the fixture's unthreaded rows are hidden by the filter"
     );
 }
 
 #[test]
-fn board_with_headers_paints_within_40x10_and_all_tasks_reachable() {
+fn board_with_thread_labels_paints_within_40x10_and_all_tasks_reachable() {
     let mut tasks = vec![
         task(
             100,
@@ -3014,26 +3094,15 @@ fn board_with_headers_paints_within_40x10_and_all_tasks_reachable() {
             .into_iter()
             .find(|task| task.id == id)
             .expect("selected task stays visible");
-        let header = format!(
-            "#{} 2",
-            task.thread.as_deref().expect("threaded fixture task")
-        );
-        let header_y = rows
-            .iter()
-            .position(|row| row.contains(&header))
-            .expect("selected task's header must occupy a painted row");
-        let task_y = rows
-            .iter()
-            .position(|row| row.contains(&task.title))
-            .expect("selected task must be reachable at 40x10");
         assert!(
-            header_y < task_y,
-            "the header must consume its own row before the selected task:\n{}",
+            rows.iter()
+                .any(|row| row.contains(task.title.split(' ').next().expect("title word"))),
+            "selected task must be reachable at 40x10:\n{}",
             rows.join("\n")
         );
         assert!(
             rows.iter().all(|row| row_display_width(row) == 40),
-            "thread headers and rows must stay within 40 columns"
+            "thread-labelled rows must stay within 40 columns"
         );
     }
 }
@@ -3459,7 +3528,7 @@ fn overflowing_board_list_paints_a_scrollbar() {
         .collect();
     let last_id = Uuid::from_u128(7000 + 39);
     let view = fixture_view_projects(&tasks, false);
-    let mut model = fixture_model_on_tab(&tasks, &view, BoardTab::Projects);
+    let mut model = fixture_model_on_tab(&tasks, &view, NavTab::ProjectBoard);
     model.selection_id = Some(last_id);
 
     let (rows, geo) = paint(80, 24, &model);
@@ -3501,7 +3570,7 @@ fn overflowing_board_list_does_not_clip_task_rows_to_ellipsis() {
         })
         .collect();
     let view = fixture_view_projects(&tasks, false);
-    let model = fixture_model_on_tab(&tasks, &view, BoardTab::Projects);
+    let model = fixture_model_on_tab(&tasks, &view, NavTab::ProjectBoard);
     let (rows, geo) = paint(80, 24, &model);
     let top = geo.viewport_top as usize;
     let bottom = (geo.viewport_top + geo.viewport_height) as usize;
@@ -3632,15 +3701,16 @@ fn archived_task_paints_in_no_working_lens_in_any_status_at_any_tier() {
         domain.archive_task(archived_id).expect("archive it");
         let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/lens")));
 
-        // Lens setups: desk, projects, threads (home tabs) and project focus.
-        let lens_names = ["desk", "projects", "threads", "project focus"];
+        // Lens setups: desk, the projects index, a cross-project thread view, and the
+        // project board.
+        let lens_names = ["desk", "projects", "thread view", "project board"];
         for (lens_index, lens) in lens_names.iter().enumerate() {
             match lens_index {
                 0 => {
                     apply_intent(
                         &mut domain,
                         &mut model,
-                        BoardIntent::SelectHomeTab(BoardTab::Desk),
+                        BoardIntent::SelectNavTab(NavTab::Desk),
                         None,
                     )
                     .expect("desk tab");
@@ -3649,19 +3719,28 @@ fn archived_task_paints_in_no_working_lens_in_any_status_at_any_tier() {
                     apply_intent(
                         &mut domain,
                         &mut model,
-                        BoardIntent::SelectHomeTab(BoardTab::Projects),
+                        BoardIntent::SelectNavTab(NavTab::Projects),
                         None,
                     )
-                    .expect("projects tab");
+                    .expect("projects index");
                 }
                 2 => {
                     apply_intent(
                         &mut domain,
                         &mut model,
-                        BoardIntent::SelectHomeTab(BoardTab::Threads),
+                        BoardIntent::OpenProjectsViewPicker,
                         None,
                     )
-                    .expect("threads tab");
+                    .expect("open view picker");
+                    apply_intent(&mut domain, &mut model, BoardIntent::ListPickerNext, None)
+                        .expect("first thread");
+                    apply_intent(
+                        &mut domain,
+                        &mut model,
+                        BoardIntent::ConfirmListPicker,
+                        None,
+                    )
+                    .expect("thread view");
                 }
                 _ => {
                     apply_intent(
@@ -3775,8 +3854,9 @@ fn archived_group_paints_below_done_with_its_count_and_no_header_when_empty() {
     model.sync_from_domain(&domain);
     let rows = board_rows(&model, 80, 24);
     assert!(
-        !rows.iter().any(|row| row.contains("archived")),
-        "no archived group with zero archived tasks:\n{}",
+        !rows.iter().any(|row| row.contains("archived ·")),
+        "no archived group header with zero archived tasks (the unarchived rows are \
+         ordinary ON DECK rows now):\n{}",
         rows.join("\n")
     );
 }
@@ -4070,24 +4150,50 @@ fn archived_project_paints_nowhere_on_home_tabs_or_the_picker_main_list() {
     domain.archive_project("/repos/gone").expect("archive gone");
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/here")));
 
-    for tab in [BoardTab::Desk, BoardTab::Projects, BoardTab::Threads] {
+    for tab in [NavTab::Desk, NavTab::Projects, NavTab::ProjectBoard] {
         apply_intent(
             &mut domain,
             &mut model,
-            BoardIntent::SelectHomeTab(tab),
+            BoardIntent::SelectNavTab(tab),
             None,
         )
-        .expect("switch tab");
+        .or_else(|_| {
+            apply_intent(
+                &mut domain,
+                &mut model,
+                BoardIntent::OpenProjectSelector,
+                None,
+            )
+        })
+        .expect("switch destination");
+        if tab == NavTab::ProjectBoard {
+            // No project is selected: the tab intent opens the picker; close it and
+            // test the desk/index surfaces, then choose the live project explicitly.
+            apply_intent(
+                &mut domain,
+                &mut model,
+                BoardIntent::CancelProjectPicker,
+                None,
+            )
+            .expect("close picker");
+            let rows = board_rows(&model, 80, 24);
+            assert!(
+                !rows.iter().any(|row| row.contains("gone started task")),
+                "{tab:?}: the archived project's task paints:\n{}",
+                rows.join("\n")
+            );
+            continue;
+        }
         let rows = board_rows(&model, 80, 24);
         assert!(
             !rows.iter().any(|row| row.contains("gone started task")),
             "{tab:?}: the archived project's task paints:\n{}",
             rows.join("\n")
         );
-        if tab == BoardTab::Projects {
+        if tab == NavTab::Projects {
             assert!(
                 !rows.iter().any(|row| row.contains("gone")),
-                "{tab:?}: the archived project paints a group:\n{}",
+                "{tab:?}: the archived project paints an index row:\n{}",
                 rows.join("\n")
             );
         }
@@ -4474,4 +4580,440 @@ fn picker_list_capacity_counts_the_rule_row_on_a_short_frame() {
         frame.contains(&format!("\u{25b8} {label}")),
         "the selected last option paints on a short frame:\n{frame}"
     );
+}
+
+#[test]
+fn real_quick_add_paints_its_destination() {
+    let mut domain = DomainState::new();
+    domain
+        .create(
+            "existing",
+            None,
+            TaskScope::Project {
+                path: "/repos/beta".into(),
+            },
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("task");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/beta")));
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenCapture, None).expect("quick add");
+    let text = board_rows(&model, 162, 43).join("\n");
+    assert!(
+        text.contains("add to beta"),
+        "quick-add destination missing:\n{text}"
+    );
+}
+
+#[test]
+fn project_and_cross_project_thread_views_omit_count_summaries() {
+    let mut domain = DomainState::new();
+    for (title, path, thread) in [
+        ("desk release", None, Some("release")),
+        ("alpha release", Some("/repos/alpha"), Some("release")),
+        ("alpha other", Some("/repos/alpha"), Some("other")),
+    ] {
+        domain
+            .create(
+                title,
+                None,
+                path.map(|path| TaskScope::Project { path: path.into() })
+                    .unwrap_or(TaskScope::Global),
+                ProvenanceOrigin::Manual,
+                thread.map(str::to_string),
+            )
+            .expect("task");
+    }
+    let done = domain
+        .create(
+            "done desk release",
+            None,
+            TaskScope::Global,
+            ProvenanceOrigin::Manual,
+            Some("release".into()),
+        )
+        .expect("done task");
+    domain
+        .set_status(done, HumanStatus::Done)
+        .expect("complete task");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/alpha")));
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenThreadFilterPicker,
+        None,
+    )
+    .expect("open picker");
+    apply_intent(&mut domain, &mut model, BoardIntent::ListPickerNext, None).expect("thread");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ConfirmListPicker,
+        None,
+    )
+    .expect("filter");
+    let local = board_rows(&model, 162, 43).join("\n");
+    assert!(
+        !local.contains("of 2 open tasks"),
+        "project filter must not paint a task-count summary:\n{local}"
+    );
+    assert!(
+        local.contains("alpha other"),
+        "matching task missing:\n{local}"
+    );
+    assert!(
+        !local.contains("alpha release"),
+        "filter stopped narrowing tasks:\n{local}"
+    );
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::SelectNavTab(NavTab::Projects),
+        None,
+    )
+    .expect("projects");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenProjectsViewPicker,
+        None,
+    )
+    .expect("view picker");
+    apply_intent(&mut domain, &mut model, BoardIntent::ListPickerNext, None).expect("thread");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ConfirmListPicker,
+        None,
+    )
+    .expect("view");
+    apply_intent(&mut domain, &mut model, BoardIntent::ToggleDoneDrawer, None)
+        .expect("open done drawer");
+    let cross = board_rows(&model, 162, 43).join("\n");
+    assert!(
+        !cross.contains("tasks ·") && !cross.contains("projects + desk"),
+        "cross-project count summary must not be painted:\n{cross}"
+    );
+    for title in ["alpha release", "desk release", "done desk release"] {
+        assert!(
+            cross.contains(title),
+            "thread task missing: {title}\n{cross}"
+        );
+    }
+    assert!(
+        cross.contains("desk"),
+        "cross-project desk attribution missing:\n{cross}"
+    );
+}
+
+#[test]
+fn short_panes_keep_identity_when_standard_width_is_available() {
+    let mut item = task(
+        991,
+        "Scope row",
+        HumanStatus::Started,
+        TaskScope::Project {
+            path: "/repos/alpha".into(),
+        },
+        0,
+    );
+    item.thread = Some("ship".into());
+    for width in [78, 80, 162] {
+        let mut model = BoardModel::from_tasks(vec![item.clone()], None);
+        let desk = board_rows(&model, width, 20);
+        let row = desk
+            .iter()
+            .find(|row| row.contains("Scope row"))
+            .expect("desk task row");
+        assert!(
+            row.contains("alpha"),
+            "project attribution missing at {width}: {row}"
+        );
+        model.set_selected_project(Some(PathBuf::from("/repos/alpha")));
+        let project = board_rows(&model, width, 20);
+        let row = project
+            .iter()
+            .find(|row| row.contains("Scope row"))
+            .expect("project task row");
+        assert!(
+            row.contains("#ship"),
+            "thread attribution missing at {width}: {row}"
+        );
+    }
+}
+
+#[test]
+fn wide_compact_rows_keep_project_and_thread_identity() {
+    let mut domain = DomainState::new();
+    domain
+        .create(
+            "desk item",
+            None,
+            TaskScope::Global,
+            ProvenanceOrigin::Manual,
+            Some("release".into()),
+        )
+        .expect("desk task");
+    domain
+        .create(
+            "project item",
+            None,
+            TaskScope::Project {
+                path: "/repos/alpha".into(),
+            },
+            ProvenanceOrigin::Manual,
+            Some("release".into()),
+        )
+        .expect("project task");
+    let mut model = BoardModel::from_domain(&domain, None);
+    let desk = board_rows(&model, 162, 20).join("\n");
+    assert!(desk.contains("desk"), "desk attribution missing:\n{desk}");
+    model.set_selected_project(Some(PathBuf::from("/repos/alpha")));
+    let project = board_rows(&model, 162, 20).join("\n");
+    assert!(
+        project.contains("#release"),
+        "thread attribution missing in wide compact mode:\n{project}"
+    );
+}
+
+fn searchable_thread_picker(global: bool) -> (DomainState, BoardModel) {
+    let mut domain = DomainState::new();
+    domain
+        .create(
+            "Thread lookup task",
+            None,
+            TaskScope::Project {
+                path: "/repos/alpha".into(),
+            },
+            ProvenanceOrigin::Manual,
+            Some("abcdefghijklmnopqrstuvwxyz123456".into()),
+        )
+        .expect("task");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/alpha")));
+    if global {
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::SelectNavTab(NavTab::Projects),
+            None,
+        )
+        .expect("projects");
+    }
+    let open = if global {
+        BoardIntent::OpenProjectsViewPicker
+    } else {
+        BoardIntent::OpenThreadFilterPicker
+    };
+    apply_intent(&mut domain, &mut model, open, None).expect("picker");
+    (domain, model)
+}
+
+#[test]
+fn thread_picker_search_accepts_every_letter_and_digit() {
+    for global in [false, true] {
+        let (mut domain, mut model) = searchable_thread_picker(global);
+        let name = "abcdefghijklmnopqrstuvwxyz123456";
+        for character in name.chars() {
+            let intent = map_key(
+                model.input_mode(),
+                KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE),
+            )
+            .expect("search key");
+            apply_intent(&mut domain, &mut model, intent, None).expect("type query");
+        }
+        assert_eq!(model.list_picker_query(), Some(name));
+        assert_eq!(model.visible_list_picker_options().len(), 1);
+        assert_eq!(
+            model.visible_list_picker_options()[0].1.label,
+            format!("#{name}")
+        );
+    }
+}
+
+#[test]
+fn thread_picker_search_accepts_bracketed_paste() {
+    for global in [false, true] {
+        let (mut domain, mut model) = searchable_thread_picker(global);
+        let name = "abcdefghijklmnopqrstuvwxyz123456";
+        let intent =
+            tsk_tui::ui::input::map_edit_paste(model.input_mode(), name).expect("paste accepted");
+        apply_intent(&mut domain, &mut model, intent, None).expect("paste query");
+        assert_eq!(model.list_picker_query(), Some(name));
+        assert_eq!(model.visible_list_picker_options().len(), 1);
+    }
+}
+
+#[test]
+fn empty_thread_search_keeps_its_query_and_menu_visible() {
+    for global in [false, true] {
+        let (mut domain, mut model) = searchable_thread_picker(global);
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::ListPickerQueryInsertText("nomatches".into()),
+            None,
+        )
+        .expect("query");
+        for width in [40, 80, 162] {
+            let text = board_rows(&model, width, 20).join("\n");
+            assert!(
+                text.contains("nomatches"),
+                "query disappeared at {width}:\n{text}"
+            );
+            assert!(
+                text.contains("no matching options"),
+                "empty-state missing at {width}:\n{text}"
+            );
+        }
+    }
+}
+
+#[test]
+fn real_thread_picker_paints_query_and_options() {
+    let mut domain = DomainState::new();
+    domain
+        .create(
+            "release task",
+            None,
+            TaskScope::Project {
+                path: "/repos/alpha".into(),
+            },
+            ProvenanceOrigin::Manual,
+            Some("release".into()),
+        )
+        .expect("task");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/alpha")));
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenThreadFilterPicker,
+        None,
+    )
+    .expect("open picker");
+    let rows = board_rows(&model, 162, 43).join("\n");
+    assert!(
+        rows.contains("thread filter"),
+        "picker title missing:\n{rows}"
+    );
+    assert!(
+        rows.contains("All tasks"),
+        "picker options missing:\n{rows}"
+    );
+    assert!(rows.contains("#release"), "thread option missing:\n{rows}");
+}
+
+#[test]
+fn projects_index_paints_aligned_counts_search_hint_and_duplicate_paths() {
+    let mut domain = DomainState::new();
+    for path in ["/one/alpha", "/two/alpha"] {
+        domain
+            .create(
+                "project task",
+                None,
+                TaskScope::Project { path: path.into() },
+                ProvenanceOrigin::Manual,
+                None,
+            )
+            .expect("task");
+    }
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from("/one/alpha")));
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::SelectNavTab(NavTab::Projects),
+        None,
+    )
+    .expect("projects index");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::FocusProjectsSearch,
+        None,
+    )
+    .expect("focus search");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ProjectsQueryInsertText("alpha".into()),
+        None,
+    )
+    .expect("type search");
+    let rows = board_rows(&model, 162, 43);
+    assert!(
+        rows.iter().any(|row| row.contains("▎ alpha")),
+        "visible footer search query missing:\n{}",
+        rows.join("\n")
+    );
+    let text = rows.join("\n");
+    assert!(
+        !rows[..10.min(rows.len())]
+            .iter()
+            .any(|row| row.contains("search projects")),
+        "search hint must not remain above the project table:\n{text}"
+    );
+    assert!(
+        text.contains("/one/alpha") && text.contains("/two/alpha"),
+        "paths missing:\n{text}"
+    );
+    assert!(
+        text.contains("current directory"),
+        "current project indicator missing:\n{text}"
+    );
+    let header = rows
+        .iter()
+        .find(|row| row.contains("NEEDS YOU"))
+        .expect("header");
+    let first = rows
+        .iter()
+        .find(|row| row.contains("/one/alpha"))
+        .expect("row");
+    assert_eq!(
+        header.chars().position(|ch| ch == 'N'),
+        first.chars().position(|ch| ch == '0'),
+        "numeric count starts under NEEDS YOU"
+    );
+
+    for width in [40, 80, 162] {
+        let rows = board_rows(&model, width, 20);
+        let text = rows.join("\n");
+        assert!(
+            text.contains("alpha"),
+            "project basename is visible at {width}:\n{text}"
+        );
+        let project_rows: Vec<&String> = rows
+            .iter()
+            .filter(|row| {
+                row.contains("alpha (/") || row.contains("/one/alpha") || row.contains("/two/alpha")
+            })
+            .collect();
+        assert_eq!(
+            project_rows.len(),
+            2,
+            "both duplicate rows paint at {width}:\n{text}"
+        );
+        assert!(
+            project_rows.iter().any(|row| row.contains("0")),
+            "a count remains visible at minimum width {width}:\n{text}"
+        );
+    }
+}
+
+#[test]
+fn persistent_slot_keeps_selected_project_label_on_home_tabs() {
+    let domain = DomainState::new();
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/alpha")));
+    for tab in [NavTab::Desk, NavTab::Projects] {
+        apply_intent(
+            &mut domain.clone(),
+            &mut model,
+            BoardIntent::SelectNavTab(tab),
+            None,
+        )
+        .expect("switch tab");
+        let text = board_rows(&model, 80, 24).join("\n");
+        assert!(
+            text.contains("alpha ▾"),
+            "slot label missing on {tab:?}:\n{text}"
+        );
+    }
 }

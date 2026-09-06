@@ -14,13 +14,13 @@ use crate::ui::capture::{CaptureField, TITLE_REQUIRED_MESSAGE};
 use crate::ui::edit::{flatten_line_breaks, EditBuffer};
 use crate::ui::input::BoardIntent;
 use crate::ui::mouse::BoardPopup;
-use crate::ui::queue::{ThreadProjectCollapseKey, ARCHIVED_HEADER_ROW_ID};
+use crate::ui::queue::{NavTab, ARCHIVED_HEADER_ROW_ID};
 use crate::ui::tier::{FocusedSurface, WideStage};
 
 use super::commands::{resolve_board_command, CommandSurface};
 use super::model::{
     BoardForm, BoardInputMode, BoardLocation, BoardModel, IntentOutcome, PickerTab,
-    ProjectPickerState, ProjectScopeOption, StepEditor, StepEditorSave, TaskEditSave,
+    ProjectPickerState, ProjectScopeOption, ProjectsView, StepEditor, StepEditorSave, TaskEditSave,
 };
 
 /// What the row says when an action that aims at the selection is asked for on a board that
@@ -398,6 +398,7 @@ fn apply_board_intent(
             model.invalidate_quick_add_stash();
             if let Some(quick_add) = model.quick_add.as_mut() {
                 quick_add.title.insert_char(character);
+                refresh_quick_add_scope(model, domain);
                 model.clear_message();
             }
             return Ok(IntentOutcome::None);
@@ -406,6 +407,7 @@ fn apply_board_intent(
             model.invalidate_quick_add_stash();
             if let Some(quick_add) = model.quick_add.as_mut() {
                 quick_add.title.insert_text(&flatten_line_breaks(&text));
+                refresh_quick_add_scope(model, domain);
                 model.clear_message();
             }
             return Ok(IntentOutcome::None);
@@ -414,6 +416,7 @@ fn apply_board_intent(
             model.invalidate_quick_add_stash();
             if let Some(quick_add) = model.quick_add.as_mut() {
                 quick_add.title.backspace();
+                refresh_quick_add_scope(model, domain);
                 model.clear_message();
             }
             return Ok(IntentOutcome::None);
@@ -422,6 +425,7 @@ fn apply_board_intent(
             model.invalidate_quick_add_stash();
             if let Some(quick_add) = model.quick_add.as_mut() {
                 quick_add.title.delete_forward();
+                refresh_quick_add_scope(model, domain);
                 model.clear_message();
             }
             return Ok(IntentOutcome::None);
@@ -654,10 +658,24 @@ fn apply_board_intent(
         }
 
         BoardIntent::SelectNext => {
+            // The projects index is keyboard-navigable in place: its rows are project
+            // rows, never tasks, so the pin stays untouched while the cursor moves.
+            if model.nav_tab() == NavTab::Projects
+                && matches!(model.projects_view, ProjectsView::Overview)
+            {
+                model.move_projects_cursor(true);
+                return Ok(IntentOutcome::None);
+            }
             model.select_next();
             return Ok(IntentOutcome::None);
         }
         BoardIntent::SelectPrev => {
+            if model.nav_tab() == NavTab::Projects
+                && matches!(model.projects_view, ProjectsView::Overview)
+            {
+                model.move_projects_cursor(false);
+                return Ok(IntentOutcome::None);
+            }
             model.select_prev();
             return Ok(IntentOutcome::None);
         }
@@ -1047,9 +1065,9 @@ fn apply_board_intent(
                 model.leave_archived_focus();
             }
             let options = model.project_options();
-            // Highlight the option that matches the current deck scope (session filter).
+            // Highlight the option that matches the current destination.
             let selected = match &model.board_location {
-                BoardLocation::Home { .. } => 0,
+                BoardLocation::Desk | BoardLocation::Projects => 0,
                 BoardLocation::Project(path) | BoardLocation::ArchivedProject(path) => options
                     .iter()
                     .position(|option| option == &ProjectScopeOption::Project(path.clone()))
@@ -1140,8 +1158,131 @@ fn apply_board_intent(
             model.clear_message();
             return Ok(IntentOutcome::None);
         }
-        BoardIntent::SelectHomeTab(tab) => {
-            model.set_home_tab(tab);
+        BoardIntent::SelectNavTab(tab) => {
+            let switched = model.select_nav_tab(tab);
+            // Slot 2 never changes meaning: with no project selected it opens the
+            // picker, and picking it again while its project is open answers the
+            // painted `▾` with the same picker. From the read-only archived focus,
+            // `2` stays put (the focus already occupies slot 2).
+            if !switched && tab == NavTab::ProjectBoard && !model.focus_is_archived() {
+                return apply_board_intent(
+                    domain,
+                    model,
+                    BoardIntent::OpenProjectSelector,
+                    snapshot,
+                );
+            }
+            model.clear_message();
+            return Ok(IntentOutcome::None);
+        }
+        BoardIntent::OpenThreadFilterPicker => {
+            if model.project_picker.is_some() || model.popup == BoardPopup::SaveRecovery {
+                return Ok(IntentOutcome::None);
+            }
+            model.close_command_surface();
+            model.close_popup();
+            model.close_help();
+            model.open_thread_filter_picker();
+            if model.list_picker.is_some() {
+                model.input_mode = BoardInputMode::ListPicker;
+            }
+            return Ok(IntentOutcome::None);
+        }
+        BoardIntent::OpenProjectsViewPicker => {
+            if model.project_picker.is_some() || model.popup == BoardPopup::SaveRecovery {
+                return Ok(IntentOutcome::None);
+            }
+            model.close_command_surface();
+            model.close_popup();
+            model.close_help();
+            model.open_projects_view_picker();
+            if model.list_picker.is_some() {
+                model.input_mode = BoardInputMode::ListPicker;
+            }
+            return Ok(IntentOutcome::None);
+        }
+        BoardIntent::ListPickerNext => {
+            model.move_list_picker(true);
+            return Ok(IntentOutcome::None);
+        }
+        BoardIntent::ListPickerPrev => {
+            model.move_list_picker(false);
+            return Ok(IntentOutcome::None);
+        }
+        BoardIntent::ListPickerQueryInsert(character) => {
+            model.list_picker_query_insert(character);
+            return Ok(IntentOutcome::None);
+        }
+        BoardIntent::ListPickerQueryInsertText(text) => {
+            model.list_picker_query_insert_text(&flatten_line_breaks(&text));
+            return Ok(IntentOutcome::None);
+        }
+        BoardIntent::ListPickerQueryBackspace => {
+            model.list_picker_query_backspace();
+            return Ok(IntentOutcome::None);
+        }
+        BoardIntent::SelectListOption(index) => {
+            // Mouse-only jump onto a visible picker row, same discipline as
+            // `SelectCommand`/`SelectProjectOption`: name the row directly.
+            if let Some(picker) = model.list_picker.as_mut() {
+                picker.selected = index;
+            }
+            return apply_board_intent(domain, model, BoardIntent::ConfirmListPicker, snapshot);
+        }
+        BoardIntent::ConfirmListPicker => {
+            if model.confirm_list_picker().is_some() {
+                let previous = model.selection_id;
+                let previous_visible = model.visible_ids();
+                model.reanchor_selection(previous, &previous_visible);
+                model.input_mode = BoardInputMode::Normal;
+            }
+            return Ok(IntentOutcome::None);
+        }
+        BoardIntent::CancelListPicker => {
+            model.cancel_list_picker();
+            model.input_mode = BoardInputMode::Normal;
+            return Ok(IntentOutcome::None);
+        }
+        BoardIntent::FocusProjectsSearch => {
+            if model.nav_tab() == NavTab::Projects
+                && matches!(model.projects_view, ProjectsView::Overview)
+            {
+                model.input_mode = BoardInputMode::ProjectsSearch;
+            }
+            return Ok(IntentOutcome::None);
+        }
+        BoardIntent::ProjectsQueryInsert(character) => {
+            if model.nav_tab() == NavTab::Projects
+                && matches!(model.projects_view, ProjectsView::Overview)
+            {
+                model.projects_query.push(character);
+                model.projects_selected = 0;
+            }
+            return Ok(IntentOutcome::None);
+        }
+        BoardIntent::ProjectsQueryInsertText(text) => {
+            if model.nav_tab() == NavTab::Projects
+                && matches!(model.projects_view, ProjectsView::Overview)
+            {
+                model.projects_query.push_str(&text);
+                model.projects_selected = 0;
+            }
+            return Ok(IntentOutcome::None);
+        }
+        BoardIntent::ProjectsQueryBackspace => {
+            model.projects_query.pop();
+            model.projects_selected = 0;
+            return Ok(IntentOutcome::None);
+        }
+        BoardIntent::SelectProjectRow(index) => {
+            // Mouse route onto an index row: select it, and a direct click opens the
+            // project in slot 2. Index rows are navigation, never tasks: no task verb
+            // can reach them because `selected_id()` stays untouched.
+            let Some(row) = model.project_rows().into_iter().nth(index) else {
+                return Ok(IntentOutcome::None);
+            };
+            model.projects_selected = index;
+            model.set_board_scope(ProjectScopeOption::Project(PathBuf::from(row.path)));
             model.clear_message();
             return Ok(IntentOutcome::None);
         }
@@ -1149,99 +1290,6 @@ fn apply_board_intent(
             let previous_visible = model.visible_ids();
             let previous = model.selection_id;
             if model.toggle_all_groups() {
-                model.reanchor_selection(previous, &previous_visible);
-            }
-            model.clear_message();
-            return Ok(IntentOutcome::None);
-        }
-        BoardIntent::SelectSectionProject(index) => {
-            let Some(path) = model
-                .queue_view()
-                .sections
-                .get(index)
-                .and_then(|section| section.project_label.clone())
-            else {
-                return Ok(IntentOutcome::None);
-            };
-            let path_buf = PathBuf::from(path.clone());
-            let now = Instant::now();
-            let is_double = model
-                .last_project_header_click
-                .as_ref()
-                .is_some_and(|(at, last)| {
-                    last == &path_buf && now.duration_since(*at) <= ROW_DOUBLE_CLICK_WINDOW
-                });
-            if is_double {
-                model.last_project_header_click = None;
-                model.set_board_scope(ProjectScopeOption::Project(path_buf));
-            } else {
-                let previous_visible = model.visible_ids();
-                let previous = model.selection_id;
-                model.toggle_project_collapsed(&path);
-                model.last_project_header_click = Some((now, path_buf));
-                model.reanchor_selection(previous, &previous_visible);
-            }
-            model.clear_message();
-            return Ok(IntentOutcome::None);
-        }
-        BoardIntent::SelectSectionThread(index) => {
-            let Some(thread) = model
-                .queue_view()
-                .sections
-                .get(index)
-                .and_then(|section| section.thread_label.clone())
-            else {
-                return Ok(IntentOutcome::None);
-            };
-            let previous_visible = model.visible_ids();
-            let previous = model.selection_id;
-            model.toggle_thread_collapsed(&thread);
-            model.reanchor_selection(previous, &previous_visible);
-            model.clear_message();
-            return Ok(IntentOutcome::None);
-        }
-        BoardIntent::SelectSectionThreadProject {
-            section_idx,
-            subgroup_idx,
-        } => {
-            let view = model.queue_view();
-            let Some(section) = view.sections.get(section_idx) else {
-                return Ok(IntentOutcome::None);
-            };
-            let Some(subgroup) = section.thread_subgroups.get(subgroup_idx) else {
-                return Ok(IntentOutcome::None);
-            };
-            let Some(path) = subgroup.project_path.clone().map(PathBuf::from) else {
-                let previous_visible = model.visible_ids();
-                let previous = model.selection_id;
-                let key = ThreadProjectCollapseKey {
-                    thread: section.thread_label.clone().unwrap_or_default(),
-                    project_path: None,
-                };
-                model.toggle_thread_project_collapsed(key);
-                model.reanchor_selection(previous, &previous_visible);
-                model.clear_message();
-                return Ok(IntentOutcome::None);
-            };
-            let now = Instant::now();
-            let is_double = model
-                .last_project_header_click
-                .as_ref()
-                .is_some_and(|(at, last)| {
-                    last == &path && now.duration_since(*at) <= ROW_DOUBLE_CLICK_WINDOW
-                });
-            if is_double {
-                model.last_project_header_click = None;
-                model.set_board_scope(ProjectScopeOption::Project(path));
-            } else {
-                let previous_visible = model.visible_ids();
-                let previous = model.selection_id;
-                let key = ThreadProjectCollapseKey {
-                    thread: section.thread_label.clone().unwrap_or_default(),
-                    project_path: Some(path.to_string_lossy().into_owned()),
-                };
-                model.toggle_thread_project_collapsed(key);
-                model.last_project_header_click = Some((now, path));
                 model.reanchor_selection(previous, &previous_visible);
             }
             model.clear_message();
@@ -1309,6 +1357,17 @@ fn apply_board_intent(
             return Ok(IntentOutcome::None);
         }
         BoardIntent::OpenTaskPage => {
+            // The projects index: Enter opens the selected project in slot 2. Index
+            // rows are navigation; the task-page surface never opens from them.
+            if model.nav_tab() == NavTab::Projects
+                && matches!(model.projects_view, ProjectsView::Overview)
+            {
+                if let Some(row) = model.selected_project_row() {
+                    model.set_board_scope(ProjectScopeOption::Project(PathBuf::from(row.path)));
+                    model.clear_message();
+                }
+                return Ok(IntentOutcome::None);
+            }
             // Enter on the archived header toggles the group instead of opening a page:
             // the header is chrome, never a task.
             if model.archived_header_selected() {
@@ -1566,6 +1625,12 @@ fn apply_board_intent(
                 model.input_mode = BoardInputMode::Normal;
                 return Ok(IntentOutcome::None);
             }
+            if model.input_mode == BoardInputMode::ProjectsSearch {
+                model.projects_query.clear();
+                model.projects_selected = 0;
+                model.input_mode = BoardInputMode::Normal;
+                return Ok(IntentOutcome::None);
+            }
             if model.input_mode == BoardInputMode::FormScopeDropdown {
                 model.close_form_scope_dropdown(false);
                 return Ok(IntentOutcome::None);
@@ -1630,7 +1695,14 @@ fn apply_board_intent(
                 model.leave_archived_focus();
                 return Ok(IntentOutcome::None);
             }
-            return Ok(IntentOutcome::Quit);
+            // A typed index search goes before anything else: the first Esc clears it,
+            // and the board-level Esc never quits (ctrl+q is the explicit quit).
+            if !model.projects_query.is_empty() {
+                model.projects_query.clear();
+                model.projects_selected = 0;
+                return Ok(IntentOutcome::None);
+            }
+            return Ok(IntentOutcome::None);
         }
         // The five intents below aim at the selection, and an empty board has none. Each
         // says so rather than returning to a row that has just been cleared for an action
@@ -2039,6 +2111,28 @@ fn open_task_page_on(domain: &DomainState, model: &mut BoardModel, id: Uuid) {
 
 /// The row double-click window: a second click on the same row within it opens the page.
 const ROW_DOUBLE_CLICK_WINDOW: std::time::Duration = std::time::Duration::from_millis(400);
+
+/// Keep the quick-add line's visible destination truthful while `!p` tokens are typed.
+///
+/// The row names where Enter will save (`Add to desk` / `Add to <project>`), so every
+/// buffer change re-lifts the tokens: an override applies the moment it is typed and
+/// reverts the moment it is deleted. A malformed `!p` (an archived project) leaves the
+/// last good destination painted; the save itself refuses with the same words.
+fn refresh_quick_add_scope(model: &mut BoardModel, domain: &DomainState) {
+    let Some(quick_add) = model.quick_add.as_ref() else {
+        return;
+    };
+    let default = quick_add.default.clone();
+    let lifted = lift_quick_add_tokens(
+        quick_add.title.value(),
+        domain,
+        quick_add.snapshot.as_ref().as_ref(),
+    )
+    .ok();
+    if let Some(quick_add) = model.quick_add.as_mut() {
+        quick_add.scope = lifted.and_then(|lifted| lifted.scope).unwrap_or(default);
+    }
+}
 
 /// Save the line through the same capture pipeline the expanded form uses.
 fn quick_add_save(

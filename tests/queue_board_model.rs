@@ -6,13 +6,17 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
+use std::collections::BTreeSet;
 use tsk_tui::domain::{
     DomainState, HumanStatus, ProvenanceOrigin, Task, TaskEvent, TaskEventKind, TaskScope,
 };
+use tsk_tui::scope::paths_equivalent;
 use tsk_tui::store::TaskStore;
 use tsk_tui::ui::board::{apply_intent, draw_board, BoardModel, ProjectScopeOption};
 use tsk_tui::ui::input::BoardIntent;
-use tsk_tui::ui::queue::{query_lens, BoardLens, BoardTab, SectionKind};
+use tsk_tui::ui::queue::{
+    query_board, query_lens, BoardLens, ProjectRow, QueueView, SectionKind, ThreadFilter,
+};
 use uuid::Uuid;
 
 const THIS_REPO: &str = "/repos/app";
@@ -72,6 +76,23 @@ fn on_deck(view: &tsk_tui::ui::queue::QueueView) -> &tsk_tui::ui::queue::QueueSe
         .expect("ON DECK section")
 }
 
+fn section_ids(view: &QueueView, kind: SectionKind) -> Vec<Uuid> {
+    view.sections
+        .iter()
+        .filter(|section| section.kind == kind)
+        .flat_map(|section| section.task_ids.iter().copied())
+        .collect()
+}
+
+#[allow(unused)]
+fn project_row(view: &QueueView, path: &str) -> ProjectRow {
+    view.projects
+        .iter()
+        .find(|row| paths_equivalent(&row.path, path))
+        .expect("index row")
+        .clone()
+}
+
 fn temp_dir(tag: &str) -> PathBuf {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -114,10 +135,11 @@ fn list_files_recursive(root: &Path) -> Vec<PathBuf> {
     out
 }
 
-/// First open: pin selection on the first IN MOTION row, else the first ON DECK row.
+/// First open pins the first NEEDS YOU / IN MOTION / ON DECK row of the startup
+/// destination: the project board inside a repo, the desk anywhere else.
 #[test]
-fn from_domain_seeds_selection_on_first_in_motion_else_first_deck_row() {
-    // Case A: IN MOTION present → first motion id (updated_at desc).
+fn from_domain_seeds_selection_on_first_needs_you_else_motion_else_deck_row() {
+    // Case A: startup in a repo opens its project board and seeds by lane order.
     let motion_newer = task(
         1,
         "motion-new",
@@ -135,12 +157,7 @@ fn from_domain_seeds_selection_on_first_in_motion_else_first_deck_row() {
     let deck = task(3, "deck", HumanStatus::Ready, project(THIS_REPO), 200);
     let tasks = vec![motion_newer.clone(), motion_older.clone(), deck.clone()];
     let model = BoardModel::from_tasks(tasks.clone(), Some(PathBuf::from(THIS_REPO)));
-    let view = query_lens(
-        &tasks,
-        Some(Path::new(THIS_REPO)),
-        BoardLens::Home(BoardTab::Desk),
-        false,
-    );
+    let view = query_lens(&tasks, Some(Path::new(THIS_REPO)), BoardLens::Desk, false);
     let first_motion = view
         .sections
         .iter()
@@ -193,21 +210,14 @@ fn from_domain_seeds_selection_on_first_in_motion_else_first_deck_row() {
         "from_domain seeds an IN MOTION task when any exist"
     );
 
-    // Case B: desk tab with only project ON DECK rows opens on Projects instead.
+    // Case B: a ready-only project opens its own board and seeds the first ON DECK row.
     let deck_a = task(10, "a", HumanStatus::Ready, project("/repos/a"), 30);
     let deck_b = task(11, "b", HumanStatus::Ready, project(THIS_REPO), 40);
     let deck_tasks = vec![deck_a.clone(), deck_b.clone()];
-    let model = BoardModel::from_tasks(deck_tasks.clone(), Some(PathBuf::from(THIS_REPO)));
-    assert_eq!(model.home_tab(), BoardTab::Projects);
-    assert_eq!(
-        model.selected_id(),
-        Some(Uuid::from_u128(11)),
-        "project-only boards open on Projects and seed the first ON DECK row"
-    );
     let view = query_lens(
         &deck_tasks,
         Some(Path::new(THIS_REPO)),
-        BoardLens::Home(BoardTab::Projects),
+        BoardLens::Project(Path::new(THIS_REPO)),
         false,
     );
     let first_deck = view
@@ -218,9 +228,109 @@ fn from_domain_seeds_selection_on_first_in_motion_else_first_deck_row() {
         .next();
     assert_eq!(first_deck, Some(Uuid::from_u128(11)));
 
+    let mut domain = DomainState::new();
+    let deck_id = domain
+        .create(
+            "b",
+            None,
+            project(THIS_REPO),
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .unwrap();
+    let model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
+    assert_eq!(model.nav_tab(), tsk_tui::ui::queue::NavTab::ProjectBoard);
+    assert_eq!(
+        model.selected_id(),
+        Some(deck_id),
+        "startup opens the invocation project's board and seeds its first row"
+    );
+
     // Case C: empty → no selection.
     let empty = BoardModel::from_tasks(vec![], Some(PathBuf::from(THIS_REPO)));
     assert_eq!(empty.selected_id(), None);
+}
+
+/// Directory-aware startup: a live repo opens its project board, an archived repo
+/// stays on the desk behind the launch card, no repo means the desk.
+#[test]
+fn from_domain_opens_the_invocation_project_unless_archived() {
+    let mut domain = DomainState::new();
+    let live_id = domain
+        .create(
+            "live",
+            None,
+            project(THIS_REPO),
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .unwrap();
+    domain
+        .create(
+            "elsewhere",
+            None,
+            project("/repos/other"),
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .unwrap();
+
+    let model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
+    assert_eq!(
+        model.selected_project(),
+        Some(Path::new(THIS_REPO)),
+        "launch inside a repo opens that project's board"
+    );
+    assert_eq!(model.visible_ids(), vec![live_id]);
+    assert_eq!(model.nav_tab(), tsk_tui::ui::queue::NavTab::ProjectBoard);
+
+    // Empty project: same destination, useful empty state (no fallback lens).
+    let empty_repo = format!("{THIS_REPO}-empty");
+    let model = BoardModel::from_domain(&DomainState::new(), Some(PathBuf::from(&empty_repo)));
+    assert_eq!(
+        model.selected_project(),
+        Some(Path::new(empty_repo.as_str()))
+    );
+    assert!(model.visible_ids().is_empty());
+    let view = model.queue_view();
+    assert!(
+        view.sections
+            .iter()
+            .any(|section| section.kind == SectionKind::OnDeck && section.empty_hint),
+        "an empty project board keeps a hinted deck section"
+    );
+
+    // Archived invocation repo: the launch card owns it; the board stays on the desk.
+    let mut domain = DomainState::new();
+    let archived_id = domain
+        .create(
+            "archived repo task",
+            None,
+            project(THIS_REPO),
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .unwrap();
+    domain.archive_project(THIS_REPO).expect("archive project");
+    let model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
+    assert_eq!(model.selected_project(), None);
+    assert_eq!(model.nav_tab(), tsk_tui::ui::queue::NavTab::Desk);
+    assert!(!model.visible_ids().contains(&archived_id));
+
+    // No repo at all: desk.
+    let mut domain = DomainState::new();
+    let desk_id = domain
+        .create(
+            "desk",
+            None,
+            TaskScope::Global,
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .unwrap();
+    let model = BoardModel::from_domain(&domain, None);
+    assert_eq!(model.nav_tab(), tsk_tui::ui::queue::NavTab::Desk);
+    assert_eq!(model.selected_id(), Some(desk_id));
 }
 
 /// Confirming a project selector choice narrows ON DECK to that project.
@@ -246,7 +356,11 @@ fn confirming_project_choice_changes_visible_queue_sections() {
         )
         .unwrap();
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
-    assert_eq!(model.visible_ids(), vec![app_id, other_id]);
+    assert_eq!(
+        model.visible_ids(),
+        vec![app_id],
+        "startup sits on the invocation project's board"
+    );
 
     apply_intent(
         &mut domain,
@@ -311,13 +425,6 @@ fn sync_from_domain_reanchors_by_id() {
         .unwrap();
 
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::SelectHomeTab(BoardTab::Projects),
-        None,
-    )
-    .unwrap();
     let visible = model.visible_ids();
     assert!(visible.contains(&id_doing));
     assert!(visible.contains(&id_todo));
@@ -351,7 +458,7 @@ fn sync_from_domain_reanchors_by_id() {
 }
 
 #[test]
-fn deck_group_emits_thread_blocks_with_open_counts_iff_open_tasks() {
+fn project_deck_lists_tasks_flat_with_thread_filter_across_statuses() {
     let tasks = vec![
         threaded_task(
             1,
@@ -379,22 +486,82 @@ fn deck_group_emits_thread_blocks_with_open_counts_iff_open_tasks() {
         ),
     ];
 
-    let view = query_lens(
+    // The unfiltered project deck is flat: threads are row labels, never headers.
+    let view = query_board(
         &tasks,
+        &BTreeSet::new(),
         Some(Path::new(THIS_REPO)),
         BoardLens::Project(Path::new(THIS_REPO)),
         true,
+        &ThreadFilter::All,
     );
     let deck = on_deck(&view);
+    assert_eq!(
+        deck.task_ids,
+        vec![Uuid::from_u128(1)],
+        "only the ready task is on deck; threads do not group rows"
+    );
 
-    assert_eq!(deck.thread_blocks.len(), 1);
-    assert_eq!(deck.thread_blocks[0].name, "release");
-    assert_eq!(deck.thread_blocks[0].open_count, 1);
-    assert_eq!(deck.thread_blocks[0].task_ids, vec![Uuid::from_u128(1)]);
+    // The filter narrows every status section, drawer included.
+    let filtered = query_board(
+        &tasks,
+        &BTreeSet::new(),
+        Some(Path::new(THIS_REPO)),
+        BoardLens::Project(Path::new(THIS_REPO)),
+        true,
+        &ThreadFilter::Named("release".to_string()),
+    );
+    assert_eq!(
+        section_ids(&filtered, SectionKind::InMotion),
+        vec![Uuid::from_u128(3)]
+    );
+    assert_eq!(
+        section_ids(&filtered, SectionKind::Done),
+        vec![Uuid::from_u128(2)],
+        "the done drawer respects the active thread filter"
+    );
 }
 
 #[test]
-fn unthreaded_tasks_list_after_thread_blocks() {
+fn project_deck_orders_ready_tasks_by_updated_desc_across_threads() {
+    let tasks = vec![
+        threaded_task(
+            1,
+            "alpha older",
+            HumanStatus::Ready,
+            project(THIS_REPO),
+            20,
+            "alpha",
+        ),
+        task(3, "loose", HumanStatus::Ready, project(THIS_REPO), 40),
+        threaded_task(
+            2,
+            "alpha newer",
+            HumanStatus::Ready,
+            project(THIS_REPO),
+            50,
+            "alpha",
+        ),
+    ];
+
+    let view = query_board(
+        &tasks,
+        &BTreeSet::new(),
+        Some(Path::new(THIS_REPO)),
+        BoardLens::Project(Path::new(THIS_REPO)),
+        false,
+        &ThreadFilter::All,
+    );
+    let deck = on_deck(&view);
+    assert_eq!(
+        deck.task_ids,
+        vec![Uuid::from_u128(2), Uuid::from_u128(3), Uuid::from_u128(1)],
+        "one flat recency order; no thread blocks, no loose lane"
+    );
+}
+
+#[test]
+fn without_a_thread_filter_keeps_only_unthreaded_tasks() {
     let tasks = vec![
         task(
             1,
@@ -411,119 +578,24 @@ fn unthreaded_tasks_list_after_thread_blocks() {
             20,
             "release",
         ),
-        task(3, "loose older", HumanStatus::Ready, project(THIS_REPO), 10),
     ];
 
-    let view = query_lens(
+    let view = query_board(
         &tasks,
+        &BTreeSet::new(),
         Some(Path::new(THIS_REPO)),
         BoardLens::Project(Path::new(THIS_REPO)),
         false,
-    );
-    let deck = on_deck(&view);
-
-    assert_eq!(deck.thread_blocks[0].task_ids, vec![Uuid::from_u128(2)]);
-    assert_eq!(
-        deck.loose_task_ids,
-        vec![Uuid::from_u128(1), Uuid::from_u128(3)]
+        &ThreadFilter::Without,
     );
     assert_eq!(
-        deck.task_ids,
-        vec![Uuid::from_u128(2), Uuid::from_u128(1), Uuid::from_u128(3)]
+        section_ids(&view, SectionKind::OnDeck),
+        vec![Uuid::from_u128(1)]
     );
 }
 
 #[test]
-fn thread_blocks_order_by_recency_and_tasks_within_by_updated_desc() {
-    let tasks = vec![
-        threaded_task(
-            1,
-            "alpha older",
-            HumanStatus::Ready,
-            project(THIS_REPO),
-            20,
-            "alpha",
-        ),
-        threaded_task(
-            2,
-            "alpha newer",
-            HumanStatus::Ready,
-            project(THIS_REPO),
-            50,
-            "alpha",
-        ),
-        threaded_task(
-            3,
-            "beta",
-            HumanStatus::Ready,
-            project(THIS_REPO),
-            40,
-            "beta",
-        ),
-    ];
-
-    let view = query_lens(
-        &tasks,
-        Some(Path::new(THIS_REPO)),
-        BoardLens::Project(Path::new(THIS_REPO)),
-        false,
-    );
-    let deck = on_deck(&view);
-
-    assert_eq!(
-        deck.thread_blocks
-            .iter()
-            .map(|block| block.name.as_str())
-            .collect::<Vec<_>>(),
-        vec!["alpha", "beta"]
-    );
-    assert_eq!(
-        deck.thread_blocks[0].task_ids,
-        vec![Uuid::from_u128(2), Uuid::from_u128(1)]
-    );
-}
-
-#[test]
-fn flat_task_ids_equal_block_then_loose_concatenation() {
-    let tasks = vec![
-        threaded_task(
-            1,
-            "alpha",
-            HumanStatus::Ready,
-            project(THIS_REPO),
-            10,
-            "alpha",
-        ),
-        threaded_task(
-            2,
-            "beta",
-            HumanStatus::Ready,
-            project(THIS_REPO),
-            30,
-            "beta",
-        ),
-        task(3, "loose", HumanStatus::Ready, project(THIS_REPO), 40),
-    ];
-
-    let view = query_lens(
-        &tasks,
-        Some(Path::new(THIS_REPO)),
-        BoardLens::Project(Path::new(THIS_REPO)),
-        false,
-    );
-    let deck = on_deck(&view);
-    let expected: Vec<_> = deck
-        .thread_blocks
-        .iter()
-        .flat_map(|block| block.task_ids.iter().copied())
-        .chain(deck.loose_task_ids.iter().copied())
-        .collect();
-
-    assert_eq!(deck.task_ids, expected);
-}
-
-#[test]
-fn same_thread_name_in_two_scopes_forms_independent_groups() {
+fn same_thread_name_joins_only_in_the_global_view_not_the_local_filter() {
     let tasks = vec![
         threaded_task(
             1,
@@ -543,33 +615,113 @@ fn same_thread_name_in_two_scopes_forms_independent_groups() {
         ),
     ];
 
-    let project_view = query_lens(
+    // Local filter: only the project's own match.
+    let local = query_board(
         &tasks,
+        &BTreeSet::new(),
         Some(Path::new(THIS_REPO)),
         BoardLens::Project(Path::new(THIS_REPO)),
         false,
+        &ThreadFilter::Named("release".to_string()),
     );
-    let global_view = query_lens(&tasks, None, BoardLens::Home(BoardTab::Desk), false);
-    let project_deck = on_deck(&project_view);
-    let global_deck = on_deck(&global_view);
-
     assert_eq!(
-        project_deck.thread_blocks[0].task_ids,
+        section_ids(&local, SectionKind::OnDeck),
         vec![Uuid::from_u128(1)]
     );
+
+    // Global View: both scopes join under one thread name.
+    let view = query_board(
+        &tasks,
+        &BTreeSet::new(),
+        None,
+        BoardLens::ThreadView("release"),
+        false,
+        &ThreadFilter::All,
+    );
     assert_eq!(
-        global_deck.thread_blocks[0].task_ids,
-        vec![Uuid::from_u128(2)]
+        section_ids(&view, SectionKind::OnDeck),
+        vec![Uuid::from_u128(2), Uuid::from_u128(1)]
     );
 }
 
 #[test]
-fn all_scope_in_motion_and_drawer_emit_no_blocks() {
+fn thread_view_covers_needs_you_motion_deck_and_drawer() {
     let tasks = vec![
         threaded_task(
             1,
+            "blocked",
+            HumanStatus::Blocked,
+            project(THIS_REPO),
+            10,
+            "release",
+        ),
+        threaded_task(
+            2,
+            "review",
+            HumanStatus::Review,
+            project(THIS_REPO),
+            15,
+            "release",
+        ),
+        threaded_task(
+            3,
+            "motion",
+            HumanStatus::Started,
+            project(THIS_REPO),
+            20,
+            "release",
+        ),
+        threaded_task(
+            4,
             "deck",
             HumanStatus::Ready,
+            project(THIS_REPO),
+            25,
+            "release",
+        ),
+        threaded_task(
+            5,
+            "done",
+            HumanStatus::Done,
+            project(THIS_REPO),
+            30,
+            "release",
+        ),
+    ];
+
+    let view = query_board(
+        &tasks,
+        &BTreeSet::new(),
+        None,
+        BoardLens::ThreadView("release"),
+        true,
+        &ThreadFilter::All,
+    );
+    assert_eq!(
+        section_ids(&view, SectionKind::NeedsYou),
+        vec![Uuid::from_u128(2), Uuid::from_u128(1)]
+    );
+    assert_eq!(
+        section_ids(&view, SectionKind::InMotion),
+        vec![Uuid::from_u128(3)]
+    );
+    assert_eq!(
+        section_ids(&view, SectionKind::OnDeck),
+        vec![Uuid::from_u128(4)]
+    );
+    assert_eq!(
+        section_ids(&view, SectionKind::Done),
+        vec![Uuid::from_u128(5)]
+    );
+}
+
+#[test]
+fn projects_index_rows_carry_open_work_counts() {
+    let tasks = vec![
+        threaded_task(
+            1,
+            "blocked",
+            HumanStatus::Blocked,
             project(THIS_REPO),
             10,
             "release",
@@ -584,6 +736,14 @@ fn all_scope_in_motion_and_drawer_emit_no_blocks() {
         ),
         threaded_task(
             3,
+            "deck",
+            HumanStatus::Ready,
+            project(THIS_REPO),
+            25,
+            "release",
+        ),
+        threaded_task(
+            4,
             "done",
             HumanStatus::Done,
             project(THIS_REPO),
@@ -592,32 +752,26 @@ fn all_scope_in_motion_and_drawer_emit_no_blocks() {
         ),
     ];
 
-    let home_projects = query_lens(
+    let view = query_board(
         &tasks,
+        &BTreeSet::new(),
         Some(Path::new(THIS_REPO)),
-        BoardLens::Home(BoardTab::Projects),
-        true,
+        BoardLens::Projects,
+        false,
+        &ThreadFilter::All,
     );
-    assert!(home_projects
-        .sections
-        .iter()
-        .all(|section| section.thread_blocks.is_empty() && section.loose_task_ids.is_empty()));
-
-    let scoped = query_lens(
-        &tasks,
-        Some(Path::new(THIS_REPO)),
-        BoardLens::Project(Path::new(THIS_REPO)),
-        true,
-    );
-    assert!(scoped
-        .sections
-        .iter()
-        .filter(|section| section.kind != SectionKind::OnDeck)
-        .all(|section| section.thread_blocks.is_empty() && section.loose_task_ids.is_empty()));
+    assert_eq!(view.sections, Vec::new(), "the index never lists tasks");
+    assert_eq!(view.projects.len(), 1);
+    let row = &view.projects[0];
+    assert_eq!(row.path, THIS_REPO);
+    assert_eq!(row.needs_you, 1);
+    assert_eq!(row.in_motion, 1);
+    assert_eq!(row.ready, 1, "done tasks stay out of the counts");
+    assert!(row.current, "the invocation project is marked current");
 }
 
 #[test]
-fn selection_stays_on_task_id_across_thread_block_reorder() {
+fn selection_stays_on_task_id_across_deck_reorder() {
     let mut domain = DomainState::new();
     let alpha = domain
         .create(
@@ -638,20 +792,9 @@ fn selection_stays_on_task_id_across_thread_block_reorder() {
         )
         .unwrap();
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
-    model.set_selected_project(Some(PathBuf::from(THIS_REPO)));
 
     let before = model.queue_view();
-    let before_deck = on_deck(&before);
-    assert_eq!(before_deck.thread_blocks.len(), 2);
-    assert_eq!(
-        before_deck
-            .thread_blocks
-            .iter()
-            .map(|block| block.name.as_str())
-            .collect::<Vec<_>>(),
-        vec!["beta", "alpha"]
-    );
-    assert_eq!(before_deck.task_ids, vec![beta, alpha]);
+    assert_eq!(on_deck(&before).task_ids, vec![beta, alpha]);
 
     let beta_index = model
         .visible_ids()
@@ -678,21 +821,14 @@ fn selection_stays_on_task_id_across_thread_block_reorder() {
     model.sync_from_domain(&domain);
 
     let after = model.queue_view();
-    let after_deck = on_deck(&after);
-    assert_eq!(after_deck.thread_blocks.len(), 2);
-    assert_eq!(
-        after_deck
-            .thread_blocks
-            .iter()
-            .map(|block| block.name.as_str())
-            .collect::<Vec<_>>(),
-        vec!["alpha", "beta"]
-    );
-    assert_eq!(after_deck.task_ids, vec![alpha, beta]);
+    assert_eq!(on_deck(&after).task_ids, vec![alpha, beta]);
     assert_eq!(model.selected_id(), Some(beta));
-    assert_eq!(model.visible_ids(), after_deck.task_ids);
+    assert_eq!(model.visible_ids(), on_deck(&after).task_ids);
     assert_eq!(model.selected_index(), Some(1));
-    assert_eq!(after_deck.task_ids[model.selected_index().unwrap()], beta);
+    assert_eq!(
+        on_deck(&after).task_ids[model.selected_index().unwrap()],
+        beta
+    );
 }
 
 /// Two fresh models from the same store share no UI state and write no UI-state files.
@@ -716,49 +852,50 @@ fn board_rows(model: &BoardModel, width: u16, height: u16) -> Vec<String> {
 #[test]
 fn arrow_navigation_crosses_painted_header_task_to_task() {
     let mut domain = DomainState::new();
-    domain
+    let review = domain
         .create(
-            "alpha task",
+            "review task",
             None,
             project(THIS_REPO),
             ProvenanceOrigin::Manual,
-            Some("alpha".to_string()),
+            None,
         )
-        .expect("create alpha");
+        .expect("create review");
     domain
+        .set_status(review, HumanStatus::Review)
+        .expect("review");
+    let ready = domain
         .create(
-            "beta task",
+            "ready task",
             None,
             project(THIS_REPO),
             ProvenanceOrigin::Manual,
-            Some("beta".to_string()),
+            None,
         )
-        .expect("create beta");
+        .expect("create ready");
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
     model.set_selected_project(Some(PathBuf::from(THIS_REPO)));
     let ids = model.visible_ids();
-    assert_eq!(ids.len(), 2, "two threaded tasks are visible");
+    assert_eq!(ids, vec![review, ready], "needs-you first, then on deck");
     apply_intent(&mut domain, &mut model, BoardIntent::SelectIndex(0), None)
         .expect("select first task");
 
     let rows = board_rows(&model, 80, 24);
-    let first_title = domain.get(ids[0]).expect("first task").title.clone();
-    let second = domain.get(ids[1]).expect("second task");
     let first_y = rows
         .iter()
-        .position(|row| row.contains(&first_title))
+        .position(|row| row.contains("review task"))
         .expect("first task paints");
     let header_y = rows
         .iter()
-        .position(|row| row.contains(&format!("#{}", second.thread.as_deref().unwrap())))
-        .expect("second block header paints");
+        .position(|row| row.contains("NEEDS YOU"))
+        .expect("the NEEDS YOU header paints");
     let second_y = rows
         .iter()
-        .position(|row| row.contains(&second.title))
+        .position(|row| row.contains("ready task"))
         .expect("second task paints");
     assert!(
-        first_y < header_y && header_y < second_y,
-        "a painted header must physically sit between the tasks:\n{}",
+        header_y < first_y && first_y < second_y,
+        "a painted header must physically sit above its tasks:\n{}",
         rows.join("\n")
     );
 
@@ -766,7 +903,7 @@ fn arrow_navigation_crosses_painted_header_task_to_task() {
         .expect("arrow navigation moves to next task");
     assert_eq!(
         model.selected_id(),
-        Some(ids[1]),
+        Some(ready),
         "selection must skip decorative headers and land on the next task"
     );
 }
@@ -823,13 +960,13 @@ fn two_fresh_models_from_same_store_share_no_ui_state_and_no_ui_writes_under_sta
     );
     assert_eq!(
         b_fresh.selected_project(),
-        None,
-        "fresh model starts with the all-projects deck scope"
+        Some(Path::new(THIS_REPO)),
+        "fresh model starts on the invocation project's board"
     );
     assert_eq!(
         b_fresh.visible_ids(),
         vec![id],
-        "fresh model starts with the all-projects deck scope"
+        "the startup board renders that project's rows"
     );
 
     let after_state = list_files_recursive(&state_dir);

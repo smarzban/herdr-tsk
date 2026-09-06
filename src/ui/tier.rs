@@ -147,8 +147,8 @@ pub const STANDARD_VERB_BAR_ENTRY_BUDGET: u16 = 7;
 /// Minimum width for the standard board tier. This is the default Herdr split amendment.
 const STANDARD_MIN_WIDTH: u16 = 78;
 
-/// Reserved trailing meta cells in the standard tier (project · age).
-const STANDARD_META_COLUMN_WIDTH: u16 = 28;
+/// Reserved trailing meta cells in the standard tier for full project/thread attribution.
+const STANDARD_META_COLUMN_WIDTH: u16 = 36;
 
 /// Map terminal dimensions to a tier and frame geometry.
 ///
@@ -400,7 +400,10 @@ mod tests {
             );
             if (w, h) == (STANDARD_MIN_WIDTH, 24) {
                 assert_eq!(g.meta_column_width, STANDARD_META_COLUMN_WIDTH);
-                assert_eq!(g.title_width, 50, "78 columns retain 50 title cells");
+                assert_eq!(
+                    g.title_width, 42,
+                    "78 columns retain room for full thread metadata"
+                );
             }
             let narrowed = g.with_row_width(w.saturating_sub(2));
             assert_eq!(narrowed.row_width, w.saturating_sub(2), "{w}x{h}");

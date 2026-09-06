@@ -1,9 +1,39 @@
 //! Shared project-path resolution for board and headless capture.
 
 use std::collections::BTreeSet;
+use std::path::Path;
 
 use crate::context::InvocationSnapshot;
 use crate::domain::{DomainState, TaskScope};
+
+/// Whether two project-path spellings name the same directory.
+///
+/// Comparison only: stored scope identity is never rewritten through this. When both
+/// sides exist on disk they are compared canonically, so the same repository reached
+/// as `/tmp/repo` and `/private/tmp/repo` (macOS) still matches. A missing or
+/// nonexistent side falls back to lexical equality, so a stored path whose directory
+/// has not been created yet behaves exactly as before.
+pub fn paths_equivalent(a: &str, b: &str) -> bool {
+    if trim(a) == trim(b) {
+        return true;
+    }
+    match (
+        std::fs::canonicalize(Path::new(a)),
+        std::fs::canonicalize(Path::new(b)),
+    ) {
+        (Ok(ca), Ok(cb)) => ca == cb,
+        _ => false,
+    }
+}
+
+/// Whether a stored project-path set contains an equivalent spelling.
+pub fn archived_path_contains(paths: &BTreeSet<String>, path: &str) -> bool {
+    paths.iter().any(|stored| paths_equivalent(stored, path))
+}
+
+fn trim(path: &str) -> &str {
+    path.trim_end_matches('/')
+}
 
 /// Resolve command-line project/global scope flags with the same default and basename
 /// rules used by headless add.

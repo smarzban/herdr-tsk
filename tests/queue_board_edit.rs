@@ -463,6 +463,32 @@ fn task_form_unifies_palette_field_routes_scope_dropdown_and_atomic_save() {
     assert_eq!(saved.notes.as_deref(), Some("old\nnew"));
     assert_eq!(saved.scope, TaskScope::Global);
 
+    // The saved task left this project board for the desk: navigation is the user's
+    // move now (no auto-reveal), so go there before the palette routes.
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::SelectNavTab(tsk_tui::ui::queue::NavTab::Desk),
+        None,
+    )
+    .expect("move to the desk");
+    assert!(
+        model.visible_ids().contains(&id),
+        "the saved desk task is visible from the desk"
+    );
+    let saved_row = model
+        .visible_ids()
+        .iter()
+        .position(|&visible| visible == id)
+        .expect("saved row");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::SelectIndex(saved_row),
+        None,
+    )
+    .expect("pin the saved task");
+
     let palette_notes_route = model
         .available_commands()
         .into_iter()
@@ -1186,6 +1212,9 @@ fn task_page_footer_hits_use_display_columns_and_stay_within_the_painted_row() {
         )
         .expect("create");
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
+    model.set_selected_project(Some(PathBuf::from(
+        "/repos/\u{30d7}\u{30ed}\u{30b8}\u{30a7}\u{30af}\u{30c8}",
+    )));
     apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
 
     let width = 40;
@@ -1231,6 +1260,9 @@ fn task_page_header_identifier_precedes_the_title_and_footer_scope() {
     let mut persisted = domain.get(id).expect("task").clone();
     persisted.number = Some(1);
     let mut model = BoardModel::from_tasks(vec![persisted], Some(PathBuf::from(THIS_REPO)));
+    model.set_selected_project(Some(PathBuf::from(THIS_REPO)));
+    apply_intent(&mut domain, &mut model, BoardIntent::SelectIndex(0), None)
+        .expect("select the task");
     apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
 
     let (width, height) = (80, 24);
@@ -1508,6 +1540,7 @@ fn task_page_scope_dropdown_omits_archived_projects_but_keeps_the_current_scope(
         .expect("create stranded");
     domain.archive_project("/repos/filed").expect("archive it");
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
+    model.set_selected_project(Some(PathBuf::from("/repos/other")));
 
     // Editing a live task: the archived project is not on offer.
     let index = model

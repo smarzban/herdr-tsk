@@ -1,25 +1,25 @@
 ┌────────────────────────────────────────────────────────────────────────────────┐
 │                                                                                │
-│ desk  ·  projects  ·  threads                                                  │
+│ desk  ·  tsk ▾  ·  projects                                              all ▾ │
+│                                                                               ▌│
+│ NEEDS YOU ─────────────────────────────────────────────────────────────────2  ▌│
+│                                                                               ▌│
+│  ■ T5 Wire dispatch cleanup receipts                                   herdr  ▌│
+│  ▲ T6 Docs refresh pass after F9 ships                                 herdr  ▌│
+│                                                                               ▌│
+│ IN MOTION ─────────────────────────────────────────────────────────────────2  ▌│
+│                                                                               ▌│
+│  ▸ T1 Smoke-test worktree dispatch                                       tsk  ▌│
+│  ▸ T2 Edit target binding pin                                          herdr  ▌│
+│                                                                               ▌│
+│ ON DECK · desk ────────────────────────────────────────────────────────────1  ▌│
+│                                                                               ▌│
+│  ○ T7 Global backlog note                                               desk  ▌│
+│                                                                               ▌│
+│ DONE ──────────────────────────────────────────────────────────────────────2  ▌│
 │                                                                                │
-│ IN MOTION ───────────────────────────────────────────────────────────────────2 │
-│                                                                                │
-│  ▸ T1 Smoke-test worktree dispatch                                    tsk · 3m │
-│  ▸ T2 Edit target binding pin                                      herdr · 12m │
-│                                                                                │
-│ desk ────────────────────────────────────────────────────────────────────────1 │
-│                                                                                │
-│  ○ T7 Global backlog note                                                   2d │
-│                                                                                │
-│ DONE ────────────────────────────────────────────────────────────────────────2 │
-│                                                                                │
-│  ✓ T8 Ship the queue board milestone                                  tsk · 5h │
-│  ✓ T9 Retire classic board chrome                                           6h │
-│                                                                                │
-│ ▾ archived · 2                                                                 │
-│                                                                                │
-│  ○ T31 Archived receipt sweep                                        tsk · 45m │
-│  ■ T32 Archived vendored spike                                             50m │
+│  ✓ T8 Ship the queue board milestone                                     tsk   │
+│  ✓ T9 Retire classic board chrome                                       desk   │
 │────────────────────────────────────────────────────────────────────────────────│
 │ 2 done                                                                         │
 │ enter open · ctrl+d done · ctrl+b block · : palette · ? help · + capture · f a…│
