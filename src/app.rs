@@ -23,8 +23,8 @@ use crate::ui::capture::{
     apply_capture_intent, draw_capture, CaptureModel, CaptureOutcome, TITLE_REQUIRED_MESSAGE,
 };
 use crate::ui::input::{
-    map_board_form_key, map_capture_key_state, map_capture_paste_state, map_edit_paste, map_key,
-    map_task_form_key, route_responsive_key, BoardIntent, CaptureIntent, ResponsiveKeyRoute,
+    map_capture_key_state, map_capture_paste_state, map_edit_paste, map_key, map_task_form_key,
+    route_responsive_key, BoardIntent, CaptureIntent, ResponsiveKeyRoute,
 };
 use crate::ui::mouse::{
     capture_layout_for_model, enable_terminal_input, focused_mouse_area,
@@ -968,10 +968,7 @@ fn board_keyboard_intent(
     }
 
     match model.form_focus().filter(|_| form_field_mode) {
-        Some(focus) if model.edit_target().is_some() => {
-            map_task_form_key(focus, mode == BoardInputMode::FormScopeDropdown, key)
-        }
-        Some(focus) => map_board_form_key(focus, mode == BoardInputMode::FormScopeDropdown, key),
+        Some(focus) => map_task_form_key(focus, mode == BoardInputMode::FormScopeDropdown, key),
         None => map_key(mode, key),
     }
 }

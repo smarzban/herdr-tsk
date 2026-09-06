@@ -36,9 +36,7 @@ pub fn thread_refusal_message(error: ThreadError) -> String {
     match error {
         ThreadError::Empty => "thread name is empty".into(),
         ThreadError::BadFirstCharacter(_) => "thread must start with a letter or number".into(),
-        ThreadError::BadCharacter(_) => {
-            "thread: use letters, numbers, hyphens, and dots".into()
-        }
+        ThreadError::BadCharacter(_) => "thread: use letters, numbers, hyphens, and dots".into(),
         ThreadError::OverLength { max } => format!("thread is at most {max} characters"),
     }
 }

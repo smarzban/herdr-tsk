@@ -99,15 +99,25 @@ fn plus_opens_focused_bar_regardless_of_shift_and_legacy_chord_is_unbound() {
 }
 
 #[test]
-fn expanded_capture_keeps_ctrl_a_as_line_start() {
+fn expanded_capture_ctrl_a_opens_step_add() {
     assert_eq!(
-        tsk_tui::ui::input::map_board_form_key(
+        tsk_tui::ui::input::map_task_form_key(
             tsk_tui::ui::capture::CaptureField::Title,
             false,
             KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL),
         ),
-        Some(BoardIntent::EditMoveLineStart)
+        Some(BoardIntent::BeginAddStep)
     );
+    let mut domain = DomainState::new();
+    let mut model = BoardModel::from_domain(&domain, None);
+    let snap = snapshot();
+    open(&mut domain, &mut model, &snap);
+    type_title(&mut domain, &mut model, "ctrl a step");
+    apply(&mut domain, &mut model, BoardIntent::ExpandQuickAdd, None);
+    apply(&mut domain, &mut model, BoardIntent::BeginAddStep, None);
+    assert_eq!(model.input_mode(), BoardInputMode::EditStep);
+    apply(&mut domain, &mut model, BoardIntent::CancelEdit, None);
+    assert_ne!(model.input_mode(), BoardInputMode::EditStep);
 }
 
 #[test]

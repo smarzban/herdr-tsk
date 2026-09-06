@@ -889,10 +889,14 @@ fn apply_board_intent(
             }
             // The inline step editor cancels to page view: draft discarded, no mutation,
             // and the page's step cursor state stays intact.
-            if model.input_mode == BoardInputMode::EditStep
-                && model.form.as_ref().is_some_and(BoardForm::is_task)
-            {
+            if model.input_mode == BoardInputMode::EditStep && model.form.is_some() {
+                let capture = model.form.as_ref().is_some_and(|form| !form.is_task());
                 close_step_editor(model);
+                if capture {
+                    if let Some(form) = model.form.as_ref() {
+                        model.input_mode = form.parent_mode();
+                    }
+                }
                 return Ok(IntentOutcome::None);
             }
             // Field edit on the task page: Esc cancels the field being edited (its draft
@@ -948,7 +952,7 @@ fn apply_board_intent(
             // task edit session. Keep the active row allocated until persistence confirms.
             if model.input_mode == BoardInputMode::EditStep {
                 if model.stage_active_rename_draft() {
-                    let outcome = confirm_edit(domain, model)?;
+                    let outcome = confirm_edit(domain, model, None)?;
                     model.sync_from_domain(domain);
                     return Ok(outcome);
                 }
@@ -1025,7 +1029,7 @@ fn apply_board_intent(
                     }
                 };
             }
-            let outcome = confirm_edit(domain, model)?;
+            let outcome = confirm_edit(domain, model, None)?;
             model.sync_from_domain(domain);
             return Ok(outcome);
         }
@@ -2175,6 +2179,7 @@ fn normalize_optional_thread(value: &str) -> Result<Option<String>, ThreadError>
 fn confirm_edit(
     domain: &mut DomainState,
     model: &mut BoardModel,
+    extra_step: Option<&str>,
 ) -> Result<IntentOutcome, DomainError> {
     // The task bound at open, not `model.selected_id()`: refresh may move the visible pin, but
     // it never changes the form's immutable id or any of its three drafts.
@@ -2225,6 +2230,9 @@ fn confirm_edit(
         .iter()
         .map(|(step_id, text)| (*step_id, text.clone()))
         .collect::<Vec<_>>();
+    let extra_steps = extra_step
+        .map(|text| vec![text.trim().to_string()])
+        .unwrap_or_default();
     domain.edit_with_step_changes(
         id,
         &title,
@@ -2233,6 +2241,7 @@ fn confirm_edit(
         thread.clone(),
         &step_rename_list,
         &step_removals.iter().copied().collect::<Vec<_>>(),
+        &extra_steps,
     )?;
 
     // Retain the complete form and mode until the persistence boundary confirms this exact
@@ -2661,7 +2670,17 @@ fn confirm_add_step(
         }
         return apply_intent(domain, model, BoardIntent::ConfirmEdit, snapshot);
     }
-    confirm_step_editor(domain, model, false, true)
+    let extra_step = model.form.as_ref().and_then(|form| {
+        form.steps
+            .editor
+            .as_ref()
+            .filter(|editor| editor.rename.is_none())
+            .map(|editor| editor.buffer.value().trim().to_string())
+    });
+    let Some(text) = extra_step.filter(|text| !text.is_empty()) else {
+        return confirm_step_editor(domain, model, false, true);
+    };
+    confirm_edit(domain, model, Some(&text))
 }
 
 fn stage_capture_step(

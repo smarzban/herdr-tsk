@@ -445,12 +445,15 @@ impl DomainState {
         thread: Option<String>,
         step_renames: &[(Uuid, String)],
         step_removals: &[Uuid],
+        step_adds: &[String],
     ) -> Result<(), DomainError> {
         let title = title.as_ref().trim();
         if title.is_empty() {
             return Err(DomainError::EmptyTitle);
         }
-        if step_renames.iter().any(|(_, text)| text.trim().is_empty()) {
+        if step_renames.iter().any(|(_, text)| text.trim().is_empty())
+            || step_adds.iter().any(|text| text.trim().is_empty())
+        {
             return Err(DomainError::EmptyStepText);
         }
         let task = self.task_mut(id)?;
@@ -491,6 +494,16 @@ impl DomainState {
                 step.text.clone_from(text);
             }
         }
+        let added: Vec<Step> = step_adds
+            .iter()
+            .map(|text| Step {
+                id: Uuid::new_v4(),
+                text: text.trim().to_string(),
+                done: false,
+            })
+            .collect();
+        let added_count = added.len();
+        task.steps.extend(added);
         record_mutation(task, TaskEventKind::Edited);
         let at = task.updated_at;
         task.history
@@ -503,6 +516,10 @@ impl DomainState {
                 kind: TaskEventKind::StepRemoved,
                 at,
             }));
+        task.history.extend((0..added_count).map(|_| TaskEvent {
+            kind: TaskEventKind::StepAdded,
+            at,
+        }));
         Ok(())
     }
 
@@ -1256,6 +1273,7 @@ mod tests {
                     (second, "second revised".into()),
                 ],
                 &[],
+                &[],
             )
             .expect("atomic session edit");
 
@@ -1300,6 +1318,7 @@ mod tests {
                     (removed, "renamed but removed".into()),
                 ],
                 &[removed, removed],
+                &[],
             )
             .expect("normalize overlapping changes");
 

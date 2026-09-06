@@ -4268,3 +4268,36 @@ fn shift_enter_on_a_typed_add_saves_and_exits_task_editing() {
         .collect();
     assert_eq!(texts, vec!["alpha", "bravo"]);
 }
+
+#[test]
+fn shift_enter_on_add_keeps_a_dirty_title() {
+    let (mut domain, mut model, id) = board_with_steps("Dirty title", None, &["alpha"]);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::FocusFormField(CaptureField::Title),
+        None,
+    )
+    .expect("title");
+    apply_intent(&mut domain, &mut model, BoardIntent::EditInsert('!'), None).expect("type");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginAddStep, None).expect("add");
+    for character in "bravo".chars() {
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::EditInsert(character),
+            None,
+        )
+        .expect("type step");
+    }
+    assert_eq!(
+        apply_intent(&mut domain, &mut model, BoardIntent::ConfirmEditNext, None).expect("save"),
+        IntentOutcome::Persist
+    );
+    model.sync_from_domain(&domain);
+    let task = domain.get(id).expect("task");
+    assert_eq!(task.title, "Dirty title!");
+    let texts: Vec<&str> = task.steps.iter().map(|step| step.text.as_str()).collect();
+    assert_eq!(texts, vec!["alpha", "bravo"]);
+    assert!(!model.task_editing());
+}
