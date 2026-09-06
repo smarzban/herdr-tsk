@@ -115,11 +115,13 @@ pub struct ProjectRow {
     pub in_motion: usize,
     /// Ready count.
     pub ready: usize,
+    /// Done count (live, unarchived). Feeds the index summary, never a column.
+    pub done: usize,
+    /// Distinct thread names on this project's open tasks, ordered by most recently
+    /// updated task first. Painted as the wide-width THREADS column.
+    pub threads: Vec<String>,
     /// True when this is the invocation directory's project.
     pub current: bool,
-    /// Basenames seen across the whole index; a row whose basename repeats shows its
-    /// path so identical names stay distinguishable.
-    pub duplicate_basename: bool,
 }
 
 /// One ordered section of the queue board.
@@ -314,6 +316,16 @@ fn query_desk(
     }
 }
 
+/// Per-project tallies gathered while building the index.
+#[derive(Debug, Clone)]
+struct ProjectCounts {
+    needs_you: usize,
+    in_motion: usize,
+    ready: usize,
+    done: usize,
+    threads: Vec<String>,
+}
+
 /// The projects index: one selectable row per live project with open-work counts.
 /// This is navigation, not a task list: no expanded task sections.
 fn query_projects_index(
@@ -350,19 +362,46 @@ fn query_projects_index(
         }
     }
 
-    let counts_of = |paths: &[String]| -> Vec<(usize, usize, usize)> {
+    let counts_of = |paths: &[String]| -> Vec<ProjectCounts> {
         paths
             .iter()
             .map(|path| {
                 let owned = |task: &&Task| {
                     matches!(&task.scope, TaskScope::Project { path: p } if identities.equivalent(p, path))
                 };
-                let open: Vec<&&Task> = live.iter().filter(|task| owned(task)).collect();
-                (
-                    open.iter().filter(|task| is_needs_you_status(task.status)).count(),
-                    open.iter().filter(|task| task.status == HumanStatus::Started).count(),
-                    open.iter().filter(|task| task.status == HumanStatus::Ready).count(),
-                )
+                let mut owned_tasks: Vec<&Task> =
+                    live.iter().copied().filter(|task| owned(task)).collect();
+                sort_by_updated_desc(&mut owned_tasks);
+                let mut threads: Vec<String> = Vec::new();
+                for task in owned_tasks
+                    .iter()
+                    .filter(|task| task.status != HumanStatus::Done)
+                {
+                    if let Some(thread) = &task.thread {
+                        if !threads.iter().any(|seen| seen == thread) {
+                            threads.push(thread.clone());
+                        }
+                    }
+                }
+                ProjectCounts {
+                    needs_you: owned_tasks
+                        .iter()
+                        .filter(|task| is_needs_you_status(task.status))
+                        .count(),
+                    in_motion: owned_tasks
+                        .iter()
+                        .filter(|task| task.status == HumanStatus::Started)
+                        .count(),
+                    ready: owned_tasks
+                        .iter()
+                        .filter(|task| task.status == HumanStatus::Ready)
+                        .count(),
+                    done: owned_tasks
+                        .iter()
+                        .filter(|task| task.status == HumanStatus::Done)
+                        .count(),
+                    threads,
+                }
             })
             .collect()
     };
@@ -379,24 +418,26 @@ fn query_projects_index(
         )
     });
 
-    let basenames: Vec<String> = paths
-        .iter()
-        .map(|path| short_project_name(path).to_ascii_lowercase())
-        .collect();
     let projects = order
         .iter()
         .map(|index| {
-            let (needs_you, in_motion, ready) = counts[*index];
-            let basename = basenames[*index].clone();
+            let ProjectCounts {
+                needs_you,
+                in_motion,
+                ready,
+                done,
+                threads,
+            } = counts[*index].clone();
             ProjectRow {
                 path: paths[*index].clone(),
                 needs_you,
                 in_motion,
                 ready,
+                done,
+                threads,
                 current: current_repo.is_some_and(|repo| {
                     identities.equivalent(&paths[*index], &repo.to_string_lossy())
                 }),
-                duplicate_basename: basenames.iter().filter(|name| **name == basename).count() > 1,
             }
         })
         .collect();
@@ -1258,7 +1299,7 @@ mod tests {
     }
 
     #[test]
-    fn projects_index_lists_counts_current_first_and_flags_duplicate_basenames() {
+    fn projects_index_lists_counts_current_first_and_keeps_same_named_projects() {
         let tasks = vec![
             task(1, HumanStatus::Blocked, project("/w/launch"), false, 10),
             task(2, HumanStatus::Started, project("/w/launch"), false, 20),
@@ -1292,12 +1333,10 @@ mod tests {
         assert_eq!(launch.needs_you, 1, "blocked counts as needs-you");
         assert_eq!(launch.in_motion, 1);
         assert_eq!(launch.ready, 2, "done tasks never count");
-        assert!(!launch.duplicate_basename);
-
-        let sites: Vec<&ProjectRow> = view.projects[2..].iter().collect();
-        assert!(
-            sites.iter().all(|row| row.duplicate_basename),
-            "two projects named site must be flagged so rows can disambiguate with paths"
+        assert_eq!(launch.done, 0);
+        assert_eq!(
+            view.projects[0].done, 1,
+            "done feeds the row's summary count"
         );
 
         assert!(

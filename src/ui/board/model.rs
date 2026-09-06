@@ -688,6 +688,9 @@ pub struct BoardModel {
     /// a double-click that narrows the board to that project. Presentation-only, never
     /// persisted.
     pub(super) last_project_header_click: Option<(Instant, PathBuf)>,
+    /// The last projects-index row click (time + row path), kept only to detect a
+    /// double-click that opens the project in slot 2. Presentation-only, never persisted.
+    pub(super) last_project_row_click: Option<(Instant, PathBuf)>,
     pub(super) input_mode: BoardInputMode,
     /// The one active board form. It is present for expanded quick-add and task editing alike;
     /// task identity or invocation context are held inside it and never rebound after open.
@@ -792,6 +795,7 @@ impl BoardModel {
             selection_id: None,
             last_row_click: None,
             last_project_header_click: None,
+            last_project_row_click: None,
             input_mode: BoardInputMode::Normal,
             form: None,
             quick_add: None,
@@ -1231,6 +1235,7 @@ impl BoardModel {
         self.text_selection = None;
         self.last_row_click = None;
         self.last_project_header_click = None;
+        self.last_project_row_click = None;
     }
 
     /// Apply an explicit reopen context without changing task ownership. A dirty editor is
@@ -1370,10 +1375,11 @@ impl BoardModel {
             .map(|picker| picker.query.as_str())
     }
 
-    /// Cancel an armed project-header double-click when another pointer target
-    /// intervenes. Mouse-boundary state only, never persisted.
+    /// Cancel an armed project-header or index-row double-click when another pointer
+    /// target intervenes. Mouse-boundary state only, never persisted.
     pub(crate) fn cancel_project_header_double_click(&mut self) {
         self.last_project_header_click = None;
+        self.last_project_row_click = None;
     }
 
     /// Record a left-button press cell and drop any finished selection's highlight.

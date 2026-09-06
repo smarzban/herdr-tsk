@@ -281,7 +281,7 @@ fn hit_map_covers_selection_rows_verbs_drawer_selector_chip_dropdown_palette_row
 }
 
 #[test]
-fn projects_index_row_click_selects_and_opens_the_project() {
+fn projects_index_row_click_selects_and_a_double_click_opens_the_project() {
     let (mut domain, mut model, _id) = scoped_board();
     apply_intent(
         &mut domain,
@@ -316,11 +316,27 @@ fn projects_index_row_click_selects_and_opens_the_project() {
         })
         .unwrap_or_else(|| panic!("no index row hit region for {OTHER_REPO}: {hits:?}"));
     let intent = click(row, &model, &hits).expect("row click maps to an intent");
-    apply_intent(&mut domain, &mut model, intent, None).expect("apply row click");
+    apply_intent(&mut domain, &mut model, intent.clone(), None).expect("apply row click");
+    assert_eq!(
+        model.selected_project(),
+        Some(Path::new("/repos/app")),
+        "a single index-row click only selects; slot 2 keeps its project"
+    );
+    assert_eq!(
+        model.selected_project_row().map(|row| row.path),
+        Some(OTHER_REPO.to_string()),
+        "the clicked row is the index selection"
+    );
+    assert_eq!(
+        model.nav_tab(),
+        tsk_tui::ui::queue::NavTab::Projects,
+        "the index stays open after a single click"
+    );
+    apply_intent(&mut domain, &mut model, intent, None).expect("apply second click");
     assert_eq!(
         model.selected_project(),
         Some(Path::new(OTHER_REPO)),
-        "a direct index-row click opens that project in slot 2"
+        "a second click on the same row inside the window opens it in slot 2"
     );
 }
 

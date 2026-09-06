@@ -1341,8 +1341,8 @@ fn board_mouse_intent(
     };
     let intent = map_responsive_board_mouse(model, &hits, area, mouse);
     if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) && intent.is_none() {
-        // Any pointer target that is not a named row is inert; nothing arms a
-        // double-click on the index (rows open on a single click).
+        // Any pointer target that is not a named row is inert and disarms any pending
+        // header or index-row double-click.
         model.cancel_project_header_double_click();
     }
     let intent = intent?;
@@ -2860,7 +2860,7 @@ mod tests {
     }
 
     #[test]
-    fn projects_index_row_click_opens_that_project_in_slot_2() {
+    fn projects_index_row_click_selects_and_a_second_click_opens_slot_2() {
         use crate::ui::board::{apply_intent, board_hit_map};
         use crate::ui::mouse::left_click;
         use crate::ui::render::QueueHitTarget;
@@ -2928,8 +2928,19 @@ mod tests {
         drive(&mut domain, &mut model, mouse);
         assert_eq!(
             model.selected_project(),
+            Some(Path::new("/repos/alpha")),
+            "a single index-row click only moves the index cursor"
+        );
+        assert_eq!(
+            model.selected_project_row().map(|row| row.path),
+            Some("/repos/beta".to_string()),
+            "the clicked row is selected"
+        );
+        drive(&mut domain, &mut model, mouse);
+        assert_eq!(
+            model.selected_project(),
             Some(Path::new("/repos/beta")),
-            "a direct index-row click opens that project in slot 2"
+            "a second click on the same row inside the window opens it in slot 2"
         );
 
         // Index rows are navigation: the click mutated no task, and the pin reanchors

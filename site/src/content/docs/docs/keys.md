@@ -62,7 +62,7 @@ moves to G, then runs the control you clicked.
 | `Esc` | close one layer |
 | `ctrl+q` or `ctrl+c` | quit |
 
-Click a dim task identifier (`T30`) to copy it. Click elsewhere on a row to peek, click it again to close, and fast double-click to open the page.
+Click a dim task identifier (`T30`) to copy it. Click elsewhere on a row to peek, click it again to close, and fast double-click to open the page. On the projects index a click selects the row and a fast double-click opens the project.
 
 `Esc` closes one layer at a time.
 
