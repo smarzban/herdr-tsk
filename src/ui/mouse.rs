@@ -322,6 +322,7 @@ fn verb_intent(model: &BoardModel, index: usize) -> Option<BoardIntent> {
         "esc" => Some(BoardIntent::CloseLayer),
         ":" => Some(BoardIntent::OpenCommandPalette),
         "?" => Some(BoardIntent::OpenHelp),
+        "/" => Some(BoardIntent::FocusProjectsSearch),
         "+" => Some(BoardIntent::OpenCapture),
         _ => None,
     }
@@ -800,22 +801,32 @@ pub fn map_board_mouse(
             Some(QueueHitTarget::LaunchOption(1)) => Some(BoardIntent::LaunchKeepArchived),
             _ => None,
         },
+        BoardInputMode::ListPicker => match hit_at(hits, pos) {
+            Some(QueueHitTarget::ListPickerOption(index)) => {
+                Some(BoardIntent::SelectListOption(index))
+            }
+            Some(QueueHitTarget::ModalChrome) => None,
+            Some(QueueHitTarget::ModalClose) => Some(BoardIntent::CancelListPicker),
+            _ => Some(BoardIntent::CancelListPicker),
+        },
+        BoardInputMode::ProjectsSearch => match hit_at(hits, pos) {
+            Some(QueueHitTarget::ProjectsSearch) => Some(BoardIntent::FocusProjectsSearch),
+            Some(QueueHitTarget::ProjectRow(index)) => Some(BoardIntent::SelectProjectRow(index)),
+            _ => Some(BoardIntent::CloseLayer),
+        },
         BoardInputMode::Normal => match hit_at(hits, pos) {
-            Some(QueueHitTarget::ProjectChip) => Some(BoardIntent::OpenProjectSelector),
-            Some(QueueHitTarget::HomeTab(tab)) => Some(BoardIntent::SelectHomeTab(tab)),
-            Some(QueueHitTarget::SectionProject(index)) => {
-                Some(BoardIntent::SelectSectionProject(index))
-            }
-            Some(QueueHitTarget::SectionThread(index)) => {
-                Some(BoardIntent::SelectSectionThread(index))
-            }
-            Some(QueueHitTarget::SectionThreadProject {
-                section_idx,
-                subgroup_idx,
-            }) => Some(BoardIntent::SelectSectionThreadProject {
-                section_idx,
-                subgroup_idx,
-            }),
+            Some(QueueHitTarget::NavTab(tab)) => Some(BoardIntent::SelectNavTab(tab)),
+            Some(QueueHitTarget::NavChip) => match model.nav_chip_kind() {
+                Some(crate::ui::render::NavChipKind::ThreadFilter) => {
+                    Some(BoardIntent::OpenThreadFilterPicker)
+                }
+                Some(crate::ui::render::NavChipKind::ProjectsView) => {
+                    Some(BoardIntent::OpenProjectsViewPicker)
+                }
+                None => None,
+            },
+            Some(QueueHitTarget::ProjectsSearch) => Some(BoardIntent::FocusProjectsSearch),
+            Some(QueueHitTarget::ProjectRow(index)) => Some(BoardIntent::SelectProjectRow(index)),
             Some(QueueHitTarget::Drawer) => Some(BoardIntent::ToggleDoneDrawer),
             Some(QueueHitTarget::ArchivedHeader) => Some(BoardIntent::ToggleArchivedGroup),
             Some(QueueHitTarget::TaskNumber(id)) => Some(BoardIntent::CopyTaskNumber(id)),

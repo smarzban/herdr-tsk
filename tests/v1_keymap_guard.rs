@@ -45,6 +45,8 @@ fn normal_mode_keymap_equals_the_readme_and_queue_board_v1_set() {
         (KeyCode::Char(':'), BoardIntent::OpenCommandPalette),
         (KeyCode::Char('?'), BoardIntent::OpenHelp),
         (KeyCode::Char('P'), BoardIntent::OpenProjectSelector),
+        (KeyCode::Char('t'), BoardIntent::OpenThreadFilterPicker),
+        (KeyCode::Char('v'), BoardIntent::OpenProjectsViewPicker),
     ];
     assert_eq!(
         normal_mode_keymap(),
@@ -72,9 +74,7 @@ fn normal_mode_keymap_equals_the_readme_and_queue_board_v1_set() {
         }
     }
 
-    for retired in [
-        'a', 'v', 'p', 'r', 'l', 'c', 'n', 's', 't', 'i', '1', '2', '3', '[', ']',
-    ] {
+    for retired in ['a', 'p', 'r', 'l', 'c', 'n', 'i', '1', '2', '3', '[', ']'] {
         assert_eq!(
             normal(KeyCode::Char(retired)),
             None,

@@ -28,20 +28,25 @@ For scriptable board work, use `tsk add`, `tsk list`, `tsk status`, `tsk edit`, 
 
 ### Board
 
-- Home is a tabbed board: **desk** · **projects** · **threads** (`1`/`2`/`3`). Tabs
-  show only at home; project focus (`P` → project) hides them and paints the project
-  name chip (`P ▾` on the right). At home the chip is hidden — tabs already say where
-  you are; `P` still opens the scope picker from the keyboard. **desk**: NEEDS YOU (desk
-  blocked and review), global IN MOTION, then desk/global ON DECK (ready). **projects**: one collapsible group per project (single-click
-  collapse, double-click → project focus); in motion under each project, then review,
-  blocked, open. **threads**: cross-project thread names with collapsible project
-  sub-groups; same status order. Collapse state is session-only. NEEDS YOU · IN MOTION · ON DECK when
-  project-scoped · done drawer (`z`). Scoped ON DECK thread blocks paint dim `#name`
-  headers with open counts; headers consume row budget but are not selectable or
-  hit-testable. The done drawer ends with a collapsible `▾ archived · n` group (closed by
-  default, session-only): its header is the one selectable header (`Enter`/click toggles it, the
-  word paints bold when selected, never reverse), its rows paint dim, and it folds with `ctrl+g`
-  toggle-all like any other group while the drawer is open.
+- The board keeps persistent destinations **desk** · **selected project** · **projects**
+  (`1`/`2`/`3`) in every normal board surface. `P` opens the project picker; selecting a
+  project fills slot 2 and opens its board. **desk**: NEEDS YOU across live scopes, global
+  IN MOTION, then desk-only ON DECK. **projects**: one selectable overview row per project,
+  with needs-you, in-motion, and ready counts. Its View can show a flat cross-project thread
+  board. Project focus remains available through `P` and the index. NEEDS YOU · IN MOTION ·
+  ON DECK when project-scoped · done drawer (`z`). Project rows are navigation, never task
+  rows. Scoped project boards show thread labels beside tasks and a local thread filter,
+  without a separate filtered-task count. Cross-project thread views also omit the task/project
+  summary. A selector wrapped below the tabs has one blank row above it.
+  The done drawer ends with a collapsible `▾ archived · n` group (closed by default,
+  session-only): its header is the one selectable header (`Enter`/click toggles it, the word
+  paints bold when selected, never reverse), its rows paint dim, and it folds with `ctrl+g`
+  while the drawer is open; other board surfaces have no collapsible groups. Visible tab labels are `desk` ·
+  selected project · `projects`; shortcuts `1`/`2`/`3` remain keyboard-only. Projects Overview
+  search opens in the shared footer slot with `/`, keeps the table visible, filters live, opens
+  the selected project on Enter, and clears/closes on Esc; the closed footer advertises `/ search`.
+  Task rows show project attribution on global rows or `#thread` on project rows, never relative
+  ages; task-page informational dates remain intact.
 - Archive is a flag, not a place. `archived` on a task, and a lazy project record
   (`projects` map keyed by scope path, present only while archived) for projects. Neither leaves
   `tsk.json`. A *hidden* task (archived, or in an archived project) paints in no working lens;

@@ -112,6 +112,26 @@ test("docs and demo describe the wide stage slider and threshold", async () => {
   assert.match(styles, /\.tsk-wide-split\.is-rail \{\s*grid-template-columns: 32ch 1px/);
 });
 
+test("demo keeps project navigation, attribution, and search contracts", async () => {
+  const demo = await read("../public/board-demo.js");
+  assert.match(demo, /selectedProject: "tsk",/);
+  assert.match(demo, /need: open/);
+  assert.doesNotMatch(demo, /!t\.project && \(t\.status === "blocked" \|\| t\.status === "review"\)/);
+  assert.match(demo, /state\.selectedProject = name;/);
+  assert.match(demo, /const text = tab === "project" \? state\.selectedProject : label/);
+  assert.match(demo, /state\.tasks\.filter\(\(t\) => t\.project && !t\.archived\)/);
+  assert.match(demo, /if \(a === "tsk"\) return -1/);
+  assert.match(demo, /id: `project:\${name}`/);
+  assert.match(demo, /id: "nav:archived"/);
+  assert.match(demo, /const row = selectedRow\(\);/);
+  assert.match(demo, /row\?\.kind === "project"/);
+  assert.match(demo, /selectedRow\(\)\?\.kind !== "task"/);
+  assert.match(demo, /id="tsk-project-search"/);
+  assert.ok(demo.includes('e.key === "/"'));
+  assert.match(demo, /state\.projectQuery/);
+  assert.match(demo, /data-project-row=/);
+});
+
 test("demo matches the quick-add, peek, and group-toggle contracts", async () => {
   const demo = await read("../public/board-demo.js");
   assert.match(demo, /if \(e\.key === "Enter" && !e\.ctrlKey && !e\.altKey && !e\.metaKey\)/);

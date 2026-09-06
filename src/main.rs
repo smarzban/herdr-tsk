@@ -1,6 +1,6 @@
 //! tsk binary entry.
 
-use std::io::{self, IsTerminal, Write};
+use std::io::{self, IsTerminal, Read, Write};
 use std::process::ExitCode;
 
 use tsk_tui::cli::router::{route, Surface};
@@ -9,6 +9,7 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().collect();
     match route(&args, std::env::var(tsk_tui::app::MODE_ENV).ok().as_deref()) {
         Surface::FindBoardPane => find_board_pane_main(),
+        Surface::ResolveContext => resolve_context_main(),
         Surface::GlobalHelp => {
             println!(
                 "usage: tsk [capture] | add | steps | list | status | edit | trash | archive | unarchive | project | --find-board-pane | --help\n\nCommands:\n  add    create one task or apply a JSON plan\n  steps  add, toggle, rename, or remove one step on a task\n  list   inspect tasks\n  status set a task's human status\n  edit   update a task's title or notes\n  trash  restore a trashed task\n  archive    keep a task off the working views\n  unarchive  put an archived task back\n  project    archive or unarchive a project\n\nRun `tsk add --help`, `tsk steps --help`, `tsk list --help`, `tsk status --help`, `tsk edit --help`, `tsk trash --help`, `tsk archive --help`, `tsk unarchive --help`, or `tsk project --help` for command details."
@@ -40,6 +41,41 @@ fn usage_exit() -> ExitCode {
         "usage: tsk [capture] | add | steps | list | status | edit | trash | archive | unarchive | project | --find-board-pane | --help"
     );
     ExitCode::from(2)
+}
+
+/// Internal launcher helper: turn the host's invocation JSON into a one-shot
+/// request for an already-running board, then print the resolved repository.
+fn resolve_context_main() -> ExitCode {
+    const MAX_CONTEXT_BYTES: usize = 64 * 1024;
+    let mut json = String::new();
+    if io::stdin()
+        .take((MAX_CONTEXT_BYTES + 1) as u64)
+        .read_to_string(&mut json)
+        .is_err()
+        || json.len() > MAX_CONTEXT_BYTES
+    {
+        eprintln!("tsk --resolve-context: invalid context payload");
+        return ExitCode::from(1);
+    }
+    let raw = match serde_json::from_str::<tsk_tui::context::RawHostContext>(&json) {
+        Ok(raw) => raw,
+        Err(error) => {
+            eprintln!("tsk --resolve-context: invalid context JSON: {error}");
+            return ExitCode::from(1);
+        }
+    };
+    let snapshot = tsk_tui::context::build_snapshot(&raw, std::path::PathBuf::new());
+    let project = snapshot.this_repo.clone();
+    if let Err(error) = tsk_tui::reopen::ReopenRequest::new(project.clone())
+        .write(&tsk_tui::store::default_state_dir())
+    {
+        eprintln!("tsk --resolve-context: {error}");
+        return ExitCode::from(1);
+    }
+    if let Some(project) = project {
+        println!("{}", project.display());
+    }
+    ExitCode::SUCCESS
 }
 
 fn headless_main(args: Vec<String>) -> ExitCode {

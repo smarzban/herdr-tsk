@@ -1,26 +1,26 @@
 ┌────────────────────────────────────────────────────────────────────────────────┐
 │                                                                                │
-│ desk  · ┌─ help ──────────────────────────────────────────────── [x]─┐         │
+│ desk  · ┌─ help ──────────────────────────────────────────────── [x]─┐   all ▾ │
 │         │                                                            │         │
-│ IN MOTIO│  ctrl+q quit | Esc close                                   │───────2 │
+│ NEEDS YO│  ctrl+q quit | Esc close                                   │───────2 │
 │         │  j/k · ↑/↓ move | ctrl+s primary                           │         │
-│  ▸ T1 Sm│  ctrl+d done | ctrl+o reopen                               │tsk · 3m │
-│  ▸ T2 Ed│  ctrl+b block | enter open                                 │dr · 12m │
+│  ■ T5 Wi│  ctrl+d done | ctrl+o reopen                               │   herdr │
+│  ▲ T6 Do│  ctrl+b block | enter open                                 │   herdr │
 │         │  →/← peek | + capture                                      │         │
-│ desk ───│  ctrl+e title | ctrl+x/Delete delete                       │───────1 │
+│ IN MOTIO│  ctrl+e title | ctrl+x/Delete delete                       │───────2 │
 │         │  ctrl+u undo | ctrl+f file                                 │         │
-│  ○ T7 Gl│  z drawer | : palette                                      │      2d │
-│         │  ? help | P project                                        │         │
-│         │  ctrl+g groups                                             │         │
+│  ▸ T1 Sm│  z drawer | : palette                                      │     tsk │
+│  ▸ T2 Ed│  ? help | P project                                        │   herdr │
+│         │  t threads | v views                                       │         │
+│ ON DECK │  ctrl+g groups                                             │───────1 │
 │         │                                                            │         │
-│         │  task page                                                 │         │
+│  ○ T7 Gl│  task page                                                 │    desk │
 │         │  ctrl+e title | ctrl+n notes                               │         │
 │         │  ctrl+a step | tab/↓ steps                                 │         │
 │         │  shift+enter save edit | esc close                         │         │
 │         │                                                            │         │
 │         ├────────────────────────────────────────────────────────────┤         │
-│         │ any key close                                              │         │
-│─────────└────────────────────────────────────────────────────────────┘─────────│
-│ 2 done                                                                         │
+│─────────│ any key close                                              │─────────│
+│ 2 done  └────────────────────────────────────────────────────────────┘         │
 │                                                                                │
 └────────────────────────────────────────────────────────────────────────────────┘

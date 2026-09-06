@@ -15,7 +15,11 @@ import { parseCapture } from "./capture.js";
     done: "✓",
   };
 
-  const TABS = ["desk", "projects", "threads"];
+  const TABS = [
+    ["desk", "desk"],
+    ["project", "selected project"],
+    ["projects", "projects"],
+  ];
   const NOW = Date.now();
   const MIN = 60 * 1000;
   const HOUR = 60 * MIN;
@@ -127,7 +131,10 @@ import { parseCapture } from "./capture.js";
   const state = {
     tasks: seed(),
     tab: "desk",
+    // The focused scope is transient, while this is the project selected by tab 2.
+    selectedProject: "tsk",
     focusProject: null,
+    projectQuery: "",
     collapsed: new Set(),
     selectedId: "t1",
     peekId: null,
@@ -213,6 +220,22 @@ import { parseCapture } from "./capture.js";
     return ["desk", ...[...set].sort()];
   }
 
+  function projectNames() {
+    const names = new Set(
+      state.tasks.filter((t) => t.project && !t.archived).map((t) => t.project),
+    );
+    return [...names].sort((a, b) => {
+      if (a === "tsk") return -1;
+      if (b === "tsk") return 1;
+      return a.localeCompare(b);
+    });
+  }
+
+  function matchingProjectNames() {
+    const query = state.projectQuery.trim().toLowerCase();
+    return projectNames().filter((name) => !query || name.toLowerCase().includes(query));
+  }
+
   function selectedTask() {
     return taskById(state.selectedId) || null;
   }
@@ -260,10 +283,7 @@ import { parseCapture } from "./capture.js";
       return {
         started: open.filter((t) => t.status === "started").sort(byUpdated),
         need: open
-          .filter(
-            (t) =>
-              !t.project && (t.status === "blocked" || t.status === "review"),
-          )
+          .filter((t) => t.status === "blocked" || t.status === "review")
           .sort(byUpdated),
         desk: open
           .filter((t) => !t.project && t.status === "ready")
@@ -298,7 +318,7 @@ import { parseCapture } from "./capture.js";
         v.done.forEach((t) => pushTask(t));
         const archived = archivedInScope();
         if (archived.length) {
-          rows.push({ kind: "archived", label: "archived", count: archived.length, selectable: true });
+          rows.push({ kind: "archived", label: "archived", count: archived.length, selectable: true, id: "nav:archived" });
           if (state.archivedOpen) archived.forEach((t) => rows.push({ kind: "task", task: t, indent: 0, selectable: true, id: t.id, dim: true }));
         }
       }
@@ -321,7 +341,7 @@ import { parseCapture } from "./capture.js";
         v.done.forEach((t) => pushTask(t));
         const archived = archivedInScope();
         if (archived.length) {
-          rows.push({ kind: "archived", label: "archived", count: archived.length, selectable: true });
+          rows.push({ kind: "archived", label: "archived", count: archived.length, selectable: true, id: "nav:archived" });
           if (state.archivedOpen) archived.forEach((t) => rows.push({ kind: "task", task: t, indent: 0, selectable: true, id: t.id, dim: true }));
         }
       }
@@ -329,37 +349,23 @@ import { parseCapture } from "./capture.js";
     }
 
     if (state.tab === "projects") {
-      const names = [...new Set(state.tasks.map((t) => t.project || "desk"))].sort((a, b) => {
-        if (a === "desk") return 1;
-        if (b === "desk") return -1;
-        return a.localeCompare(b);
-      });
-      for (const name of names) {
-        const key = `p:${name}`;
-        const collapsed = state.collapsed.has(key);
+      for (const name of matchingProjectNames()) {
         const group = state.tasks.filter((t) => (t.project || "desk") === name && t.status !== "done" && !t.archived);
         const started = group.filter((t) => t.status === "started").sort(byUpdated);
         const review = group.filter((t) => t.status === "review").sort(byUpdated);
         const blocked = group.filter((t) => t.status === "blocked").sort(byUpdated);
         const ready = group.filter((t) => t.status === "ready").sort(byUpdated);
-        pushHeader("group", name, group.length, { collapseKey: key, collapsed, project: name });
-        if (collapsed) continue;
-        if (started.length) {
-          pushHeader("sub", "in motion", started.length);
-          started.forEach((t) => pushTask(t, 1));
-        }
-        if (review.length) {
-          pushHeader("sub", "review", review.length);
-          review.forEach((t) => pushTask(t, 1));
-        }
-        if (blocked.length) {
-          pushHeader("sub", "blocked", blocked.length);
-          blocked.forEach((t) => pushTask(t, 1));
-        }
-        if (ready.length) {
-          pushHeader("sub", "open", ready.length);
-          ready.forEach((t) => pushTask(t, 1));
-        }
+        rows.push({
+          kind: "project",
+          label: name,
+          project: name,
+          needs: review.length + blocked.length,
+          motion: started.length,
+          ready: ready.length,
+          selectable: true,
+          id: `project:${name}`,
+        });
+        // Project index rows are navigation, not collapsible task groups.
       }
       if (state.drawer) {
         const done = state.tasks.filter((t) => t.status === "done" && !t.archived).sort(byUpdated);
@@ -367,57 +373,20 @@ import { parseCapture } from "./capture.js";
         done.forEach((t) => pushTask(t));
         const archived = archivedInScope();
         if (archived.length) {
-          rows.push({ kind: "archived", label: "archived", count: archived.length, selectable: true });
+          rows.push({ kind: "archived", label: "archived", count: archived.length, selectable: true, id: "nav:archived" });
           if (state.archivedOpen) archived.forEach((t) => rows.push({ kind: "task", task: t, indent: 0, selectable: true, id: t.id, dim: true }));
         }
       }
       return rows;
     }
 
-    const threads = new Map();
-    for (const t of state.tasks.filter((x) => x.status !== "done" && !x.archived && x.thread)) {
-      if (!threads.has(t.thread)) threads.set(t.thread, []);
-      threads.get(t.thread).push(t);
-    }
-    const names = [...threads.keys()].sort();
-    for (const thread of names) {
-      const tKey = `t:${thread}`;
-      const tCollapsed = state.collapsed.has(tKey);
-      const members = threads.get(thread);
-      pushHeader("group", `#${thread}`, members.length, { collapseKey: tKey, collapsed: tCollapsed, thread });
-      if (tCollapsed) continue;
-      const byProj = new Map();
-      for (const t of members) {
-        const p = t.project || "desk";
-        if (!byProj.has(p)) byProj.set(p, []);
-        byProj.get(p).push(t);
-      }
-      for (const [proj, list] of [...byProj.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
-        const pKey = `t:${thread}:${proj}`;
-        const pCollapsed = state.collapsed.has(pKey);
-        pushHeader("group", proj, list.length, { collapseKey: pKey, collapsed: pCollapsed, indent: 1 });
-        if (pCollapsed) continue;
-        const order = ["started", "review", "blocked", "ready"];
-        for (const st of order) {
-          const slice = list.filter((t) => t.status === st).sort(byUpdated);
-          slice.forEach((t) => pushTask(t, 2));
-        }
-      }
-    }
-    const unthreaded = state.tasks.filter((t) => t.status !== "done" && !t.archived && !t.thread);
-    if (unthreaded.length) {
-      const key = "t:unthreaded";
-      const collapsed = state.collapsed.has(key);
-      pushHeader("group", "unthreaded", unthreaded.length, { collapseKey: key, collapsed });
-      if (!collapsed) unthreaded.sort(byUpdated).forEach((t) => pushTask(t, 1));
-    }
     if (state.drawer) {
       const done = state.tasks.filter((t) => t.status === "done" && !t.archived).sort(byUpdated);
       pushHeader("section", "DONE", done.length);
       done.forEach((t) => pushTask(t));
       const archived = archivedInScope();
       if (archived.length) {
-        rows.push({ kind: "archived", label: "archived", count: archived.length, selectable: true });
+        rows.push({ kind: "archived", label: "archived", count: archived.length, selectable: true, id: "nav:archived" });
         if (state.archivedOpen) archived.forEach((t) => rows.push({ kind: "task", task: t, indent: 0, selectable: true, id: t.id, dim: true }));
       }
     }
@@ -439,8 +408,8 @@ import { parseCapture } from "./capture.js";
 
   function metaFor(task) {
     const bits = [];
-    if (state.tab === "desk" && task.project) bits.push(task.project);
-    bits.push(age(task.updatedAt));
+    if (state.tab === "desk") bits.push(projectName(task));
+    if (state.focusProject && task.thread) bits.push(`#${task.thread}`);
     return bits.join(" · ");
   }
 
@@ -469,6 +438,15 @@ import { parseCapture } from "./capture.js";
 
   function verbItems(task) {
     if (!task) {
+      if (state.tab === "projects" && !state.focusProject) {
+        return [
+          { id: "search", label: "/ search projects" },
+          { id: "open", label: "enter open" },
+          { id: "view", label: "v view" },
+          { id: "help", label: "? help" },
+          { id: "palette", label: ": palette" },
+        ];
+      }
       return [
         { id: "open", label: "enter open" },
         { id: "capture", label: "+ capture" },
@@ -491,6 +469,7 @@ import { parseCapture } from "./capture.js";
   }
 
   function runVerb(id) {
+    if (id === "search") state.overlay = "search";
     if (id === "open" && state.selectedId) openFullPage();
     if (id === "capture") openQuickAdd();
     if (id === "help") state.overlay = "help";
@@ -543,12 +522,12 @@ import { parseCapture } from "./capture.js";
       { id: "done", label: "set status: done", run: () => setStatus("done") },
       { id: "desk", label: "go desk", run: () => goTab("desk") },
       { id: "projects", label: "go projects", run: () => goTab("projects") },
-      { id: "threads", label: "go threads", run: () => goTab("threads") },
+      { id: "project", label: "go selected project", run: () => goTab("project") },
       { id: "capture", label: "capture", run: () => openQuickAdd() },
       { id: "help", label: "help", run: () => (state.overlay = "help") },
       { id: "reset", label: "reset demo", run: resetDemo },
     ];
-    if (!state.focusProject && ["projects", "threads"].includes(state.tab)) {
+    if (!state.focusProject && state.tab === "projects") {
       all.push({ id: "groups", label: "toggle groups", run: toggleAllGroups });
     }
     return all.filter((c) => !q || c.label.includes(q) || c.id.includes(q));
@@ -571,15 +550,35 @@ import { parseCapture } from "./capture.js";
 
   function goTab(tab) {
     state.tab = tab;
-    state.focusProject = null;
+    state.focusProject = tab === "project" ? state.selectedProject : null;
+    state.projectQuery = "";
     state.peekId = null;
     state.overlay = null;
     state.stage = "board";
     state.stageOrigin = null;
   }
 
+  function openProject(name) {
+    if (!name || name === "desk") {
+      goTab("desk");
+      return;
+    }
+    state.selectedProject = name;
+    state.focusProject = name;
+    state.tab = "project";
+    state.projectQuery = "";
+    state.peekId = null;
+    state.overlay = null;
+    state.stage = "board";
+    state.stageOrigin = null;
+  }
+
+  function selectedRow() {
+    return buildRows().find((row) => row.selectable && row.id === state.selectedId) || null;
+  }
+
   function toggleAllGroups() {
-    if (state.focusProject || !["projects", "threads"].includes(state.tab)) return;
+    if (state.focusProject || state.tab !== "projects") return;
     const groups = buildRows().filter((row) => row.kind === "group" && !row.indent);
     const collapse = groups.some((row) => !state.collapsed.has(row.collapseKey));
     for (const row of groups) {
@@ -591,7 +590,9 @@ import { parseCapture } from "./capture.js";
   function resetDemo() {
     state.tasks = seed();
     state.tab = "desk";
+    state.selectedProject = "tsk";
     state.focusProject = null;
+    state.projectQuery = "";
     state.collapsed = new Set();
     state.selectedId = "t1";
     state.peekId = null;
@@ -662,7 +663,7 @@ import { parseCapture } from "./capture.js";
   }
 
   function undoDelete() {
-    if (!state.undo) return;
+    if (selectedRow()?.kind !== "task" || !state.undo) return;
     const { task, index } = state.undo;
     state.tasks.splice(Math.min(index, state.tasks.length), 0, task);
     state.selectedId = task.id;
@@ -693,7 +694,7 @@ import { parseCapture } from "./capture.js";
           <div>enter open | →/← peek or slide | + capture</div>
           <div>e title | n notes | x delete | u undo</div>
           <div>z drawer | : palette | ? help</div>
-          <div>P project | 1 2 3 tabs | g groups (projects/threads)</div>
+          <div>P project | 1 2 3 navigation | / search projects | g groups</div>
           <div class="dim">app needs ctrl on verbs · demo also accepts bare keys</div>
         </div>
         <div class="tsk-box-foot">any key close</div>
@@ -726,7 +727,9 @@ import { parseCapture } from "./capture.js";
       .map((name, i) => {
         const mark = i === state.pickerI ? "▸" : " ";
         const cls = i === state.pickerI ? "sel-text" : "";
-        const current = state.focusProject === name || (!state.focusProject && name === "desk" && state.tab === "desk");
+        const current = name === "desk"
+          ? !state.focusProject && state.tab === "desk"
+          : state.selectedProject === name;
         return `<div class="tsk-pal-row ${cls}" data-pick="${esc(name)}">${mark} ${esc(name)}${current ? "  ·" : ""}</div>`;
       })
       .join("");
@@ -801,9 +804,10 @@ import { parseCapture } from "./capture.js";
   }
 
   function renderBoard(rows, rail = false, bare = false) {
-    const tabs = TABS.map((tab) => {
-      const on = !state.focusProject && state.tab === tab;
-      return `<button type="button" class="tsk-tab ${on ? "is-on" : ""}" data-tab="${tab}">${tab}</button>`;
+    const tabs = TABS.map(([tab, label]) => {
+      const on = state.tab === tab;
+      const text = tab === "project" ? state.selectedProject : label;
+      return `<button type="button" class="tsk-tab ${on ? "is-on" : ""}" data-tab="${tab}">${esc(text)}</button>`;
     }).join(`<span class="dim">  ·  </span>`);
 
     const chip = state.focusProject
@@ -816,6 +820,10 @@ import { parseCapture } from "./capture.js";
           const cls = row.kind === "sub" ? "tsk-sub" : "tsk-sec";
           return `<div class="${cls}"><span class="sec">${esc(row.label)}</span><span class="rule" aria-hidden="true"></span><span class="count">${row.count}</span></div>`;
         }
+        if (row.kind === "project") {
+          const selected = row.id === state.selectedId;
+          return `<button type="button" class="tsk-group ${selected ? "sel-text" : ""}" data-project-row="${esc(row.project)}" data-nav-id="${esc(row.id)}"><span class="sec">${selected ? "▸" : " "} ${esc(row.label)}</span><span class="count">${row.needs} needs · ${row.motion} motion · ${row.ready} ready</span></button>`;
+        }
         if (row.kind === "group") {
           const mark = row.collapsed ? "▸" : "▾";
           const pad = row.indent ? "  " : "";
@@ -823,7 +831,8 @@ import { parseCapture } from "./capture.js";
         }
         if (row.kind === "archived") {
           const mark = state.archivedOpen ? "▾" : "▸";
-          return `<button type="button" class="tsk-group" data-archived-header="1"><span class="dim">${mark}</span> <span class="sec">archived</span><span class="rule" aria-hidden="true"></span><span class="count dim">${row.count}</span></button>`;
+          const selected = row.id === state.selectedId;
+          return `<button type="button" class="tsk-group" data-archived-header="1"><span class="dim">${mark}</span> <span class="sec">${selected ? "<strong>archived</strong>" : "archived"}</span><span class="rule" aria-hidden="true"></span><span class="count dim">${row.count}</span></button>`;
         }
         const task = row.task;
         if (rail && task.status === "done") return "";
@@ -889,7 +898,10 @@ import { parseCapture } from "./capture.js";
       state.overlay === "quick"
         ? `<div class="tsk-input-row"><span class="tsk-prompt">+</span><input class="tsk-field" id="tsk-add" value="${esc(state.draft)}" placeholder="title  ·  !p project  ·  !t thread" autocomplete="off" /><span class="cursor">█</span></div>
            <div class="foot dim">${state.refuse ? esc(state.refuse) : "enter save · shift+enter stay · tab page · esc close"}</div>`
-        : `<div class="tsk-status-row"><button type="button" class="tsk-done-count foot" data-drawer="1">${doneN} done</button><span class="foot dim tsk-stage-hint">${esc(stageHint())}</span></div>
+        : state.overlay === "search"
+          ? `<div class="tsk-input-row"><span class="tsk-prompt">/</span><input class="tsk-field" id="tsk-project-search" value="${esc(state.projectQuery)}" placeholder="search projects" autocomplete="off" /><span class="cursor">█</span></div>
+             <div class="foot dim">enter open · esc close</div>`
+          : `<div class="tsk-status-row"><button type="button" class="tsk-done-count foot" data-drawer="1">${doneN} done</button><span class="foot dim tsk-stage-hint">${esc(stageHint())}</span></div>
            <div class="foot dim tsk-verbs">${verbs}</div>
            ${state.copyNotice ? `<div class="foot dim">${esc(state.copyNotice)}</div>` : ""}`;
     return `
@@ -925,11 +937,19 @@ import { parseCapture } from "./capture.js";
     if (state.overlay === "help") html += renderHelp();
     if (state.overlay === "palette") html += renderPalette();
     if (state.overlay === "picker") html += renderPicker();
+    const activeSearch = document.activeElement?.id === "tsk-project-search";
     const keepKeys =
       document.activeElement === frame || frame.contains(document.activeElement);
     root.innerHTML = html;
     const add = document.getElementById("tsk-add");
     const edit = document.getElementById("tsk-edit");
+    const search = document.getElementById("tsk-project-search");
+    if (search) {
+      search.addEventListener("input", () => {
+        state.projectQuery = search.value;
+        render();
+      });
+    }
     if (add) {
       add.focus();
       add.selectionStart = add.value.length;
@@ -942,6 +962,10 @@ import { parseCapture } from "./capture.js";
       edit.addEventListener("input", () => {
         state.editDraft = edit.value;
       });
+    } else if (search && activeSearch) {
+      search.focus();
+      search.selectionStart = search.value.length;
+      search.selectionEnd = search.value.length;
     } else if (keepKeys) {
       frame.focus({ preventScroll: true });
     }
@@ -959,6 +983,12 @@ import { parseCapture } from "./capture.js";
     i = (i + delta + ids.length) % ids.length;
     state.selectedId = ids[i];
     state.peekId = state.peekId && state.peekId === state.selectedId ? state.peekId : null;
+  }
+
+  function openProjectSearchMatch() {
+    const row = selectedRow();
+    const match = row?.kind === "project" ? row.project : matchingProjectNames()[0];
+    if (match) openProject(match);
   }
 
   function commitEdit() {
@@ -985,6 +1015,22 @@ import { parseCapture } from "./capture.js";
     if (el !== frame) {
       if (el.closest(".pane-bar, .layout-toggle, [data-divider]")) return;
       if (state.overlay !== "quick" && el.closest("button")) return;
+    }
+    if (el.id === "tsk-project-search") {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        state.projectQuery = "";
+        render();
+        frame.focus({ preventScroll: true });
+        return;
+      }
+      if (e.key === "Enter" && !e.ctrlKey && !e.altKey && !e.metaKey) {
+        e.preventDefault();
+        openProjectSearchMatch();
+        render();
+        return;
+      }
+      return;
     }
     const wide = isWideSplit();
     const taskPageActive = taskFocus();
@@ -1088,6 +1134,35 @@ import { parseCapture } from "./capture.js";
       return;
     }
 
+    if (state.overlay === "search") {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        state.projectQuery = "";
+        state.overlay = null;
+        render();
+        return;
+      }
+      if (e.key === "Enter") {
+        e.preventDefault();
+        openProjectSearchMatch();
+        state.overlay = null;
+        render();
+        return;
+      }
+      if (e.key === "Backspace") {
+        e.preventDefault();
+        state.projectQuery = state.projectQuery.slice(0, -1);
+        render();
+        return;
+      }
+      if (e.key.length === 1 && !e.altKey && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        state.projectQuery += e.key;
+        render();
+      }
+      return;
+    }
+
     if (state.overlay === "picker") {
       const opts = knownProjects();
       if (e.key === "Escape") {
@@ -1099,8 +1174,8 @@ import { parseCapture } from "./capture.js";
       if (e.key === "Enter") {
         e.preventDefault();
         const name = opts[state.pickerI];
-        state.focusProject = name === "desk" ? null : name;
-        if (name === "desk") state.tab = "desk";
+        if (name === "desk") goTab("desk");
+        else openProject(name);
         state.overlay = null;
         render();
         return;
@@ -1130,8 +1205,14 @@ import { parseCapture } from "./capture.js";
         state.overlay = null;
         leaveTaskPage();
       } else if (state.peekId) state.peekId = null;
-      else if (state.focusProject) state.focusProject = null;
+      else if (state.focusProject) goTab("desk");
       else frame.blur();
+      render();
+      return;
+    }
+    if (e.key === "/" && state.tab === "projects" && !state.focusProject) {
+      e.preventDefault();
+      state.overlay = "search";
       render();
       return;
     }
@@ -1157,7 +1238,7 @@ import { parseCapture } from "./capture.js";
     }
     if (e.key === "1" || e.key === "2" || e.key === "3") {
       e.preventDefault();
-      goTab(TABS[Number(e.key) - 1]);
+      goTab(TABS[Number(e.key) - 1][0]);
       render();
       return;
     }
@@ -1213,7 +1294,12 @@ import { parseCapture } from "./capture.js";
     if (e.key === "Enter") {
       e.preventDefault();
       if (taskPageActive && state.stage === "page") leaveTaskPage();
-      else openFullPage();
+      else {
+        const row = selectedRow();
+        if (row?.kind === "project") openProject(row.project);
+        else if (row?.kind === "archived") state.archivedOpen = !state.archivedOpen;
+        else openFullPage();
+      }
       render();
       return;
     }
@@ -1329,14 +1415,20 @@ import { parseCapture } from "./capture.js";
       render();
       return;
     }
+    const projectRow = e.target.closest("[data-project-row]");
+    if (projectRow) {
+      openProject(projectRow.getAttribute("data-project"));
+      render();
+      return;
+    }
     const group = e.target.closest("[data-collapse]");
     if (group) {
       const now = Date.now();
       const key = group.getAttribute("data-collapse");
       const project = group.getAttribute("data-project");
       if (lastClick.id === key && now - lastClick.at < 350 && project) {
-        state.focusProject = project === "desk" ? null : project;
-        if (project === "desk") state.tab = "desk";
+        if (project === "desk") goTab("desk");
+        else openProject(project);
       } else if (state.collapsed.has(key)) state.collapsed.delete(key);
       else state.collapsed.add(key);
       lastClick = { id: key, at: now };
@@ -1393,8 +1485,8 @@ import { parseCapture } from "./capture.js";
     const pick = e.target.closest("[data-pick]");
     if (pick) {
       const name = pick.getAttribute("data-pick");
-      state.focusProject = name === "desk" ? null : name;
-      if (name === "desk") state.tab = "desk";
+      if (name === "desk") goTab("desk");
+      else openProject(name);
       state.overlay = null;
       render();
     }

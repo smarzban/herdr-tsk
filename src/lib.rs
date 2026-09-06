@@ -8,6 +8,7 @@ pub mod config;
 pub mod context;
 pub mod domain;
 pub(crate) mod fsperm;
+pub mod reopen;
 pub mod save_recovery;
 pub mod scope;
 pub mod store;

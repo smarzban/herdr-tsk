@@ -215,17 +215,36 @@ pub enum BoardIntent {
     /// the task list: it runs the same effect `ConfirmProjectChoice` does after enough
     /// `ProjectPickerNext`/`ProjectPickerPrev` presses reached this option.
     SelectProjectOption(usize),
-    /// Switch the home board tab (`1` desk · `2` projects · `3` threads).
-    SelectHomeTab(crate::ui::queue::BoardTab),
-    /// Register one click on a Projects-tab group header by section index (mouse-only).
-    SelectSectionProject(usize),
-    /// Register one click on a Threads-tab group header by section index (mouse-only).
-    SelectSectionThread(usize),
-    /// Register one click on a project row under a thread group (mouse-only).
-    SelectSectionThreadProject {
-        section_idx: usize,
-        subgroup_idx: usize,
-    },
+    /// Switch to a persistent navigation tab (`1` desk · `2` selected project · `3`
+    /// projects). Tab 2 with no project opens the picker instead.
+    SelectNavTab(crate::ui::queue::NavTab),
+    /// Open the project board's searchable thread filter picker (bare `t`).
+    OpenThreadFilterPicker,
+    /// Open the projects index's searchable View picker (bare `v`).
+    OpenProjectsViewPicker,
+    /// Focus the visible projects-index search field (`/` or a click).
+    FocusProjectsSearch,
+    /// Move the open list picker's selection.
+    ListPickerNext,
+    ListPickerPrev,
+    /// Apply the highlighted list-picker option.
+    ConfirmListPicker,
+    /// Close the list picker without applying anything.
+    CancelListPicker,
+    /// Choose a visible list-picker row by index and apply it in one step (mouse).
+    SelectListOption(usize),
+    /// Type into the open list picker's search query.
+    ListPickerQueryInsert(char),
+    /// Paste into the open list picker's search query.
+    ListPickerQueryInsertText(String),
+    ListPickerQueryBackspace,
+    /// Type into the projects index's search.
+    ProjectsQueryInsert(char),
+    /// Paste into the projects index's search.
+    ProjectsQueryInsertText(String),
+    ProjectsQueryBackspace,
+    /// Mouse route onto a projects index row: select it and open its project in slot 2.
+    SelectProjectRow(usize),
     /// Move the task page's step cursor onto one steps step by its painted absolute
     /// index (mouse click on an step row; AC-21). A click selects — it never toggles the
     /// step, opens the editor, or arms the delete mark; no key produces it.
@@ -318,6 +337,8 @@ pub const HELP_SURFACE_HELP_LINE: &str = "any key closes";
 /// Compact legend shown while a failed board save is unresolved.
 pub const LAUNCH_CARD_HELP_LINE: &str = "y unarchive · n keep archived";
 pub const SAVE_RECOVERY_HELP_LINE: &str = "↑↓  ·  r retry  ·  c cancel";
+/// Compact legend while the projects index search field owns input.
+pub const PROJECTS_SEARCH_HELP_LINE: &str = "/ search  ·  type  ·  enter open  ·  esc clear";
 /// Compact legend shown while the first-use walkthrough is open.
 pub const WALKTHROUGH_HELP_LINE: &str = "Enter next  ·  Esc skip";
 
@@ -490,12 +511,29 @@ const NORMAL_KEYMAP: &[NormalKeyEntry] = &[
         help_label: "help",
         verb: false,
     },
-    // The project chip is mouse-clickable; `P` gives the keyboard the same route.
+    // The project slot is mouse-clickable; `P` gives the keyboard the same route.
     NormalKeyEntry {
         code: KeyCode::Char('P'),
         intent: BoardIntent::OpenProjectSelector,
         help_chord: "P",
         help_label: "project",
+        verb: false,
+    },
+    // `t` opens the project board's thread filter; `v` the projects index's View
+    // selector. Both are navigation (bare, not verbs); the reducer gates each to its
+    // own destination, so they are inert everywhere else.
+    NormalKeyEntry {
+        code: KeyCode::Char('t'),
+        intent: BoardIntent::OpenThreadFilterPicker,
+        help_chord: "t",
+        help_label: "threads",
+        verb: false,
+    },
+    NormalKeyEntry {
+        code: KeyCode::Char('v'),
+        intent: BoardIntent::OpenProjectsViewPicker,
+        help_chord: "v",
+        help_label: "views",
         verb: false,
     },
 ];
@@ -534,10 +572,18 @@ pub fn normal_help_bindings() -> Vec<(&'static str, &'static str)> {
             bindings.push(binding);
         }
     }
-    // Ctrl+G is deliberately not a normal key-map entry: it only acts on the home
-    // Projects and Threads lenses, never while a task page owns input.
+    // Ctrl+G is deliberately not a normal key-map entry: it only acts on the open
+    // done drawer's archived group, never while a task page owns input.
     bindings.push(("ctrl+g", "groups"));
     bindings
+}
+
+/// Whether a bare character is unbound in normal mode, and so types into destination
+/// search lines (the projects index). Bound keys — nav, verbs, pickers — stay routes.
+pub fn is_unbound_normal_char(character: char) -> bool {
+    !NORMAL_KEYMAP
+        .iter()
+        .any(|entry| entry.code == KeyCode::Char(character))
 }
 
 fn help_chord_shown(chord: &str) -> String {
@@ -606,6 +652,8 @@ pub fn map_key(mode: BoardInputMode, key: KeyEvent) -> Option<BoardIntent> {
         BoardInputMode::Normal => map_normal(key),
         BoardInputMode::TaskPage => map_task_page(key),
         BoardInputMode::ProjectPicker => map_project_picker(key),
+        BoardInputMode::ListPicker => map_list_picker(key),
+        BoardInputMode::ProjectsSearch => map_projects_search(key),
         BoardInputMode::SaveRecovery => map_save_recovery(key),
         BoardInputMode::LaunchCard => map_launch_card(key),
         BoardInputMode::Palette => map_palette(key),
@@ -922,12 +970,28 @@ fn map_form_edit_key(
     }
 }
 
+fn map_projects_search(key: KeyEvent) -> Option<BoardIntent> {
+    if key
+        .modifiers
+        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER)
+    {
+        return None;
+    }
+    match key.code {
+        KeyCode::Esc => Some(BoardIntent::CloseLayer),
+        KeyCode::Enter => Some(BoardIntent::OpenTaskPage),
+        KeyCode::Backspace => Some(BoardIntent::ProjectsQueryBackspace),
+        KeyCode::Char(character) if !character.is_control() => {
+            Some(BoardIntent::ProjectsQueryInsert(character))
+        }
+        _ => None,
+    }
+}
+
 /// Map a bracketed-paste payload to the intent that inserts it.
 ///
 /// A paste arrives as `Event::Paste`, never as a key press, so it cannot go through
-/// [`map_key`]. The two edit modes and the palette query consume one: each accepts typed
-/// characters, so each accepted a paste before bracketed paste was enabled. Every other mode
-/// ignores it.
+/// [`map_key`]. The two edit modes, the palette, and the projects search consume one.
 pub fn map_edit_paste(mode: BoardInputMode, text: &str) -> Option<BoardIntent> {
     match mode {
         BoardInputMode::QuickAdd => Some(BoardIntent::QuickAddInsertText(text.to_string())),
@@ -940,6 +1004,12 @@ pub fn map_edit_paste(mode: BoardInputMode, text: &str) -> Option<BoardIntent> {
         | BoardInputMode::FormScopeDropdown
         | BoardInputMode::LaunchCard
         | BoardInputMode::TaskPage => None,
+        BoardInputMode::ListPicker => {
+            Some(BoardIntent::ListPickerQueryInsertText(text.to_string()))
+        }
+        BoardInputMode::ProjectsSearch => {
+            Some(BoardIntent::ProjectsQueryInsertText(text.to_string()))
+        }
         BoardInputMode::Palette => Some(BoardIntent::CommandQueryInsertText(text.to_string())),
         BoardInputMode::Normal
         | BoardInputMode::ProjectPicker
@@ -1015,10 +1085,22 @@ pub fn intent_primary_action(intent: &BoardIntent) -> Option<PrimaryBoardAction>
         | BoardIntent::ConfirmProjectChoice
         | BoardIntent::CancelProjectPicker
         | BoardIntent::SelectProjectOption(_)
-        | BoardIntent::SelectHomeTab(_)
-        | BoardIntent::SelectSectionProject(_)
-        | BoardIntent::SelectSectionThread(_)
-        | BoardIntent::SelectSectionThreadProject { .. }
+        | BoardIntent::SelectNavTab(_)
+        | BoardIntent::OpenThreadFilterPicker
+        | BoardIntent::OpenProjectsViewPicker
+        | BoardIntent::ListPickerNext
+        | BoardIntent::ListPickerPrev
+        | BoardIntent::ConfirmListPicker
+        | BoardIntent::CancelListPicker
+        | BoardIntent::SelectListOption(_)
+        | BoardIntent::ListPickerQueryInsert(_)
+        | BoardIntent::ListPickerQueryInsertText(_)
+        | BoardIntent::ListPickerQueryBackspace
+        | BoardIntent::ProjectsQueryInsert(_)
+        | BoardIntent::ProjectsQueryInsertText(_)
+        | BoardIntent::ProjectsQueryBackspace
+        | BoardIntent::FocusProjectsSearch
+        | BoardIntent::SelectProjectRow(_)
         | BoardIntent::SelectStep(_)
         | BoardIntent::RetrySave
         | BoardIntent::CancelSave
@@ -1193,6 +1275,30 @@ fn map_project_picker(key: KeyEvent) -> Option<BoardIntent> {
         KeyCode::Char('j') | KeyCode::Down => Some(BoardIntent::ProjectPickerNext),
         KeyCode::Char('k') | KeyCode::Up => Some(BoardIntent::ProjectPickerPrev),
         KeyCode::Tab | KeyCode::Left | KeyCode::Right => Some(BoardIntent::ProjectPickerSwitchTab),
+        _ => None,
+    }
+}
+
+/// Searchable list picker (thread filter / projects View). Printable keys narrow the
+/// query, arrows move, Enter applies, Esc cancels — the palette's contract with counts.
+fn map_list_picker(key: KeyEvent) -> Option<BoardIntent> {
+    if key
+        .modifiers
+        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER)
+    {
+        return None;
+    }
+    match key.code {
+        KeyCode::Esc => Some(BoardIntent::CancelListPicker),
+        KeyCode::Enter => Some(BoardIntent::ConfirmListPicker),
+        KeyCode::Down => Some(BoardIntent::ListPickerNext),
+        KeyCode::Up => Some(BoardIntent::ListPickerPrev),
+        KeyCode::Backspace => Some(BoardIntent::ListPickerQueryBackspace),
+        KeyCode::Tab => Some(BoardIntent::ListPickerNext),
+        KeyCode::BackTab => Some(BoardIntent::ListPickerPrev),
+        KeyCode::Char(character) if !character.is_control() => {
+            Some(BoardIntent::ListPickerQueryInsert(character))
+        }
         _ => None,
     }
 }

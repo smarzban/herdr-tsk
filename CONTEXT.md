@@ -27,20 +27,19 @@ Canonical terms for this repo. No implementation detail.
 - **step short id**: an unambiguous prefix of a step's stable identity, used to address a step within one task from the CLI.
 - **thread**: an optional single name a task carries, grouping it with same-named tasks in the same scope. Not an entity: no identity beyond the name, no status, no lifecycle. It presents on the board exactly while at least one open task in its scope carries it; the field itself persists on the task regardless of status.
 - **thread token**: the `!t name` capture directive, sibling of `!p`; bare `!t` means unthreaded. Stripped from the saved title.
-- **thread header**: a derived, non-selectable board row above a thread's open tasks in a scoped deck group, showing the thread name and open count. Chrome, not a task.
-- **unthreaded**: carrying no thread. Unthreaded tasks list after thread groups within their deck group.
+- **thread label**: the thread name painted beside a project-board task row. It is chrome, not a task; selecting a local thread filter hides redundant labels.
+- **unthreaded**: carrying no thread. Unthreaded tasks remain in the project's flat task board.
 - **wide stage**: the session-only slider position of a wide (≥110 column) board: 0 `FullBoard`, A `Split`, G `Rail`, F `FullTask` (`ui::tier::WideStage`). Focus and geometry derive from the stage; it is never persisted and survives resizes.
 - **rail**: the 32-column dim board column of stage G: tabs, section rules, and wrapped task rows, without the meta column or the done drawer.
 - **single-pane view**: a presentation that shows only the focused board or task surface.
 - **focused surface**: the board or task view that currently owns interaction; at wide widths it derives from the wide stage (0/A board-owned, G/F task-owned), below 110 from the single-pane presentation.
-- **open task**: human status ready, blocked, or review, not soft-deleted, and not archived. The tasks a thread header groups and counts.
+- **open task**: human status ready, blocked, or review, not soft-deleted, and not archived.
 - **archived**: a flag on a task meaning "kept, off the radar". The task keeps its human status and leaves every working lens; it is visible only in the archived group of the done drawer. Not a status, not a place, nothing expires.
-- **archived project**: a project whose project record carries the archived flag. It leaves the projects tab, the threads tab, desk IN MOTION and the picker's main list; it is visible only on the picker's archived tab. Its tasks' own archived flags are independent of it.
+- **archived project**: a project whose project record carries the archived flag. It leaves the projects index, desk IN MOTION and the picker's main list; it is visible only on the picker's archived tab. Its tasks' own archived flags are independent of it.
 - **project record**: the per-project entry in the store, keyed by the project's scope path. Lazy: exists only while the project is archived. The set of projects the board shows is still derived from tasks.
 - **archived group**: the collapsible `archived · n` header and its rows inside the done drawer, closed by default, session-only collapse state. Chrome plus dimmed task rows.
 - **file**: the `ctrl+f` verb. On a task row it toggles the task's archived flag; in the picker it archives the project, on the picker's archived tab it unarchives it. Has no undo entry. `ctrl+u` on an archived selection also unarchives; on anything else it stays undo.
-- **thread block**: the derived unit of one thread's header plus its ordered open tasks inside a deck section. Exists only in query output, never in the store.
-- **working lens**: any board or CLI view meant for current work: desk tab, projects tab, threads tab, project focus, NEEDS YOU, IN MOTION, ON DECK, thread headers and counts, the rail, and default `tsk list` views. Archived tasks and archived projects never paint in one.
+- **working lens**: any board or CLI view meant for current work: desk, selected project, projects index, cross-project thread View, project focus, NEEDS YOU, IN MOTION, ON DECK, the rail, and default `tsk list` views. Archived tasks and archived projects never paint in one.
 - **NEEDS YOU**: queue section for non-deleted, non-archived blocked and review tasks. Desk shows desk/global ones; project focus shows that project's. Omitted when empty. Sits above IN MOTION.
 - **session**: one board process from launch to quit. Session-only state (collapse, wide stage, the launch card having been shown) resets on relaunch.
 - **hidden**: a task that is archived, or whose project is archived. The single predicate every working lens filters on; distinct from soft-deleted.

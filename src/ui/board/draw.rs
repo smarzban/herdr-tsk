@@ -8,11 +8,15 @@ use ratatui::Frame;
 
 use crate::domain::{HumanStatus, TaskScope};
 use crate::ui::capture::CaptureField;
-use crate::ui::edit::{escaped_line_window, wrap_text, wrapped_draft_rows, wrapped_edit_rows};
+use crate::ui::edit::{
+    escaped_line_window, wrap_text, wrapped_draft_rows, wrapped_edit_rows, EditBuffer,
+};
 use crate::ui::input::{help_card_lines, keymap_help_label};
 use crate::ui::mouse::BoardPopup;
+use crate::ui::queue::ThreadFilter;
 use crate::ui::render::{
-    self, FormScopeDropdown, PaletteCommandRow, QueueFrameModel, QueueOverlay, VerbEntry,
+    self, BoardSurface, FormScopeDropdown, NavChipKind, NavChipPaint, NavPaint, PaletteCommandRow,
+    QueueFrameModel, QueueOverlay, VerbEntry,
 };
 use crate::ui::tier;
 use crate::ui::{present_line, terminal_text};
@@ -21,7 +25,7 @@ use super::chrome::{notice_framed, row_width, DELETE_NOTICE_UNDO};
 use super::commands::CommandSurface;
 use super::model::{
     project_option_label, project_scope_option_label, BoardForm, BoardInputMode, BoardLocation,
-    BoardModel, PickerTab, ProjectScopeOption,
+    BoardModel, PickerTab, ProjectScopeOption, ProjectsView,
 };
 
 /// Verb bar for the base board list: labels follow the selected task.
@@ -86,6 +90,45 @@ pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
     };
     if let Some(task) = page_task {
         return task_page_verb_items(model, task);
+    }
+
+    if model.nav_tab() == crate::ui::queue::NavTab::Projects
+        && matches!(model.projects_view(), ProjectsView::Overview)
+    {
+        if model.input_mode() == BoardInputMode::ProjectsSearch {
+            return vec![
+                VerbEntry {
+                    key: "esc",
+                    label: "clear search",
+                },
+                VerbEntry {
+                    key: "enter",
+                    label: "open",
+                },
+            ];
+        }
+        return vec![
+            VerbEntry {
+                key: "/",
+                label: "search projects",
+            },
+            VerbEntry {
+                key: "enter",
+                label: "open",
+            },
+            VerbEntry {
+                key: "v",
+                label: "view",
+            },
+            VerbEntry {
+                key: ":",
+                label: help(":", "palette"),
+            },
+            VerbEntry {
+                key: "?",
+                label: help("?", "help"),
+            },
+        ];
     }
 
     let mut entries = Vec::with_capacity(7);
@@ -667,6 +710,55 @@ fn build_task_page_overlay<'a>(
     }
 }
 
+/// The persistent navigation row's paint for this model: fixed tabs, slot 2's label,
+/// and the active destination's right-side control.
+fn nav_paint(model: &BoardModel) -> NavPaint {
+    let slot2_label = match &model.board_location {
+        // AC-41: the read-only focus says so in its slot.
+        BoardLocation::ArchivedProject(path) => {
+            format!("{} \u{b7} archived", project_option_label(path.as_path()))
+        }
+        BoardLocation::Project(path) => project_option_label(path.as_path()),
+        // Slot 2 carries the remembered project even while another destination is active.
+        BoardLocation::Desk | BoardLocation::Projects => model
+            .selected_project()
+            .map(project_option_label)
+            .unwrap_or_else(|| "select project".to_string()),
+    };
+    let chip = match (&model.board_location, model.projects_view()) {
+        (BoardLocation::Project(_), _) => Some(NavChipPaint {
+            label: model.thread_filter().label(),
+            kind: NavChipKind::ThreadFilter,
+        }),
+        (BoardLocation::Projects, ProjectsView::Overview) => Some(NavChipPaint {
+            label: "Overview".to_string(),
+            kind: NavChipKind::ProjectsView,
+        }),
+        (BoardLocation::Projects, ProjectsView::Thread(name)) => Some(NavChipPaint {
+            label: format!("#{name}"),
+            kind: NavChipKind::ProjectsView,
+        }),
+        _ => None,
+    };
+    NavPaint {
+        active: model.nav_tab(),
+        slot2_label,
+        slot2_project: model.selected_project().is_some() || model.focus_is_archived(),
+        chip,
+    }
+}
+
+/// Which surface the list paints, from the destination and its View control.
+fn board_surface(model: &BoardModel) -> BoardSurface {
+    match model.effective_lens() {
+        crate::ui::queue::BoardLens::Desk => BoardSurface::Desk,
+        crate::ui::queue::BoardLens::Projects => BoardSurface::Projects,
+        crate::ui::queue::BoardLens::ThreadView(_) => BoardSurface::ThreadView,
+        crate::ui::queue::BoardLens::Project(_)
+        | crate::ui::queue::BoardLens::ArchivedProject(_) => BoardSurface::Project,
+    }
+}
+
 /// Draw the board into any ratatui frame (live TTY or [`ratatui::backend::TestBackend`]).
 ///
 /// the paints the queue frame via [`render::draw_queue_frame`]. Classic master-detail
@@ -706,6 +798,9 @@ struct OverlayPayloads<'a> {
     help_lines: Vec<String>,
     palette_commands: Vec<PaletteCommandRow<'a>>,
     scope_options: Vec<String>,
+    list_picker_options: Vec<String>,
+    list_picker_query: Option<String>,
+    list_picker_selected: usize,
     scope_tabs: Option<render::PickerTabsPaint>,
     launch_card_name: Option<String>,
     scope_selected: usize,
@@ -762,6 +857,16 @@ impl<'a> OverlayPayloads<'a> {
         } else {
             Vec::new()
         };
+        let list_picker_options = model
+            .visible_list_picker_options()
+            .into_iter()
+            .map(|(_, option)| match option.count {
+                Some(count) => format!("{}  {count}", option.label),
+                None => option.label,
+            })
+            .collect();
+        let list_picker_query = model.list_picker_query().map(str::to_string);
+        let list_picker_selected = model.list_picker_selected();
         let scope_selected = if model.popup() == BoardPopup::ProjectPicker {
             model.project_picker_index().unwrap_or(0)
         } else {
@@ -786,6 +891,9 @@ impl<'a> OverlayPayloads<'a> {
             help_lines,
             palette_commands,
             scope_options,
+            list_picker_options,
+            list_picker_query,
+            list_picker_selected,
             scope_selected,
             scope_tabs,
             launch_card_name,
@@ -798,6 +906,25 @@ impl<'a> OverlayPayloads<'a> {
         model: &'a BoardModel,
         geo: &tier::TierGeometry,
     ) -> Option<QueueOverlay<'a>> {
+        if model.input_mode() == BoardInputMode::ProjectsSearch {
+            let input_width = (geo.row_width as usize).saturating_sub(2);
+            let query = EditBuffer::new(
+                model.projects_query(),
+                model.projects_query().chars().count(),
+            );
+            let (text, cursor_col) = escaped_line_window(&query, input_width);
+            return Some(QueueOverlay::ProjectsSearch {
+                input: crate::ui::render::BottomInputSlot {
+                    text,
+                    cursor_col,
+                    placeholder: "search projects…   enter open · esc close",
+                    refusal: None,
+                    message: None,
+                    above_rows: Vec::new(),
+                    cursor_row_offset: 0,
+                },
+            });
+        }
         if let Some(quick_add) = model.quick_add.as_ref().filter(|_| {
             matches!(
                 model.input_mode(),
@@ -823,6 +950,12 @@ impl<'a> OverlayPayloads<'a> {
             // Continuations paint top-first (the painter stacks them upward by index).
             let above_rows: Vec<String> = window[..window.len().saturating_sub(1)].to_vec();
             let multiline = window.len() > 1;
+            // The row names its destination so Enter never has to move the user's
+            // view to prove where the task went.
+            let destination = match &quick_add.scope {
+                TaskScope::Project { path } => project_option_label(Path::new(path)).to_string(),
+                TaskScope::Global => "desk".to_string(),
+            };
             return Some(QueueOverlay::QuickAdd {
                 input: crate::ui::render::BottomInputSlot {
                     text: title,
@@ -842,7 +975,7 @@ impl<'a> OverlayPayloads<'a> {
                     )
                     .unwrap_or(0),
                 },
-                project_scope: matches!(quick_add.scope, TaskScope::Project { .. }),
+                destination,
                 recovery: model.input_mode() == BoardInputMode::SaveRecovery,
             });
         }
@@ -860,11 +993,28 @@ impl<'a> OverlayPayloads<'a> {
         if let Some(name) = self.launch_card_name.as_deref() {
             return Some(QueueOverlay::LaunchCard { name });
         }
+        if model.input_mode() == BoardInputMode::ListPicker {
+            let title = match model.list_picker_kind() {
+                Some(crate::ui::board::ListPickerKind::ProjectsView) => "projects View",
+                _ => "thread filter",
+            };
+            return Some(QueueOverlay::ScopeDropdown {
+                options: &self.list_picker_options,
+                selected: self
+                    .list_picker_selected
+                    .min(self.list_picker_options.len().saturating_sub(1)),
+                tabs: None,
+                title: Some(title),
+                query: self.list_picker_query.as_deref(),
+            });
+        }
         if model.popup() == BoardPopup::ProjectPicker {
             return Some(QueueOverlay::ScopeDropdown {
                 options: &self.scope_options,
                 selected: self.scope_selected,
                 tabs: self.scope_tabs,
+                title: None,
+                query: None,
             });
         }
         None
@@ -981,14 +1131,7 @@ fn draw_board_impl(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap
     let geo = tier::resolve(area.width, area.height);
     let queue_view = model.queue_view();
     let selection_id = model.saved_task.or(model.selection_id);
-    let scope_label = match &model.board_location {
-        BoardLocation::Home { .. } => String::new(),
-        BoardLocation::Project(path) => project_option_label(path.as_path()),
-        // AC-41: the read-only focus says so on the chip.
-        BoardLocation::ArchivedProject(path) => {
-            format!("{} \u{b7} archived", project_option_label(path.as_path()))
-        }
-    };
+    let surface = board_surface(model);
     let (status_owned, status_undo_offset) = status_row_content(model);
     // The verb bar entries: computed from the selection and the open surface so the label
     // is true for the row it describes, and drawn from this one function -- the same one
@@ -1012,12 +1155,17 @@ fn draw_board_impl(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap
         tasks: &model.tasks,
         view: &queue_view,
         selection_id,
-        at_home: model.at_home(),
-        home_tab: model.home_tab(),
-        scope_label: &scope_label,
-        collapsed_projects: &model.collapsed_projects,
-        collapsed_threads: &model.collapsed_threads,
-        collapsed_thread_projects: &model.collapsed_thread_projects,
+        nav: nav_paint(model),
+        surface,
+        thread_labels: surface == BoardSurface::Project
+            && model.thread_filter() == &ThreadFilter::All,
+        show_project_meta: matches!(surface, BoardSurface::Desk | BoardSurface::ThreadView),
+        projects: &queue_view.projects,
+        projects_index: surface == BoardSurface::Projects
+            && matches!(model.projects_view(), ProjectsView::Overview),
+        projects_cursor: model.projects_cursor(),
+        projects_query: model.projects_query(),
+        summary: None,
         status_message: status_owned.as_deref(),
         status_undo_offset,
         verb_items: &verbs,
@@ -1081,14 +1229,7 @@ fn draw_wide_board(
     let queue_view = model.queue_view();
     let selection_id = model.saved_task.or(model.selection_id);
     let selected_task = selection_id.and_then(|id| model.tasks.iter().find(|task| task.id == id));
-    let scope_label = match &model.board_location {
-        BoardLocation::Home { .. } => String::new(),
-        BoardLocation::Project(path) => project_option_label(path.as_path()),
-        // AC-41: the read-only focus says so on the chip.
-        BoardLocation::ArchivedProject(path) => {
-            format!("{} \u{b7} archived", project_option_label(path.as_path()))
-        }
-    };
+    let surface = board_surface(model);
     let (status_owned, status_undo_offset) = status_row_content(model);
     let verbs = board_verb_items(model);
     let payloads = OverlayPayloads::collect(model);
@@ -1182,12 +1323,17 @@ fn draw_wide_board(
         tasks: &model.tasks,
         view: &queue_view,
         selection_id,
-        at_home: model.at_home(),
-        home_tab: model.home_tab(),
-        scope_label: &scope_label,
-        collapsed_projects: &model.collapsed_projects,
-        collapsed_threads: &model.collapsed_threads,
-        collapsed_thread_projects: &model.collapsed_thread_projects,
+        nav: nav_paint(model),
+        surface,
+        thread_labels: surface == BoardSurface::Project
+            && model.thread_filter() == &ThreadFilter::All,
+        show_project_meta: matches!(surface, BoardSurface::Desk | BoardSurface::ThreadView),
+        projects: &queue_view.projects,
+        projects_index: surface == BoardSurface::Projects
+            && matches!(model.projects_view(), ProjectsView::Overview),
+        projects_cursor: model.projects_cursor(),
+        projects_query: model.projects_query(),
+        summary: None,
         status_message: status_owned.as_deref(),
         status_undo_offset,
         verb_items: &verbs,
@@ -1206,10 +1352,10 @@ fn draw_wide_board(
     };
     let task_frame = QueueFrameModel {
         overlay: task_overlay.clone(),
-        at_home: false,
-        scope_label: "",
         list_scroll: 0,
         follow_list: false,
+        projects: &[],
+        projects_index: false,
         ..board_frame.clone()
     };
     let footer_frame = QueueFrameModel {

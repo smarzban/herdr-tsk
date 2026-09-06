@@ -272,7 +272,7 @@ const REPO = 'https://github.com/smarzban/herdr-tsk';
               <span class="cycle-glyph" data-cycle-glyph aria-hidden="true">○</span>
               <span class="tid">T14</span>
               <span class="cycle-title">Ship the landing page</span>
-              <span class="cycle-meta">tsk · 2m</span>
+              <span class="cycle-meta">tsk</span>
             </div>
             <div class="cycle-foot">
               <span class="dim">you press</span>
@@ -350,9 +350,11 @@ const REPO = 'https://github.com/smarzban/herdr-tsk';
             <span class="index">03 <span class="index-label">board</span></span>
             <h2 id="board-heading">One list, ordered by urgency.</h2>
             <p class="band-lede">
-              Sections are computed, never navigated. Home is three tabs. <b>desk</b> is your
-              own space for planning, loose ends, and future projects. <b>projects</b> holds the
-              repos you and your agents work in. <b>threads</b> follows work that crosses them.
+              Open in a repository and start on its project board. <b>desk</b> shows what
+              needs you across projects, active work, and your loose backlog. The selected
+              <b>project</b> stays one key away; <b>projects</b> is a searchable index with
+              a View selector for cross-project threads. Filter threads within a project
+              with <kbd>t</kbd>, or across projects with <kbd>v</kbd> on the index.
               Give the board 110 columns and it becomes a slider.
             </p>
           </header>
@@ -360,46 +362,47 @@ const REPO = 'https://github.com/smarzban/herdr-tsk';
           <div class="anatomy">
             <div class="screen" role="img" aria-label="A tsk board at 78 columns, annotated with seven callouts">
               <div class="s-row s-tabs">
-                <span class="l"><span class="on">desk</span><span class="dim">  ·  </span>projects<span class="dim">  ·  </span>threads</span>
+                <span class="l"><span class="on">desk</span><span class="dim">  ·  </span>tsk ▾<span class="dim">  ·  </span>projects</span>
                 <span class="pin">1</span>
               </div>
               <div class="s-gap"></div>
               <div class="s-row s-sec">
-                <span class="sec">IN MOTION</span><span class="rule"></span><span class="count">2</span>
+                <span class="sec">NEEDS YOU</span><span class="rule"></span><span class="count">2</span>
                 <span class="pin">2</span>
               </div>
               <div class="s-gap"></div>
               <div class="s-row s-task is-sel">
-                <span class="l"><span class="sel">▸</span> <span class="tid">T31</span> <span class="sel-text">Wire the release checklist</span></span>
-                <span class="r meta">tsk · 3m</span>
+                <span class="l"><span class="sel">▲</span> <span class="tid">T31</span> <span class="sel-text">Review the release checklist</span></span>
+                <span class="r meta">#release</span>
                 <span class="pin">3</span>
               </div>
               <div class="s-row s-peek"><span class="l dim">  │ Steps live on the task page. Notes wrap, never truncate.</span></div>
               <div class="s-row s-peek"><span class="l dim">  └</span><span class="pin">4</span></div>
               <div class="s-row s-task">
-                <span class="l"><span class="glyph">▸</span> <span class="tid">T29</span> Pin the edit target on save</span>
-                <span class="r meta">herdr · 12m</span>
+                <span class="l"><span class="glyph">■</span> <span class="tid">T29</span> Waiting on the pane label</span>
+                <span class="r meta">herdr</span>
               </div>
               <div class="s-gap"></div>
               <div class="s-row s-sec">
-                <span class="sec">desk</span><span class="rule"></span><span class="count">3</span>
+                <span class="sec">IN MOTION</span><span class="rule"></span><span class="count">1</span>
               </div>
               <div class="s-gap"></div>
-              <div class="s-row s-thread">
-                <span class="l dim">#site 2</span>
+              <div class="s-row s-task">
+                <span class="l"><span class="glyph">▸</span> <span class="tid">T27</span> Proof the landing copy once more</span>
+                <span class="r meta">tsk</span>
+              </div>
+              <div class="s-gap"></div>
+              <div class="s-row s-sec">
+                <span class="sec">ON DECK · desk</span><span class="rule"></span><span class="count">2</span>
                 <span class="pin">5</span>
               </div>
               <div class="s-row s-task">
-                <span class="l"><span class="glyph">▲</span> <span class="tid">T27</span> Proof the landing copy once more</span>
-                <span class="r meta">20m</span>
-              </div>
-              <div class="s-row s-task">
-                <span class="l"><span class="glyph">■</span> <span class="tid">T25</span> Waiting on the pane label</span>
-                <span class="r meta">50m</span>
+                <span class="l"><span class="glyph">○</span> <span class="tid">T25</span> Draft the announcement</span>
+                <span class="r meta">desk</span>
               </div>
               <div class="s-row s-task">
                 <span class="l"><span class="glyph">○</span> <span class="tid">T18</span> Global backlog note</span>
-                <span class="r meta">2d</span>
+                <span class="r meta">desk</span>
               </div>
               <div class="s-fill"></div>
               <div class="s-row s-footrule"><span class="rule"></span></div>
@@ -416,15 +419,15 @@ const REPO = 'https://github.com/smarzban/herdr-tsk';
             <ol class="legend">
               <li>
                 <span class="legend-n">1</span>
-                <div><b>Home tabs.</b> <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> switch desk, projects, threads. <kbd>P</kbd> focuses one project and hides them.</div>
+                <div><b>Persistent navigation.</b> <kbd>1</kbd> opens Desk, <kbd>2</kbd> returns to the selected project, and <kbd>3</kbd> opens Projects. <kbd>P</kbd> changes the selected project without hiding the tabs.</div>
               </li>
               <li>
                 <span class="legend-n">2</span>
-                <div><b>NEEDS YOU.</b> Blocked and review, on desk and on a project board, above IN MOTION.</div>
+                <div><b>NEEDS YOU.</b> Blocked and review across all projects on Desk, or within the selected project on its board, above IN MOTION.</div>
               </li>
               <li>
                 <span class="legend-n">3</span>
-                <div><b>A row.</b> Status glyph, a dim <code>T</code>-number you can click to copy, the title, then project and age.</div>
+                <div><b>A row.</b> Status glyph, a dim <code>T</code>-number you can click to copy, the title, then project or thread attribution.</div>
               </li>
               <li>
                 <span class="legend-n">4</span>
@@ -432,7 +435,7 @@ const REPO = 'https://github.com/smarzban/herdr-tsk';
               </li>
               <li>
                 <span class="legend-n">5</span>
-                <div><b>Thread headers.</b> Open desk work groups under dim <code>#name</code> headers with a count. Unthreaded rows follow.</div>
+                <div><b>Your loose backlog.</b> Desk's ON DECK contains only tasks without a project. Project backlogs live on their own boards, with thread filters across every status.</div>
               </li>
               <li>
                 <span class="legend-n">6</span>
@@ -508,7 +511,7 @@ const REPO = 'https://github.com/smarzban/herdr-tsk';
             <div class="key" role="listitem"><span class="caps"><kbd>:</kbd></span><span>command palette</span></div>
             <div class="key" role="listitem"><span class="caps"><kbd>?</kbd></span><span>help card</span></div>
             <div class="key" role="listitem"><span class="caps"><kbd>z</kbd></span><span>done drawer</span></div>
-            <div class="key" role="listitem"><span class="caps"><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd></span><span>desk · projects · threads</span></div>
+            <div class="key" role="listitem"><span class="caps"><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd></span><span>desk · selected project · projects</span></div>
             <div class="key" role="listitem"><span class="caps"><kbd>P</kbd></span><span>project picker</span></div>
             <div class="key" role="listitem"><span class="caps"><kbd>Esc</kbd></span><span>close one layer</span></div>
           </div>

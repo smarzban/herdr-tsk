@@ -4,7 +4,6 @@
 //! `Modifier::{BOLD, DIM, UNDERLINED, REVERSED}`, plus [`draw_queue_frame`] for the
 //! the deck-only board skeleton.
 
-use std::collections::HashSet;
 use std::path::Path;
 use std::time::SystemTime;
 
@@ -19,9 +18,7 @@ use uuid::Uuid;
 use super::capture::CaptureField;
 use super::edit::{place_edit_cursor, place_edit_cursor_at};
 use super::present_line;
-use super::queue::{
-    BoardTab, QueueSection, QueueView, SectionKind, StatusCounts, ThreadProjectCollapseKey,
-};
+use super::queue::{NavTab, ProjectRow, QueueSection, QueueView, SectionKind, StatusCounts};
 use super::scrollbar;
 use super::tier::{Tier, TierGeometry};
 use crate::domain::{HumanStatus, Task, TaskScope};
@@ -197,8 +194,8 @@ pub fn paint_task_row_lines(
 /// Paint one task row: glyph+title on the left, right-aligned meta in the meta budget.
 ///
 /// Title and meta never share cells. Over-budget text is clipped through
-/// [`present_line`] so truncation always shows `…`. Compact geometry
-/// (`meta_column_width == 0`) drops meta and gives the title the full row.
+/// [`present_line`] so truncation always shows `…`. Compact geometry drops meta on
+/// narrow terminals, while wide compact frames retain a bounded identity column.
 pub fn paint_task_row(row: &TaskRowPaint<'_>, geo: &TierGeometry) -> Line<'static> {
     paint_task_row_with_indent(row, geo, 0)
 }
@@ -287,8 +284,15 @@ fn paint_task_row_with_indent(
     bound_line(Line::from(spans), row_w)
 }
 
-fn task_meta_budget(_row: &TaskRowPaint<'_>, geo: &TierGeometry) -> usize {
-    geo.meta_column_width as usize
+fn task_meta_budget(row: &TaskRowPaint<'_>, geo: &TierGeometry) -> usize {
+    if geo.meta_column_width == 0 && geo.width >= 78 && !row.meta.is_empty() {
+        // A short pane may use compact density despite having standard-width room.
+        // Preserve project/thread identity there; genuinely narrow panes keep the
+        // existing title-first layout and task titles still wrap.
+        (geo.row_width as usize / 4).min(36)
+    } else {
+        geo.meta_column_width as usize
+    }
 }
 
 /// Present untrusted text into a single mono-styled line bounded to `width` cells.
@@ -442,6 +446,10 @@ pub enum QueueOverlay<'a> {
         selected: usize,
         /// Picker tabs (main/archived). None for non-picker uses.
         tabs: Option<PickerTabsPaint>,
+        /// Card title override (the searchable list pickers name themselves).
+        title: Option<&'a str>,
+        /// Search query echoed in the card title (searchable list pickers).
+        query: Option<&'a str>,
     },
     /// Inline title edit surface (accordion row on standard; full takeover on compact).
     EditTitle { draft: String, cursor_col: u16 },
@@ -455,9 +463,12 @@ pub enum QueueOverlay<'a> {
     /// Single-line capture painted into the two bottom chrome rows, never covering the queue.
     QuickAdd {
         input: BottomInputSlot<'a>,
-        project_scope: bool,
+        /// Where Enter saves this draft, named for the user (`desk` / project name).
+        destination: String,
         recovery: bool,
     },
+    /// Projects Overview search, painted in the same shared footer slot as quick-add.
+    ProjectsSearch { input: BottomInputSlot<'a> },
     /// The task page: a full-height, view-first takeover for one bound task. `focus` is
     /// `None` in view mode; field edits focus the same drafts the board form carries.
     TaskPage {
@@ -530,18 +541,25 @@ pub struct QueueFrameModel<'a> {
     pub view: &'a QueueView,
     /// Selected task id, if any.
     pub selection_id: Option<Uuid>,
-    /// Home tabs are visible (project focus hides them).
-    pub at_home: bool,
-    /// Active home tab.
-    pub home_tab: BoardTab,
-    /// Project-focus label on the selector row's right chip.
-    pub scope_label: &'a str,
-    /// Collapsed project groups on the Projects tab.
-    pub collapsed_projects: &'a HashSet<String>,
-    /// Collapsed thread groups on the Threads tab.
-    pub collapsed_threads: &'a HashSet<String>,
-    /// Collapsed project rows under a thread group.
-    pub collapsed_thread_projects: &'a HashSet<ThreadProjectCollapseKey>,
+    /// Persistent navigation paint: the three tabs, slot 2's label, and the
+    /// destination's right-side control (thread filter / View selector).
+    pub nav: NavPaint,
+    /// Which board surface the list paints (section titles and row attribution).
+    pub surface: BoardSurface,
+    /// Paint `#thread` labels beside task rows (project board, unfiltered only).
+    pub thread_labels: bool,
+    /// Paint project attribution in every row's meta (desk global lanes, thread view).
+    pub show_project_meta: bool,
+    /// The projects index rows (Projects surface, Overview view). When `projects_index`
+    /// is set the list paints these instead of task sections.
+    pub projects: &'a [ProjectRow],
+    pub projects_index: bool,
+    /// The index row the cursor rests on.
+    pub projects_cursor: usize,
+    /// The projects-index search query used by the shared footer input.
+    pub projects_query: &'a str,
+    /// Context summary painted above a filtered or cross-project task list.
+    pub summary: Option<String>,
     /// Optional status-line notice; replaces the default counts when set.
     pub status_message: Option<&'a str>,
     /// Column offset of the delete-notice `u Undo` control inside `status_message`, when
@@ -572,6 +590,43 @@ pub struct QueueFrameModel<'a> {
     pub rows_dim: bool,
 }
 
+/// Persistent navigation row paint: three fixed tabs plus the destination control.
+#[derive(Debug, Clone)]
+pub struct NavPaint {
+    /// Which tab is active (reverse-bold).
+    pub active: NavTab,
+    /// Slot 2's label: the selected project's name, `name · archived` in read-only
+    /// focus, or the empty-slot affordance `select project`.
+    pub slot2_label: String,
+    /// Whether slot 2 currently carries a project (its click opens the picker then).
+    pub slot2_project: bool,
+    /// Right-side control of the active destination.
+    pub chip: Option<NavChipPaint>,
+}
+
+/// The right-side destination control: the project board's thread filter, or the
+/// projects index's View selector.
+#[derive(Debug, Clone)]
+pub struct NavChipPaint {
+    pub label: String,
+    pub kind: NavChipKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NavChipKind {
+    ThreadFilter,
+    ProjectsView,
+}
+
+/// Which board surface owns the list (drives section titles and row meta).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BoardSurface {
+    Desk,
+    Project,
+    Projects,
+    ThreadView,
+}
+
 /// The project picker's tab row: which list is active and how many entries the
 /// archived one carries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -583,7 +638,14 @@ pub struct PickerTabsPaint {
 /// Logical control under a painted rectangle (rebuilt every frame).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QueueHitTarget {
-    ProjectChip,
+    /// One painted persistent navigation tab.
+    NavTab(NavTab),
+    /// The active destination's right-side control (thread filter / View selector).
+    NavChip,
+    /// The visible projects-index search field.
+    ProjectsSearch,
+    /// One painted row of the projects index, indexed into `QueueView::projects`.
+    ProjectRow(usize),
     /// The quick-add input row. Clicking it keeps the already-focused line focused.
     QuickAddInput,
     Task(Uuid),
@@ -607,21 +669,13 @@ pub enum QueueHitTarget {
     /// One painted row of the open project-scope dropdown, indexed exactly as
     /// `BoardModel::project_options()` orders them.
     ProjectOption(usize),
+    /// One painted row of an open searchable list picker (thread filter / View),
+    /// indexed in the visible (filtered) order.
+    ListPickerOption(usize),
     /// One painted tab of the project picker's tab row.
     PickerTab(crate::ui::board::PickerTab),
     /// One choice row of the launch card (0 = unarchive, 1 = keep archived).
     LaunchOption(usize),
-    /// One painted home tab on the selector row.
-    HomeTab(BoardTab),
-    /// One ON DECK project-group header on the Projects tab, indexed into sections.
-    SectionProject(usize),
-    /// One thread-group header on the Threads tab, indexed into sections.
-    SectionThread(usize),
-    /// One project sub-header under a thread group.
-    SectionThreadProject {
-        section_idx: usize,
-        subgroup_idx: usize,
-    },
     /// The open help card's full-frame dismiss hit -- a click anywhere the card's own
     /// `ModalClose`/`ModalChrome`/body hits do not shadow closes it, matching the
     /// keyboard's "any key closes". The board behind the card stays visible and painted;
@@ -1068,7 +1122,13 @@ fn draw_queue_frame_impl(
 ) -> (QueueHitMap, Option<(usize, usize)>) {
     let surface = clipped_area(surface, frame.area());
     let input_slot_geo = bottom_input_slot_geometry(*geo, &model.overlay);
-    let geo = &input_slot_geo;
+    let mut selector_geo = input_slot_geo;
+    if selector_chip_wraps(model, selector_geo.row_width) && selector_geo.viewport_height > 0 {
+        // A wrapped control gets one blank row between it and the tabs.
+        selector_geo.viewport_top = selector_geo.viewport_top.saturating_add(2);
+        selector_geo.viewport_height = selector_geo.viewport_height.saturating_sub(2);
+    }
+    let geo = &selector_geo;
     let mut hits = QueueHitMap::default();
     let mut painted_list_scroll = None;
     let width = geo.row_width;
@@ -1090,6 +1150,17 @@ fn draw_queue_frame_impl(
             put_line(frame, surface, row, width, line);
             for (target, x, w) in regions {
                 hits.push(target, Rect::new(x, row, w, 1));
+            }
+            if selector_chip_wraps(model, width) {
+                let chip_row = row.saturating_add(2);
+                if chip_row < geo.rule_row.unwrap_or(geo.height) {
+                    let (chip, x, chip_width) = paint_selector_chip(model, width);
+                    put_line(frame, surface, chip_row, width, chip);
+                    hits.push(
+                        QueueHitTarget::NavChip,
+                        Rect::new(x, chip_row, chip_width, 1),
+                    );
+                }
             }
         }
     }
@@ -1239,8 +1310,14 @@ fn paint_footer(
                 }
             }
             paint_bottom_input_slot(frame, surface, row, width, input);
-            if matches!(model.overlay, QueueOverlay::QuickAdd { .. }) {
-                hits.push(QueueHitTarget::QuickAddInput, Rect::new(0, row, width, 1));
+            match model.overlay {
+                QueueOverlay::QuickAdd { .. } => {
+                    hits.push(QueueHitTarget::QuickAddInput, Rect::new(0, row, width, 1));
+                }
+                QueueOverlay::ProjectsSearch { .. } => {
+                    hits.push(QueueHitTarget::ProjectsSearch, Rect::new(0, row, width, 1));
+                }
+                _ => {}
             }
         } else {
             let (line, undo_hit) = paint_status_line(
@@ -1273,6 +1350,7 @@ fn paint_footer(
             | QueueOverlay::ScopeDropdown { .. } => &[],
             QueueOverlay::QuickAdd { recovery, .. } if *recovery => &[],
             QueueOverlay::QuickAdd { .. } => QUICK_ADD_VERBS,
+            QueueOverlay::ProjectsSearch { .. } => &[],
             // The page's field edits keep the form legends; its view mode reads the
             // model-computed page verbs (status-dependent, like the board row's own).
             QueueOverlay::TaskPage {
@@ -1292,18 +1370,13 @@ fn paint_footer(
             model.overlay,
             QueueOverlay::None | QueueOverlay::TaskPage { focus: None, .. },
         );
-        if let QueueOverlay::QuickAdd {
-            project_scope,
-            recovery: true,
-            ..
-        } = &model.overlay
-        {
+        if let QueueOverlay::QuickAdd { destination, .. } = &model.overlay {
             paint_quick_add_hint(
                 frame,
                 surface,
                 row,
                 width,
-                *project_scope,
+                destination,
                 model.status_message,
                 geo.tier,
             );
@@ -1345,7 +1418,9 @@ pub(crate) fn bottom_input_geometry(mut geo: TierGeometry, active: bool) -> Tier
 /// accidentally reserving rows differently from the line it paints.
 fn bottom_input_slot<'a>(overlay: &'a QueueOverlay<'a>) -> Option<&'a BottomInputSlot<'a>> {
     match overlay {
-        QueueOverlay::QuickAdd { input, .. } => Some(input),
+        QueueOverlay::QuickAdd { input, .. } | QueueOverlay::ProjectsSearch { input } => {
+            Some(input)
+        }
         QueueOverlay::TaskPage { bottom_input, .. } => bottom_input.as_ref(),
         _ => None,
     }
@@ -1543,8 +1618,12 @@ fn paint_overlay(
             options,
             selected,
             tabs,
+            title,
+            query,
         } => {
-            paint_scope_dropdown(frame, geo, surface, options, *selected, *tabs, hits);
+            paint_scope_dropdown(
+                frame, geo, surface, options, *selected, *tabs, *title, *query, hits,
+            );
         }
         QueueOverlay::EditTitle {
             ref draft,
@@ -1559,7 +1638,7 @@ fn paint_overlay(
         } => {
             paint_edit_notes_overlay(frame, geo, surface, rows, *cursor_row, *cursor_col);
         }
-        QueueOverlay::QuickAdd { .. } => {}
+        QueueOverlay::QuickAdd { .. } | QueueOverlay::ProjectsSearch { .. } => {}
         QueueOverlay::TaskPage {
             ref header_rows,
             ref header_identifier,
@@ -1758,6 +1837,8 @@ fn paint_edit_notes_overlay(
 struct ModalCardSpec<'a> {
     title: &'a str,
     content_rows: u16,
+    /// Let searchable options use spare outer margins before clipping their names.
+    min_content_width: u16,
     legend: &'a [VerbEntry<'a>],
     /// A full-frame dismiss hit to push first, before the card's own chrome (see below).
     dismiss: Option<QueueHitTarget>,
@@ -1791,6 +1872,7 @@ fn paint_modal_card(
     let ModalCardSpec {
         title,
         content_rows,
+        min_content_width,
         legend,
         dismiss,
         legend_hits,
@@ -1802,10 +1884,15 @@ fn paint_modal_card(
         hits.push(target, Rect::new(0, 0, geo.row_width, geo.height));
     }
 
-    let card_w = bounds.width.saturating_sub(4).clamp(1, 62);
     // Blank inset around the content, shed on both axes in compact so its scarce cells
     // go to actual body text instead of decorative breathing room.
     let pad: u16 = if geo.tier == Tier::Compact { 0 } else { 1 };
+    let card_w = bounds
+        .width
+        .saturating_sub(4)
+        .clamp(1, 62)
+        .max(min_content_width.saturating_add(2 + 2 * pad))
+        .min(bounds.width);
     let chrome_rows = modal_chrome_rows(geo.tier, !legend.is_empty());
     let shown_content = content_rows.min(bounds.height.saturating_sub(chrome_rows));
     let card_h = (chrome_rows + shown_content).min(bounds.height).max(1);
@@ -2119,6 +2206,7 @@ fn paint_palette_overlay(
         ModalCardSpec {
             title: &title,
             content_rows: rows as u16,
+            min_content_width: 0,
             legend: PALETTE_FOOTER,
             dismiss: None,
             legend_hits: None,
@@ -2230,6 +2318,7 @@ fn paint_help_overlay(
         ModalCardSpec {
             title: &title,
             content_rows: shown.len() as u16,
+            min_content_width: 0,
             legend: HELP_FOOTER,
             dismiss: Some(QueueHitTarget::HelpDismiss),
             legend_hits: None,
@@ -3036,6 +3125,7 @@ fn paint_launch_card(
         ModalCardSpec {
             title: "",
             content_rows: 1,
+            min_content_width: 0,
             legend: LAUNCH_FOOTER,
             dismiss: None,
             legend_hits: Some(QueueHitTarget::LaunchOption),
@@ -3057,6 +3147,7 @@ fn paint_launch_card(
 /// The board's `P` project-scope picker: a centered modal card, not the chip-anchored
 /// dropdown this used to paint. [`paint_page_scope_dropdown`] (the task-page form's own
 /// scope control) is a separate, unrelated painter and keeps its chip-anchored panel.
+#[allow(clippy::too_many_arguments)]
 fn paint_scope_dropdown(
     frame: &mut Frame<'_>,
     geo: &TierGeometry,
@@ -3064,14 +3155,17 @@ fn paint_scope_dropdown(
     options: &[String],
     selected: usize,
     tabs: Option<PickerTabsPaint>,
+    title_override: Option<&str>,
+    query: Option<&str>,
     hits: &mut QueueHitMap,
 ) {
-    if geo.row_width == 0 || (tabs.is_none() && options.is_empty()) {
+    if geo.row_width == 0 || (tabs.is_none() && title_override.is_none() && options.is_empty()) {
         return;
     }
     let tabs_rows = usize::from(tabs.is_some());
-    // An empty archived list still paints its empty-state row.
-    let empty_state = tabs.is_some() && options.is_empty();
+    // Search owns a visible menu even when nothing matches, so its query can be
+    // corrected or dismissed. Archived lists also retain their empty-state row.
+    let empty_state = options.is_empty();
     // Help/project-scope have nothing worth preserving underneath (no query row like the
     // palette), so the full frame is the ceiling: a narrow compact terminal gets every row
     // the border+footer would otherwise leave idle.
@@ -3102,7 +3196,14 @@ fn paint_scope_dropdown(
     };
     let above = scroll > 0;
     let below = scroll + rows < options.len();
-    let title = titled_with_scroll_marker("project", above, below);
+    let default_title = "project";
+    let base_title = title_override.unwrap_or(default_title);
+    let title = match query {
+        Some(query) if !query.is_empty() => {
+            titled_with_scroll_marker(&format!("{base_title}: {query}"), above, below)
+        }
+        _ => titled_with_scroll_marker(base_title, above, below),
+    };
 
     let content = paint_modal_card(
         frame,
@@ -3112,6 +3213,16 @@ fn paint_scope_dropdown(
         ModalCardSpec {
             title: &title,
             content_rows: (rows + tabs_rows + usize::from(tabs.is_some())) as u16,
+            min_content_width: if title_override.is_some() {
+                options
+                    .iter()
+                    .map(|option| display_width(option) + 2)
+                    .max()
+                    .unwrap_or(0)
+                    .min(u16::MAX as usize) as u16
+            } else {
+                0
+            },
             legend: if tabs.is_some_and(|tabs| tabs.archived_active) {
                 ARCHIVED_TAB_FOOTER
             } else {
@@ -3175,7 +3286,15 @@ fn paint_scope_dropdown(
             frame,
             surface,
             Rect::new(content.x, y, content.width, 1),
-            paint_bounded_line("  no archived projects", content.width, style_dim()),
+            paint_bounded_line(
+                if tabs.is_some() {
+                    "  no archived projects"
+                } else {
+                    "  no matching options"
+                },
+                content.width,
+                style_dim(),
+            ),
         );
         return;
     }
@@ -3201,39 +3320,33 @@ fn paint_scope_dropdown(
         );
         // `j` remains the source index after windowing, so a click selects the same option
         // Up/Down plus Enter would confirm rather than its position within this paint slice.
-        hits.push(QueueHitTarget::ProjectOption(j), rect);
+        if tabs.is_none() && title_override.is_some() {
+            hits.push(QueueHitTarget::ListPickerOption(j), rect);
+        } else {
+            hits.push(QueueHitTarget::ProjectOption(j), rect);
+        }
         hits.push_copyable(rect);
     }
 }
 
 enum ListRow {
     Blank,
-    /// Section header row for IN MOTION, DONE, desk ON DECK, or project focus ON DECK.
+    /// Section header row for NEEDS YOU, IN MOTION, ON DECK and the drawer.
     Header(SectionKind, usize, Line<'static>),
-    /// Collapsible project-group header on the Projects tab.
-    ProjectGroupHeader {
-        section_idx: usize,
-        line: Line<'static>,
-    },
-    /// Collapsible thread-group header on the Threads tab.
-    ThreadGroupHeader {
-        section_idx: usize,
-        line: Line<'static>,
-    },
-    /// Collapsible project sub-header under a thread group.
-    ThreadProjectHeader {
-        section_idx: usize,
-        subgroup_idx: usize,
-        line: Line<'static>,
-    },
     /// The done drawer's archived group header (sticky, selectable, hits map to the
     /// toggle intent). Selection styling is baked into the line.
     ArchivedHeader {
         line: Line<'static>,
     },
+    /// One selectable projects index row (navigation, never a task). The selected
+    /// marker is baked into the line.
+    ProjectRow {
+        index: usize,
+        line: Line<'static>,
+    },
+    /// Dim header row of the projects index's count columns.
+    IndexHeader(Line<'static>),
     Hint(Line<'static>),
-    /// Decorative scoped ON DECK thread-block label inside project focus.
-    ThreadHeader(Line<'static>),
     Task {
         id: Uuid,
         line: Line<'static>,
@@ -3257,12 +3370,7 @@ impl ListRow {
     fn is_sticky_header(&self) -> bool {
         matches!(
             self,
-            ListRow::Header(..)
-                | ListRow::ProjectGroupHeader { .. }
-                | ListRow::ThreadGroupHeader { .. }
-                | ListRow::ThreadProjectHeader { .. }
-                | ListRow::ArchivedHeader { .. }
-                | ListRow::ThreadHeader(_)
+            ListRow::Header(..) | ListRow::ArchivedHeader { .. } | ListRow::IndexHeader(_)
         )
     }
 }
@@ -3310,38 +3418,17 @@ fn paint_list_row(
                 hits.push(QueueHitTarget::Drawer, Rect::new(0, y, content_width, 1));
             }
         }
-        ListRow::ProjectGroupHeader { section_idx, line } => {
+        ListRow::IndexHeader(line) => {
             put_line(frame, surface, y, content_width, line.clone());
-            if base_list_interactive {
-                hits.push(
-                    QueueHitTarget::SectionProject(*section_idx),
-                    Rect::new(0, y, content_width, 1),
-                );
-            }
         }
-        ListRow::ThreadGroupHeader { section_idx, line } => {
+        ListRow::ProjectRow { index, line } => {
             put_line(frame, surface, y, content_width, line.clone());
             if base_list_interactive {
                 hits.push(
-                    QueueHitTarget::SectionThread(*section_idx),
+                    QueueHitTarget::ProjectRow(*index),
                     Rect::new(0, y, content_width, 1),
                 );
-            }
-        }
-        ListRow::ThreadProjectHeader {
-            section_idx,
-            subgroup_idx,
-            line,
-        } => {
-            put_line(frame, surface, y, content_width, line.clone());
-            if base_list_interactive {
-                hits.push(
-                    QueueHitTarget::SectionThreadProject {
-                        section_idx: *section_idx,
-                        subgroup_idx: *subgroup_idx,
-                    },
-                    Rect::new(0, y, content_width, 1),
-                );
+                hits.push_copyable(Rect::new(0, y, content_width, 1));
             }
         }
         ListRow::ArchivedHeader { line } => {
@@ -3353,9 +3440,7 @@ fn paint_list_row(
                 );
             }
         }
-        ListRow::Hint(line) | ListRow::ThreadHeader(line) => {
-            put_line(frame, surface, y, content_width, line.clone())
-        }
+        ListRow::Hint(line) => put_line(frame, surface, y, content_width, line.clone()),
         ListRow::Task {
             id,
             line,
@@ -3477,27 +3562,26 @@ fn build_list_rows(
                      out: &mut Vec<ListRow>,
                      selected_idx: &mut Option<usize>,
                      anchor_last_idx: &mut Option<usize>,
-                     in_project_section: bool,
-                     indented_under_thread: bool,
+                     project_attribution: bool,
+                     thread_label: bool,
                      dim: bool| {
         let Some(task) = model.tasks.iter().find(|task| task.id == id) else {
             // Stale ids may outlive a snapshot refresh. Skip them without inventing a row.
             return;
         };
-        let meta = row_meta(task, model.now, in_project_section);
+        let meta = row_meta(
+            task,
+            model.now,
+            project_attribution || model.show_project_meta,
+            thread_label && model.thread_labels,
+        );
         let selected = model.selection_id == Some(task.id)
             && !matches!(model.overlay, QueueOverlay::ScopeDropdown { .. });
         // A long title wraps onto continuation lines indented under its own first
         // row; every painted line carries the task's hit target and selection.
         let identifier = task.number.map(|number| format!("T{number}"));
         let lines = if rail {
-            paint_rail_row_lines(
-                task,
-                identifier.as_deref(),
-                selected,
-                geo.row_width,
-                usize::from(indented_under_thread) * 2,
-            )
+            paint_rail_row_lines(task, identifier.as_deref(), selected, geo.row_width, 0)
         } else {
             paint_task_row_lines(
                 &TaskRowPaint {
@@ -3511,7 +3595,7 @@ fn build_list_rows(
                     dim: dim || model.rows_dim,
                 },
                 geo,
-                usize::from(indented_under_thread) * 2,
+                0,
             )
         };
         if selected {
@@ -3542,6 +3626,39 @@ fn build_list_rows(
             *anchor_last_idx = Some(out.len() - 1);
         }
     };
+
+    // The projects index paints navigation rows, not task sections. It is the one
+    // surface whose rows are neither tasks nor chrome.
+    if model.projects_index {
+        out.push(ListRow::IndexHeader(paint_index_header(geo.row_width)));
+        if model.projects.is_empty() {
+            out.push(ListRow::Hint(paint_bounded_line(
+                "    no projects match",
+                geo.row_width,
+                style_dim(),
+            )));
+            return (out, anchor_last_idx, selected_idx);
+        }
+        for (index, _row) in model.projects.iter().enumerate() {
+            let selected = index == model.projects_cursor;
+            out.push(ListRow::ProjectRow {
+                index,
+                line: paint_project_row(model, index, selected, geo.row_width),
+            });
+            if selected {
+                selected_idx = Some(out.len() - 1);
+            }
+        }
+        return (out, anchor_last_idx, selected_idx);
+    }
+
+    if let Some(summary) = model.summary.as_deref() {
+        out.push(ListRow::Hint(paint_bounded_line(
+            &format!("    {summary}"),
+            geo.row_width,
+            style_dim(),
+        )));
+    }
 
     for (section_idx, section) in model.view.sections.iter().enumerate() {
         // The rail drops the done drawer and its archived group: it is a navigation
@@ -3585,149 +3702,134 @@ fn build_list_rows(
             out.push(ListRow::Blank);
         }
 
-        if model.at_home && model.home_tab == BoardTab::Projects && section.project_label.is_some()
-        {
-            let path = section.project_label.clone().unwrap_or_default();
-            let collapsed = model.collapsed_projects.contains(&path);
-            out.push(ListRow::ProjectGroupHeader {
-                section_idx,
-                line: paint_project_group_header(section, geo.row_width, collapsed),
-            });
-            out.push(ListRow::Blank);
-            if collapsed {
-                continue;
-            }
-            if section.empty_hint {
-                out.push(ListRow::Hint(paint_empty_hint(geo.row_width)));
-                continue;
-            }
-            for id in section.task_ids.iter().copied() {
-                push_task(
-                    id,
-                    &mut out,
-                    &mut selected_idx,
-                    &mut anchor_last_idx,
-                    true,
-                    false,
-                    false,
-                );
-            }
-            continue;
-        }
-
-        if model.at_home && model.home_tab == BoardTab::Threads && section.thread_label.is_some() {
-            let thread = section.thread_label.clone().unwrap_or_default();
-            let collapsed = model.collapsed_threads.contains(&thread);
-            out.push(ListRow::ThreadGroupHeader {
-                section_idx,
-                line: paint_thread_group_header(section, geo.row_width, collapsed),
-            });
-            out.push(ListRow::Blank);
-            if collapsed {
-                continue;
-            }
-            if section.empty_hint {
-                out.push(ListRow::Hint(paint_empty_hint(geo.row_width)));
-                continue;
-            }
-            for (subgroup_idx, subgroup) in section.thread_subgroups.iter().enumerate() {
-                let key = ThreadProjectCollapseKey {
-                    thread: thread.clone(),
-                    project_path: subgroup.project_path.clone(),
-                };
-                let sub_collapsed = model.collapsed_thread_projects.contains(&key);
-                out.push(ListRow::ThreadProjectHeader {
-                    section_idx,
-                    subgroup_idx,
-                    line: paint_thread_project_header(
-                        subgroup.project_path.as_deref(),
-                        subgroup.task_ids.len(),
-                        geo.row_width,
-                        geo,
-                    ),
-                });
-                if sub_collapsed {
-                    continue;
-                }
-                for id in subgroup.task_ids.iter().copied() {
-                    push_task(
-                        id,
-                        &mut out,
-                        &mut selected_idx,
-                        &mut anchor_last_idx,
-                        true,
-                        true,
-                        false,
-                    );
-                }
-                out.push(ListRow::Blank);
-            }
-            continue;
-        }
-
         out.push(ListRow::Header(
             section.kind,
             section_idx,
-            paint_section_header(section, geo.row_width, model.at_home, model.home_tab),
+            paint_section_header(section, geo.row_width, model.surface),
         ));
         out.push(ListRow::Blank);
         if section.empty_hint {
             out.push(ListRow::Hint(paint_empty_hint(geo.row_width)));
             continue;
         }
-        let in_project_section =
-            section.kind == SectionKind::OnDeck && section.project_label.is_some();
-        if !section.thread_blocks.is_empty() {
-            for block in &section.thread_blocks {
-                out.push(ListRow::ThreadHeader(paint_thread_header(
-                    &block.name,
-                    block.open_count,
-                    geo,
-                )));
-                for id in block.task_ids.iter().copied() {
-                    push_task(
-                        id,
-                        &mut out,
-                        &mut selected_idx,
-                        &mut anchor_last_idx,
-                        in_project_section,
-                        true,
-                        false,
-                    );
-                }
-                out.push(ListRow::Blank);
-            }
-            for id in section.loose_task_ids.iter().copied() {
-                push_task(
-                    id,
-                    &mut out,
-                    &mut selected_idx,
-                    &mut anchor_last_idx,
-                    in_project_section,
-                    false,
-                    false,
-                );
-            }
-        } else {
-            for id in section.task_ids.iter().copied() {
-                push_task(
-                    id,
-                    &mut out,
-                    &mut selected_idx,
-                    &mut anchor_last_idx,
-                    in_project_section,
-                    false,
-                    false,
-                );
-            }
+        // Thread labels paint beside project-board rows while no filter narrows the
+        // board (a selected thread makes every label the same word). Cross-project
+        // surfaces carry project attribution instead, through the meta flag.
+        let thread_label = model.thread_labels;
+        for id in section.task_ids.iter().copied() {
+            push_task(
+                id,
+                &mut out,
+                &mut selected_idx,
+                &mut anchor_last_idx,
+                false,
+                thread_label,
+                false,
+            );
         }
     }
     (out, anchor_last_idx, selected_idx)
 }
 
-/// Rail row(s) for one task: `  <mark> T<n> <title>`, wrapped at the rail width with a
-/// four-cell continuation indent and a trailing pad cell so no glyph touches the rule.
-/// The selected row paints the hollow `▹` marker; every other row keeps its status glyph.
+/// The projects index's dim column legend.
+fn paint_index_header(width: u16) -> Line<'static> {
+    let (needs_x, motion_x, ready_x) = project_columns(width as usize);
+    let compact = width < 52;
+    let labels = if compact {
+        ("PROJECT", "NEED", "MOTION", "READY")
+    } else {
+        ("PROJECT", "NEEDS YOU", "IN MOTION", "READY")
+    };
+    let mut spans = vec![Span::styled(labels.0.to_string(), style_dim())];
+    let mut x = labels.0.len();
+    for (column, label) in [
+        (needs_x, labels.1),
+        (motion_x, labels.2),
+        (ready_x, labels.3),
+    ] {
+        spans.push(Span::raw(" ".repeat(column.saturating_sub(x))));
+        spans.push(Span::styled(label.to_string(), style_dim()));
+        x = column + label.len();
+    }
+    bound_line(Line::from(spans), width as usize)
+}
+
+fn project_columns(width: usize) -> (usize, usize, usize) {
+    if width >= 52 {
+        (18, 29, 40)
+    } else {
+        let ready = width.saturating_sub(5);
+        let motion = ready.saturating_sub(10);
+        let needs = motion.saturating_sub(10);
+        (needs, motion, ready)
+    }
+}
+
+/// One projects index row: the project name (plus path when basenames collide, and a
+/// `current directory` marker for the invocation project) with its open-work counts.
+fn paint_project_row(
+    model: &QueueFrameModel<'_>,
+    index: usize,
+    selected: bool,
+    width: u16,
+) -> Line<'static> {
+    let Some(row) = model.projects.get(index) else {
+        return paint_bounded_line("", width, style_plain());
+    };
+    let marker = if selected { "\u{25b8} " } else { "  " };
+    let basename = crate::ui::board::project_option_label(Path::new(&row.path));
+    let (needs_x, motion_x, ready_x) = project_columns(width as usize);
+    let name = if row.duplicate_basename && width < 80 {
+        let parent = Path::new(&row.path)
+            .parent()
+            .and_then(Path::file_name)
+            .and_then(|name| name.to_str())
+            .unwrap_or(&row.path);
+        format!("{basename} (/{parent})")
+    } else {
+        basename
+    };
+    let path_suffix = if row.duplicate_basename && width >= 80 {
+        format!("  \u{b7} {}", row.path)
+    } else {
+        String::new()
+    };
+    let name_style = if selected {
+        style_bold()
+    } else {
+        style_plain()
+    };
+    // The name gets the space before the first count, not the whole row. The previous
+    // budget accidentally truncated the complete row to one cell when a name was long.
+    let prefix_width = display_width(&format!(" {marker}"));
+    let name_budget = needs_x.saturating_sub(prefix_width).max(1);
+    let name = present_line(&name, name_budget);
+    let mut spans = vec![Span::styled(format!(" {marker}{name}"), name_style)];
+    let current = prefix_width + display_width(&name);
+    spans.push(Span::raw(" ".repeat(needs_x.saturating_sub(current))));
+    let needs = row.needs_you.to_string();
+    spans.push(Span::styled(needs.clone(), style_dim()));
+    let after_needs = needs_x + display_width(&needs);
+    spans.push(Span::raw(" ".repeat(motion_x.saturating_sub(after_needs))));
+    let motion = row.in_motion.to_string();
+    spans.push(Span::styled(motion.clone(), style_dim()));
+    let after_motion = motion_x + display_width(&motion);
+    spans.push(Span::raw(" ".repeat(ready_x.saturating_sub(after_motion))));
+    let ready = row.ready.to_string();
+    spans.push(Span::styled(ready.clone(), style_dim()));
+    // Escape and budget the path before constructing a styled span. `bound_line` only
+    // sanitizes on overflow, while control bytes have zero display width.
+    if !path_suffix.is_empty() {
+        let suffix_budget = (width as usize).saturating_sub(ready_x + display_width(&ready));
+        let safe_suffix = present_line(&path_suffix, suffix_budget);
+        spans.push(Span::styled(safe_suffix, style_dim()));
+    }
+    if row.current {
+        spans.push(Span::styled(" · current directory", style_dim()));
+    }
+    bound_line(Line::from(spans), width as usize)
+}
+
 fn paint_rail_row_lines(
     task: &Task,
     identifier: Option<&str>,
@@ -3800,85 +3902,6 @@ fn paint_rail_row_lines(
 /// Paint one scoped ON DECK thread block label. Headers are presentation-only: their
 /// associated ids stay in the task-only queue stream, so neither keyboard selection nor
 /// mouse hit testing can land on this row.
-fn paint_thread_header(name: &str, open_count: usize, geo: &TierGeometry) -> Line<'static> {
-    let text = match geo.tier {
-        Tier::Standard => format!("  #{name} · {open_count} open"),
-        Tier::Compact => format!("  #{name} {open_count}"),
-    };
-    paint_bounded_line(&text, geo.row_width, style_dim())
-}
-
-fn paint_project_group_header(
-    section: &QueueSection,
-    width: u16,
-    collapsed: bool,
-) -> Line<'static> {
-    let title = section
-        .project_label
-        .as_deref()
-        .map(short_project)
-        .unwrap_or("project");
-    paint_collapsible_header(
-        if collapsed { "▸" } else { "▾" },
-        title,
-        section.count,
-        width,
-    )
-}
-
-fn paint_thread_group_header(section: &QueueSection, width: u16, collapsed: bool) -> Line<'static> {
-    let title = section
-        .thread_label
-        .as_deref()
-        .map(|name| format!("#{name}"))
-        .unwrap_or_else(|| "#thread".to_string());
-    paint_collapsible_header(
-        if collapsed { "▸" } else { "▾" },
-        &title,
-        section.count,
-        width,
-    )
-}
-
-fn paint_thread_project_header(
-    project_path: Option<&str>,
-    count: usize,
-    width: u16,
-    geo: &TierGeometry,
-) -> Line<'static> {
-    let title = match project_path {
-        Some(path) => short_project(path).to_string(),
-        None => "desk".to_string(),
-    };
-    let text = match geo.tier {
-        Tier::Standard => format!("  {title} · {count} open"),
-        Tier::Compact => format!("  {title} {count}"),
-    };
-    paint_bounded_line(&text, width, style_dim())
-}
-
-fn paint_collapsible_header(chevron: &str, title: &str, count: usize, width: u16) -> Line<'static> {
-    let left = present_line(&format!(" {chevron} {title} "), width as usize);
-    let right_budget = (width as usize).saturating_sub(display_width(&left));
-    let right = if right_budget == 0 {
-        String::new()
-    } else {
-        present_line(&format!("{} ", count), right_budget)
-    };
-    let rule_w = (width as usize)
-        .saturating_sub(display_width(&left))
-        .saturating_sub(display_width(&right));
-    let rule = "─".repeat(rule_w);
-    bound_line(
-        Line::from(vec![
-            Span::styled(left, style_bold()),
-            Span::styled(rule, style_dim()),
-            Span::styled(right, style_dim()),
-        ]),
-        width as usize,
-    )
-}
-
 /// The archived group's header: `{chevron} archived · {n}` with no rule. Selected,
 /// the word is bold and the rest dim; unselected, everything is dim. Never reverse.
 fn paint_archived_header(
@@ -3903,10 +3926,9 @@ fn paint_archived_header(
 fn paint_section_header(
     section: &QueueSection,
     width: u16,
-    at_home: bool,
-    home_tab: BoardTab,
+    surface: BoardSurface,
 ) -> Line<'static> {
-    let title = section_title(section, at_home, home_tab);
+    let title = section_title(section, surface);
     let left = present_line(&format!(" {title} "), width as usize);
     let right_budget = (width as usize).saturating_sub(display_width(&left));
     let right = if right_budget == 0 {
@@ -3917,7 +3939,7 @@ fn paint_section_header(
     let rule_w = (width as usize)
         .saturating_sub(display_width(&left))
         .saturating_sub(display_width(&right));
-    let rule = "─".repeat(rule_w);
+    let rule = "\u{2500}".repeat(rule_w);
     bound_line(
         Line::from(vec![
             Span::styled(left, style_bold()),
@@ -3928,16 +3950,14 @@ fn paint_section_header(
     )
 }
 
-fn section_title(section: &QueueSection, at_home: bool, home_tab: BoardTab) -> String {
+fn section_title(section: &QueueSection, surface: BoardSurface) -> String {
     match section.kind {
         SectionKind::NeedsYou => "NEEDS YOU".to_string(),
         SectionKind::InMotion => "IN MOTION".to_string(),
         SectionKind::Done => "DONE".to_string(),
         SectionKind::Archived => "archived".to_string(),
-        SectionKind::OnDeck
-            if at_home && home_tab == BoardTab::Desk && section.project_label.is_none() =>
-        {
-            "desk".to_string()
+        SectionKind::OnDeck if surface == BoardSurface::Desk && section.project_label.is_none() => {
+            "ON DECK \u{b7} desk".to_string()
         }
         SectionKind::OnDeck => "ON DECK".to_string(),
     }
@@ -4081,26 +4101,20 @@ fn paint_quick_add_hint(
     surface: Rect,
     row: u16,
     width: u16,
-    project_scope: bool,
+    destination: &str,
     message: Option<&str>,
     tier: Tier,
 ) {
     let (text, style) = if let Some(message) = message {
         (message.to_string(), style_reverse_bold())
     } else {
+        // The line names where Enter saves, so quick-add never has to move the
+        // user's view to prove where a task went.
         let text = match tier {
-            Tier::Standard => format!(
-                "Enter save · esc cancel · tab expand · scope: {}",
-                if project_scope {
-                    "this project"
-                } else {
-                    "desk"
-                }
-            ),
-            Tier::Compact => format!(
-                "⏎ save · esc · tab · {}",
-                if project_scope { "proj" } else { "desk" }
-            ),
+            Tier::Standard => {
+                format!("Enter save · esc cancel · tab expand · add to {destination}")
+            }
+            Tier::Compact => format!("⏎ save · esc · tab · + {destination}"),
         };
         (text, style_dim())
     };
@@ -4172,7 +4186,53 @@ fn paint_status_line(
     (bound_line(Line::from(spans), width as usize), undo_hit)
 }
 
-/// Selector: home tabs left, project picker chip right.
+/// Measured selector tabs. Desk and Projects are reserved controls, so only the
+/// middle project label is shortened at narrow widths. The same result drives paint,
+/// wrapping, and hit regions.
+fn selector_tab_texts(model: &QueueFrameModel<'_>, width: usize) -> [(NavTab, String); 3] {
+    let desk = " desk ".to_string();
+    let projects = " projects ".to_string();
+    let arrow = if model.nav.slot2_project {
+        " ▾ "
+    } else {
+        " ▸ "
+    };
+    let middle_budget = width
+        .saturating_sub(display_width(&desk))
+        .saturating_sub(display_width(&projects))
+        .saturating_sub(6);
+    let name_budget = middle_budget
+        .saturating_sub(1)
+        .saturating_sub(display_width(arrow));
+    let middle = format!(
+        " {}{arrow}",
+        present_line(&model.nav.slot2_label, name_budget)
+    );
+    [
+        (NavTab::Desk, desk),
+        (NavTab::ProjectBoard, middle),
+        (NavTab::Projects, projects),
+    ]
+}
+
+/// Whether the destination control needs a dedicated row to keep tabs and its selected
+/// value readable without overlap, especially at the 40-column operating floor.
+fn selector_chip_wraps(model: &QueueFrameModel<'_>, width: u16) -> bool {
+    let Some(chip) = model.nav.chip.as_ref() else {
+        return false;
+    };
+    let tabs = selector_tab_texts(model, width as usize);
+    let tabs_width = tabs
+        .iter()
+        .map(|(_, tab)| display_width(tab))
+        .sum::<usize>()
+        + 6;
+    let chip_width = display_width(&format!(" {} ▾ ", chip.label));
+    tabs_width.saturating_add(chip_width) > width as usize
+}
+
+/// Paint the selector row's persistent tabs. Tabs never disappear, so `1`/`2`/`3`
+/// keep their keyboard mappings even though the digit labels are not shown.
 fn paint_selector_row(
     model: &QueueFrameModel<'_>,
     geo: &TierGeometry,
@@ -4183,70 +4243,62 @@ fn paint_selector_row(
         return (Line::from(""), hits);
     }
 
-    let mut left_spans: Vec<Span<'static>> = Vec::new();
+    let mut spans: Vec<Span<'static>> = Vec::new();
     let mut left_width = 0usize;
-
-    if model.at_home {
-        for (index, (tab, label)) in [
-            (BoardTab::Desk, "desk"),
-            (BoardTab::Projects, "projects"),
-            (BoardTab::Threads, "threads"),
-        ]
-        .iter()
-        .enumerate()
-        {
-            if index > 0 {
-                left_spans.push(Span::styled(" · ".to_string(), style_dim()));
-                left_width += 3;
-            }
-            let active = model.home_tab == *tab;
-            let text = format!(" {label} ");
-            let shown = present_line(&text, width.saturating_sub(left_width));
-            let w = display_width(&shown);
-            hits.push((
-                QueueHitTarget::HomeTab(*tab),
-                left_width as u16,
-                w.max(1) as u16,
-            ));
-            left_spans.push(Span::styled(
-                shown,
-                if active {
-                    style_reverse_bold()
-                } else {
-                    style_dim()
-                },
-            ));
-            left_width += w;
+    let tabs = selector_tab_texts(model, width);
+    for (index, (tab, text)) in tabs.iter().enumerate() {
+        if index > 0 {
+            spans.push(Span::styled(" \u{b7} ".to_string(), style_dim()));
+            left_width += 3;
         }
+        let active = model.nav.active == *tab;
+        let shown = present_line(text, width.saturating_sub(left_width));
+        let w = display_width(&shown);
+        hits.push((
+            QueueHitTarget::NavTab(*tab),
+            left_width as u16,
+            w.max(1) as u16,
+        ));
+        spans.push(Span::styled(
+            shown,
+            if active {
+                style_reverse_bold()
+            } else {
+                style_dim()
+            },
+        ));
+        left_width += w;
     }
 
-    let mut spans = left_spans;
-    if model.at_home {
-        let pad = width.saturating_sub(left_width);
-        if pad > 0 {
-            spans.push(Span::styled(" ".repeat(pad), style_plain()));
+    // The active destination's control rides the row's right side when it fits. Narrow
+    // frames paint it on the dedicated row added by `draw_queue_frame_impl`.
+    if !selector_chip_wraps(model, geo.row_width) {
+        if let Some(chip) = model.nav.chip.as_ref() {
+            let chip_text = present_line(&format!(" {} \u{25be} ", chip.label), width);
+            let chip_w = display_width(&chip_text);
+            let spacer_w = width.saturating_sub(left_width).saturating_sub(chip_w);
+            let chip_x = (left_width + spacer_w) as u16;
+            spans.push(Span::styled(" ".repeat(spacer_w), style_plain()));
+            spans.push(Span::styled(chip_text, style_dim()));
+            hits.push((QueueHitTarget::NavChip, chip_x, chip_w.max(1) as u16));
         }
-    } else {
-        let chip_label = model.scope_label;
-        let chip_budget = (geo.selector_chip_max as usize).min(width);
-        let chip_raw = format!("{chip_label} ▾ ");
-        let chip_text = present_line(&chip_raw, chip_budget);
-        let chip_w = display_width(&chip_text);
-        let spacer_w = width.saturating_sub(left_width).saturating_sub(chip_w);
-        let chip_x = (left_width + spacer_w) as u16;
-        spans.push(Span::styled(" ".repeat(spacer_w), style_plain()));
-        spans.push(Span::styled(
-            present_line(chip_label, chip_budget.saturating_sub(display_width(" ▾ "))),
-            style_bold(),
-        ));
-        spans.push(Span::styled(
-            present_line(" ▾ ", chip_budget.saturating_sub(display_width(chip_label))),
-            style_dim(),
-        ));
-        hits.push((QueueHitTarget::ProjectChip, chip_x, chip_w.max(1) as u16));
     }
 
     (bound_line(Line::from(spans), width), hits)
+}
+
+fn paint_selector_chip(model: &QueueFrameModel<'_>, width: u16) -> (Line<'static>, u16, u16) {
+    let Some(chip) = model.nav.chip.as_ref() else {
+        return (Line::from(""), 0, 0);
+    };
+    let chip_text = present_line(&format!(" {} \u{25be} ", chip.label), width as usize);
+    let chip_width = display_width(&chip_text).min(width as usize);
+    let x = (width as usize).saturating_sub(chip_width) as u16;
+    let line = Line::from(vec![
+        Span::styled(" ".repeat(x as usize), style_plain()),
+        Span::styled(chip_text, style_dim()),
+    ]);
+    (line, x, chip_width.max(1) as u16)
 }
 
 /// Verb bar: ` key label · key label …`, trimmed to `budget` entries.
@@ -4303,47 +4355,55 @@ fn paint_verb_bar(
 
 /// Widest row-meta display width across the tasks the view paints. The wide split's board
 /// column uses it to size its meta column to the content actually shown, instead of the
-/// narrow board's fixed reserve.
+/// narrow board's fixed reserve. Relative ages are deliberately excluded from row metadata.
 pub fn widest_row_meta_width(tasks: &[Task], view: &QueueView, now: SystemTime) -> usize {
     let mut widest = 0usize;
     for section in &view.sections {
-        let in_project_section =
-            section.kind == SectionKind::OnDeck && section.project_label.is_some();
+        let attribution = section.project_label.is_none();
         for id in &section.task_ids {
             if let Some(task) = tasks.iter().find(|task| task.id == *id) {
-                widest = widest.max(display_width(&row_meta(task, now, in_project_section)));
+                widest = widest.max(display_width(&row_meta(task, now, attribution, false)));
+                // Stage A may paint project-board thread attribution even though the
+                // section metadata does not carry that surface flag. Budget both real
+                // attribution shapes so a full valid thread is never clipped there.
+                widest = widest.max(display_width(&row_meta(task, now, false, true)));
             }
         }
     }
     widest
 }
 
-fn row_meta(task: &Task, now: SystemTime, in_project_section: bool) -> String {
-    let age = format_age(now, task.updated_at);
-    let project = if !in_project_section {
+fn row_meta(
+    task: &Task,
+    _now: SystemTime,
+    project_attribution: bool,
+    thread_label: bool,
+) -> String {
+    let project = if project_attribution {
         match &task.scope {
             TaskScope::Project { path } => Some(short_project(path).to_string()),
-            TaskScope::Global => None,
+            TaskScope::Global => Some("desk".to_string()),
         }
     } else {
         None
     };
-    fit_row_meta(project, age)
+    let thread = if thread_label {
+        task.thread.as_deref().map(|name| format!("#{name}"))
+    } else {
+        None
+    };
+    fit_row_meta(project, thread)
 }
 
-/// Keep the age intact and shrink the project basename inside the standard meta column.
-fn fit_row_meta(project: Option<String>, age: String) -> String {
-    const CONTENT: usize = 27;
-    const SEP: &str = " · ";
-    let project = project.and_then(|name| {
-        let room = CONTENT.saturating_sub(display_width(&age).saturating_add(display_width(SEP)));
-        (room > 0).then(|| present_line(&name, room))
-    });
-    [project, Some(age)]
+/// Keep the genuine project/thread attribution intact. Relative ages belong to task-page
+/// information, not task rows, so metadata has no fixed age reserve or artificial cap.
+fn fit_row_meta(project: Option<String>, thread: Option<String>) -> String {
+    [project, thread]
         .into_iter()
         .flatten()
+        .filter(|value| !value.is_empty())
         .collect::<Vec<_>>()
-        .join(SEP)
+        .join(" · ")
 }
 
 pub(crate) fn format_age(now: SystemTime, then: SystemTime) -> String {
@@ -4485,6 +4545,122 @@ mod tests {
     }
 
     #[test]
+    fn narrow_selector_reserves_desk_and_projects_tabs() {
+        let view = QueueView {
+            sections: vec![],
+            counts: StatusCounts::default(),
+            projects: vec![],
+        };
+        let model = QueueFrameModel {
+            tasks: &[],
+            view: &view,
+            selection_id: None,
+            nav: NavPaint {
+                active: NavTab::ProjectBoard,
+                slot2_label: "x".repeat(32),
+                slot2_project: true,
+                chip: None,
+            },
+            surface: BoardSurface::Projects,
+            thread_labels: false,
+            show_project_meta: false,
+            projects: &[],
+            projects_index: false,
+            projects_cursor: 0,
+            projects_query: "",
+            summary: None,
+            status_message: None,
+            status_undo_offset: None,
+            verb_items: &[],
+            now: SystemTime::UNIX_EPOCH,
+            overlay: QueueOverlay::None,
+            detail_open: None,
+            list_scroll: 0,
+            follow_list: false,
+            archived_collapsed: true,
+            archived_header_selected: false,
+            rows_dim: false,
+        };
+        let (line, hits) = paint_selector_row(&model, &tier::resolve(40, 24));
+        let text = plain(&line);
+        assert!(text.contains("desk"));
+        assert!(text.contains("projects"));
+        assert!(
+            text.contains('▾'),
+            "project tab must retain its chevron: {text}"
+        );
+        assert!(display_width(&text) <= 40);
+        for (target, x, width) in hits {
+            assert!(
+                x.saturating_add(width) <= 40,
+                "{target:?} overflows selector"
+            );
+        }
+    }
+
+    #[test]
+    fn project_row_escapes_control_bytes_even_when_suffix_fits() {
+        let unsafe_path = "/tmp/\u{1b}]52;clipboard\u{7}/repo".to_string();
+        let projects = vec![
+            ProjectRow {
+                path: unsafe_path.clone(),
+                needs_you: 0,
+                in_motion: 0,
+                ready: 1,
+                current: false,
+                duplicate_basename: true,
+            },
+            ProjectRow {
+                path: "/other/repo".into(),
+                needs_you: 0,
+                in_motion: 0,
+                ready: 1,
+                current: false,
+                duplicate_basename: true,
+            },
+        ];
+        let view = QueueView {
+            sections: vec![],
+            counts: StatusCounts::default(),
+            projects: projects.clone(),
+        };
+        let model = QueueFrameModel {
+            tasks: &[],
+            view: &view,
+            selection_id: None,
+            nav: NavPaint {
+                active: NavTab::Projects,
+                slot2_label: "select project".into(),
+                slot2_project: false,
+                chip: None,
+            },
+            surface: BoardSurface::Projects,
+            thread_labels: false,
+            show_project_meta: false,
+            projects: &projects,
+            projects_index: true,
+            projects_cursor: 0,
+            projects_query: "",
+            summary: None,
+            status_message: None,
+            status_undo_offset: None,
+            verb_items: &[],
+            now: SystemTime::UNIX_EPOCH,
+            overlay: QueueOverlay::None,
+            detail_open: None,
+            list_scroll: 0,
+            follow_list: false,
+            archived_collapsed: true,
+            archived_header_selected: false,
+            rows_dim: false,
+        };
+        let line = paint_project_row(&model, 0, false, 120);
+        let text = plain(&line);
+        assert!(text.contains("\\u{001b}]52;clipboard\\u{0007}"));
+        assert!(!text.contains('\u{1b}'));
+    }
+
+    #[test]
     fn steps_start_two_rows_after_the_notes_block() {
         let layout = page_content_layout(1, 3, 16);
         assert_eq!(layout.steps_start, 3);
@@ -4583,12 +4759,12 @@ mod tests {
         );
         let meta_text = plain(&meta_only);
         assert!(
-            meta_text.contains('…'),
-            "long meta must truncate with …, got {meta_text:?}"
+            !meta_text.contains('…'),
+            "full task-row attribution should fit without the old age cap, got {meta_text:?}"
         );
         assert!(
-            meta_text.contains("short"),
-            "short title must remain intact when only meta overflows"
+            meta_text.contains(long_meta),
+            "full metadata must remain readable when it fits, got {meta_text:?}"
         );
     }
 

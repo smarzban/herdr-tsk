@@ -10,8 +10,8 @@ Nav, peek, `Enter`, `P`, `1` / `2` / `3`, `z`, `:`, `?`, `+`, and `Esc` stay
 bare.
 
 The web demo on the landing page uses bare verb letters on purpose. Browsers
-steal control chords. On its projects and threads tabs, bare `g` toggles groups
-and the palette offers the same command.
+steal control chords. `ctrl+g` only answers when the done drawer has a visible
+archived group.
 
 ## Wide stage slider
 
@@ -54,8 +54,11 @@ moves to G, then runs the control you clicked.
 | `:` | command palette |
 | `?` | help |
 | `P` | project picker |
-| `1` `2` `3` | home tabs: desk · projects · threads |
-| `ctrl+g` | expand or collapse all visible groups; while the done drawer is open the `archived` group folds and unfolds with them |
+| `t` on a project | open its thread filter |
+| `v` on Projects | choose Overview or a thread across projects |
+| `1` `2` `3` | navigation: desk · selected project · projects |
+| `/` on Projects | focus the footer's `/ search projects` affordance; type or paste, then Enter opens the selected match and Esc clears and closes |
+| `ctrl+g` | fold or unfold the done drawer's `archived` group when it is visible |
 | `Esc` | close one layer |
 | `ctrl+q` or `ctrl+c` | quit |
 
@@ -89,7 +92,9 @@ selects, then opens or closes its text editor on a second click.
 ## Any text field
 
 Title, notes, thread, step, and quick-add share one editor. The palette query takes
-only typing, arrows, Tab, Enter, Esc, and Backspace.
+only typing, arrows, Tab, Enter, Esc, and Backspace. The Projects overview search is focused with `/` or by clicking the footer's `/ search`
+affordance, shows its query and caret in that shared slot, and accepts letters, digits,
+Backspace, and paste.
 
 | Key | Does |
 | --- | --- |
@@ -105,6 +110,7 @@ only typing, arrows, Tab, Enter, Esc, and Backspace.
 | Surface | Keys |
 | --- | --- |
 | `:` palette | type to filter · `↑` `↓` or `Tab` / `Shift+Tab` move · `Enter` run · `Esc` close |
+| `t` / `v` thread selectors | type or paste to filter (`j` and `k` are text) · arrows or `Tab` / `Shift+Tab` move · `Enter` choose · `Esc` close |
 | `P` project picker | `j` `k` or arrows · `Tab` main/archived tabs · `Enter` choose · `ctrl+f` archive (archived tab: unarchive) · `Esc` or `q` cancel |
 | launch card | `y` unarchive · `n` or `Esc` keep archived |
 | `?` help | any key closes |

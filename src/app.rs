@@ -13,11 +13,12 @@ use ratatui::DefaultTerminal;
 use crate::config::{default_config_dir, WalkthroughRecord};
 use crate::context::{build_snapshot, InvocationSnapshot, RawHostContext};
 use crate::domain::{DomainError, DomainState};
+use crate::reopen::ReopenWatch;
 use crate::save_recovery::SaveRecovery;
 use crate::store::{default_state_dir, StoreError, StoreSignature, TaskStore};
 use crate::ui::board::{
     apply_intent, board_intent_may_persist, draw_board, resolve_board_command, BoardInputMode,
-    BoardModel, IntentOutcome, SaveResolution, WalkthroughOutcome,
+    BoardModel, IntentOutcome, ProjectsView, SaveResolution, WalkthroughOutcome,
 };
 use crate::ui::capture::{
     apply_capture_intent, draw_capture, CaptureModel, CaptureOutcome, TITLE_REQUIRED_MESSAGE,
@@ -32,7 +33,7 @@ use crate::ui::mouse::{
     map_scrollbar_mouse, press_on_focused_surface, scrollbar_hit_at, wide_mouse_focus_intent,
     ScrollbarMouse,
 };
-use crate::ui::queue::BoardTab;
+use crate::ui::queue::NavTab;
 use crate::ui::scheduler;
 use crate::ui::text_select::{
     copy_to_clipboard, copyable_line_at, frame_text_rows, selection_text,
@@ -296,6 +297,9 @@ fn run_board() -> Result<(), Box<dyn Error>> {
     // `load_board` just read the store, so seed the watch from that snapshot: the first idle
     // tick must not immediately re-merge what is already loaded.
     let mut store_watch = StoreWatch::seeded(&store);
+    // Focusing an existing plugin pane cannot refresh its inherited host environment. The
+    // launcher publishes a one-shot request in the state dir, consumed only on idle ticks.
+    let mut reopen_watch = ReopenWatch::seeded(&store);
     // the board frame path does no host polling and does not
     // auto-open the walkthrough on launch. `load_board` is the whole open path; the first
     // paint below is of that model, unrefreshed. attention polling (removed),
@@ -368,6 +372,7 @@ fn run_board() -> Result<(), Box<dyn Error>> {
                     drag_gesture.has_autoscroll(),
                 )?;
                 if poll == FramePoll::Idle {
+                    apply_reopen_request(&mut model, &mut reopen_watch, &save_recovery);
                     if let Some(auto) = drag_gesture.autoscroll() {
                         let area = terminal_area(terminal)?;
                         let content = drag_content_area(&model, area);
@@ -776,6 +781,32 @@ pub fn tick_drag_autoscroll(
     }
 }
 
+/// Apply a pending explicit launcher context once the board is not in save recovery.
+/// Returning `false` leaves a dirty editor's request pending for a later idle tick.
+pub fn apply_reopen_request(
+    model: &mut BoardModel,
+    watch: &mut ReopenWatch,
+    recovery: &SaveRecovery<DomainState>,
+) -> bool {
+    if recovery.is_pending() {
+        return false;
+    }
+    let Some(request) = watch.poll() else {
+        return false;
+    };
+    if model.has_unsaved_work() {
+        if watch.mark_deferred_notice() {
+            model.set_message("save or cancel edits before reopening tsk");
+        }
+        return false;
+    }
+    if !model.apply_reopen_project(request.project.clone()) {
+        return false;
+    }
+    watch.acknowledge();
+    true
+}
+
 /// Whether save recovery permits the board to apply background state changes.
 fn board_background_work_allowed(recovery: &SaveRecovery<DomainState>) -> bool {
     !recovery.is_pending()
@@ -948,7 +979,10 @@ fn board_keyboard_intent(
     // not worth an `expect` here: this runs on every keypress inside the raw-mode event loop, so
     // a panic would abort with the terminal still in raw mode and take the user's shell with it.
     // Falling through to `map_key` degrades to normal-mode routing instead of dying.
-    if mode == BoardInputMode::Normal && model.at_home() {
+    // Persistent navigation: `1` desk · `2` selected project · `3` projects, from
+    // every normal-mode surface. Tab 2 with no selected project opens the picker
+    // (the reducer answers the intent), so the digits never change meaning.
+    if mode == BoardInputMode::Normal {
         if key
             .modifiers
             .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER)
@@ -956,13 +990,19 @@ fn board_keyboard_intent(
             // fall through
         } else if let KeyCode::Char(c) = key.code {
             let tab = match c {
-                '1' => Some(BoardTab::Desk),
-                '2' => Some(BoardTab::Projects),
-                '3' => Some(BoardTab::Threads),
+                '1' => Some(NavTab::Desk),
+                '2' => Some(NavTab::ProjectBoard),
+                '3' => Some(NavTab::Projects),
                 _ => None,
             };
             if let Some(tab) = tab {
-                return Some(BoardIntent::SelectHomeTab(tab));
+                return Some(BoardIntent::SelectNavTab(tab));
+            }
+            if model.nav_tab() == NavTab::Projects
+                && matches!(model.projects_view(), ProjectsView::Overview)
+                && c == '/'
+            {
+                return Some(BoardIntent::FocusProjectsSearch);
             }
         }
     }
@@ -1300,17 +1340,9 @@ fn board_mouse_intent(
         crate::ui::render::QueueHitMap::default()
     };
     let intent = map_responsive_board_mouse(model, &hits, area, mouse);
-    if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
-        && !matches!(
-            intent,
-            Some(BoardIntent::SelectSectionProject(_))
-                | Some(BoardIntent::SelectSectionThreadProject { .. })
-        )
-    {
-        // A double-click is two consecutive clicks on the same project header (a
-        // projects-tab group header, or a threads-tab project sub-group header). Any other
-        // pointer target, including inert board space, cancels the armed first click before
-        // the next event can be mistaken for its second half.
+    if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) && intent.is_none() {
+        // Any pointer target that is not a named row is inert; nothing arms a
+        // double-click on the index (rows open on a single click).
         model.cancel_project_header_double_click();
     }
     let intent = intent?;
@@ -1600,7 +1632,7 @@ fn capture_form_loop(
 }
 #[cfg(test)]
 mod save_recovery_tests {
-    use super::board_background_work_allowed;
+    use super::{apply_reopen_request, board_background_work_allowed};
     use crate::domain::DomainState;
     use crate::save_recovery::SaveRecovery;
 
@@ -1612,6 +1644,105 @@ mod save_recovery_tests {
         assert!(!board_background_work_allowed(&recovery));
         let _ = recovery.cancel();
         assert!(board_background_work_allowed(&recovery));
+    }
+
+    #[test]
+    fn reopen_deferred_request_does_not_overwrite_new_editor_feedback() {
+        use crate::domain::{ProvenanceOrigin, TaskScope};
+        use crate::reopen::{ReopenRequest, ReopenWatch};
+        use crate::store::TaskStore;
+        use crate::ui::board::BoardModel;
+        use crate::ui::input::BoardIntent;
+        use std::fs;
+        use std::path::PathBuf;
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static SEQ: AtomicU64 = AtomicU64::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "tsk-reopen-dirty-{}-{}",
+            std::process::id(),
+            SEQ.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&dir).expect("state dir");
+        let store = TaskStore::new(&dir);
+        let mut domain = DomainState::new();
+        domain
+            .create(
+                "draft",
+                None,
+                TaskScope::Global,
+                ProvenanceOrigin::Manual,
+                None,
+            )
+            .expect("task");
+        let mut model = BoardModel::from_domain(&domain, None);
+        crate::ui::board::apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+            .expect("edit");
+        crate::ui::board::apply_intent(&mut domain, &mut model, BoardIntent::EditInsert('x'), None)
+            .expect("type");
+        let mut watch = ReopenWatch::seeded(&store);
+        ReopenRequest::new(Some(PathBuf::from("/repo/deferred")))
+            .write(&dir)
+            .expect("request");
+        let recovery = SaveRecovery::new();
+        assert!(!apply_reopen_request(&mut model, &mut watch, &recovery));
+        assert!(model
+            .message()
+            .is_some_and(|message| message.contains("save or cancel")));
+        model.set_message("title is required");
+        assert!(!apply_reopen_request(&mut model, &mut watch, &recovery));
+        assert_eq!(model.message(), Some("title is required"));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn reopen_idle_bridge_applies_and_acknowledges_or_defers_behind_recovery() {
+        use crate::reopen::{ReopenRequest, ReopenWatch};
+        use crate::store::TaskStore;
+        use crate::ui::board::BoardModel;
+        use std::fs;
+        use std::path::PathBuf;
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static SEQ: AtomicU64 = AtomicU64::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "tsk-reopen-app-{}-{}",
+            std::process::id(),
+            SEQ.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&dir).expect("state dir");
+        let store = TaskStore::new(&dir);
+        let mut watch = ReopenWatch::seeded(&store);
+        let mut model = BoardModel::from_domain(&DomainState::new(), None);
+        let recovery = SaveRecovery::new();
+        ReopenRequest::new(Some(PathBuf::from("/repo/new")))
+            .write(&dir)
+            .expect("request");
+        assert!(apply_reopen_request(&mut model, &mut watch, &recovery));
+        assert_eq!(
+            model.selected_project(),
+            Some(std::path::Path::new("/repo/new"))
+        );
+        assert!(!dir.join("reopen.json").exists());
+
+        let mut pending = SaveRecovery::new();
+        pending.fail(DomainState::new(), DomainState::new(), "save failed");
+        ReopenRequest::new(Some(PathBuf::from("/repo/deferred")))
+            .write(&dir)
+            .expect("request");
+        assert!(!apply_reopen_request(&mut model, &mut watch, &pending));
+        assert!(
+            dir.join("reopen.json").exists(),
+            "deferred request remains pending"
+        );
+        model.set_message("editor feedback");
+        assert!(!apply_reopen_request(&mut model, &mut watch, &pending));
+        assert_eq!(model.message(), Some("editor feedback"));
+        let _ = pending.cancel();
+        assert!(apply_reopen_request(&mut model, &mut watch, &pending));
+        assert_eq!(
+            model.selected_project(),
+            Some(std::path::Path::new("/repo/deferred"))
+        );
+        let _ = fs::remove_dir_all(dir);
     }
 }
 
@@ -2146,14 +2277,14 @@ mod tests {
 
     use crate::context::InvocationSnapshot;
     use crate::domain::{HumanStatus, ProvenanceOrigin, TaskScope};
-    use crate::ui::board::CommandSurface;
+    use crate::ui::board::{board_hit_map, CommandSurface};
     use crate::ui::capture::CaptureField;
     use crate::ui::input::{map_key, CaptureIntent};
     use crate::ui::mouse::{
         focused_mouse_area, left_click, map_board_mouse, map_responsive_board_mouse,
         press_on_focused_surface,
     };
-    use crate::ui::queue::BoardTab;
+    use crate::ui::queue::NavTab;
 
     static TEMP_DIR_SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
@@ -2729,15 +2860,15 @@ mod tests {
     }
 
     #[test]
-    fn intervening_task_click_cancels_an_armed_project_header_double_click() {
+    fn projects_index_row_click_opens_that_project_in_slot_2() {
         use crate::ui::board::{apply_intent, board_hit_map};
         use crate::ui::mouse::left_click;
         use crate::ui::render::QueueHitTarget;
 
         let mut domain = DomainState::new();
-        let id = domain
+        domain
             .create(
-                "click between headers",
+                "alpha task",
                 None,
                 TaskScope::Project {
                     path: "/repos/alpha".into(),
@@ -2748,7 +2879,7 @@ mod tests {
             .expect("create task");
         domain
             .create(
-                "other project task",
+                "beta task",
                 None,
                 TaskScope::Project {
                     path: "/repos/beta".into(),
@@ -2761,89 +2892,57 @@ mod tests {
         apply_intent(
             &mut domain,
             &mut model,
-            BoardIntent::SelectHomeTab(BoardTab::Projects),
+            BoardIntent::SelectNavTab(NavTab::Projects),
             None,
         )
-        .expect("projects tab");
+        .expect("projects index");
+        assert_eq!(
+            model.selected_project(),
+            Some(Path::new("/repos/alpha")),
+            "slot 2 retains the invocation project while Projects is active"
+        );
+
         let area = Rect::new(0, 0, 80, 24);
-
-        fn header_for<'a>(
-            hits: &'a crate::ui::render::QueueHitMap,
-            view: &crate::ui::queue::QueueView,
-            path: &str,
-        ) -> &'a crate::ui::render::QueueHit {
-            hits.regions
-                .iter()
-                .find(|hit| {
-                    matches!(hit.target, QueueHitTarget::SectionProject(index) if view
-                    .sections
-                    .get(index)
-                    .and_then(|section| section.project_label.as_deref())
-                    == Some(path))
-                })
-                .unwrap_or_else(|| panic!("missing header for {path} in {hits:?}"))
-        }
-
-        fn target_mouse(
-            area: Rect,
-            model: &BoardModel,
-            target: impl Fn(QueueHitTarget) -> bool,
-        ) -> crossterm::event::MouseEvent {
+        let row_click = |model: &BoardModel, path: &str| {
             let hits = board_hit_map(area, model);
             let hit = hits
                 .regions
                 .iter()
-                .find(|hit| target(hit.target))
-                .unwrap_or_else(|| panic!("missing target in {hits:?}"));
+                .find(|hit| {
+                    matches!(hit.target, QueueHitTarget::ProjectRow(index) if model
+                        .project_rows()
+                        .get(index)
+                        .is_some_and(|row| row.path == path))
+                })
+                .unwrap_or_else(|| panic!("missing index row for {path} in {hits:?}"));
             left_click(hit.area.x, hit.area.y)
-        }
-        let drive_click = |domain: &mut DomainState,
-                           model: &mut BoardModel,
-                           mouse: crossterm::event::MouseEvent| {
+        };
+        let drive = |domain: &mut DomainState,
+                     model: &mut BoardModel,
+                     mouse: crossterm::event::MouseEvent| {
             let intent = board_mouse_intent(area, model, mouse).expect("click maps to intent");
             apply_intent(domain, model, intent, None).expect("click applies");
         };
 
-        let mouse = {
-            let hits = board_hit_map(area, &model);
-            let hit = header_for(&hits, &model.queue_view(), "/repos/beta");
-            left_click(hit.area.x, hit.area.y)
-        };
-        drive_click(&mut domain, &mut model, mouse);
-        assert_eq!(
-            model.selected_project(),
-            None,
-            "first header click collapses/arm only"
-        );
-
-        let mouse = target_mouse(
-            area,
-            &model,
-            |target| matches!(target, QueueHitTarget::Task(task_id) if task_id == id),
-        );
-        drive_click(&mut domain, &mut model, mouse);
-        let mouse = {
-            let hits = board_hit_map(area, &model);
-            let hit = header_for(&hits, &model.queue_view(), "/repos/beta");
-            left_click(hit.area.x, hit.area.y)
-        };
-        drive_click(&mut domain, &mut model, mouse);
-        assert_eq!(
-            model.selected_project(),
-            None,
-            "header click after an intervening task click must be a new first click"
-        );
-
-        let mouse = {
-            let hits = board_hit_map(area, &model);
-            let hit = header_for(&hits, &model.queue_view(), "/repos/beta");
-            left_click(hit.area.x, hit.area.y)
-        };
-        drive_click(&mut domain, &mut model, mouse);
+        let mouse = row_click(&model, "/repos/beta");
+        drive(&mut domain, &mut model, mouse);
         assert_eq!(
             model.selected_project(),
             Some(Path::new("/repos/beta")),
-            "only two consecutive header clicks scope the board"
+            "a direct index-row click opens that project in slot 2"
+        );
+
+        // Index rows are navigation: the click mutated no task, and the pin reanchors
+        // onto the opened project's own rows.
+        let pinned = model
+            .selected_id()
+            .and_then(|id| domain.get(id).map(|task| task.scope.clone()));
+        assert_eq!(
+            pinned,
+            Some(TaskScope::Project {
+                path: "/repos/beta".into()
+            }),
+            "the pin lands on a row of the project it opened"
         );
     }
 
@@ -2876,25 +2975,31 @@ mod tests {
             Rect::new(0, 0, 49, 18),
             Rect::new(0, 0, 40, 10),
         ] {
+            // Clicking slot 2 while its project is open opens the picker, the way the
+            // old chip did.
             let hits = board_hit_map(area, &model);
-            let chip = hits
+            let tab2 = hits
                 .regions
                 .iter()
-                .find(|hit| matches!(hit.target, QueueHitTarget::ProjectChip))
-                .unwrap_or_else(|| panic!("no project chip hit region at {area:?}"));
+                .find(|hit| matches!(hit.target, QueueHitTarget::NavTab(NavTab::ProjectBoard)))
+                .unwrap_or_else(|| panic!("no slot-2 tab hit region at {area:?}"));
             let mouse_intent =
-                map_board_mouse(&model, &hits, left_click(chip.area.x + 1, chip.area.y))
-                    .expect("project chip hit");
-            assert_eq!(mouse_intent, BoardIntent::OpenProjectSelector);
-            // `P` gives the keyboard the identical route to the same intent.
+                map_board_mouse(&model, &hits, left_click(tab2.area.x + 1, tab2.area.y))
+                    .expect("slot-2 tab hit");
+            assert_eq!(
+                mouse_intent,
+                BoardIntent::SelectNavTab(NavTab::ProjectBoard),
+                "slot-2's click is the tab intent; the reducer opens the picker from it"
+            );
+            // `P` gives the keyboard the same destination by direct intent.
             let keyboard_intent = map_key(
                 board_input_mode_for_area(area, model.input_mode()),
                 KeyEvent::new(KeyCode::Char('P'), KeyModifiers::NONE),
             );
             assert_eq!(
                 keyboard_intent,
-                Some(mouse_intent.clone()),
-                "`P` must dispatch the same intent as the project chip click at {area:?}"
+                Some(BoardIntent::OpenProjectSelector),
+                "`P` must open the project selector at {area:?}"
             );
             assert_eq!(
                 board_intent_for_area(area, mouse_intent.clone()),
@@ -3170,8 +3275,10 @@ mod tests {
             "board `+` must create exactly one task through the real app intent path, not zero"
         );
         assert!(
-            model.visible_ids().contains(&created[0].id),
-            "board model must show the task it just created"
+            model.visible_ids().contains(&created[0].id)
+                || model.nav_tab() == crate::ui::queue::NavTab::Desk,
+            "the board either shows the saved task or keeps the user's destination: \
+             a save must not switch tabs to prove where a row went"
         );
     }
 
@@ -3373,19 +3480,23 @@ mod tests {
             Some(&snapshot),
         )
         .expect("focus scope");
+        // Startup inside a repo opens that project's board, so quick-add starts
+        // scoped to it; cycling moves to the next option (the desk).
+        assert_eq!(
+            model.form_scope(),
+            Some(&TaskScope::Project {
+                path: "/repos/chosen".into()
+            }),
+            "quick-add inherits the invocation project as its destination"
+        );
         apply_intent(
             &mut domain,
             &mut model,
             BoardIntent::FormCycleScope,
             Some(&snapshot),
         )
-        .expect("choose project scope");
-        assert_eq!(
-            model.form_scope(),
-            Some(&TaskScope::Project {
-                path: "/repos/chosen".into()
-            })
-        );
+        .expect("cycle scope");
+        assert_eq!(model.form_scope(), Some(&TaskScope::Global));
 
         let outcome = apply_board_intent_with_save_recovery(
             &mut domain,
@@ -3427,9 +3538,8 @@ mod tests {
         );
         assert_eq!(
             model.form_scope(),
-            Some(&TaskScope::Project {
-                path: "/repos/chosen".into()
-            })
+            Some(&TaskScope::Global),
+            "the stashed draft keeps the scope the user chose"
         );
         apply_intent(
             &mut domain,
@@ -3733,22 +3843,167 @@ mod tests {
         }
     }
 
-    /// `BoardMode` is now purely a layout classification (the compact tier vs the
-    /// standard tier,); it no longer changes which input mode a key resolves to or
-    /// which intents reach the reducer. Every surface the board can have open must resolve
-    /// the identical input mode, and route the identical intent for every primary action key
-    /// and for quit, at the legacy Resize band as at a wide size.
-    ///
-    /// Formerly two tests asserting the opposite, now-removed contract
-    /// (`resize_guidance_keeps_keyboard_quit_reachable_from_every_open_surface`,
-    /// `resize_guidance_blocks_task_mutation_from_every_open_surface`): every open surface was
-    /// force-closed and forced to `Normal`, and every intent but quit/close-layer was
-    /// swallowed below 50x18.
-    /// a bracketed paste reaches the board's edit route, and only that route.
-    ///
-    /// The board loop's paste arm is exactly this resolution followed by the same
-    /// `handle_board_intent` call the key arm makes, so a paste cannot reach a route a key
-    /// press could not.
+    #[test]
+    fn navigation_digits_route_from_project_focus_and_preserve_input_interception() {
+        let (mut domain, mut model) = board_fixture("digits", None);
+        model.apply_reopen_project(Some(PathBuf::from("/repos/alpha")));
+        let key = |code| KeyEvent::new(code, KeyModifiers::NONE);
+        assert_eq!(
+            board_keyboard_intent(&model, BoardInputMode::Normal, key(KeyCode::Char('1'))),
+            Some(BoardIntent::SelectNavTab(NavTab::Desk))
+        );
+        assert_eq!(
+            board_keyboard_intent(&model, BoardInputMode::Normal, key(KeyCode::Char('2'))),
+            Some(BoardIntent::SelectNavTab(NavTab::ProjectBoard))
+        );
+        assert_eq!(
+            board_keyboard_intent(&model, BoardInputMode::Normal, key(KeyCode::Char('3'))),
+            Some(BoardIntent::SelectNavTab(NavTab::Projects))
+        );
+        apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None).expect("edit");
+        assert!(matches!(
+            board_keyboard_intent(&model, BoardInputMode::EditTitle, key(KeyCode::Char('1'))),
+            Some(BoardIntent::EditInsert('1'))
+        ));
+    }
+
+    #[test]
+    fn projects_search_owns_bound_keys_paste_and_mouse_focus() {
+        let (mut domain, mut model) = board_fixture("search", None);
+        model.apply_reopen_project(Some(PathBuf::from("/repos/beta")));
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::SelectNavTab(NavTab::Projects),
+            None,
+        )
+        .expect("projects index");
+        let key = |code| KeyEvent::new(code, KeyModifiers::NONE);
+        let hits = board_hit_map(Rect::new(0, 0, 80, 24), &model);
+        let search = hits
+            .regions
+            .iter()
+            .find(|hit| hit.target == crate::ui::render::QueueHitTarget::Verb(0))
+            .expect("closed footer search affordance");
+        assert!(
+            search.area.y >= 20,
+            "projects search belongs in the footer slot, got hit at y={}",
+            search.area.y
+        );
+        assert_eq!(
+            map_board_mouse(&model, &hits, click_at(search.area)),
+            Some(BoardIntent::FocusProjectsSearch)
+        );
+        assert_eq!(
+            board_keyboard_intent(&model, BoardInputMode::Normal, key(KeyCode::Char('/'))),
+            Some(BoardIntent::FocusProjectsSearch)
+        );
+        // Normal mode does not own an implicit query. Bound and unbound letters
+        // retain their ordinary routes or are inert until slash/footer search focus.
+        assert_eq!(
+            board_keyboard_intent(&model, BoardInputMode::Normal, key(KeyCode::Char('e'))),
+            None
+        );
+        assert_eq!(
+            board_keyboard_intent(&model, BoardInputMode::Normal, key(KeyCode::Char('w'))),
+            None
+        );
+        assert_eq!(
+            board_keyboard_intent(&model, BoardInputMode::Normal, key(KeyCode::Backspace)),
+            None
+        );
+        assert_eq!(
+            board_keyboard_intent(&model, BoardInputMode::Normal, key(KeyCode::Char('v'))),
+            Some(BoardIntent::OpenProjectsViewPicker)
+        );
+        assert_eq!(
+            board_keyboard_intent(&model, BoardInputMode::Normal, key(KeyCode::Char('3'))),
+            Some(BoardIntent::SelectNavTab(NavTab::Projects))
+        );
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::FocusProjectsSearch,
+            None,
+        )
+        .expect("focus search");
+        let compact_hits = board_hit_map(Rect::new(0, 0, 40, 10), &model);
+        let compact_search = compact_hits
+            .regions
+            .iter()
+            .find(|hit| hit.target == crate::ui::render::QueueHitTarget::ProjectsSearch)
+            .expect("compact footer search input");
+        assert!(
+            compact_search.area.y >= 7,
+            "compact search must stay in the footer slot"
+        );
+        for c in ['b', 'e', 't', 'a', 'j', 'k', 'v', '1', '2', '3'] {
+            assert_eq!(
+                board_keyboard_intent(
+                    &model,
+                    BoardInputMode::ProjectsSearch,
+                    key(KeyCode::Char(c))
+                ),
+                Some(BoardIntent::ProjectsQueryInsert(c)),
+                "bound search character should be text: {c}"
+            );
+        }
+        let intent = board_paste_intent(Rect::new(0, 0, 80, 24), &mut model, "beta")
+            .expect("paste search query");
+        assert_eq!(intent, BoardIntent::ProjectsQueryInsertText("beta".into()));
+        apply_intent(&mut domain, &mut model, intent, None).expect("insert query");
+        assert_eq!(model.projects_query(), "beta");
+        assert_eq!(model.project_rows().len(), 1);
+        assert_eq!(
+            board_keyboard_intent(
+                &model,
+                BoardInputMode::ProjectsSearch,
+                key(KeyCode::Backspace)
+            ),
+            Some(BoardIntent::ProjectsQueryBackspace)
+        );
+        let hits = board_hit_map(Rect::new(0, 0, 80, 24), &model);
+        let search = hits
+            .regions
+            .iter()
+            .find(|hit| hit.target == crate::ui::render::QueueHitTarget::ProjectsSearch)
+            .expect("open footer search input");
+        assert!(
+            search.area.y >= 20,
+            "open projects search must remain in the footer slot, got y={}",
+            search.area.y
+        );
+        assert_eq!(
+            map_board_mouse(&model, &hits, click_at(search.area)),
+            Some(BoardIntent::FocusProjectsSearch)
+        );
+        apply_intent(&mut domain, &mut model, BoardIntent::CloseLayer, None).expect("clear search");
+        assert_eq!(model.projects_query(), "");
+        assert_eq!(model.input_mode(), BoardInputMode::Normal);
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::FocusProjectsSearch,
+            None,
+        )
+        .expect("refocus search");
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::ProjectsQueryInsertText("beta".into()),
+            None,
+        )
+        .expect("restore query");
+        apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None)
+            .expect("open selected search match");
+        assert_eq!(model.nav_tab(), NavTab::ProjectBoard);
+        assert_eq!(model.input_mode(), BoardInputMode::Normal);
+        assert_eq!(
+            board_keyboard_intent(&model, BoardInputMode::ProjectsSearch, key(KeyCode::Esc)),
+            Some(BoardIntent::CloseLayer)
+        );
+    }
+
     #[test]
     fn a_board_paste_routes_to_the_edit_buffer_and_is_inert_outside_an_edit_mode() {
         let area = Rect::new(0, 0, 120, 40);
@@ -4129,21 +4384,17 @@ mod tests {
 }
 
 #[cfg(test)]
-mod thread_project_double_click_tests {
-    use super::board_mouse_intent;
-    use crate::domain::{DomainState, ProvenanceOrigin};
-    use crate::ui::board::{apply_intent, board_hit_map, BoardTab};
-    use crate::ui::input::BoardIntent;
-    use crate::ui::mouse::left_click;
-    use crate::ui::render::QueueHitTarget;
-    use std::path::{Path, PathBuf};
+mod projects_view_tests {
+    use super::{apply_intent, BoardIntent, DomainState, NavTab};
+    use crate::domain::ProvenanceOrigin;
+    use std::path::PathBuf;
 
-    /// A threads-tab project sub-header must adopt its second click into project focus.
-    /// The router cancels the armed first click for any pointer target that is not a
-    /// scope control, and `SelectSectionThreadProject` is one, so the armed state has to
-    /// survive it exactly as it does `SelectSectionProject`.
+    /// The projects index's View selector replaces the index with one thread's flat
+    /// cross-project task board.
     #[test]
-    fn thread_project_header_double_click_scopes_the_board_to_that_project() {
+    fn projects_view_thread_renders_cross_project_matches() {
+        use crate::ui::queue::SectionKind;
+
         let mut domain = DomainState::new();
         for (title, path) in [
             ("alpha release task", "/repos/alpha"),
@@ -4164,51 +4415,46 @@ mod thread_project_double_click_tests {
         apply_intent(
             &mut domain,
             &mut model,
-            BoardIntent::SelectHomeTab(BoardTab::Threads),
+            BoardIntent::SelectNavTab(NavTab::Projects),
             None,
         )
-        .expect("open threads tab");
-
-        let area = ratatui::layout::Rect::new(0, 0, 80, 24);
-        // Whichever project paints first under the thread group is the header we drive.
-        let targeted_path = model.queue_view().sections[0].thread_subgroups[0]
-            .project_path
-            .clone()
-            .expect("subgroup names a project");
-        let sub_header = |model: &crate::ui::board::BoardModel| {
-            let hits = board_hit_map(area, model);
-            let hit = hits
-                .regions
-                .iter()
-                .find(|hit| {
-                    matches!(
-                        hit.target,
-                        QueueHitTarget::SectionThreadProject {
-                            section_idx: 0,
-                            subgroup_idx: 0,
-                        }
-                    )
-                })
-                .unwrap_or_else(|| panic!("no thread project sub-header hit region: {hits:?}"));
-            left_click(hit.area.x, hit.area.y)
-        };
-
-        let first = sub_header(&model);
-        let intent = board_mouse_intent(area, &mut model, first).expect("first click maps");
-        apply_intent(&mut domain, &mut model, intent.clone(), None).expect("apply first click");
-        assert_eq!(
-            model.selected_project(),
+        .expect("projects index");
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::OpenProjectsViewPicker,
             None,
-            "one sub-header click collapses the subgroup but stays at home"
-        );
+        )
+        .expect("open view picker");
+        assert!(model.list_picker_open(), "the View picker opens");
+        // The picker's first row is Overview; move once to the first thread, then confirm.
+        apply_intent(&mut domain, &mut model, BoardIntent::ListPickerNext, None)
+            .expect("move to first thread");
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::ConfirmListPicker,
+            None,
+        )
+        .expect("apply thread view");
 
-        let second = sub_header(&model);
-        let intent = board_mouse_intent(area, &mut model, second).expect("second click maps");
-        apply_intent(&mut domain, &mut model, intent, None).expect("apply second click");
-        assert_eq!(
-            model.selected_project().map(Path::to_path_buf),
-            Some(PathBuf::from(&targeted_path)),
-            "sub-header double-click must narrow the session to the clicked project"
+        let view = model.queue_view();
+        assert!(
+            view.projects.is_empty(),
+            "the thread view replaces the project index rows"
         );
+        let listed: Vec<_> = view
+            .sections
+            .iter()
+            .flat_map(|section| section.task_ids.iter().copied())
+            .collect();
+        assert_eq!(listed.len(), 2, "both projects' release tasks list flat");
+        assert!(
+            view.sections
+                .iter()
+                .all(|section| section.project_label.is_none()),
+            "no thread/project nesting"
+        );
+        let _ = SectionKind::NeedsYou;
     }
 }

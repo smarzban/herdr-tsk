@@ -47,6 +47,14 @@ find_board_pane_id() {
 
 pane_id="$(find_board_pane_id || true)"
 if [ -n "${pane_id:-}" ]; then
+  # A focused existing pane keeps its process environment, so hand the fresh host
+  # context to the board through the private one-shot request file before focusing it.
+  if [ -x "$plugin_bin" ] && [ -n "${HERDR_PLUGIN_CONTEXT_JSON:-}" ]; then
+    if ! printf '%s' "$HERDR_PLUGIN_CONTEXT_JSON" | "$plugin_bin" --resolve-context; then
+      printf 'tsk: could not hand off the board context, existing pane was not focused\n' >&2
+      exit 1
+    fi
+  fi
   # Prefer the plugin-pane focus API (herdr >= 0.7). Fall back to open if focus fails
   # (stale list race) so the keypress is never a silent no-op.
   if "$herdr_bin" plugin pane focus "$pane_id"; then
@@ -54,4 +62,5 @@ if [ -n "${pane_id:-}" ]; then
   fi
 fi
 
+# A new pane receives HERDR_PLUGIN_CONTEXT_JSON directly from herdr.
 open_board

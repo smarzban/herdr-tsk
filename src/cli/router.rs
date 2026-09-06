@@ -15,6 +15,7 @@ pub enum Surface {
     Unarchive,
     Project,
     FindBoardPane,
+    ResolveContext,
     GlobalHelp,
     Usage,
 }
@@ -37,6 +38,7 @@ pub fn route<S: AsRef<str>>(
         if arg.starts_with('-') {
             let surface = match arg {
                 "--find-board-pane" => Surface::FindBoardPane,
+                "--resolve-context" => Surface::ResolveContext,
                 "--help" => Surface::GlobalHelp,
                 _ => return Surface::Usage,
             };
@@ -107,6 +109,18 @@ mod tests {
     fn find_board_pane_with_extra_argument_is_usage() {
         assert_eq!(
             route(["tsk", "--find-board-pane", "extra"], None),
+            Surface::Usage
+        );
+    }
+
+    #[test]
+    fn resolve_context_is_a_hidden_global_surface() {
+        assert_eq!(
+            route(["tsk", "--resolve-context"], None),
+            Surface::ResolveContext
+        );
+        assert_eq!(
+            route(["tsk", "--resolve-context", "extra"], None),
             Surface::Usage
         );
     }

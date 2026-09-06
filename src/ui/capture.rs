@@ -14,6 +14,7 @@ use crate::capture::{capture_save, CaptureError};
 use crate::context::InvocationSnapshot;
 use crate::domain::{DomainState, TaskScope};
 use crate::save_recovery::SaveRecovery;
+use crate::scope::{archived_path_contains, paths_equivalent};
 use crate::store::TaskStore;
 
 use super::edit::{
@@ -218,8 +219,12 @@ impl CaptureModel {
             return;
         };
         let path = repo.to_string_lossy().into_owned();
-        self.this_repo_archived = archived.contains(&path);
-        if self.this_repo_archived && self.scope == (TaskScope::Project { path }) {
+        self.this_repo_archived = archived_path_contains(archived, &path);
+        if self.this_repo_archived
+            && matches!(&self.scope, TaskScope::Project { path: scope_path } if archived
+                .iter()
+                .any(|stored| paths_equivalent(stored, scope_path)))
+        {
             self.scope = TaskScope::Global;
         }
     }
@@ -2550,9 +2555,9 @@ mod tests {
     fn capture_scope_never_offers_an_archived_this_project() {
         let snapshot = InvocationSnapshot {
             default_scope: TaskScope::Project {
-                path: "/repos/filed".into(),
+                path: "/private/tmp".into(),
             },
-            this_repo: Some(PathBuf::from("/repos/filed")),
+            this_repo: Some(PathBuf::from("/private/tmp")),
             title_prefill: None,
             provenance: ProvenanceOrigin::Capture,
         };
@@ -2560,7 +2565,7 @@ mod tests {
         assert!(model.this_project_available());
 
         let mut archived = std::collections::BTreeSet::new();
-        archived.insert("/repos/filed".to_string());
+        archived.insert("/tmp".to_string());
         model.mark_archived_projects(&archived);
 
         assert!(

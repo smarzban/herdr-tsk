@@ -37,7 +37,7 @@ refused rather than chmodding their targets. Other platforms claim no mode.
 
 Archive for tasks and projects: `ctrl+f` on a board row toggles a task's
 archived flag (no undo entry), and archived tasks keep their human status while
-leaving every working lens — desk, projects, threads, project focus, and the
+leaving every working lens — desk, selected project, projects, and project focus,
 default `tsk list` views. The done drawer gains a collapsible `archived · n`
 group (closed on launch, dim rows) that a click or `Enter` on its header toggles
 and that `ctrl+g` folds with every other group while the drawer is open, the project picker gains main/archived tabs with in-place archive and
