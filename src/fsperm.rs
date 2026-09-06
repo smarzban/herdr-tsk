@@ -113,7 +113,10 @@ pub fn open_lock_file(path: &Path) -> io::Result<File> {
         };
         let file = match result {
             Ok(file) => file,
-            Err(error) if before.is_none() && error.kind() == io::ErrorKind::AlreadyExists => {
+            Err(error)
+                if (before.is_none() && error.kind() == io::ErrorKind::AlreadyExists)
+                    || (before.is_some() && error.kind() == io::ErrorKind::NotFound) =>
+            {
                 continue;
             }
             Err(error) => return Err(error),
@@ -248,6 +251,29 @@ mod tests {
             !target.exists(),
             "the raced symlink target must not be created"
         );
+    }
+
+    #[test]
+    fn open_lock_file_retries_when_existing_inode_disappears_before_open() {
+        let seq = TEMP_SEQ.fetch_add(1, Ordering::Relaxed);
+        let root = std::env::temp_dir().join(format!(
+            "tsk-fsperm-lock-removed-{}-{seq}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).expect("mkdir root");
+        let _guard = TempDirGuard(root.clone());
+        let lock = root.join("lock");
+        fs::write(&lock, "old lock").expect("existing lock");
+        let hook_lock = lock.clone();
+        BEFORE_LOCK_OPEN.with(|slot| {
+            *slot.borrow_mut() = Some(Box::new(move || {
+                fs::remove_file(hook_lock).expect("remove between stat and open");
+            }));
+        });
+        let file = open_lock_file(&lock).expect("retry the disappearing inode");
+        assert!(file.metadata().expect("opened lock").is_file());
+        assert!(lock.is_file());
+        file.try_lock().expect("replacement inode is lockable");
     }
 
     #[test]
