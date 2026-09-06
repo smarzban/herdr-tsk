@@ -794,6 +794,12 @@ pub fn apply_reopen_request(
     let Some(request) = watch.poll() else {
         return false;
     };
+    if model.has_unsaved_work() {
+        if watch.mark_deferred_notice() {
+            model.set_message("save or cancel edits before reopening tsk");
+        }
+        return false;
+    }
     if !model.apply_reopen_project(request.project.clone()) {
         return false;
     }
@@ -992,27 +998,12 @@ fn board_keyboard_intent(
             if let Some(tab) = tab {
                 return Some(BoardIntent::SelectNavTab(tab));
             }
-            // The projects index takes free typing as its search: unbound normal-mode
-            // characters narrow the row list, Backspace unwinds it. Bound keys (nav,
-            // verbs, pickers, `+`, `:`, `?`) keep their routes.
             if model.nav_tab() == NavTab::Projects
                 && matches!(model.projects_view(), ProjectsView::Overview)
                 && c == '/'
             {
                 return Some(BoardIntent::FocusProjectsSearch);
             }
-            if model.nav_tab() == NavTab::Projects
-                && key.modifiers.is_empty()
-                && crate::ui::input::is_unbound_normal_char(c)
-                && !c.is_control()
-            {
-                return Some(BoardIntent::ProjectsQueryInsert(c));
-            }
-        } else if key.code == KeyCode::Backspace
-            && key.modifiers.is_empty()
-            && model.nav_tab() == NavTab::Projects
-        {
-            return Some(BoardIntent::ProjectsQueryBackspace);
         }
     }
 
@@ -1641,7 +1632,7 @@ fn capture_form_loop(
 }
 #[cfg(test)]
 mod save_recovery_tests {
-    use super::board_background_work_allowed;
+    use super::{apply_reopen_request, board_background_work_allowed};
     use crate::domain::DomainState;
     use crate::save_recovery::SaveRecovery;
 
@@ -1653,6 +1644,105 @@ mod save_recovery_tests {
         assert!(!board_background_work_allowed(&recovery));
         let _ = recovery.cancel();
         assert!(board_background_work_allowed(&recovery));
+    }
+
+    #[test]
+    fn reopen_deferred_request_does_not_overwrite_new_editor_feedback() {
+        use crate::domain::{ProvenanceOrigin, TaskScope};
+        use crate::reopen::{ReopenRequest, ReopenWatch};
+        use crate::store::TaskStore;
+        use crate::ui::board::BoardModel;
+        use crate::ui::input::BoardIntent;
+        use std::fs;
+        use std::path::PathBuf;
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static SEQ: AtomicU64 = AtomicU64::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "tsk-reopen-dirty-{}-{}",
+            std::process::id(),
+            SEQ.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&dir).expect("state dir");
+        let store = TaskStore::new(&dir);
+        let mut domain = DomainState::new();
+        domain
+            .create(
+                "draft",
+                None,
+                TaskScope::Global,
+                ProvenanceOrigin::Manual,
+                None,
+            )
+            .expect("task");
+        let mut model = BoardModel::from_domain(&domain, None);
+        crate::ui::board::apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+            .expect("edit");
+        crate::ui::board::apply_intent(&mut domain, &mut model, BoardIntent::EditInsert('x'), None)
+            .expect("type");
+        let mut watch = ReopenWatch::seeded(&store);
+        ReopenRequest::new(Some(PathBuf::from("/repo/deferred")))
+            .write(&dir)
+            .expect("request");
+        let recovery = SaveRecovery::new();
+        assert!(!apply_reopen_request(&mut model, &mut watch, &recovery));
+        assert!(model
+            .message()
+            .is_some_and(|message| message.contains("save or cancel")));
+        model.set_message("title is required");
+        assert!(!apply_reopen_request(&mut model, &mut watch, &recovery));
+        assert_eq!(model.message(), Some("title is required"));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn reopen_idle_bridge_applies_and_acknowledges_or_defers_behind_recovery() {
+        use crate::reopen::{ReopenRequest, ReopenWatch};
+        use crate::store::TaskStore;
+        use crate::ui::board::BoardModel;
+        use std::fs;
+        use std::path::PathBuf;
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static SEQ: AtomicU64 = AtomicU64::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "tsk-reopen-app-{}-{}",
+            std::process::id(),
+            SEQ.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&dir).expect("state dir");
+        let store = TaskStore::new(&dir);
+        let mut watch = ReopenWatch::seeded(&store);
+        let mut model = BoardModel::from_domain(&DomainState::new(), None);
+        let recovery = SaveRecovery::new();
+        ReopenRequest::new(Some(PathBuf::from("/repo/new")))
+            .write(&dir)
+            .expect("request");
+        assert!(apply_reopen_request(&mut model, &mut watch, &recovery));
+        assert_eq!(
+            model.selected_project(),
+            Some(std::path::Path::new("/repo/new"))
+        );
+        assert!(!dir.join("reopen.json").exists());
+
+        let mut pending = SaveRecovery::new();
+        pending.fail(DomainState::new(), DomainState::new(), "save failed");
+        ReopenRequest::new(Some(PathBuf::from("/repo/deferred")))
+            .write(&dir)
+            .expect("request");
+        assert!(!apply_reopen_request(&mut model, &mut watch, &pending));
+        assert!(
+            dir.join("reopen.json").exists(),
+            "deferred request remains pending"
+        );
+        model.set_message("editor feedback");
+        assert!(!apply_reopen_request(&mut model, &mut watch, &pending));
+        assert_eq!(model.message(), Some("editor feedback"));
+        let _ = pending.cancel();
+        assert!(apply_reopen_request(&mut model, &mut watch, &pending));
+        assert_eq!(
+            model.selected_project(),
+            Some(std::path::Path::new("/repo/deferred"))
+        );
+        let _ = fs::remove_dir_all(dir);
     }
 }
 
@@ -3754,6 +3844,30 @@ mod tests {
     }
 
     #[test]
+    fn navigation_digits_route_from_project_focus_and_preserve_input_interception() {
+        let (mut domain, mut model) = board_fixture("digits", None);
+        model.apply_reopen_project(Some(PathBuf::from("/repos/alpha")));
+        let key = |code| KeyEvent::new(code, KeyModifiers::NONE);
+        assert_eq!(
+            board_keyboard_intent(&model, BoardInputMode::Normal, key(KeyCode::Char('1'))),
+            Some(BoardIntent::SelectNavTab(NavTab::Desk))
+        );
+        assert_eq!(
+            board_keyboard_intent(&model, BoardInputMode::Normal, key(KeyCode::Char('2'))),
+            Some(BoardIntent::SelectNavTab(NavTab::ProjectBoard))
+        );
+        assert_eq!(
+            board_keyboard_intent(&model, BoardInputMode::Normal, key(KeyCode::Char('3'))),
+            Some(BoardIntent::SelectNavTab(NavTab::Projects))
+        );
+        apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None).expect("edit");
+        assert!(matches!(
+            board_keyboard_intent(&model, BoardInputMode::EditTitle, key(KeyCode::Char('1'))),
+            Some(BoardIntent::EditInsert('1'))
+        ));
+    }
+
+    #[test]
     fn projects_search_owns_bound_keys_paste_and_mouse_focus() {
         let (mut domain, mut model) = board_fixture("search", None);
         model.apply_reopen_project(Some(PathBuf::from("/repos/beta")));
@@ -3783,6 +3897,20 @@ mod tests {
         assert_eq!(
             board_keyboard_intent(&model, BoardInputMode::Normal, key(KeyCode::Char('/'))),
             Some(BoardIntent::FocusProjectsSearch)
+        );
+        // Normal mode does not own an implicit query. Bound and unbound letters
+        // retain their ordinary routes or are inert until slash/footer search focus.
+        assert_eq!(
+            board_keyboard_intent(&model, BoardInputMode::Normal, key(KeyCode::Char('e'))),
+            None
+        );
+        assert_eq!(
+            board_keyboard_intent(&model, BoardInputMode::Normal, key(KeyCode::Char('w'))),
+            None
+        );
+        assert_eq!(
+            board_keyboard_intent(&model, BoardInputMode::Normal, key(KeyCode::Backspace)),
+            None
         );
         assert_eq!(
             board_keyboard_intent(&model, BoardInputMode::Normal, key(KeyCode::Char('v'))),

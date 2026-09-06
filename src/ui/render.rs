@@ -3816,10 +3816,13 @@ fn paint_project_row(
     let after_motion = motion_x + display_width(&motion);
     spans.push(Span::raw(" ".repeat(ready_x.saturating_sub(after_motion))));
     let ready = row.ready.to_string();
-    spans.push(Span::styled(ready, style_dim()));
-    // Keep annotations after the aligned counts so they cannot consume the basename budget.
+    spans.push(Span::styled(ready.clone(), style_dim()));
+    // Escape and budget the path before constructing a styled span. `bound_line` only
+    // sanitizes on overflow, while control bytes have zero display width.
     if !path_suffix.is_empty() {
-        spans.push(Span::styled(path_suffix, style_dim()));
+        let suffix_budget = (width as usize).saturating_sub(ready_x + display_width(&ready));
+        let safe_suffix = present_line(&path_suffix, suffix_budget);
+        spans.push(Span::styled(safe_suffix, style_dim()));
     }
     if row.current {
         spans.push(Span::styled(" · current directory", style_dim()));
@@ -4183,23 +4186,47 @@ fn paint_status_line(
     (bound_line(Line::from(spans), width as usize), undo_hit)
 }
 
+/// Measured selector tabs. Desk and Projects are reserved controls, so only the
+/// middle project label is shortened at narrow widths. The same result drives paint,
+/// wrapping, and hit regions.
+fn selector_tab_texts(model: &QueueFrameModel<'_>, width: usize) -> [(NavTab, String); 3] {
+    let desk = " desk ".to_string();
+    let projects = " projects ".to_string();
+    let arrow = if model.nav.slot2_project {
+        " ▾ "
+    } else {
+        " ▸ "
+    };
+    let middle_budget = width
+        .saturating_sub(display_width(&desk))
+        .saturating_sub(display_width(&projects))
+        .saturating_sub(6);
+    let name_budget = middle_budget
+        .saturating_sub(1)
+        .saturating_sub(display_width(arrow));
+    let middle = format!(
+        " {}{arrow}",
+        present_line(&model.nav.slot2_label, name_budget)
+    );
+    [
+        (NavTab::Desk, desk),
+        (NavTab::ProjectBoard, middle),
+        (NavTab::Projects, projects),
+    ]
+}
+
 /// Whether the destination control needs a dedicated row to keep tabs and its selected
 /// value readable without overlap, especially at the 40-column operating floor.
 fn selector_chip_wraps(model: &QueueFrameModel<'_>, width: u16) -> bool {
     let Some(chip) = model.nav.chip.as_ref() else {
         return false;
     };
-    let slot2 = model.nav.slot2_label.as_str();
-    let tabs = [
-        " desk ".to_string(),
-        if model.nav.slot2_project {
-            format!(" {slot2} ▾ ")
-        } else {
-            format!(" {slot2} ▸ ")
-        },
-        " projects ".to_string(),
-    ];
-    let tabs_width = tabs.iter().map(|tab| display_width(tab)).sum::<usize>() + 6;
+    let tabs = selector_tab_texts(model, width as usize);
+    let tabs_width = tabs
+        .iter()
+        .map(|(_, tab)| display_width(tab))
+        .sum::<usize>()
+        + 6;
     let chip_width = display_width(&format!(" {} ▾ ", chip.label));
     tabs_width.saturating_add(chip_width) > width as usize
 }
@@ -4218,19 +4245,7 @@ fn paint_selector_row(
 
     let mut spans: Vec<Span<'static>> = Vec::new();
     let mut left_width = 0usize;
-    let slot2 = model.nav.slot2_label.as_str();
-    let tabs: [(NavTab, String); 3] = [
-        (NavTab::Desk, " desk ".to_string()),
-        (
-            NavTab::ProjectBoard,
-            if model.nav.slot2_project {
-                format!(" {slot2} \u{25be} ")
-            } else {
-                format!(" {slot2} \u{25b8} ")
-            },
-        ),
-        (NavTab::Projects, " projects ".to_string()),
-    ];
+    let tabs = selector_tab_texts(model, width);
     for (index, (tab, text)) in tabs.iter().enumerate() {
         if index > 0 {
             spans.push(Span::styled(" \u{b7} ".to_string(), style_dim()));
@@ -4527,6 +4542,122 @@ mod tests {
             })
             .expect("draw");
         terminal.backend().buffer().clone()
+    }
+
+    #[test]
+    fn narrow_selector_reserves_desk_and_projects_tabs() {
+        let view = QueueView {
+            sections: vec![],
+            counts: StatusCounts::default(),
+            projects: vec![],
+        };
+        let model = QueueFrameModel {
+            tasks: &[],
+            view: &view,
+            selection_id: None,
+            nav: NavPaint {
+                active: NavTab::ProjectBoard,
+                slot2_label: "x".repeat(32),
+                slot2_project: true,
+                chip: None,
+            },
+            surface: BoardSurface::Projects,
+            thread_labels: false,
+            show_project_meta: false,
+            projects: &[],
+            projects_index: false,
+            projects_cursor: 0,
+            projects_query: "",
+            summary: None,
+            status_message: None,
+            status_undo_offset: None,
+            verb_items: &[],
+            now: SystemTime::UNIX_EPOCH,
+            overlay: QueueOverlay::None,
+            detail_open: None,
+            list_scroll: 0,
+            follow_list: false,
+            archived_collapsed: true,
+            archived_header_selected: false,
+            rows_dim: false,
+        };
+        let (line, hits) = paint_selector_row(&model, &tier::resolve(40, 24));
+        let text = plain(&line);
+        assert!(text.contains("desk"));
+        assert!(text.contains("projects"));
+        assert!(
+            text.contains('▾'),
+            "project tab must retain its chevron: {text}"
+        );
+        assert!(display_width(&text) <= 40);
+        for (target, x, width) in hits {
+            assert!(
+                x.saturating_add(width) <= 40,
+                "{target:?} overflows selector"
+            );
+        }
+    }
+
+    #[test]
+    fn project_row_escapes_control_bytes_even_when_suffix_fits() {
+        let unsafe_path = "/tmp/\u{1b}]52;clipboard\u{7}/repo".to_string();
+        let projects = vec![
+            ProjectRow {
+                path: unsafe_path.clone(),
+                needs_you: 0,
+                in_motion: 0,
+                ready: 1,
+                current: false,
+                duplicate_basename: true,
+            },
+            ProjectRow {
+                path: "/other/repo".into(),
+                needs_you: 0,
+                in_motion: 0,
+                ready: 1,
+                current: false,
+                duplicate_basename: true,
+            },
+        ];
+        let view = QueueView {
+            sections: vec![],
+            counts: StatusCounts::default(),
+            projects: projects.clone(),
+        };
+        let model = QueueFrameModel {
+            tasks: &[],
+            view: &view,
+            selection_id: None,
+            nav: NavPaint {
+                active: NavTab::Projects,
+                slot2_label: "select project".into(),
+                slot2_project: false,
+                chip: None,
+            },
+            surface: BoardSurface::Projects,
+            thread_labels: false,
+            show_project_meta: false,
+            projects: &projects,
+            projects_index: true,
+            projects_cursor: 0,
+            projects_query: "",
+            summary: None,
+            status_message: None,
+            status_undo_offset: None,
+            verb_items: &[],
+            now: SystemTime::UNIX_EPOCH,
+            overlay: QueueOverlay::None,
+            detail_open: None,
+            list_scroll: 0,
+            follow_list: false,
+            archived_collapsed: true,
+            archived_header_selected: false,
+            rows_dim: false,
+        };
+        let line = paint_project_row(&model, 0, false, 120);
+        let text = plain(&line);
+        assert!(text.contains("\\u{001b}]52;clipboard\\u{0007}"));
+        assert!(!text.contains('\u{1b}'));
     }
 
     #[test]

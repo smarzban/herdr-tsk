@@ -1650,7 +1650,7 @@ impl BoardModel {
             BoardLocation::Project(path) => Some(path.to_string_lossy().into_owned()),
             _ => None,
         };
-        let in_project = |task: &Task| matches!(&task.scope, TaskScope::Project { path } if Some(path.clone()) == scope);
+        let in_project = |task: &Task| matches!(&task.scope, TaskScope::Project { path } if scope.as_deref().is_some_and(|scope| paths_equivalent(path, scope)));
         let mut threads: BTreeMap<String, usize> = BTreeMap::new();
         let mut unthreaded = 0usize;
         let mut open = 0usize;
@@ -3079,6 +3079,40 @@ mod tests {
             "another project's thread must not offer itself here"
         );
         assert_eq!(model.list_picker_kind(), Some(ListPickerKind::ThreadFilter));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn thread_filter_picker_matches_equivalent_project_aliases() {
+        use std::fs;
+        use std::os::unix::fs::symlink;
+        let root = std::env::temp_dir().join(format!("tsk-thread-alias-{}", std::process::id()));
+        let real = root.join("real");
+        let alias = root.join("alias");
+        fs::create_dir_all(&real).expect("real");
+        symlink(&real, &alias).expect("alias");
+        let mut domain = DomainState::new();
+        let id = create(
+            &mut domain,
+            "aliased",
+            project(alias.to_string_lossy().as_ref()),
+        );
+        domain
+            .edit(
+                id,
+                "aliased",
+                None,
+                project(alias.to_string_lossy().as_ref()),
+                Some("nav".into()),
+            )
+            .expect("thread");
+        let mut model = BoardModel::from_domain(&domain, Some(real));
+        model.open_thread_filter_picker();
+        assert!(model
+            .visible_list_picker_options()
+            .iter()
+            .any(|(_, option)| option.label == "#nav"));
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

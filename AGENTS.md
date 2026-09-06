@@ -41,7 +41,7 @@ For scriptable board work, use `tsk add`, `tsk list`, `tsk status`, `tsk edit`, 
   The done drawer ends with a collapsible `▾ archived · n` group (closed by default,
   session-only): its header is the one selectable header (`Enter`/click toggles it, the word
   paints bold when selected, never reverse), its rows paint dim, and it folds with `ctrl+g`
-  toggle-all like any other group while the drawer is open. Visible tab labels are `desk` ·
+  while the drawer is open; other board surfaces have no collapsible groups. Visible tab labels are `desk` ·
   selected project · `projects`; shortcuts `1`/`2`/`3` remain keyboard-only. Projects Overview
   search opens in the shared footer slot with `/`, keeps the table visible, filters live, opens
   the selected project on Enter, and clears/closes on Esc; the closed footer advertises `/ search`.

@@ -69,10 +69,9 @@ projects, project focus, and default `tsk list` views). The done
 drawer lists archived tasks in its scope under an `▾ archived · n` group below
 DONE: closed on every launch, one click or `Enter` on the header toggles it on its
 own, and expanded rows paint dim with their status glyph and `T<n>`. The header
-paints the word bold when it holds the selection, never a reverse block. It is one
-of the board's groups: while the drawer is open, `ctrl+g` (toggle all groups) folds
-and unfolds it along with the project and thread groups; with the drawer closed
-`ctrl+g` leaves it alone. `ctrl+f` on a row
+paints the word bold when it holds the selection, never a reverse block. It is the
+done drawer's only collapsible group: while the drawer is open, `ctrl+g` folds and
+unfolds it; with the drawer closed `ctrl+g` leaves it alone. `ctrl+f` on a row
 files it, and `ctrl+f` or `ctrl+u` on an archived
 selection brings it back; neither writes an undo entry.
 
@@ -215,7 +214,6 @@ letters appear in order anywhere in a label, so `ssr` finds `set status: review`
 | `delete` | a task is selected |
 | `reopen` | the selected task is done |
 | `undo` · `done drawer` | always |
-| `toggle groups` | on the projects index |
 | `help` · `quit` | always |
 | `Retry save` · `Cancel save` | a save is waiting on you (the only two entries then) |
 

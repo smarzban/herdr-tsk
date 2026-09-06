@@ -5,7 +5,7 @@
 //! short-lived, private request in the normal tsk state directory before focusing the
 //! pane. The board consumes it during its idle tick.
 
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -152,31 +152,23 @@ fn sync_directory(path: &Path) -> io::Result<()> {
 }
 
 struct RequestLock {
-    path: PathBuf,
+    _file: File,
 }
 
 impl RequestLock {
+    /// Acquire the persistent lock inode with a bounded wait. Ownership is the OS
+    /// advisory lock, not the inode, so a crash releases it without unlinking anything.
     fn acquire(state_dir: &Path) -> io::Result<Self> {
         let path = state_dir.join(LOCK_FILE);
+        let file = crate::fsperm::open_lock_file(&path)?;
+        crate::fsperm::tighten_file(&path);
         for _ in 0..100 {
-            let mut options = OpenOptions::new();
-            options.write(true).create_new(true);
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::OpenOptionsExt;
-                options.mode(0o600);
-            }
-            match options.open(&path) {
-                Ok(file) => {
-                    file.sync_all()?;
-                    return Ok(Self { path });
-                }
-                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
-                    // A lock may belong to a live launcher or board. Never infer staleness
-                    // from its mtime: waiting is safe, deleting it can interleave two writers.
+            match file.try_lock() {
+                Ok(()) => return Ok(Self { _file: file }),
+                Err(std::fs::TryLockError::WouldBlock) => {
                     std::thread::sleep(Duration::from_millis(5));
                 }
-                Err(error) => return Err(error),
+                Err(std::fs::TryLockError::Error(error)) => return Err(error),
             }
         }
         Err(io::Error::new(
@@ -184,11 +176,21 @@ impl RequestLock {
             "reopen request is busy",
         ))
     }
-}
 
-impl Drop for RequestLock {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(&self.path);
+    /// One nonblocking claim for the board's idle path. A competing writer must
+    /// never stall the event loop.
+    fn try_acquire(state_dir: &Path) -> io::Result<Self> {
+        let path = state_dir.join(LOCK_FILE);
+        let file = crate::fsperm::open_lock_file(&path)?;
+        crate::fsperm::tighten_file(&path);
+        match file.try_lock() {
+            Ok(()) => Ok(Self { _file: file }),
+            Err(std::fs::TryLockError::WouldBlock) => Err(io::Error::new(
+                io::ErrorKind::WouldBlock,
+                "reopen request is busy",
+            )),
+            Err(std::fs::TryLockError::Error(error)) => Err(error),
+        }
     }
 }
 
@@ -199,6 +201,7 @@ pub struct ReopenWatch {
     last_seen: Option<StoreSignature>,
     pending: Option<ReopenRequest>,
     pending_signature: Option<StoreSignature>,
+    deferred_notice_sent: bool,
 }
 
 impl ReopenWatch {
@@ -218,43 +221,82 @@ impl ReopenWatch {
     /// Poll without consuming. The same request remains pending until `acknowledge`,
     /// which lets a save-recovery or dirty editor defer the context switch safely.
     pub fn poll(&mut self) -> Option<ReopenRequest> {
-        let Ok(_lock) = RequestLock::acquire(&self.state_dir) else {
-            return self.pending.clone();
-        };
+        self.poll_with_pre_lock(|| {})
+    }
+
+    fn poll_with_pre_lock(&mut self, before_lock: impl FnOnce()) -> Option<ReopenRequest> {
         let path = self.request_path();
-        let signature = request_signature(&path);
-        if self.pending.is_some() {
-            if signature != self.pending_signature {
-                self.pending = self.read_request(&path);
-                self.pending_signature = self.pending.as_ref().and(signature);
-            }
+        let preflight = request_signature(&path);
+        let Some(preflight) = preflight else {
+            // A removed pending request was withdrawn, so do not keep delivering a stale
+            // context switch or its one-shot deferred notice.
+            self.pending = None;
+            self.pending_signature = None;
+            self.deferred_notice_sent = false;
+            return None;
+        };
+        if self.pending_signature == Some(preflight) {
             return self.pending.clone();
         }
-        if signature == self.last_seen {
+        if self.pending.is_none() && self.last_seen == Some(preflight) {
             return None;
         }
-        self.last_seen = signature;
+        before_lock();
+        let Ok(_lock) = RequestLock::try_acquire(&self.state_dir) else {
+            return self.pending.clone();
+        };
+        // The preflight avoids lock-file work for unchanged requests only. Pair the
+        // bytes read while holding the writer lock with this authoritative signature.
+        let Some(signature) = request_signature(&path) else {
+            self.pending = None;
+            self.pending_signature = None;
+            self.deferred_notice_sent = false;
+            return None;
+        };
+        if self.pending_signature == Some(signature) {
+            return self.pending.clone();
+        }
+        if self.pending.is_none() && self.last_seen == Some(signature) {
+            return None;
+        }
+        self.last_seen = Some(signature);
         self.pending = self.read_request(&path);
-        self.pending_signature = self.pending.as_ref().and(signature);
+        self.pending_signature = self.pending.as_ref().map(|_| signature);
+        self.deferred_notice_sent = false;
         self.pending.clone()
+    }
+
+    /// Return true once per pending request when a dirty editor defers it.
+    pub fn mark_deferred_notice(&mut self) -> bool {
+        if self.deferred_notice_sent {
+            false
+        } else {
+            self.deferred_notice_sent = true;
+            true
+        }
     }
 
     /// Mark the currently applied request handled and remove its file. If another
     /// invocation replaced it meanwhile, leave that newer request for the next poll.
     pub fn acknowledge(&mut self) {
-        let Ok(_lock) = RequestLock::acquire(&self.state_dir) else {
+        let Some(signature) = self.pending_signature else {
+            return;
+        };
+        // Application already happened. Consume it before opportunistic cleanup so a
+        // busy lock cannot cause the same request to be applied on every idle tick.
+        self.pending = None;
+        self.pending_signature = None;
+        self.last_seen = Some(signature);
+        self.deferred_notice_sent = false;
+
+        let Ok(_lock) = RequestLock::try_acquire(&self.state_dir) else {
             return;
         };
         let path = self.request_path();
-        if self
-            .pending_signature
-            .is_some_and(|signature| request_signature(&path) == Some(signature))
-        {
+        if request_signature(&path) == Some(signature) {
             let _ = fs::remove_file(path);
             self.last_seen = None;
         }
-        self.pending = None;
-        self.pending_signature = None;
     }
 
     fn request_path(&self) -> PathBuf {
@@ -336,6 +378,169 @@ mod tests {
         );
         drop(lock);
         assert!(RequestLock::acquire(&dir).is_ok());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn request_lock_is_released_when_owner_process_exits() {
+        if std::env::var_os("TSK_REOPEN_LOCK_CHILD").is_some() {
+            let dir = PathBuf::from(std::env::var_os("TSK_REOPEN_LOCK_DIR").expect("lock dir"));
+            let _lock = RequestLock::acquire(&dir).expect("child lock");
+            std::process::exit(0);
+        }
+        let dir = std::env::temp_dir().join(format!(
+            "tsk-reopen-crash-{}-{}",
+            std::process::id(),
+            REQUEST_SEQ.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&dir).expect("state dir");
+        let output = std::process::Command::new(std::env::current_exe().expect("test binary"))
+            .args([
+                "--exact",
+                "reopen::tests::request_lock_is_released_when_owner_process_exits",
+                "--nocapture",
+            ])
+            .env("TSK_REOPEN_LOCK_CHILD", "1")
+            .env("TSK_REOPEN_LOCK_DIR", &dir)
+            .output()
+            .expect("child");
+        assert!(
+            output.status.success(),
+            "child lock owner failed: {output:?}"
+        );
+        assert!(
+            dir.join(LOCK_FILE).exists(),
+            "the persistent lock inode must outlive a crashing owner"
+        );
+        assert!(
+            RequestLock::acquire(&dir).is_ok(),
+            "crash-released lock remains held"
+        );
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn idle_poll_without_a_request_does_not_create_or_touch_a_lock() {
+        let dir = std::env::temp_dir().join(format!(
+            "tsk-reopen-idle-{}-{}",
+            std::process::id(),
+            REQUEST_SEQ.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&dir).expect("state dir");
+        let store = TaskStore::new(&dir);
+        let mut watch = ReopenWatch::seeded(&store);
+        fs::remove_file(dir.join(LOCK_FILE)).expect("remove setup lock");
+        assert_eq!(watch.poll(), None);
+        assert!(
+            !dir.join(LOCK_FILE).exists(),
+            "idle poll created a lock file"
+        );
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn idle_poll_does_not_wait_for_a_competing_lock() {
+        let dir = std::env::temp_dir().join(format!(
+            "tsk-reopen-nonblocking-{}-{}",
+            std::process::id(),
+            REQUEST_SEQ.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&dir).expect("state dir");
+        let store = TaskStore::new(&dir);
+        let mut watch = ReopenWatch::seeded(&store);
+        ReopenRequest::new(Some(PathBuf::from("/repo/pending")))
+            .write(&dir)
+            .expect("request");
+        let lock = RequestLock::acquire(&dir).expect("competing lock");
+        let started = std::time::Instant::now();
+        assert_eq!(watch.poll(), None);
+        assert!(
+            started.elapsed() < Duration::from_millis(200),
+            "idle poll must not wait for the writer's 500ms bounded acquisition"
+        );
+        drop(lock);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn unchanged_pending_request_does_not_reopen_or_tighten_the_lock() {
+        let dir = std::env::temp_dir().join(format!(
+            "tsk-reopen-unchanged-{}-{}",
+            std::process::id(),
+            REQUEST_SEQ.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&dir).expect("state dir");
+        let store = TaskStore::new(&dir);
+        let mut watch = ReopenWatch::seeded(&store);
+        ReopenRequest::new(Some(PathBuf::from("/repo/pending")))
+            .write(&dir)
+            .expect("request");
+        let request = watch.poll().expect("pending request");
+        fs::remove_file(dir.join(LOCK_FILE)).expect("remove lock");
+        assert_eq!(watch.poll(), Some(request));
+        assert!(
+            !dir.join(LOCK_FILE).exists(),
+            "unchanged pending request reopened the lock file"
+        );
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn poll_pairs_the_post_lock_signature_with_the_request_bytes() {
+        let dir = std::env::temp_dir().join(format!(
+            "tsk-reopen-signature-race-{}-{}",
+            std::process::id(),
+            REQUEST_SEQ.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&dir).expect("state dir");
+        let store = TaskStore::new(&dir);
+        let mut watch = ReopenWatch::seeded(&store);
+        ReopenRequest::new(Some(PathBuf::from("/repo/a")))
+            .write(&dir)
+            .expect("request a");
+        let request = watch
+            .poll_with_pre_lock(|| {
+                ReopenRequest::new(Some(PathBuf::from("/repo/b")))
+                    .write(&dir)
+                    .expect("replace with b");
+            })
+            .expect("replacement request");
+        assert_eq!(request.project.as_deref(), Some(Path::new("/repo/b")));
+        watch.acknowledge();
+        assert_eq!(watch.poll(), None, "acknowledged b must not replay");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn acknowledge_is_nonblocking_and_consumes_a_request_when_cleanup_is_busy() {
+        let dir = std::env::temp_dir().join(format!(
+            "tsk-reopen-ack-nonblocking-{}-{}",
+            std::process::id(),
+            REQUEST_SEQ.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&dir).expect("state dir");
+        let store = TaskStore::new(&dir);
+        let mut watch = ReopenWatch::seeded(&store);
+        ReopenRequest::new(Some(PathBuf::from("/repo/a")))
+            .write(&dir)
+            .expect("request a");
+        assert!(watch.poll().is_some(), "request applied");
+        let lock = RequestLock::acquire(&dir).expect("competing cleanup lock");
+        let started = std::time::Instant::now();
+        watch.acknowledge();
+        assert!(
+            started.elapsed() < Duration::from_millis(200),
+            "acknowledgement must not wait for the writer's 500ms bounded acquisition"
+        );
+        drop(lock);
+        assert_eq!(watch.poll(), None, "handled request must not replay");
+        ReopenRequest::new(Some(PathBuf::from("/repo/b")))
+            .write(&dir)
+            .expect("newer request");
+        assert_eq!(
+            watch.poll().expect("newer request").project.as_deref(),
+            Some(Path::new("/repo/b"))
+        );
         let _ = fs::remove_dir_all(dir);
     }
 }

@@ -59,6 +59,39 @@ fn reopen_watch_reads_one_atomic_request_and_acknowledges_it_once() {
 }
 
 #[test]
+fn reopen_watch_keeps_the_latest_request_and_does_not_acknowledge_a_replacement() {
+    let dir = state_dir();
+    let store = TaskStore::new(&dir);
+    let mut watch = ReopenWatch::seeded(&store);
+    ReopenRequest::new(Some(PathBuf::from("/repo/a")))
+        .write(&dir)
+        .expect("request a");
+    let first = watch.poll().expect("first request");
+    ReopenRequest::new(Some(PathBuf::from("/repo/b")))
+        .write(&dir)
+        .expect("request b");
+    let second = watch.poll().expect("replacement request");
+    assert_eq!(
+        second.project.as_deref(),
+        Some(std::path::Path::new("/repo/b"))
+    );
+    ReopenRequest::new(Some(PathBuf::from("/repo/c")))
+        .write(&dir)
+        .expect("request c");
+    watch.acknowledge();
+    assert!(
+        dir.join("reopen.json").exists(),
+        "ack must not delete newer request"
+    );
+    assert_ne!(first.project, second.project);
+    assert_eq!(
+        watch.poll().expect("latest remains").project.as_deref(),
+        Some(std::path::Path::new("/repo/c"))
+    );
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
 fn resolve_context_rejects_malformed_json_without_publishing_a_request() {
     let dir = state_dir();
     let binary = env!("CARGO_BIN_EXE_tsk");
@@ -118,6 +151,67 @@ fn resolve_context_publishes_project_and_desk_requests_without_using_process_cwd
     );
     let request = fs::read_to_string(dir.join("reopen.json")).expect("request");
     assert!(request.contains(&repo.display().to_string()));
+
+    // A host invocation outside any repository must publish an explicit Desk
+    // request, even though this test process itself runs from the repository.
+    let outside = dir.join("outside");
+    fs::create_dir_all(&outside).expect("outside");
+    // Keep the process cwd in-repo while the host JSON supplies the outside cwd.
+    let mut child = Command::new(binary)
+        .arg("--resolve-context")
+        .env("TSK_STATE_DIR", &dir)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("resolve desk context");
+    child
+        .stdin
+        .take()
+        .expect("stdin")
+        .write_all(
+            format!(
+                r#"{{"focused_pane_cwd":{}}}"#,
+                serde_json::to_string(&outside).unwrap()
+            )
+            .as_bytes(),
+        )
+        .expect("context");
+    let output = child.wait_with_output().expect("output");
+    assert!(output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).trim().is_empty());
+    let request = fs::read_to_string(dir.join("reopen.json")).expect("desk request");
+    assert!(request.contains(r#""project":null"#));
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn board_reopen_refuses_archived_canonical_and_alias_projects_to_desk() {
+    use std::os::unix::fs::symlink;
+    let dir = state_dir();
+    let real = dir.join("archived");
+    let alias = dir.join("alias");
+    fs::create_dir_all(&real).expect("real project");
+    symlink(&real, &alias).expect("project alias");
+    let real_text = real.to_string_lossy().into_owned();
+    let mut domain = DomainState::new();
+    domain
+        .create(
+            "archived",
+            None,
+            TaskScope::Project {
+                path: real_text.clone(),
+            },
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("task");
+    domain.archive_project(&real_text).expect("archive");
+    let mut model = BoardModel::from_domain(&domain, None);
+    assert!(model.apply_reopen_project(Some(real.clone())));
+    assert!(model.selected_project().is_none());
+    assert!(model.apply_reopen_project(Some(alias)));
+    assert!(model.selected_project().is_none());
     let _ = fs::remove_dir_all(dir);
 }
 

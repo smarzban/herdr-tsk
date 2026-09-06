@@ -7,7 +7,7 @@ use std::path::Path;
 use uuid::Uuid;
 
 use crate::domain::{HumanStatus, Task, TaskScope};
-use crate::scope::{archived_path_contains, paths_equivalent};
+use crate::scope::PathIdentityCache;
 
 /// The board's persistent navigation destinations.
 ///
@@ -181,14 +181,22 @@ pub fn query_board(
     drawer_open: bool,
     thread_filter: &ThreadFilter,
 ) -> QueueView {
+    let identities = PathIdentityCache::default();
     match lens {
-        BoardLens::Desk => query_desk(tasks, archived_projects, drawer_open),
-        BoardLens::Projects => query_projects_index(tasks, archived_projects, current_repo),
-        BoardLens::Project(path) => {
-            query_project_focus(tasks, archived_projects, path, drawer_open, thread_filter)
+        BoardLens::Desk => query_desk(tasks, archived_projects, drawer_open, &identities),
+        BoardLens::Projects => {
+            query_projects_index(tasks, archived_projects, current_repo, &identities)
         }
+        BoardLens::Project(path) => query_project_focus(
+            tasks,
+            archived_projects,
+            path,
+            drawer_open,
+            thread_filter,
+            &identities,
+        ),
         BoardLens::ThreadView(name) => {
-            query_thread_view(tasks, archived_projects, name, drawer_open)
+            query_thread_view(tasks, archived_projects, name, drawer_open, &identities)
         }
         // AC-41/AC-45: the read-only focus is the only lens that paints an archived
         // project's tasks. It is the project focus computed as if the project were live.
@@ -198,27 +206,36 @@ pub fn query_board(
             path,
             drawer_open,
             &ThreadFilter::All,
+            &identities,
         ),
     }
 }
 
 /// A task survives the working-lens filter: not soft-deleted, not archived, and no
 /// archived project owns its scope.
-fn is_live(task: &Task, archived_projects: &BTreeSet<String>) -> bool {
+fn is_live(
+    task: &Task,
+    archived_projects: &BTreeSet<String>,
+    identities: &PathIdentityCache,
+) -> bool {
     if task.soft_deleted || task.archived {
         return false;
     }
     match &task.scope {
         TaskScope::Global => true,
-        TaskScope::Project { path } => !archived_path_contains(archived_projects, path),
+        TaskScope::Project { path } => !identities.contains(archived_projects, path),
     }
 }
 
 /// Whether an archived project owns the task's scope (its own flag is irrelevant here).
-fn task_owned_by_archived_project(task: &Task, archived_projects: &BTreeSet<String>) -> bool {
+fn task_owned_by_archived_project(
+    task: &Task,
+    archived_projects: &BTreeSet<String>,
+    identities: &PathIdentityCache,
+) -> bool {
     match &task.scope {
         TaskScope::Global => false,
-        TaskScope::Project { path } => archived_path_contains(archived_projects, path),
+        TaskScope::Project { path } => identities.contains(archived_projects, path),
     }
 }
 
@@ -244,14 +261,15 @@ fn query_desk(
     tasks: &[Task],
     archived_projects: &BTreeSet<String>,
     drawer_open: bool,
+    identities: &PathIdentityCache,
 ) -> QueueView {
     let live: Vec<&Task> = tasks
         .iter()
-        .filter(|task| is_live(task, archived_projects))
+        .filter(|task| is_live(task, archived_projects, identities))
         .collect();
     let archived_pool: Vec<&Task> = tasks
         .iter()
-        .filter(|task| !task_owned_by_archived_project(task, archived_projects))
+        .filter(|task| !task_owned_by_archived_project(task, archived_projects, identities))
         .collect();
 
     // NEEDS YOU is the global attention lane: blocked and review across every live
@@ -302,10 +320,11 @@ fn query_projects_index(
     tasks: &[Task],
     archived_projects: &BTreeSet<String>,
     current_repo: Option<&Path>,
+    identities: &PathIdentityCache,
 ) -> QueueView {
     let live: Vec<&Task> = tasks
         .iter()
-        .filter(|task| is_live(task, archived_projects))
+        .filter(|task| is_live(task, archived_projects, identities))
         .collect();
 
     let mut paths: Vec<String> = Vec::new();
@@ -321,10 +340,10 @@ fn query_projects_index(
     // opening tsk inside an empty repo still offers its board.
     if let Some(repo) = current_repo {
         let repo_string = repo.to_string_lossy().into_owned();
-        if !archived_path_contains(archived_projects, &repo_string)
+        if !identities.contains(archived_projects, &repo_string)
             && !paths
                 .iter()
-                .any(|path| paths_equivalent(path, &repo_string))
+                .any(|path| identities.equivalent(path, &repo_string))
         {
             paths.push(repo_string);
             paths.sort();
@@ -336,7 +355,7 @@ fn query_projects_index(
             .iter()
             .map(|path| {
                 let owned = |task: &&Task| {
-                    matches!(&task.scope, TaskScope::Project { path: p } if paths_equivalent(p, path))
+                    matches!(&task.scope, TaskScope::Project { path: p } if identities.equivalent(p, path))
                 };
                 let open: Vec<&&Task> = live.iter().filter(|task| owned(task)).collect();
                 (
@@ -353,10 +372,9 @@ fn query_projects_index(
     let mut order: Vec<usize> = (0..paths.len()).collect();
     order.sort_by_key(|&index| {
         (
-            usize::from(
-                current_repo
-                    .is_some_and(|repo| !paths_equivalent(&paths[index], &repo.to_string_lossy())),
-            ),
+            usize::from(current_repo.is_some_and(|repo| {
+                !identities.equivalent(&paths[index], &repo.to_string_lossy())
+            })),
             paths[index].clone(),
         )
     });
@@ -375,8 +393,9 @@ fn query_projects_index(
                 needs_you,
                 in_motion,
                 ready,
-                current: current_repo
-                    .is_some_and(|repo| paths_equivalent(&paths[*index], &repo.to_string_lossy())),
+                current: current_repo.is_some_and(|repo| {
+                    identities.equivalent(&paths[*index], &repo.to_string_lossy())
+                }),
                 duplicate_basename: basenames.iter().filter(|name| **name == basename).count() > 1,
             }
         })
@@ -397,6 +416,7 @@ fn query_thread_view(
     archived_projects: &BTreeSet<String>,
     name: &str,
     drawer_open: bool,
+    identities: &PathIdentityCache,
 ) -> QueueView {
     let matches_thread = |task: &Task| {
         task.thread
@@ -405,12 +425,13 @@ fn query_thread_view(
     };
     let live: Vec<&Task> = tasks
         .iter()
-        .filter(|task| is_live(task, archived_projects) && matches_thread(task))
+        .filter(|task| is_live(task, archived_projects, identities) && matches_thread(task))
         .collect();
     let archived_pool: Vec<&Task> = tasks
         .iter()
         .filter(|task| {
-            !task_owned_by_archived_project(task, archived_projects) && matches_thread(task)
+            !task_owned_by_archived_project(task, archived_projects, identities)
+                && matches_thread(task)
         })
         .collect();
 
@@ -456,10 +477,14 @@ fn query_project_focus(
     path: &Path,
     drawer_open: bool,
     thread_filter: &ThreadFilter,
+    identities: &PathIdentityCache,
 ) -> QueueView {
     let live: Vec<&Task> = tasks
         .iter()
-        .filter(|task| is_live(task, archived_projects) && task_matches_scope(task, path))
+        .filter(|task| {
+            is_live(task, archived_projects, identities)
+                && task_matches_scope(task, path, identities)
+        })
         .collect();
     let admits = |task: &Task| thread_filter.admits(task);
 
@@ -482,7 +507,7 @@ fn query_project_focus(
         .iter()
         .find_map(|task| match &task.scope {
             TaskScope::Project { path: stored }
-                if paths_equivalent(stored, &path.to_string_lossy()) =>
+                if identities.equivalent(stored, &path.to_string_lossy()) =>
             {
                 Some(stored.clone())
             }
@@ -501,8 +526,8 @@ fn query_project_focus(
     append_done(&mut sections, &done_pool, drawer_open);
     let in_scope: Vec<&Task> = tasks
         .iter()
-        .filter(|task| task_matches_scope(task, path))
-        .filter(|task| !task_owned_by_archived_project(task, archived_projects))
+        .filter(|task| task_matches_scope(task, path, identities))
+        .filter(|task| !task_owned_by_archived_project(task, archived_projects, identities))
         .filter(|task| admits(task))
         .collect();
     append_archived(&mut sections, &in_scope, drawer_open);
@@ -631,9 +656,11 @@ fn push_deck(
 
 /// Whether a task belongs to the project at `path`, tolerating the same directory
 /// reached through different path spellings (symlinks, `/tmp` vs `/private/tmp`).
-fn task_matches_scope(task: &Task, path: &Path) -> bool {
+fn task_matches_scope(task: &Task, path: &Path, identities: &PathIdentityCache) -> bool {
     match &task.scope {
-        TaskScope::Project { path: stored } => paths_equivalent(stored, &path.to_string_lossy()),
+        TaskScope::Project { path: stored } => {
+            identities.equivalent(stored, &path.to_string_lossy())
+        }
         TaskScope::Global => false,
     }
 }

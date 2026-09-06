@@ -10,8 +10,8 @@ Nav, peek, `Enter`, `P`, `1` / `2` / `3`, `z`, `:`, `?`, `+`, and `Esc` stay
 bare.
 
 The web demo on the landing page uses bare verb letters on purpose. Browsers
-steal control chords. On its projects index, bare `g` toggles groups and the
-palette offers the same command.
+steal control chords. `ctrl+g` only answers when the done drawer has a visible
+archived group.
 
 ## Wide stage slider
 
@@ -58,7 +58,7 @@ moves to G, then runs the control you clicked.
 | `v` on Projects | choose Overview or a thread across projects |
 | `1` `2` `3` | navigation: desk · selected project · projects |
 | `/` on Projects | focus the footer's `/ search projects` affordance; type or paste, then Enter opens the selected match and Esc clears and closes |
-| `ctrl+g` | expand or collapse all visible groups; while the done drawer is open the `archived` group folds and unfolds with them |
+| `ctrl+g` | fold or unfold the done drawer's `archived` group when it is visible |
 | `Esc` | close one layer |
 | `ctrl+q` or `ctrl+c` | quit |
 

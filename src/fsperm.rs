@@ -13,6 +13,21 @@ use std::fs::{self, File, OpenOptions};
 use std::io;
 use std::path::Path;
 
+#[cfg(test)]
+thread_local! {
+    static BEFORE_LOCK_OPEN: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+fn run_before_lock_open_hook() {
+    if let Some(hook) = BEFORE_LOCK_OPEN.with(|slot| slot.borrow_mut().take()) {
+        hook();
+    }
+}
+
+#[cfg(not(test))]
+fn run_before_lock_open_hook() {}
+
 /// Create `path` (recursively) as a user-private directory (`0700` on Unix),
 /// stripping any group/other access from one that already exists. Stricter
 /// existing modes are kept.
@@ -82,14 +97,80 @@ pub fn create_private_file(path: &Path) -> io::Result<File> {
 /// Open (or create) a lock file without truncating it, `0600` on Unix when
 /// created. Existing files are tightened by the caller after open.
 pub fn open_lock_file(path: &Path) -> io::Result<File> {
+    // An absent entry is created atomically. If another process wins that race, retry
+    // through the existing-file path, which never creates through a newly planted link.
+    for _ in 0..3 {
+        let before = match fs::symlink_metadata(path) {
+            Ok(metadata) if metadata.file_type().is_file() => Some(metadata),
+            Ok(_) => return invalid_lock_path(),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+            Err(error) => return Err(error),
+        };
+        run_before_lock_open_hook();
+        let result = match before.as_ref() {
+            Some(_) => lock_open_options(false).open(path),
+            None => lock_open_options(true).open(path),
+        };
+        let file = match result {
+            Ok(file) => file,
+            Err(error) if before.is_none() && error.kind() == io::ErrorKind::AlreadyExists => {
+                continue;
+            }
+            Err(error) => return Err(error),
+        };
+        let opened = file.metadata()?;
+        let current = match fs::symlink_metadata(path) {
+            Ok(metadata) if metadata.file_type().is_file() => metadata,
+            Ok(_) => return invalid_lock_path(),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error),
+        };
+        if opened.file_type().is_file()
+            && same_file_identity(&opened, &current)
+            && before
+                .as_ref()
+                .is_none_or(|before| same_file_identity(before, &opened))
+        {
+            return Ok(file);
+        }
+    }
+    Err(io::Error::new(
+        io::ErrorKind::WouldBlock,
+        "lock path changed repeatedly while opening",
+    ))
+}
+
+fn lock_open_options(create_new: bool) -> OpenOptions {
     let mut options = OpenOptions::new();
-    options.read(true).write(true).create(true).truncate(false);
+    options
+        .read(true)
+        .write(true)
+        .create_new(create_new)
+        .truncate(false);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
         options.mode(0o600);
     }
-    options.open(path)
+    options
+}
+
+fn invalid_lock_path<T>() -> io::Result<T> {
+    Err(io::Error::new(
+        io::ErrorKind::InvalidInput,
+        "lock path must be a regular file, not a symlink",
+    ))
+}
+
+#[cfg(unix)]
+fn same_file_identity(a: &fs::Metadata, b: &fs::Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    a.dev() == b.dev() && a.ino() == b.ino()
+}
+
+#[cfg(not(unix))]
+fn same_file_identity(a: &fs::Metadata, b: &fs::Metadata) -> bool {
+    a.file_type().is_file() && b.file_type().is_file()
 }
 
 /// Tighten an existing file to owner-only (`0600`) on Unix by stripping
@@ -143,6 +224,53 @@ mod tests {
             let _ = fs::set_permissions(self.0.join("target"), fs::Permissions::from_mode(0o700));
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn open_lock_file_does_not_follow_an_absent_path_symlink_race() {
+        let seq = TEMP_SEQ.fetch_add(1, Ordering::Relaxed);
+        let root =
+            std::env::temp_dir().join(format!("tsk-fsperm-lock-race-{}-{seq}", std::process::id()));
+        fs::create_dir_all(&root).expect("mkdir root");
+        let _guard = TempDirGuard(root.clone());
+        let lock = root.join("lock");
+        let target = root.join("outside-target");
+        let hook_lock = lock.clone();
+        let hook_target = target.clone();
+        BEFORE_LOCK_OPEN.with(|slot| {
+            *slot.borrow_mut() = Some(Box::new(move || {
+                symlink(&hook_target, &hook_lock).expect("publish symlink");
+            }));
+        });
+
+        open_lock_file(&lock).expect_err("a raced symlink must be rejected");
+        assert!(
+            !target.exists(),
+            "the raced symlink target must not be created"
+        );
+    }
+
+    #[test]
+    fn open_lock_file_reuses_regular_inode_and_rejects_nonfiles() {
+        use std::os::unix::fs::MetadataExt;
+
+        let seq = TEMP_SEQ.fetch_add(1, Ordering::Relaxed);
+        let root = std::env::temp_dir().join(format!(
+            "tsk-fsperm-lock-inode-{}-{seq}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).expect("mkdir root");
+        let _guard = TempDirGuard(root.clone());
+        let lock = root.join("lock");
+        let first = open_lock_file(&lock).expect("first opener");
+        let second = open_lock_file(&lock).expect("second opener");
+        let first_metadata = first.metadata().expect("first metadata");
+        let second_metadata = second.metadata().expect("second metadata");
+        assert_eq!(first_metadata.dev(), second_metadata.dev());
+        assert_eq!(first_metadata.ino(), second_metadata.ino());
+
+        fs::create_dir(root.join("not-a-file")).expect("non-file entry");
+        open_lock_file(&root.join("not-a-file")).expect_err("non-file lock path must fail");
     }
 
     #[test]
