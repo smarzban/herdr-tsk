@@ -32,8 +32,11 @@ For scriptable board work, use `tsk add`, `tsk list`, `tsk status`, `tsk edit`, 
   (`1`/`2`/`3`) in every normal board surface. `P` opens the project picker; selecting a
   project fills slot 2 and opens its board. **desk**: NEEDS YOU across live scopes, global
   IN MOTION, then desk-only ON DECK. **projects**: one selectable overview row per project,
-  with needs-you, in-motion, and ready counts. Its View can show a flat cross-project thread
-  board. Project focus remains available through `P` and the index. NEEDS YOU · IN MOTION ·
+  with right-anchored needs-you, in-motion, and ready counts (zero paints a dim `·`, live
+  needs-you bold), a blank row under the legend, basename-only rows with a dim `here` on the
+  launch project, a THREADS column at ≥100 columns, and the selected row's full path on the
+  status row. Click selects an index row, double-click or Enter opens it. Its View can show a
+  flat cross-project thread board. Project focus remains available through `P` and the index. NEEDS YOU · IN MOTION ·
   ON DECK when project-scoped · done drawer (`z`). Project rows are navigation, never task
   rows. Scoped project boards show thread labels beside tasks and a local thread filter,
   without a separate filtered-task count. Cross-project thread views also omit the task/project

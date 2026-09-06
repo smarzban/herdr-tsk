@@ -18,7 +18,7 @@ use uuid::Uuid;
 use super::capture::CaptureField;
 use super::edit::{place_edit_cursor, place_edit_cursor_at};
 use super::present_line;
-use super::queue::{NavTab, ProjectRow, QueueSection, QueueView, SectionKind, StatusCounts};
+use super::queue::{NavTab, ProjectRow, QueueSection, QueueView, SectionKind};
 use super::scrollbar;
 use super::tier::{Tier, TierGeometry};
 use crate::domain::{HumanStatus, Task, TaskScope};
@@ -1307,6 +1307,17 @@ fn paint_footer(
             {
                 if let Some(message) = input.message {
                     paint_bottom_input_message(frame, surface, message_row, width, message);
+                } else if matches!(model.overlay, QueueOverlay::ProjectsSearch { .. }) {
+                    // The status row is the query while searching, so the selected
+                    // project's path moves to the reserved row above it. Read from the
+                    // frame's already-built view: no second queue query per paint.
+                    put_line(
+                        frame,
+                        surface,
+                        message_row,
+                        width,
+                        paint_bounded_line(&index_selected_path(model), width, style_dim()),
+                    );
                 }
             }
             paint_bottom_input_slot(frame, surface, row, width, input);
@@ -1320,10 +1331,18 @@ fn paint_footer(
                 _ => {}
             }
         } else {
+            let idle = if model.projects_index {
+                // The index's status row names the selected project's full path; rows
+                // carry only the basename.
+                index_selected_path(model)
+            } else {
+                // Idle status: done count only. In-motion is already on the section header.
+                format!(" {} done", model.view.counts.done)
+            };
             let (line, undo_hit) = paint_status_line(
                 model.status_message,
                 model.status_undo_offset,
-                model.view.counts,
+                &idle,
                 width,
                 hint,
             );
@@ -3631,6 +3650,7 @@ fn build_list_rows(
     // surface whose rows are neither tasks nor chrome.
     if model.projects_index {
         out.push(ListRow::IndexHeader(paint_index_header(geo.row_width)));
+        out.push(ListRow::Blank);
         if model.projects.is_empty() {
             out.push(ListRow::Hint(paint_bounded_line(
                 "    no projects match",
@@ -3731,42 +3751,183 @@ fn build_list_rows(
     (out, anchor_last_idx, selected_idx)
 }
 
-/// The projects index's dim column legend.
-fn paint_index_header(width: u16) -> Line<'static> {
-    let (needs_x, motion_x, ready_x) = project_columns(width as usize);
-    let compact = width < 52;
-    let labels = if compact {
-        ("PROJECT", "NEED", "MOTION", "READY")
+/// Column geometry of the projects index. The three count columns are anchored to the
+/// right edge, so the name column absorbs whatever width the frame has instead of
+/// truncating at a fixed cell. A THREADS column opens between name and counts once the
+/// frame is wide enough to give both a fair share.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct IndexColumns {
+    /// First cell of the name (after the ` ▸ ` marker).
+    pub name_x: usize,
+    /// Cells available to the name cell (basename, path disambiguation, `here`).
+    pub name_w: usize,
+    /// Threads column `(x, width)` when the frame paints one.
+    pub threads: Option<(usize, usize)>,
+    /// Exclusive right edge of NEEDS YOU.
+    pub needs_end: usize,
+    /// Exclusive right edge of IN MOTION.
+    pub motion_end: usize,
+    /// Exclusive right edge of READY.
+    pub ready_end: usize,
+    /// Column legend words, shortened below 52 cells.
+    pub labels: (&'static str, &'static str, &'static str),
+}
+
+/// Cells taken by the ` ▸ ` / `   ` row marker.
+const INDEX_NAME_X: usize = 3;
+/// Gap between adjacent index columns.
+const INDEX_GAP: usize = 2;
+/// Narrowest frame that paints the THREADS column.
+pub(crate) const INDEX_THREADS_MIN_WIDTH: usize = 100;
+/// Narrowest frame that spells the count legend in full.
+const INDEX_FULL_LABELS_MIN_WIDTH: usize = 52;
+
+pub(crate) fn index_columns(width: usize) -> IndexColumns {
+    let labels = if width < INDEX_FULL_LABELS_MIN_WIDTH {
+        ("NEED", "MOTION", "READY")
     } else {
-        ("PROJECT", "NEEDS YOU", "IN MOTION", "READY")
+        ("NEEDS YOU", "IN MOTION", "READY")
     };
-    let mut spans = vec![Span::styled(labels.0.to_string(), style_dim())];
-    let mut x = labels.0.len();
-    for (column, label) in [
-        (needs_x, labels.1),
-        (motion_x, labels.2),
-        (ready_x, labels.3),
+    let ready_end = width.saturating_sub(INDEX_GAP);
+    let motion_end = ready_end.saturating_sub(labels.2.len() + INDEX_GAP);
+    let needs_end = motion_end.saturating_sub(labels.1.len() + INDEX_GAP);
+    let needs_start = needs_end.saturating_sub(labels.0.len());
+    let available = needs_start
+        .saturating_sub(INDEX_GAP)
+        .saturating_sub(INDEX_NAME_X);
+    let threads = (width >= INDEX_THREADS_MIN_WIDTH).then(|| {
+        // Name keeps two fifths of the shared span, threads the rest.
+        let name_w = (available * 2 / 5).max(24);
+        let threads_x = INDEX_NAME_X + name_w + INDEX_GAP;
+        let threads_w = needs_start
+            .saturating_sub(INDEX_GAP)
+            .saturating_sub(threads_x);
+        (name_w, threads_x, threads_w)
+    });
+    IndexColumns {
+        name_x: INDEX_NAME_X,
+        name_w: threads.map_or(available.max(1), |(name_w, _, _)| name_w),
+        threads: threads.map(|(_, x, w)| (x, w)),
+        needs_end,
+        motion_end,
+        ready_end,
+        labels,
+    }
+}
+
+/// Pad `spans` from `*x` to `target`, then push `text` there and advance `*x`.
+fn place_span(
+    spans: &mut Vec<Span<'static>>,
+    x: &mut usize,
+    target: usize,
+    text: String,
+    style: Style,
+) {
+    if target > *x {
+        spans.push(Span::raw(" ".repeat(target - *x)));
+        *x = target;
+    }
+    *x += display_width(&text);
+    spans.push(Span::styled(text, style));
+}
+
+/// Push `text` so that it ends at `end` (right-aligned), advancing `*x`.
+fn place_right(
+    spans: &mut Vec<Span<'static>>,
+    x: &mut usize,
+    end: usize,
+    text: String,
+    style: Style,
+) {
+    let start = end.saturating_sub(display_width(&text));
+    place_span(spans, x, start, text, style);
+}
+
+/// The projects index's dim column legend: names left, counts right-aligned over
+/// their numbers.
+fn paint_index_header(width: u16) -> Line<'static> {
+    let columns = index_columns(width as usize);
+    let mut spans = Vec::new();
+    let mut x = 0;
+    place_span(
+        &mut spans,
+        &mut x,
+        columns.name_x,
+        "PROJECT".to_string(),
+        style_dim(),
+    );
+    if let Some((threads_x, threads_w)) = columns.threads {
+        if threads_w >= "THREADS".len() {
+            place_span(
+                &mut spans,
+                &mut x,
+                threads_x,
+                "THREADS".to_string(),
+                style_dim(),
+            );
+        }
+    }
+    for (end, label) in [
+        (columns.needs_end, columns.labels.0),
+        (columns.motion_end, columns.labels.1),
+        (columns.ready_end, columns.labels.2),
     ] {
-        spans.push(Span::raw(" ".repeat(column.saturating_sub(x))));
-        spans.push(Span::styled(label.to_string(), style_dim()));
-        x = column + label.len();
+        place_right(&mut spans, &mut x, end, label.to_string(), style_dim());
     }
     bound_line(Line::from(spans), width as usize)
 }
 
-fn project_columns(width: usize) -> (usize, usize, usize) {
-    if width >= 52 {
-        (18, 29, 40)
+/// A count cell: zero paints a dim `·` so the eye skips it; a live number takes the
+/// weight of its lane (NEEDS YOU bold, IN MOTION plain, READY dim).
+fn index_count(value: usize, live_style: Style) -> (String, Style) {
+    if value == 0 {
+        ("\u{b7}".to_string(), style_dim())
     } else {
-        let ready = width.saturating_sub(5);
-        let motion = ready.saturating_sub(10);
-        let needs = motion.saturating_sub(10);
-        (needs, motion, ready)
+        (value.to_string(), live_style)
     }
 }
 
-/// One projects index row: the project name (plus path when basenames collide, and a
-/// `current directory` marker for the invocation project) with its open-work counts.
+/// `#a #b #c  +n`: as many thread names as fit, then a dim overflow count.
+pub(crate) fn threads_cell(threads: &[String], width: usize) -> String {
+    if threads.is_empty() || width == 0 {
+        return String::new();
+    }
+    let mut out = String::new();
+    let mut shown = 0;
+    for (index, thread) in threads.iter().enumerate() {
+        let label = format!("#{thread}");
+        let remaining = threads.len() - index - 1;
+        let overflow = if remaining > 0 {
+            format!("  +{remaining}")
+        } else {
+            String::new()
+        };
+        let candidate = if out.is_empty() {
+            label.clone()
+        } else {
+            format!("{out} {label}")
+        };
+        // Reserve room for the overflow marker unless this is the last thread.
+        if display_width(&candidate) + display_width(&overflow) > width {
+            break;
+        }
+        out = candidate;
+        shown += 1;
+    }
+    let hidden = threads.len() - shown;
+    if shown == 0 {
+        return present_line(&format!("+{}", threads.len()), width);
+    }
+    if hidden > 0 {
+        out.push_str(&format!("  +{hidden}"));
+    }
+    // Thread names are normalized on entry, but the store is hand-editable: escape
+    // before painting like every other stored string.
+    present_line(&out, width)
+}
+
+/// One projects index row: the name cell (basename, a dim `here` on the invocation
+/// project), the wide-width thread column, and the right-aligned open-work counts.
 fn paint_project_row(
     model: &QueueFrameModel<'_>,
     index: usize,
@@ -3776,56 +3937,55 @@ fn paint_project_row(
     let Some(row) = model.projects.get(index) else {
         return paint_bounded_line("", width, style_plain());
     };
+    let columns = index_columns(width as usize);
     let marker = if selected { "\u{25b8} " } else { "  " };
     let basename = crate::ui::board::project_option_label(Path::new(&row.path));
-    let (needs_x, motion_x, ready_x) = project_columns(width as usize);
-    let name = if row.duplicate_basename && width < 80 {
-        let parent = Path::new(&row.path)
-            .parent()
-            .and_then(Path::file_name)
-            .and_then(|name| name.to_str())
-            .unwrap_or(&row.path);
-        format!("{basename} (/{parent})")
-    } else {
-        basename
-    };
-    let path_suffix = if row.duplicate_basename && width >= 80 {
-        format!("  \u{b7} {}", row.path)
-    } else {
-        String::new()
-    };
     let name_style = if selected {
         style_bold()
     } else {
         style_plain()
     };
-    // The name gets the space before the first count, not the whole row. The previous
-    // budget accidentally truncated the complete row to one cell when a name was long.
-    let prefix_width = display_width(&format!(" {marker}"));
-    let name_budget = needs_x.saturating_sub(prefix_width).max(1);
-    let name = present_line(&name, name_budget);
-    let mut spans = vec![Span::styled(format!(" {marker}{name}"), name_style)];
-    let current = prefix_width + display_width(&name);
-    spans.push(Span::raw(" ".repeat(needs_x.saturating_sub(current))));
-    let needs = row.needs_you.to_string();
-    spans.push(Span::styled(needs.clone(), style_dim()));
-    let after_needs = needs_x + display_width(&needs);
-    spans.push(Span::raw(" ".repeat(motion_x.saturating_sub(after_needs))));
-    let motion = row.in_motion.to_string();
-    spans.push(Span::styled(motion.clone(), style_dim()));
-    let after_motion = motion_x + display_width(&motion);
-    spans.push(Span::raw(" ".repeat(ready_x.saturating_sub(after_motion))));
-    let ready = row.ready.to_string();
-    spans.push(Span::styled(ready.clone(), style_dim()));
-    // Escape and budget the path before constructing a styled span. `bound_line` only
-    // sanitizes on overflow, while control bytes have zero display width.
-    if !path_suffix.is_empty() {
-        let suffix_budget = (width as usize).saturating_sub(ready_x + display_width(&ready));
-        let safe_suffix = present_line(&path_suffix, suffix_budget);
-        spans.push(Span::styled(safe_suffix, style_dim()));
+    let here = if row.current {
+        " \u{b7} here".to_string()
+    } else {
+        String::new()
+    };
+    // The name cell is the basename plus a dim `here` on the launch project. The
+    // basename wins over the marker; only when nothing else remains does it truncate.
+    // Same-named projects are told apart by the status row, which paints the
+    // selected row's full path.
+    let name_w = columns.name_w;
+    let (name, suffix) = [here, String::new()]
+        .iter()
+        .find_map(|suffix| {
+            let safe_suffix = present_line(suffix, name_w);
+            (display_width(&basename) + display_width(&safe_suffix) <= name_w)
+                .then(|| (basename.clone(), safe_suffix))
+        })
+        .unwrap_or_else(|| (present_line(&basename, name_w.max(1)), String::new()));
+
+    let mut spans = vec![Span::styled(format!(" {marker}"), name_style)];
+    let mut x = display_width(&format!(" {marker}"));
+    place_span(&mut spans, &mut x, columns.name_x, name, name_style);
+    if !suffix.is_empty() {
+        let at = x;
+        place_span(&mut spans, &mut x, at, suffix, style_dim());
     }
-    if row.current {
-        spans.push(Span::styled(" · current directory", style_dim()));
+    if let Some((threads_x, threads_w)) = columns.threads {
+        let cell = threads_cell(&row.threads, threads_w);
+        if !cell.is_empty() {
+            place_span(&mut spans, &mut x, threads_x, cell, style_dim());
+        }
+    }
+    for (end, (text, style)) in [
+        (columns.needs_end, index_count(row.needs_you, style_bold())),
+        (
+            columns.motion_end,
+            index_count(row.in_motion, style_plain()),
+        ),
+        (columns.ready_end, index_count(row.ready, style_dim())),
+    ] {
+        place_right(&mut spans, &mut x, end, text, style);
     }
     bound_line(Line::from(spans), width as usize)
 }
@@ -4130,10 +4290,20 @@ fn paint_quick_add_hint(
     );
 }
 
+/// The projects index's idle status: the selected row's stored path, so same-named
+/// projects stay distinguishable without crowding the rows.
+fn index_selected_path(model: &QueueFrameModel<'_>) -> String {
+    model
+        .projects
+        .get(model.projects_cursor)
+        .map(|row| format!(" {}", row.path))
+        .unwrap_or_default()
+}
+
 fn paint_status_line(
     message: Option<&str>,
     undo_offset: Option<usize>,
-    counts: StatusCounts,
+    idle: &str,
     width: u16,
     hint: Option<StatusHint<'_>>,
 ) -> (Line<'static>, Option<(u16, u16)>) {
@@ -4152,12 +4322,7 @@ fn paint_status_line(
         });
         (shown, strip_color(style_bold()), undo_hit)
     } else {
-        // Idle status: done count only. In-motion is already on the section header.
-        (
-            present_line(&format!(" {} done", counts.done), width as usize),
-            style_dim(),
-            None,
-        )
+        (present_line(idle, width as usize), style_dim(), None)
     };
     let left_w = display_width(&left);
     // The left text always wins the row. The hint drops its crumb first, then its keys.
@@ -4548,7 +4713,7 @@ mod tests {
     fn narrow_selector_reserves_desk_and_projects_tabs() {
         let view = QueueView {
             sections: vec![],
-            counts: StatusCounts::default(),
+            counts: crate::ui::queue::StatusCounts::default(),
             projects: vec![],
         };
         let model = QueueFrameModel {
@@ -4599,7 +4764,7 @@ mod tests {
     }
 
     #[test]
-    fn project_row_escapes_control_bytes_even_when_suffix_fits() {
+    fn index_status_path_is_escaped_and_rows_carry_only_the_basename() {
         let unsafe_path = "/tmp/\u{1b}]52;clipboard\u{7}/repo".to_string();
         let projects = vec![
             ProjectRow {
@@ -4607,21 +4772,21 @@ mod tests {
                 needs_you: 0,
                 in_motion: 0,
                 ready: 1,
+                threads: Vec::new(),
                 current: false,
-                duplicate_basename: true,
             },
             ProjectRow {
                 path: "/other/repo".into(),
                 needs_you: 0,
                 in_motion: 0,
                 ready: 1,
+                threads: Vec::new(),
                 current: false,
-                duplicate_basename: true,
             },
         ];
         let view = QueueView {
             sections: vec![],
-            counts: StatusCounts::default(),
+            counts: crate::ui::queue::StatusCounts::default(),
             projects: projects.clone(),
         };
         let model = QueueFrameModel {
@@ -4654,10 +4819,19 @@ mod tests {
             archived_header_selected: false,
             rows_dim: false,
         };
-        let line = paint_project_row(&model, 0, false, 120);
+        // The status row paints the selected path, escaped.
+        let idle = index_selected_path(&model);
+        let (line, _) = paint_status_line(None, None, &idle, 200, None);
         let text = plain(&line);
-        assert!(text.contains("\\u{001b}]52;clipboard\\u{0007}"));
+        assert!(text.contains("\\u{001b}]52;clipboard\\u{0007}"), "{text}");
         assert!(!text.contains('\u{1b}'));
+        // Rows never paint the path, and the basename stays clean at every width.
+        for width in [40, 60, 79, 100, 120, 200] {
+            let text = plain(&paint_project_row(&model, 0, false, width));
+            assert!(!text.contains("clipboard"), "{width}: {text}");
+            assert!(!text.contains('\u{1b}'), "{width}: {text}");
+            assert!(text.contains("repo"), "{width}: {text}");
+        }
     }
 
     #[test]

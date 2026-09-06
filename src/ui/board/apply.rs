@@ -1275,15 +1275,29 @@ fn apply_board_intent(
             return Ok(IntentOutcome::None);
         }
         BoardIntent::SelectProjectRow(index) => {
-            // Mouse route onto an index row: select it, and a direct click opens the
-            // project in slot 2. Index rows are navigation, never tasks: no task verb
-            // can reach them because `selected_id()` stays untouched.
+            // Mouse route onto an index row: a click selects it (the status row then names
+            // its path), a second click on the same row inside the double-click window
+            // opens the project in slot 2. Index rows are navigation, never tasks: no
+            // task verb can reach them because `selected_id()` stays untouched.
             let Some(row) = model.project_rows().into_iter().nth(index) else {
                 return Ok(IntentOutcome::None);
             };
+            let path = PathBuf::from(row.path);
             model.projects_selected = index;
-            model.set_board_scope(ProjectScopeOption::Project(PathBuf::from(row.path)));
             model.clear_message();
+            let now = Instant::now();
+            let is_double = model
+                .last_project_row_click
+                .as_ref()
+                .is_some_and(|(at, last)| {
+                    *last == path && now.duration_since(*at) <= ROW_DOUBLE_CLICK_WINDOW
+                });
+            if is_double {
+                model.last_project_row_click = None;
+                model.set_board_scope(ProjectScopeOption::Project(path));
+            } else {
+                model.last_project_row_click = Some((now, path));
+            }
             return Ok(IntentOutcome::None);
         }
         BoardIntent::ToggleAllGroups => {

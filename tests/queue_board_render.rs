@@ -4903,7 +4903,7 @@ fn real_thread_picker_paints_query_and_options() {
 }
 
 #[test]
-fn projects_index_paints_aligned_counts_search_hint_and_duplicate_paths() {
+fn projects_index_paints_aligned_counts_search_hint_and_selected_path() {
     let mut domain = DomainState::new();
     for path in ["/one/alpha", "/two/alpha"] {
         domain
@@ -4924,6 +4924,84 @@ fn projects_index_paints_aligned_counts_search_hint_and_duplicate_paths() {
         None,
     )
     .expect("projects index");
+
+    // Closed search: the status row names the selected project's path; rows never do.
+    let rows = board_rows(&model, 162, 43);
+    let text = rows.join("\n");
+    let status = rows
+        .iter()
+        .find(|row| row.trim_start().starts_with("/one/alpha"))
+        .expect("status row paints the selected path");
+    assert!(
+        rows.iter()
+            .position(|row| row == status)
+            .expect("status index")
+            > rows.len() - 4,
+        "the path sits on the footer status row:\n{text}"
+    );
+    assert!(
+        !text.contains("/two/alpha"),
+        "the unselected twin's path is nowhere on the frame:\n{text}"
+    );
+    let header_index = rows
+        .iter()
+        .position(|row| row.contains("NEEDS YOU"))
+        .expect("header");
+    assert_eq!(
+        rows[header_index + 1].trim(),
+        "",
+        "one blank row separates the legend from the first project:\n{text}"
+    );
+    let header = &rows[header_index];
+    let first = &rows[header_index + 2];
+    assert!(
+        first.contains("▸ alpha · here") && !first.contains("/one"),
+        "the selected row is the launch project, basename plus here, no path:\n{first}"
+    );
+    let twin = &rows[header_index + 3];
+    assert!(
+        twin.trim_start().starts_with("alpha ") && !twin.contains('/') && !twin.contains("here"),
+        "the twin paints the bare basename:\n{twin}"
+    );
+    // Counts are right-aligned: the last cell of each legend word sits over the digit.
+    // Positions are char columns, not byte offsets (the marker and dots are multibyte).
+    let legend_end =
+        |label: &str| char_col(header, header.find(label).expect(label)) + label.len() - 1;
+    let ready_x = char_col(first, first.rfind('1').expect("ready count"));
+    assert_eq!(
+        legend_end("READY"),
+        ready_x,
+        "READY right edge over its count:\n{header}\n{first}"
+    );
+    let zero_cells: Vec<usize> = first
+        .match_indices('·')
+        .map(|(x, _)| char_col(first, x))
+        .collect();
+    assert!(
+        zero_cells.contains(&legend_end("NEEDS YOU"))
+            && zero_cells.contains(&legend_end("IN MOTION")),
+        "zero counts paint a dim dot under the legend's right edge:\n{header}\n{first}"
+    );
+    assert!(
+        !first.contains(" 0"),
+        "zero never paints as a digit:\n{first}"
+    );
+
+    // Moving the cursor moves the path.
+    apply_intent(&mut domain, &mut model, BoardIntent::SelectNext, None).expect("move down");
+    let rows = board_rows(&model, 162, 43);
+    let text = rows.join("\n");
+    assert!(
+        rows.iter()
+            .any(|row| row.trim_start().starts_with("/two/alpha")),
+        "status row follows the index cursor:\n{text}"
+    );
+    assert!(
+        !text.contains("/one/alpha"),
+        "only the selected path paints:\n{text}"
+    );
+
+    // Open search: the footer slot is the query, and the hint leaves the table.
     apply_intent(
         &mut domain,
         &mut model,
@@ -4939,63 +5017,152 @@ fn projects_index_paints_aligned_counts_search_hint_and_duplicate_paths() {
     )
     .expect("type search");
     let rows = board_rows(&model, 162, 43);
+    let text = rows.join("\n");
     assert!(
         rows.iter().any(|row| row.contains("▎ alpha")),
-        "visible footer search query missing:\n{}",
-        rows.join("\n")
+        "visible footer search query missing:\n{text}"
     );
-    let text = rows.join("\n");
     assert!(
         !rows[..10.min(rows.len())]
             .iter()
             .any(|row| row.contains("search projects")),
         "search hint must not remain above the project table:\n{text}"
     );
-    assert!(
-        text.contains("/one/alpha") && text.contains("/two/alpha"),
-        "paths missing:\n{text}"
-    );
-    assert!(
-        text.contains("current directory"),
-        "current project indicator missing:\n{text}"
-    );
-    let header = rows
+    // The status row is the input now, so the selected path moves to the reserved row
+    // directly above it (the query reset the cursor to the first match).
+    let input_index = rows
         .iter()
-        .find(|row| row.contains("NEEDS YOU"))
-        .expect("header");
-    let first = rows
-        .iter()
-        .find(|row| row.contains("/one/alpha"))
-        .expect("row");
+        .position(|row| row.contains("▎ alpha"))
+        .expect("input row");
     assert_eq!(
-        header.chars().position(|ch| ch == 'N'),
-        first.chars().position(|ch| ch == '0'),
-        "numeric count starts under NEEDS YOU"
+        rows[input_index - 1].trim(),
+        "/one/alpha",
+        "selected path paints above the search input:\n{text}"
+    );
+    assert!(
+        !rows[..input_index - 1].iter().any(|row| row.contains('/')),
+        "no path anywhere else while searching:\n{text}"
     );
 
-    for width in [40, 80, 162] {
+    for width in [40, 52, 79, 100, 162] {
         let rows = board_rows(&model, width, 20);
         let text = rows.join("\n");
-        assert!(
-            text.contains("alpha"),
-            "project basename is visible at {width}:\n{text}"
-        );
+        let header = rows
+            .iter()
+            .find(|row| row.contains("PROJECT"))
+            .expect("header");
         let project_rows: Vec<&String> = rows
             .iter()
             .filter(|row| {
-                row.contains("alpha (/") || row.contains("/one/alpha") || row.contains("/two/alpha")
+                row.contains("alpha") && row.contains('·') && row.trim_end().ends_with('1')
             })
             .collect();
         assert_eq!(
             project_rows.len(),
             2,
-            "both duplicate rows paint at {width}:\n{text}"
+            "both same-named rows paint at {width}:\n{text}"
         );
-        assert!(
-            project_rows.iter().any(|row| row.contains("0")),
-            "a count remains visible at minimum width {width}:\n{text}"
+        let ready_end =
+            char_col(header, header.find("READY").expect("ready label")) + "READY".len() - 1;
+        for row in &project_rows {
+            assert_eq!(
+                row.rfind('1').map(|x| char_col(row, x)),
+                Some(ready_end),
+                "READY count anchors to the right edge at {width}:\n{header}\n{row}"
+            );
+            assert!(
+                !row.contains('/'),
+                "rows never paint a path at {width}:\n{row}"
+            );
+        }
+        assert_eq!(
+            header.contains("THREADS"),
+            width >= 100,
+            "THREADS column opens at 100 and above only ({width}):\n{header}"
         );
     }
+}
+
+/// Char column of a byte offset inside a single-width rendered row.
+fn char_col(row: &str, byte: usize) -> usize {
+    row[..byte].chars().count()
+}
+
+#[test]
+fn projects_index_threads_column_lists_names_then_an_overflow_count() {
+    let mut domain = DomainState::new();
+    for (title, thread) in [
+        ("a", "board-redesign"),
+        ("b", "cli-router"),
+        ("c", "site-landing"),
+        ("d", "docs-keys"),
+        ("e", "release-0.5"),
+        ("f", "board-redesign"),
+    ] {
+        domain
+            .create(
+                title,
+                None,
+                TaskScope::Project {
+                    path: "/repos/alpha".into(),
+                },
+                ProvenanceOrigin::Manual,
+                Some(thread.into()),
+            )
+            .expect("task");
+    }
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/alpha")));
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::SelectNavTab(NavTab::Projects),
+        None,
+    )
+    .expect("projects index");
+
+    let rows = board_rows(&model, 162, 24);
+    let row = rows
+        .iter()
+        .find(|row| row.contains("alpha · here"))
+        .expect("project row");
+    assert!(
+        row.contains("#board-redesign #release-0.5 #docs-keys #site-landing #cli-router"),
+        "all five threads fit at 162, most recently updated first:\n{row}"
+    );
+    assert!(
+        !row.contains('+'),
+        "no overflow when every thread fits:\n{row}"
+    );
+
+    let rows = board_rows(&model, 100, 24);
+    let row = rows
+        .iter()
+        .find(|row| row.contains("alpha · here"))
+        .expect("project row");
+    let header = rows
+        .iter()
+        .find(|row| row.contains("THREADS"))
+        .expect("threads header");
+    assert!(
+        row.contains("#board-redesign") && row.contains("  +"),
+        "narrow threads column truncates to an overflow count:\n{header}\n{row}"
+    );
+    assert!(
+        !row.contains("#cli-router"),
+        "the last thread gives way to the overflow count:\n{row}"
+    );
+    assert_eq!(
+        header.find("THREADS").map(|x| char_col(header, x)),
+        row.find("#board").map(|x| char_col(row, x)),
+        "thread cell starts under its legend:\n{header}\n{row}"
+    );
+
+    let rows = board_rows(&model, 99, 24);
+    let text = rows.join("\n");
+    assert!(
+        !text.contains("#board") && !text.contains("THREADS"),
+        "below 100 the threads column is gone:\n{text}"
+    );
 }
 
 #[test]

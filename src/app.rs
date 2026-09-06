@@ -1340,9 +1340,12 @@ fn board_mouse_intent(
         crate::ui::render::QueueHitMap::default()
     };
     let intent = map_responsive_board_mouse(model, &hits, area, mouse);
-    if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) && intent.is_none() {
-        // Any pointer target that is not a named row is inert; nothing arms a
-        // double-click on the index (rows open on a single click).
+    if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
+        && !matches!(intent, Some(BoardIntent::SelectProjectRow(_)))
+    {
+        // Any left press that is not an index-row click disarms a pending index-row
+        // double-click: inert cells and other controls (tabs, chips, search) alike.
+        // The header double-click shares the same disarm.
         model.cancel_project_header_double_click();
     }
     let intent = intent?;
@@ -2860,7 +2863,7 @@ mod tests {
     }
 
     #[test]
-    fn projects_index_row_click_opens_that_project_in_slot_2() {
+    fn projects_index_row_click_selects_and_a_second_click_opens_slot_2() {
         use crate::ui::board::{apply_intent, board_hit_map};
         use crate::ui::mouse::left_click;
         use crate::ui::render::QueueHitTarget;
@@ -2928,8 +2931,36 @@ mod tests {
         drive(&mut domain, &mut model, mouse);
         assert_eq!(
             model.selected_project(),
+            Some(Path::new("/repos/alpha")),
+            "a single index-row click only moves the index cursor"
+        );
+        assert_eq!(
+            model.selected_project_row().map(|row| row.path),
+            Some("/repos/beta".to_string()),
+            "the clicked row is selected"
+        );
+        // A click on another mapped control between the two row clicks disarms the
+        // pending double-click: the second row click selects again instead of opening.
+        let hits = board_hit_map(area, &model);
+        let tab = hits
+            .regions
+            .iter()
+            .find(|hit| matches!(hit.target, QueueHitTarget::NavTab(NavTab::Projects)))
+            .expect("projects tab hit");
+        let tab_click = left_click(tab.area.x, tab.area.y);
+        drive(&mut domain, &mut model, tab_click);
+        drive(&mut domain, &mut model, mouse);
+        assert_eq!(
+            model.selected_project(),
+            Some(Path::new("/repos/alpha")),
+            "an intervening click on the tab disarms the row double-click"
+        );
+
+        drive(&mut domain, &mut model, mouse);
+        assert_eq!(
+            model.selected_project(),
             Some(Path::new("/repos/beta")),
-            "a direct index-row click opens that project in slot 2"
+            "a second click on the same row inside the window opens it in slot 2"
         );
 
         // Index rows are navigation: the click mutated no task, and the pin reanchors
