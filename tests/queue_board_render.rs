@@ -974,7 +974,6 @@ fn quick_add_refusal_message_uses_the_reserved_blank_row_without_color_or_overfl
                 placeholder: "title…",
                 refusal: None,
                 message: Some("Title required"),
-                hint: None,
                 above_rows: Vec::new(),
                 cursor_row_offset: 0,
             },

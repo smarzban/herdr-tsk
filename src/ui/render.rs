@@ -400,10 +400,6 @@ pub struct BottomInputSlot<'a> {
     /// A contextual refusal that needs its own row above the input. Empty-text
     /// refusals belong in `refusal` so they never cover the cursor.
     pub message: Option<&'a str>,
-    /// Dim context painted on the reserved row while no `message` claims it (the
-    /// projects search shows the selected row's path here, since the status row it
-    /// normally lives on is the input).
-    pub hint: Option<String>,
     /// Wrapped continuation rows painting ABOVE the input line, top row first.
     /// Empty for single-line drafts; a multiline draft also suppresses `message`,
     /// which shares those rows.
@@ -421,7 +417,6 @@ impl<'a> BottomInputSlot<'a> {
             placeholder,
             refusal: None,
             message: None,
-            hint: None,
             above_rows: Vec::new(),
             cursor_row_offset: 0,
         }
@@ -1312,13 +1307,16 @@ fn paint_footer(
             {
                 if let Some(message) = input.message {
                     paint_bottom_input_message(frame, surface, message_row, width, message);
-                } else if let Some(hint) = input.hint.as_deref() {
+                } else if matches!(model.overlay, QueueOverlay::ProjectsSearch { .. }) {
+                    // The status row is the query while searching, so the selected
+                    // project's path moves to the reserved row above it. Read from the
+                    // frame's already-built view: no second queue query per paint.
                     put_line(
                         frame,
                         surface,
                         message_row,
                         width,
-                        paint_bounded_line(hint, width, style_dim()),
+                        paint_bounded_line(&index_selected_path(model), width, style_dim()),
                     );
                 }
             }

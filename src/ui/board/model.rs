@@ -1627,10 +1627,9 @@ impl BoardModel {
 
     /// The index row the cursor rests on.
     pub fn selected_project_row(&self) -> Option<ProjectRow> {
-        self.queue_view()
-            .projects
-            .get(self.projects_cursor())
-            .cloned()
+        let projects = self.queue_view().projects;
+        let cursor = self.projects_selected.min(projects.len().saturating_sub(1));
+        projects.into_iter().nth(cursor)
     }
 
     pub(super) fn move_projects_cursor(&mut self, forward: bool) -> bool {
