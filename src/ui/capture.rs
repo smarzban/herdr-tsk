@@ -598,8 +598,8 @@ pub fn apply_capture_intent(
             } else {
                 match crate::domain::normalize_thread(thread_value) {
                     Ok(thread) => Some(thread),
-                    Err(_) => {
-                        model.thread_refusal = Some("invalid thread name".into());
+                    Err(error) => {
+                        model.thread_refusal = Some(crate::domain::thread_refusal_message(error));
                         model.message = None;
                         return Ok(CaptureOutcome::None);
                     }
@@ -2541,8 +2541,9 @@ mod tests {
             CaptureOutcome::None
         );
         assert!(domain.tasks().is_empty());
-        assert_eq!(model.thread_refusal.as_deref(), Some("invalid thread name"));
-        assert!(render_plain(&model, 80, 16).contains("invalid thread name"));
+        let refusal = model.thread_refusal.as_deref().expect("thread refusal");
+        assert!(refusal.contains("hyphens"), "{refusal}");
+        assert!(render_plain(&model, 80, 16).contains("hyphens"));
     }
 
     #[test]

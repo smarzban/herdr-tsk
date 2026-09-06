@@ -781,6 +781,17 @@ pub fn map_board_mouse(
             Some(QueueHitTarget::Step(index)) => Some(BoardIntent::SelectStep(index)),
             Some(QueueHitTarget::StepAdd) => Some(BoardIntent::BeginAddStep),
             Some(QueueHitTarget::Verb(index)) => verb_intent(model, index),
+            Some(QueueHitTarget::TaskNumber(id)) if model.empty_add_step_editor() => {
+                Some(BoardIntent::CopyTaskNumber(id))
+            }
+            Some(QueueHitTarget::Task(id)) if model.empty_add_step_editor() => model
+                .visible_ids()
+                .iter()
+                .position(|&visible| visible == id)
+                .map(BoardIntent::SelectIndex),
+            Some(QueueHitTarget::PageScroll(offset)) if model.empty_add_step_editor() => {
+                Some(BoardIntent::PageScrollTo(offset))
+            }
             _ => None,
         },
         BoardInputMode::SaveRecovery => None,

@@ -75,7 +75,7 @@ selected, every verb answers `select a task first`.
 
 ## Delete and undo
 
-`ctrl+x` (or `ctrl+Delete`) soft-deletes the selected task. It leaves every lens
+`ctrl+x` (or `ctrl+Delete`) asks once (`press ctrl+x again to delete`), then soft-deletes the selected task. It leaves every lens
 and the status row reads `Deleted "title" · u Undo` until your next action. Nothing
 on the board hard-deletes; `tsk list --deleted` still shows it.
 

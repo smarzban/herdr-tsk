@@ -296,6 +296,15 @@ fn build_task_page_overlay<'a>(
                 .collect()
         })
         .unwrap_or_default();
+    for text in &form.steps.pending_adds {
+        step_views.push(render::StepView {
+            done: false,
+            rows: crate::ui::edit::wrap_text(text, step_text_width)
+                .into_iter()
+                .map(|row| row.text)
+                .collect(),
+        });
+    }
     let stored_step_count = step_views.len();
     // Existing-step edits are task-session drafts. Paint every parked draft first, then the
     // active row over it. Only the active EditStep mode receives cursor metadata, so moving to
@@ -555,7 +564,7 @@ fn build_task_page_overlay<'a>(
     // present). The identifier belongs in the header, so it never competes with scope hits.
     // A wide column moves the project up into its header slot: the scope footer paints only
     // while the edit session can change it, so its control stays reachable by mouse.
-    let editing_session = form.is_task() && form.editing || model.open_field_edit().is_some();
+    let editing_session = !form.is_task() || form.editing || model.open_field_edit().is_some();
     let show_scope = !column || editing_session;
     let meta_scope = if show_scope {
         match &form.scope {
@@ -570,18 +579,21 @@ fn build_task_page_overlay<'a>(
     let meta_scope_x = 0;
     meta.push_str(&meta_scope);
     let mut thread_slot = None;
-    if let Some(task) = bound_task {
-        let shown_thread = if form.is_task() && form.editing {
-            Some(form.thread.value())
-        } else {
-            task.thread.as_deref()
-        };
+    let capture_form = !form.is_task();
+    let shown_thread = if capture_form || (form.is_task() && form.editing) {
+        Some(form.thread.value())
+    } else {
+        bound_task.and_then(|task| task.thread.as_deref())
+    };
+    if bound_task.is_some() || capture_form {
+        let task = bound_task;
         // Without a scope ahead of it (a wide column outside an edit session) the thread
         // leads the footer and drops its separator.
         let separator = if meta.is_empty() { "" } else { " · " };
         thread_slot = if let Some(thread) = shown_thread.filter(|thread| !thread.is_empty()) {
             Some(format!("{separator}#{}", terminal_text(thread)))
-        } else if (form.is_task() && form.editing)
+        } else if capture_form
+            || (form.is_task() && form.editing)
             || matches!(
                 model.input_mode(),
                 BoardInputMode::EditTitle
@@ -601,17 +613,19 @@ fn build_task_page_overlay<'a>(
         if let Some(slot) = &thread_slot {
             meta.push_str(slot);
         }
-        let now = SystemTime::now();
-        let ages = format!(
-            "created {} ago · updated {} ago",
-            render::format_age(now, task.created_at),
-            render::format_age(now, task.updated_at)
-        );
-        if meta.is_empty() {
-            meta.push_str(&ages);
-        } else {
-            meta.push_str(" · ");
-            meta.push_str(&ages);
+        if let Some(task) = task {
+            let now = SystemTime::now();
+            let ages = format!(
+                "created {} ago · updated {} ago",
+                render::format_age(now, task.created_at),
+                render::format_age(now, task.updated_at),
+            );
+            if meta.is_empty() {
+                meta.push_str(&ages);
+            } else {
+                meta.push_str(" · ");
+                meta.push_str(&ages);
+            }
         }
     }
     let thread_slot_width = thread_slot

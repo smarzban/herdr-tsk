@@ -23,8 +23,8 @@ park/resume, linking, and dispatch are not in this tree; reference lives on
 
 A gitignored `HANDOFF.md` may hold this clone’s live working state.
 
-For scriptable board work, use `tsk add` and `tsk list`; read
-`skills/tsk-cli/SKILL.md` first for retry and scope-check rules.
+For scriptable board work, use `tsk add`, `tsk list`, `tsk status`, `tsk edit`, and
+`tsk steps`; read `skills/tsk-cli/SKILL.md` first for retry and scope-check rules.
 
 ### Board
 
@@ -83,15 +83,15 @@ For scriptable board work, use `tsk add` and `tsk list`; read
 - Task creation is the quick-add bar, never a form takeover. `+` opens a one-line
   title input on the status-row slot with a blank row above and below, list still
   visible. `Enter` saves and closes, `Shift+Enter` saves and stays open, `Tab`
-  expands the draft onto the task page with a title·notes·scope stash, so Esc
-  returns to the line and a second `Tab` restores what was typed. A project board
+  expands the draft onto the task page with a title·notes·thread·scope stash and a
+  `+ step` row, so Esc returns to the line and a second `Tab` restores what was typed. A project board
   defaults the draft to that project, a project-less board defaults it to your desk, and home
   keeps the invocation cwd-derived default. Capture tokens in the title: `!p` and
   `!t` each consume one whitespace-delimited argument. Bare `!p` selects your desk,
   `!p name` selects a project basename (case-insensitive), and `!p /path` uses that
   path verbatim. Bare `!t` unthreads, while `!t name` assigns a normalized thread:
-  lowercase ASCII alphanumerics and hyphens, starting with an alphanumeric, at most
-  32 characters. Tokens are stripped from the saved title. A saved task becomes the
+  lowercase ASCII alphanumerics, hyphens, and dots, starting with an alphanumeric, at most
+  32 characters. A refusal names the rule (start character, allowed characters, or length). Tokens are stripped from the saved title. A saved task becomes the
   selection. Success has no status message: the row flash is the feedback. Refusals
   paint while the line is open and clear when it closes.
 - There is no inline board capture form. Creation detail lives on the task page;
@@ -105,8 +105,10 @@ For scriptable board work, use `tsk add` and `tsk list`; read
   the one exception being a quick-add draft expanded with `Tab`, which opens
   straight into Notes edit mode because a draft has nothing to view. `ctrl+s`
   toggles a selected step, otherwise it starts or reopens the task. Plain `Enter`
-  parks an existing-step rename; `Shift+Enter` saves the complete task-edit
-  session, with `Alt+Enter` as the legacy-terminal fallback. The scope footer is
+  parks an existing-step rename; on a new step it saves that step and opens the next empty
+  row. `Shift+Enter` saves the complete task-edit session (and a typed new step), with
+  `Alt+Enter` as the legacy-terminal fallback. An empty new-step row discards if you click
+  elsewhere. `ctrl+x` asks once (`press ctrl+x again to delete`) before deleting a task. The scope footer is
   inert until an edit has started.
 - Content and chrome use mono modifiers only, at every width. No color theme module.
 - No host attention poll, park/resume, linking, or dispatch recovery on the board.

@@ -1036,6 +1036,7 @@ fn x_soft_deletes_and_status_line_names_task_with_undo_hint() {
     }
     assert_eq!(model.selected_id(), Some(id));
 
+    apply_intent(&mut domain, &mut model, BoardIntent::SoftDelete, None).expect("arm delete");
     let outcome =
         apply_intent(&mut domain, &mut model, BoardIntent::SoftDelete, None).expect("soft delete");
     assert_eq!(outcome, IntentOutcome::Persist);
@@ -1070,6 +1071,7 @@ fn u_undoes_with_domain_coverage_and_stale_undo_refused_visibly() {
         )
         .expect("create");
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
+    apply_intent(&mut domain, &mut model, BoardIntent::SoftDelete, None).expect("arm delete");
     apply_intent(&mut domain, &mut model, BoardIntent::SoftDelete, None).expect("delete");
     assert!(domain.get(id).expect("task").soft_deleted);
     assert!(!model.visible_ids().contains(&id));
@@ -1084,6 +1086,7 @@ fn u_undoes_with_domain_coverage_and_stale_undo_refused_visibly() {
 
     // stale undo: delete again (records entry with current rev), then direct-restore (advances rev
     // without popping the entry). Next undo must refuse visibly.
+    apply_intent(&mut domain, &mut model, BoardIntent::SoftDelete, None).expect("arm delete2");
     apply_intent(&mut domain, &mut model, BoardIntent::SoftDelete, None).expect("delete2");
     assert!(domain.get(id).expect("task").soft_deleted);
     let _ = domain.restore(id);
@@ -1208,6 +1211,7 @@ fn deleting_from_the_page_closes_it_and_undo_restores() {
     apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
     let delete = map_key(BoardInputMode::TaskPage, ctrl(KeyCode::Char('x'))).expect("x");
     assert_eq!(delete, BoardIntent::SoftDelete);
+    apply_intent(&mut domain, &mut model, delete.clone(), None).expect("arm delete");
     apply_intent(&mut domain, &mut model, delete, None).expect("delete");
     assert!(domain.get(id).expect("task").soft_deleted);
     assert_eq!(
@@ -1422,12 +1426,12 @@ fn task_edit_save_uses_shift_enter_with_alt_enter_as_the_legacy_fallback() {
     assert_eq!(
         map_key(BoardInputMode::EditStep, press(KeyCode::Enter)),
         Some(BoardIntent::ConfirmEdit),
-        "plain Enter saves one inline step and returns to the target"
+        "plain Enter saves a new step and opens the next empty row"
     );
     assert_eq!(
         map_key(BoardInputMode::EditStep, alt(KeyCode::Enter)),
         Some(BoardIntent::ConfirmEditNext),
-        "Alt+Enter must exactly match the inline editor's Shift+Enter save-next route"
+        "Alt+Enter must exactly match the inline editor's Shift+Enter save-and-exit route"
     );
     assert_eq!(
         map_key(BoardInputMode::EditNotes, shift(KeyCode::Enter)),
@@ -1994,7 +1998,7 @@ fn view_step_target_tabs_to_an_independent_plain_enter_editor() {
         IntentOutcome::Persist
     );
     model.sync_from_domain(&domain);
-    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+    assert_eq!(model.input_mode(), BoardInputMode::EditStep);
     assert!(
         !model.task_editing(),
         "saving an add must not save a task session"
@@ -2084,8 +2088,8 @@ fn ctrl_a_opens_step_add_from_task_view_and_every_task_edit_state() {
     apply_intent(&mut domain, &mut model, BoardIntent::ConfirmEdit, None).expect("save view add");
     model.sync_from_domain(&domain);
     assert!(
-        rendered_board(&model, 80, 24).contains("▸ ▪ view add"),
-        "plain Enter selects the independently saved stored step"
+        rendered_board(&model, 80, 24).contains("▪ view add"),
+        "plain Enter saves the step and opens the next empty row"
     );
 
     apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None).expect("title");
@@ -2563,8 +2567,8 @@ fn add_verb_opens_editor_shift_enter_applies_esc_cancels() {
     for ch in "zed step".chars() {
         apply_intent(&mut domain, &mut model, BoardIntent::EditInsert(ch), None).expect("type");
     }
-    let save = map_key(model.input_mode(), shift(KeyCode::Enter)).expect("shift+enter");
-    assert_eq!(save, BoardIntent::ConfirmEditNext);
+    let save = map_key(model.input_mode(), press(KeyCode::Enter)).expect("enter");
+    assert_eq!(save, BoardIntent::ConfirmEdit);
     let outcome = apply_intent(&mut domain, &mut model, save, None).expect("add step");
     assert_eq!(outcome, IntentOutcome::Persist);
     // The app boundary persisted; add mode keeps an empty next inline row open (T-4).
@@ -2574,7 +2578,7 @@ fn add_verb_opens_editor_shift_enter_applies_esc_cancels() {
     assert_eq!(
         texts,
         vec!["alpha step", "zed step"],
-        "Shift+Enter must append the typed step"
+        "Enter must append the typed step"
     );
     assert_eq!(
         task.history.last().expect("event").kind,
@@ -2619,16 +2623,16 @@ fn step_editor_shift_enter_reopens_and_retains_task_editing() {
         apply_intent(&mut domain, &mut model, BoardIntent::EditInsert(ch), None)
             .expect("type first step");
     }
-    let shift_enter = map_key(model.input_mode(), shift(KeyCode::Enter))
-        .expect("shift+enter maps in the step editor");
-    let outcome = apply_intent(&mut domain, &mut model, shift_enter, None)
-        .expect("save and reopen the inline row");
+    let enter =
+        map_key(model.input_mode(), press(KeyCode::Enter)).expect("enter maps in the step editor");
+    let outcome =
+        apply_intent(&mut domain, &mut model, enter, None).expect("save and reopen the inline row");
     assert_eq!(outcome, IntentOutcome::Persist);
     model.sync_from_domain(&domain);
     assert_eq!(
         model.input_mode(),
         BoardInputMode::EditStep,
-        "Shift+Enter in add mode reopens the inline row for the next step"
+        "Enter in add mode reopens the inline row for the next step"
     );
     let reopened = rendered_board(&model, 80, 24);
     assert!(
@@ -2641,16 +2645,15 @@ fn step_editor_shift_enter_reopens_and_retains_task_editing() {
         apply_intent(&mut domain, &mut model, BoardIntent::EditInsert(ch), None)
             .expect("type second step");
     }
-    let shift_enter = map_key(model.input_mode(), shift(KeyCode::Enter))
-        .expect("shift+enter saves the second step");
-    let outcome =
-        apply_intent(&mut domain, &mut model, shift_enter, None).expect("save and reopen");
+    let enter =
+        map_key(model.input_mode(), press(KeyCode::Enter)).expect("enter saves the second step");
+    let outcome = apply_intent(&mut domain, &mut model, enter, None).expect("save and reopen");
     assert_eq!(outcome, IntentOutcome::Persist);
     model.sync_from_domain(&domain);
     assert_eq!(
         model.input_mode(),
         BoardInputMode::EditStep,
-        "Shift+Enter keeps the next inline add row open"
+        "Enter keeps the next inline add row open"
     );
     apply_intent(&mut domain, &mut model, BoardIntent::CancelEdit, None)
         .expect("close the empty next row");
@@ -2835,7 +2838,7 @@ fn empty_step_text_refusal_paints_on_line_and_clears_on_close() {
         "the refusal clears when the line closes:\n{closed}"
     );
 
-    // A successful save clears it too: refuse once, type valid text, Shift+Enter saves.
+    // A successful save clears it too: refuse once, type valid text, Enter saves.
     apply_intent(&mut domain, &mut model, BoardIntent::BeginAddStep, None)
         .expect("reopen add editor");
     apply_intent(&mut domain, &mut model, shift_enter.clone(), None)
@@ -2844,8 +2847,8 @@ fn empty_step_text_refusal_paints_on_line_and_clears_on_close() {
         apply_intent(&mut domain, &mut model, BoardIntent::EditInsert(ch), None)
             .expect("type valid text");
     }
-    let outcome =
-        apply_intent(&mut domain, &mut model, shift_enter, None).expect("save the valid text");
+    let enter = map_key(model.input_mode(), press(KeyCode::Enter)).expect("enter");
+    let outcome = apply_intent(&mut domain, &mut model, enter, None).expect("save the valid text");
     assert_eq!(outcome, IntentOutcome::Persist);
     model.sync_from_domain(&domain);
     assert_eq!(model.input_mode(), BoardInputMode::EditStep);
@@ -2881,9 +2884,9 @@ fn step_input_is_inline_and_shift_enter_reopens_an_empty_next_row() {
         "the editor must not occupy the footer:\n{open}"
     );
 
-    let save_next = map_key(model.input_mode(), shift(KeyCode::Enter))
-        .expect("Shift+Enter saves the current step and starts the next");
-    assert_eq!(save_next, BoardIntent::ConfirmEditNext);
+    let save_next = map_key(model.input_mode(), press(KeyCode::Enter))
+        .expect("Enter saves the current step and starts the next");
+    assert_eq!(save_next, BoardIntent::ConfirmEdit);
     assert_eq!(
         apply_intent(&mut domain, &mut model, save_next, None).expect("save and continue"),
         IntentOutcome::Persist
@@ -4208,4 +4211,93 @@ fn toggle_all_groups_folds_and_unfolds_the_archived_group_with_the_others_when_t
         model.visible_ids().contains(&filed),
         "the archived group is still expanded, untouched while the drawer was shut"
     );
+}
+
+#[test]
+fn first_delete_asks_and_second_deletes() {
+    let (mut domain, mut model, id) = board_with_noted_task();
+    apply_intent(&mut domain, &mut model, BoardIntent::SoftDelete, None).expect("arm");
+    assert!(!domain.get(id).expect("task").soft_deleted);
+    assert_eq!(model.message(), Some("press ctrl+x again to delete"));
+    apply_intent(&mut domain, &mut model, BoardIntent::SoftDelete, None).expect("confirm");
+    assert!(domain.get(id).expect("task").soft_deleted);
+}
+
+#[test]
+fn empty_add_click_on_title_discards_the_row() {
+    let (mut domain, mut model, _) = board_with_steps("Click away", None, &["alpha"]);
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginAddStep, None).expect("open add");
+    assert_eq!(model.input_mode(), BoardInputMode::EditStep);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::FocusFormField(CaptureField::Title),
+        None,
+    )
+    .expect("click title");
+    assert_ne!(model.input_mode(), BoardInputMode::EditStep);
+    assert!(!rendered_board(&model, 80, 24).contains("step…"));
+}
+
+#[test]
+fn shift_enter_on_a_typed_add_saves_and_exits_task_editing() {
+    let (mut domain, mut model, id) = board_with_steps("Save exit", None, &["alpha"]);
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginAddStep, None).expect("open add");
+    for character in "bravo".chars() {
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::EditInsert(character),
+            None,
+        )
+        .expect("type");
+    }
+    assert_eq!(
+        apply_intent(&mut domain, &mut model, BoardIntent::ConfirmEditNext, None).expect("save"),
+        IntentOutcome::Persist
+    );
+    model.sync_from_domain(&domain);
+    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+    assert!(!model.task_editing());
+    let texts: Vec<&str> = domain
+        .get(id)
+        .expect("task")
+        .steps
+        .iter()
+        .map(|step| step.text.as_str())
+        .collect();
+    assert_eq!(texts, vec!["alpha", "bravo"]);
+}
+
+#[test]
+fn shift_enter_on_add_keeps_a_dirty_title() {
+    let (mut domain, mut model, id) = board_with_steps("Dirty title", None, &["alpha"]);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::FocusFormField(CaptureField::Title),
+        None,
+    )
+    .expect("title");
+    apply_intent(&mut domain, &mut model, BoardIntent::EditInsert('!'), None).expect("type");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginAddStep, None).expect("add");
+    for character in "bravo".chars() {
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::EditInsert(character),
+            None,
+        )
+        .expect("type step");
+    }
+    assert_eq!(
+        apply_intent(&mut domain, &mut model, BoardIntent::ConfirmEditNext, None).expect("save"),
+        IntentOutcome::Persist
+    );
+    model.sync_from_domain(&domain);
+    let task = domain.get(id).expect("task");
+    assert_eq!(task.title, "Dirty title!");
+    let texts: Vec<&str> = task.steps.iter().map(|step| step.text.as_str()).collect();
+    assert_eq!(texts, vec!["alpha", "bravo"]);
+    assert!(!model.task_editing());
 }

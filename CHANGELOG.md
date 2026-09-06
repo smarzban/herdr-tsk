@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+Thread names accept dots (`v0.0.6`). A refusal names the rule instead of `invalid thread name`.
+
+Expanded quick-add can set thread and add steps. Enter on a new step saves it and opens the next empty row; Shift+Enter saves the step and the task-edit session. An empty new-step row discards if you click elsewhere. Deleting a task asks `press ctrl+x again to delete` first.
+
 NEEDS YOU section: blocked and review tasks sit above IN MOTION on desk and on a
 project board. Desk ON DECK / project ON DECK keep ready work. An empty deck
 header is omitted while NEEDS YOU has rows.

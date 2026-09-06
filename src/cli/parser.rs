@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use uuid::Uuid;
 
 use super::steps::StepsAction;
-use crate::domain::{normalize_thread, HumanStatus};
+use crate::domain::{normalize_thread, thread_refusal_message, HumanStatus};
 
 /// A direct task operand, either the internal UUID or its human task number.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -647,10 +647,9 @@ pub fn parse_flag_add(args: &[String]) -> Result<FlagAdd, String> {
                 index += 1;
             }
             flag if flag.starts_with("--thread=") => {
-                parsed.thread = Some(
-                    normalize_thread(&flag["--thread=".len()..])
-                        .map_err(|_| "invalid thread name".to_owned())?,
-                );
+                parsed.thread = Some(normalize_thread(&flag["--thread=".len()..]).map_err(
+                    |error| format!("invalid thread name · {}", thread_refusal_message(error)),
+                )?);
                 parsed.has_item_flags = true;
                 index += 1;
             }
@@ -670,10 +669,9 @@ pub fn parse_flag_add(args: &[String]) -> Result<FlagAdd, String> {
                 index += 2;
             }
             "--thread" => {
-                parsed.thread = Some(
-                    normalize_thread(&value(flag)?)
-                        .map_err(|_| "invalid thread name".to_owned())?,
-                );
+                parsed.thread = Some(normalize_thread(&value(flag)?).map_err(|error| {
+                    format!("invalid thread name · {}", thread_refusal_message(error))
+                })?);
                 parsed.has_item_flags = true;
                 index += 2;
             }
