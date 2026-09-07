@@ -304,7 +304,9 @@ pub(super) struct BoardForm {
     /// advance independently while the user is editing.
     pub(super) task_snapshot: Option<Box<Task>>,
     /// View-mode scroll of the task page's shared notes-and-steps body, never used by capture.
+    pub(super) title_wrap_width: std::cell::Cell<usize>,
     pub(super) notes_scroll: usize,
+    pub(super) manual_page_scroll: bool,
     /// Page-session steps state (step cursor, window scroll, delete mark, step
     /// editor). Carried by the form so it lives exactly as long as the page does.
     pub(super) steps: StepsPageState,
@@ -402,7 +404,9 @@ impl BoardForm {
             scope_selected,
             binding,
             task_snapshot: None,
+            title_wrap_width: std::cell::Cell::new(0),
             notes_scroll: 0,
+            manual_page_scroll: false,
             steps: StepsPageState::default(),
             notes_max_scroll: std::cell::Cell::new(0),
             notes_width: std::cell::Cell::new(0),
@@ -1986,7 +1990,6 @@ impl BoardModel {
     pub fn page_scroll(&self) -> usize {
         self.form
             .as_ref()
-            .filter(|form| form.is_task())
             .map(|form| form.notes_scroll)
             .unwrap_or(0)
     }
@@ -2078,6 +2081,19 @@ impl BoardModel {
             .as_ref()
             .map(|quick_add| quick_add.title.value())
             .unwrap_or("")
+    }
+
+    /// Whether a quick-add draft is open: the status-row line or its expanded page.
+    /// The quick-capture popup session lives exactly as long as this draft.
+    pub fn quick_add_open(&self) -> bool {
+        self.quick_add.is_some()
+    }
+
+    /// Whether the expanded capture page is open over its retained quick-add line.
+    /// Esc there would collapse the page back to the line, which in the quick-capture
+    /// popup is the top-level draft Escape.
+    pub fn expanded_capture_open(&self) -> bool {
+        self.quick_add.is_some() && self.form.as_ref().is_some_and(|form| !form.is_task())
     }
 
     pub(super) fn clear_saved_task(&mut self) {
@@ -2300,6 +2316,7 @@ impl BoardModel {
     /// Apply the shared cursor-window origin contract whenever form focus enters Notes.
     fn set_form_focus(form: &mut BoardForm, focus: CaptureField) {
         form.focus = focus;
+        form.manual_page_scroll = false;
         // Notes drafts are cursor-windowed rather than a full copy of the shared
         // content stream. Entering the editor therefore returns its window to the
         // visible origin, so a prior reading scroll cannot hide the draft or put

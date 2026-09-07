@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+Quick capture opens the expanded quick-add page in a herdr popup instead of the old
+capture form. It is the same page as `+` then `Tab` on the board, opening with the
+cursor in Title: scope and selected-text prefill from the focused pane, `Shift+Enter`
+saves and closes the popup, `Esc` cancels and closes without creating a task, and a
+failed save keeps the draft editable with retry/cancel. `tsk capture` (or
+`TSK_MODE=capture`) opens the same page.
+
 Thread names accept dots (`v0.0.6`). A refusal names the rule instead of `invalid thread name`.
 
 Expanded quick-add can set thread and add steps. Enter on a new step saves it and opens the next empty row; Shift+Enter saves the step and the task-edit session. An empty new-step row discards if you click elsewhere. Deleting a task asks `press ctrl+x again to delete` first.

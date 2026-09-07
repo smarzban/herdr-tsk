@@ -73,8 +73,8 @@ herdr plugin action invoke open-board --plugin herdr-tsk
 It opens a **tsk** split beside the current pane. Invoke it again to focus the
 board you already have.
 
-**Quick capture** opens the capture form without a persistent board. Selected text
-in the focused pane becomes the title:
+**Quick capture** opens the expanded quick-add page in a short-lived popup, without
+a persistent board. Selected text in the focused pane becomes the title:
 
 ```bash
 herdr plugin action invoke quick-capture --plugin herdr-tsk

@@ -567,11 +567,21 @@ pub fn map_scrollbar_mouse(
     mouse: MouseEvent,
     dragging: &mut bool,
 ) -> ScrollbarMouse {
-    if !matches!(mode, BoardInputMode::Normal | BoardInputMode::TaskPage) {
+    if !matches!(
+        mode,
+        BoardInputMode::Normal
+            | BoardInputMode::TaskPage
+            | BoardInputMode::EditStep
+            | BoardInputMode::EditTitle
+            | BoardInputMode::EditNotes
+            | BoardInputMode::EditScope
+            | BoardInputMode::EditThread
+            | BoardInputMode::SelectThread
+    ) {
         *dragging = false;
         return ScrollbarMouse::Miss;
     }
-    let page = mode == BoardInputMode::TaskPage;
+    let page = mode != BoardInputMode::Normal;
     match mouse.kind {
         MouseEventKind::Down(MouseButton::Left) => {
             let pos = Position::new(mouse.column, mouse.row);
@@ -600,7 +610,13 @@ pub fn map_scrollbar_mouse(
 
 fn wheel_board_intent(model: &BoardModel, kind: MouseEventKind) -> Option<BoardIntent> {
     match model.input_mode() {
-        BoardInputMode::TaskPage | BoardInputMode::EditStep => match kind {
+        BoardInputMode::TaskPage
+        | BoardInputMode::EditTitle
+        | BoardInputMode::EditNotes
+        | BoardInputMode::EditScope
+        | BoardInputMode::EditThread
+        | BoardInputMode::SelectThread
+        | BoardInputMode::EditStep => match kind {
             MouseEventKind::ScrollUp => Some(BoardIntent::PageWheelScrollUp),
             MouseEventKind::ScrollDown => Some(BoardIntent::PageWheelScrollDown),
             _ => None,
@@ -646,6 +662,40 @@ pub fn map_board_mouse(
         _ => return None,
     }
     let pos = point(mouse.column, mouse.row);
+    if model.expanded_capture_open()
+        && matches!(
+            model.input_mode(),
+            BoardInputMode::EditTitle
+                | BoardInputMode::EditNotes
+                | BoardInputMode::EditScope
+                | BoardInputMode::EditThread
+                | BoardInputMode::SelectThread
+                | BoardInputMode::EditStep
+        )
+    {
+        let target = hit_at(hits, pos);
+        if let Some(hit) = hits.regions.iter().find(|hit| {
+            Some(hit.target) == target && hit.area.contains(Position::new(mouse.column, mouse.row))
+        }) {
+            match hit.target {
+                QueueHitTarget::FormTitle => {
+                    return Some(BoardIntent::FocusFormCursor(
+                        CaptureField::Title,
+                        mouse.row.saturating_sub(hit.area.y) as usize,
+                        mouse.column.saturating_sub(hit.area.x + 4) as usize,
+                    ))
+                }
+                QueueHitTarget::FormNotes(row) => {
+                    return Some(BoardIntent::FocusFormCursor(
+                        CaptureField::Notes,
+                        row,
+                        mouse.column.saturating_sub(hit.area.x + 2) as usize,
+                    ))
+                }
+                _ => {}
+            }
+        }
+    }
     match model.input_mode() {
         BoardInputMode::Palette => match hit_at(hits, pos) {
             Some(QueueHitTarget::Command(index)) => model

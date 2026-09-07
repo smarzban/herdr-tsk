@@ -19,8 +19,9 @@ pub use board_pane::{find_board_pane_from_stdin, find_board_pane_id};
 
 /// Run the tsk binary entrypoint with argv-style arguments.
 ///
-/// Default mode is the Tasks board. Pass `capture` (or set `TSK_MODE=capture`)
-/// for Capture UI mode (form; exits after save/cancel).
+/// Default mode is the Tasks board. Pass `capture` (or set `TSK_MODE=capture`) for
+/// quick capture: the board session seeded onto the expanded quick-add page (exits
+/// after save or cancel).
 ///
 /// `--find-board-pane` is handled by the binary (`main`) before this entry.
 pub fn run(

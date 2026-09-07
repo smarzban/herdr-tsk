@@ -146,6 +146,7 @@ fn read_only_focus_refuses(intent: &BoardIntent) -> bool {
             | BoardIntent::FormFocusNext
             | BoardIntent::FormFocusPrev
             | BoardIntent::FocusFormField(_)
+            | BoardIntent::FocusFormCursor(_, _, _)
             | BoardIntent::SelectStep(_)
     )
 }
@@ -608,6 +609,28 @@ fn apply_board_intent(
             } else if model.form.is_some() && model.input_mode != BoardInputMode::FormScopeDropdown
             {
                 model.move_form_focus(false);
+            }
+            return Ok(IntentOutcome::None);
+        }
+        BoardIntent::FocusFormCursor(field, row, column) => {
+            let cursor = model.form.as_ref().and_then(|form| {
+                let (draft, width) = match field {
+                    CaptureField::Title => (&form.title, form.title_wrap_width.get()),
+                    CaptureField::Notes => (&form.notes, form.notes_width.get()),
+                    _ => return None,
+                };
+                crate::ui::edit::wrap_text(draft.value(), width.max(1))
+                    .get(row)
+                    .map(|row| row.cursor_at(column))
+            });
+            model.focus_form_field(field);
+            let focused = matches!(
+                (field, model.input_mode),
+                (CaptureField::Title, BoardInputMode::EditTitle)
+                    | (CaptureField::Notes, BoardInputMode::EditNotes)
+            );
+            if let Some(cursor) = cursor.filter(|_| focused) {
+                edit_draft(model, |draft| draft.set_cursor(cursor));
             }
             return Ok(IntentOutcome::None);
         }
@@ -1492,11 +1515,21 @@ fn apply_board_intent(
             return Ok(IntentOutcome::None);
         }
         BoardIntent::PageScrollTo(offset) => {
-            if model.focused_surface() != FocusedSurface::Task {
+            if model.focused_surface() != FocusedSurface::Task && !model.expanded_capture_open() {
                 return Ok(IntentOutcome::None);
             }
-            if let Some(form) = model.form.as_mut().filter(|form| form.is_task()) {
-                if model.input_mode == BoardInputMode::TaskPage {
+            if let Some(form) = model.form.as_mut() {
+                if matches!(
+                    model.input_mode,
+                    BoardInputMode::TaskPage
+                        | BoardInputMode::EditStep
+                        | BoardInputMode::EditTitle
+                        | BoardInputMode::EditNotes
+                        | BoardInputMode::EditScope
+                        | BoardInputMode::EditThread
+                        | BoardInputMode::SelectThread
+                ) {
+                    form.manual_page_scroll = true;
                     let horizon = form.notes_max_scroll.get();
                     form.notes_scroll = offset.min(horizon);
                 }
@@ -1504,14 +1537,21 @@ fn apply_board_intent(
             return Ok(IntentOutcome::None);
         }
         BoardIntent::PageWheelScrollUp | BoardIntent::PageWheelScrollDown => {
-            if model.focused_surface() != FocusedSurface::Task {
+            if model.focused_surface() != FocusedSurface::Task && !model.expanded_capture_open() {
                 return Ok(IntentOutcome::None);
             }
-            if let Some(form) = model.form.as_mut().filter(|form| form.is_task()) {
+            if let Some(form) = model.form.as_mut() {
                 if matches!(
                     model.input_mode,
-                    BoardInputMode::TaskPage | BoardInputMode::EditStep
+                    BoardInputMode::TaskPage
+                        | BoardInputMode::EditStep
+                        | BoardInputMode::EditTitle
+                        | BoardInputMode::EditNotes
+                        | BoardInputMode::EditScope
+                        | BoardInputMode::EditThread
+                        | BoardInputMode::SelectThread
                 ) {
+                    form.manual_page_scroll = true;
                     let horizon = form.notes_max_scroll.get();
                     form.notes_scroll = match intent {
                         BoardIntent::PageWheelScrollUp => form.notes_scroll.saturating_sub(1),
@@ -2013,6 +2053,7 @@ fn edit_draft(model: &mut BoardModel, operation: impl FnOnce(&mut EditBuffer)) {
     let Some(form) = model.form.as_mut() else {
         return;
     };
+    form.manual_page_scroll = false;
     match form.focus {
         CaptureField::Title => operation(&mut form.title),
         CaptureField::Notes => operation(&mut form.notes),

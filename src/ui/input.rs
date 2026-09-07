@@ -143,6 +143,8 @@ pub enum BoardIntent {
     FormFocusPrev,
     /// Focus one painted field of the already-open shared form (mouse).
     FocusFormField(CaptureField),
+    /// Focus a text field at a painted wrapped row and display-cell column.
+    FocusFormCursor(CaptureField, usize, usize),
     /// Enter or a second click opens or closes the selected task-page Thread text editor.
     /// It never commits or leaves the enclosing task edit session.
     ToggleThreadEditing,
@@ -1156,6 +1158,7 @@ pub fn intent_primary_action(intent: &BoardIntent) -> Option<PrimaryBoardAction>
         | BoardIntent::FormFocusNext
         | BoardIntent::FormFocusPrev
         | BoardIntent::FocusFormField(_)
+        | BoardIntent::FocusFormCursor(_, _, _)
         | BoardIntent::ToggleThreadEditing
         | BoardIntent::FormCycleScope
         | BoardIntent::OpenFormScopeDropdown

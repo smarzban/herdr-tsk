@@ -20,18 +20,15 @@ use crate::ui::board::{
     apply_intent, board_intent_may_persist, draw_board, resolve_board_command, BoardInputMode,
     BoardModel, IntentOutcome, ProjectsView, SaveResolution, WalkthroughOutcome,
 };
-use crate::ui::capture::{
-    apply_capture_intent, draw_capture, CaptureModel, CaptureOutcome, TITLE_REQUIRED_MESSAGE,
-};
+use crate::ui::capture::{CaptureField, TITLE_REQUIRED_MESSAGE};
 use crate::ui::input::{
-    map_capture_key_state, map_capture_paste_state, map_edit_paste, map_key, map_task_form_key,
-    route_responsive_key, BoardIntent, CaptureIntent, ResponsiveKeyRoute,
+    map_edit_paste, map_key, map_task_form_key, route_responsive_key, BoardIntent,
+    ResponsiveKeyRoute,
 };
 use crate::ui::mouse::{
-    capture_layout_for_model, enable_terminal_input, focused_mouse_area,
-    keyboard_enhancement_supported, map_capture_mouse, map_responsive_board_mouse,
-    map_scrollbar_mouse, press_on_focused_surface, scrollbar_hit_at, wide_mouse_focus_intent,
-    ScrollbarMouse,
+    enable_terminal_input, focused_mouse_area, keyboard_enhancement_supported,
+    map_responsive_board_mouse, map_scrollbar_mouse, press_on_focused_surface, scrollbar_hit_at,
+    wide_mouse_focus_intent, ScrollbarMouse,
 };
 use crate::ui::queue::NavTab;
 use crate::ui::scheduler;
@@ -39,15 +36,16 @@ use crate::ui::text_select::{
     copy_to_clipboard, copyable_line_at, frame_text_rows, selection_text,
 };
 
-/// Env var set by open-capture launcher for Capture UI mode.
+/// Env var set by open-capture launcher for the quick-capture popup session.
 pub const MODE_ENV: &str = "TSK_MODE";
 
-/// One binary, two modes (Board default; Capture for quick-capture).
+/// One binary, two modes (Board default; Capture is quick capture: the board session
+/// seeded onto the expanded quick-add page).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppMode {
     /// Primary Tasks board.
     Board,
-    /// Capture UI form.
+    /// Quick-capture popup (expanded quick-add page).
     Capture,
 }
 
@@ -87,11 +85,28 @@ fn load_snapshot() -> InvocationSnapshot {
 
 /// Load store + snapshot into domain and board view-model (no TTY).
 pub fn load_board() -> Result<(TaskStore, DomainState, BoardModel), Box<dyn Error>> {
+    load_board_inner(true)
+}
+
+/// Load store + snapshot for the quick-capture popup (no TTY).
+///
+/// The launch card is a board-open concern; the popup opens straight onto the draft
+/// page, and its archived-project scope fallback happens when the draft opens.
+pub fn load_board_for_quick_capture() -> Result<(TaskStore, DomainState, BoardModel), Box<dyn Error>>
+{
+    load_board_inner(false)
+}
+
+fn load_board_inner(
+    offer_launch_card: bool,
+) -> Result<(TaskStore, DomainState, BoardModel), Box<dyn Error>> {
     let store = TaskStore::new(default_state_dir());
     let state = store.load()?;
     let snapshot = load_snapshot();
     let mut model = BoardModel::from_domain(&state, snapshot.this_repo.clone());
-    model.offer_launch_card(&state, &snapshot);
+    if offer_launch_card {
+        model.offer_launch_card(&state, &snapshot);
+    }
     Ok((store, state, model))
 }
 
@@ -264,7 +279,8 @@ pub fn load_board_model() -> Result<BoardModel, Box<dyn Error>> {
 
 /// Binary entry used by `main`. Default mode is the Tasks board.
 ///
-/// Pass `capture` argv (or `TSK_MODE=capture`) for popup-style Capture UI.
+/// Pass `capture` argv (or `TSK_MODE=capture`) for the quick-capture popup: the board
+/// session seeded onto the expanded quick-add page (exits after save or cancel).
 pub fn run(args: impl IntoIterator<Item = impl AsRef<str>>) -> Result<(), Box<dyn Error>> {
     match resolve_mode(args) {
         AppMode::Board => run_board(),
@@ -272,34 +288,65 @@ pub fn run(args: impl IntoIterator<Item = impl AsRef<str>>) -> Result<(), Box<dy
     }
 }
 
-/// Standalone capture mode: form loop, exit after save or cancel (popup-style).
-fn run_capture() -> Result<(), Box<dyn Error>> {
-    let store = TaskStore::new(default_state_dir());
-    let mut domain = store.load()?;
-    let snapshot = load_snapshot();
-    let mut model = CaptureModel::from_snapshot(&snapshot);
-    // AC-39: an archived invocation repository is not on offer as a scope.
-    model.mark_archived_projects(&domain.archived_projects());
+/// Seed the quick-capture session onto the expanded quick-add page.
+///
+/// These are the same intents the board routes for `+` then `Tab`, plus one: `OpenCapture`
+/// stages the line from the invocation snapshot (scope and selected-text prefill) and
+/// `ExpandQuickAdd` lifts it onto the task page with Notes focused, then `FocusFormField`
+/// moves the cursor to Title so a name can be typed immediately. Neither of the first two
+/// intents has a failure mode; their Results exist for the mutating arms the shared reducer
+/// serves.
+pub fn seed_quick_capture(
+    domain: &mut DomainState,
+    model: &mut BoardModel,
+    snapshot: &InvocationSnapshot,
+) {
+    let _ = apply_intent(domain, model, BoardIntent::OpenCapture, Some(snapshot));
+    let _ = apply_intent(domain, model, BoardIntent::ExpandQuickAdd, None);
+    let _ = apply_intent(
+        domain,
+        model,
+        BoardIntent::FocusFormField(CaptureField::Title),
+        None,
+    );
+}
 
-    // Query before the alternate screen is entered: it can block on a terminal round-trip,
-    // and a blank alternate screen is what the user would be staring at meanwhile.
-    let keyboard_enhancement = keyboard_enhancement_supported();
-    ratatui::run(|terminal| -> io::Result<()> {
-        let _input = enable_terminal_input(keyboard_enhancement)?;
-        capture_form_loop(terminal, &store, &mut domain, &snapshot, &mut model)
-    })?;
-    Ok(())
+/// Whether the quick-capture popup session has ended: the draft is gone because a save
+/// persisted or the user discarded it. Every other state -- editing, refusals, save
+/// recovery, the retained line stash behind an expanded page -- keeps the popup open.
+pub fn quick_capture_finished(model: &BoardModel) -> bool {
+    !model.quick_add_open() && !model.board_form_open()
+}
+
+/// Quick capture: the board session seeded onto the expanded quick-add page.
+///
+/// The popup lives exactly as long as that draft: a persisted save closes it, an
+/// explicit discard closes it, and a failed save keeps it open in recovery.
+fn run_capture() -> Result<(), Box<dyn Error>> {
+    let (store, mut domain, mut model) = load_board_for_quick_capture()?;
+    let snapshot = load_snapshot();
+    seed_quick_capture(&mut domain, &mut model, &snapshot);
+    run_board_loop(store, domain, model, true)
 }
 
 fn run_board() -> Result<(), Box<dyn Error>> {
-    let (store, mut domain, mut model) = load_board()?;
+    let (store, domain, model) = load_board()?;
+    run_board_loop(store, domain, model, false)
+}
+
+fn run_board_loop(
+    store: TaskStore,
+    mut domain: DomainState,
+    mut model: BoardModel,
+    quick_capture: bool,
+) -> Result<(), Box<dyn Error>> {
     let walkthrough = WalkthroughRecord::new(default_config_dir());
     // `load_board` just read the store, so seed the watch from that snapshot: the first idle
     // tick must not immediately re-merge what is already loaded.
     let mut store_watch = StoreWatch::seeded(&store);
     // Focusing an existing plugin pane cannot refresh its inherited host environment. The
     // launcher publishes a one-shot request in the state dir, consumed only on idle ticks.
-    let mut reopen_watch = ReopenWatch::seeded(&store);
+    let mut reopen_watch = (!quick_capture).then(|| ReopenWatch::seeded(&store));
     // the board frame path does no host polling and does not
     // auto-open the walkthrough on launch. `load_board` is the whole open path; the first
     // paint below is of that model, unrefreshed. attention polling (removed),
@@ -372,7 +419,9 @@ fn run_board() -> Result<(), Box<dyn Error>> {
                     drag_gesture.has_autoscroll(),
                 )?;
                 if poll == FramePoll::Idle {
-                    apply_reopen_request(&mut model, &mut reopen_watch, &save_recovery);
+                    if let Some(watch) = reopen_watch.as_mut() {
+                        apply_reopen_request(&mut model, watch, &save_recovery);
+                    }
                     if let Some(auto) = drag_gesture.autoscroll() {
                         let area = terminal_area(terminal)?;
                         let content = drag_content_area(&model, area);
@@ -418,6 +467,7 @@ fn run_board() -> Result<(), Box<dyn Error>> {
                         &mut model,
                         intent,
                         &mut save_recovery,
+                        quick_capture,
                     )? {
                         break;
                     }
@@ -445,6 +495,7 @@ fn run_board() -> Result<(), Box<dyn Error>> {
                                 model,
                                 focus,
                                 &mut save_recovery,
+                                quick_capture,
                             )
                         },
                     )?;
@@ -461,6 +512,7 @@ fn run_board() -> Result<(), Box<dyn Error>> {
                                 &mut model,
                                 intent,
                                 &mut save_recovery,
+                                quick_capture,
                             )? {
                                 break;
                             }
@@ -605,6 +657,7 @@ fn run_board() -> Result<(), Box<dyn Error>> {
                                 model,
                                 focus,
                                 &mut save_recovery,
+                                quick_capture,
                             )
                         },
                     )?;
@@ -620,6 +673,7 @@ fn run_board() -> Result<(), Box<dyn Error>> {
                         &mut model,
                         intent,
                         &mut save_recovery,
+                        quick_capture,
                     )? {
                         break;
                     }
@@ -635,6 +689,7 @@ fn run_board() -> Result<(), Box<dyn Error>> {
                         &mut model,
                         intent,
                         &mut save_recovery,
+                        quick_capture,
                     )? {
                         break;
                     }
@@ -1362,17 +1417,6 @@ fn board_mouse_intent(
     resolve_board_command(model, intent)
 }
 
-/// Route a bracketed paste to the Capture intent the focused field accepts.
-///
-/// An unresolved save owns the form until Retry or Cancel, exactly as for a key press, so a
-/// paste is inert there rather than editing a draft the form is not accepting.
-fn capture_paste_intent(model: &CaptureModel, text: &str) -> Option<CaptureIntent> {
-    if model.is_save_recovery() {
-        return None;
-    }
-    map_capture_paste_state(model.focused(), model.is_path_editing(), text)
-}
-
 /// Apply one board intent and present any refusal instead of discarding it.
 ///
 /// A refused intent changes nothing: an open edit keeps its mode, its draft, and its cursor,
@@ -1518,16 +1562,38 @@ fn copy_task_number_with(
 }
 
 /// Apply a board intent. Returns `true` when the board loop should quit.
+///
+/// In the quick-capture popup (`quick_capture`), the loop also quits once the capture
+/// session has ended: the single choke point every key, mouse, and paste dispatch
+/// passes through, so a persisted save or a discard closes the popup no matter which
+/// route ended the draft.
 fn handle_board_intent(
     store: &TaskStore,
     domain: &mut DomainState,
     model: &mut BoardModel,
     intent: BoardIntent,
     save_recovery: &mut SaveRecovery<DomainState>,
+    quick_capture: bool,
 ) -> io::Result<bool> {
     if let BoardIntent::CopyTaskNumber(id) = intent {
         copy_task_number(domain, model, id);
         return Ok(false);
+    }
+
+    // Quick capture: Esc on the expanded draft is the top-level cancel. The board's
+    // collapse-to-line fallback would strand the popup on a retained one-line draft, so
+    // the whole draft is discarded and the popup closes. Nested Escapes keep their own
+    // semantics: an open scope dropdown maps to CancelFormScopeDropdown, the inline step
+    // editor owns its CancelEdit, and an unresolved save routes Esc to CancelSave before
+    // this dispatch.
+    if quick_capture
+        && intent == BoardIntent::CancelEdit
+        && !save_recovery.is_pending()
+        && model.expanded_capture_open()
+        && model.input_mode() != BoardInputMode::EditStep
+    {
+        let _ = apply_intent(domain, model, BoardIntent::CancelQuickAdd, None);
+        return Ok(true);
     }
 
     let baseline = if save_recovery.is_pending() || !board_intent_may_persist(&intent) {
@@ -1572,76 +1638,12 @@ fn handle_board_intent(
         },
     ) {
         IntentOutcome::Quit => Ok(true),
-        IntentOutcome::Persist | IntentOutcome::Persisted => Ok(false),
-        IntentOutcome::None => Ok(false),
+        IntentOutcome::Persist | IntentOutcome::Persisted | IntentOutcome::None => {
+            Ok(quick_capture && quick_capture_finished(model))
+        }
     }
 }
 
-/// Run the capture form until save/cancel.
-///
-/// Standalone capture mode: caller exits the process after this returns (popup closes).
-/// Board-initiated: caller resumes the board loop (same process).
-fn capture_form_loop(
-    terminal: &mut DefaultTerminal,
-    store: &TaskStore,
-    domain: &mut DomainState,
-    snapshot: &InvocationSnapshot,
-    model: &mut CaptureModel,
-) -> io::Result<()> {
-    loop {
-        terminal.draw(|frame| draw_capture(frame, model))?;
-        if !event::poll(Duration::from_millis(250))? {
-            continue;
-        }
-        match event::read()? {
-            Event::Key(key) if key.kind == KeyEventKind::Press => {
-                let Some(intent) = map_capture_key_state(
-                    model.focused(),
-                    model.is_path_editing(),
-                    model.is_save_recovery(),
-                    key,
-                ) else {
-                    continue;
-                };
-                match apply_capture_intent(domain, Some(store), snapshot, model, intent) {
-                    Ok(CaptureOutcome::Saved(_)) | Ok(CaptureOutcome::Cancelled) => break,
-                    Ok(CaptureOutcome::None) => {}
-                    Err(e) => {
-                        // Persist/domain failures after validation: abort form with error.
-                        return Err(io::Error::other(e.to_string()));
-                    }
-                }
-            }
-            Event::Mouse(mouse) => {
-                let area = terminal_area(terminal)?;
-                // One Capture geometry for renderer and live dispatch: scope controls and the
-                // disclosed path row must be clickable exactly where they are painted.
-                let layout = capture_layout_for_model(area, model);
-                let Some(intent) = map_capture_mouse(&layout, mouse) else {
-                    continue;
-                };
-                match apply_capture_intent(domain, Some(store), snapshot, model, intent) {
-                    Ok(CaptureOutcome::Saved(_)) | Ok(CaptureOutcome::Cancelled) => break,
-                    Ok(CaptureOutcome::None) => {}
-                    Err(e) => return Err(io::Error::other(e.to_string())),
-                }
-            }
-            Event::Paste(text) => {
-                let Some(intent) = capture_paste_intent(model, &text) else {
-                    continue;
-                };
-                match apply_capture_intent(domain, Some(store), snapshot, model, intent) {
-                    Ok(CaptureOutcome::Saved(_)) | Ok(CaptureOutcome::Cancelled) => break,
-                    Ok(CaptureOutcome::None) => {}
-                    Err(e) => return Err(io::Error::other(e.to_string())),
-                }
-            }
-            Event::Resize(_, _) => {}
-            _ => {}
-        }
-    }
-    Ok(())
-}
 #[cfg(test)]
 mod save_recovery_tests {
     use super::{apply_reopen_request, board_background_work_allowed};
@@ -2290,8 +2292,8 @@ mod tests {
     use crate::context::InvocationSnapshot;
     use crate::domain::{HumanStatus, ProvenanceOrigin, TaskScope};
     use crate::ui::board::{board_hit_map, CommandSurface};
-    use crate::ui::capture::CaptureField;
-    use crate::ui::input::{map_key, CaptureIntent};
+    use crate::ui::capture::{apply_capture_intent, CaptureField, CaptureModel};
+    use crate::ui::input::{map_capture_paste_state, map_key, CaptureIntent};
     use crate::ui::mouse::{
         focused_mouse_area, left_click, map_board_mouse, map_responsive_board_mouse,
         press_on_focused_surface,
@@ -3181,6 +3183,7 @@ mod tests {
             &mut model,
             BoardIntent::CopyTaskNumber(id),
             &mut recovery,
+            false,
         )
         .expect("copy intent");
 
@@ -3226,6 +3229,7 @@ mod tests {
             &mut model,
             BoardIntent::ConfirmEditNext,
             &mut recovery,
+            false,
         )
         .expect("real shift-enter save");
         assert_eq!(
@@ -3268,6 +3272,7 @@ mod tests {
             &mut model,
             BoardIntent::OpenCapture,
             &mut save_recovery,
+            false,
         )
         .expect("open capture");
         assert!(!quit);
@@ -3281,6 +3286,7 @@ mod tests {
                 &mut model,
                 BoardIntent::QuickAddInsert(ch),
                 &mut save_recovery,
+                false,
             )
             .expect("type title");
         }
@@ -3292,6 +3298,7 @@ mod tests {
             &mut model,
             BoardIntent::QuickAddSave,
             &mut save_recovery,
+            false,
         )
         .expect("save quick add");
         assert!(!quit);
@@ -3642,6 +3649,327 @@ mod tests {
         assert_eq!(model.input_mode(), BoardInputMode::Normal);
         assert!(!model.board_form_open());
         assert_eq!(model.selected_id(), Some(id));
+    }
+
+    /// Quick capture (prefix+c) seeds the popup with the expanded quick-add page and the
+    /// cursor in Title, snapshot defaults intact. The board's `+` then `Tab` keeps its
+    /// Notes focus; the popup opens on the title so a name can be typed immediately.
+    #[test]
+    fn quick_capture_seeds_the_expanded_draft_page_with_snapshot_defaults() {
+        let snapshot = InvocationSnapshot {
+            default_scope: TaskScope::Global,
+            this_repo: None,
+            title_prefill: Some("Popup draft".into()),
+            provenance: ProvenanceOrigin::Selection,
+        };
+        let mut domain = DomainState::new();
+        let mut model = BoardModel::from_domain(&domain, None);
+        seed_quick_capture(&mut domain, &mut model, &snapshot);
+
+        assert_eq!(model.quick_add_title_value(), "Popup draft");
+        assert_eq!(model.form_focus(), Some(CaptureField::Title));
+        assert_eq!(
+            model.input_mode(),
+            BoardInputMode::EditTitle,
+            "the popup opens with the cursor in the title"
+        );
+        assert!(model.board_form_open(), "the expanded page owns the popup");
+        assert!(!quick_capture_finished(&model), "the session is live");
+        assert!(domain.tasks().is_empty(), "seeding never creates a task");
+    }
+
+    /// The popup frame is the task-page takeover painting the expanded draft, not the
+    /// legacy capture form card.
+    #[test]
+    fn quick_capture_popup_paints_the_task_page_takeover() {
+        let snapshot = InvocationSnapshot {
+            default_scope: TaskScope::Global,
+            this_repo: None,
+            title_prefill: Some("Popup paint".into()),
+            provenance: ProvenanceOrigin::Capture,
+        };
+        let mut domain = DomainState::new();
+        let mut model = BoardModel::from_domain(&domain, None);
+        seed_quick_capture(&mut domain, &mut model, &snapshot);
+
+        // Also cover a smaller 50x16 viewport above the compact board's
+        // 40x10 operable floor, so the takeover stays readable there.
+        let width = 50u16;
+        let height = 16u16;
+        let backend = ratatui::backend::TestBackend::new(width, height);
+        let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
+        terminal
+            .draw(|frame| {
+                crate::ui::board::draw_board(frame, &model);
+            })
+            .expect("draw popup frame");
+        let buffer = terminal.backend().buffer().clone();
+        let rows: Vec<String> = (0..height)
+            .map(|y| {
+                (0..width)
+                    .map(|x| buffer.cell((x, y)).expect("cell").symbol())
+                    .collect()
+            })
+            .collect();
+        let frame_text = rows.join("\n");
+        assert!(
+            frame_text.contains("+ step"),
+            "expanded page must paint its step target"
+        );
+        assert!(
+            frame_text.contains("Popup paint"),
+            "the prefill paints on the page: {frame_text}"
+        );
+        assert!(
+            frame_text.contains("desk"),
+            "the snapshot's default destination paints: {frame_text}"
+        );
+    }
+
+    #[test]
+    fn quick_capture_save_persists_and_ends_the_popup_session() {
+        let temp = TempStore::new("quick-capture-popup-save");
+        let snapshot = InvocationSnapshot {
+            default_scope: TaskScope::Global,
+            this_repo: None,
+            title_prefill: Some("Popup saved task".into()),
+            provenance: ProvenanceOrigin::Capture,
+        };
+        let mut domain = DomainState::new();
+        let mut model = BoardModel::from_domain(&domain, None);
+        let mut recovery = SaveRecovery::new();
+        seed_quick_capture(&mut domain, &mut model, &snapshot);
+
+        let outcome = apply_board_intent_with_save_recovery(
+            &mut domain,
+            &mut model,
+            &mut recovery,
+            BoardSaveContext {
+                baseline: DomainState::new(),
+                intent: BoardIntent::ConfirmEdit,
+                snapshot: Some(&snapshot),
+            },
+            |working| {
+                temp.store
+                    .reload_merge_save(working)
+                    .map_err(|e| e.to_string())
+            },
+        )
+        .expect("save the popup draft");
+
+        assert_eq!(outcome, IntentOutcome::Persisted);
+        assert!(!recovery.is_pending());
+        assert!(
+            quick_capture_finished(&model),
+            "a persisted save closes the popup"
+        );
+        assert_eq!(temp.store.load().expect("reload").tasks().len(), 1);
+    }
+
+    #[test]
+    fn quick_capture_cancel_closes_without_creating_a_task() {
+        let snapshot = InvocationSnapshot {
+            default_scope: TaskScope::Global,
+            this_repo: None,
+            title_prefill: Some("Popup cancelled".into()),
+            provenance: ProvenanceOrigin::Capture,
+        };
+        let mut domain = DomainState::new();
+        let mut model = BoardModel::from_domain(&domain, None);
+        seed_quick_capture(&mut domain, &mut model, &snapshot);
+
+        // Esc first returns to the retained one-line draft (the board's existing flow).
+        apply_intent(&mut domain, &mut model, BoardIntent::CancelEdit, None)
+            .expect("cancel the page back to the line");
+        assert!(!quick_capture_finished(&model), "the line is still open");
+        assert!(domain.tasks().is_empty());
+
+        // Second Esc discards the line and ends the session.
+        apply_intent(&mut domain, &mut model, BoardIntent::CancelQuickAdd, None)
+            .expect("discard the draft line");
+        assert!(quick_capture_finished(&model), "cancel closes the popup");
+        assert!(domain.tasks().is_empty(), "cancel creates nothing");
+    }
+
+    /// The popup's Esc on the expanded draft is one press: the whole draft is discarded
+    /// and the session ends, instead of the board's fallback to the retained one-line
+    /// draft.
+    #[test]
+    fn popup_step_escape_keeps_the_parent_draft() {
+        let temp = TempStore::new("popup-step-escape");
+        let snapshot = InvocationSnapshot {
+            default_scope: TaskScope::Global,
+            this_repo: None,
+            title_prefill: Some("retained title".into()),
+            provenance: ProvenanceOrigin::Capture,
+        };
+        let mut domain = DomainState::new();
+        let mut model = BoardModel::from_domain(&domain, None);
+        let mut recovery = SaveRecovery::new();
+        seed_quick_capture(&mut domain, &mut model, &snapshot);
+        for intent in [
+            BoardIntent::BeginAddStep,
+            BoardIntent::EditInsertText("unsaved step".into()),
+        ] {
+            apply_intent(&mut domain, &mut model, intent, None).unwrap();
+        }
+        let intent = crate::ui::input::map_key(
+            model.input_mode(),
+            crossterm::event::KeyEvent::new(
+                crossterm::event::KeyCode::Esc,
+                crossterm::event::KeyModifiers::NONE,
+            ),
+        )
+        .expect("Escape maps");
+        let quit = handle_board_intent(
+            &temp.store,
+            &mut domain,
+            &mut model,
+            intent,
+            &mut recovery,
+            true,
+        )
+        .unwrap();
+        assert!(!quit);
+        assert!(model.expanded_capture_open());
+        assert_eq!(model.quick_add_title_value(), "retained title");
+        assert!(!quick_capture_finished(&model));
+    }
+
+    #[test]
+    fn quick_capture_esc_on_the_expanded_draft_closes_the_popup_in_one_press() {
+        let temp = TempStore::new("quick-capture-popup-esc");
+        let snapshot = InvocationSnapshot {
+            default_scope: TaskScope::Global,
+            this_repo: None,
+            title_prefill: Some("Popup esc".into()),
+            provenance: ProvenanceOrigin::Capture,
+        };
+        let mut domain = DomainState::new();
+        let mut model = BoardModel::from_domain(&domain, None);
+        let mut recovery = SaveRecovery::new();
+        seed_quick_capture(&mut domain, &mut model, &snapshot);
+
+        let quit = handle_board_intent(
+            &temp.store,
+            &mut domain,
+            &mut model,
+            BoardIntent::CancelEdit,
+            &mut recovery,
+            true,
+        )
+        .expect("cancel the popup draft");
+
+        assert!(quit, "one Esc closes the popup");
+        assert!(
+            quick_capture_finished(&model),
+            "the expanded page and the retained line are both gone"
+        );
+        assert!(domain.tasks().is_empty(), "Esc creates nothing");
+    }
+
+    /// The board keeps its two-press Esc: the expanded page falls back to the retained
+    /// one-line draft, only the second press discards it, and no cancel quits the board.
+    #[test]
+    fn board_esc_from_the_expanded_page_still_returns_to_the_retained_line() {
+        let temp = TempStore::new("board-expanded-esc");
+        let snapshot = InvocationSnapshot {
+            default_scope: TaskScope::Global,
+            this_repo: None,
+            title_prefill: Some("Board esc".into()),
+            provenance: ProvenanceOrigin::Capture,
+        };
+        let mut domain = DomainState::new();
+        let mut model = BoardModel::from_domain(&domain, None);
+        let mut recovery = SaveRecovery::new();
+        seed_quick_capture(&mut domain, &mut model, &snapshot);
+
+        let quit = handle_board_intent(
+            &temp.store,
+            &mut domain,
+            &mut model,
+            BoardIntent::CancelEdit,
+            &mut recovery,
+            false,
+        )
+        .expect("cancel the page");
+
+        assert!(!quit);
+        assert!(model.quick_add_open(), "the one-line draft is retained");
+        assert!(
+            model.board_form_open(),
+            "the page stays stashed so Tab can restore it"
+        );
+        assert_eq!(model.input_mode(), BoardInputMode::QuickAdd);
+
+        let quit = handle_board_intent(
+            &temp.store,
+            &mut domain,
+            &mut model,
+            BoardIntent::CancelQuickAdd,
+            &mut recovery,
+            false,
+        )
+        .expect("discard the line");
+        assert!(!quit, "a draft cancel never quits the board");
+        assert!(domain.tasks().is_empty());
+    }
+
+    #[test]
+    fn quick_capture_failed_save_keeps_the_editable_draft_in_recovery() {
+        let snapshot = InvocationSnapshot {
+            default_scope: TaskScope::Global,
+            this_repo: None,
+            title_prefill: Some("Popup recovery".into()),
+            provenance: ProvenanceOrigin::Capture,
+        };
+        let mut domain = DomainState::new();
+        let mut model = BoardModel::from_domain(&domain, None);
+        let mut recovery = SaveRecovery::new();
+        seed_quick_capture(&mut domain, &mut model, &snapshot);
+
+        let outcome = apply_board_intent_with_save_recovery(
+            &mut domain,
+            &mut model,
+            &mut recovery,
+            BoardSaveContext {
+                baseline: DomainState::new(),
+                intent: BoardIntent::ConfirmEdit,
+                snapshot: Some(&snapshot),
+            },
+            |_| Err("disk full".to_string()),
+        )
+        .expect("the failed save stays in the popup");
+
+        assert_eq!(outcome, IntentOutcome::None);
+        assert!(recovery.is_pending());
+        assert!(
+            !quick_capture_finished(&model),
+            "a failed save keeps the popup"
+        );
+        assert!(model.board_form_open(), "the draft stays editable");
+
+        // Cancel restores the baseline and returns to the retained line; the session is
+        // still live until the draft itself is discarded.
+        apply_board_intent_with_save_recovery(
+            &mut domain,
+            &mut model,
+            &mut recovery,
+            BoardSaveContext {
+                baseline: DomainState::new(),
+                intent: BoardIntent::CancelSave,
+                snapshot: None,
+            },
+            |working| unreachable!("cancelling recovery never persists: {working:?}"),
+        )
+        .expect("cancel the failed save");
+        assert!(!recovery.is_pending());
+        assert!(!quick_capture_finished(&model));
+        assert!(domain.tasks().is_empty(), "the baseline has no new task");
+
+        apply_intent(&mut domain, &mut model, BoardIntent::CancelQuickAdd, None)
+            .expect("discard the draft line");
+        assert!(quick_capture_finished(&model));
     }
 
     /// Without a snapshot, quick-add save must neither call `capture_save` nor report
@@ -4249,13 +4577,16 @@ mod tests {
         assert_eq!(model.focused(), CaptureField::Scope);
         assert!(model.is_path_editing());
 
-        let intent = capture_paste_intent(&model, "/repos/app").expect("a paste into the path");
+        let intent =
+            map_capture_paste_state(model.focused(), model.is_path_editing(), "/repos/app")
+                .expect("a paste into the path");
         apply_capture_intent(&mut domain, None, &snap, &mut model, intent)
             .expect("insert the paste");
         assert_eq!(model.scope_path_edit(), Some("/repos/app"));
 
         // The path is one line: a pasted break folds to a single space, CRLF included.
-        let intent = capture_paste_intent(&model, "\r\nmore").expect("a paste into the path");
+        let intent = map_capture_paste_state(model.focused(), model.is_path_editing(), "\r\nmore")
+            .expect("a paste into the path");
         apply_capture_intent(&mut domain, None, &snap, &mut model, intent)
             .expect("insert the paste");
         assert_eq!(model.scope_path_edit(), Some("/repos/app more"));
@@ -4278,7 +4609,10 @@ mod tests {
         )
         .expect("focus scope");
         assert!(!model.is_path_editing());
-        assert_eq!(capture_paste_intent(&model, "ignored"), None);
+        assert_eq!(
+            map_capture_paste_state(model.focused(), model.is_path_editing(), "ignored"),
+            None
+        );
     }
 
     /// a Capture paste reaches the focused text field, and nowhere else.
@@ -4297,7 +4631,8 @@ mod tests {
         let mut model = CaptureModel::from_snapshot(&snap);
         assert_eq!(model.focused(), CaptureField::Title);
 
-        let intent = capture_paste_intent(&model, "one\ntwo").expect("a paste into Title");
+        let intent = map_capture_paste_state(model.focused(), model.is_path_editing(), "one\ntwo")
+            .expect("a paste into Title");
         assert_eq!(intent, CaptureIntent::InsertText("one\ntwo".to_string()));
         apply_capture_intent(&mut domain, None, &snap, &mut model, intent)
             .expect("insert the paste");
@@ -4313,7 +4648,10 @@ mod tests {
             CaptureIntent::FocusField(CaptureField::Scope),
         )
         .expect("focus scope");
-        assert_eq!(capture_paste_intent(&model, "ignored"), None);
+        assert_eq!(
+            map_capture_paste_state(model.focused(), model.is_path_editing(), "ignored"),
+            None
+        );
         assert_eq!(model.title(), "one two");
     }
 
@@ -4358,12 +4696,15 @@ mod tests {
         assert!(model.is_save_recovery());
         assert_eq!(model.focused(), CaptureField::Title);
 
+        let intent = map_capture_paste_state(model.focused(), model.is_path_editing(), "pasted")
+            .expect("the paste still routes to the focused field");
+        apply_capture_intent(&mut domain, Some(&store), &snap, &mut model, intent)
+            .expect("recovery answers the paste without editing");
         assert_eq!(
-            capture_paste_intent(&model, "pasted"),
-            None,
+            model.title(),
+            "Pending",
             "recovery accepts only Retry or Cancel, by key or by paste"
         );
-        assert_eq!(model.title(), "Pending");
 
         let _ = fs::remove_dir_all(&dir);
     }

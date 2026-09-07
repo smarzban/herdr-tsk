@@ -111,9 +111,15 @@ For scriptable board work, use `tsk add`, `tsk list`, `tsk status`, `tsk edit`, 
   32 characters. A refusal names the rule (start character, allowed characters, or length). Tokens are stripped from the saved title. A saved task becomes the
   selection. Success has no status message: the row flash is the feedback. Refusals
   paint while the line is open and clear when it closes.
-- There is no inline board capture form. Creation detail lives on the task page;
-  the standalone Capture UI (`AppMode::Capture`, `src/ui/capture.rs`) is a
-  separate surface reached through the host launcher.
+- There is no inline board capture form and no standalone capture-form surface.
+  Creation detail lives on the task page. Quick capture (`tsk capture`,
+  or `TSK_MODE=capture`) runs the same board session seeded onto the expanded
+  quick-add page (title focused, launch card skipped): a persisted save or an
+  explicit discard exits the process (which closes the host popup), and a failed
+  save keeps the draft editable through the usual recovery. The host launcher opens
+  it as a fixed-size popup below the wide threshold (`scripts/open-capture.sh`);
+  the legacy Capture form module (`src/ui/capture.rs`) is no longer reachable from
+  the binary.
 - Below 110 columns, row click peeks, clicking the same row again closes peek, and
   a fast double-click opens the page. At wide widths there is no peek: a board or rail
   row click selects it in place (a rail click lands the board in stage A), and a fast

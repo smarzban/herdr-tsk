@@ -133,19 +133,16 @@ Backspace, and paste.
 | `?` help | `↑` `↓`, `j` `k`, page keys, wheel scroll · `Esc`, `?`, or `q` close |
 | save failed | `r` or `Enter` retry · `c` or `Esc` cancel |
 
-## Capture line and form
+## Quick-add and quick capture
 
 | Key | Does |
 | --- | --- |
-| `Tab` / `Shift+Tab` | Title, Notes, Thread, Scope |
-| `Enter` in Title or Thread | save |
-| `Enter` in Notes | new line |
-| `Ctrl+Enter` in Title, Notes, or Thread | save (`Alt+Enter` is the legacy-terminal fallback) |
-| `1` `2` `3` on Scope | this project · desk · other path |
-| `s`, `Space`, `←` `→` on Scope | cycle the scope |
-| `p` or `e` on Scope | type another path; `Enter` confirms it |
-| `Enter` on Scope | save |
-| `Esc` | cancel |
+| `Enter` on the `+` line | save and close |
+| `Shift+Enter` on the `+` line | save and stay open |
+| `Tab` on the `+` line | expand onto the task page (notes edit) |
+| `Esc` | close the line, or return to it from the expanded page |
 
-On the board `+` line: `Enter` saves and closes, `Shift+Enter` saves and stays
-open, `Tab` expands onto the task page.
+The herdr quick-capture popup is that expanded page with the cursor in Title:
+`Shift+Enter` saves and closes the popup, `Esc` cancels and closes in one press. A
+failed save keeps the draft editable with retry/cancel. Editing keys are the task
+page's and the shared text-field set above.
