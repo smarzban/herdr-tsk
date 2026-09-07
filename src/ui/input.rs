@@ -749,18 +749,14 @@ pub fn map_key(mode: BoardInputMode, key: KeyEvent) -> Option<BoardIntent> {
         BoardInputMode::EditThread => map_thread_edit_key(key),
         BoardInputMode::EditTitle | BoardInputMode::EditNotes => map_edit(mode, key),
         // A step edit belongs to the retained task form, not a modal editor. Enter saves one
-        // independent add; Shift+Enter saves and opens the next empty add row. Alt+Enter is
-        // the same save-next intent for terminals that cannot distinguish Shift+Enter.
+        // independent add; Shift+Enter saves the session. Alt+Enter is not a save route on
+        // the board.
         BoardInputMode::EditStep => {
             let shift_save = key.modifiers.contains(KeyModifiers::SHIFT)
                 && !key
                     .modifiers
                     .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER);
-            let alt_save = key.modifiers.contains(KeyModifiers::ALT)
-                && !key
-                    .modifiers
-                    .intersects(KeyModifiers::CONTROL | KeyModifiers::SHIFT | KeyModifiers::SUPER);
-            if key.code == KeyCode::Enter && (shift_save || alt_save) {
+            if key.code == KeyCode::Enter && shift_save {
                 Some(BoardIntent::ConfirmEditNext)
             } else if key.code == KeyCode::Enter && key.modifiers.is_empty() {
                 Some(BoardIntent::ConfirmEdit)
@@ -984,9 +980,9 @@ fn map_form_edit_key(
     let super_key = mods.contains(KeyModifiers::SUPER);
 
     match key.code {
-        // Shift+Enter is the visible task-session save chord. Alt+Enter is the legacy-terminal
-        // fallback because an unenhanced terminal cannot distinguish Shift+Enter from Enter.
-        KeyCode::Enter if shift != alt && !ctrl && !super_key => {
+        // Shift+Enter is the one task-session save chord. Alt+Enter is not a fallback here
+        // (standalone Capture keeps its own); a modified Enter that is not Shift is inert.
+        KeyCode::Enter if shift && !alt && !ctrl && !super_key => {
             return Some(BoardIntent::ConfirmEdit)
         }
         KeyCode::Tab => match navigation {
@@ -1032,8 +1028,14 @@ fn map_form_edit_key(
             KeyCode::Enter if focused == CaptureField::Notes => {
                 Some(BoardIntent::EditInsertLineBreak)
             }
-            // Task edits save only through Shift+Enter, matched above. A plain Enter must
-            // neither save a title/thread nor close an inline step editor.
+            // A one-line Title is finished by Enter: focus moves on to Notes. Saving stays
+            // Shift+Enter (matched above).
+            KeyCode::Enter
+                if focused == CaptureField::Title && navigation == FormEditNavigation::Form =>
+            {
+                Some(BoardIntent::FormFocusNext)
+            }
+            // A plain Enter must neither save a thread nor close an inline step editor.
             KeyCode::Enter => None,
             KeyCode::Esc => Some(BoardIntent::CancelEdit),
             KeyCode::Backspace => Some(BoardIntent::EditBackspace),
