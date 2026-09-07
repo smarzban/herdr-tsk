@@ -336,6 +336,7 @@ fn fixture_model_on_tab<'a>(
         projects_cursor: 0,
         projects_query: "",
         summary: None,
+        context: " desk".to_string(),
         status_message: None,
         status_undo_offset: None,
         verb_items: fixture_verbs(),
@@ -679,9 +680,10 @@ fn standard_78x24_fixture_has_selector_list_rule_status_verb_and_no_other_chrome
     );
 
     let status = trimmed(&rows[22]);
-    assert!(
-        status.contains("done") && !status.contains("in motion"),
-        "status line must show done count only: {status:?}"
+    assert_eq!(
+        status.trim(),
+        "desk",
+        "idle status line must name the active lens"
     );
     assert!(
         !status.contains("need") && !status.contains("claude") && !status.contains("grok"),
@@ -840,8 +842,8 @@ fn desk_and_project_focus_paint_needs_you_above_in_motion() {
 fn assert_visible_chrome(rows: &[String], geo: TierGeometry, dimensions: &str) {
     let status = trimmed(&rows[geo.status_row.expect("status row") as usize]);
     assert!(
-        status.contains("done") && !status.contains("in motion"),
-        "{dimensions}: status must remain reachable: {status:?}"
+        !status.is_empty() && !status.contains("done"),
+        "{dimensions}: lens context must remain reachable: {status:?}"
     );
     let verbs = trimmed(&rows[geo.verb_row.expect("verb row") as usize]);
     assert!(
@@ -2241,9 +2243,10 @@ fn compact_notes_editor_never_paints_into_the_rule_or_status_row_at_40x10() {
         "rule row lost its rule chrome: {:?}",
         rows[rule_row as usize]
     );
-    assert!(
-        trimmed(&rows[status_row as usize]).contains("done"),
-        "status row lost its counts chrome: {:?}",
+    assert_eq!(
+        trimmed(&rows[status_row as usize]).trim(),
+        "desk",
+        "status row lost its desk context: {:?}",
         rows[status_row as usize]
     );
 }
@@ -3016,6 +3019,11 @@ fn a_selected_thread_filter_hides_redundant_labels_and_narrows_the_board() {
 
     let rows = board_rows(&model, 80, 24);
     let joined = rows.join("\n");
+    assert_eq!(
+        rows[22].trim(),
+        "tsk · #release",
+        "idle status row carries the active thread filter"
+    );
     assert!(
         joined.contains("Prototype the queue-style board UI"),
         "matching rows stay visible:\n{joined}"
@@ -3413,7 +3421,7 @@ fn task_page_caps_a_wrapped_header_inside_the_page_body() {
         rows.join("\n")
     );
     assert!(
-        rows[8].contains("done"),
+        rows[8].contains("desk"),
         "the status row was overwritten by the header:\n{}",
         rows.join("\n")
     );
@@ -4523,6 +4531,51 @@ fn archived_tab_verb_bar_advertises_ctrl_u_enter_esc() {
     assert!(
         frame.contains("ctrl+u unarchive \u{b7} enter open \u{b7} esc close"),
         "the archived tab's footer reads its own verbs:\n{frame}"
+    );
+}
+
+#[test]
+fn project_picker_main_tab_advertises_archive_without_leaking_to_thread_picker() {
+    let mut domain = DomainState::new();
+    domain
+        .create(
+            "picker task",
+            None,
+            project("/repos/picker"),
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/picker")));
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenProjectSelector,
+        None,
+    )
+    .expect("project picker");
+    let main = board_rows(&model, 80, 24).join("\n");
+    assert!(
+        main.contains("↑↓ move \u{b7} enter choose \u{b7} ctrl+f archive \u{b7} esc close"),
+        "main project picker must advertise archive:\n{main}"
+    );
+
+    apply_intent(&mut domain, &mut model, BoardIntent::CloseLayer, None).expect("close picker");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenThreadFilterPicker,
+        None,
+    )
+    .expect("thread picker");
+    let threads = board_rows(&model, 80, 24).join("\n");
+    assert!(
+        threads.contains("↑↓ move \u{b7} enter choose \u{b7} esc close"),
+        "thread picker must keep its ordinary footer:\n{threads}"
+    );
+    assert!(
+        !threads.contains("ctrl+f archive"),
+        "thread picker must not advertise project archive:\n{threads}"
     );
 }
 

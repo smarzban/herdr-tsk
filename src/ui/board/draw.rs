@@ -146,6 +146,15 @@ pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
     }
     entries.push(ADD);
     entries.push(HELP);
+    if model.visible_delete_notice().is_some() {
+        entries.insert(
+            0,
+            VerbEntry {
+                key: "u",
+                label: "undo",
+            },
+        );
+    }
     entries
 }
 
@@ -631,6 +640,28 @@ fn build_task_page_overlay<'a>(
     }
 }
 
+/// Idle status-row context for the active lens. Stored paths and thread names reach the
+/// renderer only through its `present_line` path before they are painted.
+fn footer_context(model: &BoardModel, surface: BoardSurface) -> String {
+    match surface {
+        BoardSurface::Desk => " desk".to_string(),
+        BoardSurface::Projects | BoardSurface::ThreadView => " projects".to_string(),
+        BoardSurface::Project => {
+            let path = model.archived_focus().or_else(|| model.active_project());
+            let name = path
+                .map(|path| render::short_project(&path.to_string_lossy()).to_string())
+                .unwrap_or_else(|| "desk".to_string());
+            let mut context = format!(" {name}");
+            if model.focus_is_archived() {
+                context.push_str(" · archived");
+            } else if model.thread_filter() != &ThreadFilter::All {
+                context.push_str(&format!(" · {}", model.thread_filter().label()));
+            }
+            context
+        }
+    }
+}
+
 /// The persistent navigation row's paint for this model: fixed tabs, slot 2's label,
 /// and the active destination's right-side control.
 fn nav_paint(model: &BoardModel) -> NavPaint {
@@ -1100,6 +1131,7 @@ fn draw_board_hits(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap
         projects_cursor: model.projects_cursor(),
         projects_query: model.projects_query(),
         summary: None,
+        context: footer_context(model, surface),
         status_message: status_owned.as_deref(),
         status_undo_offset,
         verb_items: &verbs,
@@ -1268,6 +1300,7 @@ fn draw_wide_board(
         projects_cursor: model.projects_cursor(),
         projects_query: model.projects_query(),
         summary: None,
+        context: footer_context(model, surface),
         status_message: status_owned.as_deref(),
         status_undo_offset,
         verb_items: &verbs,

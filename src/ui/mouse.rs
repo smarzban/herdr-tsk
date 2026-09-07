@@ -330,7 +330,6 @@ fn verb_intent(model: &BoardModel, index: usize) -> Option<BoardIntent> {
 fn quick_add_verb_intent(index: usize) -> Option<BoardIntent> {
     match QUICK_ADD_VERBS.get(index)?.key {
         "enter" => Some(BoardIntent::QuickAddSave),
-        "shift+enter" => Some(BoardIntent::QuickAddSaveNext),
         "tab" => Some(BoardIntent::ExpandQuickAdd),
         "esc" => Some(BoardIntent::CancelQuickAdd),
         _ => None,

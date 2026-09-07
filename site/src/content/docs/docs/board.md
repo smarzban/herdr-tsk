@@ -111,8 +111,9 @@ Archive, delete, undo, the drawer and the palette are reached by their keys, `?`
 ## Delete and undo
 
 `ctrl+x` (or `ctrl+Delete`) asks once (`press ctrl+x again to delete`), then soft-deletes the selected task. It leaves every lens
-and the status row reads `Deleted "title" · ctrl+u undo` until your next action. Nothing
-on the board hard-deletes; `tsk list --deleted` still shows it.
+and the status row reads `Deleted "title" · ctrl+u undo` until your next action. While
+that notice is visible, the board prompt begins `ctrl+u undo`. Nothing on the board
+hard-deletes; `tsk list --deleted` still shows it.
 
 `ctrl+u` undoes the most recent delete or done, then the one before it. If the task
 changed on disk since then, undo refuses with `changed since the undoable action`
@@ -171,8 +172,9 @@ archived project and reads `no archived projects` when empty. `ctrl+f` on a
 main-tab project archives it in place — the picker stays open and the project
 leaves the main list, the projects index, desk IN MOTION, and the rail.
 `ctrl+f` or `ctrl+u` on an archived-tab entry unarchives it, and every task
-returns in the status it had. A dim rule sits under the tabs row, and the
-archived tab's footer reads `ctrl+u unarchive · enter open · esc close`.
+returns in the status it had. A dim rule sits under the tabs row. The main tab's
+footer reads `↑↓ move · enter choose · ctrl+f archive · esc close`; the archived tab's
+footer reads `ctrl+u unarchive · enter open · esc close`.
 
 ## Read-only archived focus
 

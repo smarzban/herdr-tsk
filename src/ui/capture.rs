@@ -1897,15 +1897,15 @@ mod tests {
         apply(&mut domain, &snap, &mut model, CaptureIntent::FocusNext);
         assert_eq!(model.focused(), CaptureField::Notes);
         let plain = render_plain(&model, 100, 16);
-        assert!(plain.contains("Ctrl+Enter/Alt+Enter save"), "{plain}");
-        assert!(plain.contains("Enter newline"), "{plain}");
+        assert!(plain.contains("ctrl+enter / alt+enter save"), "{plain}");
+        assert!(plain.contains("enter newline"), "{plain}");
 
         // Title is one line: Enter still saves there.
         apply(&mut domain, &snap, &mut model, CaptureIntent::FocusPrev);
         assert_eq!(model.focused(), CaptureField::Title);
         let plain = render_plain(&model, 100, 16);
-        assert!(plain.contains("Enter save"), "{plain}");
-        assert!(!plain.contains("Enter newline"), "{plain}");
+        assert!(plain.contains("enter save"), "{plain}");
+        assert!(!plain.contains("enter newline"), "{plain}");
 
         // The scope row is unchanged by this task, and so is its legend.
         model.focused = CaptureField::Scope;
@@ -1983,13 +1983,16 @@ mod tests {
     }
 
     #[test]
-    fn help_line_lists_capture_keys() {
-        for token in ["Tab", "scope", "path", "save", "cancel"] {
-            assert!(
-                CAPTURE_HELP_LINE.contains(token),
-                "help line missing {token:?}: {CAPTURE_HELP_LINE}"
-            );
-        }
+    fn help_lines_use_the_shared_lowercase_verb_grammar() {
+        assert_eq!(
+            CAPTURE_HELP_LINE,
+            "tab fields · 1–3 scope · 3 other path · enter save · esc cancel"
+        );
+        assert_eq!(
+            CAPTURE_NOTES_HELP_LINE,
+            "tab fields · ctrl+enter / alt+enter save · enter newline · esc cancel"
+        );
+        assert_eq!(CAPTURE_SAVE_RECOVERY_HELP_LINE, "r retry · c cancel");
     }
 
     #[test]

@@ -92,8 +92,8 @@ For scriptable board work, use `tsk add`, `tsk list`, `tsk status`, `tsk edit`, 
   `ctrl+r` toggles review ↔ ready.
 - The footer's verb row is a prompt, not a keymap: open · status verbs · `+ add` · `? help`
   on the board, `ctrl+e edit` · status verbs · `esc close` on the page, `shift+enter save` ·
-  `esc cancel` while editing. Archive, delete, undo, drawer, pickers, and palette are not
-  seats; `?` lists every key of every surface on one scrollable card (`↑↓`/`jk`/page/wheel,
+  `esc cancel` while editing. A visible delete notice prefixes the board prompt with `ctrl+u undo`.
+  Archive, delete, drawer, pickers, and palette are not seats; `?` lists every key of every surface on one scrollable card (`↑↓`/`jk`/page/wheel,
   closes on `Esc`/`?`/`q`). Keys paint as `ctrl+x label`; inputs' placeholders hold only the
   content hint, and the reserved row above a bottom input carries its context (quick-add
   destination, selected project path).

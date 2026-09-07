@@ -88,13 +88,13 @@ pub enum CaptureIntent {
 
 /// Bottom chrome: compact key legend for capture form.
 pub const CAPTURE_HELP_LINE: &str =
-    "Tab fields  ·  1–3 scope  ·  3 other path  ·  Enter save  ·  Esc cancel";
+    "tab fields · 1–3 scope · 3 other path · enter save · esc cancel";
 /// Bottom chrome while Notes has focus: Enter opens a line there, so both save encodings stay
 /// visible. Alt+Enter works when a legacy terminal cannot distinguish modified Enter keys.
 pub const CAPTURE_NOTES_HELP_LINE: &str =
-    "Tab fields  ·  Ctrl+Enter/Alt+Enter save  ·  Enter newline  ·  Esc cancel";
+    "tab fields · ctrl+enter / alt+enter save · enter newline · esc cancel";
 /// Compact legend shown while a Capture save is unresolved.
-pub const CAPTURE_SAVE_RECOVERY_HELP_LINE: &str = "r retry  ·  c cancel";
+pub const CAPTURE_SAVE_RECOVERY_HELP_LINE: &str = "r retry · c cancel";
 
 /// Board primary actions reachable by an the normal-mode key (table coverage).
 pub const PRIMARY_BOARD_ACTIONS: &[PrimaryBoardAction] = &[
@@ -337,17 +337,16 @@ pub enum BoardIntent {
 /// Bottom chrome: compact key legend for primary board actions.
 pub const BOARD_HELP_LINE: &str = "↑↓/jk  ·  ctrl+s start  ·  enter open  ·  → peek  ·  ctrl+d done  ·  ctrl+o reopen  ·  ctrl+b block  ·  ctrl+r review  ·  + add  ·  ctrl+e title  ·  ctrl+x del  ·  ctrl+u undo  ·  ctrl+f archive  ·  d drawer  ·  g archived  ·  p projects  ·  : palette  ·  ? help  ·  ctrl+q quit";
 /// Compact legend shown while the action sheet or command palette is open.
-pub const COMMAND_SURFACE_HELP_LINE: &str =
-    "↑↓ select  ·  type to filter  ·  Enter run  ·  Esc close";
+pub const COMMAND_SURFACE_HELP_LINE: &str = "↑↓ select · type to filter · enter run · esc close";
 /// Compact legend shown while the help card is open.
-pub const HELP_SURFACE_HELP_LINE: &str = "↑↓ scroll  ·  esc close";
+pub const HELP_SURFACE_HELP_LINE: &str = "↑↓ scroll · esc close";
 /// Compact legend shown while a failed board save is unresolved.
 pub const LAUNCH_CARD_HELP_LINE: &str = "y unarchive · n keep archived";
-pub const SAVE_RECOVERY_HELP_LINE: &str = "↑↓  ·  r retry  ·  c cancel";
+pub const SAVE_RECOVERY_HELP_LINE: &str = "↑↓ · r retry · c cancel";
 /// Compact legend while the projects index search field owns input.
-pub const PROJECTS_SEARCH_HELP_LINE: &str = "/ search  ·  type  ·  enter open  ·  esc clear";
+pub const PROJECTS_SEARCH_HELP_LINE: &str = "/ search · type · enter open · esc clear";
 /// Compact legend shown while the first-use walkthrough is open.
-pub const WALKTHROUGH_HELP_LINE: &str = "Enter next  ·  Esc skip";
+pub const WALKTHROUGH_HELP_LINE: &str = "enter next · esc skip";
 
 /// One normal-mode key → intent entry. Help text and `map_normal` share this table.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -12,7 +12,7 @@
 │  ▸ T1 Sm│   set status: review                                       │     tsk │
 │  ▸ T2 Ed│                                                            │   herdr │
 │         ├────────────────────────────────────────────────────────────┤         │
-│ ON DECK │ ↑/↓ move · enter run · esc close                           │───────1 │
+│ ON DECK │ ↑↓ move · enter run · esc close                            │───────1 │
 │         └────────────────────────────────────────────────────────────┘         │
 │  ○ T7 Global backlog note                                                 desk │
 │                                                                                │

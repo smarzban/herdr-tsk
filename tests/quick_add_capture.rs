@@ -1065,7 +1065,7 @@ fn capture_bar_renders_spaced_three_row_block_and_stays_bounded_without_color_sg
         "visible task",
         "title…   !p = desk · !p name = project · !t name = thread",
         "add to invocation",
-        "enter save · shift+enter save+next · tab details · esc close",
+        "enter save · tab details · esc close",
     ] {
         assert!(standard.contains(text), "missing {text:?}: {standard}");
     }

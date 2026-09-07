@@ -687,7 +687,7 @@ import { parseCapture } from "./capture.js";
           <div>j/k · ↑/↓ move | enter open | →/← peek or slide</div>
           <div>s start / reopen | d done | o reopen | b block | r review</div>
           <div>e edit title | x delete | u undo | f archive | + add</div>
-          <div>z drawer (app: d) | g archived group | p projects | 1 2 3 destinations</div>
+          <div>z or D drawer (app: d) | g archived group | p projects | 1 2 3 destinations</div>
           <div>/ search projects | : palette | ? help</div>
           <div class="dim">app needs ctrl on verbs · demo also accepts bare keys</div>
         </div>
@@ -877,10 +877,10 @@ import { parseCapture } from "./capture.js";
     );
   }
 
-  // One footer for the frame: a rule, the status row (done count · stage crumb), and the verb
+  // One footer for the frame: a rule, the status row (active lens · stage crumb), and the verb
   // bar for whichever side owns focus. Wide stages paint it under both columns, as the app does.
   function renderFooter() {
-    const doneN = state.tasks.filter((t) => t.status === "done").length;
+    const context = state.tab === "desk" ? "desk" : state.focusProject || state.tab;
     const task = selectedTask();
     const verbs = taskFocus()
       ? pageVerbBar()
@@ -890,11 +890,11 @@ import { parseCapture } from "./capture.js";
     const footer =
       state.overlay === "quick"
         ? `<div class="tsk-input-row"><span class="tsk-prompt">+</span><input class="tsk-field" id="tsk-add" value="${esc(state.draft)}" placeholder="title  ·  !p project  ·  !t thread" autocomplete="off" /><span class="cursor">█</span></div>
-           <div class="foot dim">${state.refuse ? esc(state.refuse) : "enter save · shift+enter save+next · tab details · esc close"}</div>`
+           <div class="foot dim">${state.refuse ? esc(state.refuse) : "enter save · tab details · esc close"}</div>`
         : state.overlay === "search"
           ? `<div class="tsk-input-row"><span class="tsk-prompt">/</span><input class="tsk-field" id="tsk-project-search" value="${esc(state.projectQuery)}" placeholder="search projects" autocomplete="off" /><span class="cursor">█</span></div>
              <div class="foot dim">enter open · esc close</div>`
-          : `<div class="tsk-status-row"><button type="button" class="tsk-done-count foot" data-drawer="1">${doneN} done</button><span class="foot dim tsk-stage-hint">${esc(stageHint())}</span></div>
+          : `<div class="tsk-status-row"><button type="button" class="tsk-done-count foot" data-drawer="1">${esc(context)}</button><span class="foot dim tsk-stage-hint">${esc(stageHint())}</span></div>
            <div class="foot dim tsk-verbs">${verbs}</div>
            ${state.copyNotice ? `<div class="foot dim">${esc(state.copyNotice)}</div>` : ""}`;
     return `
@@ -1242,7 +1242,7 @@ import { parseCapture } from "./capture.js";
       render();
       return;
     }
-    if (e.key === "z") {
+    if (e.key === "z" || e.key === "D") {
       e.preventDefault();
       state.drawer = !state.drawer;
       render();

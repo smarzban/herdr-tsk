@@ -136,7 +136,9 @@ test("demo matches the quick-add, peek, and group-toggle contracts", async () =>
   const demo = await read("../public/board-demo.js");
   assert.match(demo, /if \(e\.key === "Enter" && !e\.ctrlKey && !e\.altKey && !e\.metaKey\)/);
   assert.match(demo, /saveDraft\(e\.shiftKey\)/);
-  assert.match(demo, /enter save · shift\+enter save\+next · tab details · esc close/);
+  assert.match(demo, /enter save · tab details · esc close/);
+  assert.match(demo, /z or D drawer \(app: d\)/);
+  assert.match(demo, /e\.key === "z" \|\| e\.key === "D"/);
   assert.doesNotMatch(demo, /saveDraft\(e\.ctrlKey \|\| e\.metaKey\)/);
   assert.match(demo, /return notes\.split\(\/\\n\/\)\.slice\(0, 5\);/);
   assert.doesNotMatch(demo, /thread #\$\{task\.thread\}|scope \$\{projectName\(task\)\}|created \$\{age\(/);

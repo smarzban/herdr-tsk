@@ -564,6 +564,9 @@ pub struct QueueFrameModel<'a> {
     pub projects_query: &'a str,
     /// Context summary painted above a filtered or cross-project task list.
     pub summary: Option<String>,
+    /// Current board lens painted on the idle status row (for example `desk` or
+    /// `tsk · #release`). The projects index keeps its selected path instead.
+    pub context: String,
     /// Optional status-line notice; replaces the default counts when set.
     pub status_message: Option<&'a str>,
     /// Column offset of the delete-notice `ctrl+u undo` control inside `status_message`, when
@@ -1354,8 +1357,7 @@ fn paint_footer(
                 // carry only the basename.
                 index_selected_path(model)
             } else {
-                // Idle status: done count only. In-motion is already on the section header.
-                format!(" {} done", model.view.counts.done)
+                model.context.clone()
             };
             let (line, undo_hit) = paint_status_line(
                 model.status_message,
@@ -1478,10 +1480,6 @@ pub(crate) const QUICK_ADD_VERBS: &[VerbEntry<'static>] = &[
     VerbEntry {
         key: "enter",
         label: "save",
-    },
-    VerbEntry {
-        key: "shift+enter",
-        label: "save+next",
     },
     VerbEntry {
         key: "tab",
@@ -2117,7 +2115,7 @@ const HELP_FOOTER: &[VerbEntry<'static>] = &[
 /// Legend footer for the command palette card.
 const PALETTE_FOOTER: &[VerbEntry<'static>] = &[
     VerbEntry {
-        key: "↑/↓",
+        key: "↑↓",
         label: "move",
     },
     VerbEntry {
@@ -2148,9 +2146,28 @@ const ARCHIVED_TAB_FOOTER: &[VerbEntry<'static>] = &[
     },
 ];
 
+const PROJECT_PICKER_FOOTER: &[VerbEntry<'static>] = &[
+    VerbEntry {
+        key: "↑↓",
+        label: "move",
+    },
+    VerbEntry {
+        key: "enter",
+        label: "choose",
+    },
+    VerbEntry {
+        key: "ctrl+f",
+        label: "archive",
+    },
+    VerbEntry {
+        key: "esc",
+        label: "close",
+    },
+];
+
 const SCOPE_FOOTER: &[VerbEntry<'static>] = &[
     VerbEntry {
-        key: "↑/↓",
+        key: "↑↓",
         label: "move",
     },
     VerbEntry {
@@ -3247,10 +3264,10 @@ fn paint_scope_dropdown(
             } else {
                 0
             },
-            legend: if tabs.is_some_and(|tabs| tabs.archived_active) {
-                ARCHIVED_TAB_FOOTER
-            } else {
-                SCOPE_FOOTER
+            legend: match tabs {
+                Some(tabs) if tabs.archived_active => ARCHIVED_TAB_FOOTER,
+                Some(_) => PROJECT_PICKER_FOOTER,
+                None => SCOPE_FOOTER,
             },
             dismiss: None,
             legend_hits: None,
@@ -4712,6 +4729,7 @@ mod tests {
             projects_cursor: 0,
             projects_query: "",
             summary: None,
+            context: " projects".to_string(),
             status_message: None,
             status_undo_offset: None,
             verb_items: &[],
@@ -4785,6 +4803,7 @@ mod tests {
             projects_cursor: 0,
             projects_query: "",
             summary: None,
+            context: " projects".to_string(),
             status_message: None,
             status_undo_offset: None,
             verb_items: &[],

@@ -219,18 +219,11 @@ fn wide_paints_exactly_one_footer_rule_row_at_every_stage() {
             header_underlines, expected_underlines,
             "{stage:?}: header underline rows"
         );
-        let done_rows: Vec<usize> = rows
-            .iter()
-            .enumerate()
-            .filter(|(_, row)| row.starts_with(" 0 done"))
-            .map(|(y, _)| y)
-            .collect();
-        assert_eq!(
-            done_rows,
-            vec![status_y as usize],
-            "{stage:?}: one status row"
+        assert!(
+            rows[status_y as usize].starts_with(" desk"),
+            "{stage:?}: footer status names the desk lens: {}",
+            rows[status_y as usize]
         );
-        assert!(rows[status_y as usize].starts_with(" 0 done"), "{stage:?}");
         let verb_row = &rows[verb_y as usize];
         assert!(
             verb_row.starts_with(' '),

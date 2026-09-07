@@ -16,14 +16,17 @@ archived group.
 ## Footer
 
 The footer is two rows under a rule. The **status row** carries context and feedback:
-the done count (or the selected project's path on the projects index), the last
-action's message, a delete notice, and at wide widths the stage crumb. The **verb
-row** is a prompt, not a keymap: the few things you are most likely to do next from
-where the cursor is, then the way out, then `? help`. Every surface reads the same
-shape, `open · status verbs · + add · ? help` on the board, `ctrl+e edit · status
-verbs · esc close` on the task page, `shift+enter save · esc cancel` while editing.
-Archive, delete, undo, the drawer, the pickers and the palette are not seats: they
-live in `?` (every key, scrollable) and `:` (every action).
+`desk` on Desk, the project basename (and `#thread` when filtered) on a project
+board, `<name> · archived` in read-only archived focus, or the selected project's
+full path on the projects index. It also carries the last action's message, a delete
+notice, and at wide widths the stage crumb. The **verb row** is a prompt, not a
+keymap: the few things you are most likely to do next from where the cursor is, then
+the way out, then `? help`. Every surface reads the same shape, `open · status verbs
+· + add · ? help` on the board, `ctrl+e edit · status verbs · esc close` on the task
+page, `shift+enter save · esc cancel` while editing. Archive, delete, the drawer,
+the pickers and the palette are not seats: they live in `?` (every key, scrollable)
+and `:` (every action). A visible delete notice prefixes the board prompt with
+`ctrl+u undo`.
 
 ## Wide stage slider
 

@@ -391,7 +391,7 @@ fn board_save_failure_retains_working_state_blocks_mutations_and_retries_exactly
     );
     assert_eq!(model.input_mode(), BoardInputMode::SaveRecovery);
     assert_eq!(model.popup(), BoardPopup::SaveRecovery);
-    assert_eq!(model.help_line(), "↑↓  ·  r retry  ·  c cancel");
+    assert_eq!(model.help_line(), "↑↓ · r retry · c cancel");
     let failure_message = model.message().unwrap();
     assert!(failure_message.contains("save failed"), "{failure_message}");
     assert!(!failure_message.contains("completed"), "{failure_message}");
@@ -2133,4 +2133,25 @@ fn failed_save_during_thread_edit_holds_form_until_retry_or_cancel() {
         "a successful retry retains the task edit session on its task page"
     );
     assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+}
+
+#[test]
+fn input_surface_help_lines_use_the_shared_lowercase_verb_grammar() {
+    use tsk_tui::ui::input::{
+        COMMAND_SURFACE_HELP_LINE, HELP_SURFACE_HELP_LINE, LAUNCH_CARD_HELP_LINE,
+        PROJECTS_SEARCH_HELP_LINE, SAVE_RECOVERY_HELP_LINE, WALKTHROUGH_HELP_LINE,
+    };
+
+    assert_eq!(
+        COMMAND_SURFACE_HELP_LINE,
+        "↑↓ select · type to filter · enter run · esc close"
+    );
+    assert_eq!(HELP_SURFACE_HELP_LINE, "↑↓ scroll · esc close");
+    assert_eq!(LAUNCH_CARD_HELP_LINE, "y unarchive · n keep archived");
+    assert_eq!(SAVE_RECOVERY_HELP_LINE, "↑↓ · r retry · c cancel");
+    assert_eq!(
+        PROJECTS_SEARCH_HELP_LINE,
+        "/ search · type · enter open · esc clear"
+    );
+    assert_eq!(WALKTHROUGH_HELP_LINE, "enter next · esc skip");
 }

@@ -950,9 +950,10 @@ fn project_scope_chip_and_dropdown_filter_all_visible_sections_matching_ac5() {
     assert!(!model.visible_ids().contains(&done_global));
     model.clear_message();
     let other_status = board_chrome_row(&model, (80, 24));
-    assert!(
-        other_status.contains("1 done") && !other_status.contains("in motion"),
-        "scoped status counts must be painted: {other_status:?}"
+    assert_eq!(
+        other_status.trim(),
+        "other",
+        "scoped status must name the project basename: {other_status:?}"
     );
     assert!(!model.visible_ids().contains(&motion_app));
     assert!(!model.visible_ids().contains(&deck_app));
@@ -1000,9 +1001,10 @@ fn project_scope_chip_and_dropdown_filter_all_visible_sections_matching_ac5() {
     assert!(!model.visible_ids().contains(&deck_app));
     model.clear_message();
     let home_status = board_chrome_row(&model, (80, 24));
-    assert!(
-        home_status.contains("4 done") && !home_status.contains("in motion"),
-        "home status counts must be painted: {home_status:?}"
+    assert_eq!(
+        home_status.trim(),
+        "desk",
+        "home status must name the desk lens: {home_status:?}"
     );
 
     // Scoped project with zero open deck tasks → header + empty hint, no invented row.
@@ -1117,6 +1119,29 @@ fn x_soft_deletes_and_status_line_names_task_with_undo_hint() {
     // selection reanchored to remaining task
     assert!(model.selected_id().is_some());
     assert_ne!(model.selected_id(), Some(id));
+}
+
+#[test]
+fn delete_notice_prefixes_the_board_verb_bar_with_undo_until_undone() {
+    let (mut domain, mut model, id) = board_with_task("undo seat", HumanStatus::Ready);
+    apply_intent(&mut domain, &mut model, BoardIntent::SoftDelete, None).expect("arm delete");
+    apply_intent(&mut domain, &mut model, BoardIntent::SoftDelete, None).expect("delete");
+    assert!(domain.get(id).expect("task").soft_deleted);
+
+    let armed = board_verb_items(&model);
+    assert_eq!(
+        armed.first().map(|entry| (entry.key, entry.label)),
+        Some(("u", "undo")),
+        "the delete notice puts undo first in the board prompt"
+    );
+
+    apply_intent(&mut domain, &mut model, BoardIntent::Undo, None).expect("undo");
+    assert!(
+        !board_verb_items(&model)
+            .iter()
+            .any(|entry| entry.key == "u" && entry.label == "undo"),
+        "undo seat leaves with the delete notice"
+    );
 }
 
 #[test]
@@ -3971,7 +3996,9 @@ fn enter_on_the_archived_tab_opens_a_read_only_focus_that_persists_nothing() {
         "the archived project's tasks paint in this focus"
     );
 
-    // The chip says so, and the rows paint dim.
+    // The idle status row names the read-only lens, and the chip says the same.
+    let status = board_chrome_row(&model, (80, 24));
+    assert_eq!(status.trim(), "app · archived");
     let frame = rendered_board(&model, 80, 24);
     assert!(
         frame.contains("app \u{b7} archived"),
