@@ -691,6 +691,8 @@ pub struct BoardModel {
     /// The last projects-index row click (time + row path), kept only to detect a
     /// double-click that opens the project in slot 2. Presentation-only, never persisted.
     pub(super) last_project_row_click: Option<(Instant, PathBuf)>,
+    /// First visible row of the help card's key list. Session-only, reset on open.
+    pub(super) help_scroll: usize,
     pub(super) input_mode: BoardInputMode,
     /// The one active board form. It is present for expanded quick-add and task editing alike;
     /// task identity or invocation context are held inside it and never rebound after open.
@@ -796,6 +798,7 @@ impl BoardModel {
             last_row_click: None,
             last_project_header_click: None,
             last_project_row_click: None,
+            help_scroll: 0,
             input_mode: BoardInputMode::Normal,
             form: None,
             quick_add: None,
@@ -1607,6 +1610,11 @@ impl BoardModel {
     /// The projects index's current View control.
     pub fn projects_view(&self) -> &ProjectsView {
         &self.projects_view
+    }
+
+    /// The help card's scroll offset.
+    pub fn help_scroll(&self) -> usize {
+        self.help_scroll
     }
 
     /// The index's search query.

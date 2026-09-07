@@ -21,66 +21,84 @@ fn ctrl(code: KeyCode) -> Option<BoardIntent> {
 
 #[test]
 fn normal_mode_keymap_equals_the_readme_and_queue_board_v1_set() {
+    // (key, intent, needs ctrl)
     let documented = [
-        (KeyCode::Char('q'), BoardIntent::Quit),
-        (KeyCode::Esc, BoardIntent::CloseLayer),
-        (KeyCode::Char('j'), BoardIntent::SelectNext),
-        (KeyCode::Down, BoardIntent::SelectNext),
-        (KeyCode::Char('k'), BoardIntent::SelectPrev),
-        (KeyCode::Up, BoardIntent::SelectPrev),
-        (KeyCode::Char('s'), BoardIntent::PrimaryVerb),
-        (KeyCode::Char('d'), BoardIntent::Complete),
-        (KeyCode::Char('o'), BoardIntent::Reopen),
-        (KeyCode::Char('b'), BoardIntent::ToggleBlock),
-        (KeyCode::Enter, BoardIntent::OpenTaskPage),
-        (KeyCode::Right, BoardIntent::PeekDetail),
-        (KeyCode::Left, BoardIntent::CollapseDetail),
-        (KeyCode::Char('+'), BoardIntent::OpenCapture),
-        (KeyCode::Char('e'), BoardIntent::BeginEditTitle),
-        (KeyCode::Char('x'), BoardIntent::SoftDelete),
-        (KeyCode::Delete, BoardIntent::SoftDelete),
-        (KeyCode::Char('u'), BoardIntent::Undo),
-        (KeyCode::Char('f'), BoardIntent::File),
-        (KeyCode::Char('z'), BoardIntent::ToggleDoneDrawer),
-        (KeyCode::Char(':'), BoardIntent::OpenCommandPalette),
-        (KeyCode::Char('?'), BoardIntent::OpenHelp),
-        (KeyCode::Char('P'), BoardIntent::OpenProjectSelector),
-        (KeyCode::Char('t'), BoardIntent::OpenThreadFilterPicker),
-        (KeyCode::Char('v'), BoardIntent::OpenProjectsViewPicker),
+        (KeyCode::Char('j'), BoardIntent::SelectNext, false),
+        (KeyCode::Down, BoardIntent::SelectNext, false),
+        (KeyCode::Char('k'), BoardIntent::SelectPrev, false),
+        (KeyCode::Up, BoardIntent::SelectPrev, false),
+        (KeyCode::Enter, BoardIntent::OpenTaskPage, false),
+        (KeyCode::Right, BoardIntent::PeekDetail, false),
+        (KeyCode::Left, BoardIntent::CollapseDetail, false),
+        (KeyCode::Esc, BoardIntent::CloseLayer, false),
+        (KeyCode::Char('s'), BoardIntent::PrimaryVerb, true),
+        (KeyCode::Char('d'), BoardIntent::Complete, true),
+        (KeyCode::Char('o'), BoardIntent::Reopen, true),
+        (KeyCode::Char('b'), BoardIntent::ToggleBlock, true),
+        (KeyCode::Char('r'), BoardIntent::ToggleReview, true),
+        (KeyCode::Char('e'), BoardIntent::BeginEditTitle, true),
+        (KeyCode::Char('x'), BoardIntent::SoftDelete, true),
+        (KeyCode::Delete, BoardIntent::SoftDelete, true),
+        (KeyCode::Char('u'), BoardIntent::Undo, true),
+        (KeyCode::Char('f'), BoardIntent::File, true),
+        (KeyCode::Char('+'), BoardIntent::OpenCapture, false),
+        (KeyCode::Char('d'), BoardIntent::ToggleDoneDrawer, false),
+        (KeyCode::Char('g'), BoardIntent::ToggleAllGroups, false),
+        (KeyCode::Char('p'), BoardIntent::OpenProjectSelector, false),
+        (
+            KeyCode::Char('t'),
+            BoardIntent::OpenThreadFilterPicker,
+            false,
+        ),
+        (
+            KeyCode::Char('v'),
+            BoardIntent::OpenProjectsViewPicker,
+            false,
+        ),
+        (KeyCode::Char(':'), BoardIntent::OpenCommandPalette, false),
+        (KeyCode::Char('?'), BoardIntent::OpenHelp, false),
+        (KeyCode::Char('q'), BoardIntent::Quit, true),
     ];
+    let table: Vec<(KeyCode, BoardIntent)> = documented
+        .iter()
+        .map(|(key, intent, _)| (*key, intent.clone()))
+        .collect();
     assert_eq!(
         normal_mode_keymap(),
-        documented,
-        "the normal-mode table must equal the documented V1 queue keymap"
+        table,
+        "the normal-mode table must equal the documented queue keymap"
     );
-    let mutating = [
-        KeyCode::Char('q'),
-        KeyCode::Char('s'),
-        KeyCode::Char('d'),
-        KeyCode::Char('o'),
-        KeyCode::Char('b'),
-        KeyCode::Char('e'),
-        KeyCode::Char('x'),
-        KeyCode::Delete,
-        KeyCode::Char('u'),
-        KeyCode::Char('f'),
-    ];
-    for (key, intent) in documented {
-        if mutating.contains(&key) {
-            assert_eq!(normal(key), None, "bare mutating key {key:?} must be dead");
+    for (key, intent, needs_ctrl) in documented {
+        if needs_ctrl {
             assert_eq!(ctrl(key), Some(intent), "ctrl+{key:?}");
+            // A bare mutating letter is dead unless the same letter carries a bare route
+            // of its own (`d` opens the done drawer).
+            if key != KeyCode::Char('d') {
+                assert_eq!(normal(key), None, "bare mutating key {key:?} must be dead");
+            }
         } else {
             assert_eq!(normal(key), Some(intent), "documented key {key:?}");
         }
     }
+    // The bare/ctrl split on one letter resolves by modifier, never by table order.
+    assert_eq!(
+        normal(KeyCode::Char('d')),
+        Some(BoardIntent::ToggleDoneDrawer)
+    );
+    assert_eq!(ctrl(KeyCode::Char('d')), Some(BoardIntent::Complete));
 
-    for retired in ['a', 'p', 'r', 'l', 'c', 'n', 'i', '1', '2', '3', '[', ']'] {
+    for retired in ['a', 'l', 'c', 'n', 'i', 'z', 'P', '1', '2', '3', '[', ']'] {
         assert_eq!(
             normal(KeyCode::Char(retired)),
             None,
             "retired normal-mode key {retired:?} must stay unbound"
         );
     }
+    assert_eq!(
+        ctrl(KeyCode::Char('g')),
+        None,
+        "ctrl+g retired in favour of bare g"
+    );
 }
 
 #[test]

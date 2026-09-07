@@ -3022,15 +3022,15 @@ mod tests {
                 BoardIntent::SelectNavTab(NavTab::ProjectBoard),
                 "slot-2's click is the tab intent; the reducer opens the picker from it"
             );
-            // `P` gives the keyboard the same destination by direct intent.
+            // `p` gives the keyboard the same destination by direct intent.
             let keyboard_intent = map_key(
                 board_input_mode_for_area(area, model.input_mode()),
-                KeyEvent::new(KeyCode::Char('P'), KeyModifiers::NONE),
+                KeyEvent::new(KeyCode::Char('p'), KeyModifiers::NONE),
             );
             assert_eq!(
                 keyboard_intent,
                 Some(BoardIntent::OpenProjectSelector),
-                "`P` must open the project selector at {area:?}"
+                "`p` must open the project selector at {area:?}"
             );
             assert_eq!(
                 board_intent_for_area(area, mouse_intent.clone()),
@@ -3824,9 +3824,10 @@ mod tests {
                 KeyCode::Char('r'),
                 Some(BoardIntent::CommandQueryInsert('r')),
             ),
+            (BoardInputMode::Help, KeyCode::Char('r'), None),
             (
                 BoardInputMode::Help,
-                KeyCode::Char('r'),
+                KeyCode::Esc,
                 Some(BoardIntent::CloseLayer),
             ),
         ] {

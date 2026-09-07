@@ -1062,7 +1062,10 @@ fn overlay_rows_are_padded_exact_no_base_bleed() {
             String::new(),
             "any key to close".to_string(),
         ];
-        model.overlay = QueueOverlay::Help { lines: &help_lines };
+        model.overlay = QueueOverlay::Help {
+            lines: &help_lines,
+            scroll: 0,
+        };
         let (rows, _geo) = paint(80, 24, &model);
         // Help centers; ensure painted rows are width-padded and carry no status/meta fragments.
         // The body width is min(width-2,62), padded on left; trailing must fill to row_width.
@@ -2694,7 +2697,10 @@ fn golden_scenes() -> Vec<GoldenScene> {
     // recorded here so a reviewer does not re-litigate the divergence as a bug.
     let mut help_model = fixture_model(&tasks, &board_view);
     let help_lines: Vec<String> = tsk_tui::ui::input::help_card_lines();
-    help_model.overlay = QueueOverlay::Help { lines: &help_lines };
+    help_model.overlay = QueueOverlay::Help {
+        lines: &help_lines,
+        scroll: 0,
+    };
     let (help_rows, _) = paint(80, 24, &help_model);
 
     // `done_drawer` has no prototype counterpart -- the prototype's own

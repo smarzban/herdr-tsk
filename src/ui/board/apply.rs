@@ -68,6 +68,7 @@ pub fn board_intent_may_persist(intent: &BoardIntent) -> bool {
             | BoardIntent::LaunchUnarchive
             | BoardIntent::PrimaryVerb
             | BoardIntent::ToggleBlock
+            | BoardIntent::ToggleReview
             | BoardIntent::QuickAddSave
             | BoardIntent::QuickAddSaveNext
     )
@@ -1362,6 +1363,29 @@ fn apply_board_intent(
                 }
             }
         }
+        BoardIntent::ToggleReview => {
+            model.close_popup();
+            let Some(id) = model.selected_id() else {
+                model.set_message(NO_SELECTION);
+                return Ok(IntentOutcome::None);
+            };
+            let Some(task) = domain.get(id) else {
+                model.set_message("that task is no longer here");
+                return Ok(IntentOutcome::None);
+            };
+            match task.status {
+                HumanStatus::Review => {
+                    domain.set_status(id, HumanStatus::Ready)?;
+                }
+                HumanStatus::Ready | HumanStatus::Started | HumanStatus::Blocked => {
+                    domain.set_status(id, HumanStatus::Review)?;
+                }
+                HumanStatus::Done => {
+                    model.set_message("completed tasks cannot go to review");
+                    return Ok(IntentOutcome::None);
+                }
+            }
+        }
         BoardIntent::StageRight => {
             stage_right(domain, model);
             return Ok(IntentOutcome::None);
@@ -1624,7 +1648,21 @@ fn apply_board_intent(
             }
             model.close_command_surface();
             model.close_popup();
+            model.help_scroll = 0;
             model.input_mode = BoardInputMode::Help;
+            return Ok(IntentOutcome::None);
+        }
+        BoardIntent::HelpScrollUp | BoardIntent::HelpScrollDown => {
+            if model.input_mode != BoardInputMode::Help {
+                return Ok(IntentOutcome::None);
+            }
+            // The renderer clamps to what fits; the model only needs a monotone offset that
+            // cannot run past the list.
+            let horizon = crate::ui::input::help_card_lines().len().saturating_sub(1);
+            model.help_scroll = match intent {
+                BoardIntent::HelpScrollUp => model.help_scroll.saturating_sub(1),
+                _ => model.help_scroll.saturating_add(1).min(horizon),
+            };
             return Ok(IntentOutcome::None);
         }
         BoardIntent::CloseLayer => {

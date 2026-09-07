@@ -642,7 +642,7 @@ fn click_and_wheel_match_keyboard_effects_for_each_control() {
         assert!(model.drawer_open());
     }
     let keyboard_intent =
-        map_key(BoardInputMode::Normal, press(KeyCode::Char('z'))).expect("z key");
+        map_key(BoardInputMode::Normal, press(KeyCode::Char('d'))).expect("d key");
     apply_intent(
         &mut domain_key,
         &mut model_key,

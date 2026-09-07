@@ -982,6 +982,7 @@ impl<'a> OverlayPayloads<'a> {
         if model.input_mode() == BoardInputMode::Help {
             return Some(QueueOverlay::Help {
                 lines: &self.help_lines,
+                scroll: model.help_scroll(),
             });
         }
         if model.command_surface() == CommandSurface::Palette {

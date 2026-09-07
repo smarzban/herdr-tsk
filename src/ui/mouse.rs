@@ -640,6 +640,11 @@ fn wheel_board_intent(model: &BoardModel, kind: MouseEventKind) -> Option<BoardI
                 _ => None,
             }
         }
+        BoardInputMode::Help => match kind {
+            MouseEventKind::ScrollUp => Some(BoardIntent::HelpScrollUp),
+            MouseEventKind::ScrollDown => Some(BoardIntent::HelpScrollDown),
+            _ => None,
+        },
         _ => None,
     }
 }

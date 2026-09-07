@@ -437,7 +437,11 @@ pub enum QueueOverlay<'a> {
         commands: &'a [PaletteCommandRow<'a>],
     },
     /// Help card (`?`).
-    Help { lines: &'a [String] },
+    Help {
+        lines: &'a [String],
+        /// First list row in view; the painter clamps it to the rows that fit.
+        scroll: usize,
+    },
     /// Launch card: the two-choice archived-project modal.
     LaunchCard { name: &'a str },
     /// Project-scope dropdown from the selector chip.
@@ -1627,8 +1631,8 @@ fn paint_overlay(
         QueueOverlay::Palette { query, commands } => {
             paint_palette_overlay(frame, geo, surface, query, commands, hits);
         }
-        QueueOverlay::Help { lines } => {
-            paint_help_overlay(frame, geo, surface, lines, hits);
+        QueueOverlay::Help { lines, scroll } => {
+            paint_help_overlay(frame, geo, surface, lines, *scroll, hits);
         }
         QueueOverlay::LaunchCard { name } => {
             paint_launch_card(frame, geo, surface, name, hits);
@@ -2107,11 +2111,17 @@ fn modal_bounds(geo: &TierGeometry) -> Rect {
     Rect::new(0, 0, geo.row_width, geo.rule_row.unwrap_or(geo.height))
 }
 
-/// Legend footer for the Help card: any key (Esc included) closes it.
-const HELP_FOOTER: &[VerbEntry<'static>] = &[VerbEntry {
-    key: "any key",
-    label: "close",
-}];
+/// Legend footer for the Help card.
+const HELP_FOOTER: &[VerbEntry<'static>] = &[
+    VerbEntry {
+        key: "↑↓",
+        label: "scroll",
+    },
+    VerbEntry {
+        key: "esc",
+        label: "close",
+    },
+];
 
 /// Legend footer for the command palette card.
 const PALETTE_FOOTER: &[VerbEntry<'static>] = &[
@@ -2298,6 +2308,7 @@ fn paint_help_overlay(
     geo: &TierGeometry,
     surface: Rect,
     lines: &[String],
+    scroll: usize,
     hits: &mut QueueHitMap,
 ) {
     if geo.row_width == 0 || geo.height == 0 || lines.is_empty() {
@@ -2324,11 +2335,13 @@ fn paint_help_overlay(
     let bounds = Rect::new(0, 0, geo.row_width, geo.height);
     let capacity = bounds
         .height
-        .saturating_sub(modal_chrome_rows(geo.tier, true));
-    // Never scrolls -- there is no selection to seek with, and closing on any key rules
-    // out a dedicated scroll chord -- so `▼` here means "more exists" (resize to see it),
-    // not "more is reachable".
-    let title = titled_with_scroll_marker("help", false, (shown.len() as u16) > capacity);
+        .saturating_sub(modal_chrome_rows(geo.tier, true)) as usize;
+    // The list scrolls with the arrows, `j`/`k`, page keys, and the wheel. The offset is
+    // clamped so the last page is always full; `▲`/`▼` mark the rows out of view.
+    let max_scroll = shown.len().saturating_sub(capacity);
+    let scroll = scroll.min(max_scroll);
+    let window: Vec<String> = shown.iter().skip(scroll).take(capacity).cloned().collect();
+    let title = titled_with_scroll_marker("help", scroll > 0, scroll + window.len() < shown.len());
     let content = paint_modal_card(
         frame,
         geo,
@@ -2336,7 +2349,7 @@ fn paint_help_overlay(
         bounds,
         ModalCardSpec {
             title: &title,
-            content_rows: shown.len() as u16,
+            content_rows: window.len() as u16,
             min_content_width: 0,
             legend: HELP_FOOTER,
             dismiss: Some(QueueHitTarget::HelpDismiss),
@@ -2351,7 +2364,7 @@ fn paint_help_overlay(
     // reclaiming its own content rect as a `HelpDismiss` hit, the same close its own `[x]`
     // and the frame outside the card already resolve to.
     hits.push(QueueHitTarget::HelpDismiss, content);
-    for (j, ln) in shown.iter().take(content.height as usize).enumerate() {
+    for (j, ln) in window.iter().take(content.height as usize).enumerate() {
         let y = content.y.saturating_add(j as u16);
         let rect = Rect::new(content.x, y, content.width, 1);
         put_line_at(
