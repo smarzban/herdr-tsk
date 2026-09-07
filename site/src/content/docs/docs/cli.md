@@ -33,7 +33,7 @@ The repo ships the same rules as an agent skill in
 | Command | Does |
 | --- | --- |
 | `tsk` | opens the board |
-| `tsk capture` | opens the capture form (also `TSK_MODE=capture`) |
+| `tsk capture` | opens quick capture: the expanded quick-add page (also `TSK_MODE=capture`) |
 | `tsk add` · `tsk list` · `tsk steps` · `tsk status` · `tsk edit` · `tsk trash` · `tsk archive` · `tsk unarchive` · `tsk project` | headless; below |
 | `tsk --help` | usage, exit 0 |
 | `tsk --find-board-pane` | herdr helper: reads `pane list` JSON on stdin, prints the id of the pane labelled `tsk`; exit 1 when none |

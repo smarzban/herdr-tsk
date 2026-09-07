@@ -410,7 +410,7 @@ impl WrappedRow {
     /// line instead clamps ONTO its last character: its `end_cursor` names the
     /// NEXT row's first character, and returning it would make locate paint the
     /// caret on that row, skipping the one the move targeted.
-    fn cursor_at(&self, column: usize) -> usize {
+    pub(crate) fn cursor_at(&self, column: usize) -> usize {
         if self.cell_of.is_empty() || column < self.cell_of[0] {
             return self.first_raw;
         }

@@ -49,7 +49,9 @@ discards if you click elsewhere. Field `Esc` cancels that
 field, while Esc from task editing restores staged removals.
 
 Notes are multiline, so `Enter` inserts a line. `Shift+Enter` saves and does not
-insert a line.
+insert a line. Mouse-wheel scrolling and the page scrollbar work during field editing,
+so long notes do not hide `+ step`. Scrolling leaves the draft intact; typing or
+moving the Notes cursor brings it back into view.
 
 Thread uses the same name rules as capture `!t`. The field is optional.
 

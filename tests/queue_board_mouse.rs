@@ -3046,3 +3046,106 @@ fn the_project_picker_tab_row_click_selects_the_tab() {
         "the click switched to the archived tab"
     );
 }
+
+#[test]
+fn expanded_capture_long_notes_can_scroll_to_add_step_while_editing() {
+    let (mut domain, mut model) = deck_of(1);
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenCapture, None).unwrap();
+    apply_intent(&mut domain, &mut model, BoardIntent::ExpandQuickAdd, None).unwrap();
+    let notes = (0..40)
+        .map(|i| format!("note line {i}\n"))
+        .collect::<String>();
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::EditInsertText(notes),
+        None,
+    )
+    .unwrap();
+    let area = Rect::new(0, 0, 78, 13);
+    for _ in 0..80 {
+        let hits = board_hit_map(area, &model);
+        let intent = map_board_mouse(&model, &hits, wheel_down(5, 5))
+            .expect("wheel works while editing notes");
+        apply_intent(&mut domain, &mut model, intent, None).unwrap();
+    }
+    let hits = board_hit_map(area, &model);
+    assert!(
+        hits.regions
+            .iter()
+            .any(|hit| hit.target == QueueHitTarget::StepAdd),
+        "scroll exposes add step"
+    );
+    assert_eq!(model.input_mode(), BoardInputMode::EditNotes);
+    let mut dragging = false;
+    let track = hits
+        .regions
+        .iter()
+        .find(|hit| matches!(hit.target, QueueHitTarget::PageScroll(0)))
+        .expect("top of scrollbar");
+    let mouse = MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: track.area.x,
+        row: track.area.y,
+        modifiers: KeyModifiers::NONE,
+    };
+    let ScrollbarMouse::Intent(intent) =
+        map_scrollbar_mouse(model.input_mode(), &hits, mouse, &mut dragging)
+    else {
+        panic!("scrollbar works during notes edit")
+    };
+    apply_intent(&mut domain, &mut model, intent, None).unwrap();
+    assert_eq!(model.page_scroll(), 0);
+    let hits = board_hit_map(area, &model);
+    assert!(!hits
+        .regions
+        .iter()
+        .any(|hit| hit.target == QueueHitTarget::StepAdd));
+}
+
+#[test]
+fn draft_text_click_places_title_and_notes_cursor() {
+    let (mut domain, mut model) = deck_of(1);
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenCapture, None).unwrap();
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::QuickAddInsertText("abcdef".into()),
+        None,
+    )
+    .unwrap();
+    apply_intent(&mut domain, &mut model, BoardIntent::ExpandQuickAdd, None).unwrap();
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::EditInsertText("abcdef\nsecond".into()),
+        None,
+    )
+    .unwrap();
+    let area = Rect::new(0, 0, 78, 13);
+    let hits = board_hit_map(area, &model);
+    let note = hits
+        .regions
+        .iter()
+        .find(|h| h.target == QueueHitTarget::FormNotes(0))
+        .unwrap();
+    let intent = map_board_mouse(&model, &hits, left_click(note.area.x + 4, note.area.y)).unwrap();
+    apply_intent(&mut domain, &mut model, intent, None).unwrap();
+    apply_intent(&mut domain, &mut model, BoardIntent::EditInsert('X'), None).unwrap();
+    let rows = page_rows(&model).join("\n");
+    assert!(
+        rows.contains("abXcdef"),
+        "click inserts at note character, not end: {rows}"
+    );
+    let hits = board_hit_map(area, &model);
+    let title = hits
+        .regions
+        .iter()
+        .find(|h| h.target == QueueHitTarget::FormTitle)
+        .unwrap();
+    let intent =
+        map_board_mouse(&model, &hits, left_click(title.area.x + 6, title.area.y)).unwrap();
+    apply_intent(&mut domain, &mut model, intent, None).unwrap();
+    apply_intent(&mut domain, &mut model, BoardIntent::EditInsert('Y'), None).unwrap();
+    assert!(page_rows(&model).join("\n").contains("abYcdef"));
+}

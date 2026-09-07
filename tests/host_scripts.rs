@@ -275,6 +275,36 @@ fn open_capture_uses_herdr_cli_and_capture_path() {
 }
 
 #[test]
+fn open_capture_opens_a_sized_popup_for_the_capture_session() {
+    let text = read(&open_capture_path());
+    let active = active_script_lines(&text).join("\n");
+    assert!(
+        active.contains("--placement popup"),
+        "open-capture must open a popup pane; active lines: {active}"
+    );
+    assert!(
+        !text.contains("overlay"),
+        "open-capture must not use the retired overlay placement: {text}"
+    );
+    assert!(
+        active.contains("--width") && active.contains("--height"),
+        "a popup needs explicit --width/--height sized for the task page: {active}"
+    );
+    assert!(
+        active.contains("--width 80") && active.contains("--height 15"),
+        "the popup is 80x15 (operable for the task page): {active}"
+    );
+    assert!(
+        active.contains("--focus"),
+        "the popup must take focus when quick capture is invoked: {active}"
+    );
+    assert!(
+        active.contains(&format!("--env {}=capture", MODE_ENV)),
+        "the popup must still launch the binary in the capture session mode"
+    );
+}
+
+#[test]
 fn quick_capture_injects_the_mode_env_var_the_binary_reads() {
     let text = read(&open_capture_path());
     assert!(

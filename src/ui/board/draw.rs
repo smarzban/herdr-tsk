@@ -435,6 +435,7 @@ fn build_task_page_overlay<'a>(
             .min()
             .unwrap_or(page_geo.height);
         let header_cap = page_bottom.saturating_sub(3).max(1) as usize;
+        form.title_wrap_width.set(title_avail);
         if editing_title {
             let (mut rows, cursor_row, cursor_col) = wrapped_edit_rows(&form.title, title_avail);
             let overflowed = rows.len() > header_cap;
@@ -512,16 +513,19 @@ fn build_task_page_overlay<'a>(
     let editing_notes = model.input_mode() == BoardInputMode::EditNotes;
     let (notes_rows, notes_cursor, more_lines, notes_scroll) = if editing_notes {
         let (all_rows, cursor_row, cursor_column) = wrapped_edit_rows(&form.notes, notes_width);
-        // The notes editor owns the page viewport, so wheel and page scrolling stay inert
-        // while the caret is active. Keep the minimal window that shows the caret's wrapped
-        // row; Esc returns to page view, where below-fold steps can be scrolled into view.
-        let follow = form.notes_scroll.clamp(
-            cursor_row.saturating_sub(want.saturating_sub(1)),
-            cursor_row,
-        );
+        // Explicit pointer scrolling may leave the caret offscreen to reach steps.
+        // Typing or moving the caret restores automatic following.
+        let follow = if form.manual_page_scroll {
+            form.notes_scroll
+        } else {
+            form.notes_scroll.clamp(
+                cursor_row.saturating_sub(want.saturating_sub(1)),
+                cursor_row,
+            )
+        };
         (
             all_rows,
-            Some((
+            (!form.manual_page_scroll).then_some((
                 u16::try_from(cursor_row).unwrap_or(u16::MAX),
                 u16::try_from(cursor_column).unwrap_or(u16::MAX),
             )),
