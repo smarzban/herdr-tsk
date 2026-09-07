@@ -127,9 +127,8 @@ pub fn paint_task_row_lines(
     geo: &TierGeometry,
     leading_indent: usize,
 ) -> Vec<TaskRowLine> {
-    let row_w = geo.row_width as usize;
-    let meta_budget = task_meta_budget(row, geo);
-    let title_budget = row_w.saturating_sub(meta_budget);
+    let row_w = geo.row_width.saturating_sub(2) as usize;
+    let title_budget = row_w;
     let glyph_cells = display_width(&super::terminal_text(row.glyph));
     let prefix_cells = leading_indent + 2 + glyph_cells + 1;
     let identifier_width = row.identifier.map(display_width).unwrap_or(0);
@@ -156,10 +155,13 @@ pub fn paint_task_row_lines(
     let mut lines = Vec::with_capacity(segments.len());
     let head = TaskRowPaint {
         title: &segments[0],
+        meta: "",
         ..*row
     };
+    let mut title_geo = *geo;
+    title_geo.row_width = row_w as u16;
     lines.push(TaskRowLine {
-        line: paint_task_row_with_indent(&head, geo, leading_indent),
+        line: paint_task_row_with_indent(&head, &title_geo, leading_indent),
         content_x: head_content_x,
         content_width: head_content_width,
         identifier,
@@ -208,7 +210,12 @@ fn paint_task_row_with_indent(
 ) -> Line<'static> {
     let row_w = geo.row_width as usize;
     let meta_budget = task_meta_budget(row, geo);
-    let title_budget = row_w.saturating_sub(meta_budget);
+    let label_gap = if meta_budget > 0 && !row.meta.is_empty() {
+        2
+    } else {
+        0
+    };
+    let title_budget = row_w.saturating_sub(meta_budget + label_gap);
 
     let glyph = super::terminal_text(row.glyph);
     let prefix = format!("{}  {glyph} ", " ".repeat(leading_indent));
@@ -237,7 +244,7 @@ fn paint_task_row_with_indent(
     } else {
         let title_pad = title_budget.saturating_sub(left_w);
         let meta_pad = meta_content_budget.saturating_sub(meta_w);
-        title_pad + meta_pad
+        title_pad + label_gap + meta_pad
     };
     let leader = " ".repeat(leader_w);
 
@@ -285,14 +292,21 @@ fn paint_task_row_with_indent(
 }
 
 fn task_meta_budget(row: &TaskRowPaint<'_>, geo: &TierGeometry) -> usize {
-    if geo.meta_column_width == 0 && geo.width >= 78 && !row.meta.is_empty() {
-        // A short pane may use compact density despite having standard-width room.
-        // Preserve project/thread identity there; genuinely narrow panes keep the
-        // existing title-first layout and task titles still wrap.
+    if row.meta.is_empty() {
+        return 0;
+    }
+    let cap = if geo.meta_column_width == 0 && geo.width >= 78 {
+        // Short, standard-width panes still retain project/thread identity.
         (geo.row_width as usize / 4).min(36)
     } else {
         geo.meta_column_width as usize
+    };
+    if cap == 0 {
+        return 0;
     }
+    // Reserve only the label actually painted plus its trailing margin, not the
+    // maximum metadata column. The title owns every remaining cell up to its gap.
+    display_width(&present_line(row.meta, cap.saturating_sub(1))) + 1
 }
 
 /// Present untrusted text into a single mono-styled line bounded to `width` cells.
@@ -3690,11 +3704,30 @@ fn build_list_rows(
             *selected_idx = Some(out.len() - 1);
         }
         if detail_target == Some(task.id) {
-            for (line, content_x, content_width) in detail_lines_for_task(task, geo.row_width) {
+            let mut details = detail_lines_for_task(task, geo.row_width);
+            if !meta.is_empty() {
+                details.pop();
+            }
+            for (line, content_x, content_width) in details {
                 out.push(ListRow::Detail {
                     line,
                     content_x,
                     content_width,
+                });
+            }
+            *anchor_last_idx = Some(out.len() - 1);
+        }
+        if detail_target == Some(task.id) && !meta.is_empty() {
+            let room = geo.row_width.saturating_sub(9).max(1) as usize;
+            for (index, row) in crate::ui::edit::wrap_text(&meta, room)
+                .into_iter()
+                .enumerate()
+            {
+                let prefix = if index == 0 { "    └─ " } else { "       " };
+                out.push(ListRow::Detail {
+                    line: Line::from(Span::styled(format!("{prefix}{}", row.text), style_dim())),
+                    content_x: 7,
+                    content_width: display_width(&row.text) as u16,
                 });
             }
             *anchor_last_idx = Some(out.len() - 1);
@@ -4871,6 +4904,31 @@ mod tests {
 
         let layout = page_content_layout(5, 3, 16);
         assert_eq!(layout.steps_start, 7);
+    }
+
+    #[test]
+    fn task_titles_use_full_width_with_two_cells_at_right_edge() {
+        let geo = tier::resolve(80, 24);
+        let room = geo.row_width as usize - 8 - 2;
+        let title = "X".repeat(room + 1);
+        for meta in ["", "#public-launch", "project"] {
+            let row = TaskRowPaint {
+                glyph: "○",
+                identifier: Some("T28"),
+                title: &title,
+                meta,
+                selected: false,
+                title_bold: false,
+                dim: false,
+            };
+            let lines = paint_task_row_lines(&row, &geo, 0);
+            assert_eq!(lines.len(), 2);
+            assert_eq!(plain(&lines[0].line).matches('X').count(), room);
+            assert!(!plain(&lines[0].line).contains("public-launch"));
+            assert!(lines
+                .iter()
+                .all(|line| line.line.width() <= geo.row_width as usize - 2));
+        }
     }
 
     #[test]

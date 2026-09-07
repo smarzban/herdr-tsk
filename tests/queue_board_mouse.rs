@@ -1463,7 +1463,7 @@ fn non_left_clicks_over_a_live_control_are_ignored() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn section_header_rows_register_no_hit_target_and_thread_labels_stay_in_task_rows() {
+fn section_headers_have_no_hits_and_collapsed_task_titles_are_selectable() {
     let mut domain = DomainState::new();
     domain
         .create(
@@ -1477,11 +1477,11 @@ fn section_header_rows_register_no_hit_target_and_thread_labels_stay_in_task_row
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
     model.set_selected_project(Some(PathBuf::from(THIS_REPO)));
     let rows = page_rows(&model);
-    // The thread label is part of the task row's meta now, not a header of its own.
+    // The attribution line remains a task hit, never a section header.
     let task_row = rows
         .iter()
-        .position(|row| row.contains("threaded row") && row.contains("#release"))
-        .expect("thread label paints beside its task row");
+        .position(|row| row.contains("threaded row"))
+        .expect("task title paints without attribution");
     let header_y = rows
         .iter()
         .position(|row| row.contains("ON DECK"))
@@ -1502,7 +1502,7 @@ fn section_header_rows_register_no_hit_target_and_thread_labels_stay_in_task_row
             .iter()
             .any(|hit| matches!(hit.target, QueueHitTarget::Task(_))
                 && hit.area.y == task_row as u16),
-        "the row carrying the thread label is the task row itself"
+        "title row carries the task hit"
     );
 }
 

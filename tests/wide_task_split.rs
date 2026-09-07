@@ -260,11 +260,7 @@ fn stage_zero_and_full_task_render_the_standard_tier_at_130x24() {
     assert!(rows[3].starts_with(" IN MOTION ─"));
     assert!(rows[4].trim().is_empty(), "blank between header and rows");
     assert!(rows[5].starts_with("  ▸ T12 Frame the wide task view"));
-    assert!(
-        rows[5].trim_end().ends_with("tsk"),
-        "meta column: {}",
-        rows[5]
-    );
+    assert!(!rows.iter().any(|row| row.contains("└─ tsk")));
     assert!(rows[6].trim().is_empty());
     assert!(rows[7].starts_with(" ON DECK · desk ─"));
     assert!(rows[9].starts_with("  ○ T15 Renew domain"));
@@ -350,14 +346,14 @@ fn task_column_header_replaces_the_in_pane_header_with_stage_weight() {
 }
 
 #[test]
-fn stage_a_board_keeps_its_meta_column() {
+fn stage_a_board_has_no_attribution_column() {
     let (mut domain, mut model) = fixture();
     to_stage(&mut domain, &mut model, WideStage::Split);
     let geometry = resolve_responsive(130, 24, WideStage::Split);
     let (rows, _) = render(&model, 130, 24);
     let row = column_text(&rows, geometry.board, 5);
     assert!(row.starts_with("  ▸ T12 Frame"), "{row}");
-    assert!(row.trim_end().ends_with("tsk"), "meta column: {row}");
+    assert!(!rows.iter().any(|row| row.contains("└─ tsk")));
     assert_eq!(rows[5].chars().nth(geometry.rule.x as usize), Some('│'));
 }
 

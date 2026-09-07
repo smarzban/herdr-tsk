@@ -439,6 +439,20 @@ fn project_rows_show_full_thread_metadata_without_relative_age() {
     tasks[0].thread = Some("a".repeat(32));
     let mut model = BoardModel::from_tasks(tasks, Some(PathBuf::from("/repos/tsk")));
     model.apply_reopen_project(Some(PathBuf::from("/repos/tsk")));
+    let index = model
+        .visible_ids()
+        .iter()
+        .position(|id| *id == Uuid::from_u128(1))
+        .unwrap();
+    let mut domain = DomainState::new();
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::SelectIndex(index),
+        None,
+    )
+    .unwrap();
+    apply_intent(&mut domain, &mut model, BoardIntent::PeekDetail, None).unwrap();
     let rows = board_rows(&model, 80, 24);
     let joined = rows.join("\n");
     assert!(
@@ -640,7 +654,7 @@ fn standard_78x24_fixture_has_selector_list_rule_status_verb_and_no_other_chrome
         "desk tab must include the desk ON DECK header:\n{list}"
     );
     assert!(
-        list.contains('▸') && list.contains('○') && list.contains('✓'),
+        list.contains('▸') && list.contains('○'),
         "status glyphs must appear:\n{list}"
     );
     assert!(
@@ -649,8 +663,8 @@ fn standard_78x24_fixture_has_selector_list_rule_status_verb_and_no_other_chrome
     );
     // Standard trailing meta keeps scope/thread identity without relative ages.
     assert!(
-        list.contains("herdr") && list.contains("tsk") && list.contains("desk"),
-        "standard tier must paint task attribution:\n{list}"
+        !list.contains("└─"),
+        "collapsed board must hide attribution:\n{list}"
     );
     assert!(
         !list.contains("ago"),
@@ -659,9 +673,7 @@ fn standard_78x24_fixture_has_selector_list_rule_status_verb_and_no_other_chrome
     // NEEDS YOU is the desk's global attention lane: the fixture's blocked/review
     // rows from /repos/herdr paint here with project attribution.
     assert!(
-        list.contains("NEEDS YOU")
-            && list.contains("Wire dispatch cleanup receipts")
-            && list.contains("herdr"),
+        list.contains("NEEDS YOU") && list.contains("Wire dispatch cleanup receipts"),
         "desk NEEDS YOU must gather blocked/review from every live scope:\n{list}"
     );
     assert!(
@@ -867,29 +879,13 @@ fn every_section_header_has_symmetric_spacing_and_scrolls_with_its_selected_task
     let desk_view = fixture_view(&tasks, true);
     let projects_view = fixture_view_projects(&tasks, true);
     let desk_cases = [
-        (
-            "NEEDS YOU",
-            Uuid::from_u128(20),
-            "Wire dispatch cleanup receipts",
-        ),
-        (
-            "IN MOTION",
-            Uuid::from_u128(1),
-            "Smoke-test worktree dispatch",
-        ),
+        ("NEEDS YOU", Uuid::from_u128(20), "Wire dispatch cleanup"),
+        ("IN MOTION", Uuid::from_u128(1), "Smoke-test worktree"),
         ("ON DECK · desk", Uuid::from_u128(30), "Global backlog note"),
-        (
-            "DONE",
-            Uuid::from_u128(40),
-            "Ship the queue board milestone",
-        ),
+        ("DONE", Uuid::from_u128(40), "Ship the queue board"),
     ];
     let project_cases = [
-        (
-            "IN MOTION",
-            Uuid::from_u128(1),
-            "Smoke-test worktree dispatch",
-        ),
+        ("IN MOTION", Uuid::from_u128(1), "Smoke-test worktree"),
         (
             "ON DECK",
             Uuid::from_u128(10),
@@ -1252,7 +1248,8 @@ fn standard_row_meta_keeps_full_project_without_relative_age() {
     tasks[0].scope = project("/src/customer-portal-api");
     tasks[0].updated_at = at_secs_ago(12 * 60);
     let view = fixture_view(&tasks, false);
-    let model = fixture_model(&tasks, &view);
+    let mut model = fixture_model(&tasks, &view);
+    model.detail_open = Some(tasks[0].id);
     let rows = paint(80, 24, &model).0;
     let row = rows
         .iter()
@@ -1260,7 +1257,8 @@ fn standard_row_meta_keeps_full_project_without_relative_age() {
         .expect("started fixture row");
     assert!(row.contains('7'), "number must remain visible:\n{row}");
     assert!(
-        row.contains("customer-portal-api"),
+        rows.iter()
+            .any(|row| row.contains("└─ customer-portal-api")),
         "full project attribution must remain visible:\n{row}"
     );
     assert!(
@@ -1334,7 +1332,8 @@ fn done_drawer_rows_lead_with_identifiers() {
     let mut tasks = fixture_tasks();
     tasks[7].number = Some(12);
     let view = fixture_view(&tasks, true);
-    let model = fixture_model(&tasks, &view);
+    let mut model = fixture_model(&tasks, &view);
+    model.selection_id = Some(tasks[7].id);
     let body = paint(80, 24, &model).0.join("\n");
 
     assert!(
@@ -2943,7 +2942,7 @@ fn footer_lists_the_step_add_verb() {
 /// Thread labels are row meta on the project board: they paint beside their own task
 /// row, never as a decorative header block, and rows stay flush left.
 #[test]
-fn thread_labels_paint_beside_rows_without_headers_or_indent() {
+fn collapsed_threaded_rows_have_no_labels_or_extra_indent() {
     let mut tasks = fixture_tasks();
     tasks[2].thread = Some("release".to_string());
     tasks[3].thread = Some("release".to_string());
@@ -2968,8 +2967,8 @@ fn thread_labels_paint_beside_rows_without_headers_or_indent() {
         .expect("unthreaded task paints");
 
     assert!(
-        threaded.contains("#release"),
-        "the thread label paints on its task row's meta:\n{threaded:?}"
+        !rows.iter().any(|row| row.contains("#release")),
+        "collapsed task hides the thread label:\n{threaded:?}"
     );
     assert!(
         rows.iter()
@@ -3237,7 +3236,8 @@ fn all_golden_frames_pass_no_color_sgr_scan() {
 #[test]
 fn board_list_wraps_a_long_title_onto_a_continuation_row() {
     let mut domain = DomainState::new();
-    let title = "alpha bravo charlie delta echo foxtrot golf hotel".to_string();
+    let title =
+        "alpha bravo charlie delta echo foxtrot golf india juliet kilo lima mike hotel".to_string();
     domain
         .create(
             &title,
@@ -4782,7 +4782,7 @@ fn project_and_cross_project_thread_views_omit_count_summaries() {
 }
 
 #[test]
-fn short_panes_keep_identity_when_standard_width_is_available() {
+fn collapsed_short_panes_hide_project_and_thread_labels() {
     let mut item = task(
         991,
         "Scope row",
@@ -4801,8 +4801,8 @@ fn short_panes_keep_identity_when_standard_width_is_available() {
             .find(|row| row.contains("Scope row"))
             .expect("desk task row");
         assert!(
-            row.contains("alpha"),
-            "project attribution missing at {width}: {row}"
+            !desk.iter().any(|row| row.contains("└─ alpha")),
+            "collapsed project attribution should be hidden at {width}: {row}"
         );
         model.set_selected_project(Some(PathBuf::from("/repos/alpha")));
         let project = board_rows(&model, width, 20);
@@ -4811,14 +4811,14 @@ fn short_panes_keep_identity_when_standard_width_is_available() {
             .find(|row| row.contains("Scope row"))
             .expect("project task row");
         assert!(
-            row.contains("#ship"),
-            "thread attribution missing at {width}: {row}"
+            !project.iter().any(|row| row.contains("#ship")),
+            "collapsed thread attribution should be hidden at {width}: {row}"
         );
     }
 }
 
 #[test]
-fn wide_compact_rows_keep_project_and_thread_identity() {
+fn collapsed_wide_compact_rows_hide_thread_labels() {
     let mut domain = DomainState::new();
     domain
         .create(
@@ -4846,8 +4846,8 @@ fn wide_compact_rows_keep_project_and_thread_identity() {
     model.set_selected_project(Some(PathBuf::from("/repos/alpha")));
     let project = board_rows(&model, 162, 20).join("\n");
     assert!(
-        project.contains("#release"),
-        "thread attribution missing in wide compact mode:\n{project}"
+        !project.contains("#release"),
+        "collapsed thread attribution should be hidden in wide compact mode:\n{project}"
     );
 }
 
@@ -5257,5 +5257,54 @@ fn persistent_slot_keeps_selected_project_label_on_home_tabs() {
             text.contains("alpha ▾"),
             "slot label missing on {tab:?}:\n{text}"
         );
+    }
+}
+
+#[test]
+fn attribution_appears_only_at_bottom_of_open_peek() {
+    let mut task = task(
+        999,
+        "A task with notes",
+        HumanStatus::Ready,
+        project("/repos/tsk"),
+        0,
+    );
+    task.thread = Some("release".into());
+    task.notes = Some("Peek note body".into());
+    let mut model = BoardModel::from_tasks(vec![task], Some(PathBuf::from("/repos/tsk")));
+    model.set_selected_project(Some(PathBuf::from("/repos/tsk")));
+    let mut domain = DomainState::new();
+    for peek in [false, true] {
+        if peek {
+            apply_intent(&mut domain, &mut model, BoardIntent::PeekDetail, None).unwrap();
+        }
+        let rows = board_rows(&model, 80, 24);
+        let title = rows
+            .iter()
+            .position(|row| row.contains("A task with notes"))
+            .unwrap();
+        if !peek {
+            assert!(
+                !rows.iter().any(|row| row.contains("#release")),
+                "collapsed task must have no label"
+            );
+            continue;
+        }
+        let label = rows
+            .iter()
+            .position(|row| row.contains("└─ #release"))
+            .expect("L-shaped label line");
+        assert!(label > title);
+        assert!(!rows[title].contains("release"));
+        if peek {
+            let note = rows
+                .iter()
+                .position(|row| row.contains("Peek note body"))
+                .unwrap();
+            assert!(title < note && note < label);
+            assert_eq!(rows.iter().filter(|row| row.contains('└')).count(), 1);
+        } else {
+            assert_eq!(label, title + 1);
+        }
     }
 }

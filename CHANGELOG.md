@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+Board attribution appears only inside an open peek, on a dim `└─ label` line
+below its notes. Collapsed rows show no labels. Titles wrap two cells before the right edge without a label column.
+
 Quick capture opens the expanded quick-add page in a herdr popup instead of the old
 capture form. It is the same page as `+` then `Tab` on the board, opening with the
 cursor in Title: scope and selected-text prefill from the focused pane, `Shift+Enter`

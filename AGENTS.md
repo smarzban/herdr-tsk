@@ -38,7 +38,7 @@ For scriptable board work, use `tsk add`, `tsk list`, `tsk status`, `tsk edit`, 
   status row. Click selects an index row, double-click or Enter opens it. Its View can show a
   flat cross-project thread board. Project focus remains available through `p` and the index. NEEDS YOU · IN MOTION ·
   ON DECK when project-scoped · done drawer (`d`). Project rows are navigation, never task
-  rows. Scoped project boards show thread labels beside tasks and a local thread filter,
+  rows. Scoped project boards show thread labels in task peeks and a local thread filter,
   without a separate filtered-task count. Cross-project thread views also omit the task/project
   summary. A selector wrapped below the tabs has one blank row above it.
   The done drawer ends with a collapsible `▾ archived · n` group (closed by default,
@@ -48,8 +48,9 @@ For scriptable board work, use `tsk add`, `tsk list`, `tsk status`, `tsk edit`, 
   selected project · `projects`; shortcuts `1`/`2`/`3` remain keyboard-only. Projects Overview
   search opens in the shared footer slot with `/`, keeps the table visible, filters live, opens
   the selected project on Enter, and clears/closes on Esc; the closed footer advertises `/ search`.
-  Task rows show project attribution on global rows or `#thread` on project rows, never relative
-  ages; task-page informational dates remain intact.
+  Collapsed task rows show no attribution. Open peek shows project attribution on global
+  rows or `#thread` on project rows on a dim `└─ label` line below its notes, never relative ages.
+  Titles wrap two cells before the right edge; unlabeled tasks have no attribution line; task-page informational dates remain intact.
 - Archive is a flag, not a place. `archived` on a task, and a lazy project record
   (`projects` map keyed by scope path, present only while archived) for projects. Neither leaves
   `tsk.json`. A *hidden* task (archived, or in an archived project) paints in no working lens;
