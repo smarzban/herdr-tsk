@@ -2437,6 +2437,33 @@ impl BoardModel {
         };
     }
 
+    /// Whether the task page's cursor rests on a stored (not removed, not the `+ step`
+    /// row) step. Enter toggles that step instead of acting on the page.
+    pub fn stored_step_selected(&self) -> bool {
+        if self.focused_surface() != FocusedSurface::Task
+            || !matches!(
+                self.input_mode,
+                BoardInputMode::TaskPage | BoardInputMode::EditStep
+            )
+        {
+            return false;
+        }
+        let Some(form) = self.form.as_ref().filter(|form| form.is_task()) else {
+            return false;
+        };
+        if form.steps.add_selected {
+            return false;
+        }
+        let (Some(task_id), Some(index)) = (form.task_id(), form.steps.cursor) else {
+            return false;
+        };
+        self.tasks
+            .iter()
+            .find(|task| task.id == task_id)
+            .and_then(|task| task.steps.get(index))
+            .is_some_and(|step| !form.steps.removals.contains(&step.id))
+    }
+
     /// Whether the current task page has entered its edit session.
     pub fn task_editing(&self) -> bool {
         self.form

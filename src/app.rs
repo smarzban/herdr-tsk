@@ -966,6 +966,15 @@ fn board_keyboard_intent(
     {
         return Some(BoardIntent::ConfirmEdit);
     }
+    // Bare Enter on a stored step toggles it. Resolved here, where the model is in reach,
+    // so the persisting intent is classified before the save boundary sees it.
+    if mode == BoardInputMode::TaskPage
+        && key.code == KeyCode::Enter
+        && key.modifiers.is_empty()
+        && model.stored_step_selected()
+    {
+        return Some(BoardIntent::ToggleStep);
+    }
     // Task-page Thread has a selected state before its text cursor opens. It owns Enter and
     // Tab itself, while capture's direct Thread editor keeps the shared form mapper.
     if matches!(

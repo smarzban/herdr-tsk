@@ -69,6 +69,7 @@ pub fn board_intent_may_persist(intent: &BoardIntent) -> bool {
             | BoardIntent::PrimaryVerb
             | BoardIntent::ToggleBlock
             | BoardIntent::ToggleReview
+            | BoardIntent::ToggleStep
             | BoardIntent::QuickAddSave
             | BoardIntent::QuickAddSaveNext
     )
@@ -1312,31 +1313,34 @@ fn apply_board_intent(
         }
         // The app-level save-recovery boundary handles these while unresolved.
         BoardIntent::RetrySave | BoardIntent::CancelSave => return Ok(IntentOutcome::None),
+        BoardIntent::ToggleStep => {
+            model.close_popup();
+            let Some((task_id, step_id)) = selected_step(domain, model) else {
+                return Ok(IntentOutcome::None);
+            };
+            domain.toggle_step(task_id, step_id)?;
+        }
         BoardIntent::PrimaryVerb => {
             model.close_popup();
-            // A selected step owns the page primary verb. With no live step selection, retain
-            // the task's start/reopen behavior.
-            if let Some((task_id, step_id)) = selected_step(domain, model) {
-                domain.toggle_step(task_id, step_id)?;
-            } else {
-                let Some(id) = model.selected_id() else {
-                    model.set_message(NO_SELECTION);
+            // Status verbs always act on the task, even with a step selected: Enter is the
+            // step's own toggle.
+            let Some(id) = model.selected_id() else {
+                model.set_message(NO_SELECTION);
+                return Ok(IntentOutcome::None);
+            };
+            let Some(task) = domain.get(id) else {
+                model.set_message("that task is no longer here");
+                return Ok(IntentOutcome::None);
+            };
+            match task.status {
+                HumanStatus::Ready => {
+                    domain.set_status(id, HumanStatus::Started)?;
+                }
+                HumanStatus::Done => {
+                    domain.reopen(id)?;
+                }
+                HumanStatus::Started | HumanStatus::Blocked | HumanStatus::Review => {
                     return Ok(IntentOutcome::None);
-                };
-                let Some(task) = domain.get(id) else {
-                    model.set_message("that task is no longer here");
-                    return Ok(IntentOutcome::None);
-                };
-                match task.status {
-                    HumanStatus::Ready => {
-                        domain.set_status(id, HumanStatus::Started)?;
-                    }
-                    HumanStatus::Done => {
-                        domain.reopen(id)?;
-                    }
-                    HumanStatus::Started | HumanStatus::Blocked | HumanStatus::Review => {
-                        return Ok(IntentOutcome::None);
-                    }
                 }
             }
         }
@@ -1769,39 +1773,20 @@ fn apply_board_intent(
         }
         BoardIntent::Complete => {
             model.close_popup();
-            if let Some((task_id, step_id)) = selected_step(domain, model) {
-                let done = domain
-                    .get(task_id)
-                    .and_then(|task| task.steps.iter().find(|step| step.id == step_id))
-                    .is_some_and(|step| step.done);
-                if !done {
-                    domain.toggle_step(task_id, step_id)?;
-                }
-            } else {
-                let Some(id) = model.selected_id() else {
-                    model.set_message(NO_SELECTION);
-                    return Ok(IntentOutcome::None);
-                };
-                domain.complete(id)?;
-            }
+            // Task-level, even with a step selected (Enter owns the step).
+            let Some(id) = model.selected_id() else {
+                model.set_message(NO_SELECTION);
+                return Ok(IntentOutcome::None);
+            };
+            domain.complete(id)?;
         }
         BoardIntent::Reopen => {
             model.close_popup();
-            if let Some((task_id, step_id)) = selected_step(domain, model) {
-                let done = domain
-                    .get(task_id)
-                    .and_then(|task| task.steps.iter().find(|step| step.id == step_id))
-                    .is_some_and(|step| step.done);
-                if done {
-                    domain.toggle_step(task_id, step_id)?;
-                }
-            } else {
-                let Some(id) = model.selected_id() else {
-                    model.set_message(NO_SELECTION);
-                    return Ok(IntentOutcome::None);
-                };
-                domain.reopen(id)?;
-            }
+            let Some(id) = model.selected_id() else {
+                model.set_message(NO_SELECTION);
+                return Ok(IntentOutcome::None);
+            };
+            domain.reopen(id)?;
         }
         BoardIntent::SoftDelete => {
             model.close_popup();

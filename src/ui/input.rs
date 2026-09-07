@@ -289,6 +289,8 @@ pub enum BoardIntent {
     /// Help card: scroll its key list one row.
     HelpScrollUp,
     HelpScrollDown,
+    /// `Enter` on a stored task-page step: flip it between done and ready.
+    ToggleStep,
     /// `Enter` opens the selected task as a full-page view in single-pane presentation.
     OpenTaskPage,
     /// `→` at wide widths: move the stage slider one step towards the task (0 → A → G → F).
@@ -1201,6 +1203,7 @@ pub fn intent_primary_action(intent: &BoardIntent) -> Option<PrimaryBoardAction>
         | BoardIntent::ToggleReview
         | BoardIntent::HelpScrollUp
         | BoardIntent::HelpScrollDown
+        | BoardIntent::ToggleStep
         | BoardIntent::OpenTaskPage
         | BoardIntent::StageRight
         | BoardIntent::StageLeft

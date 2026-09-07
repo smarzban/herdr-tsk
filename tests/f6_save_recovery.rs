@@ -1643,7 +1643,7 @@ fn successful_step_removal_keeps_the_cursor_on_the_same_step_id() {
         page.contains("▸ ▪ bravo"),
         "the cursor must stay on bravo after alpha is removed: {page}"
     );
-    apply_intent(&mut domain, &mut model, BoardIntent::PrimaryVerb, None)
+    apply_intent(&mut domain, &mut model, BoardIntent::ToggleStep, None)
         .expect("toggle selected step");
     let task = domain.get(id).expect("task");
     assert!(task.steps[0].done, "bravo must be toggled");
