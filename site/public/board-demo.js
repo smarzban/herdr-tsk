@@ -438,33 +438,28 @@ import { parseCapture } from "./capture.js";
 
   function verbItems(task) {
     if (!task) {
+      // The bar is a prompt, not a keymap: open · status verbs · add · help.
       if (state.tab === "projects" && !state.focusProject) {
         return [
-          { id: "search", label: "/ search projects" },
           { id: "open", label: "enter open" },
-          { id: "view", label: "v view" },
+          { id: "search", label: "/ search" },
           { id: "help", label: "? help" },
-          { id: "palette", label: ": palette" },
         ];
       }
       return [
-        { id: "open", label: "enter open" },
-        { id: "capture", label: "+ capture" },
+        { id: "capture", label: "+ add" },
         { id: "help", label: "? help" },
-        { id: "palette", label: ": palette" },
       ];
     }
     const items = [{ id: "open", label: "enter open" }];
     if (task.status === "ready") items.push({ id: "start", label: "s start" });
     if (task.status === "done") {
-      items.push({ id: "reopen", label: "s reopen" });
       items.push({ id: "reopen", label: "o reopen" });
     } else {
       items.push({ id: "done", label: "d done" });
       items.push({ id: "block", label: task.status === "blocked" ? "b unblock" : "b block" });
     }
-    items.push({ id: "file", label: task.archived ? "f unarchive" : "f archive" });
-    items.push({ id: "palette", label: ": palette" }, { id: "help", label: "? help" }, { id: "capture", label: "+ capture" });
+    items.push({ id: "capture", label: "+ add" }, { id: "help", label: "? help" });
     return items;
   }
 
@@ -688,16 +683,15 @@ import { parseCapture } from "./capture.js";
       <div class="tsk-box tsk-help" role="dialog" aria-label="help">
         <div class="tsk-box-top"><span class="tsk-box-title">help</span><button type="button" class="tsk-box-close" data-close="1" aria-label="close">[x]</button></div>
         <div class="tsk-box-body tsk-help-body">
-          <div>esc close | click a verb to run it</div>
-          <div>j/k · ↑/↓ move | s primary</div>
-          <div>d done | o reopen | b block</div>
-          <div>enter open | →/← peek or slide | + capture</div>
-          <div>e title | n notes | x delete | u undo</div>
-          <div>z drawer | : palette | ? help</div>
-          <div>P project | 1 2 3 navigation | / search projects | g groups</div>
+          <div>board</div>
+          <div>j/k · ↑/↓ move | enter open | →/← peek or slide</div>
+          <div>s start / reopen | d done | o reopen | b block | r review</div>
+          <div>e edit title | x delete | u undo | f archive | + add</div>
+          <div>z drawer (app: d) | g archived group | p projects | 1 2 3 destinations</div>
+          <div>/ search projects | : palette | ? help</div>
           <div class="dim">app needs ctrl on verbs · demo also accepts bare keys</div>
         </div>
-        <div class="tsk-box-foot">any key close</div>
+        <div class="tsk-box-foot">esc close</div>
       </div>`;
   }
 
@@ -870,8 +864,7 @@ import { parseCapture } from "./capture.js";
   }
 
   const PAGE_VERBS = [
-    { id: "edit", label: "e title" },
-    { id: "notes", label: "n notes" },
+    { id: "edit", label: "e edit" },
     { id: "done", label: "d done" },
     { id: "block", label: "b block" },
   ];
@@ -880,7 +873,7 @@ import { parseCapture } from "./capture.js";
     return (
       PAGE_VERBS.map((v) => `<button type="button" class="tsk-verb" data-page-verb="${v.id}">${v.label}</button>`).join(
         "<span> · </span>",
-      ) + "<span> · </span><span>esc back</span>"
+      ) + "<span> · </span><span>esc close</span>"
     );
   }
 
@@ -897,7 +890,7 @@ import { parseCapture } from "./capture.js";
     const footer =
       state.overlay === "quick"
         ? `<div class="tsk-input-row"><span class="tsk-prompt">+</span><input class="tsk-field" id="tsk-add" value="${esc(state.draft)}" placeholder="title  ·  !p project  ·  !t thread" autocomplete="off" /><span class="cursor">█</span></div>
-           <div class="foot dim">${state.refuse ? esc(state.refuse) : "enter save · shift+enter stay · tab page · esc close"}</div>`
+           <div class="foot dim">${state.refuse ? esc(state.refuse) : "enter save · shift+enter save+next · tab details · esc close"}</div>`
         : state.overlay === "search"
           ? `<div class="tsk-input-row"><span class="tsk-prompt">/</span><input class="tsk-field" id="tsk-project-search" value="${esc(state.projectQuery)}" placeholder="search projects" autocomplete="off" /><span class="cursor">█</span></div>
              <div class="foot dim">enter open · esc close</div>`
@@ -1242,7 +1235,7 @@ import { parseCapture } from "./capture.js";
       render();
       return;
     }
-    if (e.key === "P") {
+    if (e.key === "p" || e.key === "P") {
       e.preventDefault();
       state.overlay = "picker";
       state.pickerI = 0;

@@ -20,8 +20,8 @@ leaving task view. The target sits immediately below the final stored step as ` 
 start task editing. `ctrl+a` also opens that editor from every task-edit field or
 inline step state.
 
-- `ctrl+s` toggles the selected step, otherwise it starts or reopens the task
-- `ctrl+d` completes a selected open step, `ctrl+o` reopens a selected done step
+- `Enter` on a selected stored step toggles it done ↔ ready
+- `ctrl+s`, `ctrl+d`, `ctrl+o`, `ctrl+b`, `ctrl+r` act on the task, never the step
 - `ctrl+e` on a selected stored step starts task editing and opens it inline
 - In task editing, Tab runs Title, Notes, stored steps, `+ step`, Scope, Thread
 - Reaching a stored step through Tab or arrows opens its inline editor
@@ -37,7 +37,8 @@ step and opens the next empty editor. `Shift+Enter` saves that step and the encl
 task-edit session. An empty new-step row discards if you click elsewhere. Existing-step
 renames and removals are staged with Title, Notes, Thread, and Scope. Plain `Enter` parks
 an existing-step rename in that session, then `Shift+Enter` saves all staged changes
-(`Alt+Enter` is the legacy-terminal fallback). `Esc` cancels a field; Esc from task
+(the only session save chord; `Alt+Enter` does nothing on the board). `Esc` cancels a
+field; Esc from task
 editing restores staged removals. A failed save keeps its drafts until you retry or cancel.
 
 Wheel still scrolls the page. Bare `↓` activates the first stored step, then arrows

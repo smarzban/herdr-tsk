@@ -2553,11 +2553,33 @@ mod tests {
 
     #[test]
     fn capture_scope_never_offers_an_archived_this_project() {
+        // The archived record names the project through a symlink while the invocation
+        // resolved the real directory; both must count as the same project. Built here so
+        // the test holds on Linux too (it used to lean on macOS's `/tmp` → `/private/tmp`).
+        static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let unique = format!(
+            "tsk-capture-archived-{}-{}-{}",
+            std::process::id(),
+            COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or_default()
+        );
+        let root = std::env::temp_dir().join(unique);
+        let real = root.join("real");
+        let link = root.join("link");
+        std::fs::create_dir_all(&real).expect("real dir");
+        std::os::unix::fs::symlink(&real, &link).expect("symlink");
+        let real = std::fs::canonicalize(&real).expect("canonical real");
+        let real_str = real.to_string_lossy().into_owned();
+        let link_str = link.to_string_lossy().into_owned();
+
         let snapshot = InvocationSnapshot {
             default_scope: TaskScope::Project {
-                path: "/private/tmp".into(),
+                path: real_str.clone(),
             },
-            this_repo: Some(PathBuf::from("/private/tmp")),
+            this_repo: Some(real.clone()),
             title_prefill: None,
             provenance: ProvenanceOrigin::Capture,
         };
@@ -2565,7 +2587,7 @@ mod tests {
         assert!(model.this_project_available());
 
         let mut archived = std::collections::BTreeSet::new();
-        archived.insert("/tmp".to_string());
+        archived.insert(link_str);
         model.mark_archived_projects(&archived);
 
         assert!(
@@ -2594,5 +2616,6 @@ mod tests {
             &TaskScope::Global,
             "cycling never lands on the archived repo either"
         );
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

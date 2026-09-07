@@ -956,7 +956,7 @@ fn empty_board_hint_advertises_the_live_quick_add_key() {
     let (rows, _) = paint(80, 24, &model);
     let frame = rows.join("\n");
 
-    assert!(frame.contains("+ capture"), "empty-board hint: {frame}");
+    assert!(frame.contains("+ add"), "empty-board hint: {frame}");
     assert!(!frame.contains("a capture"), "empty-board hint: {frame}");
 }
 

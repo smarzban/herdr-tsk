@@ -29,21 +29,21 @@ For scriptable board work, use `tsk add`, `tsk list`, `tsk status`, `tsk edit`, 
 ### Board
 
 - The board keeps persistent destinations **desk** · **selected project** · **projects**
-  (`1`/`2`/`3`) in every normal board surface. `P` opens the project picker; selecting a
+  (`1`/`2`/`3`) in every normal board surface. `p` opens the project picker; selecting a
   project fills slot 2 and opens its board. **desk**: NEEDS YOU across live scopes, global
   IN MOTION, then desk-only ON DECK. **projects**: one selectable overview row per project,
   with right-anchored needs-you, in-motion, and ready counts (zero paints a dim `·`, live
   needs-you bold), a blank row under the legend, basename-only rows with a dim `here` on the
   launch project, a THREADS column at ≥100 columns, and the selected row's full path on the
   status row. Click selects an index row, double-click or Enter opens it. Its View can show a
-  flat cross-project thread board. Project focus remains available through `P` and the index. NEEDS YOU · IN MOTION ·
-  ON DECK when project-scoped · done drawer (`z`). Project rows are navigation, never task
+  flat cross-project thread board. Project focus remains available through `p` and the index. NEEDS YOU · IN MOTION ·
+  ON DECK when project-scoped · done drawer (`d`). Project rows are navigation, never task
   rows. Scoped project boards show thread labels beside tasks and a local thread filter,
   without a separate filtered-task count. Cross-project thread views also omit the task/project
   summary. A selector wrapped below the tabs has one blank row above it.
   The done drawer ends with a collapsible `▾ archived · n` group (closed by default,
   session-only): its header is the one selectable header (`Enter`/click toggles it, the word
-  paints bold when selected, never reverse), its rows paint dim, and it folds with `ctrl+g`
+  paints bold when selected, never reverse), its rows paint dim, and it folds with bare `g`
   while the drawer is open; other board surfaces have no collapsible groups. Visible tab labels are `desk` ·
   selected project · `projects`; shortcuts `1`/`2`/`3` remain keyboard-only. Projects Overview
   search opens in the shared footer slot with `/`, keeps the table visible, filters live, opens
@@ -53,13 +53,13 @@ For scriptable board work, use `tsk add`, `tsk list`, `tsk status`, `tsk edit`, 
 - Archive is a flag, not a place. `archived` on a task, and a lazy project record
   (`projects` map keyed by scope path, present only while archived) for projects. Neither leaves
   `tsk.json`. A *hidden* task (archived, or in an archived project) paints in no working lens;
-  `open task` excludes archived. `ctrl+f` ("file") toggles the selected task; in the `P` picker
+  `open task` excludes archived. `ctrl+f` ("file") toggles the selected task; in the `p` picker
   it archives the selected project, on the picker's archived tab it unarchives. `ctrl+u` on an
   archived selection unarchives, otherwise it is undo. No undo entry for archive.
-- The `P` picker has two tabs (main · archived) with a dim rule under them. `Enter` on an
+- The `p` picker has two tabs (main · archived) with a dim rule under them. `Enter` on an
   archived project opens a **read-only focus**: chip `name · archived`, dim rows, every
   mutating verb refuses with `project <name> is archived · ctrl+u unarchive`, task page is
-  view-only, `ctrl+u` unarchives in place, `Esc`/`P`/`1`-`3` leave. The only lens that paints an
+  view-only, `ctrl+u` unarchives in place, `Esc`/`p`/`1`-`3` leave. The only lens that paints an
   archived project's tasks. Scope dropdowns (task page, quick-add, capture) never offer an
   archived project. Launching inside an archived project's directory shows a once-per-session
   card (`project <name> is archived, would you like to unarchive it?`, `y`/`n`/`Esc`); keep →
@@ -85,9 +85,18 @@ For scriptable board work, use `tsk add`, `tsk list`, `tsk status`, `tsk edit`, 
   and done drawer; clicking that prefix copies it. Peek relies on its parent row's prefix.
   Drafts without a number paint none.
 - Human status: `ready` · `started` · `blocked` · `review` · `done`.
-- Mutating verbs (`s` `d` `o` `b` `e` `n` `x` `u` `f` `q`) need Ctrl. Bare
-  letters do nothing. Nav, peek,
-  `Enter`, `P`, `1`/`2`/`3`, `z`, `:`, `?`, `+`, and `Esc` stay bare.
+- Mutating verbs (`s` `d` `o` `b` `r` `e` `n` `x` `u` `f` `q`) need Ctrl. Bare
+  letters do nothing unless they carry a bare route. Nav, peek, `Enter`, `p` (picker),
+  `d` (done drawer), `g` (archived group), `t`, `v`, `1`/`2`/`3`, `:`, `?`, `+`, and `Esc`
+  stay bare; the keymap resolves one letter by modifier class (`d` drawer vs `ctrl+d` done).
+  `ctrl+r` toggles review ↔ ready.
+- The footer's verb row is a prompt, not a keymap: open · status verbs · `+ add` · `? help`
+  on the board, `ctrl+e edit` · status verbs · `esc close` on the page, `shift+enter save` ·
+  `esc cancel` while editing. Archive, delete, undo, drawer, pickers, and palette are not
+  seats; `?` lists every key of every surface on one scrollable card (`↑↓`/`jk`/page/wheel,
+  closes on `Esc`/`?`/`q`). Keys paint as `ctrl+x label`; inputs' placeholders hold only the
+  content hint, and the reserved row above a bottom input carries its context (quick-add
+  destination, selected project path).
 - Task creation is the quick-add bar, never a form takeover. `+` opens a one-line
   title input on the status-row slot with a blank row above and below, list still
   visible. `Enter` saves and closes, `Shift+Enter` saves and stays open, `Tab`
@@ -111,11 +120,13 @@ For scriptable board work, use `tsk add`, `tsk list`, `tsk status`, `tsk edit`, 
   double-click opens the full task page.
 - Task page is view-first. Only `ctrl+e`, `ctrl+n`, or bare Tab enter edit mode,
   the one exception being a quick-add draft expanded with `Tab`, which opens
-  straight into Notes edit mode because a draft has nothing to view. `ctrl+s`
-  toggles a selected step, otherwise it starts or reopens the task. Plain `Enter`
-  parks an existing-step rename; on a new step it saves that step and opens the next empty
-  row. `Shift+Enter` saves the complete task-edit session (and a typed new step), with
-  `Alt+Enter` as the legacy-terminal fallback. An empty new-step row discards if you click
+  straight into Notes edit mode because a draft has nothing to view. The status verbs
+  (`ctrl+s` `ctrl+d` `ctrl+o` `ctrl+b` `ctrl+r`) always act on the task; `Enter` on a stored
+  step toggles it (`ToggleStep`, resolved at the keyboard boundary in `src/app.rs` so the
+  save baseline loads first). Plain `Enter` parks an existing-step rename; on a new step it
+  saves that step and opens the next empty row; in the Title editor it moves to Notes.
+  `Shift+Enter` is the only whole-session save chord (`Alt+Enter` does nothing on the board;
+  standalone Capture keeps its own fallback). An empty new-step row discards if you click
   elsewhere. `ctrl+x` asks once (`press ctrl+x again to delete`) before deleting a task. The scope footer is
   inert until an edit has started.
 - Content and chrome use mono modifiers only, at every width. No color theme module.
