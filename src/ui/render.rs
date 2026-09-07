@@ -1425,6 +1425,9 @@ fn paint_footer(
             if let Some(message) = quick_add_message {
                 paint_bottom_input_message(frame, surface, row, width, message);
             }
+            // The row is a notice while the message holds it: a click there is inert, it
+            // must not read as an outside click that discards the draft.
+            hits.push(QueueHitTarget::ModalChrome, Rect::new(0, row, width, 1));
         } else {
             let (line, verb_hits) = paint_verb_bar(verb_items, budget, width, prefix_verbs);
             put_line(frame, surface, row, width, line);

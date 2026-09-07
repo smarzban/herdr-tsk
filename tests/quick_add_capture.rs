@@ -1294,3 +1294,76 @@ fn expanded_quick_add_sets_thread_and_steps() {
     assert_eq!(task.steps.len(), 1);
     assert_eq!(task.steps[0].text, "first step");
 }
+
+/// A wrapped draft owns the reserved row above the input, so its refusal moves down to the
+/// verb row instead of vanishing, and a click on that notice is inert (it must not read as
+/// an outside click that discards the draft).
+#[test]
+fn wrapped_draft_refusal_paints_on_the_verb_row_and_a_click_there_keeps_the_draft() {
+    use ratatui::layout::Position;
+    use tsk_tui::ui::render::QueueHitTarget;
+
+    let mut domain = DomainState::new();
+    domain
+        .create(
+            "anchor",
+            None,
+            TaskScope::Project {
+                path: "/repos/other".into(),
+            },
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create anchor");
+    domain.archive_project("/repos/other").expect("archive");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/invocation")));
+    let snap = snapshot();
+    open(&mut domain, &mut model, &snap);
+    // Long enough to wrap at 80 columns, and naming an archived project so the save refuses.
+    let long: String = (0..30).map(|index| format!("w{index} ")).collect();
+    type_title(&mut domain, &mut model, &format!("{long}!p other"));
+    assert_eq!(
+        apply(&mut domain, &mut model, BoardIntent::QuickAddSave, None),
+        IntentOutcome::None
+    );
+    let message = model.message().expect("refusal").to_string();
+
+    let rows = render_rows(&model, 80, 24);
+    let prompt_rows = rows.iter().filter(|row| row.contains('▎')).count();
+    assert_eq!(
+        prompt_rows,
+        2,
+        "the draft wrapped onto the reserved row:\n{}",
+        rows.join("\n")
+    );
+    assert!(
+        rows[23].contains(&message),
+        "the refusal moved to the verb row:\n{}",
+        rows.join("\n")
+    );
+
+    let area = Rect::new(0, 0, 80, 24);
+    let hits = board_hit_map(area, &model);
+    let notice = hits
+        .regions
+        .iter()
+        .find(|hit| hit.target == QueueHitTarget::ModalChrome && hit.area.y == 23)
+        .expect("the notice row is registered as inert chrome");
+    assert!(notice.area.contains(Position { x: 10, y: 23 }));
+    let click = crossterm::event::MouseEvent {
+        kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+        column: 10,
+        row: 23,
+        modifiers: KeyModifiers::NONE,
+    };
+    assert_eq!(
+        tsk_tui::ui::mouse::map_board_mouse(&model, &hits, click),
+        None,
+        "a click on the notice is inert"
+    );
+    assert_eq!(
+        model.input_mode(),
+        BoardInputMode::QuickAdd,
+        "the draft survives"
+    );
+}

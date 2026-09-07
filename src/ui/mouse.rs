@@ -686,6 +686,8 @@ pub fn map_board_mouse(
                 .position(|&visible| visible == id)
                 .map(BoardIntent::QuickAddSelectIndex),
             Some(QueueHitTarget::Verb(index)) => quick_add_verb_intent(index),
+            // A refusal holding the verb row is a notice, not the outside.
+            Some(QueueHitTarget::ModalChrome) => None,
             // Chosen policy: outside clicks discard the draft and are swallowed, rather than
             // triggering a second board action behind the capture surface.
             _ => Some(BoardIntent::CancelQuickAdd),
