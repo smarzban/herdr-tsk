@@ -137,23 +137,27 @@ pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
     }
 
     // While a delete notice is on the status row, the bar leads with its undo and keeps
-    // the row's done verb: exactly the five-seat compact budget, so no tier clips an
-    // action. Start and block stay on their keys and in `:` until the notice clears. The
-    // seat is Normal-mode only, because every other surface hides the notice it belongs to.
+    // only the selected row's first truthful status verb: exactly the five-seat compact
+    // budget with a selection, so no tier clips an action. The remaining status verbs stay
+    // on their keys and in `:` until the notice clears. The seat is Normal-mode only,
+    // because every other surface hides the notice it belongs to.
     if model.visible_delete_notice().is_some() && model.input_mode() == BoardInputMode::Normal {
-        return vec![
-            VerbEntry {
-                key: "u",
-                label: "undo",
-            },
-            OPEN,
-            VerbEntry {
-                key: "d",
-                label: "done",
-            },
-            ADD,
-            HELP,
-        ];
+        let selected_task = model
+            .selected_id()
+            .and_then(|id| model.tasks.iter().find(|t| t.id == id));
+        let mut armed = vec![VerbEntry {
+            key: "u",
+            label: "undo",
+        }];
+        if let Some(task) = selected_task {
+            armed.push(OPEN);
+            if let Some(verb) = status_verbs(task.status).into_iter().next() {
+                armed.push(verb);
+            }
+        }
+        armed.push(ADD);
+        armed.push(HELP);
+        return armed;
     }
     let selected_task = model
         .selected_id()

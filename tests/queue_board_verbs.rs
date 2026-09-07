@@ -1131,8 +1131,8 @@ fn delete_notice_prefixes_the_board_verb_bar_with_undo_until_undone() {
     let armed: Vec<&str> = board_verb_items(&model).iter().map(|v| v.key).collect();
     assert_eq!(
         armed,
-        vec!["u", "enter", "d", "+", "?"],
-        "the delete notice keeps the prompt at the compact budget: undo · open · done · add · help"
+        vec!["u", "enter", "s", "+", "?"],
+        "armed prompt: undo · open · the row's first truthful status verb · add · help"
     );
 
     // The seat belongs to the notice, and the notice belongs to the plain board: any
@@ -1150,7 +1150,7 @@ fn delete_notice_prefixes_the_board_verb_bar_with_undo_until_undone() {
             .iter()
             .map(|v| v.key)
             .collect::<Vec<_>>(),
-        vec!["u", "enter", "d", "+", "?"],
+        vec!["u", "enter", "s", "+", "?"],
         "the seat returns with the notice"
     );
 
