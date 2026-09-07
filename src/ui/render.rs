@@ -2146,6 +2146,23 @@ const ARCHIVED_TAB_FOOTER: &[VerbEntry<'static>] = &[
     },
 ];
 
+/// Painted width of a card legend: the two-cell lead, `key label` seats, ` · ` between.
+fn legend_fits(geo: &TierGeometry, entries: &[VerbEntry<'_>]) -> bool {
+    let pad: usize = usize::from(geo.tier != Tier::Compact);
+    let content = (geo.row_width as usize)
+        .saturating_sub(4)
+        .min(62)
+        .saturating_sub(2)
+        .saturating_sub(2 * pad);
+    let width = 2
+        + entries
+            .iter()
+            .map(|entry| display_width(entry.key) + 1 + display_width(entry.label))
+            .sum::<usize>()
+        + 3 * entries.len().saturating_sub(1);
+    width <= content
+}
+
 /// Compact terminals cap the card near 34 content columns, so the legend keeps only the
 /// seat that is not guessable (`ctrl+f archive`) beside the way out.
 const PROJECT_PICKER_FOOTER_COMPACT: &[VerbEntry<'static>] = &[
@@ -3279,8 +3296,10 @@ fn paint_scope_dropdown(
             },
             legend: match tabs {
                 Some(tabs) if tabs.archived_active => ARCHIVED_TAB_FOOTER,
-                Some(_) if geo.tier == Tier::Compact => PROJECT_PICKER_FOOTER_COMPACT,
-                Some(_) => PROJECT_PICKER_FOOTER,
+                // Keyed on the painted width, not the tier: a tall-but-narrow frame and a
+                // wide-but-short one both get the largest legend their card can hold.
+                Some(_) if legend_fits(geo, PROJECT_PICKER_FOOTER) => PROJECT_PICKER_FOOTER,
+                Some(_) => PROJECT_PICKER_FOOTER_COMPACT,
                 None => SCOPE_FOOTER,
             },
             dismiss: None,

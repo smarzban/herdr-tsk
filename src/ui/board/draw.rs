@@ -136,9 +136,10 @@ pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
         ];
     }
 
-    // While a delete notice is on the status row, the bar leads with its undo and steps
-    // aside: four seats that fit the compact budget with no action clipped. The seat is
-    // Normal-mode only, because every other surface hides the notice it belongs to.
+    // While a delete notice is on the status row, the bar leads with its undo and keeps
+    // the row's done verb: exactly the five-seat compact budget, so no tier clips an
+    // action. Start and block stay on their keys and in `:` until the notice clears. The
+    // seat is Normal-mode only, because every other surface hides the notice it belongs to.
     if model.visible_delete_notice().is_some() && model.input_mode() == BoardInputMode::Normal {
         return vec![
             VerbEntry {
@@ -146,6 +147,10 @@ pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
                 label: "undo",
             },
             OPEN,
+            VerbEntry {
+                key: "d",
+                label: "done",
+            },
             ADD,
             HELP,
         ];
