@@ -78,3 +78,6 @@ leaving the draft. Typing or moving the Notes cursor brings it back into view.
 
 In the capture popup, clicking Title or Notes places the cursor at the clicked
 character, including wrapped and scrolled note lines.
+
+The page scrollbar also works while a new step is being typed. A field click
+that refuses to leave an unfinished step keeps that step’s cursor unchanged.

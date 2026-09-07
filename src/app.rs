@@ -346,7 +346,7 @@ fn run_board_loop(
     let mut store_watch = StoreWatch::seeded(&store);
     // Focusing an existing plugin pane cannot refresh its inherited host environment. The
     // launcher publishes a one-shot request in the state dir, consumed only on idle ticks.
-    let mut reopen_watch = ReopenWatch::seeded(&store);
+    let mut reopen_watch = (!quick_capture).then(|| ReopenWatch::seeded(&store));
     // the board frame path does no host polling and does not
     // auto-open the walkthrough on launch. `load_board` is the whole open path; the first
     // paint below is of that model, unrefreshed. attention polling (removed),
@@ -419,7 +419,9 @@ fn run_board_loop(
                     drag_gesture.has_autoscroll(),
                 )?;
                 if poll == FramePoll::Idle {
-                    apply_reopen_request(&mut model, &mut reopen_watch, &save_recovery);
+                    if let Some(watch) = reopen_watch.as_mut() {
+                        apply_reopen_request(&mut model, watch, &save_recovery);
+                    }
                     if let Some(auto) = drag_gesture.autoscroll() {
                         let area = terminal_area(terminal)?;
                         let content = drag_content_area(&model, area);
@@ -3711,6 +3713,10 @@ mod tests {
             .collect();
         let frame_text = rows.join("\n");
         assert!(
+            frame_text.contains("+ step"),
+            "expanded page must paint its step target"
+        );
+        assert!(
             frame_text.contains("Popup paint"),
             "the prefill paints on the page: {frame_text}"
         );
@@ -3788,6 +3794,48 @@ mod tests {
     /// The popup's Esc on the expanded draft is one press: the whole draft is discarded
     /// and the session ends, instead of the board's fallback to the retained one-line
     /// draft.
+    #[test]
+    fn popup_step_escape_keeps_the_parent_draft() {
+        let temp = TempStore::new("popup-step-escape");
+        let snapshot = InvocationSnapshot {
+            default_scope: TaskScope::Global,
+            this_repo: None,
+            title_prefill: Some("retained title".into()),
+            provenance: ProvenanceOrigin::Capture,
+        };
+        let mut domain = DomainState::new();
+        let mut model = BoardModel::from_domain(&domain, None);
+        let mut recovery = SaveRecovery::new();
+        seed_quick_capture(&mut domain, &mut model, &snapshot);
+        for intent in [
+            BoardIntent::BeginAddStep,
+            BoardIntent::EditInsertText("unsaved step".into()),
+        ] {
+            apply_intent(&mut domain, &mut model, intent, None).unwrap();
+        }
+        let intent = crate::ui::input::map_key(
+            model.input_mode(),
+            crossterm::event::KeyEvent::new(
+                crossterm::event::KeyCode::Esc,
+                crossterm::event::KeyModifiers::NONE,
+            ),
+        )
+        .expect("Escape maps");
+        let quit = handle_board_intent(
+            &temp.store,
+            &mut domain,
+            &mut model,
+            intent,
+            &mut recovery,
+            true,
+        )
+        .unwrap();
+        assert!(!quit);
+        assert!(model.expanded_capture_open());
+        assert_eq!(model.quick_add_title_value(), "retained title");
+        assert!(!quick_capture_finished(&model));
+    }
+
     #[test]
     fn quick_capture_esc_on_the_expanded_draft_closes_the_popup_in_one_press() {
         let temp = TempStore::new("quick-capture-popup-esc");

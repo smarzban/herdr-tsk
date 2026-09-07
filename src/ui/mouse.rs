@@ -571,6 +571,7 @@ pub fn map_scrollbar_mouse(
         mode,
         BoardInputMode::Normal
             | BoardInputMode::TaskPage
+            | BoardInputMode::EditStep
             | BoardInputMode::EditTitle
             | BoardInputMode::EditNotes
             | BoardInputMode::EditScope

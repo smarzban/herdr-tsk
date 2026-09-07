@@ -624,7 +624,12 @@ fn apply_board_intent(
                     .map(|row| row.cursor_at(column))
             });
             model.focus_form_field(field);
-            if let Some(cursor) = cursor {
+            let focused = matches!(
+                (field, model.input_mode),
+                (CaptureField::Title, BoardInputMode::EditTitle)
+                    | (CaptureField::Notes, BoardInputMode::EditNotes)
+            );
+            if let Some(cursor) = cursor.filter(|_| focused) {
                 edit_draft(model, |draft| draft.set_cursor(cursor));
             }
             return Ok(IntentOutcome::None);
@@ -1517,6 +1522,7 @@ fn apply_board_intent(
                 if matches!(
                     model.input_mode,
                     BoardInputMode::TaskPage
+                        | BoardInputMode::EditStep
                         | BoardInputMode::EditTitle
                         | BoardInputMode::EditNotes
                         | BoardInputMode::EditScope
