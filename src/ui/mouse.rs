@@ -344,6 +344,8 @@ fn form_verb_intent(model: &BoardModel, index: usize) -> Option<BoardIntent> {
         "shift+enter" => Some(BoardIntent::ConfirmEdit),
         "enter" if dropdown_open => Some(BoardIntent::ConfirmFormScopeDropdown),
         "enter" if focus == CaptureField::Scope => Some(BoardIntent::OpenFormScopeDropdown),
+        // The Title bar paints `enter next`: the click must do what the key does.
+        "enter" if focus == CaptureField::Title => Some(BoardIntent::FormFocusNext),
         "enter" => Some(BoardIntent::ConfirmEdit),
         "esc" if dropdown_open => Some(BoardIntent::CancelFormScopeDropdown),
         "esc" => Some(BoardIntent::CancelEdit),
@@ -797,6 +799,8 @@ pub fn map_board_mouse(
         BoardInputMode::ProjectsSearch => match hit_at(hits, pos) {
             Some(QueueHitTarget::ProjectsSearch) => Some(BoardIntent::FocusProjectsSearch),
             Some(QueueHitTarget::ProjectRow(index)) => Some(BoardIntent::SelectProjectRow(index)),
+            // The painted `enter open · esc close` row dispatches like the keys.
+            Some(QueueHitTarget::Verb(index)) => verb_intent(model, index),
             _ => Some(BoardIntent::CloseLayer),
         },
         BoardInputMode::Normal => match hit_at(hits, pos) {

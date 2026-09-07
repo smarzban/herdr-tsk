@@ -3069,6 +3069,8 @@ mod tests {
             BoardIntent::Undo,
             BoardIntent::PrimaryVerb,
             BoardIntent::ToggleBlock,
+            BoardIntent::ToggleReview,
+            BoardIntent::ToggleStep,
         ] {
             assert!(
                 board_intent_may_persist(&intent),
@@ -3882,6 +3884,72 @@ mod tests {
                 "SaveRecovery must own {code:?} while a form stays open"
             );
         }
+    }
+
+    /// Bare Enter on the task page becomes `ToggleStep` only while a stored step is
+    /// selected. Resolved here, at the keyboard boundary, so the persisting intent is
+    /// classified before the save baseline loads; everywhere else Enter keeps its route.
+    #[test]
+    fn bare_enter_on_a_stored_step_resolves_to_toggle_step_at_the_keyboard_boundary() {
+        use crate::ui::board::apply_intent;
+
+        let (mut domain, mut model) = board_fixture("Stepped", None);
+        let id = model.selected_id().expect("task");
+        domain.add_step(id, "alpha").expect("step");
+        domain.add_step(id, "bravo").expect("step");
+        model.sync_from_domain(&domain);
+        let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+
+        // Board: Enter opens the page.
+        assert_eq!(
+            board_keyboard_intent(&model, BoardInputMode::Normal, enter),
+            Some(BoardIntent::OpenTaskPage)
+        );
+        apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open");
+        assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+
+        // Page with no step selected: Enter is still the page route.
+        assert!(!model.stored_step_selected());
+        assert_eq!(
+            board_keyboard_intent(&model, BoardInputMode::TaskPage, enter),
+            Some(BoardIntent::OpenTaskPage)
+        );
+
+        // Tab selects the first stored step: Enter now toggles it.
+        apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None).expect("tab");
+        assert!(model.stored_step_selected());
+        let intent = board_keyboard_intent(&model, BoardInputMode::TaskPage, enter)
+            .expect("enter on a step");
+        assert_eq!(intent, BoardIntent::ToggleStep);
+        assert!(board_intent_may_persist(&intent));
+        apply_intent(&mut domain, &mut model, intent, None).expect("toggle");
+        assert!(domain.get(id).expect("task").steps[0].done, "alpha toggled");
+        assert_eq!(
+            domain.get(id).expect("task").status,
+            HumanStatus::Ready,
+            "task status untouched"
+        );
+
+        // On the trailing `+ step` target Enter keeps its add route (not a toggle).
+        apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None).expect("bravo");
+        apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None).expect("+ step");
+        assert!(!model.stored_step_selected());
+        assert_eq!(
+            board_keyboard_intent(&model, BoardInputMode::TaskPage, enter),
+            Some(BoardIntent::OpenTaskPage)
+        );
+
+        // Shift+Enter never becomes a toggle.
+        apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None).expect("wrap");
+        assert!(model.stored_step_selected());
+        assert_ne!(
+            board_keyboard_intent(
+                &model,
+                BoardInputMode::TaskPage,
+                KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT)
+            ),
+            Some(BoardIntent::ToggleStep)
+        );
     }
 
     #[test]

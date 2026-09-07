@@ -13,7 +13,7 @@
 │  ▸ T2 Ed│  p projects | t threads                                    │   herdr │
 │         │  v views | : palette                                       │         │
 │ ON DECK │  ? help | ctrl+q quit                                      │───────1 │
-│         │  1 · 2 · 3 desk · project · projects | / search (projects) │         │
+│         │  1 · 2 · 3 desk · project · projects | / search projects   │         │
 │  ○ T7 Gl│  ctrl+c quit                                               │    desk │
 │         │                                                            │         │
 │         │  task page                                                 │         │

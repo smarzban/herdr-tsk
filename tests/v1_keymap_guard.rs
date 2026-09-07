@@ -167,3 +167,16 @@ fn bare_page_keys_never_mutate_steps() {
         "bare page keys must not open an edit"
     );
 }
+
+/// The shared modal card's body is at most 58 columns at the standard tier, so every help
+/// line must fit or the card silently clips a binding at every terminal size.
+#[test]
+fn help_card_lines_fit_the_modal_body_at_every_size() {
+    for line in tsk_tui::ui::input::help_card_lines() {
+        let width = line.chars().count();
+        assert!(
+            width <= 58,
+            "help line is {width} cells, over the 58-cell card body: {line:?}"
+        );
+    }
+}

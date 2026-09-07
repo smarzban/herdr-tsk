@@ -2005,6 +2005,66 @@ fn ctrl_d_with_a_step_selected_completes_the_task_and_enter_toggles_the_step() {
     assert_eq!(dones, vec![false, false, false], "no step flipped");
 }
 
+/// `ctrl+r` walks review ↔ ready and rides the persist path; a done task refuses.
+#[test]
+fn ctrl_r_toggles_review_and_ready_and_refuses_on_done() {
+    let (mut domain, mut model, id) = board_with_task("Review me", HumanStatus::Ready);
+    let review = map_key(BoardInputMode::Normal, ctrl(KeyCode::Char('r'))).expect("ctrl+r");
+    assert_eq!(review, BoardIntent::ToggleReview);
+    assert!(
+        board_intent_may_persist(&review),
+        "review is a durable status change"
+    );
+
+    let outcome = apply_intent(&mut domain, &mut model, review.clone(), None).expect("to review");
+    assert_eq!(outcome, IntentOutcome::Persist);
+    assert_eq!(domain.get(id).expect("task").status, HumanStatus::Review);
+
+    // Review lives in NEEDS YOU, so the row stays selected and the bar keeps done/block.
+    let verbs: Vec<&str> = board_verb_items(&model).iter().map(|v| v.key).collect();
+    assert_eq!(verbs, vec!["enter", "d", "b", "+", "?"]);
+
+    apply_intent(&mut domain, &mut model, review.clone(), None).expect("back to ready");
+    assert_eq!(domain.get(id).expect("task").status, HumanStatus::Ready);
+
+    for from in [HumanStatus::Started, HumanStatus::Blocked] {
+        domain.set_status(id, from).expect("seed status");
+        model.sync_from_domain(&domain);
+        apply_intent(&mut domain, &mut model, review.clone(), None).expect("to review");
+        assert_eq!(
+            domain.get(id).expect("task").status,
+            HumanStatus::Review,
+            "{from:?} → review"
+        );
+    }
+
+    domain.set_status(id, HumanStatus::Done).expect("done");
+    model.sync_from_domain(&domain);
+    apply_intent(&mut domain, &mut model, BoardIntent::ToggleDoneDrawer, None).expect("drawer");
+    let idx = model
+        .visible_ids()
+        .iter()
+        .position(|&row| row == id)
+        .expect("done row visible");
+    apply_intent(&mut domain, &mut model, BoardIntent::SelectIndex(idx), None).expect("select");
+    let outcome = apply_intent(&mut domain, &mut model, review.clone(), None).expect("refused");
+    assert_eq!(outcome, IntentOutcome::None);
+    assert_eq!(domain.get(id).expect("task").status, HumanStatus::Done);
+    assert_eq!(model.message(), Some("completed tasks cannot go to review"));
+
+    // The task page maps the same chord.
+    assert_eq!(
+        map_key(BoardInputMode::TaskPage, ctrl(KeyCode::Char('r'))),
+        Some(BoardIntent::ToggleReview)
+    );
+
+    // No selection: the shared refusal.
+    let mut empty = BoardModel::from_domain(&DomainState::new(), None);
+    let mut empty_domain = DomainState::new();
+    apply_intent(&mut empty_domain, &mut empty, review, None).expect("no selection");
+    assert_eq!(empty.message(), Some("select a task first"));
+}
+
 /// Enter keeps a selected view step read-only. Ctrl+e remains contextual, opening its inline
 /// editor while an inactive cursor still routes it to task-title editing.
 #[test]
@@ -3964,6 +4024,8 @@ fn every_mutating_verb_in_read_only_focus_refuses_with_the_archived_message() {
         BoardIntent::Complete,
         BoardIntent::Reopen,
         BoardIntent::ToggleBlock,
+        BoardIntent::ToggleReview,
+        BoardIntent::ToggleStep,
         BoardIntent::BeginEditTitle,
         BoardIntent::BeginEditNotes,
         BoardIntent::SoftDelete,

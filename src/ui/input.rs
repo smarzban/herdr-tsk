@@ -623,7 +623,7 @@ fn board_help_bindings() -> Vec<(String, &'static str)> {
         }
     }
     seen.push(("1 · 2 · 3".to_string(), "desk · project · projects"));
-    seen.push(("/".to_string(), "search (projects)"));
+    seen.push(("/".to_string(), "search projects"));
     seen.push(("ctrl+c".to_string(), "quit"));
     seen
 }
@@ -637,9 +637,9 @@ pub fn task_page_help_bindings() -> Vec<(&'static str, &'static str)> {
         ("ctrl+a", "add step"),
         ("tab / ↓", "select steps"),
         ("enter", "toggle step"),
-        ("ctrl+s · ctrl+d · ctrl+b · ctrl+r", "task status"),
+        ("ctrl+s/d/b/r", "task status"),
         ("ctrl+o", "reopen task"),
-        ("ctrl+x", "delete step or task"),
+        ("ctrl+x", "delete step / task"),
         ("ctrl+f", "archive"),
         ("→ / ←", "wide stage"),
         ("esc", "close"),
@@ -653,8 +653,8 @@ fn editing_help_bindings() -> Vec<(&'static str, &'static str)> {
         ("enter (notes)", "new line"),
         ("enter (step)", "save step, next row"),
         ("shift+enter", "save edit"),
-        ("tab / shift+tab", "next / previous field"),
-        ("space (scope)", "cycle scope"),
+        ("tab / shift+tab", "next / prev field"),
+        ("space (scope)", "cycle"),
         ("esc", "cancel"),
     ]
 }
@@ -665,7 +665,7 @@ fn quick_add_help_bindings() -> Vec<(&'static str, &'static str)> {
         ("+", "open quick-add"),
         ("enter", "save"),
         ("shift+enter", "save, keep open"),
-        ("tab", "expand to task page"),
+        ("tab", "expand to page"),
         ("!p name · !p", "project · desk"),
         ("!t name · !t", "thread · none"),
     ]
@@ -677,9 +677,9 @@ fn picker_help_bindings() -> Vec<(&'static str, &'static str)> {
         ("↑↓ / jk", "move"),
         ("type", "filter"),
         ("enter", "choose"),
-        ("ctrl+f (projects)", "archive project"),
-        ("ctrl+u (projects)", "unarchive project"),
-        ("tab (projects)", "main · archived"),
+        ("ctrl+f (picker)", "archive project"),
+        ("ctrl+u (picker)", "unarchive"),
+        ("tab (picker)", "main · archived"),
         ("esc", "close"),
     ]
 }

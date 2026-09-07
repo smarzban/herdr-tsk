@@ -1047,6 +1047,16 @@ fn wide_status_hint(model: &BoardModel) -> (Option<&'static str>, &'static str) 
 }
 
 fn draw_board_impl(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap {
+    let hits = draw_board_hits(frame, model);
+    // Renderer-recorded horizon for the help card, like the list's max scroll: the reducer
+    // clamps with it so the offset never runs past the last page.
+    if let Some(max_scroll) = hits.help_max_scroll {
+        model.help_max_scroll.set(max_scroll);
+    }
+    hits
+}
+
+fn draw_board_hits(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap {
     let area = frame.area();
     let responsive = tier::resolve_responsive(area.width, area.height, model.wide_stage());
     if responsive.presentation == tier::ResponsivePresentation::WideSplit {
@@ -1321,6 +1331,7 @@ fn draw_wide_board(
                 render::draw_queue_frame(frame, &board_frame, &board_geo, column_rect(board_area));
             hits.regions.append(&mut board_hits.regions);
             hits.copyable.append(&mut board_hits.copyable);
+            hits.help_max_scroll = hits.help_max_scroll.or(board_hits.help_max_scroll);
             if let Some((scroll, max_scroll)) = painted_list_scroll {
                 model.list_scroll.set(scroll);
                 model.list_max_scroll.set(max_scroll);

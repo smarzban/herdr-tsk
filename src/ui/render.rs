@@ -751,6 +751,9 @@ pub struct QueueHitMap {
     /// inside these, so chrome — scrollbars, borders, verb bars, dividers — is
     /// excluded by construction.
     pub copyable: Vec<Rect>,
+    /// Furthest help-card scroll the painted frame could show, when the card was up.
+    /// The reducer clamps with it so the offset never runs past the last page.
+    pub help_max_scroll: Option<usize>,
 }
 
 impl QueueHitMap {
@@ -1404,9 +1407,22 @@ fn paint_footer(
             model.overlay,
             QueueOverlay::None | QueueOverlay::TaskPage { focus: None, .. },
         );
-        if let QueueOverlay::QuickAdd { recovery: true, .. } = &model.overlay {
-            // Save recovery owns this row with its refusal; see the status message path.
-            if let Some(message) = model.status_message {
+        // Save recovery owns this row with its refusal. A wrapped quick-add draft also
+        // takes the reserved row above the input for its own continuation, so its refusal
+        // moves down here rather than vanishing.
+        let quick_add_message = match &model.overlay {
+            QueueOverlay::QuickAdd { recovery: true, .. } => model.status_message,
+            QueueOverlay::QuickAdd { input, .. } if !input.above_rows.is_empty() => {
+                input.refusal.or(model.status_message)
+            }
+            _ => None,
+        };
+        if matches!(
+            &model.overlay,
+            QueueOverlay::QuickAdd { recovery: true, .. }
+        ) || quick_add_message.is_some()
+        {
+            if let Some(message) = quick_add_message {
                 paint_bottom_input_message(frame, surface, row, width, message);
             }
         } else {
@@ -2311,6 +2327,7 @@ fn paint_help_overlay(
     // The list scrolls with the arrows, `j`/`k`, page keys, and the wheel. The offset is
     // clamped so the last page is always full; `▲`/`▼` mark the rows out of view.
     let max_scroll = shown.len().saturating_sub(capacity);
+    hits.help_max_scroll = Some(max_scroll);
     let scroll = scroll.min(max_scroll);
     let window: Vec<String> = shown.iter().skip(scroll).take(capacity).cloned().collect();
     let title = titled_with_scroll_marker("help", scroll > 0, scroll + window.len() < shown.len());

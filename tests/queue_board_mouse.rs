@@ -426,8 +426,23 @@ fn task_form_mouse_fields_dropdown_and_verbs_match_keyboard_while_scrolled() {
             .unwrap_or_else(|| panic!("missing task-form hit region for {target:?}"));
         click(hit, &model, &hits)
     };
+    // The Title bar is `enter next · shift+enter save · esc cancel`: each seat matches
+    // the key it names.
     assert_eq!(
         intent_for(QueueHitTarget::Verb(0)),
+        map_board_form_key(
+            CaptureField::Title,
+            false,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+        ),
+        "task-form `enter next` verb must match Title's Enter route"
+    );
+    assert_eq!(
+        intent_for(QueueHitTarget::Verb(0)),
+        Some(BoardIntent::FormFocusNext)
+    );
+    assert_eq!(
+        intent_for(QueueHitTarget::Verb(1)),
         map_board_form_key(
             CaptureField::Title,
             false,
@@ -1838,6 +1853,101 @@ fn page_verb_clicks_resolve_through_the_page_legend() {
         "clicking the page's done verb completes its task"
     );
     assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+
+    // Every seat of the fixed page bar dispatches what its label says: the painted legend
+    // is `ctrl+e edit · <status verbs> · esc close`, indexed exactly as painted.
+    let click_verb = |model: &BoardModel, key: &str| -> BoardIntent {
+        let verbs = board_verb_items(model);
+        let index = verbs
+            .iter()
+            .position(|entry| entry.key == key)
+            .unwrap_or_else(|| panic!("no {key:?} seat in {verbs:?}"));
+        let hits = board_hit_map(STANDARD, model);
+        let area = hits
+            .regions
+            .iter()
+            .find(|hit| hit.target == QueueHitTarget::Verb(index))
+            .unwrap_or_else(|| panic!("no hit for seat {index} ({key})"))
+            .area;
+        map_board_mouse(model, &hits, left_click(area.x + 1, area.y)).expect("verb click")
+    };
+    let verbs: Vec<&str> = board_verb_items(&model).iter().map(|v| v.key).collect();
+    assert_eq!(
+        verbs,
+        vec!["e", "o", "esc"],
+        "done page bar: edit · reopen · close"
+    );
+    assert_eq!(click_verb(&model, "o"), BoardIntent::Reopen);
+    apply_intent(&mut domain, &mut model, BoardIntent::Reopen, None).expect("reopen");
+    let verbs: Vec<&str> = board_verb_items(&model).iter().map(|v| v.key).collect();
+    assert_eq!(verbs, vec!["e", "s", "d", "b", "esc"], "ready page bar");
+    assert_eq!(click_verb(&model, "e"), BoardIntent::BeginEditTitle);
+    assert_eq!(click_verb(&model, "s"), BoardIntent::PrimaryVerb);
+    assert_eq!(click_verb(&model, "b"), BoardIntent::ToggleBlock);
+    let close = click_verb(&model, "esc");
+    assert_eq!(close, BoardIntent::CloseLayer);
+    apply_intent(&mut domain, &mut model, close, None).expect("close via click");
+    assert_eq!(model.input_mode(), BoardInputMode::Normal);
+}
+
+#[test]
+fn help_card_wheel_scrolls_and_the_offset_clamps_to_the_last_page() {
+    let (mut domain, mut model) = deck_of(1);
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenHelp, None).expect("help");
+    let small = Rect::new(0, 0, 40, 10);
+    let hits = board_hit_map(small, &model);
+    let down = map_board_mouse(&model, &hits, wheel_down(20, 5)).expect("wheel down in help");
+    assert_eq!(down, BoardIntent::HelpScrollDown);
+    let up = map_board_mouse(&model, &hits, wheel_up(20, 5)).expect("wheel up in help");
+    assert_eq!(up, BoardIntent::HelpScrollUp);
+
+    // Scroll far past the end: the painter records the last page and the reducer stops
+    // there, so one wheel up immediately moves the window back.
+    for _ in 0..200 {
+        apply_intent(&mut domain, &mut model, down.clone(), None).expect("scroll");
+        let _ = board_hit_map(small, &model);
+    }
+    let lines = tsk_tui::ui::input::help_card_lines();
+    assert!(
+        model.help_scroll() < lines.len(),
+        "offset clamps inside the list: {}",
+        model.help_scroll()
+    );
+    let paint = |model: &BoardModel| -> String {
+        let mut terminal = Terminal::new(TestBackend::new(40, 10)).expect("test terminal");
+        terminal
+            .draw(|frame| {
+                let _ = draw_board(frame, model);
+            })
+            .expect("draw help");
+        let buffer = terminal.backend().buffer();
+        (0..10u16)
+            .map(|y| {
+                (0..40u16)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let bottom = paint(&model);
+    assert!(
+        !bottom.contains("help ▼"),
+        "the last page has nothing below: {bottom}"
+    );
+    let at_bottom = model.help_scroll();
+    apply_intent(&mut domain, &mut model, up, None).expect("scroll up");
+    assert_eq!(model.help_scroll(), at_bottom - 1);
+    let one_up = paint(&model);
+    assert_ne!(
+        one_up, bottom,
+        "one step up from the clamped bottom moves the window at once (no dead zone)"
+    );
+    assert!(one_up.contains("help ▲"), "rows above are marked: {one_up}");
+    assert!(
+        one_up.contains("help ▲▼") || one_up.contains("▼"),
+        "rows below too: {one_up}"
+    );
 }
 
 #[test]
