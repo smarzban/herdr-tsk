@@ -1124,6 +1124,17 @@ fn x_soft_deletes_and_status_line_names_task_with_undo_hint() {
 #[test]
 fn delete_notice_prefixes_the_board_verb_bar_with_undo_until_undone() {
     let (mut domain, mut model, id) = board_with_task("undo seat", HumanStatus::Ready);
+    // A neighbour keeps a truthful selection alive after the delete reanchors.
+    let other = domain
+        .create(
+            "still here",
+            None,
+            project(THIS_REPO),
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("neighbour");
+    let _ = other;
     apply_intent(&mut domain, &mut model, BoardIntent::SoftDelete, None).expect("arm delete");
     apply_intent(&mut domain, &mut model, BoardIntent::SoftDelete, None).expect("delete");
     assert!(domain.get(id).expect("task").soft_deleted);
@@ -1152,6 +1163,19 @@ fn delete_notice_prefixes_the_board_verb_bar_with_undo_until_undone() {
             .collect::<Vec<_>>(),
         vec!["u", "enter", "s", "+", "?"],
         "the seat returns with the notice"
+    );
+
+    // Deleting the neighbour too empties the selection: the prompt keeps the undo and
+    // drops the row seats it can no longer describe.
+    let neighbour = model.selected_id().expect("reanchored onto the neighbour");
+    apply_intent(&mut domain, &mut model, BoardIntent::SoftDelete, None).expect("arm second");
+    apply_intent(&mut domain, &mut model, BoardIntent::SoftDelete, None).expect("delete second");
+    assert!(domain.get(neighbour).expect("neighbour").soft_deleted);
+    let armed: Vec<&str> = board_verb_items(&model).iter().map(|v| v.key).collect();
+    assert_eq!(
+        armed,
+        vec!["u", "+", "?"],
+        "no selection: undo · add · help"
     );
 
     apply_intent(&mut domain, &mut model, BoardIntent::Undo, None).expect("undo");
