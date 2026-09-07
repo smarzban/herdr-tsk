@@ -1128,11 +1128,30 @@ fn delete_notice_prefixes_the_board_verb_bar_with_undo_until_undone() {
     apply_intent(&mut domain, &mut model, BoardIntent::SoftDelete, None).expect("delete");
     assert!(domain.get(id).expect("task").soft_deleted);
 
-    let armed = board_verb_items(&model);
+    let armed: Vec<&str> = board_verb_items(&model).iter().map(|v| v.key).collect();
     assert_eq!(
-        armed.first().map(|entry| (entry.key, entry.label)),
-        Some(("u", "undo")),
-        "the delete notice puts undo first in the board prompt"
+        armed,
+        vec!["u", "enter", "+", "?"],
+        "the delete notice steps the prompt aside: undo · open · add · help, no clipped action"
+    );
+
+    // The seat belongs to the notice, and the notice belongs to the plain board: any
+    // surface that hides the status row hides the seat with it.
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenCapture, None).expect("quick-add");
+    assert!(
+        !board_verb_items(&model)
+            .iter()
+            .any(|entry| entry.key == "u"),
+        "no ghost undo seat while the quick-add line hides the status row"
+    );
+    apply_intent(&mut domain, &mut model, BoardIntent::CancelQuickAdd, None).expect("close");
+    assert_eq!(
+        board_verb_items(&model)
+            .iter()
+            .map(|v| v.key)
+            .collect::<Vec<_>>(),
+        vec!["u", "enter", "+", "?"],
+        "the seat returns with the notice"
     );
 
     apply_intent(&mut domain, &mut model, BoardIntent::Undo, None).expect("undo");

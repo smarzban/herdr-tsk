@@ -4560,6 +4560,22 @@ fn project_picker_main_tab_advertises_archive_without_leaking_to_thread_picker()
         "main project picker must advertise archive:\n{main}"
     );
 
+    // The compact card caps near 34 content columns: the legend keeps only the seat that
+    // is not guessable, rather than clipping the archive seat mid-word.
+    let compact = board_rows(&model, 40, 10).join("\n");
+    let legend_row = compact
+        .lines()
+        .find(|line| line.contains("ctrl+f"))
+        .expect("compact legend painted");
+    assert!(
+        legend_row.contains("ctrl+f archive \u{b7} esc close"),
+        "compact picker keeps the archive seat readable:\n{compact}"
+    );
+    assert!(
+        !legend_row.contains("…"),
+        "no mid-word clipping in the compact legend: {legend_row}"
+    );
+
     apply_intent(&mut domain, &mut model, BoardIntent::CloseLayer, None).expect("close picker");
     apply_intent(
         &mut domain,

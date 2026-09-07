@@ -2146,6 +2146,19 @@ const ARCHIVED_TAB_FOOTER: &[VerbEntry<'static>] = &[
     },
 ];
 
+/// Compact terminals cap the card near 34 content columns, so the legend keeps only the
+/// seat that is not guessable (`ctrl+f archive`) beside the way out.
+const PROJECT_PICKER_FOOTER_COMPACT: &[VerbEntry<'static>] = &[
+    VerbEntry {
+        key: "ctrl+f",
+        label: "archive",
+    },
+    VerbEntry {
+        key: "esc",
+        label: "close",
+    },
+];
+
 const PROJECT_PICKER_FOOTER: &[VerbEntry<'static>] = &[
     VerbEntry {
         key: "↑↓",
@@ -3266,6 +3279,7 @@ fn paint_scope_dropdown(
             },
             legend: match tabs {
                 Some(tabs) if tabs.archived_active => ARCHIVED_TAB_FOOTER,
+                Some(_) if geo.tier == Tier::Compact => PROJECT_PICKER_FOOTER_COMPACT,
                 Some(_) => PROJECT_PICKER_FOOTER,
                 None => SCOPE_FOOTER,
             },

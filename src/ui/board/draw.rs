@@ -136,6 +136,20 @@ pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
         ];
     }
 
+    // While a delete notice is on the status row, the bar leads with its undo and steps
+    // aside: four seats that fit the compact budget with no action clipped. The seat is
+    // Normal-mode only, because every other surface hides the notice it belongs to.
+    if model.visible_delete_notice().is_some() && model.input_mode() == BoardInputMode::Normal {
+        return vec![
+            VerbEntry {
+                key: "u",
+                label: "undo",
+            },
+            OPEN,
+            ADD,
+            HELP,
+        ];
+    }
     let selected_task = model
         .selected_id()
         .and_then(|id| model.tasks.iter().find(|t| t.id == id));
@@ -146,15 +160,6 @@ pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
     }
     entries.push(ADD);
     entries.push(HELP);
-    if model.visible_delete_notice().is_some() {
-        entries.insert(
-            0,
-            VerbEntry {
-                key: "u",
-                label: "undo",
-            },
-        );
-    }
     entries
 }
 

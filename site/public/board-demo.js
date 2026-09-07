@@ -1188,7 +1188,7 @@ import { parseCapture } from "./capture.js";
     }
 
     const alt = e.altKey || e.ctrlKey || e.metaKey;
-    if (taskPageActive && !e.altKey && !e.ctrlKey && ["j", "k", "ArrowDown", "ArrowUp", "1", "2", "3", "+", "z", ":"].includes(e.key)) {
+    if (taskPageActive && !e.altKey && !e.ctrlKey && ["j", "k", "ArrowDown", "ArrowUp", "1", "2", "3", "+", "z", "D", ":"].includes(e.key)) {
       e.preventDefault();
       return;
     }
