@@ -1064,14 +1064,24 @@ fn capture_bar_renders_spaced_three_row_block_and_stays_bounded_without_color_sg
     for text in [
         "visible task",
         "title…   !p = desk · !p name = project · !t name = thread",
-        "Enter save · esc cancel · tab expand · add to invocation",
+        "add to invocation",
+        "enter save · shift+enter save+next · tab details · esc close",
     ] {
         assert!(standard.contains(text), "missing {text:?}: {standard}");
     }
     let standard_rows = render_rows(&model, 80, 24);
-    assert!(standard_rows[20].trim().is_empty(), "blank row above input");
+    assert_eq!(
+        standard_rows[20].trim(),
+        "add to invocation",
+        "the row above the input names the destination"
+    );
     assert!(standard_rows[21].contains("title…"), "input row");
     assert!(standard_rows[22].trim().is_empty(), "blank row below input");
+    assert!(
+        standard_rows[23].contains("enter save"),
+        "keys live on the verb row: {}",
+        standard_rows[23]
+    );
     let hits = board_hit_map(Rect::new(0, 0, 80, 24), &model);
     assert!(
         hits.regions

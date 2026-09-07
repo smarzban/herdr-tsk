@@ -280,7 +280,9 @@ fn stage_zero_and_full_task_render_the_standard_tier_at_130x24() {
         .iter()
         .filter(|hit| matches!(hit.target, QueueHitTarget::Verb(_)))
         .count();
-    assert!(verbs > 5, "standard verb budget, not compact: {verbs}");
+    // The bar is a fixed shape (open · status verbs · add · help): a started row paints
+    // five entries at every tier, well inside the standard budget.
+    assert_eq!(verbs, 5, "started row bar: {verbs}");
     assert!(verbs <= usize::from(STANDARD_VERB_BAR_ENTRY_BUDGET));
 
     to_stage(&mut domain, &mut model, WideStage::FullTask);
@@ -435,18 +437,14 @@ fn rail_wraps_titles_with_indent_four_and_dims_every_cell() {
 #[test]
 fn status_row_crumb_and_keys_follow_the_stage() {
     let expectations = [
-        (WideStage::FullBoard, None, "→ pane · enter open"),
-        (
-            WideStage::Split,
-            Some("board ▸ task"),
-            "→ task · ← close · enter open",
-        ),
+        (WideStage::FullBoard, None, "→ task pane"),
+        (WideStage::Split, Some("board ▸ task"), "→ task · ← close"),
         (
             WideStage::Rail,
             Some("board ◂ task"),
             "← board · → full page",
         ),
-        (WideStage::FullTask, None, "← rail · esc back"),
+        (WideStage::FullTask, None, "← rail"),
     ];
     for (stage, crumb, keys) in expectations {
         let (mut domain, mut model) = fixture();
@@ -478,22 +476,27 @@ fn status_row_refusal_wins_over_the_crumb_then_the_keys() {
     let (rows, _) = render(&model, 130, 24);
     assert!(rows[status_y as usize].contains("board ▸ task"));
 
-    model.set_message("x".repeat(90));
+    // 130 cols: ` x…x` (1 + 100) leaves 29 cells, room for `→ task · ← close` (16) but not
+    // for the crumb-plus-keys pair (32).
+    model.set_message("x".repeat(100));
     let (rows, _) = render(&model, 130, 24);
     let status = &rows[status_y as usize];
-    assert!(status.contains(&"x".repeat(90)));
+    assert!(status.contains(&"x".repeat(100)));
     assert!(
         !status.contains("board ▸ task"),
         "crumb drops first: {status}"
     );
-    assert!(status.contains("enter open"), "keys survive: {status}");
+    assert!(
+        status.contains("→ task · ← close"),
+        "keys survive: {status}"
+    );
 
     model.set_message("y".repeat(120));
     let (rows, _) = render(&model, 130, 24);
     let status = &rows[status_y as usize];
     assert!(status.contains(&"y".repeat(120)));
     assert!(
-        !status.contains("enter open"),
+        !status.contains("→ task"),
         "keys drop after the crumb: {status}"
     );
 }
@@ -602,12 +605,21 @@ fn footer_crumb_returns_to_stage_keys_when_the_session_is_clean_and_parked() {
     assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
     assert!(model.task_session_dirty(), "the draft is now dirty");
     assert!(model.open_field_edit().is_none());
-    let (rows, _) = render(&model, 130, 24);
+    let (rows, hits) = render(&model, 130, 24);
     let status = &rows[status_y as usize];
     assert!(
-        status.contains("shift+enter save · esc cancel"),
-        "a dirty parked draft keeps the save keys: {status}"
+        !status.contains("← board") && status.contains("board ◂ task"),
+        "a dirty parked draft drops the stage keys but keeps the crumb: {status}"
     );
+    // The save keys live on the verb row, not the status row.
+    let (_, _, verb_y) = footer_rows(24);
+    assert!(
+        rows[verb_y as usize].contains("shift+enter save")
+            && rows[verb_y as usize].contains("esc cancel"),
+        "the verb row carries save / cancel: {}",
+        rows[verb_y as usize]
+    );
+    let _ = hits;
 }
 
 #[test]
@@ -616,8 +628,13 @@ fn status_row_shows_editor_keys_while_an_editor_is_active() {
     to_stage(&mut domain, &mut model, WideStage::Rail);
     go(&mut domain, &mut model, BoardIntent::BeginEditTitle);
     let (rows, _) = render(&model, 130, 24);
-    let (_, status_y, _) = footer_rows(24);
-    assert!(rows[status_y as usize].contains("shift+enter save · esc cancel"));
+    let (_, status_y, verb_y) = footer_rows(24);
+    assert!(
+        rows[verb_y as usize].contains("shift+enter save")
+            && rows[verb_y as usize].contains("esc cancel"),
+        "{}",
+        rows[verb_y as usize]
+    );
     assert!(!rows[status_y as usize].contains("← board"));
     let geometry = resolve_responsive(130, 24, WideStage::Rail);
     let header = column_text(&rows, geometry.task_content(), 1);
@@ -1533,7 +1550,7 @@ fn footer_verbs_dispatch_for_the_focused_surface_in_every_stage() {
         let intent = click_map(&model, &hits, done_x, 23);
         assert_eq!(intent, Some(BoardIntent::Complete), "{stage:?}: {verb_row}");
         let right_half =
-            u16::try_from(verb_row.rfind("+ capture").unwrap_or(done_x as usize)).expect("x");
+            u16::try_from(verb_row.rfind("+ add").unwrap_or(done_x as usize)).expect("x");
         if stage.focused_surface() == FocusedSurface::Board {
             assert_eq!(
                 click_map(&model, &hits, right_half, 23),

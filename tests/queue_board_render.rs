@@ -693,8 +693,8 @@ fn standard_78x24_fixture_has_selector_list_rule_status_verb_and_no_other_chrome
     // task, and `PrimaryVerb` is a silent no-op there, so a correct legend omits the entry
     // rather than advertise a no-op. `enter`/`?` are always present regardless of selection.
     assert!(
-        verbs.contains("enter") && verbs.contains('?') && verbs.contains("+ capture"),
-        "standard verb bar must retain open, help, and capture: {verbs:?}"
+        verbs.contains("enter") && verbs.contains('?') && verbs.contains("+ add"),
+        "standard verb bar must retain open, help, and add: {verbs:?}"
     );
 
     // Chrome is exactly selector + rule + status + verb. Viewport rows are list content only
@@ -2932,8 +2932,8 @@ fn footer_lists_the_step_add_verb() {
 
     let floor = page_verb_row_with(&["only step"], 78);
     assert!(
-        floor.contains("ctrl+a…"),
-        "the compact verb-bar budget may ellipsize the final Ctrl chord, without making the bar overflow:\n{floor}"
+        floor.contains("ctrl+a step") && floor.contains("esc cancel"),
+        "the editing bar fits the standard floor without clipping:\n{floor}"
     );
 }
 

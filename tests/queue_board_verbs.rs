@@ -1111,7 +1111,7 @@ fn x_soft_deletes_and_status_line_names_task_with_undo_hint() {
         "status line must name deleted task with framed wording: {row:?}"
     );
     assert!(
-        row.contains("· u Undo"),
+        row.contains("· ctrl+u undo"),
         "status line must include undo hint: {row:?}"
     );
     // selection reanchored to remaining task
@@ -2504,8 +2504,8 @@ fn first_step_up_deactivates_before_inactive_up_scrolls_then_down_reactivates() 
     assert!(
         active_verbs
             .iter()
-            .any(|entry| entry.key == "s" && entry.label == "toggle step"),
-        "active step cursor must advertise the step primary verb"
+            .any(|entry| entry.key == "s" && entry.label == "start"),
+        "the bar keeps the task verb with a step selected (Enter owns the step): {active_verbs:?}"
     );
 
     apply_intent(&mut domain, &mut model, BoardIntent::PageScrollUp, None)
@@ -2584,10 +2584,14 @@ fn stale_step_cursor_falls_back_to_the_live_task_status_verb() {
 
     let verbs = board_verb_items(&model);
     assert!(
-        verbs
+        !verbs
             .iter()
-            .any(|entry| entry.key == "s" && entry.label == "start"),
+            .any(|entry| entry.label.contains("step") && entry.key == "s"),
         "a stale cursor must not advertise toggle step: {verbs:?}"
+    );
+    assert!(
+        !model.stored_step_selected(),
+        "a cursor past the live step list is not a stored-step selection"
     );
     assert!(
         !verbs
@@ -3393,7 +3397,7 @@ fn ctrl_u_on_an_archived_selection_unarchives_without_popping_the_undo_stack() {
 }
 
 #[test]
-fn help_card_lists_ctrl_f_and_the_verb_bar_shows_file_for_a_task_row_and_the_group() {
+fn help_card_lists_ctrl_f_and_the_verb_bar_keeps_archive_out_of_its_seats() {
     let (mut domain, mut model, _id) = board_with_task("help me", HumanStatus::Ready);
     apply_intent(&mut domain, &mut model, BoardIntent::OpenHelp, None).expect("help");
     let frame = rendered_board(&model, 80, 24);
@@ -3407,13 +3411,16 @@ fn help_card_lists_ctrl_f_and_the_verb_bar_shows_file_for_a_task_row_and_the_gro
     );
     apply_intent(&mut domain, &mut model, BoardIntent::CloseLayer, None).expect("close help");
 
-    // A deck row's verb bar offers `f archive`.
+    // Archive has no bar seat: the row's bar is the shared shape, and `?` carries ctrl+f.
     let verbs = board_verb_items(&model);
     assert!(
-        verbs
-            .iter()
-            .any(|entry| entry.key == "f" && entry.label == "archive"),
-        "deck row verb bar must show `f archive`: {verbs:?}"
+        !verbs.iter().any(|entry| entry.key == "f"),
+        "archive is not a verb-bar seat: {verbs:?}"
+    );
+    assert_eq!(
+        verbs.iter().map(|entry| entry.key).collect::<Vec<_>>(),
+        vec!["enter", "s", "d", "b", "+", "?"],
+        "ready row bar: open · start · done · block · add · help"
     );
 
     // The expanded archived group: header shows its toggle, a row shows `f unarchive`.
@@ -3454,10 +3461,13 @@ fn help_card_lists_ctrl_f_and_the_verb_bar_shows_file_for_a_task_row_and_the_gro
         .expect("select the archived row");
     let verbs = board_verb_items(&model);
     assert!(
-        verbs
-            .iter()
-            .any(|entry| entry.key == "f" && entry.label == "unarchive"),
-        "archived row verb bar must show `f unarchive`: {verbs:?}"
+        !verbs.iter().any(|entry| entry.key == "f"),
+        "unarchive is not a verb-bar seat either: {verbs:?}"
+    );
+    let frame = rendered_board(&model, 80, 24);
+    assert!(
+        frame.contains("ctrl+u undo") || !frame.contains("u Undo"),
+        "no legacy undo label survives"
     );
 }
 
@@ -3908,7 +3918,7 @@ fn enter_on_the_archived_tab_opens_a_read_only_focus_that_persists_nothing() {
         "the chip reads `<name> · archived`:\n{frame}"
     );
     assert!(
-        frame.contains("ctrl+u unarchive \u{b7} enter open \u{b7} esc back"),
+        frame.contains("ctrl+u unarchive \u{b7} enter open \u{b7} esc close \u{b7} ? help"),
         "the focus verb bar offers only what works here:\n{frame}"
     );
     let backend = TestBackend::new(80, 24);

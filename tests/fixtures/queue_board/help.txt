@@ -1,26 +1,26 @@
 ┌────────────────────────────────────────────────────────────────────────────────┐
-│                                                                                │
-│ desk  · ┌─ help ──────────────────────────────────────────────── [x]─┐   all ▾ │
+│         ┌─ help ▼ ────────────────────────────────────────────── [x]─┐         │
+│ desk  · │                                                            │   all ▾ │
+│         │  board                                                     │         │
+│ NEEDS YO│  ↑↓ / jk move | enter open                                 │───────2 │
+│         │  → / ← peek | esc close                                    │         │
+│  ■ T5 Wi│  ctrl+s start / reopen | ctrl+d done                       │   herdr │
+│  ▲ T6 Do│  ctrl+o reopen | ctrl+b block                              │   herdr │
+│         │  ctrl+r review | ctrl+e edit title                         │         │
+│ IN MOTIO│  ctrl+x / delete delete | ctrl+u undo                      │───────2 │
+│         │  ctrl+f archive | + add                                    │         │
+│  ▸ T1 Sm│  d done drawer | g archived group                          │     tsk │
+│  ▸ T2 Ed│  p projects | t threads                                    │   herdr │
+│         │  v views | : palette                                       │         │
+│ ON DECK │  ? help | ctrl+q quit                                      │───────1 │
+│         │  1 · 2 · 3 desk · project · projects | / search (projects) │         │
+│  ○ T7 Gl│  ctrl+c quit                                               │    desk │
 │         │                                                            │         │
-│ NEEDS YO│  ctrl+q quit | Esc close                                   │───────2 │
-│         │  j/k · ↑/↓ move | ctrl+s primary                           │         │
-│  ■ T5 Wi│  ctrl+d done | ctrl+o reopen                               │   herdr │
-│  ▲ T6 Do│  ctrl+b block | enter open                                 │   herdr │
-│         │  →/← peek | + capture                                      │         │
-│ IN MOTIO│  ctrl+e title | ctrl+x/Delete delete                       │───────2 │
-│         │  ctrl+u undo | ctrl+f file                                 │         │
-│  ▸ T1 Sm│  z drawer | : palette                                      │     tsk │
-│  ▸ T2 Ed│  ? help | P project                                        │   herdr │
-│         │  t threads | v views                                       │         │
-│ ON DECK │  ctrl+g groups                                             │───────1 │
+│         │  task page                                                 │         │
+│         │  ctrl+e edit title | ctrl+n edit notes                     │         │
+│         │  ctrl+a add step | tab / ↓ select steps                    │         │
 │         │                                                            │         │
-│  ○ T7 Gl│  task page                                                 │    desk │
-│         │  ctrl+e title | ctrl+n notes                               │         │
-│         │  ctrl+a step | tab/↓ steps                                 │         │
-│         │  shift+enter save edit | esc close                         │         │
-│         │                                                            │         │
-│         ├────────────────────────────────────────────────────────────┤         │
-│─────────│ any key close                                              │─────────│
-│ 2 done  └────────────────────────────────────────────────────────────┘         │
-│                                                                                │
+│─────────├────────────────────────────────────────────────────────────┤─────────│
+│ 2 done  │ ↑↓ scroll · esc close                                      │         │
+│         └────────────────────────────────────────────────────────────┘         │
 └────────────────────────────────────────────────────────────────────────────────┘

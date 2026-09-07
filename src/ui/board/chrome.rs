@@ -145,7 +145,7 @@ fn edit_chrome_line(mode: BoardInputMode, lead: &[ChromeRowPart<'_>], width: usi
 ///
 /// One string for the row and the hit region, so a click always lands on the words the
 /// board painted.
-pub const DELETE_NOTICE_UNDO: &str = "u Undo";
+pub const DELETE_NOTICE_UNDO: &str = "ctrl+u undo";
 
 /// Columns between two things sharing the chrome row.
 const CHROME_ROW_SEPARATOR: &str = "  ·  ";
@@ -174,7 +174,7 @@ pub(super) fn row_width(text: &str) -> usize {
     ratatui::text::Line::from(text).width()
 }
 
-/// The delete recovery notice around a title: `Deleted "title" · u Undo`.
+/// The delete recovery notice around a title: `Deleted "title" · ctrl+u undo`.
 pub(super) fn notice_framed(title: &str, undo: bool) -> String {
     if undo {
         format!("Deleted \"{title}\" · {DELETE_NOTICE_UNDO}")

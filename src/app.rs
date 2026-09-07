@@ -3924,7 +3924,7 @@ mod tests {
         let search = hits
             .regions
             .iter()
-            .find(|hit| hit.target == crate::ui::render::QueueHitTarget::Verb(0))
+            .find(|hit| hit.target == crate::ui::render::QueueHitTarget::Verb(1))
             .expect("closed footer search affordance");
         assert!(
             search.area.y >= 20,

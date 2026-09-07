@@ -566,7 +566,7 @@ pub struct QueueFrameModel<'a> {
     pub summary: Option<String>,
     /// Optional status-line notice; replaces the default counts when set.
     pub status_message: Option<&'a str>,
-    /// Column offset of the delete-notice `u Undo` control inside `status_message`, when
+    /// Column offset of the delete-notice `ctrl+u undo` control inside `status_message`, when
     /// the notice's own composition put one there: the caller
     /// computes this from the same composition that built `status_message` (see
     /// `board.rs`'s `notice_framed`), so the hit region is never re-derived by searching
@@ -709,7 +709,7 @@ pub enum QueueHitTarget {
     ListScroll(usize),
     /// One cell of the task-page body scrollbar. The usize is the notes/steps offset.
     PageScroll(usize),
-    /// The `u Undo` control inside the delete-recovery notice on the status line (I2,
+    /// The `ctrl+u undo` control inside the delete-recovery notice on the status line (I2,
     /// round 2), positioned wherever [`paint_status_line`] actually put it -- which shifts
     /// with the deleted title's length and with whether a later message is composed after
     /// it -- rather than a fixed column. Dispatches the same [`BoardIntent::Undo`] the `u`
@@ -1311,17 +1311,28 @@ fn paint_footer(
             {
                 if let Some(message) = input.message {
                     paint_bottom_input_message(frame, surface, message_row, width, message);
-                } else if matches!(model.overlay, QueueOverlay::ProjectsSearch { .. }) {
-                    // The status row is the query while searching, so the selected
-                    // project's path moves to the reserved row above it. Read from the
-                    // frame's already-built view: no second queue query per paint.
-                    put_line(
-                        frame,
-                        surface,
-                        message_row,
-                        width,
-                        paint_bounded_line(&index_selected_path(model), width, style_dim()),
-                    );
+                } else {
+                    // The reserved row carries the input's context while no refusal claims
+                    // it: the selected project's path under a search, the destination of a
+                    // quick-add draft. Keys stay on the verb row.
+                    let context = match &model.overlay {
+                        QueueOverlay::ProjectsSearch { .. } => Some(index_selected_path(model)),
+                        QueueOverlay::QuickAdd {
+                            destination,
+                            recovery: false,
+                            ..
+                        } if input.above_rows.is_empty() => Some(format!(" add to {destination}")),
+                        _ => None,
+                    };
+                    if let Some(context) = context {
+                        put_line(
+                            frame,
+                            surface,
+                            message_row,
+                            width,
+                            paint_bounded_line(&context, width, style_dim()),
+                        );
+                    }
                 }
             }
             paint_bottom_input_slot(frame, surface, row, width, input);
@@ -1373,7 +1384,7 @@ fn paint_footer(
             | QueueOverlay::ScopeDropdown { .. } => &[],
             QueueOverlay::QuickAdd { recovery, .. } if *recovery => &[],
             QueueOverlay::QuickAdd { .. } => QUICK_ADD_VERBS,
-            QueueOverlay::ProjectsSearch { .. } => &[],
+            QueueOverlay::ProjectsSearch { .. } => model.verb_items,
             // The page's field edits keep the form legends; its view mode reads the
             // model-computed page verbs (status-dependent, like the board row's own).
             QueueOverlay::TaskPage {
@@ -1393,16 +1404,11 @@ fn paint_footer(
             model.overlay,
             QueueOverlay::None | QueueOverlay::TaskPage { focus: None, .. },
         );
-        if let QueueOverlay::QuickAdd { destination, .. } = &model.overlay {
-            paint_quick_add_hint(
-                frame,
-                surface,
-                row,
-                width,
-                destination,
-                model.status_message,
-                geo.tier,
-            );
+        if let QueueOverlay::QuickAdd { recovery: true, .. } = &model.overlay {
+            // Save recovery owns this row with its refusal; see the status message path.
+            if let Some(message) = model.status_message {
+                paint_bottom_input_message(frame, surface, row, width, message);
+            }
         } else {
             let (line, verb_hits) = paint_verb_bar(verb_items, budget, width, prefix_verbs);
             put_line(frame, surface, row, width, line);
@@ -1468,31 +1474,16 @@ pub(crate) const QUICK_ADD_VERBS: &[VerbEntry<'static>] = &[
     },
 ];
 
-pub(crate) const PALETTE_VERBS: &[VerbEntry<'static>] = &[
-    VerbEntry {
-        key: "enter",
-        label: "run",
-    },
-    VerbEntry {
-        key: "esc",
-        label: "close",
-    },
-    VerbEntry {
-        key: "type",
-        label: "to filter",
-    },
-];
-
 /// Shared-form verb rows. The renderer and mouse mapper both read these exact arrays, so a
 /// painted Save or Cancel control cannot promise a key route different from the one it sends.
 const FORM_TITLE_VERBS: &[VerbEntry<'static>] = &[
     VerbEntry {
-        key: "shift+enter",
-        label: "save",
+        key: "enter",
+        label: "next",
     },
     VerbEntry {
-        key: "tab",
-        label: "next",
+        key: "shift+enter",
+        label: "save",
     },
     VerbEntry {
         key: "esc",
@@ -1530,7 +1521,7 @@ const FORM_THREAD_VERBS: &[VerbEntry<'static>] = &[
 const FORM_SCOPE_VERBS: &[VerbEntry<'static>] = &[
     VerbEntry {
         key: "enter",
-        label: "scopes",
+        label: "choose",
     },
     VerbEntry {
         key: "space",
@@ -1543,12 +1534,12 @@ const FORM_SCOPE_VERBS: &[VerbEntry<'static>] = &[
 ];
 const FORM_SCOPE_DROPDOWN_VERBS: &[VerbEntry<'static>] = &[
     VerbEntry {
-        key: "j/k",
-        label: "choose",
+        key: "↑↓",
+        label: "move",
     },
     VerbEntry {
         key: "enter",
-        label: "scope",
+        label: "choose",
     },
     VerbEntry {
         key: "esc",
@@ -1594,25 +1585,6 @@ const EDIT_NOTES_VERBS: &[VerbEntry<'static>] = &[
     VerbEntry {
         key: "esc",
         label: "cancel",
-    },
-];
-
-pub(crate) const SCOPE_VERBS: &[VerbEntry<'static>] = &[
-    VerbEntry {
-        key: "j/k",
-        label: "choose",
-    },
-    VerbEntry {
-        key: "f",
-        label: "file",
-    },
-    VerbEntry {
-        key: "enter",
-        label: "scope",
-    },
-    VerbEntry {
-        key: "esc",
-        label: "close",
     },
 ];
 
@@ -4153,7 +4125,7 @@ fn paint_rule_row(width: u16) -> Line<'static> {
     Line::from(Span::styled(rule, style_dim()))
 }
 
-/// The status line, plus the `u Undo` control's (column, width) inside it when the
+/// The status line, plus the `ctrl+u undo` control's (column, width) inside it when the
 /// delete-recovery notice actually painted one that survived clipping (I2, Minor 1,
 /// round 2).
 ///
@@ -4269,40 +4241,6 @@ fn paint_bottom_input_message(
     );
 }
 
-fn paint_quick_add_hint(
-    frame: &mut Frame<'_>,
-    surface: Rect,
-    row: u16,
-    width: u16,
-    destination: &str,
-    message: Option<&str>,
-    tier: Tier,
-) {
-    let (text, style) = if let Some(message) = message {
-        (message.to_string(), style_reverse_bold())
-    } else {
-        // The line names where Enter saves, so quick-add never has to move the
-        // user's view to prove where a task went.
-        let text = match tier {
-            Tier::Standard => {
-                format!("Enter save · esc cancel · tab expand · add to {destination}")
-            }
-            Tier::Compact => format!("⏎ save · esc · tab · + {destination}"),
-        };
-        (text, style_dim())
-    };
-    put_line(
-        frame,
-        surface,
-        row,
-        width,
-        bound_line(
-            Line::from(Span::styled(present_line(&text, width as usize), style)),
-            width as usize,
-        ),
-    );
-}
-
 /// The projects index's idle status: the selected row's stored path, so same-named
 /// projects stay distinguishable without crowding the rows.
 fn index_selected_path(model: &QueueFrameModel<'_>) -> String {
@@ -4343,9 +4281,16 @@ fn paint_status_line(
         let fits = |text: &str| left_w + 2 + display_width(text) < width as usize;
         let with_crumb = hint
             .crumb
-            .map(|crumb| format!("{crumb}    {}", hint.keys))
+            .map(|crumb| {
+                if hint.keys.is_empty() {
+                    crumb.to_string()
+                } else {
+                    format!("{crumb}    {}", hint.keys)
+                }
+            })
             .filter(|text| fits(text));
-        with_crumb.or_else(|| fits(hint.keys).then(|| hint.keys.to_string()))
+        with_crumb
+            .or_else(|| (!hint.keys.is_empty() && fits(hint.keys)).then(|| hint.keys.to_string()))
     });
     let right_w = right.as_deref().map(display_width).unwrap_or(0);
     let trailing = usize::from(right.is_some());
@@ -4485,7 +4430,7 @@ fn paint_selector_chip(model: &QueueFrameModel<'_>, width: u16) -> (Line<'static
 fn mutating_verb_key(key: &str) -> bool {
     matches!(
         key,
-        "s" | "d" | "o" | "b" | "x" | "a" | "e" | "u" | "n" | "q"
+        "s" | "d" | "o" | "b" | "r" | "x" | "a" | "e" | "u" | "n" | "f" | "q"
     )
 }
 

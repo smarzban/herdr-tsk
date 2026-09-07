@@ -622,11 +622,10 @@ fn click_and_wheel_match_keyboard_effects_for_each_control() {
     assert_verb_parity("enter", HumanStatus::Ready, "enter", KeyCode::Enter);
     assert_verb_parity("d", HumanStatus::Ready, "d", KeyCode::Char('d'));
     assert_verb_parity("b", HumanStatus::Ready, "b", KeyCode::Char('b'));
-    assert_verb_parity("colon", HumanStatus::Ready, ":", KeyCode::Char(':'));
     assert_verb_parity("question", HumanStatus::Ready, "?", KeyCode::Char('?'));
-    assert_verb_parity("capture", HumanStatus::Started, "+", KeyCode::Char('+'));
-    // The file verb is last, so a Ready bar's budget trims it; a Started bar shows it.
-    assert_verb_parity("file", HumanStatus::Started, "f", KeyCode::Char('f'));
+    assert_verb_parity("add", HumanStatus::Started, "+", KeyCode::Char('+'));
+    // Archive has no bar seat: it lives in `?` / `:` and on ctrl+f.
+    assert_verb_parity("unblock", HumanStatus::Blocked, "b", KeyCode::Char('b'));
     assert_verb_parity("reopen", HumanStatus::Done, "o", KeyCode::Char('o'));
 
     // Drawer toggle: open it by keyboard on both boards first (a shared start state), then
@@ -1317,7 +1316,7 @@ fn wheel_scrolls_the_open_command_surface_so_every_command_becomes_reachable() {
     );
 }
 
-/// `DELETE_NOTICE_UNDO` ("u Undo") is painted on the status line while a
+/// `DELETE_NOTICE_UNDO` ("ctrl+u undo") is painted on the status line while a
 /// delete-recovery notice is armed (`draw_queue_frame`'s status row), but had no hit region
 /// and no `map_board_mouse` arm -- a painted affordance with no mouse route, restoring the
 /// coverage `the_delete_notice_undo_control_is_clickable_in_every_mode_that_shows_it`
@@ -1350,7 +1349,7 @@ fn delete_notice_undo_control_is_clickable_and_matches_the_keyboard() {
 }
 
 /// Minor 1: the Undo hit region used to be located by `find`ing the
-/// literal `u Undo` text over the whole composed status row (`Deleted "<title>" · u Undo`),
+/// literal `ctrl+u undo` text over the whole composed status row (`Deleted "<title>" · ctrl+u undo`),
 /// which is partly user text. A task titled with that literal steals the region: the real
 /// control (painted at the end of the notice, after the *first* deleted-title occurrence)
 /// goes unreachable at its own coordinates, while a click on the earlier occurrence inside
@@ -1358,8 +1357,8 @@ fn delete_notice_undo_control_is_clickable_and_matches_the_keyboard() {
 /// the notice actually painted, and a click on the title's own occurrence of the words must
 /// not fire `Undo`.
 #[test]
-fn delete_notice_undo_region_survives_a_title_containing_the_literal_u_undo() {
-    let (mut domain, mut model, id) = board_with_task("u Undo now", HumanStatus::Ready);
+fn delete_notice_undo_region_survives_a_title_containing_the_literal_undo_control() {
+    let (mut domain, mut model, id) = board_with_task("ctrl+u undo now", HumanStatus::Ready);
     apply_intent(&mut domain, &mut model, BoardIntent::SoftDelete, None).expect("arm delete");
     apply_intent(&mut domain, &mut model, BoardIntent::SoftDelete, None).expect("soft delete");
     assert!(
@@ -1383,11 +1382,11 @@ fn delete_notice_undo_region_survives_a_title_containing_the_literal_u_undo() {
     // `Undo`: it must resolve through whatever the row actually paints there (the notice
     // text is not a control), never through the region a naive `find` would have located.
     // The status row is painted from column 0 (`paint_status_line`'s `put_line`), leading
-    // with one space, then `Deleted "`: the title's own `u Undo` inside `u Undo now` starts
+    // with one space, then `Deleted "`: the title's own `ctrl+u undo` inside the title starts
     // right after that 10-column prefix, well left of the real control near the row's end.
     let title_occurrence_x: u16 = 10;
     assert!(
-        title_occurrence_x + 6 <= undo_hit.area.x,
+        title_occurrence_x + 11 <= undo_hit.area.x,
         "the title's own occurrence must sit left of the real control: {undo_hit:?}"
     );
     assert_eq!(
