@@ -642,22 +642,22 @@ fn palette_window_keeps_wrapped_last_command_visible() {
     );
 }
 
-/// help card lists every active-tier binding and closes on any key.
+/// help card lists every binding of every surface, scrolls, and closes on esc / ? / q.
 #[test]
-fn help_card_lists_every_active_tier_binding_and_closes_on_any_key() {
+fn help_card_lists_every_binding_scrolls_and_closes_on_esc() {
     let (mut domain, mut model, _id) = board_with_task("help me", HumanStatus::Ready);
     apply_intent(&mut domain, &mut model, BoardIntent::OpenHelp, None).expect("help");
     assert_eq!(model.input_mode(), BoardInputMode::Help);
 
-    let frame = rendered_board(&model, 80, 24);
+    // Tall enough that every line fits: each board binding is on the card.
+    let frame = rendered_board(&model, 100, 60);
     let bindings = normal_help_bindings();
     assert!(
         !bindings.is_empty(),
         "help bindings table must not be empty"
     );
     for (chord, label) in bindings {
-        // Chord may be multi-token ("j/k · ↑/↓"); require each significant token.
-        for token in chord.split(|c: char| c.is_whitespace() || c == '·') {
+        for token in chord.split(|c: char| c.is_whitespace() || c == '·' || c == '/') {
             let token = token.trim();
             if token.is_empty() {
                 continue;
@@ -670,40 +670,92 @@ fn help_card_lists_every_active_tier_binding_and_closes_on_any_key() {
         assert!(
             frame
                 .to_ascii_lowercase()
-                .contains(&label.to_ascii_lowercase())
-                || frame.contains(label),
+                .contains(&label.to_ascii_lowercase()),
             "help card missing label {label:?}\n{frame}"
         );
     }
+    // Every surface has a section, and the remapped keys read as they now are.
+    for section in [
+        " board",
+        " task page",
+        " editing",
+        " quick-add",
+        " pickers · palette",
+    ] {
+        assert!(
+            frame.contains(section),
+            "missing section {section:?}\n{frame}"
+        );
+    }
+    for expected in [
+        "ctrl+r review",
+        "d done drawer",
+        "g archived group",
+        "p projects",
+        "enter toggle step",
+        "enter (title) next field",
+        "shift+enter save edit",
+        "1 · 2 · 3",
+    ] {
+        assert!(frame.contains(expected), "missing {expected:?}\n{frame}");
+    }
+    for retired in ["z drawer", "P project", "ctrl+g", "any key"] {
+        assert!(
+            !frame.contains(retired),
+            "retired {retired:?} still on the card\n{frame}"
+        );
+    }
 
-    // At the 40x10 operability floor the shared modal card's own border+footer chrome
-    // leaves too few rows for every binding to fit at once (unlike the full-screen takeover
-    // this used to be): the card shows as many as it can starting from the top and marks
-    // the title `▼` so the cut-off is visible rather than silently dropped.
+    // At the 40x10 floor the card windows the list and marks the rest with ▼.
     let compact = rendered_board(&model, 40, 10);
     assert!(
         compact.contains("help ▼"),
         "compact help card must mark its title truncated: {compact:?}"
     );
     assert!(
-        compact.contains("any key close"),
+        compact.contains("esc close"),
         "compact help card must keep its close legend: {compact:?}"
     );
-    let (first_chord, first_label) = normal_help_bindings()[0];
+
+    // Scrolling: ↓ / j / wheel move the window, ▲ appears, and the top line leaves.
+    let down = map_key(BoardInputMode::Help, press(KeyCode::Down)).expect("↓ scrolls");
+    assert_eq!(down, BoardIntent::HelpScrollDown);
+    assert_eq!(
+        map_key(BoardInputMode::Help, press(KeyCode::Char('j'))),
+        Some(BoardIntent::HelpScrollDown)
+    );
+    assert_eq!(
+        map_key(BoardInputMode::Help, press(KeyCode::Char('k'))),
+        Some(BoardIntent::HelpScrollUp)
+    );
+    apply_intent(&mut domain, &mut model, down.clone(), None).expect("scroll");
+    apply_intent(&mut domain, &mut model, down, None).expect("scroll");
+    let scrolled = rendered_board(&model, 40, 10);
     assert!(
-        compact.contains(first_chord) && compact.contains(first_label),
-        "compact help card must show its first binding {first_chord:?}/{first_label:?}: {compact:?}"
+        scrolled.contains("help ▲"),
+        "scrolled card marks rows above: {scrolled:?}"
+    );
+    assert!(
+        !scrolled.contains("board"),
+        "the section heading scrolled out of view: {scrolled:?}"
     );
 
-    // Any key closes (including a letter that would quit in normal mode).
-    let close = map_key(BoardInputMode::Help, press(KeyCode::Char('q'))).expect("any key");
+    // Only esc / ? / q close; a stray letter is inert.
+    assert_eq!(
+        map_key(BoardInputMode::Help, press(KeyCode::Char('x'))),
+        None
+    );
+    assert_eq!(
+        map_key(BoardInputMode::Help, press(KeyCode::Char('?'))),
+        Some(BoardIntent::CloseLayer)
+    );
+    let close = map_key(BoardInputMode::Help, press(KeyCode::Char('q'))).expect("q closes");
     assert_eq!(close, BoardIntent::CloseLayer);
     apply_intent(&mut domain, &mut model, close, None).expect("close");
     assert_eq!(model.input_mode(), BoardInputMode::Normal);
-    assert_eq!(
-        map_key(BoardInputMode::Help, press(KeyCode::Char('x'))),
-        Some(BoardIntent::CloseLayer)
-    );
+    // Reopening starts at the top again.
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenHelp, None).expect("help");
+    assert!(rendered_board(&model, 40, 10).contains("board"));
 }
 
 /// project-scope chip/dropdown filters every visible section and count.
@@ -898,9 +950,10 @@ fn project_scope_chip_and_dropdown_filter_all_visible_sections_matching_ac5() {
     assert!(!model.visible_ids().contains(&done_global));
     model.clear_message();
     let other_status = board_chrome_row(&model, (80, 24));
-    assert!(
-        other_status.contains("1 done") && !other_status.contains("in motion"),
-        "scoped status counts must be painted: {other_status:?}"
+    assert_eq!(
+        other_status.trim(),
+        "other",
+        "scoped status must name the project basename: {other_status:?}"
     );
     assert!(!model.visible_ids().contains(&motion_app));
     assert!(!model.visible_ids().contains(&deck_app));
@@ -948,9 +1001,10 @@ fn project_scope_chip_and_dropdown_filter_all_visible_sections_matching_ac5() {
     assert!(!model.visible_ids().contains(&deck_app));
     model.clear_message();
     let home_status = board_chrome_row(&model, (80, 24));
-    assert!(
-        home_status.contains("4 done") && !home_status.contains("in motion"),
-        "home status counts must be painted: {home_status:?}"
+    assert_eq!(
+        home_status.trim(),
+        "desk",
+        "home status must name the desk lens: {home_status:?}"
     );
 
     // Scoped project with zero open deck tasks → header + empty hint, no invented row.
@@ -1059,12 +1113,78 @@ fn x_soft_deletes_and_status_line_names_task_with_undo_hint() {
         "status line must name deleted task with framed wording: {row:?}"
     );
     assert!(
-        row.contains("· u Undo"),
+        row.contains("· ctrl+u undo"),
         "status line must include undo hint: {row:?}"
     );
     // selection reanchored to remaining task
     assert!(model.selected_id().is_some());
     assert_ne!(model.selected_id(), Some(id));
+}
+
+#[test]
+fn delete_notice_prefixes_the_board_verb_bar_with_undo_until_undone() {
+    let (mut domain, mut model, id) = board_with_task("undo seat", HumanStatus::Ready);
+    // A neighbour keeps a truthful selection alive after the delete reanchors.
+    let other = domain
+        .create(
+            "still here",
+            None,
+            project(THIS_REPO),
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("neighbour");
+    let _ = other;
+    apply_intent(&mut domain, &mut model, BoardIntent::SoftDelete, None).expect("arm delete");
+    apply_intent(&mut domain, &mut model, BoardIntent::SoftDelete, None).expect("delete");
+    assert!(domain.get(id).expect("task").soft_deleted);
+
+    let armed: Vec<&str> = board_verb_items(&model).iter().map(|v| v.key).collect();
+    assert_eq!(
+        armed,
+        vec!["u", "enter", "s", "+", "?"],
+        "armed prompt: undo · open · the row's first truthful status verb · add · help"
+    );
+
+    // The seat belongs to the notice, and the notice belongs to the plain board: any
+    // surface that hides the status row hides the seat with it.
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenCapture, None).expect("quick-add");
+    assert!(
+        !board_verb_items(&model)
+            .iter()
+            .any(|entry| entry.key == "u"),
+        "no ghost undo seat while the quick-add line hides the status row"
+    );
+    apply_intent(&mut domain, &mut model, BoardIntent::CancelQuickAdd, None).expect("close");
+    assert_eq!(
+        board_verb_items(&model)
+            .iter()
+            .map(|v| v.key)
+            .collect::<Vec<_>>(),
+        vec!["u", "enter", "s", "+", "?"],
+        "the seat returns with the notice"
+    );
+
+    // Deleting the neighbour too empties the selection: the prompt keeps the undo and
+    // drops the row seats it can no longer describe.
+    let neighbour = model.selected_id().expect("reanchored onto the neighbour");
+    apply_intent(&mut domain, &mut model, BoardIntent::SoftDelete, None).expect("arm second");
+    apply_intent(&mut domain, &mut model, BoardIntent::SoftDelete, None).expect("delete second");
+    assert!(domain.get(neighbour).expect("neighbour").soft_deleted);
+    let armed: Vec<&str> = board_verb_items(&model).iter().map(|v| v.key).collect();
+    assert_eq!(
+        armed,
+        vec!["u", "+", "?"],
+        "no selection: undo · add · help"
+    );
+
+    apply_intent(&mut domain, &mut model, BoardIntent::Undo, None).expect("undo");
+    assert!(
+        !board_verb_items(&model)
+            .iter()
+            .any(|entry| entry.key == "u" && entry.label == "undo"),
+        "undo seat leaves with the delete notice"
+    );
 }
 
 #[test]
@@ -1421,7 +1541,7 @@ fn closing_the_page_after_completing_its_task_reanchors_to_a_visible_row() {
 }
 
 #[test]
-fn task_edit_save_uses_shift_enter_with_alt_enter_as_the_legacy_fallback() {
+fn task_edit_save_uses_shift_enter_only_and_title_enter_advances_to_notes() {
     assert_eq!(
         map_key(BoardInputMode::EditTitle, ctrl(KeyCode::Enter)),
         None,
@@ -1432,6 +1552,34 @@ fn task_edit_save_uses_shift_enter_with_alt_enter_as_the_legacy_fallback() {
         None,
         "plain Enter must not be a hidden task-field save chord"
     );
+    // The real task form (form navigation) moves Title → Notes on Enter.
+    assert_eq!(
+        map_task_form_key(
+            tsk_tui::ui::capture::CaptureField::Title,
+            false,
+            press(KeyCode::Enter)
+        ),
+        Some(BoardIntent::FormFocusNext),
+        "Enter in the Title editor advances to Notes"
+    );
+    assert_eq!(
+        map_task_form_key(
+            tsk_tui::ui::capture::CaptureField::Title,
+            false,
+            shift(KeyCode::Enter)
+        ),
+        Some(BoardIntent::ConfirmEdit),
+        "Shift+Enter still saves from Title"
+    );
+    assert_eq!(
+        map_task_form_key(
+            tsk_tui::ui::capture::CaptureField::Title,
+            false,
+            alt(KeyCode::Enter)
+        ),
+        None,
+        "Alt+Enter is no longer a task-edit save route"
+    );
     assert_eq!(
         map_key(BoardInputMode::EditStep, press(KeyCode::Enter)),
         Some(BoardIntent::ConfirmEdit),
@@ -1439,8 +1587,13 @@ fn task_edit_save_uses_shift_enter_with_alt_enter_as_the_legacy_fallback() {
     );
     assert_eq!(
         map_key(BoardInputMode::EditStep, alt(KeyCode::Enter)),
+        None,
+        "Alt+Enter is not a step save route either"
+    );
+    assert_eq!(
+        map_key(BoardInputMode::EditStep, shift(KeyCode::Enter)),
         Some(BoardIntent::ConfirmEditNext),
-        "Alt+Enter must exactly match the inline editor's Shift+Enter save-and-exit route"
+        "Shift+Enter is the step editor's session save"
     );
     assert_eq!(
         map_key(BoardInputMode::EditNotes, shift(KeyCode::Enter)),
@@ -1449,8 +1602,8 @@ fn task_edit_save_uses_shift_enter_with_alt_enter_as_the_legacy_fallback() {
     );
     assert_eq!(
         map_key(BoardInputMode::EditNotes, alt(KeyCode::Enter)),
-        Some(BoardIntent::ConfirmEdit),
-        "Alt+Enter remains usable when Shift+Enter is encoded as bare Enter"
+        None,
+        "Alt+Enter no longer saves task notes"
     );
     assert_eq!(
         map_capture_key(
@@ -1670,17 +1823,28 @@ fn view_tab_selection_wraps_without_starting_task_edit_and_ctrl_e_opens_inline_s
 
     let primary =
         map_key(BoardInputMode::TaskPage, ctrl(KeyCode::Char('s'))).expect("Ctrl+S primary verb");
-    apply_intent(&mut domain, &mut model, primary, None).expect("toggle selected step");
-    assert!(domain.get(id).expect("task").steps[0].done);
-    assert_eq!(domain.get(id).expect("task").status, HumanStatus::Ready);
+    apply_intent(&mut domain, &mut model, primary, None).expect("start the task");
+    assert!(
+        !domain.get(id).expect("task").steps[0].done,
+        "ctrl+s never touches the selected step"
+    );
+    assert_eq!(
+        domain.get(id).expect("task").status,
+        HumanStatus::Started,
+        "ctrl+s is the task's primary verb even with a step selected"
+    );
     assert_eq!(
         model.input_mode(),
         BoardInputMode::TaskPage,
-        "step toggle keeps task view open"
+        "the task verb keeps task view open"
     );
 
+    // Enter on the stored step toggles it (resolved to ToggleStep at the key boundary);
+    // the raw OpenTaskPage intent stays inert on a step.
+    apply_intent(&mut domain, &mut model, BoardIntent::ToggleStep, None).expect("Enter toggles");
+    assert!(domain.get(id).expect("task").steps[0].done);
     apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None)
-        .expect("Enter on view selection is inert");
+        .expect("OpenTaskPage on a step selection is inert");
     assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
     assert!(!model.task_editing());
 
@@ -1842,7 +2006,7 @@ fn arrow_keys_move_the_cursor_through_shared_steps() {
 /// Ctrl+D completes exactly the highlighted step through the real apply/save path, without
 /// changing the task's human status.
 #[test]
-fn ctrl_d_completes_the_highlighted_step() {
+fn ctrl_d_with_a_step_selected_completes_the_task_and_enter_toggles_the_step() {
     let (mut domain, mut model, id) = board_with_steps(
         "Toggle witness",
         None,
@@ -1852,27 +2016,30 @@ fn ctrl_d_completes_the_highlighted_step() {
 
     // The active task-edit fixture starts on the first step, then Down moves to "bravo step".
     apply_intent(&mut domain, &mut model, BoardIntent::PageScrollDown, None).expect("cursor down");
+    assert!(
+        model.stored_step_selected(),
+        "bravo is a stored step under the cursor"
+    );
 
-    let complete = map_key(BoardInputMode::TaskPage, ctrl(KeyCode::Char('d'))).expect("Ctrl+D");
-    assert_eq!(complete, BoardIntent::Complete);
-    let outcome = apply_intent(&mut domain, &mut model, complete, None).expect("complete step");
+    // Enter owns the step: it flips bravo and rides the persist path.
+    let outcome =
+        apply_intent(&mut domain, &mut model, BoardIntent::ToggleStep, None).expect("toggle step");
     assert_eq!(
         outcome,
         IntentOutcome::Persist,
         "the step toggle must ride the real persist path"
     );
-
     let task = domain.get(id).expect("task");
     let dones: Vec<bool> = task.steps.iter().map(|step| step.done).collect();
     assert_eq!(
         dones,
         vec![false, true, false],
-        "exactly the highlighted step completes"
+        "exactly the highlighted step toggles"
     );
     assert_eq!(
         task.status,
         HumanStatus::Ready,
-        "completing a step never changes human status"
+        "toggling a step never changes human status"
     );
     assert_ne!(
         task.revision, revision_before,
@@ -1883,7 +2050,6 @@ fn ctrl_d_completes_the_highlighted_step() {
         TaskEventKind::StepChecked,
         "the toggle must journal its typed event"
     );
-
     let frame = rendered_board(&model, 80, 24);
     assert!(
         frame.contains("steps 1/3"),
@@ -1893,6 +2059,78 @@ fn ctrl_d_completes_the_highlighted_step() {
         frame.contains("▸ ✓ bravo step"),
         "the toggled step stays under the cursor:\n{frame}"
     );
+    // Enter again flips it back.
+    apply_intent(&mut domain, &mut model, BoardIntent::ToggleStep, None).expect("toggle back");
+    assert!(!domain.get(id).expect("task").steps[1].done);
+
+    // Ctrl+D with the step still selected completes the TASK, and leaves the steps alone.
+    let complete = map_key(BoardInputMode::TaskPage, ctrl(KeyCode::Char('d'))).expect("Ctrl+D");
+    assert_eq!(complete, BoardIntent::Complete);
+    apply_intent(&mut domain, &mut model, complete, None).expect("complete task");
+    let task = domain.get(id).expect("task");
+    assert_eq!(task.status, HumanStatus::Done, "ctrl+d is the task verb");
+    let dones: Vec<bool> = task.steps.iter().map(|step| step.done).collect();
+    assert_eq!(dones, vec![false, false, false], "no step flipped");
+}
+
+/// `ctrl+r` walks review ↔ ready and rides the persist path; a done task refuses.
+#[test]
+fn ctrl_r_toggles_review_and_ready_and_refuses_on_done() {
+    let (mut domain, mut model, id) = board_with_task("Review me", HumanStatus::Ready);
+    let review = map_key(BoardInputMode::Normal, ctrl(KeyCode::Char('r'))).expect("ctrl+r");
+    assert_eq!(review, BoardIntent::ToggleReview);
+    assert!(
+        board_intent_may_persist(&review),
+        "review is a durable status change"
+    );
+
+    let outcome = apply_intent(&mut domain, &mut model, review.clone(), None).expect("to review");
+    assert_eq!(outcome, IntentOutcome::Persist);
+    assert_eq!(domain.get(id).expect("task").status, HumanStatus::Review);
+
+    // Review lives in NEEDS YOU, so the row stays selected and the bar keeps done/block.
+    let verbs: Vec<&str> = board_verb_items(&model).iter().map(|v| v.key).collect();
+    assert_eq!(verbs, vec!["enter", "d", "b", "+", "?"]);
+
+    apply_intent(&mut domain, &mut model, review.clone(), None).expect("back to ready");
+    assert_eq!(domain.get(id).expect("task").status, HumanStatus::Ready);
+
+    for from in [HumanStatus::Started, HumanStatus::Blocked] {
+        domain.set_status(id, from).expect("seed status");
+        model.sync_from_domain(&domain);
+        apply_intent(&mut domain, &mut model, review.clone(), None).expect("to review");
+        assert_eq!(
+            domain.get(id).expect("task").status,
+            HumanStatus::Review,
+            "{from:?} → review"
+        );
+    }
+
+    domain.set_status(id, HumanStatus::Done).expect("done");
+    model.sync_from_domain(&domain);
+    apply_intent(&mut domain, &mut model, BoardIntent::ToggleDoneDrawer, None).expect("drawer");
+    let idx = model
+        .visible_ids()
+        .iter()
+        .position(|&row| row == id)
+        .expect("done row visible");
+    apply_intent(&mut domain, &mut model, BoardIntent::SelectIndex(idx), None).expect("select");
+    let outcome = apply_intent(&mut domain, &mut model, review.clone(), None).expect("refused");
+    assert_eq!(outcome, IntentOutcome::None);
+    assert_eq!(domain.get(id).expect("task").status, HumanStatus::Done);
+    assert_eq!(model.message(), Some("completed tasks cannot go to review"));
+
+    // The task page maps the same chord.
+    assert_eq!(
+        map_key(BoardInputMode::TaskPage, ctrl(KeyCode::Char('r'))),
+        Some(BoardIntent::ToggleReview)
+    );
+
+    // No selection: the shared refusal.
+    let mut empty = BoardModel::from_domain(&DomainState::new(), None);
+    let mut empty_domain = DomainState::new();
+    apply_intent(&mut empty_domain, &mut empty, review, None).expect("no selection");
+    assert_eq!(empty.message(), Some("select a task first"));
 }
 
 /// Enter keeps a selected view step read-only. Ctrl+e remains contextual, opening its inline
@@ -2394,8 +2632,8 @@ fn first_step_up_deactivates_before_inactive_up_scrolls_then_down_reactivates() 
     assert!(
         active_verbs
             .iter()
-            .any(|entry| entry.key == "s" && entry.label == "toggle step"),
-        "active step cursor must advertise the step primary verb"
+            .any(|entry| entry.key == "s" && entry.label == "start"),
+        "the bar keeps the task verb with a step selected (Enter owns the step): {active_verbs:?}"
     );
 
     apply_intent(&mut domain, &mut model, BoardIntent::PageScrollUp, None)
@@ -2474,10 +2712,14 @@ fn stale_step_cursor_falls_back_to_the_live_task_status_verb() {
 
     let verbs = board_verb_items(&model);
     assert!(
-        verbs
+        !verbs
             .iter()
-            .any(|entry| entry.key == "s" && entry.label == "start"),
+            .any(|entry| entry.label.contains("step") && entry.key == "s"),
         "a stale cursor must not advertise toggle step: {verbs:?}"
+    );
+    assert!(
+        !model.stored_step_selected(),
+        "a cursor past the live step list is not a stored-step selection"
     );
     assert!(
         !verbs
@@ -3283,7 +3525,7 @@ fn ctrl_u_on_an_archived_selection_unarchives_without_popping_the_undo_stack() {
 }
 
 #[test]
-fn help_card_lists_ctrl_f_and_the_verb_bar_shows_file_for_a_task_row_and_the_group() {
+fn help_card_lists_ctrl_f_and_the_verb_bar_keeps_archive_out_of_its_seats() {
     let (mut domain, mut model, _id) = board_with_task("help me", HumanStatus::Ready);
     apply_intent(&mut domain, &mut model, BoardIntent::OpenHelp, None).expect("help");
     let frame = rendered_board(&model, 80, 24);
@@ -3292,18 +3534,21 @@ fn help_card_lists_ctrl_f_and_the_verb_bar_shows_file_for_a_task_row_and_the_gro
         "help card must list ctrl+f:\n{frame}"
     );
     assert!(
-        frame.to_ascii_lowercase().contains("file"),
-        "help card must label the file verb:\n{frame}"
+        frame.to_ascii_lowercase().contains("archive"),
+        "help card must label the archive verb:\n{frame}"
     );
     apply_intent(&mut domain, &mut model, BoardIntent::CloseLayer, None).expect("close help");
 
-    // A deck row's verb bar offers `f archive`.
+    // Archive has no bar seat: the row's bar is the shared shape, and `?` carries ctrl+f.
     let verbs = board_verb_items(&model);
     assert!(
-        verbs
-            .iter()
-            .any(|entry| entry.key == "f" && entry.label == "archive"),
-        "deck row verb bar must show `f archive`: {verbs:?}"
+        !verbs.iter().any(|entry| entry.key == "f"),
+        "archive is not a verb-bar seat: {verbs:?}"
+    );
+    assert_eq!(
+        verbs.iter().map(|entry| entry.key).collect::<Vec<_>>(),
+        vec!["enter", "s", "d", "b", "+", "?"],
+        "ready row bar: open · start · done · block · add · help"
     );
 
     // The expanded archived group: header shows its toggle, a row shows `f unarchive`.
@@ -3344,10 +3589,13 @@ fn help_card_lists_ctrl_f_and_the_verb_bar_shows_file_for_a_task_row_and_the_gro
         .expect("select the archived row");
     let verbs = board_verb_items(&model);
     assert!(
-        verbs
-            .iter()
-            .any(|entry| entry.key == "f" && entry.label == "unarchive"),
-        "archived row verb bar must show `f unarchive`: {verbs:?}"
+        !verbs.iter().any(|entry| entry.key == "f"),
+        "unarchive is not a verb-bar seat either: {verbs:?}"
+    );
+    let frame = rendered_board(&model, 80, 24);
+    assert!(
+        frame.contains("ctrl+u undo") || !frame.contains("u Undo"),
+        "no legacy undo label survives"
     );
 }
 
@@ -3791,14 +4039,16 @@ fn enter_on_the_archived_tab_opens_a_read_only_focus_that_persists_nothing() {
         "the archived project's tasks paint in this focus"
     );
 
-    // The chip says so, and the rows paint dim.
+    // The idle status row names the read-only lens, and the chip says the same.
+    let status = board_chrome_row(&model, (80, 24));
+    assert_eq!(status.trim(), "app · archived");
     let frame = rendered_board(&model, 80, 24);
     assert!(
         frame.contains("app \u{b7} archived"),
         "the chip reads `<name> · archived`:\n{frame}"
     );
     assert!(
-        frame.contains("ctrl+u unarchive \u{b7} enter open \u{b7} esc back"),
+        frame.contains("ctrl+u unarchive \u{b7} enter open \u{b7} esc close \u{b7} ? help"),
         "the focus verb bar offers only what works here:\n{frame}"
     );
     let backend = TestBackend::new(80, 24);
@@ -3844,6 +4094,8 @@ fn every_mutating_verb_in_read_only_focus_refuses_with_the_archived_message() {
         BoardIntent::Complete,
         BoardIntent::Reopen,
         BoardIntent::ToggleBlock,
+        BoardIntent::ToggleReview,
+        BoardIntent::ToggleStep,
         BoardIntent::BeginEditTitle,
         BoardIntent::BeginEditNotes,
         BoardIntent::SoftDelete,
@@ -4175,11 +4427,11 @@ fn toggle_all_groups_folds_and_unfolds_the_archived_group_with_the_others_when_t
     assert!(model.visible_ids().contains(&filed), "archived group open");
 
     let toggle_all =
-        map_key(BoardInputMode::Normal, ctrl(KeyCode::Char('g'))).expect("ctrl+g is bound");
+        map_key(BoardInputMode::Normal, press(KeyCode::Char('g'))).expect("g is bound");
     assert_eq!(
         toggle_all,
         BoardIntent::ToggleAllGroups,
-        "ctrl+g keeps its meaning"
+        "bare g folds the groups"
     );
 
     apply_intent(&mut domain, &mut model, toggle_all.clone(), None).expect("fold all");

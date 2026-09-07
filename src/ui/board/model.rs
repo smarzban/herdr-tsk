@@ -691,6 +691,10 @@ pub struct BoardModel {
     /// The last projects-index row click (time + row path), kept only to detect a
     /// double-click that opens the project in slot 2. Presentation-only, never persisted.
     pub(super) last_project_row_click: Option<(Instant, PathBuf)>,
+    /// First visible row of the help card's key list. Session-only, reset on open.
+    pub(super) help_scroll: usize,
+    /// Furthest help scroll the last painted card could show (renderer-recorded).
+    pub(super) help_max_scroll: Cell<usize>,
     pub(super) input_mode: BoardInputMode,
     /// The one active board form. It is present for expanded quick-add and task editing alike;
     /// task identity or invocation context are held inside it and never rebound after open.
@@ -796,6 +800,8 @@ impl BoardModel {
             last_row_click: None,
             last_project_header_click: None,
             last_project_row_click: None,
+            help_scroll: 0,
+            help_max_scroll: Cell::new(usize::MAX),
             input_mode: BoardInputMode::Normal,
             form: None,
             quick_add: None,
@@ -1607,6 +1613,11 @@ impl BoardModel {
     /// The projects index's current View control.
     pub fn projects_view(&self) -> &ProjectsView {
         &self.projects_view
+    }
+
+    /// The help card's scroll offset.
+    pub fn help_scroll(&self) -> usize {
+        self.help_scroll
     }
 
     /// The index's search query.
@@ -2427,6 +2438,33 @@ impl BoardModel {
             BoardInputMode::EditThread => BoardInputMode::SelectThread,
             _ => return,
         };
+    }
+
+    /// Whether the task page's cursor rests on a stored (not removed, not the `+ step`
+    /// row) step. Enter toggles that step instead of acting on the page.
+    pub fn stored_step_selected(&self) -> bool {
+        if self.focused_surface() != FocusedSurface::Task
+            || !matches!(
+                self.input_mode,
+                BoardInputMode::TaskPage | BoardInputMode::EditStep
+            )
+        {
+            return false;
+        }
+        let Some(form) = self.form.as_ref().filter(|form| form.is_task()) else {
+            return false;
+        };
+        if form.steps.add_selected {
+            return false;
+        }
+        let (Some(task_id), Some(index)) = (form.task_id(), form.steps.cursor) else {
+            return false;
+        };
+        self.tasks
+            .iter()
+            .find(|task| task.id == task_id)
+            .and_then(|task| task.steps.get(index))
+            .is_some_and(|step| !form.steps.removals.contains(&step.id))
     }
 
     /// Whether the current task page has entered its edit session.

@@ -437,7 +437,11 @@ pub enum QueueOverlay<'a> {
         commands: &'a [PaletteCommandRow<'a>],
     },
     /// Help card (`?`).
-    Help { lines: &'a [String] },
+    Help {
+        lines: &'a [String],
+        /// First list row in view; the painter clamps it to the rows that fit.
+        scroll: usize,
+    },
     /// Launch card: the two-choice archived-project modal.
     LaunchCard { name: &'a str },
     /// Project-scope dropdown from the selector chip.
@@ -560,9 +564,12 @@ pub struct QueueFrameModel<'a> {
     pub projects_query: &'a str,
     /// Context summary painted above a filtered or cross-project task list.
     pub summary: Option<String>,
+    /// Current board lens painted on the idle status row (for example `desk` or
+    /// `tsk · #release`). The projects index keeps its selected path instead.
+    pub context: String,
     /// Optional status-line notice; replaces the default counts when set.
     pub status_message: Option<&'a str>,
-    /// Column offset of the delete-notice `u Undo` control inside `status_message`, when
+    /// Column offset of the delete-notice `ctrl+u undo` control inside `status_message`, when
     /// the notice's own composition put one there: the caller
     /// computes this from the same composition that built `status_message` (see
     /// `board.rs`'s `notice_framed`), so the hit region is never re-derived by searching
@@ -705,7 +712,7 @@ pub enum QueueHitTarget {
     ListScroll(usize),
     /// One cell of the task-page body scrollbar. The usize is the notes/steps offset.
     PageScroll(usize),
-    /// The `u Undo` control inside the delete-recovery notice on the status line (I2,
+    /// The `ctrl+u undo` control inside the delete-recovery notice on the status line (I2,
     /// round 2), positioned wherever [`paint_status_line`] actually put it -- which shifts
     /// with the deleted title's length and with whether a later message is composed after
     /// it -- rather than a fixed column. Dispatches the same [`BoardIntent::Undo`] the `u`
@@ -747,6 +754,9 @@ pub struct QueueHitMap {
     /// inside these, so chrome — scrollbars, borders, verb bars, dividers — is
     /// excluded by construction.
     pub copyable: Vec<Rect>,
+    /// Furthest help-card scroll the painted frame could show, when the card was up.
+    /// The reducer clamps with it so the offset never runs past the last page.
+    pub help_max_scroll: Option<usize>,
 }
 
 impl QueueHitMap {
@@ -1307,17 +1317,28 @@ fn paint_footer(
             {
                 if let Some(message) = input.message {
                     paint_bottom_input_message(frame, surface, message_row, width, message);
-                } else if matches!(model.overlay, QueueOverlay::ProjectsSearch { .. }) {
-                    // The status row is the query while searching, so the selected
-                    // project's path moves to the reserved row above it. Read from the
-                    // frame's already-built view: no second queue query per paint.
-                    put_line(
-                        frame,
-                        surface,
-                        message_row,
-                        width,
-                        paint_bounded_line(&index_selected_path(model), width, style_dim()),
-                    );
+                } else {
+                    // The reserved row carries the input's context while no refusal claims
+                    // it: the selected project's path under a search, the destination of a
+                    // quick-add draft. Keys stay on the verb row.
+                    let context = match &model.overlay {
+                        QueueOverlay::ProjectsSearch { .. } => Some(index_selected_path(model)),
+                        QueueOverlay::QuickAdd {
+                            destination,
+                            recovery: false,
+                            ..
+                        } if input.above_rows.is_empty() => Some(format!(" add to {destination}")),
+                        _ => None,
+                    };
+                    if let Some(context) = context {
+                        put_line(
+                            frame,
+                            surface,
+                            message_row,
+                            width,
+                            paint_bounded_line(&context, width, style_dim()),
+                        );
+                    }
                 }
             }
             paint_bottom_input_slot(frame, surface, row, width, input);
@@ -1336,8 +1357,7 @@ fn paint_footer(
                 // carry only the basename.
                 index_selected_path(model)
             } else {
-                // Idle status: done count only. In-motion is already on the section header.
-                format!(" {} done", model.view.counts.done)
+                model.context.clone()
             };
             let (line, undo_hit) = paint_status_line(
                 model.status_message,
@@ -1369,7 +1389,7 @@ fn paint_footer(
             | QueueOverlay::ScopeDropdown { .. } => &[],
             QueueOverlay::QuickAdd { recovery, .. } if *recovery => &[],
             QueueOverlay::QuickAdd { .. } => QUICK_ADD_VERBS,
-            QueueOverlay::ProjectsSearch { .. } => &[],
+            QueueOverlay::ProjectsSearch { .. } => model.verb_items,
             // The page's field edits keep the form legends; its view mode reads the
             // model-computed page verbs (status-dependent, like the board row's own).
             QueueOverlay::TaskPage {
@@ -1389,16 +1409,27 @@ fn paint_footer(
             model.overlay,
             QueueOverlay::None | QueueOverlay::TaskPage { focus: None, .. },
         );
-        if let QueueOverlay::QuickAdd { destination, .. } = &model.overlay {
-            paint_quick_add_hint(
-                frame,
-                surface,
-                row,
-                width,
-                destination,
-                model.status_message,
-                geo.tier,
-            );
+        // Save recovery owns this row with its refusal. A wrapped quick-add draft also
+        // takes the reserved row above the input for its own continuation, so its refusal
+        // moves down here rather than vanishing.
+        let quick_add_message = match &model.overlay {
+            QueueOverlay::QuickAdd { recovery: true, .. } => model.status_message,
+            QueueOverlay::QuickAdd { input, .. } if !input.above_rows.is_empty() => {
+                input.refusal.or(model.status_message)
+            }
+            _ => None,
+        };
+        if matches!(
+            &model.overlay,
+            QueueOverlay::QuickAdd { recovery: true, .. }
+        ) || quick_add_message.is_some()
+        {
+            if let Some(message) = quick_add_message {
+                paint_bottom_input_message(frame, surface, row, width, message);
+            }
+            // The row is a notice while the message holds it: a click there is inert, it
+            // must not read as an outside click that discards the draft.
+            hits.push(QueueHitTarget::ModalChrome, Rect::new(0, row, width, 1));
         } else {
             let (line, verb_hits) = paint_verb_bar(verb_items, budget, width, prefix_verbs);
             put_line(frame, surface, row, width, line);
@@ -1451,10 +1482,6 @@ pub(crate) const QUICK_ADD_VERBS: &[VerbEntry<'static>] = &[
         label: "save",
     },
     VerbEntry {
-        key: "shift+enter",
-        label: "save+next",
-    },
-    VerbEntry {
         key: "tab",
         label: "details",
     },
@@ -1464,31 +1491,16 @@ pub(crate) const QUICK_ADD_VERBS: &[VerbEntry<'static>] = &[
     },
 ];
 
-pub(crate) const PALETTE_VERBS: &[VerbEntry<'static>] = &[
-    VerbEntry {
-        key: "enter",
-        label: "run",
-    },
-    VerbEntry {
-        key: "esc",
-        label: "close",
-    },
-    VerbEntry {
-        key: "type",
-        label: "to filter",
-    },
-];
-
 /// Shared-form verb rows. The renderer and mouse mapper both read these exact arrays, so a
 /// painted Save or Cancel control cannot promise a key route different from the one it sends.
 const FORM_TITLE_VERBS: &[VerbEntry<'static>] = &[
     VerbEntry {
-        key: "shift+enter",
-        label: "save",
+        key: "enter",
+        label: "next",
     },
     VerbEntry {
-        key: "tab",
-        label: "next",
+        key: "shift+enter",
+        label: "save",
     },
     VerbEntry {
         key: "esc",
@@ -1526,7 +1538,7 @@ const FORM_THREAD_VERBS: &[VerbEntry<'static>] = &[
 const FORM_SCOPE_VERBS: &[VerbEntry<'static>] = &[
     VerbEntry {
         key: "enter",
-        label: "scopes",
+        label: "choose",
     },
     VerbEntry {
         key: "space",
@@ -1539,12 +1551,12 @@ const FORM_SCOPE_VERBS: &[VerbEntry<'static>] = &[
 ];
 const FORM_SCOPE_DROPDOWN_VERBS: &[VerbEntry<'static>] = &[
     VerbEntry {
-        key: "j/k",
-        label: "choose",
+        key: "↑↓",
+        label: "move",
     },
     VerbEntry {
         key: "enter",
-        label: "scope",
+        label: "choose",
     },
     VerbEntry {
         key: "esc",
@@ -1593,25 +1605,6 @@ const EDIT_NOTES_VERBS: &[VerbEntry<'static>] = &[
     },
 ];
 
-pub(crate) const SCOPE_VERBS: &[VerbEntry<'static>] = &[
-    VerbEntry {
-        key: "j/k",
-        label: "choose",
-    },
-    VerbEntry {
-        key: "f",
-        label: "file",
-    },
-    VerbEntry {
-        key: "enter",
-        label: "scope",
-    },
-    VerbEntry {
-        key: "esc",
-        label: "close",
-    },
-];
-
 /// Paint palette / help / scope dropdown over the base frame.
 ///
 /// Standard: floating overlay. Compact: full-viewport takeover when height is tight.
@@ -1627,8 +1620,8 @@ fn paint_overlay(
         QueueOverlay::Palette { query, commands } => {
             paint_palette_overlay(frame, geo, surface, query, commands, hits);
         }
-        QueueOverlay::Help { lines } => {
-            paint_help_overlay(frame, geo, surface, lines, hits);
+        QueueOverlay::Help { lines, scroll } => {
+            paint_help_overlay(frame, geo, surface, lines, *scroll, hits);
         }
         QueueOverlay::LaunchCard { name } => {
             paint_launch_card(frame, geo, surface, name, hits);
@@ -2107,16 +2100,22 @@ fn modal_bounds(geo: &TierGeometry) -> Rect {
     Rect::new(0, 0, geo.row_width, geo.rule_row.unwrap_or(geo.height))
 }
 
-/// Legend footer for the Help card: any key (Esc included) closes it.
-const HELP_FOOTER: &[VerbEntry<'static>] = &[VerbEntry {
-    key: "any key",
-    label: "close",
-}];
+/// Legend footer for the Help card.
+const HELP_FOOTER: &[VerbEntry<'static>] = &[
+    VerbEntry {
+        key: "↑↓",
+        label: "scroll",
+    },
+    VerbEntry {
+        key: "esc",
+        label: "close",
+    },
+];
 
 /// Legend footer for the command palette card.
 const PALETTE_FOOTER: &[VerbEntry<'static>] = &[
     VerbEntry {
-        key: "↑/↓",
+        key: "↑↓",
         label: "move",
     },
     VerbEntry {
@@ -2147,9 +2146,58 @@ const ARCHIVED_TAB_FOOTER: &[VerbEntry<'static>] = &[
     },
 ];
 
+/// Painted width of a card legend: the two-cell lead, `key label` seats, ` · ` between.
+fn legend_fits(geo: &TierGeometry, entries: &[VerbEntry<'_>]) -> bool {
+    let pad: usize = usize::from(geo.tier != Tier::Compact);
+    let content = (geo.row_width as usize)
+        .saturating_sub(4)
+        .min(62)
+        .saturating_sub(2)
+        .saturating_sub(2 * pad);
+    let width = 2
+        + entries
+            .iter()
+            .map(|entry| display_width(entry.key) + 1 + display_width(entry.label))
+            .sum::<usize>()
+        + 3 * entries.len().saturating_sub(1);
+    width <= content
+}
+
+/// Compact terminals cap the card near 34 content columns, so the legend keeps only the
+/// seat that is not guessable (`ctrl+f archive`) beside the way out.
+const PROJECT_PICKER_FOOTER_COMPACT: &[VerbEntry<'static>] = &[
+    VerbEntry {
+        key: "ctrl+f",
+        label: "archive",
+    },
+    VerbEntry {
+        key: "esc",
+        label: "close",
+    },
+];
+
+const PROJECT_PICKER_FOOTER: &[VerbEntry<'static>] = &[
+    VerbEntry {
+        key: "↑↓",
+        label: "move",
+    },
+    VerbEntry {
+        key: "enter",
+        label: "choose",
+    },
+    VerbEntry {
+        key: "ctrl+f",
+        label: "archive",
+    },
+    VerbEntry {
+        key: "esc",
+        label: "close",
+    },
+];
+
 const SCOPE_FOOTER: &[VerbEntry<'static>] = &[
     VerbEntry {
-        key: "↑/↓",
+        key: "↑↓",
         label: "move",
     },
     VerbEntry {
@@ -2298,6 +2346,7 @@ fn paint_help_overlay(
     geo: &TierGeometry,
     surface: Rect,
     lines: &[String],
+    scroll: usize,
     hits: &mut QueueHitMap,
 ) {
     if geo.row_width == 0 || geo.height == 0 || lines.is_empty() {
@@ -2324,11 +2373,14 @@ fn paint_help_overlay(
     let bounds = Rect::new(0, 0, geo.row_width, geo.height);
     let capacity = bounds
         .height
-        .saturating_sub(modal_chrome_rows(geo.tier, true));
-    // Never scrolls -- there is no selection to seek with, and closing on any key rules
-    // out a dedicated scroll chord -- so `▼` here means "more exists" (resize to see it),
-    // not "more is reachable".
-    let title = titled_with_scroll_marker("help", false, (shown.len() as u16) > capacity);
+        .saturating_sub(modal_chrome_rows(geo.tier, true)) as usize;
+    // The list scrolls with the arrows, `j`/`k`, page keys, and the wheel. The offset is
+    // clamped so the last page is always full; `▲`/`▼` mark the rows out of view.
+    let max_scroll = shown.len().saturating_sub(capacity);
+    hits.help_max_scroll = Some(max_scroll);
+    let scroll = scroll.min(max_scroll);
+    let window: Vec<String> = shown.iter().skip(scroll).take(capacity).cloned().collect();
+    let title = titled_with_scroll_marker("help", scroll > 0, scroll + window.len() < shown.len());
     let content = paint_modal_card(
         frame,
         geo,
@@ -2336,7 +2388,7 @@ fn paint_help_overlay(
         bounds,
         ModalCardSpec {
             title: &title,
-            content_rows: shown.len() as u16,
+            content_rows: window.len() as u16,
             min_content_width: 0,
             legend: HELP_FOOTER,
             dismiss: Some(QueueHitTarget::HelpDismiss),
@@ -2351,7 +2403,7 @@ fn paint_help_overlay(
     // reclaiming its own content rect as a `HelpDismiss` hit, the same close its own `[x]`
     // and the frame outside the card already resolve to.
     hits.push(QueueHitTarget::HelpDismiss, content);
-    for (j, ln) in shown.iter().take(content.height as usize).enumerate() {
+    for (j, ln) in window.iter().take(content.height as usize).enumerate() {
         let y = content.y.saturating_add(j as u16);
         let rect = Rect::new(content.x, y, content.width, 1);
         put_line_at(
@@ -3242,10 +3294,13 @@ fn paint_scope_dropdown(
             } else {
                 0
             },
-            legend: if tabs.is_some_and(|tabs| tabs.archived_active) {
-                ARCHIVED_TAB_FOOTER
-            } else {
-                SCOPE_FOOTER
+            legend: match tabs {
+                Some(tabs) if tabs.archived_active => ARCHIVED_TAB_FOOTER,
+                // Keyed on the painted width, not the tier: a tall-but-narrow frame and a
+                // wide-but-short one both get the largest legend their card can hold.
+                Some(_) if legend_fits(geo, PROJECT_PICKER_FOOTER) => PROJECT_PICKER_FOOTER,
+                Some(_) => PROJECT_PICKER_FOOTER_COMPACT,
+                None => SCOPE_FOOTER,
             },
             dismiss: None,
             legend_hits: None,
@@ -4124,13 +4179,13 @@ fn section_title(section: &QueueSection, surface: BoardSurface) -> String {
 }
 
 fn paint_empty_hint(width: u16) -> Line<'static> {
-    // " no open tasks here — P rescope or + capture"
+    // " no open tasks here — p rescope or + add"
     let spans = vec![
         Span::styled("    no open tasks here — ".to_string(), style_dim()),
-        Span::styled("P".to_string(), style_bold()),
+        Span::styled("p".to_string(), style_bold()),
         Span::styled(" rescope or ".to_string(), style_dim()),
         Span::styled("+".to_string(), style_bold()),
-        Span::styled(" capture".to_string(), style_dim()),
+        Span::styled(" add".to_string(), style_dim()),
     ];
     bound_line(Line::from(spans), width as usize)
 }
@@ -4140,7 +4195,7 @@ fn paint_rule_row(width: u16) -> Line<'static> {
     Line::from(Span::styled(rule, style_dim()))
 }
 
-/// The status line, plus the `u Undo` control's (column, width) inside it when the
+/// The status line, plus the `ctrl+u undo` control's (column, width) inside it when the
 /// delete-recovery notice actually painted one that survived clipping (I2, Minor 1,
 /// round 2).
 ///
@@ -4256,40 +4311,6 @@ fn paint_bottom_input_message(
     );
 }
 
-fn paint_quick_add_hint(
-    frame: &mut Frame<'_>,
-    surface: Rect,
-    row: u16,
-    width: u16,
-    destination: &str,
-    message: Option<&str>,
-    tier: Tier,
-) {
-    let (text, style) = if let Some(message) = message {
-        (message.to_string(), style_reverse_bold())
-    } else {
-        // The line names where Enter saves, so quick-add never has to move the
-        // user's view to prove where a task went.
-        let text = match tier {
-            Tier::Standard => {
-                format!("Enter save · esc cancel · tab expand · add to {destination}")
-            }
-            Tier::Compact => format!("⏎ save · esc · tab · + {destination}"),
-        };
-        (text, style_dim())
-    };
-    put_line(
-        frame,
-        surface,
-        row,
-        width,
-        bound_line(
-            Line::from(Span::styled(present_line(&text, width as usize), style)),
-            width as usize,
-        ),
-    );
-}
-
 /// The projects index's idle status: the selected row's stored path, so same-named
 /// projects stay distinguishable without crowding the rows.
 fn index_selected_path(model: &QueueFrameModel<'_>) -> String {
@@ -4330,9 +4351,16 @@ fn paint_status_line(
         let fits = |text: &str| left_w + 2 + display_width(text) < width as usize;
         let with_crumb = hint
             .crumb
-            .map(|crumb| format!("{crumb}    {}", hint.keys))
+            .map(|crumb| {
+                if hint.keys.is_empty() {
+                    crumb.to_string()
+                } else {
+                    format!("{crumb}    {}", hint.keys)
+                }
+            })
             .filter(|text| fits(text));
-        with_crumb.or_else(|| fits(hint.keys).then(|| hint.keys.to_string()))
+        with_crumb
+            .or_else(|| (!hint.keys.is_empty() && fits(hint.keys)).then(|| hint.keys.to_string()))
     });
     let right_w = right.as_deref().map(display_width).unwrap_or(0);
     let trailing = usize::from(right.is_some());
@@ -4472,7 +4500,7 @@ fn paint_selector_chip(model: &QueueFrameModel<'_>, width: u16) -> (Line<'static
 fn mutating_verb_key(key: &str) -> bool {
     matches!(
         key,
-        "s" | "d" | "o" | "b" | "x" | "a" | "e" | "u" | "n" | "q"
+        "s" | "d" | "o" | "b" | "r" | "x" | "a" | "e" | "u" | "n" | "f" | "q"
     )
 }
 
@@ -4734,6 +4762,7 @@ mod tests {
             projects_cursor: 0,
             projects_query: "",
             summary: None,
+            context: " projects".to_string(),
             status_message: None,
             status_undo_offset: None,
             verb_items: &[],
@@ -4807,6 +4836,7 @@ mod tests {
             projects_cursor: 0,
             projects_query: "",
             summary: None,
+            context: " projects".to_string(),
             status_message: None,
             status_undo_offset: None,
             verb_items: &[],

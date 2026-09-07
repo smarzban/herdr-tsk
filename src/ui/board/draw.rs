@@ -11,7 +11,7 @@ use crate::ui::capture::CaptureField;
 use crate::ui::edit::{
     escaped_line_window, wrap_text, wrapped_draft_rows, wrapped_edit_rows, EditBuffer,
 };
-use crate::ui::input::{help_card_lines, keymap_help_label};
+use crate::ui::input::help_card_lines;
 use crate::ui::mouse::BoardPopup;
 use crate::ui::queue::ThreadFilter;
 use crate::ui::render::{
@@ -28,18 +28,34 @@ use super::model::{
     BoardModel, PickerTab, ProjectScopeOption, ProjectsView,
 };
 
-/// Verb bar for the base board list: labels follow the selected task.
+/// Verb bar for the base board list.
 ///
-/// `s` starts a ready task or reopens a done one. On started/blocked/review it is
-/// omitted (`PrimaryVerb` is inert on started/blocked/review). `b` reads `unblock` only on a blocked task.
-/// Done tasks show `o reopen` instead of `d`/`b`. `:` / `?` take their word from the keymap.
+/// The bar is a prompt, not a keymap: the few things you are most likely to do next from
+/// where the cursor is, then the way out, then `? help`. Everything else lives in `?` and
+/// `:`. Every surface reads the same shape (primary · status · create · out · help) so the
+/// compact budget clips help first and never an action.
 pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
-    let help = |chord: &str, fallback: &'static str| keymap_help_label(chord).unwrap_or(fallback);
+    const HELP: VerbEntry<'static> = VerbEntry {
+        key: "?",
+        label: "help",
+    };
+    const ADD: VerbEntry<'static> = VerbEntry {
+        key: "+",
+        label: "add",
+    };
+    const OPEN: VerbEntry<'static> = VerbEntry {
+        key: "enter",
+        label: "open",
+    };
 
-    // An inline step editor saves only through Shift+Enter. Add mode reopens an empty row;
-    // an existing-step rename commits the complete task edit session and exits it.
+    // The inline step editor: Enter saves this step (and opens the next row on an add),
+    // Shift+Enter saves the whole task session.
     if model.input_mode() == BoardInputMode::EditStep {
         return vec![
+            VerbEntry {
+                key: "enter",
+                label: "step",
+            },
             VerbEntry {
                 key: "shift+enter",
                 label: "save",
@@ -51,29 +67,19 @@ pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
         ];
     }
 
-    // AC-41/AC-43: the read-only archived focus offers only what works there.
+    // The read-only archived focus offers only what works there.
     if model.focus_is_archived() {
         return vec![
             VerbEntry {
                 key: "u",
                 label: "unarchive",
             },
-            VerbEntry {
-                key: "enter",
-                label: "open",
-            },
+            OPEN,
             VerbEntry {
                 key: "esc",
-                label: "back",
+                label: "close",
             },
-            VerbEntry {
-                key: ":",
-                label: "palette",
-            },
-            VerbEntry {
-                key: "?",
-                label: "help",
-            },
+            HELP,
         ];
     }
 
@@ -97,41 +103,23 @@ pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
     {
         if model.input_mode() == BoardInputMode::ProjectsSearch {
             return vec![
+                OPEN,
                 VerbEntry {
                     key: "esc",
-                    label: "clear search",
-                },
-                VerbEntry {
-                    key: "enter",
-                    label: "open",
+                    label: "close",
                 },
             ];
         }
         return vec![
+            OPEN,
             VerbEntry {
                 key: "/",
-                label: "search projects",
+                label: "search",
             },
-            VerbEntry {
-                key: "enter",
-                label: "open",
-            },
-            VerbEntry {
-                key: "v",
-                label: "view",
-            },
-            VerbEntry {
-                key: ":",
-                label: help(":", "palette"),
-            },
-            VerbEntry {
-                key: "?",
-                label: help("?", "help"),
-            },
+            HELP,
         ];
     }
 
-    let mut entries = Vec::with_capacity(7);
     // The archived header holds the selection: its own verbs only.
     if model.archived_header_selected() {
         return vec![
@@ -143,163 +131,119 @@ pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
                     "collapse"
                 },
             },
-            VerbEntry {
-                key: ":",
-                label: help(":", "palette"),
-            },
-            VerbEntry {
-                key: "?",
-                label: help("?", "help"),
-            },
-            VerbEntry {
-                key: "+",
-                label: "capture",
-            },
+            ADD,
+            HELP,
         ];
+    }
+
+    // While a delete notice is on the status row, the bar leads with its undo and keeps
+    // only the selected row's first truthful status verb: exactly the five-seat compact
+    // budget with a selection, so no tier clips an action. The remaining status verbs stay
+    // on their keys and in `:` until the notice clears. The seat is Normal-mode only,
+    // because every other surface hides the notice it belongs to.
+    if model.visible_delete_notice().is_some() && model.input_mode() == BoardInputMode::Normal {
+        let selected_task = model
+            .selected_id()
+            .and_then(|id| model.tasks.iter().find(|t| t.id == id));
+        let mut armed = vec![VerbEntry {
+            key: "u",
+            label: "undo",
+        }];
+        if let Some(task) = selected_task {
+            armed.push(OPEN);
+            if let Some(verb) = status_verbs(task.status).into_iter().next() {
+                armed.push(verb);
+            }
+        }
+        armed.push(ADD);
+        armed.push(HELP);
+        return armed;
     }
     let selected_task = model
         .selected_id()
         .and_then(|id| model.tasks.iter().find(|t| t.id == id));
-
+    let mut entries = Vec::with_capacity(6);
     if let Some(task) = selected_task {
-        match task.status {
-            HumanStatus::Ready => {
-                entries.push(VerbEntry {
-                    key: "s",
-                    label: "start",
-                });
-            }
-            HumanStatus::Done => {
-                entries.push(VerbEntry {
-                    key: "s",
-                    label: "reopen",
-                });
-            }
-            // `PrimaryVerb` is a no-op on Started/Blocked/Review ("nothing to do
-            // available yet"): omit the entry rather than advertise a no-op.
-            HumanStatus::Started | HumanStatus::Blocked | HumanStatus::Review => {}
-        }
-        entries.push(VerbEntry {
-            key: "enter",
-            label: "open",
-        });
-        if task.status == HumanStatus::Done {
-            entries.push(VerbEntry {
-                key: "o",
-                label: help("o", "reopen"),
-            });
-        } else {
-            entries.push(VerbEntry {
-                key: "d",
-                label: help("d", "done"),
-            });
-            entries.push(VerbEntry {
-                key: "b",
-                label: if task.status == HumanStatus::Blocked {
-                    "unblock"
-                } else {
-                    help("b", "block")
-                },
-            });
-        }
+        entries.push(OPEN);
+        entries.extend(status_verbs(task.status));
     }
-    entries.push(VerbEntry {
-        key: ":",
-        label: help(":", "palette"),
-    });
-    entries.push(VerbEntry {
-        key: "?",
-        label: help("?", "help"),
-    });
-    // Capture and file are last so the compact budget preserves the established board
-    // verbs; the file verb trails capture because the established verbs win the
-    // standard width first.
-    entries.push(VerbEntry {
-        key: "+",
-        label: "capture",
-    });
-    if let Some(task) = selected_task {
-        entries.push(VerbEntry {
-            key: "f",
-            label: if task.archived {
-                "unarchive"
-            } else {
-                "archive"
-            },
-        });
-    }
+    entries.push(ADD);
+    entries.push(HELP);
     entries
 }
 
+/// The status verbs a task's current status makes meaningful, in the order every bar
+/// paints them: start / reopen, done, block / unblock.
+fn status_verbs(status: HumanStatus) -> Vec<VerbEntry<'static>> {
+    match status {
+        HumanStatus::Ready => vec![
+            VerbEntry {
+                key: "s",
+                label: "start",
+            },
+            VerbEntry {
+                key: "d",
+                label: "done",
+            },
+            VerbEntry {
+                key: "b",
+                label: "block",
+            },
+        ],
+        HumanStatus::Started | HumanStatus::Review => vec![
+            VerbEntry {
+                key: "d",
+                label: "done",
+            },
+            VerbEntry {
+                key: "b",
+                label: "block",
+            },
+        ],
+        HumanStatus::Blocked => vec![
+            VerbEntry {
+                key: "d",
+                label: "done",
+            },
+            VerbEntry {
+                key: "b",
+                label: "unblock",
+            },
+        ],
+        HumanStatus::Done => vec![VerbEntry {
+            key: "o",
+            label: "reopen",
+        }],
+    }
+}
+
 fn task_page_verb_items(model: &BoardModel, task: &crate::domain::Task) -> Vec<VerbEntry<'static>> {
-    let help = |chord: &str, fallback: &'static str| keymap_help_label(chord).unwrap_or(fallback);
+    // A parked edit session (dirty draft, no editor open) is about saving or discarding.
+    if model.task_editing() {
+        return vec![
+            VerbEntry {
+                key: "shift+enter",
+                label: "save",
+            },
+            VerbEntry {
+                key: "a",
+                label: "step",
+            },
+            VerbEntry {
+                key: "esc",
+                label: "cancel",
+            },
+        ];
+    }
     let mut entries = Vec::with_capacity(6);
     entries.push(VerbEntry {
         key: "e",
         label: "edit",
     });
-    let selected_step_done = model
-        .form
-        .as_ref()
-        .filter(|form| form.task_id() == Some(task.id))
-        .and_then(|form| form.steps.cursor)
-        .and_then(|index| task.steps.get(index))
-        .map(|step| step.done);
-    if selected_step_done.is_some() {
-        entries.push(VerbEntry {
-            key: "s",
-            label: "toggle step",
-        });
-    } else {
-        match task.status {
-            HumanStatus::Ready => entries.push(VerbEntry {
-                key: "s",
-                label: "start",
-            }),
-            HumanStatus::Done => entries.push(VerbEntry {
-                key: "s",
-                label: "reopen",
-            }),
-            HumanStatus::Started | HumanStatus::Blocked | HumanStatus::Review => {}
-        }
-    }
-    if selected_step_done.unwrap_or(task.status == HumanStatus::Done) {
-        entries.push(VerbEntry {
-            key: "o",
-            label: help("o", "reopen"),
-        });
-    } else {
-        entries.push(VerbEntry {
-            key: "d",
-            label: help("d", "done"),
-        });
-        entries.push(VerbEntry {
-            key: "b",
-            label: if task.status == HumanStatus::Blocked {
-                "unblock"
-            } else {
-                help("b", "block")
-            },
-        });
-    }
+    entries.extend(status_verbs(task.status));
     entries.push(VerbEntry {
         key: "esc",
         label: "close",
-    });
-    if model.task_editing() {
-        entries.push(VerbEntry {
-            key: "a",
-            label: "step",
-        });
-    }
-    // The file verb is last so the width budget clips it before the established page verbs.
-    entries.push(VerbEntry {
-        key: "f",
-        label: if task.archived {
-            "unarchive"
-        } else {
-            "archive"
-        },
     });
     entries
 }
@@ -427,7 +371,7 @@ fn build_task_page_overlay<'a>(
         crate::ui::render::BottomInputSlot {
             text,
             cursor_col,
-            placeholder: "thread…   enter close · shift+enter save · esc cancel",
+            placeholder: "thread…",
             refusal: None,
             above_rows: Vec::new(),
             cursor_row_offset: 0,
@@ -710,6 +654,28 @@ fn build_task_page_overlay<'a>(
     }
 }
 
+/// Idle status-row context for the active lens. Stored paths and thread names reach the
+/// renderer only through its `present_line` path before they are painted.
+fn footer_context(model: &BoardModel, surface: BoardSurface) -> String {
+    match surface {
+        BoardSurface::Desk => " desk".to_string(),
+        BoardSurface::Projects | BoardSurface::ThreadView => " projects".to_string(),
+        BoardSurface::Project => {
+            let path = model.archived_focus().or_else(|| model.active_project());
+            let name = path
+                .map(|path| render::short_project(&path.to_string_lossy()).to_string())
+                .unwrap_or_else(|| "desk".to_string());
+            let mut context = format!(" {name}");
+            if model.focus_is_archived() {
+                context.push_str(" · archived");
+            } else if model.thread_filter() != &ThreadFilter::All {
+                context.push_str(&format!(" · {}", model.thread_filter().label()));
+            }
+            context
+        }
+    }
+}
+
 /// The persistent navigation row's paint for this model: fixed tabs, slot 2's label,
 /// and the active destination's right-side control.
 fn nav_paint(model: &BoardModel) -> NavPaint {
@@ -917,7 +883,7 @@ impl<'a> OverlayPayloads<'a> {
                 input: crate::ui::render::BottomInputSlot {
                     text,
                     cursor_col,
-                    placeholder: "search projects…   enter open · esc close",
+                    placeholder: "search projects…",
                     refusal: None,
                     message: None,
                     above_rows: Vec::new(),
@@ -982,6 +948,7 @@ impl<'a> OverlayPayloads<'a> {
         if model.input_mode() == BoardInputMode::Help {
             return Some(QueueOverlay::Help {
                 lines: &self.help_lines,
+                scroll: model.help_scroll(),
             });
         }
         if model.command_surface() == CommandSurface::Palette {
@@ -1112,17 +1079,29 @@ fn wide_status_hint(model: &BoardModel) -> (Option<&'static str>, &'static str) 
     let field_editor = model.open_field_edit().is_some()
         || model.input_mode() == BoardInputMode::FormScopeDropdown;
     let editing = field_editor || model.task_session_dirty();
+    // Stage navigation only: the verb row already carries the surface's keys, so the hint
+    // never repeats them.
     match model.wide_stage() {
-        tier::WideStage::FullBoard => (None, "→ pane · enter open"),
-        tier::WideStage::Split => (Some("board ▸ task"), "→ task · ← close · enter open"),
-        tier::WideStage::Rail if editing => (Some("board ◂ task"), "shift+enter save · esc cancel"),
+        tier::WideStage::FullBoard => (None, "→ task pane"),
+        tier::WideStage::Split => (Some("board ▸ task"), "→ task · ← close"),
+        tier::WideStage::Rail if editing => (Some("board ◂ task"), ""),
         tier::WideStage::Rail => (Some("board ◂ task"), "← board · → full page"),
-        tier::WideStage::FullTask if editing => (None, "shift+enter save · esc cancel"),
-        tier::WideStage::FullTask => (None, "← rail · esc back"),
+        tier::WideStage::FullTask if editing => (None, ""),
+        tier::WideStage::FullTask => (None, "← rail"),
     }
 }
 
 fn draw_board_impl(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap {
+    let hits = draw_board_hits(frame, model);
+    // Renderer-recorded horizon for the help card, like the list's max scroll: the reducer
+    // clamps with it so the offset never runs past the last page.
+    if let Some(max_scroll) = hits.help_max_scroll {
+        model.help_max_scroll.set(max_scroll);
+    }
+    hits
+}
+
+fn draw_board_hits(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap {
     let area = frame.area();
     let responsive = tier::resolve_responsive(area.width, area.height, model.wide_stage());
     if responsive.presentation == tier::ResponsivePresentation::WideSplit {
@@ -1166,6 +1145,7 @@ fn draw_board_impl(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap
         projects_cursor: model.projects_cursor(),
         projects_query: model.projects_query(),
         summary: None,
+        context: footer_context(model, surface),
         status_message: status_owned.as_deref(),
         status_undo_offset,
         verb_items: &verbs,
@@ -1334,6 +1314,7 @@ fn draw_wide_board(
         projects_cursor: model.projects_cursor(),
         projects_query: model.projects_query(),
         summary: None,
+        context: footer_context(model, surface),
         status_message: status_owned.as_deref(),
         status_undo_offset,
         verb_items: &verbs,
@@ -1397,6 +1378,7 @@ fn draw_wide_board(
                 render::draw_queue_frame(frame, &board_frame, &board_geo, column_rect(board_area));
             hits.regions.append(&mut board_hits.regions);
             hits.copyable.append(&mut board_hits.copyable);
+            hits.help_max_scroll = hits.help_max_scroll.or(board_hits.help_max_scroll);
             if let Some((scroll, max_scroll)) = painted_list_scroll {
                 model.list_scroll.set(scroll);
                 model.list_max_scroll.set(max_scroll);

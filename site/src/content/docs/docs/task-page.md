@@ -24,8 +24,10 @@ It is view-first. Nothing is in edit mode until you ask. `ctrl+e` edits the titl
 `ctrl+a`, or a click on it opens its independent editor, then Enter saves one step
 and selects that new stored step.
 
-Bare `↓` activates the first stored step, then arrows move the selection. `ctrl+s`
-toggles that selected step without changing the task's human status.
+Bare `↓` activates the first stored step, then arrows move the selection. `Enter` on
+that selected step toggles it done ↔ ready without changing the task's human status.
+The status verbs (`ctrl+s`, `ctrl+d`, `ctrl+o`, `ctrl+b`, `ctrl+r`) always act on the
+task, whatever the step cursor is doing.
 
 `ctrl+e` on a stored-step selection starts task editing with the step inline. In task
 editing, Tab runs Title, Notes, stored steps, `+ step`, Scope, Thread, then Title.
@@ -36,10 +38,10 @@ picker and `Enter` again chooses the highlighted scope. `Enter` on Thread, or a
 second click, opens or closes its text editor without leaving the task edit session.
 The scope footer does nothing until task editing starts.
 
-Plain `Enter` parks an existing-step rename without saving the task session.
-`Shift+Enter` is the visible task-session save chord: it saves Title, Notes, Thread,
-Scope, staged existing-step edits, and staged removals, then exits editing. `Alt+Enter`
-is the legacy-terminal fallback. A staged
+Plain `Enter` parks an existing-step rename without saving the task session, and in
+the Title editor it moves on to Notes. `Shift+Enter` is the one task-session save
+chord: it saves Title, Notes, Thread, Scope, staged existing-step edits, and staged
+removals, then exits editing. `Alt+Enter` does nothing on the board. A staged
 `ctrl+x` removal disappears immediately and returns if task editing is cancelled. New
 steps save independently from view or task edit: Enter saves one and opens the next empty
 editor, Shift+Enter saves that step and the task-edit session. An empty new-step row

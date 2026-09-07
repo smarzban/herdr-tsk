@@ -18,9 +18,7 @@ use super::capture::{
     CAPTURE_SCOPE_CONTROLS,
 };
 use super::input::{BoardIntent, CaptureIntent, PrimaryCaptureAction, PRIMARY_CAPTURE_ACTIONS};
-use super::render::{
-    form_verb_items, QueueHitMap, QueueHitTarget, PALETTE_VERBS, QUICK_ADD_VERBS, SCOPE_VERBS,
-};
+use super::render::{form_verb_items, QueueHitMap, QueueHitTarget, QUICK_ADD_VERBS};
 use super::tier::{resolve, resolve_responsive, FocusedSurface, ResponsivePresentation, WideStage};
 
 /// Transient presentation that still exists on the V1 queue board.
@@ -312,6 +310,7 @@ fn verb_intent(model: &BoardModel, index: usize) -> Option<BoardIntent> {
         "d" => Some(BoardIntent::Complete),
         "o" => Some(BoardIntent::Reopen),
         "b" => Some(BoardIntent::ToggleBlock),
+        "r" => Some(BoardIntent::ToggleReview),
         "x" => Some(BoardIntent::SoftDelete),
         "u" => Some(BoardIntent::Undo),
         "f" => Some(BoardIntent::File),
@@ -331,17 +330,8 @@ fn verb_intent(model: &BoardModel, index: usize) -> Option<BoardIntent> {
 fn quick_add_verb_intent(index: usize) -> Option<BoardIntent> {
     match QUICK_ADD_VERBS.get(index)?.key {
         "enter" => Some(BoardIntent::QuickAddSave),
-        "shift+enter" => Some(BoardIntent::QuickAddSaveNext),
         "tab" => Some(BoardIntent::ExpandQuickAdd),
         "esc" => Some(BoardIntent::CancelQuickAdd),
-        _ => None,
-    }
-}
-
-fn palette_verb_intent(index: usize) -> Option<BoardIntent> {
-    match PALETTE_VERBS.get(index)?.key {
-        "enter" => Some(BoardIntent::ConfirmCommand),
-        "esc" => Some(BoardIntent::CloseCommandSurface),
         _ => None,
     }
 }
@@ -353,18 +343,11 @@ fn form_verb_intent(model: &BoardModel, index: usize) -> Option<BoardIntent> {
         "shift+enter" => Some(BoardIntent::ConfirmEdit),
         "enter" if dropdown_open => Some(BoardIntent::ConfirmFormScopeDropdown),
         "enter" if focus == CaptureField::Scope => Some(BoardIntent::OpenFormScopeDropdown),
+        // The Title bar paints `enter next`: the click must do what the key does.
+        "enter" if focus == CaptureField::Title => Some(BoardIntent::FormFocusNext),
         "enter" => Some(BoardIntent::ConfirmEdit),
         "esc" if dropdown_open => Some(BoardIntent::CancelFormScopeDropdown),
         "esc" => Some(BoardIntent::CancelEdit),
-        _ => None,
-    }
-}
-
-fn scope_dropdown_verb_intent(index: usize) -> Option<BoardIntent> {
-    match SCOPE_VERBS.get(index)?.key {
-        "enter" => Some(BoardIntent::ConfirmProjectChoice),
-        "f" => Some(BoardIntent::File),
-        "esc" => Some(BoardIntent::CancelProjectPicker),
         _ => None,
     }
 }
@@ -640,6 +623,11 @@ fn wheel_board_intent(model: &BoardModel, kind: MouseEventKind) -> Option<BoardI
                 _ => None,
             }
         }
+        BoardInputMode::Help => match kind {
+            MouseEventKind::ScrollUp => Some(BoardIntent::HelpScrollUp),
+            MouseEventKind::ScrollDown => Some(BoardIntent::HelpScrollDown),
+            _ => None,
+        },
         _ => None,
     }
 }
@@ -669,7 +657,6 @@ pub fn map_board_mouse(
             // pre-card `CommandChrome` furniture just above.
             Some(QueueHitTarget::ModalChrome) => None,
             Some(QueueHitTarget::ModalClose) => Some(BoardIntent::CloseCommandSurface),
-            Some(QueueHitTarget::Verb(index)) => palette_verb_intent(index),
             _ => Some(BoardIntent::CloseCommandSurface),
         },
         BoardInputMode::ProjectPicker => match hit_at(hits, pos) {
@@ -679,7 +666,6 @@ pub fn map_board_mouse(
             Some(QueueHitTarget::PickerTab(tab)) => Some(BoardIntent::SelectPickerTab(tab)),
             Some(QueueHitTarget::ModalChrome) => None,
             Some(QueueHitTarget::ModalClose) => Some(BoardIntent::CancelProjectPicker),
-            Some(QueueHitTarget::Verb(index)) => scope_dropdown_verb_intent(index),
             _ => Some(BoardIntent::CancelProjectPicker),
         },
         // The card's border/title/footer are inert; every other hit -- the `[x]` close
@@ -699,6 +685,8 @@ pub fn map_board_mouse(
                 .position(|&visible| visible == id)
                 .map(BoardIntent::QuickAddSelectIndex),
             Some(QueueHitTarget::Verb(index)) => quick_add_verb_intent(index),
+            // A refusal holding the verb row is a notice, not the outside.
+            Some(QueueHitTarget::ModalChrome) => None,
             // Chosen policy: outside clicks discard the draft and are swallowed, rather than
             // triggering a second board action behind the capture surface.
             _ => Some(BoardIntent::CancelQuickAdd),
@@ -812,6 +800,8 @@ pub fn map_board_mouse(
         BoardInputMode::ProjectsSearch => match hit_at(hits, pos) {
             Some(QueueHitTarget::ProjectsSearch) => Some(BoardIntent::FocusProjectsSearch),
             Some(QueueHitTarget::ProjectRow(index)) => Some(BoardIntent::SelectProjectRow(index)),
+            // The painted `enter open · esc close` row dispatches like the keys.
+            Some(QueueHitTarget::Verb(index)) => verb_intent(model, index),
             _ => Some(BoardIntent::CloseLayer),
         },
         BoardInputMode::Normal => match hit_at(hits, pos) {

@@ -426,8 +426,23 @@ fn task_form_mouse_fields_dropdown_and_verbs_match_keyboard_while_scrolled() {
             .unwrap_or_else(|| panic!("missing task-form hit region for {target:?}"));
         click(hit, &model, &hits)
     };
+    // The Title bar is `enter next · shift+enter save · esc cancel`: each seat matches
+    // the key it names.
     assert_eq!(
         intent_for(QueueHitTarget::Verb(0)),
+        map_board_form_key(
+            CaptureField::Title,
+            false,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+        ),
+        "task-form `enter next` verb must match Title's Enter route"
+    );
+    assert_eq!(
+        intent_for(QueueHitTarget::Verb(0)),
+        Some(BoardIntent::FormFocusNext)
+    );
+    assert_eq!(
+        intent_for(QueueHitTarget::Verb(1)),
         map_board_form_key(
             CaptureField::Title,
             false,
@@ -622,11 +637,10 @@ fn click_and_wheel_match_keyboard_effects_for_each_control() {
     assert_verb_parity("enter", HumanStatus::Ready, "enter", KeyCode::Enter);
     assert_verb_parity("d", HumanStatus::Ready, "d", KeyCode::Char('d'));
     assert_verb_parity("b", HumanStatus::Ready, "b", KeyCode::Char('b'));
-    assert_verb_parity("colon", HumanStatus::Ready, ":", KeyCode::Char(':'));
     assert_verb_parity("question", HumanStatus::Ready, "?", KeyCode::Char('?'));
-    assert_verb_parity("capture", HumanStatus::Started, "+", KeyCode::Char('+'));
-    // The file verb is last, so a Ready bar's budget trims it; a Started bar shows it.
-    assert_verb_parity("file", HumanStatus::Started, "f", KeyCode::Char('f'));
+    assert_verb_parity("add", HumanStatus::Started, "+", KeyCode::Char('+'));
+    // Archive has no bar seat: it lives in `?` / `:` and on ctrl+f.
+    assert_verb_parity("unblock", HumanStatus::Blocked, "b", KeyCode::Char('b'));
     assert_verb_parity("reopen", HumanStatus::Done, "o", KeyCode::Char('o'));
 
     // Drawer toggle: open it by keyboard on both boards first (a shared start state), then
@@ -642,7 +656,7 @@ fn click_and_wheel_match_keyboard_effects_for_each_control() {
         assert!(model.drawer_open());
     }
     let keyboard_intent =
-        map_key(BoardInputMode::Normal, press(KeyCode::Char('z'))).expect("z key");
+        map_key(BoardInputMode::Normal, press(KeyCode::Char('d'))).expect("d key");
     apply_intent(
         &mut domain_key,
         &mut model_key,
@@ -1317,7 +1331,7 @@ fn wheel_scrolls_the_open_command_surface_so_every_command_becomes_reachable() {
     );
 }
 
-/// `DELETE_NOTICE_UNDO` ("u Undo") is painted on the status line while a
+/// `DELETE_NOTICE_UNDO` ("ctrl+u undo") is painted on the status line while a
 /// delete-recovery notice is armed (`draw_queue_frame`'s status row), but had no hit region
 /// and no `map_board_mouse` arm -- a painted affordance with no mouse route, restoring the
 /// coverage `the_delete_notice_undo_control_is_clickable_in_every_mode_that_shows_it`
@@ -1350,7 +1364,7 @@ fn delete_notice_undo_control_is_clickable_and_matches_the_keyboard() {
 }
 
 /// Minor 1: the Undo hit region used to be located by `find`ing the
-/// literal `u Undo` text over the whole composed status row (`Deleted "<title>" · u Undo`),
+/// literal `ctrl+u undo` text over the whole composed status row (`Deleted "<title>" · ctrl+u undo`),
 /// which is partly user text. A task titled with that literal steals the region: the real
 /// control (painted at the end of the notice, after the *first* deleted-title occurrence)
 /// goes unreachable at its own coordinates, while a click on the earlier occurrence inside
@@ -1358,8 +1372,8 @@ fn delete_notice_undo_control_is_clickable_and_matches_the_keyboard() {
 /// the notice actually painted, and a click on the title's own occurrence of the words must
 /// not fire `Undo`.
 #[test]
-fn delete_notice_undo_region_survives_a_title_containing_the_literal_u_undo() {
-    let (mut domain, mut model, id) = board_with_task("u Undo now", HumanStatus::Ready);
+fn delete_notice_undo_region_survives_a_title_containing_the_literal_undo_control() {
+    let (mut domain, mut model, id) = board_with_task("ctrl+u undo now", HumanStatus::Ready);
     apply_intent(&mut domain, &mut model, BoardIntent::SoftDelete, None).expect("arm delete");
     apply_intent(&mut domain, &mut model, BoardIntent::SoftDelete, None).expect("soft delete");
     assert!(
@@ -1383,11 +1397,11 @@ fn delete_notice_undo_region_survives_a_title_containing_the_literal_u_undo() {
     // `Undo`: it must resolve through whatever the row actually paints there (the notice
     // text is not a control), never through the region a naive `find` would have located.
     // The status row is painted from column 0 (`paint_status_line`'s `put_line`), leading
-    // with one space, then `Deleted "`: the title's own `u Undo` inside `u Undo now` starts
+    // with one space, then `Deleted "`: the title's own `ctrl+u undo` inside the title starts
     // right after that 10-column prefix, well left of the real control near the row's end.
     let title_occurrence_x: u16 = 10;
     assert!(
-        title_occurrence_x + 6 <= undo_hit.area.x,
+        title_occurrence_x + 11 <= undo_hit.area.x,
         "the title's own occurrence must sit left of the real control: {undo_hit:?}"
     );
     assert_eq!(
@@ -1839,6 +1853,101 @@ fn page_verb_clicks_resolve_through_the_page_legend() {
         "clicking the page's done verb completes its task"
     );
     assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+
+    // Every seat of the fixed page bar dispatches what its label says: the painted legend
+    // is `ctrl+e edit · <status verbs> · esc close`, indexed exactly as painted.
+    let click_verb = |model: &BoardModel, key: &str| -> BoardIntent {
+        let verbs = board_verb_items(model);
+        let index = verbs
+            .iter()
+            .position(|entry| entry.key == key)
+            .unwrap_or_else(|| panic!("no {key:?} seat in {verbs:?}"));
+        let hits = board_hit_map(STANDARD, model);
+        let area = hits
+            .regions
+            .iter()
+            .find(|hit| hit.target == QueueHitTarget::Verb(index))
+            .unwrap_or_else(|| panic!("no hit for seat {index} ({key})"))
+            .area;
+        map_board_mouse(model, &hits, left_click(area.x + 1, area.y)).expect("verb click")
+    };
+    let verbs: Vec<&str> = board_verb_items(&model).iter().map(|v| v.key).collect();
+    assert_eq!(
+        verbs,
+        vec!["e", "o", "esc"],
+        "done page bar: edit · reopen · close"
+    );
+    assert_eq!(click_verb(&model, "o"), BoardIntent::Reopen);
+    apply_intent(&mut domain, &mut model, BoardIntent::Reopen, None).expect("reopen");
+    let verbs: Vec<&str> = board_verb_items(&model).iter().map(|v| v.key).collect();
+    assert_eq!(verbs, vec!["e", "s", "d", "b", "esc"], "ready page bar");
+    assert_eq!(click_verb(&model, "e"), BoardIntent::BeginEditTitle);
+    assert_eq!(click_verb(&model, "s"), BoardIntent::PrimaryVerb);
+    assert_eq!(click_verb(&model, "b"), BoardIntent::ToggleBlock);
+    let close = click_verb(&model, "esc");
+    assert_eq!(close, BoardIntent::CloseLayer);
+    apply_intent(&mut domain, &mut model, close, None).expect("close via click");
+    assert_eq!(model.input_mode(), BoardInputMode::Normal);
+}
+
+#[test]
+fn help_card_wheel_scrolls_and_the_offset_clamps_to_the_last_page() {
+    let (mut domain, mut model) = deck_of(1);
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenHelp, None).expect("help");
+    let small = Rect::new(0, 0, 40, 10);
+    let hits = board_hit_map(small, &model);
+    let down = map_board_mouse(&model, &hits, wheel_down(20, 5)).expect("wheel down in help");
+    assert_eq!(down, BoardIntent::HelpScrollDown);
+    let up = map_board_mouse(&model, &hits, wheel_up(20, 5)).expect("wheel up in help");
+    assert_eq!(up, BoardIntent::HelpScrollUp);
+
+    // Scroll far past the end: the painter records the last page and the reducer stops
+    // there, so one wheel up immediately moves the window back.
+    for _ in 0..200 {
+        apply_intent(&mut domain, &mut model, down.clone(), None).expect("scroll");
+        let _ = board_hit_map(small, &model);
+    }
+    let lines = tsk_tui::ui::input::help_card_lines();
+    assert!(
+        model.help_scroll() < lines.len(),
+        "offset clamps inside the list: {}",
+        model.help_scroll()
+    );
+    let paint = |model: &BoardModel| -> String {
+        let mut terminal = Terminal::new(TestBackend::new(40, 10)).expect("test terminal");
+        terminal
+            .draw(|frame| {
+                let _ = draw_board(frame, model);
+            })
+            .expect("draw help");
+        let buffer = terminal.backend().buffer();
+        (0..10u16)
+            .map(|y| {
+                (0..40u16)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let bottom = paint(&model);
+    assert!(
+        !bottom.contains("help ▼"),
+        "the last page has nothing below: {bottom}"
+    );
+    let at_bottom = model.help_scroll();
+    apply_intent(&mut domain, &mut model, up, None).expect("scroll up");
+    assert_eq!(model.help_scroll(), at_bottom - 1);
+    let one_up = paint(&model);
+    assert_ne!(
+        one_up, bottom,
+        "one step up from the clamped bottom moves the window at once (no dead zone)"
+    );
+    assert!(one_up.contains("help ▲"), "rows above are marked: {one_up}");
+    assert!(
+        one_up.contains("help ▲▼") || one_up.contains("▼"),
+        "rows below too: {one_up}"
+    );
 }
 
 #[test]

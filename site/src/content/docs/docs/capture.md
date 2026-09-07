@@ -3,7 +3,9 @@ title: Capture
 description: Quick-add on the board, title tokens, and the capture overlay.
 ---
 
-Press `+` for a one-line title on the status-row slot. The list stays visible.
+Press `+` for a one-line title on the status-row slot. The list stays visible. Its
+prompt reads `enter save · tab details · esc close`; `Shift+Enter` still saves and
+stays open, and is listed in help rather than the short prompt.
 
 - `Enter` saves and closes
 - `Shift+Enter` saves and stays open

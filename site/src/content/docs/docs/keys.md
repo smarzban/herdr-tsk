@@ -6,12 +6,27 @@ description: Board, task page, and capture key chords.
 Mutating keys need **Ctrl**. Bare letters do nothing, so typing in a focused
 board cannot complete or delete work.
 
-Nav, peek, `Enter`, `P`, `1` / `2` / `3`, `z`, `:`, `?`, `+`, and `Esc` stay
-bare.
+Nav, peek, `Enter`, `p`, `1` / `2` / `3`, `d`, `g`, `t`, `v`, `:`, `?`, `+`, and
+`Esc` stay bare.
 
 The web demo on the landing page uses bare verb letters on purpose. Browsers
-steal control chords. `ctrl+g` only answers when the done drawer has a visible
+steal control chords. `g` only answers when the done drawer has a visible
 archived group.
+
+## Footer
+
+The footer is two rows under a rule. The **status row** carries context and feedback:
+`desk` on Desk, the project basename (and `#thread` when filtered) on a project
+board, `<name> · archived` in read-only archived focus, or the selected project's
+full path on the projects index. It also carries the last action's message, a delete
+notice, and at wide widths the stage crumb. The **verb row** is a prompt, not a
+keymap: the few things you are most likely to do next from where the cursor is, then
+the way out, then `? help`. Every surface reads the same shape, `open · status verbs
+· + add · ? help` on the board, `ctrl+e edit · status verbs · esc close` on the task
+page, `shift+enter save · esc cancel` while editing. Archive, delete, the drawer,
+the pickers and the palette are not seats: they live in `?` (every key, scrollable)
+and `:` (every action). A visible delete notice prefixes the board prompt with
+`ctrl+u undo`.
 
 ## Wide stage slider
 
@@ -41,24 +56,25 @@ moves to G, then runs the control you clicked.
 | `ctrl+s` | start the selected task, or reopen it if it is done |
 | `ctrl+d` | done |
 | `ctrl+o` | reopen |
-| `ctrl+b` | toggle blocked |
+| `ctrl+b` | toggle blocked ↔ ready |
+| `ctrl+r` | toggle review ↔ ready |
 | `Enter` | open the [task page](/docs/task-page/) full width (stage F at wide widths) |
 | `→` `←` | peek notes below 110 columns; at wide widths, slide the stage |
-| `+` | [capture](/docs/capture/) |
+| `+` | [quick-add](/docs/capture/) |
 | `ctrl+e` | edit title |
 | `ctrl+x` or `ctrl+Delete` | delete (`ctrl+u` undoes) |
 | `ctrl+f` | file: toggle the task's archived flag. No undo entry. In the picker, archives the selected project; on the picker's archived tab (or `ctrl+u` on an archived selection) it unarchives |
 | `Enter` on the picker's archived tab | open that project in read-only focus |
 | `ctrl+u` in read-only focus | unarchive that project in place |
-| `z` | done drawer |
+| `d` | done drawer |
+| `g` | fold or unfold the done drawer's `archived` group when it is visible |
 | `:` | command palette |
-| `?` | help |
-| `P` | project picker |
+| `?` | help: every key on one scrollable card (`↑` `↓`, `j` `k`, page keys, wheel); `Esc`, `?`, or `q` closes |
+| `p` | project picker |
 | `t` on a project | open its thread filter |
 | `v` on Projects | choose Overview or a thread across projects |
 | `1` `2` `3` | navigation: desk · selected project · projects |
-| `/` on Projects | focus the footer's `/ search projects` affordance; type or paste, then Enter opens the selected match and Esc clears and closes |
-| `ctrl+g` | fold or unfold the done drawer's `archived` group when it is visible |
+| `/` on Projects | focus the footer's `/ search` affordance; type or paste, then Enter opens the selected match and Esc clears and closes |
 | `Esc` | close one layer |
 | `ctrl+q` or `ctrl+c` | quit |
 
@@ -76,13 +92,14 @@ The page is view-first. Verbs still need the modifier, except Tab and arrows.
 | `ctrl+n` | edit notes |
 | `Tab` / `Shift+Tab` | in view, loop forward or backward through stored steps and `+ step`; in task editing, loop Title, Notes, stored steps, `+ step`, Scope, Thread |
 | `ctrl+a` | open an independent inline [step](/docs/steps/) editor from view or any task-edit focus |
-| `Enter` | saves a new step and opens the next empty row, parks an existing-step rename, opens Scope's picker, or toggles Thread's selected text editor |
+| `Enter` | on a stored step, toggles it done ↔ ready; in a new-step row saves it and opens the next empty row; parks an existing-step rename; opens Scope's picker; toggles Thread's selected text editor |
 | click a step | selects it in view, opens it inline only during task editing; click `   + step` to add from any page edit state |
 | `↓` `↑` | Down activates the first stored step, then arrows move selected steps; an open add row scrolls the page |
-| `ctrl+s` | toggle the selected step, otherwise start or reopen the task |
-| `ctrl+d` / `ctrl+o` | complete / reopen the selected step, otherwise act on the task |
+| `ctrl+s` | start or reopen the task (never the step, even with one selected) |
+| `ctrl+d` / `ctrl+o` / `ctrl+b` / `ctrl+r` | complete / reopen / block / review the task |
 | `ctrl+x` | in view, first mark then remove a selected step on a second press; in task edit immediately hide and stage its removal, otherwise ask once then delete the task |
-| `Shift+Enter` | task-edit save, or save a new step and exit task editing (`Alt+Enter` is the legacy-terminal save fallback) |
+| `Shift+Enter` | task-edit save, or save a new step and exit task editing. The only whole-session save chord; `Alt+Enter` does nothing on the board |
+| `Enter` in Title | move on to Notes |
 | `Esc` | cancel the field, restore staged task-edit changes, or close the page |
 
 Title, Notes, Thread, and Scope clicks are inert until task editing starts. Once it
@@ -111,9 +128,9 @@ Backspace, and paste.
 | --- | --- |
 | `:` palette | type to filter · `↑` `↓` or `Tab` / `Shift+Tab` move · `Enter` run · `Esc` close |
 | `t` / `v` thread selectors | type or paste to filter (`j` and `k` are text) · arrows or `Tab` / `Shift+Tab` move · `Enter` choose · `Esc` close |
-| `P` project picker | `j` `k` or arrows · `Tab` main/archived tabs · `Enter` choose · `ctrl+f` archive (archived tab: unarchive) · `Esc` or `q` cancel |
+| `p` project picker | `j` `k` or arrows · `Tab` main/archived tabs · `Enter` choose · `ctrl+f` archive (archived tab: unarchive) · `Esc` or `q` cancel |
 | launch card | `y` unarchive · `n` or `Esc` keep archived |
-| `?` help | any key closes |
+| `?` help | `↑` `↓`, `j` `k`, page keys, wheel scroll · `Esc`, `?`, or `q` close |
 | save failed | `r` or `Enter` retry · `c` or `Esc` cancel |
 
 ## Capture line and form

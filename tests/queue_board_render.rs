@@ -336,6 +336,7 @@ fn fixture_model_on_tab<'a>(
         projects_cursor: 0,
         projects_query: "",
         summary: None,
+        context: " desk".to_string(),
         status_message: None,
         status_undo_offset: None,
         verb_items: fixture_verbs(),
@@ -679,9 +680,10 @@ fn standard_78x24_fixture_has_selector_list_rule_status_verb_and_no_other_chrome
     );
 
     let status = trimmed(&rows[22]);
-    assert!(
-        status.contains("done") && !status.contains("in motion"),
-        "status line must show done count only: {status:?}"
+    assert_eq!(
+        status.trim(),
+        "desk",
+        "idle status line must name the active lens"
     );
     assert!(
         !status.contains("need") && !status.contains("claude") && !status.contains("grok"),
@@ -693,8 +695,8 @@ fn standard_78x24_fixture_has_selector_list_rule_status_verb_and_no_other_chrome
     // task, and `PrimaryVerb` is a silent no-op there, so a correct legend omits the entry
     // rather than advertise a no-op. `enter`/`?` are always present regardless of selection.
     assert!(
-        verbs.contains("enter") && verbs.contains('?') && verbs.contains("+ capture"),
-        "standard verb bar must retain open, help, and capture: {verbs:?}"
+        verbs.contains("enter") && verbs.contains('?') && verbs.contains("+ add"),
+        "standard verb bar must retain open, help, and add: {verbs:?}"
     );
 
     // Chrome is exactly selector + rule + status + verb. Viewport rows are list content only
@@ -840,8 +842,8 @@ fn desk_and_project_focus_paint_needs_you_above_in_motion() {
 fn assert_visible_chrome(rows: &[String], geo: TierGeometry, dimensions: &str) {
     let status = trimmed(&rows[geo.status_row.expect("status row") as usize]);
     assert!(
-        status.contains("done") && !status.contains("in motion"),
-        "{dimensions}: status must remain reachable: {status:?}"
+        !status.is_empty() && !status.contains("done"),
+        "{dimensions}: lens context must remain reachable: {status:?}"
     );
     let verbs = trimmed(&rows[geo.verb_row.expect("verb row") as usize]);
     assert!(
@@ -956,7 +958,7 @@ fn empty_board_hint_advertises_the_live_quick_add_key() {
     let (rows, _) = paint(80, 24, &model);
     let frame = rows.join("\n");
 
-    assert!(frame.contains("+ capture"), "empty-board hint: {frame}");
+    assert!(frame.contains("+ add"), "empty-board hint: {frame}");
     assert!(!frame.contains("a capture"), "empty-board hint: {frame}");
 }
 
@@ -1062,7 +1064,10 @@ fn overlay_rows_are_padded_exact_no_base_bleed() {
             String::new(),
             "any key to close".to_string(),
         ];
-        model.overlay = QueueOverlay::Help { lines: &help_lines };
+        model.overlay = QueueOverlay::Help {
+            lines: &help_lines,
+            scroll: 0,
+        };
         let (rows, _geo) = paint(80, 24, &model);
         // Help centers; ensure painted rows are width-padded and carry no status/meta fragments.
         // The body width is min(width-2,62), padded on left; trailing must fill to row_width.
@@ -2238,9 +2243,10 @@ fn compact_notes_editor_never_paints_into_the_rule_or_status_row_at_40x10() {
         "rule row lost its rule chrome: {:?}",
         rows[rule_row as usize]
     );
-    assert!(
-        trimmed(&rows[status_row as usize]).contains("done"),
-        "status row lost its counts chrome: {:?}",
+    assert_eq!(
+        trimmed(&rows[status_row as usize]).trim(),
+        "desk",
+        "status row lost its desk context: {:?}",
         rows[status_row as usize]
     );
 }
@@ -2694,7 +2700,10 @@ fn golden_scenes() -> Vec<GoldenScene> {
     // recorded here so a reviewer does not re-litigate the divergence as a bug.
     let mut help_model = fixture_model(&tasks, &board_view);
     let help_lines: Vec<String> = tsk_tui::ui::input::help_card_lines();
-    help_model.overlay = QueueOverlay::Help { lines: &help_lines };
+    help_model.overlay = QueueOverlay::Help {
+        lines: &help_lines,
+        scroll: 0,
+    };
     let (help_rows, _) = paint(80, 24, &help_model);
 
     // `done_drawer` has no prototype counterpart -- the prototype's own
@@ -2926,8 +2935,8 @@ fn footer_lists_the_step_add_verb() {
 
     let floor = page_verb_row_with(&["only step"], 78);
     assert!(
-        floor.contains("ctrl+a…"),
-        "the compact verb-bar budget may ellipsize the final Ctrl chord, without making the bar overflow:\n{floor}"
+        floor.contains("ctrl+a step") && floor.contains("esc cancel"),
+        "the editing bar fits the standard floor without clipping:\n{floor}"
     );
 }
 
@@ -3010,6 +3019,11 @@ fn a_selected_thread_filter_hides_redundant_labels_and_narrows_the_board() {
 
     let rows = board_rows(&model, 80, 24);
     let joined = rows.join("\n");
+    assert_eq!(
+        rows[22].trim(),
+        "tsk · #release",
+        "idle status row carries the active thread filter"
+    );
     assert!(
         joined.contains("Prototype the queue-style board UI"),
         "matching rows stay visible:\n{joined}"
@@ -3407,7 +3421,7 @@ fn task_page_caps_a_wrapped_header_inside_the_page_body() {
         rows.join("\n")
     );
     assert!(
-        rows[8].contains("done"),
+        rows[8].contains("desk"),
         "the status row was overwritten by the header:\n{}",
         rows.join("\n")
     );
@@ -4517,6 +4531,67 @@ fn archived_tab_verb_bar_advertises_ctrl_u_enter_esc() {
     assert!(
         frame.contains("ctrl+u unarchive \u{b7} enter open \u{b7} esc close"),
         "the archived tab's footer reads its own verbs:\n{frame}"
+    );
+}
+
+#[test]
+fn project_picker_main_tab_advertises_archive_without_leaking_to_thread_picker() {
+    let mut domain = DomainState::new();
+    domain
+        .create(
+            "picker task",
+            None,
+            project("/repos/picker"),
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create");
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/picker")));
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenProjectSelector,
+        None,
+    )
+    .expect("project picker");
+    let main = board_rows(&model, 80, 24).join("\n");
+    assert!(
+        main.contains("↑↓ move \u{b7} enter choose \u{b7} ctrl+f archive \u{b7} esc close"),
+        "main project picker must advertise archive:\n{main}"
+    );
+
+    // The compact card caps near 34 content columns: the legend keeps only the seat that
+    // is not guessable, rather than clipping the archive seat mid-word.
+    let compact = board_rows(&model, 40, 10).join("\n");
+    let legend_row = compact
+        .lines()
+        .find(|line| line.contains("ctrl+f"))
+        .expect("compact legend painted");
+    assert!(
+        legend_row.contains("ctrl+f archive \u{b7} esc close"),
+        "compact picker keeps the archive seat readable:\n{compact}"
+    );
+    assert!(
+        !legend_row.contains("…"),
+        "no mid-word clipping in the compact legend: {legend_row}"
+    );
+
+    apply_intent(&mut domain, &mut model, BoardIntent::CloseLayer, None).expect("close picker");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenThreadFilterPicker,
+        None,
+    )
+    .expect("thread picker");
+    let threads = board_rows(&model, 80, 24).join("\n");
+    assert!(
+        threads.contains("↑↓ move \u{b7} enter choose \u{b7} esc close"),
+        "thread picker must keep its ordinary footer:\n{threads}"
+    );
+    assert!(
+        !threads.contains("ctrl+f archive"),
+        "thread picker must not advertise project archive:\n{threads}"
     );
 }
 

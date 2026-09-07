@@ -4,7 +4,7 @@ description: Tabs, sections, status, peek, and the done drawer.
 ---
 
 The board keeps three navigation destinations visible: **desk** · **selected project** ·
-**projects**. Use `1` / `2` / `3` from normal board mode. `P` opens the project picker
+**projects**. Use `1` / `2` / `3` from normal board mode. `p` opens the project picker
 from the keyboard.
 
 ## Tabs
@@ -57,7 +57,7 @@ Each persisted row begins with a dim store-global identifier such as
 `T30`. Click the identifier to copy it (`copy sent: T30`). At standard size a row
 ends with its project name on global rows, or its `#thread` attribution on project
 rows. Task-page informational dates remain in the footer. A scoped
-group with nothing open reads `no open tasks here — P rescope or + capture`.
+group with nothing open reads `no open tasks here — p rescope or + add`.
 
 ## Sections
 
@@ -78,8 +78,9 @@ drawer lists archived tasks in its scope under an `▾ archived · n` group belo
 DONE: closed on every launch, one click or `Enter` on the header toggles it on its
 own, and expanded rows paint dim with their status glyph and `T<n>`. The header
 paints the word bold when it holds the selection, never a reverse block. It is the
-done drawer's only collapsible group: while the drawer is open, `ctrl+g` folds and
-unfolds it; with the drawer closed `ctrl+g` leaves it alone. `ctrl+f` on a row
+done drawer's only collapsible group: while the drawer is open, `g` folds and
+unfolds it; with the drawer closed `g` leaves it alone. `d` opens and closes the
+drawer itself. `ctrl+f` on a row
 files it, and `ctrl+f` or `ctrl+u` on an archived
 selection brings it back; neither writes an undo entry.
 
@@ -98,16 +99,21 @@ task. Agents do not auto-complete work.
 `ctrl+s` starts a ready task, or reopens a done one. On a started, blocked, or
 review task it does nothing, and the verb bar drops the entry. `ctrl+d` marks done.
 `ctrl+o` sets ready again from any status; the palette's `reopen` entry appears only
-for a done task. `ctrl+b` toggles blocked; a done task
-answers `completed tasks cannot be blocked`. **review** is set from the command
-palette (`:` → `set status: review`), not from a dedicated letter. With nothing
-selected, every verb answers `select a task first`.
+for a done task. `ctrl+b` toggles blocked ↔ ready; `ctrl+r` toggles review ↔ ready. A
+done task answers `completed tasks cannot be blocked` (or `… go to review`). With
+nothing selected, every verb answers `select a task first`.
+
+The verb row shows only the seats that matter for the selected row: `enter open`, the
+status verbs its status makes meaningful (`ctrl+s start` on ready, `ctrl+d done` and
+`ctrl+b block` or `unblock` while open, `ctrl+o reopen` when done), `+ add`, `? help`.
+Archive, delete, undo, the drawer and the palette are reached by their keys, `?`, or `:`.
 
 ## Delete and undo
 
 `ctrl+x` (or `ctrl+Delete`) asks once (`press ctrl+x again to delete`), then soft-deletes the selected task. It leaves every lens
-and the status row reads `Deleted "title" · u Undo` until your next action. Nothing
-on the board hard-deletes; `tsk list --deleted` still shows it.
+and the status row reads `Deleted "title" · ctrl+u undo` until your next action. While
+that notice is visible, the board prompt begins `ctrl+u undo`. Nothing on the board
+hard-deletes; `tsk list --deleted` still shows it.
 
 `ctrl+u` undoes the most recent delete or done, then the one before it. If the task
 changed on disk since then, undo refuses with `changed since the undoable action`
@@ -152,7 +158,7 @@ click selects it in place and a fast double-click opens the
 [task page](/docs/task-page/). The wheel scrolls the list.
 
 Everything painted as a control is clickable: the tabs, destination chips, picker
-options, verb-bar entries, `u Undo` on a delete notice, and the DONE header (which
+options, verb-bar entries, `ctrl+u undo` on a delete notice, and the DONE header (which
 closes the drawer). When the list overflows, a scrollbar appears on the right: click
 the track to jump, drag the thumb to scroll. Dragging across text selects it and copies
 on release (`copied`), using the terminal's clipboard protocol. With the quick-add line
@@ -160,24 +166,25 @@ open, clicking a task row discards the draft and selects that row.
 
 ## Project picker
 
-`P` opens the project picker with two tabs: main (unarchived projects plus
+`p` opens the project picker with two tabs: main (unarchived projects plus
 Home) and archived. `Tab` or the arrows flip tabs; the archived tab lists every
 archived project and reads `no archived projects` when empty. `ctrl+f` on a
 main-tab project archives it in place — the picker stays open and the project
 leaves the main list, the projects index, desk IN MOTION, and the rail.
 `ctrl+f` or `ctrl+u` on an archived-tab entry unarchives it, and every task
-returns in the status it had. A dim rule sits under the tabs row, and the
-archived tab's footer reads `ctrl+u unarchive · enter open · esc close`.
+returns in the status it had. A dim rule sits under the tabs row. The main tab's
+footer reads `↑↓ move · enter choose · ctrl+f archive · esc close`; the archived tab's
+footer reads `ctrl+u unarchive · enter open · esc close`.
 
 ## Read-only archived focus
 
 `Enter` on an archived-tab entry opens that project in read-only focus: the chip
 reads `<name> · archived`, its tasks paint dim, and nothing is written by
 entering. It is the only lens that paints an archived project's tasks; `Esc`,
-`P`, or `1`/`2`/`3` leave it for your desk and hide them again (`Esc` there never quits,
-and `P` leaves the lens before the picker paints). If the project is unarchived by any
+`p`, or `1`/`2`/`3` leave it for your desk and hide them again (`Esc` there never quits,
+and `p` leaves the lens before the picker paints). If the project is unarchived by any
 other route while you sit in it, the focus becomes an ordinary project focus. Every mutating verb (`ctrl+s`,
-`ctrl+d`, `ctrl+o`, `ctrl+b`, `ctrl+e`, `ctrl+n`, `ctrl+x`, `ctrl+f`, `+`, and
+`ctrl+d`, `ctrl+o`, `ctrl+b`, `ctrl+r`, `ctrl+e`, `ctrl+n`, `ctrl+x`, `ctrl+f`, `+`, and
 step toggles) refuses with `project <name> is archived · ctrl+u unarchive` and
 changes nothing; the task page opens view-only for the same reason. `ctrl+u`
 unarchives the project in place and the focus becomes an ordinary project
