@@ -1775,15 +1775,6 @@ html[data-theme="light"] .pane {
   color: var(--ink-2);
 }
 
-.screen .sel {
-  color: var(--accent);
-}
-
-.screen .sel-text {
-  color: var(--sel-fg);
-  background: var(--accent-soft);
-}
-
 .screen .tid {
   color: var(--dim);
 }
@@ -1813,12 +1804,6 @@ html[data-theme="light"] .pane {
 
 .s-task {
   padding-left: 1ch;
-}
-
-.s-task.is-sel {
-  background: linear-gradient(90deg, var(--accent-soft), transparent 70%);
-  margin-left: -0.5rem;
-  padding-left: calc(0.5rem + 1ch);
 }
 
 .s-peek {

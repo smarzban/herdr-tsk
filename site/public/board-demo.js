@@ -471,7 +471,9 @@ import { parseCapture } from "./capture.js";
   }
 
   function archivedInScope() {
-    const archived = state.tasks.filter((t) => t.archived).sort(byUpdated);
+    const archived = state.tasks
+      .filter((t) => t.archived && matchesThread(t))
+      .sort(byUpdated);
     if (state.focusProject || isProjectsThreadView()) {
       const inP = (t) =>
         !state.focusProject ||
