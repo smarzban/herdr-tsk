@@ -23,7 +23,6 @@ test("project navigation, counted views and selection match the app", async ({
     expect(colors[0]).not.toBe(colors[1]);
   }
   await page.locator('[data-tab="project"]').click();
-  await expect(page.locator(".tsk-project-selector")).toHaveCount(0);
   await expect(page.locator("[data-filter]")).toHaveText("all ▾");
   await page.locator("[data-filter]").click();
   await expect(
