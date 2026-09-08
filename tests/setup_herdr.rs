@@ -62,7 +62,7 @@ fn builtin_and_multi_binding_conflicts_preserve_unrelated_keys() {
     assert!(updated.contains("other"));
 }
 #[test]
-fn noninteractive_conflict_writes_nothing_and_never_calls_herdr() {
+fn noninteractive_conflict_preserves_config_bytes() {
     let root = temp();
     let config = root.join("config.toml");
     let source = "[keys]\nnew_tab = 'prefix+t'\n";
@@ -104,7 +104,7 @@ fn installed_symlink_is_shared_with_plugin_and_rerun_does_not_duplicate_assets()
     let installed = bin.join("tsk");
     symlink(env!("CARGO_BIN_EXE_tsk"), &installed).unwrap();
     let host = bin.join("herdr");
-    fs::write(&host, "#!/bin/sh\nif [ \"$1 $2\" = 'plugin link' ]; then printf '%s' \"$3\" > \"$SETUP_LINK\"; fi\nexit 0\n").unwrap();
+    fs::write(&host, "#!/bin/sh\nif [ \"$1 $2\" = 'plugin list' ]; then if [ -f \"$SETUP_LINK\" ]; then printf '{\"result\":{\"plugins\":[{\"plugin_id\":\"herdr-tsk\",\"plugin_root\":\"%s\"}]}}' \"$(cat \"$SETUP_LINK\")\"; else printf '{\"result\":{\"plugins\":[]}}'; fi; exit 0; fi\nif [ \"$1 $2\" = 'plugin link' ]; then printf '%s' \"$3\" > \"$SETUP_LINK\"; fi\nexit 0\n").unwrap();
     fs::set_permissions(&host, fs::Permissions::from_mode(0o755)).unwrap();
     let config = root.join("herdr/config.toml");
     let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap());
@@ -157,13 +157,13 @@ fn installed_symlink_is_shared_with_plugin_and_rerun_does_not_duplicate_assets()
 
 #[cfg(unix)]
 #[test]
-fn failed_host_registration_keeps_original_config_and_cleans_lock() {
+fn failed_host_registration_keeps_original_config_and_releases_lock() {
     use std::os::unix::fs::PermissionsExt;
     let root = temp();
     let host = root.join("herdr");
     fs::write(
         &host,
-        "#!/bin/sh\nif [ \"$1 $2\" = 'plugin link' ]; then echo refused >&2; exit 1; fi\nexit 0\n",
+        "#!/bin/sh\nif [ \"$1 $2\" = 'plugin list' ]; then printf '{\"result\":{\"plugins\":[]}}'; exit 0; fi\nif [ \"$1 $2\" = 'plugin link' ]; then echo refused >&2; exit 1; fi\nexit 0\n",
     )
     .unwrap();
     fs::set_permissions(&host, fs::Permissions::from_mode(0o755)).unwrap();
@@ -182,7 +182,13 @@ fn failed_host_registration_keeps_original_config_and_cleans_lock() {
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("refused"));
     assert_eq!(fs::read_to_string(&config).unwrap(), original);
-    assert!(!root.join(".tsk-setup.lock").exists());
+    fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(root.join(".tsk-setup.lock"))
+        .unwrap()
+        .try_lock()
+        .unwrap();
     fs::remove_dir_all(root).unwrap();
 }
 

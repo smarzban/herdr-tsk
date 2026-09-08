@@ -16,6 +16,13 @@ WORKFLOW = ROOT / ".github/workflows/release.yml"
 
 
 class WorkflowTests(unittest.TestCase):
+    def test_packaging_checks_live_only_in_rust_ci(self):
+        site = (ROOT / ".github/workflows/site.yml").read_text()
+        ci = (ROOT / ".github/workflows/ci.yml").read_text()
+        for token in ["actions/setup-python", "Packaging contract tests", "python3 -m unittest discover -s tests/packaging"]:
+            self.assertNotIn(token, site)
+            self.assertIn(token, ci)
+
     def test_release_handoff_creates_only_a_draft_for_an_existing_tag(self):
         source = WORKFLOW.read_text()
         commands = re.findall(r"^        run: (gh release create[^\n]+)$", source, re.M)

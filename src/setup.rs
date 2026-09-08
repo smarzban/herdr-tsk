@@ -3,10 +3,15 @@ use std::{
     collections::hash_map::DefaultHasher,
     env, fs,
     hash::{Hash, Hasher},
-    io::{self, IsTerminal, Write},
+    io::{self, BufRead, Write},
     path::{Path, PathBuf},
     process::Command,
 };
+#[cfg(unix)]
+mod dir;
+#[cfg(unix)]
+use dir::{Dir, TempFile};
+
 use toml_edit::{value, Array, ArrayOfTables, DocumentMut, Item, Table};
 
 const BINDINGS: [(&str, &str); 2] = [
@@ -107,7 +112,9 @@ pub fn edit_bindings(
             continue;
         }
         for name in builtin {
-            remove_binding(&mut keys[&name], key);
+            if !remove_binding(&mut keys[&name], key) {
+                keys.remove(&name);
+            }
         }
         let commands = keys["command"].as_array_of_tables_mut().unwrap();
         let mut remove = Vec::new();
@@ -169,7 +176,7 @@ fn installed_binary() -> io::Result<PathBuf> {
     Ok(candidate)
 }
 
-fn managed_assets(binary: &Path) -> io::Result<Vec<(&'static str, String)>> {
+fn managed_assets(binary: &Path, version: &str) -> io::Result<Vec<(&'static str, String)>> {
     let path = binary
         .to_str()
         .ok_or_else(|| error("installed binary path must be UTF-8"))?;
@@ -178,7 +185,7 @@ fn managed_assets(binary: &Path) -> io::Result<Vec<(&'static str, String)>> {
         .map_err(|e| error(e.to_string()))?;
     manifest.remove("build");
     manifest["min_herdr_version"] = value("0.9.0");
-    manifest["version"] = value(env!("CARGO_PKG_VERSION"));
+    manifest["version"] = value(version);
     let mut command = Array::new();
     command.push(path);
     manifest["panes"]
@@ -227,26 +234,7 @@ fn read_config(path: &Path) -> io::Result<Option<String>> {
         Err(e) => Err(e),
     }
 }
-fn write_new(path: &Path, contents: &str) -> io::Result<()> {
-    use std::fs::OpenOptions;
-    let mut options = OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    let mut file = options.open(path)?;
-    file.write_all(contents.as_bytes())?;
-    file.sync_all()
-}
-struct RemoveOnDrop(PathBuf);
-impl Drop for RemoveOnDrop {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(&self.0);
-    }
-}
-fn herdr(args: &[&str], config: &Path) -> io::Result<()> {
+fn herdr(args: &[&str], config: &Path) -> io::Result<String> {
     let output = Command::new("herdr")
         .args(args)
         .env("HERDR_CONFIG_PATH", config)
@@ -260,116 +248,294 @@ fn herdr(args: &[&str], config: &Path) -> io::Result<()> {
             String::from_utf8_lossy(&output.stderr)
         )));
     }
-    Ok(())
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
-pub fn run() -> io::Result<()> {
-    let config = config_path()?;
-    let before = read_config(&config)?;
-    let interactive = io::stdin().is_terminal() && io::stderr().is_terminal();
+/// Prompt via an injected reader/writer, shared by production and regression tests.
+pub fn confirm(
+    reader: &mut impl BufRead,
+    writer: &mut impl Write,
+    key: &str,
+    detail: &str,
+) -> io::Result<bool> {
+    for line in detail.lines() {
+        writeln!(writer, "{}", crate::ui::terminal_text(line))?;
+    }
+    write!(
+        writer,
+        "Replace the existing {} binding? [y/N] ",
+        crate::ui::terminal_text(key)
+    )?;
+    writer.flush()?;
+    let mut response = String::new();
+    if reader.read_line(&mut response)? == 0 {
+        return Err(error("confirmation ended; no changes made"));
+    }
+    Ok(matches!(
+        response.trim().to_ascii_lowercase().as_str(),
+        "y" | "yes"
+    ))
+}
+
+pub struct SetupResult {
+    pub binary: PathBuf,
+    pub root: PathBuf,
+    pub backup: Option<PathBuf>,
+}
+
+pub fn run(
+    reader: &mut impl BufRead,
+    writer: &mut impl Write,
+    interactive: bool,
+) -> io::Result<SetupResult> {
+    #[cfg(unix)]
+    {
+        run_at(
+            &config_path()?,
+            env!("CARGO_PKG_VERSION"),
+            reader,
+            writer,
+            interactive,
+            &mut herdr,
+        )
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (reader, writer, interactive);
+        Err(error("Herdr setup requires macOS or Linux"))
+    }
+}
+
+fn registered_root(
+    config: &Path,
+    host: &mut impl FnMut(&[&str], &Path) -> io::Result<String>,
+) -> io::Result<Option<PathBuf>> {
+    let result = host(
+        &["plugin", "list", "--plugin", "herdr-tsk", "--json"],
+        config,
+    )?;
+    let json: serde_json::Value = serde_json::from_str(&result)
+        .map_err(|e| error(format!("invalid Herdr plugin list: {e}")))?;
+    let plugins = json
+        .pointer("/result/plugins")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| error("Herdr plugin list is missing plugins"))?;
+    if plugins.len() > 1 {
+        return Err(error("multiple herdr-tsk registrations; refusing cleanup"));
+    }
+    plugins
+        .first()
+        .map(|p| {
+            if p["plugin_id"].as_str() != Some("herdr-tsk") {
+                return Err(error("unexpected plugin in filtered Herdr list"));
+            }
+            p["plugin_root"]
+                .as_str()
+                .map(PathBuf::from)
+                .ok_or_else(|| error("Herdr registration is missing plugin_root"))
+        })
+        .transpose()
+}
+
+#[cfg(unix)]
+fn run_at(
+    config: &Path,
+    version: &str,
+    reader: &mut impl BufRead,
+    writer: &mut impl Write,
+    interactive: bool,
+    host: &mut impl FnMut(&[&str], &Path) -> io::Result<String>,
+) -> io::Result<SetupResult> {
+    let parent_path = config
+        .parent()
+        .ok_or_else(|| error("config has no parent directory"))?;
+    let filename = Path::new(
+        config
+            .file_name()
+            .ok_or_else(|| error("config has no filename"))?,
+    );
+    // Pin an existing parent before reading or prompting. No writes before all conflict decisions.
+    let existing = match Dir::open(parent_path, false) {
+        Ok(d) => Some(d),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => None,
+        Err(e) => return Err(e),
+    };
+    let before = if let Some(dir) = &existing {
+        dir.read(filename)?
+    } else {
+        read_config(config)?
+    };
     let edited = edit_bindings(
         before.as_deref().unwrap_or(""),
         interactive,
-        |key, detail| {
-            for line in detail.lines() {
-                eprintln!("{}", crate::ui::terminal_text(line));
-            }
-            eprint!("Replace the existing {key} binding? [y/N] ");
-            io::stderr().flush()?;
-            let mut response = String::new();
-            if io::stdin().read_line(&mut response)? == 0 {
-                return Err(error("confirmation ended; no changes made"));
-            }
-            Ok(matches!(
-                response.trim().to_ascii_lowercase().as_str(),
-                "y" | "yes"
-            ))
-        },
+        |key, detail| confirm(reader, writer, key, detail),
     )?;
-    let assets = managed_assets(&installed_binary()?)?;
-    // Check Herdr before creating any files. config check below validates the full candidate.
-    herdr(&["--version"], &config)?;
-    let parent = config
-        .parent()
-        .ok_or_else(|| error("config has no parent directory"))?;
-    no_symlink(parent)?;
-    fs::create_dir_all(parent)?;
-    let lock = parent.join(".tsk-setup.lock");
-    write_new(&lock, "tsk setup in progress\n").map_err(|e| {
-        error(format!(
-            "could not lock setup (remove stale {} only after checking no setup runs): {e}",
-            lock.display()
-        ))
-    })?;
-    let _lock = RemoveOnDrop(lock);
-    if read_config(&config)? != before {
-        return Err(error("Herdr config changed during setup; retry"));
-    }
-    let staged = parent.join(format!(".tsk-config-{}.toml", uuid::Uuid::new_v4()));
-    write_new(&staged, &edited)?;
-    let _staged = RemoveOnDrop(staged.clone());
-    herdr(&["config", "check"], &staged)?;
+    let binary = installed_binary()?;
+    let assets = managed_assets(&binary, version)?;
+    host(&["--version"], config)?;
+    let parent = match existing {
+        Some(dir) => dir,
+        None => Dir::open(parent_path, true)?,
+    };
+    parent.validate()?;
+    let _lock = parent.lock()?;
+    let unchanged = || -> io::Result<()> {
+        parent.validate()?;
+        if parent.read(filename)? != before {
+            return Err(error("Herdr config changed during setup; retry"));
+        }
+        Ok(())
+    };
+    unchanged()?;
+    let staged = TempFile {
+        dir: &parent,
+        name: format!(".tsk-config-{}.toml", uuid::Uuid::new_v4()).into(),
+    };
+    parent.write_new(&staged.name, &edited)?;
+    host(&["config", "check"], &parent.path.join(&staged.name))?;
+    unchanged()?;
+    let old = registered_root(config, host)?;
+    unchanged()?;
     let mut hash = DefaultHasher::new();
     assets.hash(&mut hash);
-    let base = parent.join("tsk-plugins");
-    no_symlink(&base)?;
-    crate::fsperm::ensure_private_dir(&base)?;
-    let root = base.join(format!("{:016x}", hash.finish()));
-    no_symlink(&root)?;
-    crate::fsperm::ensure_private_dir(&root)?;
-    for (name, contents) in assets {
-        let path = root.join(name);
-        no_symlink(&path)?;
-        no_symlink(path.parent().unwrap())?;
-        fs::create_dir_all(path.parent().unwrap())?;
-        if path.exists() {
-            if fs::read_to_string(&path)? != contents {
-                return Err(error(
-                    "managed plugin assets were modified; refusing overwrite",
-                ));
-            }
+    let base = parent.child(Path::new("tsk-plugins"), true)?;
+    let root = base.child(Path::new(&format!("{:016x}", hash.finish())), true)?;
+    for (name, contents) in &assets {
+        let path = Path::new(name);
+        let directory = if path.parent().is_some_and(|p| p != Path::new("")) {
+            Some(root.child(path.parent().unwrap(), true)?)
         } else {
-            write_new(&path, &contents)?;
+            None
+        };
+        let directory = directory.as_ref().unwrap_or(&root);
+        let file = Path::new(path.file_name().unwrap());
+        match directory.read(file)? {
+            Some(actual) if actual != *contents => {
+                return Err(error(format!(
+                    "managed plugin asset was modified; refusing overwrite: {}",
+                    directory.path.join(file).display()
+                )))
+            }
+            Some(_) => {}
+            None => directory.write_new(file, contents)?,
         }
     }
-    if read_config(&config)? != before {
-        return Err(error("Herdr config changed during setup; retry"));
-    }
-    // Registration failure leaves the user's config intact. Asset files are harmless until linked.
-    herdr(
+    // Back up before registering, so backup failures cannot leave a partial registration.
+    let backup = if before.as_deref() != Some(&edited) {
+        if let Some(original) = &before {
+            let name = PathBuf::from(format!("config.toml.tsk-backup-{}", uuid::Uuid::new_v4()));
+            parent.write_new(&name, original)?;
+            Some(parent.path.join(name))
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    unchanged()?;
+    base.validate()?;
+    root.validate()?;
+    host(
         &[
             "plugin",
             "link",
-            root.to_str()
+            root.path
+                .to_str()
                 .ok_or_else(|| error("plugin path must be UTF-8"))?,
         ],
-        &config,
+        config,
     )?;
-    if read_config(&config)? != before {
-        return Err(error(
-            "plugin registered, but config changed; shortcuts not written, rerun setup",
-        ));
-    }
-    if before.as_deref() != Some(&edited) {
-        if let Some(original) = &before {
-            let backup = parent.join(format!("config.toml.tsk-backup-{}", uuid::Uuid::new_v4()));
-            write_new(&backup, original)?;
-            println!(
-                "Herdr config backup: {}",
-                crate::ui::terminal_text(&backup.display().to_string())
-            );
+    // Everything after successful registration reports its partial state on failure.
+    (|| -> io::Result<()> {
+        unchanged()?;
+        base.validate()?;
+        root.validate()?;
+        let linked = registered_root(config, host)?
+            .ok_or_else(|| error("plugin link did not register herdr-tsk"))?;
+        if fs::canonicalize(&linked)? != fs::canonicalize(&root.path)? {
+            return Err(error(
+                "Herdr registration changed; refusing config write and cleanup",
+            ));
         }
-        fs::rename(&staged, &config).map_err(|e| {
-            error(format!(
-                "plugin registered but shortcuts were not saved: {e}; rerun setup"
-            ))
-        })?;
+        unchanged()?;
+        if before.as_deref() != Some(&edited) {
+            parent.rename(&staged.name, filename)?;
+        }
+        if let Some(old) = old {
+            cleanup_old(&base, &root, &old)?;
+        }
+        Ok(())
+    })()
+    .map_err(|e| {
+        error(format!(
+            "plugin registered, setup incomplete: {e}; inspect config and rerun setup"
+        ))
+    })?;
+    Ok(SetupResult {
+        binary,
+        root: root.path.clone(),
+        backup,
+    })
+}
+
+#[cfg(unix)]
+fn cleanup_old(base: &Dir, current: &Dir, old: &Path) -> io::Result<()> {
+    base.validate()?;
+    current.validate()?;
+    if fs::canonicalize(old)? == fs::canonicalize(&current.path)? {
+        return Ok(());
     }
-    println!(
-        "Herdr plugin registered, using {}",
-        crate::ui::terminal_text(&installed_binary()?.display().to_string())
-    );
-    println!("Configured available shortcuts: prefix+t board, prefix+a quick capture. Declined conflicts were left unchanged.");
-    println!("Reload Herdr configuration (herdr server reload-config), or restart Herdr, to apply shortcuts.");
+    // Never remove a source checkout or another installation. Only an intact generated root
+    // directly in this setup's pinned asset base, with its content hash matching its name.
+    let Some(name) = old.file_name() else {
+        return Ok(());
+    };
+    if old.parent().map(fs::canonicalize).transpose()?.as_deref()
+        != Some(fs::canonicalize(&base.path)?.as_path())
+    {
+        return Ok(());
+    }
+    let old = base.child(Path::new(name), false)?;
+    let scripts = old.child(Path::new("scripts"), false)?;
+    let mut contents = Vec::new();
+    for file in [
+        "herdr-plugin.toml",
+        "scripts/open-board.sh",
+        "scripts/open-capture.sh",
+    ] {
+        let path = Path::new(file);
+        let dir = if file.starts_with("scripts/") {
+            &scripts
+        } else {
+            &old
+        };
+        let body = dir
+            .read(Path::new(path.file_name().unwrap()))?
+            .ok_or_else(|| {
+                error(format!(
+                    "stale asset missing: {}",
+                    old.path.join(file).display()
+                ))
+            })?;
+        contents.push((file, body));
+    }
+    let mut hash = DefaultHasher::new();
+    contents.hash(&mut hash);
+    if name != std::ffi::OsStr::new(&format!("{:016x}", hash.finish())) {
+        return Err(error(format!(
+            "stale plugin root was modified; kept {}",
+            old.path.display()
+        )));
+    }
+    // Herdr 0.9 link replaces by plugin ID (online map insert, offline retain+push).
+    // Do NOT unlink by ID here: that would remove the new registration too.
+    scripts.remove(Path::new("open-board.sh"), false)?;
+    scripts.remove(Path::new("open-capture.sh"), false)?;
+    old.remove(Path::new("herdr-plugin.toml"), false)?;
+    old.remove(Path::new("scripts"), true)?;
+    base.remove(Path::new(name), true)?;
     Ok(())
 }
+
+#[cfg(all(test, unix))]
+mod tests;

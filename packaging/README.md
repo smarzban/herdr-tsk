@@ -1,6 +1,5 @@
 # Native distribution
 
-Status: preparation only. No tap repository, tag, or release is created by these local scripts.
 The GitHub `Prepare release` workflow is manually dispatched and creates a **draft**, never a published release. Publishing and changing repository visibility require owner approval.
 
 ## Artifacts
@@ -18,7 +17,7 @@ Names are `tsk-vX.Y.Z-<target>.tar.gz`, containing `tsk`, `LICENSE`, and `README
 
 `SHA256SUMS` covers the four archives and `install.sh`. `tsk.rb` is generated from those exact archive digests. This is checksum verification over HTTPS, not code signing or independent publisher authentication. The checksum file and binaries share the GitHub trust boundary.
 
-## Local preparation
+## Local packaging
 
 Python 3.11+ is required for maintainer scripts, not end-user installation.
 
@@ -44,7 +43,7 @@ Package refuses to overwrite an archive. Assemble requires all four platform arc
 3. Review the `release-bundle` workflow artifact and draft assets. Test installation on every supported architecture, including Homebrew. Replace the draft checklist with actual release notes. If a draft/upload was interrupted, inspect it first; the workflow intentionally refuses an existing release rather than silently replacing artifacts. Delete an incomplete draft only with approval before retrying.
 4. Obtain approval to make the source repository publicly accessible if still private, and publish the release. The anonymous installer cannot download private or draft assets. Mark the intended stable release as latest; the installer uses GitHub's latest-release redirect, not a semantic-version sort or `main`.
 5. Create the public `smarzban/homebrew-tap` repository with approval, using `packaging/homebrew/` as its scaffold. Put the generated `tsk.rb` in `Formula/tsk.rb`, test it, then commit and push. Repeat the formula update for every release, only after that release's assets exist publicly. No cross-repository write token is configured here.
-6. Smoke the public installer and tap on clean machines. Remove the site's "not published yet" notices only when those install routes work. A source build remains the documented working route until then.
+6. Smoke the public installer and tap on clean machines.
 
 ## User contracts
 
@@ -59,3 +58,51 @@ Homebrew follows the formula's explicit release URLs and SHA-256 values. A relea
 - [GitHub runner images](https://github.com/actions/runner-images)
 
 crates.io publishing is separate task T29. `publish = false` remains in Cargo.toml.
+
+## Herdr setup and upgrades
+
+`tsk setup herdr` requires Herdr 0.9+ on PATH. It uses `HERDR_CONFIG_PATH`, otherwise
+`$XDG_CONFIG_HOME/herdr/config.toml`, otherwise `~/.config/herdr/config.toml`.
+Config symlinks are refused. An open directory descriptor anchors all setup writes,
+backups, renames and cleanup; a replaced parent cannot redirect them. A kernel lock
+on `.tsk-setup.lock` serializes setup and is released on process death. The lock file
+stays on disk and does not imply a running setup.
+
+The embedded manifest and launchers are materialized in `tsk-plugins/<content-hash>`
+beside that config. The manifest includes the crate version, so upgrading changes
+the root. Herdr 0.9.0 replaces registrations by plugin ID: the online handler inserts
+into its ID-keyed map; the offline CLI removes entries with that ID then inserts
+the replacement. Setup checks the new registration before removing the intact old
+managed root. It does not call `plugin unlink herdr-tsk` after linking: that would
+unlink the new registration. Source-checkout and other installation roots are never
+removed. Modified stale assets are retained and reported with their path.
+
+References: Herdr 0.9.0
+[`handle_plugin_link`](https://github.com/herdrdev/herdr/blob/v0.9.0/src/app/api/plugins/mod.rs)
+and [`persist_plugin_offline`](https://github.com/herdrdev/herdr/blob/v0.9.0/src/cli/plugin.rs).
+
+Setup retains the invoked binary path, including the unversioned Homebrew symlink,
+not its canonical Cellar target. Board and capture share it. Reopen boards after a
+binary upgrade and rerun setup to update the manifest and launchers. No installer
+runs setup automatically. Explicit setup replaces an existing `herdr-tsk` link.
+
+The shortcut planner preserves the configured prefix and unrelated settings.
+It asks before replacing each conflicting prefix+t / prefix+a binding. Declining
+keeps that shortcut; a noninteractive conflict aborts before filesystem or host
+changes. If an accepted builtin override has no remaining bindings, it is removed,
+restoring Herdr's default. Candidate config is checked by Herdr before registration;
+existing config bytes are backed up before linking and replaced atomically afterward.
+Registration failure leaves config intact; post-registration failures identify the
+partial state. Success prints the plugin root and any backup path. Reload config
+with `herdr server reload-config` or restart Herdr to apply shortcuts.
+
+To remove integration, close its board/popups, run `herdr plugin unlink herdr-tsk`,
+remove its two command bindings, and reload config. Restore a setup backup only if
+it will not discard later edits. Removing the binary alone leaves Herdr config and
+`~/.tsk` intact.
+
+For isolated smoke tests, override XDG config/state roots **and** `HERDR_SOCKET_PATH`,
+as well as `TSK_STATE_DIR` / `TSK_CONFIG_DIR`. `HERDR_CONFIG_PATH` alone does not
+isolate Herdr's running session or plugin registry. Never relink a daily plugin for
+a test. A failed asset integrity check names the file to inspect; do not erase an
+unrelated checkout or package-manager installation to recover setup.

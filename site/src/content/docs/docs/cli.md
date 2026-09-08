@@ -242,5 +242,4 @@ without writes. `tsk setup herdr --help` is read-only.
 
 Exit codes: 0 success/help, 1 setup or confirmation failure, 2 invalid arguments.
 The command does not edit task data. See [installation](/docs/install/#herdr-setup-with-an-installed-binary)
-for config paths, backups, reload, upgrades and removing integration. Native packages
-and the tap remain unpublished until release staging is complete.
+for config paths, backups, reload, upgrades and removing integration.

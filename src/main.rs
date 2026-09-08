@@ -8,24 +8,6 @@ use tsk_tui::cli::router::{route, Surface};
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().collect();
     match route(&args, std::env::var(tsk_tui::app::MODE_ENV).ok().as_deref()) {
-        Surface::Setup => {
-            let tail: Vec<_> = args.iter().skip(2).map(String::as_str).collect();
-            if matches!(tail.as_slice(), ["--help"] | ["herdr", "--help"]) {
-                println!("usage: tsk setup herdr\nRegister the installed binary and bundled plugin assets.\nAdds prefix+t for board and prefix+a for capture; asks before replacing conflicts.\nUses HERDR_CONFIG_PATH, or XDG_CONFIG_HOME/herdr/config.toml, or ~/.config/herdr/config.toml.");
-                ExitCode::SUCCESS
-            } else if tail == ["herdr"] {
-                match tsk_tui::setup::run() {
-                    Ok(()) => ExitCode::SUCCESS,
-                    Err(e) => {
-                        eprintln!("tsk setup: {e}");
-                        ExitCode::from(1)
-                    }
-                }
-            } else {
-                eprintln!("usage: tsk setup herdr");
-                ExitCode::from(2)
-            }
-        }
         Surface::FindBoardPane => find_board_pane_main(),
         Surface::ResolveContext => resolve_context_main(),
         Surface::GlobalHelp => {
@@ -43,7 +25,8 @@ fn main() -> ExitCode {
         | Surface::Trash
         | Surface::Archive
         | Surface::Unarchive
-        | Surface::Project => headless_main(args),
+        | Surface::Project
+        | Surface::Setup => headless_main(args),
         Surface::Board | Surface::Capture => match tsk_tui::run(args) {
             Ok(()) => ExitCode::SUCCESS,
             Err(err) => {

@@ -168,8 +168,7 @@ For scriptable board work, use `tsk add`, `tsk list`, `tsk status`, `tsk edit`, 
   manually dispatched against an existing stable tag and only creates a draft.
   Installer payloads come from published release assets, never main. Homebrew uses
   a generated, version-pinned formula for `smarzban/homebrew-tap`; formula updates
-  are separate from release publication. Do not document these routes as available
-  until public assets and the tap have been verified.
+  are separate from release publication.
 
 - Build: `cargo build --release`
 - `herdr-plugin.toml` launches `./target/release/tsk`. Rebuild in-repo

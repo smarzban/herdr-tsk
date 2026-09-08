@@ -1,0 +1,240 @@
+#![cfg(unix)]
+#[path = "support/setup_host.rs"]
+mod fixture;
+use fixture::Host;
+use std::{
+    fs,
+    os::unix::{fs::symlink, process::CommandExt},
+    time::{Duration, Instant},
+};
+fn host() -> Host {
+    Host::new(env!("CARGO_BIN_EXE_tsk"))
+}
+fn ok(output: std::process::Output) -> String {
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).unwrap()
+}
+#[test]
+fn scalar_and_single_element_builtin_are_removed() {
+    for binding in ["'prefix+t'", "['prefix+t']"] {
+        let updated =
+            tsk_tui::setup::edit_bindings(&format!("[keys]\nnew_tab={binding}\n"), true, |_, _| {
+                Ok(true)
+            })
+            .unwrap();
+        assert!(!updated.contains("new_tab"));
+    }
+}
+#[test]
+fn setup_uses_cli_harness() {
+    let output =
+        tsk_tui::cli::run_with(["tsk", "setup", "herdr", "--help"], std::io::empty(), false);
+    assert_eq!(output.code, 0);
+    assert!(output.stdout.contains("prefix+t"));
+}
+#[test]
+fn bare_path_install_materializes_capture_and_version_and_reports_root() {
+    let h = host();
+    let output = ok(h.run(""));
+    let root = h.linked();
+    assert!(output.contains(root.to_str().unwrap()));
+    assert_eq!(
+        fs::read(root.join("scripts/open-capture.sh")).unwrap(),
+        include_bytes!("../scripts/open-capture.sh")
+    );
+    let capture = std::process::Command::new("bash")
+        .arg(root.join("scripts/open-capture.sh"))
+        .env("HERDR_BIN_PATH", h.bin.join("herdr"))
+        .env("FIXTURE", &h.root)
+        .output()
+        .unwrap();
+    assert!(capture.status.success());
+    assert!(h.calls().contains("plugin pane open --plugin herdr-tsk --entrypoint board --placement popup --width 80 --height 15 --focus --env TSK_MODE=capture"));
+    let doc = fs::read_to_string(root.join("herdr-plugin.toml"))
+        .unwrap()
+        .parse::<toml_edit::DocumentMut>()
+        .unwrap();
+    assert_eq!(doc["version"].as_str(), Some(env!("CARGO_PKG_VERSION")));
+    assert_eq!(doc["min_herdr_version"].as_str(), Some("0.9.0"));
+    assert_eq!(
+        doc["panes"].as_array_of_tables().unwrap().get(0).unwrap()["command"][0].as_str(),
+        h.bin.join("tsk").to_str()
+    );
+}
+#[test]
+fn rejected_native_config_leaves_config_untouched_and_never_links() {
+    let h = host();
+    fs::write(&h.config, "# original\n").unwrap();
+    let output = h.run("invalid");
+    assert!(!output.status.success());
+    assert_eq!(fs::read_to_string(&h.config).unwrap(), "# original\n");
+    assert!(!h.calls().contains("plugin link"));
+    assert!(!output.stderr.contains(&0x1b));
+    assert!(!output.stderr.contains(&7));
+    let checked = fs::read_to_string(h.root.join("checked")).unwrap();
+    assert_ne!(checked, h.config.to_str().unwrap());
+    assert!(!std::path::Path::new(&checked).exists());
+}
+#[test]
+fn noninteractive_conflict_has_zero_host_calls() {
+    let h = host();
+    fs::write(&h.config, "[keys]\nnew_tab='prefix+t'\n").unwrap();
+    assert!(!h.run("").status.success());
+    assert_eq!(h.calls(), "");
+    assert_eq!(fs::read_dir(h.config.parent().unwrap()).unwrap().count(), 1);
+}
+#[test]
+fn replacement_backs_up_original_and_renames_new_document() {
+    use std::os::unix::fs::MetadataExt;
+    let h = host();
+    let original = "# preserved\n[ui]\nmouse_capture=true\n";
+    fs::write(&h.config, original).unwrap();
+    let inode = fs::metadata(&h.config).unwrap().ino();
+    let output = ok(h.run(""));
+    assert_ne!(inode, fs::metadata(&h.config).unwrap().ino());
+    let backups: Vec<_> = fs::read_dir(h.config.parent().unwrap())
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| {
+            p.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("config.toml.tsk-backup-")
+        })
+        .collect();
+    assert_eq!(backups.len(), 1);
+    assert_eq!(fs::read_to_string(&backups[0]).unwrap(), original);
+    assert!(output.contains(backups[0].to_str().unwrap()));
+    let updated = fs::read_to_string(&h.config).unwrap();
+    assert!(updated.contains(original.trim()));
+    assert!(updated.contains("herdr-tsk.quick-capture"));
+}
+#[test]
+fn argv0_mismatch_is_refused_without_registration() {
+    let h = host();
+    let mut command = h.command();
+    command.arg0("herdr");
+    let output = command.output().unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("does not match"));
+    assert_eq!(h.calls(), "");
+}
+#[test]
+fn symlink_config_and_parent_and_assets_are_refused() {
+    for which in [
+        "config", "parent", "asset", "scripts", "root", "base", "lock",
+    ] {
+        let h = host();
+        let outside = h.root.join("outside");
+        match which {
+            "config" => {
+                fs::write(outside.join("file"), "# target").unwrap();
+                symlink(outside.join("file"), &h.config).unwrap();
+            }
+            "parent" => {
+                fs::remove_dir(h.config.parent().unwrap()).unwrap();
+                symlink(&outside, h.config.parent().unwrap()).unwrap();
+            }
+            "lock" => {
+                fs::write(outside.join("file"), "# target").unwrap();
+                symlink(
+                    outside.join("file"),
+                    h.config.parent().unwrap().join(".tsk-setup.lock"),
+                )
+                .unwrap();
+            }
+            _ => {
+                ok(h.run(""));
+                let root = h.linked();
+                let target = match which {
+                    "asset" => root.join("scripts/open-capture.sh"),
+                    "scripts" => root.join("scripts"),
+                    "root" => root.clone(),
+                    _ => root.parent().unwrap().to_path_buf(),
+                };
+                if target.is_dir() {
+                    fs::remove_dir_all(&target).unwrap();
+                    symlink(&outside, &target).unwrap();
+                } else {
+                    fs::remove_file(&target).unwrap();
+                    fs::write(outside.join("file"), "# target").unwrap();
+                    symlink(outside.join("file"), &target).unwrap();
+                }
+            }
+        }
+        let output = h.run("");
+        assert!(!output.status.success(), "{which}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("symlink"),
+            "{which}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(!outside.join("config.toml").exists());
+        if outside.join("file").exists() {
+            assert_eq!(
+                fs::read_to_string(outside.join("file")).unwrap(),
+                "# target"
+            );
+        }
+    }
+}
+#[test]
+fn changing_parent_during_validation_cannot_redirect_writes_or_cleanup() {
+    let h = host();
+    let output = h.run("swap");
+    assert!(!output.status.success());
+    assert!(!h.calls().contains("plugin link"));
+    assert_eq!(fs::read_dir(h.root.join("outside")).unwrap().count(), 0);
+    assert!(!h.root.join("moved/config.toml").exists());
+}
+#[test]
+fn config_changed_during_host_calls_is_not_overwritten() {
+    for scenario in ["change", "change-link"] {
+        let h = host();
+        fs::write(&h.config, "# original\n").unwrap();
+        let output = h.run(scenario);
+        assert!(!output.status.success());
+        assert_eq!(fs::read_to_string(&h.config).unwrap(), "# external edit\n");
+        if scenario == "change" {
+            assert!(!h.calls().contains("plugin link"));
+        } else {
+            assert!(String::from_utf8_lossy(&output.stderr).contains("plugin registered"));
+        }
+    }
+}
+#[test]
+fn contention_refuses_but_killed_owner_does_not_leave_a_stale_lock() {
+    let h = host();
+    let mut child = h
+        .command()
+        .env("SCENARIO", "block")
+        .stdout(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !h.root.join("waiting").exists() {
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let refused = h.run("");
+    assert!(!refused.status.success());
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("lock"));
+    child.kill().unwrap();
+    child.wait().unwrap();
+    fs::write(h.root.join("release"), "").unwrap();
+    ok(h.run(""));
+}
+#[test]
+fn modified_asset_error_names_file() {
+    let h = host();
+    ok(h.run(""));
+    let path = h.linked().join("scripts/open-board.sh");
+    fs::write(&path, "broken").unwrap();
+    let output = h.run("");
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains(path.to_str().unwrap()));
+}

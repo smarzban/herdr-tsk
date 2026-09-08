@@ -16,30 +16,29 @@ Park, resume, attention, linking, and dispatch are not part of this tree.
 
 ## Quickstart
 
-Native release binaries, an installer and a Homebrew tap are being prepared,
-**not published yet**. For now, build from source as below. See the
-[install guide](https://gettsk.sh/docs/install/) for the planned release-only paths.
+Install with Homebrew:
 
-```bash
-git clone https://github.com/smarzban/herdr-tsk.git
-cd herdr-tsk
-cargo build --release
-./target/release/tsk add -t "Draft release notes"
-./target/release/tsk
+```sh
+brew install smarzban/tap/tsk
+tsk add -t "Draft release notes"
+tsk
 ```
 
-To run `tsk` without the path, `export PATH="$PWD/target/release:$PATH"`.
+Or use the checksum-verifying installer:
 
-As a herdr plugin: `cargo build --release`, then `herdr plugin link "$PWD"`,
-then **Open tsk board**. Rebuild after you pull. A running board keeps the old
-binary until you quit it.
+```sh
+curl -fsSL https://gettsk.sh/install.sh -o install-tsk.sh
+sh install-tsk.sh
+```
 
-After native packages are published, `tsk setup herdr` will register the same
-installed binary with Herdr 0.9+ and add prefix+t / prefix+a, asking before replacing
-conflicts. No second build or checkout is needed for that route.
+It installs the latest stable release to `~/.local/bin`; add that directory to PATH.
+Manual release archives and source builds are covered in the
+[install guide](https://gettsk.sh/docs/install/).
 
-Full install (standalone vs plugin, env vars, quick capture):
-[Install](https://gettsk.sh/docs/install/).
+For Herdr 0.9+, run `tsk setup herdr`, then `herdr server reload-config`.
+The board and quick capture share your installed binary. Setup adds prefix+t /
+prefix+a and asks before replacing conflicts. Rerun setup after upgrades; no second
+build or checkout is needed. Reopen running boards to use the upgraded binary.
 
 ## Usage
 

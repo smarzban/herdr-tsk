@@ -1,11 +1,8 @@
 # smarzban Homebrew tap
 
-This is the local scaffold for the proposed `smarzban/homebrew-tap` repository.
-The tap is not published yet. Add `Formula/tsk.rb` from the reviewed release bundle,
-then test and publish the tap after owner approval. Do not create placeholder
-checksums or point a formula at an unpublished release.
+Homebrew installs checksum-pinned release binaries from `smarzban/homebrew-tap`.
 
-Once published, users can install with:
+Install with:
 
 ```sh
 brew install smarzban/tap/tsk
@@ -33,8 +30,8 @@ Homebrew installation itself does not relink plugins or remove task data.
 
 ## Maintenance
 
-Copy this README into the tap repository, replace the preparation notice above once
-published, and add the generated `tsk.rb` under `Formula/`. Update the formula for
+Copy this README into the tap repository and add the generated `tsk.rb` from the
+reviewed release bundle under `Formula/`. Update the formula for
 every release, after its assets are public. Keep the old formula until then.
 
 On each supported platform, tap the checkout and run:
