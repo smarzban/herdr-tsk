@@ -100,6 +100,7 @@ def assemble(tag, out):
         lines.append("  end")
     lines.extend([
         "", "  def install", '    bin.install "tsk"', "  end", "",
+        "  def caveats", '    "To register the shared tsk binary and shortcuts in Herdr, run: tsk setup herdr"', "  end", "",
         "  test do", '    ENV["TSK_STATE_DIR"] = (testpath/"state").to_s',
         '    ENV["TSK_CONFIG_DIR"] = (testpath/"config").to_s',
         '    assert_match "usage: tsk", shell_output("#{bin}/tsk --help")',

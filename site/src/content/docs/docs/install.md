@@ -11,8 +11,8 @@ working public install routes yet. Until then, use the source build below.
 
 The planned archives support Apple Silicon and Intel macOS (deployment target 11+),
 and ARM64 and x86-64 Linux using musl. No Rust toolchain is needed to run a prebuilt
-binary. Native packaging installs standalone `tsk`; plugin linking still uses the
-source checkout described below.
+binary. The same installed binary can register its embedded Herdr plugin assets
+with `tsk setup herdr`, without a source checkout or another build.
 
 ### Install script
 
@@ -124,7 +124,48 @@ directories, not symlinks.
 After `export PATH="$PWD/target/release:$PATH"`, the same commands work as
 `tsk add` and `tsk list`.
 
-## As a herdr plugin
+## Herdr setup with an installed binary
+
+After installing through Homebrew or the release installer, run:
+
+```sh
+tsk setup herdr
+```
+
+Requires Herdr 0.9.0 or newer on PATH. Setup writes bundled manifest/launcher assets
+under `tsk-plugins/` beside Herdr's configuration file and registers them with
+`herdr plugin link`. There is no binary copy or Rust build: the plugin points to the
+same stable `tsk` path you invoked (including Homebrew's unversioned symlink).
+Both board and quick capture use it. Use the normal PATH command, not a versioned
+Homebrew Cellar path, so upgrades continue to work.
+
+Setup adds **prefix+t** for the board and **prefix+a** for quick capture, preserving
+your configured prefix. It asks before replacing each conflicting shortcut; declining
+keeps that shortcut unchanged. Without an interactive terminal, a conflict aborts
+before any files or registration change. Unrelated settings/comments are retained,
+config edits get a backup, and re-running setup does not duplicate bindings.
+`tsk setup herdr --help` is read-only; there is no `--force` option.
+
+The config path is `HERDR_CONFIG_PATH`, otherwise
+`$XDG_CONFIG_HOME/herdr/config.toml`, otherwise `~/.config/herdr/config.toml`.
+Setup refuses config symlinks, invalid config and concurrent setup runs rather than
+overwriting blindly. Herdr itself chooses its running session/plugin registry;
+changing only `HERDR_CONFIG_PATH` does not isolate that registry.
+
+Reload the running host with `herdr server reload-config`, or restart Herdr, to
+activate the shortcuts. After an upgrade, reopen running boards to pick up the new
+shared binary; rerun setup to refresh bundled launcher assets if they changed.
+Installation alone never registers or relinks a plugin. Explicit setup replaces the
+existing `herdr-tsk` registration, if any, with the installed-binary registration.
+If registration fails the config is left intact. If a later config write fails, setup
+reports the partial registration and asks you to rerun; it does not claim success.
+
+To remove integration, close its running board/popups, run `herdr plugin unlink herdr-tsk`,
+and remove only the two `herdr-tsk` command bindings from your config (or restore the
+setup backup when appropriate). Reload Herdr. The standalone uninstall command does
+not remove your Herdr configuration or task data.
+
+## Source-checkout plugin (development)
 
 The pane runs `./target/release/tsk`, so build before you link:
 

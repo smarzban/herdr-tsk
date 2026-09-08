@@ -34,6 +34,10 @@ As a herdr plugin: `cargo build --release`, then `herdr plugin link "$PWD"`,
 then **Open tsk board**. Rebuild after you pull. A running board keeps the old
 binary until you quit it.
 
+After native packages are published, `tsk setup herdr` will register the same
+installed binary with Herdr 0.9+ and add prefix+t / prefix+a, asking before replacing
+conflicts. No second build or checkout is needed for that route.
+
 Full install (standalone vs plugin, env vars, quick capture):
 [Install](https://gettsk.sh/docs/install/).
 

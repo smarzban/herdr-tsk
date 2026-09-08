@@ -155,6 +155,13 @@ For scriptable board work, use `tsk add`, `tsk list`, `tsk status`, `tsk edit`, 
 
 ## Build / test / verify
 
+- `tsk setup herdr` explicitly registers embedded plugin assets from `src/setup.rs`,
+  sharing the stable invoked executable path (not a canonicalized Homebrew Cellar path).
+  It adds prefix+t / prefix+a with conflict confirmation, aborting before writes for
+  noninteractive conflicts. Re-running setup does not duplicate bindings. Test setup
+  with isolated XDG config/state roots AND HERDR_SOCKET_PATH: config override alone
+  does not isolate Herdr's plugin registry. Never smoke setup against a daily plugin.
+
 - Native packaging lives in `scripts/release.py`, `site/public/install.sh`, and
   `.github/workflows/release.yml`; see `packaging/README.md`. Python 3.11+ packaging
   checks: `python3 -m unittest discover -s tests/packaging`. The release workflow is

@@ -7,7 +7,7 @@ The attached `install.sh` installs the latest published stable release into `~/.
 
 The generated `tsk.rb` is for the maintainer's Homebrew tap, not an application file to install by hand. Homebrew availability depends on the corresponding formula being published in `smarzban/homebrew-tap`.
 
-Source-based herdr plugin installation is unchanged. The standalone binary does not install or relink a plugin.
+Run `tsk setup herdr` explicitly to register the embedded plugin assets with Herdr 0.9+, sharing the same installed binary for board and capture. Setup adds prefix+t and prefix+a, asks before replacing conflicts, and requires an interactive terminal if any conflict exists. Reload Herdr configuration afterwards. Installing/upgrading alone does not relink a plugin.
 
 ## Maintainer checklist before publishing
 

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+`tsk setup herdr` registers embedded plugin assets with Herdr 0.9+, sharing the
+installed standalone binary. It adds prefix+t board and prefix+a quick capture,
+asks before replacing conflicting shortcuts, and refuses noninteractive conflicts
+without changes. No source checkout, separate build, or automatic install-time link.
+
 Native distribution preparation: an owner-run draft-release workflow builds four
 macOS/Linux architectures, generates checksums and a version-pinned Homebrew formula.
 The installer downloads published releases only. Public binaries and the tap are
