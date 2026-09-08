@@ -28,3 +28,7 @@ public/apple-touch-icon-dark.png
 public/apple-touch-icon-light.png
 .vercel
 .env*
+
+/parity-results/
+/playwright-report/
+/parity-reference/

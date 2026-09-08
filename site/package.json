@@ -10,12 +10,17 @@
     "preview": "astro preview",
     "astro": "astro",
     "generate-apple-touch": "node scripts/generate-apple-touch.mjs",
-    "test": "node --test"
+    "test": "node --test test/*.test.mjs",
+    "test:parity": "npm run parity:reference && playwright test",
+    "parity:reference": "TSK_PARITY_OUTPUT=\"$PWD/parity-reference\" cargo test --manifest-path ../Cargo.toml --test demo_parity"
   },
   "dependencies": {
     "@astrojs/sitemap": "^3.7.2",
     "@astrojs/starlight": "^0.41.10",
     "astro": "^7.1.6",
     "sharp": "^0.35.3"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0"
   }
 }

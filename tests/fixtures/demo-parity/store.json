@@ -1,0 +1,108 @@
+{
+  "format_version": 2,
+  "next_task_number": 16,
+  "tasks": [
+    {
+      "id": "00000000-0000-4000-8000-000000000012",
+      "number": 12,
+      "revision": "10000000-0000-4000-8000-000000000012",
+      "title": "Check the release notes",
+      "notes": "Confirm the wording before release.",
+      "thread": "release",
+      "status": "blocked",
+      "scope": {
+        "project": {
+          "path": "/tmp/tsk-parity"
+        }
+      },
+      "provenance": "selection",
+      "history": [],
+      "steps": [],
+      "soft_deleted": false,
+      "created_at": [
+        1700000000,
+        0
+      ],
+      "updated_at": [
+        1700000100,
+        0
+      ]
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000013",
+      "number": 13,
+      "revision": "10000000-0000-4000-8000-000000000013",
+      "title": "Read every word of this long title before starting the task so the continuation must align beneath its title and retain the final boundary marker END",
+      "notes": "A plain note for the first matched task-page flow.",
+      "thread": null,
+      "status": "ready",
+      "scope": "global",
+      "provenance": "selection",
+      "history": [],
+      "steps": [],
+      "soft_deleted": false,
+      "created_at": [
+        1700000000,
+        0
+      ],
+      "updated_at": [
+        1700000099,
+        0
+      ]
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000014",
+      "number": 14,
+      "revision": "10000000-0000-4000-8000-000000000014",
+      "title": "Check the project thread",
+      "notes": "First line\nSecond line",
+      "thread": "release",
+      "status": "ready",
+      "scope": {
+        "project": {
+          "path": "/tmp/tsk-parity"
+        }
+      },
+      "provenance": "selection",
+      "history": [],
+      "steps": [],
+      "soft_deleted": false,
+      "created_at": [
+        1700000000,
+        0
+      ],
+      "updated_at": [
+        1700000098,
+        0
+      ]
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000015",
+      "number": 15,
+      "revision": "10000000-0000-4000-8000-000000000015",
+      "title": "Check the unlabeled project task",
+      "notes": "",
+      "thread": null,
+      "status": "ready",
+      "scope": {
+        "project": {
+          "path": "/tmp/tsk-parity"
+        }
+      },
+      "provenance": "selection",
+      "history": [],
+      "steps": [],
+      "soft_deleted": false,
+      "created_at": [
+        1700000000,
+        0
+      ],
+      "updated_at": [
+        1700000097,
+        0
+      ]
+    }
+  ],
+  "projects": {},
+  "undo_stack": []
+}

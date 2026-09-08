@@ -1,0 +1,183 @@
+//! App-side reference states for site/parity. These are TestBackend frames, not terminal screenshots.
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::{backend::TestBackend, Terminal};
+use std::{fs, path::PathBuf};
+use tsk_tui::{
+    domain::DomainState,
+    ui::{
+        apply_intent, draw_board,
+        input::{map_key, route_responsive_key, ResponsiveKeyRoute},
+        queue::NavTab,
+        BoardIntent, BoardModel,
+    },
+};
+
+fn key(
+    state: &mut DomainState,
+    model: &mut BoardModel,
+    code: KeyCode,
+    mods: KeyModifiers,
+    width: u16,
+) {
+    let event = KeyEvent::new(code, mods);
+    let intent = match route_responsive_key(
+        model.input_mode(),
+        model.wide_stage(),
+        tsk_tui::ui::tier::resolve_responsive(width, 24, model.wide_stage()).presentation,
+        event,
+    ) {
+        ResponsiveKeyRoute::Intent(intent) => Some(intent),
+        ResponsiveKeyRoute::Inert => None,
+        ResponsiveKeyRoute::Surface => map_key(model.input_mode(), event),
+    };
+    if let Some(intent) = intent {
+        apply_intent(state, model, intent, None).unwrap();
+    }
+}
+fn capture(model: &BoardModel, width: u16, name: &str) -> String {
+    let mut terminal = Terminal::new(TestBackend::new(width, 24)).unwrap();
+    terminal
+        .draw(|f| {
+            draw_board(f, model);
+        })
+        .unwrap();
+    let buffer = terminal.backend().buffer();
+    let text = (0..24)
+        .map(|y| {
+            (0..width)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    if let Ok(dir) = std::env::var("TSK_PARITY_OUTPUT") {
+        fs::create_dir_all(&dir).unwrap();
+        let dir = PathBuf::from(dir);
+        fs::write(dir.join(format!("app-{width}-{name}.txt")), &text).unwrap();
+        if name == "initial" {
+            let lines: Vec<_> = text
+                .lines()
+                .skip_while(|line| !line.contains("T13 "))
+                .take_while(|line| !line.trim().is_empty())
+                .map(|line| {
+                    line.chars()
+                        .skip(8)
+                        .collect::<String>()
+                        .trim_end()
+                        .to_string()
+                })
+                .collect();
+            fs::write(
+                dir.join(format!("title-{width}.json")),
+                serde_json::to_string_pretty(&lines).unwrap(),
+            )
+            .unwrap();
+        }
+    }
+    text
+}
+#[test]
+fn shared_fixture_first_flow_and_peek_references() {
+    for width in [40, 78, 109, 110] {
+        let mut state: DomainState =
+            serde_json::from_str(include_str!("fixtures/demo-parity/store.json")).unwrap();
+        let mut model = BoardModel::from_domain(&state, Some(PathBuf::from("/tmp/tsk-parity")));
+        apply_intent(
+            &mut state,
+            &mut model,
+            BoardIntent::SelectNavTab(NavTab::Desk),
+            None,
+        )
+        .unwrap();
+        assert!(!capture(&model, width, "initial").contains("IN MOTION"));
+        key(
+            &mut state,
+            &mut model,
+            KeyCode::Right,
+            KeyModifiers::NONE,
+            width,
+        );
+        let peek = capture(&model, width, "project-peek-or-split");
+        if width < 110 {
+            assert!(peek.contains("└─ tsk-parity"));
+        }
+        key(
+            &mut state,
+            &mut model,
+            KeyCode::Left,
+            KeyModifiers::NONE,
+            width,
+        );
+        key(
+            &mut state,
+            &mut model,
+            KeyCode::Down,
+            KeyModifiers::NONE,
+            width,
+        );
+        key(
+            &mut state,
+            &mut model,
+            KeyCode::Char('s'),
+            KeyModifiers::CONTROL,
+            width,
+        );
+        assert!(capture(&model, width, "started").contains("IN MOTION"));
+        key(
+            &mut state,
+            &mut model,
+            KeyCode::Enter,
+            KeyModifiers::NONE,
+            width,
+        );
+        let page = capture(&model, width, "page");
+        assert!(page.contains("plain note"));
+        key(
+            &mut state,
+            &mut model,
+            KeyCode::Esc,
+            KeyModifiers::NONE,
+            width,
+        );
+        assert!(capture(&model, width, "back").contains("IN MOTION"));
+        if width < 110 {
+            apply_intent(
+                &mut state,
+                &mut model,
+                BoardIntent::SelectNavTab(NavTab::ProjectBoard),
+                None,
+            )
+            .unwrap();
+            key(
+                &mut state,
+                &mut model,
+                KeyCode::Down,
+                KeyModifiers::NONE,
+                width,
+            );
+            key(
+                &mut state,
+                &mut model,
+                KeyCode::Right,
+                KeyModifiers::NONE,
+                width,
+            );
+            assert!(capture(&model, width, "thread-peek").contains("└─ #release"));
+            key(
+                &mut state,
+                &mut model,
+                KeyCode::Down,
+                KeyModifiers::NONE,
+                width,
+            );
+            key(
+                &mut state,
+                &mut model,
+                KeyCode::Right,
+                KeyModifiers::NONE,
+                width,
+            );
+            assert!(!capture(&model, width, "unlabeled-peek").contains("└─"));
+        }
+    }
+}

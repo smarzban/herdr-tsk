@@ -114,7 +114,7 @@ test("docs and demo describe the wide stage slider and threshold", async () => {
 
 test("demo keeps project navigation, attribution, and search contracts", async () => {
   const demo = await read("../public/board-demo.js");
-  assert.match(demo, /selectedProject: "tsk",/);
+  assert.match(demo, /selectedProject: fixture\?\.selectedProject \|\| "tsk",/);
   assert.match(demo, /need: open/);
   assert.doesNotMatch(demo, /!t\.project && \(t\.status === "blocked" \|\| t\.status === "review"\)/);
   assert.match(demo, /state\.selectedProject = name;/);
@@ -140,9 +140,7 @@ test("demo matches the quick-add, peek, and group-toggle contracts", async () =>
   assert.match(demo, /z or D drawer \(app: d\)/);
   assert.match(demo, /e\.key === "z" \|\| e\.key === "D"/);
   assert.doesNotMatch(demo, /saveDraft\(e\.ctrlKey \|\| e\.metaKey\)/);
-  assert.match(demo, /return notes\.split\(\/\\n\/\)\.slice\(0, 5\);/);
   assert.doesNotMatch(demo, /thread #\$\{task\.thread\}|scope \$\{projectName\(task\)\}|created \$\{age\(/);
-  assert.match(demo, /<div class="tsk-peek dim">\$\{indent\}    └<\/div>/);
   assert.match(demo, /function toggleAllGroups\(\)/);
   assert.match(demo, /id: "groups", label: "toggle groups"/);
   assert.match(demo, /if \(e\.key === "g" && !e\.altKey && !e\.ctrlKey && !e\.metaKey\)/);
@@ -189,8 +187,6 @@ test("attribution is peek-only in demo and static anatomy", async () => {
   const page = await read("../src/pages/index.astro");
   const styles = await read("../src/styles/landing.css");
   const guide = await read("../src/content/docs/docs/board.md");
-  assert.ok(demo.includes('state.peekId === task.id && metaFor(task) ? `<div class="tsk-attribution dim">'));
-  assert.ok(demo.includes('└─ ${esc(metaFor(task))}'));
   assert.doesNotMatch(demo, /<span class="meta">/);
   assert.match(styles, /\.tsk-attribution\s*\{[^}]*white-space: pre-wrap;[^}]*overflow-wrap: anywhere;/);
   assert.match(styles, /\.tsk-row-main\s*\{[^}]*padding-right: 2ch;/);

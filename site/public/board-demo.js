@@ -1,3 +1,4 @@
+import { wrapText } from "./board-wrap.js";
 import { parseCapture } from "./capture.js";
 
 (() => {
@@ -20,7 +21,10 @@ import { parseCapture } from "./capture.js";
     ["project", "selected project"],
     ["projects", "projects"],
   ];
-  const NOW = Date.now();
+  // Optional fixture data is supplied only by the local parity harness.
+  const fixture = JSON.parse(document.getElementById("tsk-demo-fixture")?.textContent || "null");
+  const clock = () => fixture?.now ?? Date.now();
+  const NOW = clock();
   const MIN = 60 * 1000;
   const HOUR = 60 * MIN;
   const DAY = 24 * HOUR;
@@ -129,10 +133,10 @@ import { parseCapture } from "./capture.js";
   };
 
   const state = {
-    tasks: seed(),
+    tasks: fixture ? structuredClone(fixture.tasks) : seed(),
     tab: "desk",
     // The focused scope is transient, while this is the project selected by tab 2.
-    selectedProject: "tsk",
+    selectedProject: fixture?.selectedProject || "tsk",
     focusProject: null,
     projectQuery: "",
     collapsed: new Set(),
@@ -203,7 +207,7 @@ import { parseCapture } from "./capture.js";
     );
 
   const age = (ts) => {
-    const secs = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+    const secs = Math.max(0, Math.floor((clock() - ts) / 1000));
     if (secs < 60) return `${secs}s`;
     if (secs < 3600) return `${Math.floor(secs / 60)}m`;
     if (secs < 86400) return `${Math.floor(secs / 3600)}h`;
@@ -241,8 +245,13 @@ import { parseCapture } from "./capture.js";
   }
 
   function terminalColumns() {
-    const fontSize = Number.parseFloat(getComputedStyle(root).fontSize) || 14;
-    return Math.floor(root.getBoundingClientRect().width / (fontSize * 0.6));
+    const style = getComputedStyle(root);
+    const canvas = document.createElement("canvas");
+    const context = canvas.getContext("2d");
+    context.font = `${style.fontSize} ${style.fontFamily}`;
+    const cell = context.measureText("0").width;
+    const padding = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
+    return Math.round((root.clientWidth - padding) / cell);
   }
 
   function isWideSplit() {
@@ -309,9 +318,9 @@ import { parseCapture } from "./capture.js";
         pushHeader("section", "NEEDS YOU", v.need.length);
         v.need.forEach((t) => pushTask(t));
       }
-      pushHeader("section", "IN MOTION", v.started.length);
+      if (v.started.length) pushHeader("section", "IN MOTION", v.started.length);
       v.started.forEach((t) => pushTask(t));
-      pushHeader("section", "desk", v.desk.length);
+      if (v.desk.length || !v.need.length) pushHeader("section", "ON DECK · desk", v.desk.length);
       v.desk.forEach((t) => pushTask(t));
       if (state.drawer) {
         pushHeader("section", "DONE", v.done.length);
@@ -332,7 +341,7 @@ import { parseCapture } from "./capture.js";
         pushHeader("section", "NEEDS YOU", need.length);
         need.forEach((t) => pushTask(t));
       }
-      pushHeader("section", "IN MOTION", v.started.length);
+      if (v.started.length) pushHeader("section", "IN MOTION", v.started.length);
       v.started.forEach((t) => pushTask(t));
       pushHeader("section", "ON DECK", v.ready.length);
       v.ready.forEach((t) => pushTask(t));
@@ -479,34 +488,6 @@ import { parseCapture } from "./capture.js";
     if (id === "file") fileSelected();
   }
 
-  // Word-wrap note lines to the board width so each visual line carries its own │ gutter,
-  // as the app paints peek. At most five rows, like peekLines.
-  function wrapPeek(lines, width) {
-    const out = [];
-    for (const line of lines) {
-      const words = line.split(/\s+/).filter(Boolean);
-      let current = "";
-      for (const word of words) {
-        if (!current) current = word;
-        else if (current.length + 1 + word.length <= width) current += ` ${word}`;
-        else {
-          out.push(current);
-          current = word;
-        }
-        if (out.length >= 5) return out.slice(0, 5);
-      }
-      if (current || !words.length) out.push(current);
-      if (out.length >= 5) return out.slice(0, 5);
-    }
-    return out;
-  }
-
-  function peekLines(task) {
-    const notes = (task.notes || "").trim();
-    if (!notes) return ["no notes yet"];
-    return notes.split(/\n/).slice(0, 5);
-  }
-
   function paletteCommands() {
     const q = state.paletteQ.trim().toLowerCase();
     const all = [
@@ -532,7 +513,7 @@ import { parseCapture } from "./capture.js";
     const task = selectedTask();
     if (!task) return;
     task.status = status;
-    task.updatedAt = Date.now();
+    task.updatedAt = clock();
     if (status !== "done") state.drawer = state.drawer;
     state.flashId = task.id;
     setTimeout(() => {
@@ -839,24 +820,26 @@ import { parseCapture } from "./capture.js";
           <span class="tsk-row-main">${indent}  <span class="glyph">${glyph}</span> <span class="tsk-task-id" data-copy-task="${esc(task.id)}" title="copy T${task.number}">T${task.number}</span> <span>${esc(task.title)}</span></span>
         </button>`;
         }
-        const peek =
-          state.peekId === task.id
-            ? [
-                ...wrapPeek(peekLines(task), Math.max(20, terminalColumns() - indent.length - 12)).map(
-                  (line) => `<div class="tsk-peek dim">${indent}    │ ${esc(line)}</div>`,
-                ),
-                ...(metaFor(task) ? [] : [`<div class="tsk-peek dim">${indent}    └</div>`]),
-              ].join("")
-            : "";
+        const columns = isWideSplit() && state.stage === "split"
+          ? Math.floor(terminalColumns() * 0.4) : terminalColumns();
+        const titleLines = wrapText(task.title, columns - 2 - 4 - `T${task.number} `.length);
+        const title = titleLines.map(line => `<span class="tsk-title-line ${selected ? "sel-text" : ""}">${esc(line)}</span>`).join("");
+        const noteLines = wrapText((task.notes || "").trim() || "no notes yet", columns - 7);
+        const label = metaFor(task);
+        const peek = state.peekId === task.id && !isWideSplit() ? [
+          ...noteLines.slice(0, 5).map(line => `<div class="tsk-peek dim">    │ ${esc(line)}</div>`),
+          ...(noteLines.length > 5 ? [`<div class="tsk-peek dim">    │ … ${noteLines.length - 5} more lines</div>`] : []),
+          ...(label ? wrapText(label, columns - 9).map((line, i) => `<div class="tsk-attribution dim">${i ? "       " : "    └─ "}${esc(line)}</div>`) : [`<div class="tsk-peek dim">    └</div>`]),
+        ].join("") : "";
         const dimRow = row.dim ? "dim" : "";
-        return `<button type="button" class="tsk-row ${dimRow} ${selected ? "is-sel" : ""} ${flash ? "is-flash" : ""}" data-task="${task.id}">
-          <span class="tsk-row-main">${indent}  <span class="${selected ? "sel" : "glyph"}">${glyph}</span> <span class="tsk-task-id ${selected ? "sel-text" : ""}" data-copy-task="${esc(task.id)}" title="copy T${task.number}">T${task.number}</span> <span class="${selected ? "sel-text" : ""}">${esc(task.title)}</span></span>
-        </button>${peek}${state.peekId === task.id && metaFor(task) ? `<div class="tsk-attribution dim">${indent}    └─ ${esc(metaFor(task))}</div>` : ""}`;
+        return `<button type="button" class="tsk-row ${dimRow} ${selected ? "is-sel" : ""} ${flash ? "is-flash" : ""}" data-task="${task.id}"><span class="tsk-row-main"><span class="tsk-row-prefix">  <span class="tsk-row-glyph">${glyph}</span> <span class="tsk-task-id ${selected ? "sel-text" : ""}" data-copy-task="${esc(task.id)}" title="copy T${task.number}">T${task.number}</span> </span><span class="tsk-row-title">${title}</span></span></button>${peek}`;
+
       })
       .join("");
 
     const column = `
-      <div class="tsk-tabs">${state.focusProject ? chip : tabs}</div>
+      <div class="tsk-tabs">${tabs}</div>
+      ${chip ? `<div class="tsk-project-selector">${chip}</div>` : ""}
       <div class="tsk-list">${body || `<div class="dim">  nothing here</div>`}</div>`;
     // Wide stages paint one shared footer under both columns, so a column omits its own.
     return rail || bare ? column : column + renderFooter();
@@ -922,10 +905,11 @@ import { parseCapture } from "./capture.js";
          </div>${renderFooter()}`;
     } else if (wide && state.stage === "page") {
       html = `<div class="tsk-wide-split is-page">${renderPage(true)}</div>${renderFooter()}`;
+    } else if (taskFocus()) {
+      html = `<div class="tsk-single-task">${renderPage(true)}</div>${renderFooter()}`;
     } else {
       html = renderBoard(rows);
     }
-    if (!wide && taskFocus()) html += renderPage();
     if (state.overlay === "help") html += renderHelp();
     if (state.overlay === "palette") html += renderPalette();
     if (state.overlay === "picker") html += renderPicker();
@@ -992,7 +976,7 @@ import { parseCapture } from "./capture.js";
     } else {
       task.notes = state.editDraft;
     }
-    task.updatedAt = Date.now();
+    task.updatedAt = clock();
     state.editField = null;
     state.editDraft = "";
   }
@@ -1436,7 +1420,7 @@ import { parseCapture } from "./capture.js";
         state.peekId = null;
         openFullPage();
       } else if (isWideSplit()) {
-        // A board or rail row click selects in place: the stage stays put.
+        if (state.stage === "rail") state.stage = "split";
         state.selectedId = id;
         state.peekId = null;
         state.overlay = null;

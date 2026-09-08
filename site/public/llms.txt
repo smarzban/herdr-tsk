@@ -20,3 +20,5 @@ User guide: https://gettsk.sh/docs/
 - [CLI](https://gettsk.sh/docs/cli/)
 
 Source: https://github.com/smarzban/herdr-tsk
+
+Website demo: first parity slice covers desk selection/start/open/Escape, wrapped titles and peek attribution. It uses bare browser status keys. Steps, full editing, project archive and save recovery remain outside the implemented demo subset.

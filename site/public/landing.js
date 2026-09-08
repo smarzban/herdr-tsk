@@ -122,13 +122,18 @@
     const DIVIDER = 9;
     const BESIDE_COLUMNS = 78;
 
-    const charWidth = () => (Number.parseFloat(getComputedStyle(board).fontSize) || 14) * 0.6;
+    const charWidth = () => {
+      const style = getComputedStyle(board);
+      const context = document.createElement("canvas").getContext("2d");
+      context.font = `${style.fontSize} ${style.fontFamily}`;
+      return context.measureText("0").width;
+    };
     const boardPadding = () => {
       const cs = getComputedStyle(board);
       return (Number.parseFloat(cs.paddingLeft) || 0) + (Number.parseFloat(cs.paddingRight) || 0);
     };
-    // Same measure the demo uses to pick peek vs slider: frame width over a 0.6em cell.
-    const columns = () => Math.floor(board.getBoundingClientRect().width / charWidth());
+    // Match the demo: usable content width divided by the measured monospace cell.
+    const columns = () => Math.round((board.clientWidth - boardPadding()) / charWidth());
     const minAgent = 180;
     const maxAgent = () => split.clientWidth - DIVIDER - (40 * charWidth() + boardPadding());
 
@@ -137,7 +142,7 @@
       split.style.setProperty("--agent-w", `${w}px`);
       if (divider) divider.setAttribute("aria-valuenow", String(w));
     };
-    const agentForBoardColumns = (n) => split.clientWidth - DIVIDER - n * charWidth();
+    const agentForBoardColumns = (n) => split.clientWidth - DIVIDER - (n * charWidth() + boardPadding());
 
     const setLayout = (name) => {
       const beside = name === "beside";

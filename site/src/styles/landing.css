@@ -2499,3 +2499,84 @@ html[data-theme="light"] .pane {
     margin-left: 0;
   }
 }
+
+/* The board canvas follows terminal modifiers; surrounding website chrome keeps its theme. */
+.tsk-row:not(.tsk-rail-row) .tsk-row-main {
+  display: flex;
+  width: 100%;
+  padding-right: 2ch;
+  overflow: visible;
+}
+.tsk-row-prefix {
+  flex: none;
+  white-space: pre;
+}
+.tsk-row-title {
+  min-width: 0;
+}
+.tsk-title-line {
+  display: block;
+  white-space: pre;
+}
+.tsk-peek, .tsk-attribution {
+  padding: 0;
+  white-space: pre;
+}
+.board .sel-text, .board .tsk-row.is-sel .sel-text {
+  color: var(--bg);
+  background: var(--ink);
+}
+.board .tsk-row.is-flash {
+  background: var(--line);
+}
+.board .tsk-tab.is-on {
+  text-decoration-color: currentColor;
+}
+.tsk-single-task {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.tsk-single-task > .tsk-task-column {
+  width: 100%;
+}
+.tsk-single-task .tsk-task-header {
+  flex-wrap: wrap;
+  white-space: normal;
+}
+.tsk-single-task .tsk-task-header .sec {
+  overflow: visible;
+  overflow-wrap: anywhere;
+}
+.board .tsk-tabs {
+  margin-top: 1lh;
+  margin-bottom: 1lh;
+}
+.board .tsk-list {
+  gap: 0;
+  min-height: 0;
+  overflow-y: auto;
+}
+.board .tsk-sec {
+  margin: 1lh 0;
+  padding: 0 1ch;
+  line-height: inherit;
+}
+.board .tsk-sec:first-child {
+  margin-top: 0;
+}
+.board .tsk-row {
+  padding: 0;
+}
+.board .tsk-row-prefix, .board .tsk-row-title {
+  font-weight: normal;
+}
+.board .tsk-task-header.is-bold .glyph {
+  color: var(--ink);
+}
+.board .tsk-tab {
+  flex-shrink: 0;
+}
+.board .tsk-project-selector {
+  margin-bottom: 1lh;
+}

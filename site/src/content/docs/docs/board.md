@@ -248,3 +248,11 @@ Retry or Cancel` and the board keeps your draft. `r` or `Enter` retries and
 answers `saved`; `c` or `Esc` cancels and drops the change (`save cancelled`).
 Until you choose, mutating verbs are held; moving around, peeking, and quitting
 still work. `Esc` does not skip the choice.
+
+## Website demo
+
+The browser demo supports a repeatable desk → select → start → open → Escape flow.
+Titles retain all text and align continuation lines beneath the title; collapsed rows
+have no attribution, and narrow peeks show project or thread labels beneath notes.
+Browser status shortcuts are bare letters. The demo is a subset: steps, full editing,
+project archive and save recovery are not yet reproduced. It is not a complete app emulator.
