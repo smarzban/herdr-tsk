@@ -1,6 +1,7 @@
 """Offline installer contract tests, no network or real HOME writes."""
 import hashlib
 import io
+import json
 import os
 import platform
 from pathlib import Path
@@ -22,14 +23,15 @@ class InstallerTests(unittest.TestCase):
         self.bin.mkdir()
         self.assets = self.root / "assets"
         self.assets.mkdir()
-        self.env = dict(os.environ, HOME=str(self.root / "home"), PATH=f"{self.bin}:{os.environ['PATH']}", ASSETS=str(self.assets), REQUESTS=str(self.root / "requests"), MOCK_OS="Linux", MOCK_ARCH="x86_64")
+        self.env = dict(os.environ, HOME=str(self.root / "home"), PATH=f"{self.bin}:{os.environ['PATH']}", CURL_ARGS=str(self.root / "curl-args"), ASSETS=str(self.assets), REQUESTS=str(self.root / "requests"), MOCK_OS="Linux", MOCK_ARCH="x86_64")
         self.env.pop("TSK_VERSION", None)
         self.env.pop("TSK_INSTALL_DIR", None)
         self.command("uname", '#!/bin/sh\ncase "$1" in -s) echo "$MOCK_OS";; -m) echo "$MOCK_ARCH";; esac\n')
         self.command("curl", '''#!/usr/bin/env python3
-import os, pathlib, sys
+import json, os, pathlib, sys
 args = sys.argv[1:]
 url = args[-1]
+with open(os.environ["CURL_ARGS"], "a") as out: out.write(json.dumps(args) + "\\n")
 with open(os.environ["REQUESTS"], "a") as out: out.write(url + "\\n")
 if os.environ.get("FAIL_DOWNLOAD"): sys.exit(22)
 if url.endswith("/releases/latest"):
@@ -58,7 +60,7 @@ else:
         (self.assets / "SHA256SUMS").write_text(f"{digest}  {archive.name}\n")
 
     def run_install(self, **env):
-        return subprocess.run(["sh", str(INSTALLER)], env=dict(self.env, **env), text=True, capture_output=True)
+        return subprocess.run(["sh", str(INSTALLER)], env=dict(self.env, **env), cwd=self.root, text=True, capture_output=True)
 
     @unittest.skipUnless(os.environ.get("TSK_TEST_BINARY"), "set TSK_TEST_BINARY to smoke a built executable")
     def test_installed_real_binary_runs_isolated_cli(self):
@@ -137,6 +139,41 @@ else:
         result = self.run_install(TSK_INSTALL_DIR=str(dest))
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(target.read_text(), "keep")
+
+    def test_destination_guards_refuse_before_downloading_assets(self):
+        self.archive()
+        dest = self.root / "directory-destination"
+        (dest / "tsk").mkdir(parents=True)
+        marker = dest / "tsk/keep"
+        marker.write_text("untouched")
+        for directory, message in [("relative-bin", "absolute path"), (str(dest), "destination is a directory")]:
+            with self.subTest(directory=directory):
+                (self.root / "requests").unlink(missing_ok=True)
+                result = self.run_install(TSK_VERSION="v1.2.3", TSK_INSTALL_DIR=directory)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(message, result.stderr)
+                self.assertFalse((self.root / "requests").exists())
+                self.assertFalse((self.root / "relative-bin").exists())
+                self.assertEqual(list((dest / "tsk").iterdir()), [marker])
+                self.assertEqual(marker.read_text(), "untouched")
+
+    def test_every_download_restricts_protocol_redirects_and_tls(self):
+        self.archive()
+        result = self.run_install()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = [json.loads(line) for line in (self.root / "curl-args").read_text().splitlines()]
+        self.assertEqual(len(calls), 3)
+        self.assertTrue(calls[0][-1].endswith("/releases/latest"))
+        self.assertTrue(calls[1][-1].endswith(".tar.gz"))
+        self.assertTrue(calls[2][-1].endswith("/SHA256SUMS"))
+        for args in calls:
+            with self.subTest(url=args[-1]):
+                for flag in ["--proto", "--proto-redir"]:
+                    self.assertIn(flag, args)
+                    self.assertEqual(args[args.index(flag) + 1], "=https")
+                self.assertIn("--tlsv1.2", args)
+                self.assertNotIn("--insecure", args)
+                self.assertNotIn("-k", args)
 
     def test_help_and_unknown_arguments_do_not_download(self):
         for argument, expected in [("--help", 0), ("--version", 1)]:
