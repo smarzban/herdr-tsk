@@ -2625,7 +2625,7 @@ html[data-theme="light"] .pane {
 .tsk-view-control { margin-left: auto; }
 .board .tsk-row.is-sel, .board .tsk-row.is-sel .sel-text { background: transparent; color: var(--ink); }
 .tsk-project-row, .tsk-project-legend { display: grid; grid-template-columns: minmax(0,1fr) 10ch 11ch 7ch; align-items: baseline; padding: 0 2ch 0 1ch; gap: 0; text-align: right; font: inherit; line-height: inherit; }
-.tsk-project-table.with-threads .tsk-project-row, .tsk-project-table.with-threads .tsk-project-legend { grid-template-columns: minmax(0,1fr) 9ch 10ch 11ch 7ch; }
+.tsk-project-table.with-threads .tsk-project-row, .tsk-project-table.with-threads .tsk-project-legend { grid-template-columns: minmax(0,1fr) var(--project-thread-width) 10ch 11ch 7ch; }
 .tsk-project-row { appearance: none; border: 0; background: none; color: var(--ink); width: 100%; cursor: pointer; }
 .tsk-project-name, .tsk-project-legend > :first-child { text-align: left; white-space: pre; }
 .tsk-project-row.is-selected .tsk-project-name > span:first-child, .tsk-project-row .is-bold { font-weight: bold; }
@@ -2682,3 +2682,5 @@ html[data-theme="light"] .pane {
   #coming-soon .index { grid-row: 1 / span 3; }
   #coming-soon .band-head h2, #coming-soon .band-lede { grid-column: 2; }
 }
+
+.tsk-project-threads { text-align: left; white-space: pre; }

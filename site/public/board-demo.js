@@ -453,7 +453,7 @@ import { parseCapture } from "./capture.js";
   function filterOptions() {
     const project = state.focusProject;
     const tasks = state.tasks.filter(t => !t.archived && !state.archivedProjects.has(t.project) && t.status !== "done" && (!project || t.project === project));
-    const names = [...new Set(tasks.map(t => t.thread).filter(Boolean))].sort();
+    const names = [...new Set(tasks.map(t => t.thread).filter(Boolean))].sort((a,b) => tasks.filter(t=>t.thread===b).length - tasks.filter(t=>t.thread===a).length || a.localeCompare(b));
     return [
       {value: null, label: project ? `All tasks  ${tasks.length}` : "Overview"},
       ...names.map(name => ({value:name,label:`#${name}  ${tasks.filter(t=>t.thread===name).length}`})),
@@ -481,7 +481,7 @@ import { parseCapture } from "./capture.js";
     // Hidden (archived) tasks leave every working view.
     const matchesThread = t => state.focusProject ? state.threadFilter === null || (t.thread || "") === state.threadFilter : state.tab !== "projects" || state.projectView === null || t.thread === state.projectView;
     const open = state.tasks.filter((t) => t.status !== "done" && !t.archived && !state.archivedProjects.has(t.project) && matchesThread(t));
-    const done = state.tasks.filter((t) => t.status === "done" && !t.archived).sort(byUpdated);
+    const done = state.tasks.filter((t) => t.status === "done" && !t.archived && !state.archivedProjects.has(t.project) && matchesThread(t)).sort(byUpdated);
     if (state.focusProject || (state.tab === "projects" && state.projectView !== null)) {
       const inP = (t) =>
         !state.focusProject || (state.focusProject === "desk" ? !t.project : t.project === state.focusProject);
@@ -582,7 +582,7 @@ import { parseCapture } from "./capture.js";
         // Project index rows are navigation, not collapsible task groups.
       }
       if (state.drawer) {
-        const done = state.tasks.filter((t) => t.status === "done" && !t.archived).sort(byUpdated);
+        const done = state.tasks.filter((t) => t.status === "done" && !t.archived && !state.archivedProjects.has(t.project) && matchesThread(t)).sort(byUpdated);
         pushHeader("section", "DONE", done.length);
         done.forEach((t) => pushTask(t));
         const archived = archivedInScope();
@@ -595,7 +595,7 @@ import { parseCapture } from "./capture.js";
     }
 
     if (state.drawer) {
-      const done = state.tasks.filter((t) => t.status === "done" && !t.archived).sort(byUpdated);
+      const done = state.tasks.filter((t) => t.status === "done" && !t.archived && !state.archivedProjects.has(t.project) && matchesThread(t)).sort(byUpdated);
       pushHeader("section", "DONE", done.length);
       done.forEach((t) => pushTask(t));
       const archived = archivedInScope();
@@ -1001,6 +1001,21 @@ import { parseCapture } from "./capture.js";
     return "← rail";
   }
 
+  // Same overflow rule as the native threads_cell: reserve room for hidden names.
+  function threadCell(threads, width) {
+    let out = "", shown = 0;
+    for (const thread of threads) {
+      const candidate = out ? out + " #" + thread : "#" + thread;
+      const remaining = threads.length - shown - 1;
+      const suffix = remaining ? "  +" + remaining : "";
+      if (candidate.length + suffix.length > width) break;
+      out = candidate;
+      shown++;
+    }
+    if (!shown) return threads.length ? ("+" + threads.length).slice(0,width) : "";
+    return out + (shown < threads.length ? "  +" + (threads.length-shown) : "");
+  }
+
   function renderBoard(rows, rail = false, bare = false) {
     const tabs = TABS.map(([tab, label]) => {
       const on = state.tab === tab;
@@ -1011,6 +1026,9 @@ import { parseCapture } from "./capture.js";
     const control = filter === null ? "" : `<button class="tsk-view-control dim" data-filter="1">${esc(filter)} ▾</button>`;
     const index = state.tab === "projects" && state.projectView === null && !state.focusProject;
     const showThreads = terminalColumns() >= 100;
+    const available = terminalColumns() - 34;
+    const nameWidth = Math.max(24, Math.floor(available * .4));
+    const threadWidth = Math.max(0, available - nameWidth - 2);
     const count = n => n || "·";
     const body = rows
       .map((row) => {
@@ -1020,8 +1038,8 @@ import { parseCapture } from "./capture.js";
         }
         if (row.kind === "project") {
           const selected = row.id === state.selectedId;
-          const threads = new Set(state.tasks.filter(t=>t.project===row.project && !t.archived && t.status!=="done").map(t=>t.thread).filter(Boolean)).size;
-          return `<button type="button" class="tsk-project-row ${selected ? "is-selected" : ""}" data-project-row="${esc(row.project)}" data-nav-id="${esc(row.id)}"><span class="tsk-project-name">${selected ? "▸" : " "} <span>${esc(row.label)}</span>${row.project === (fixture?.selectedProject || "launchpad") ? `<span class="dim"> · here</span>` : ""}</span>${showThreads ? `<span class="dim">${count(threads)}</span>` : ""}<span class="${row.needs ? "is-bold" : "dim"}">${count(row.needs)}</span><span>${count(row.motion)}</span><span class="dim">${count(row.ready)}</span></button>`;
+          const threads = [...new Set(state.tasks.filter(t=>t.project===row.project && !t.archived && t.status!=="done").map(t=>t.thread).filter(Boolean))].sort();
+          return `<button type="button" class="tsk-project-row ${selected ? "is-selected" : ""}" data-project-row="${esc(row.project)}" data-nav-id="${esc(row.id)}"><span class="tsk-project-name">${selected ? "▸" : " "} <span>${esc(row.label)}</span>${row.project === (fixture?.selectedProject || "launchpad") ? `<span class="dim"> · here</span>` : ""}</span>${showThreads ? `<span class="dim tsk-project-threads">${esc(threadCell(threads, threadWidth))}</span>` : ""}<span class="${row.needs ? "is-bold" : "dim"}">${count(row.needs)}</span><span>${count(row.motion)}</span><span class="dim">${count(row.ready)}</span></button>`;
         }
         if (row.kind === "group") {
           const mark = row.collapsed ? "▸" : "▾";
@@ -1063,7 +1081,7 @@ import { parseCapture } from "./capture.js";
 
     const column = `
       <div class="tsk-tabs">${tabs}${control}</div>
-      <div class="tsk-list ${index ? "tsk-project-table" : ""} ${showThreads ? "with-threads" : ""}">${index ? `<div class="tsk-project-legend"><span>  PROJECT</span>${showThreads ? "<span>THREADS</span>" : ""}<span>NEEDS YOU</span><span>IN MOTION</span><span>READY</span></div>` : ""}${body || `<div class="dim">  nothing here</div>`}</div>`;
+      <div class="tsk-list ${index ? "tsk-project-table" : ""} ${showThreads ? "with-threads" : ""}" style="--project-name-width:${nameWidth + 2}ch;--project-thread-width:${threadWidth + 2}ch">${index ? `<div class="tsk-project-legend"><span>  PROJECT</span>${showThreads ? "<span>THREADS</span>" : ""}<span>NEEDS YOU</span><span>IN MOTION</span><span>READY</span></div>` : ""}${body || `<div class="dim">  nothing here</div>`}</div>`;
     // Wide stages paint one shared footer under both columns, so a column omits its own.
     return rail || bare ? column : column + renderFooter();
   }

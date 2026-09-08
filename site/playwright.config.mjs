@@ -5,5 +5,5 @@ export default defineConfig({
  outputDir: './parity-results', reporter: 'list',
  use: { baseURL:'http://127.0.0.1:4178', viewport:{width:1400,height:1000},
   launchOptions: { executablePath: process.env.PARITY_CHROME || (existsSync('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome') ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' : undefined) } },
- webServer: { command:'node parity/server.mjs', url:'http://127.0.0.1:4178', reuseExistingServer:false },
+ webServer: [{ command:'node parity/server.mjs', url:'http://127.0.0.1:4178', reuseExistingServer:false }, { command:'node parity/preview.mjs', url:'http://127.0.0.1:4180', reuseExistingServer:false }],
 });

@@ -188,8 +188,8 @@ const REPO = 'https://github.com/smarzban/herdr-tsk';
                 <div class="agent-body">
                   <p class="agent-line you">webhook retries are applying the same event twice. investigate and add a task.</p>
                   <p class="agent-line say">The handler applies side effects before recording the event ID. Concurrent retries can both get through.</p>
-                  <div class="agent-tool"><span class="tool-name">Bash</span><span class="tool-arg">tsk add -t "Make webhook delivery idempotent" -p launchpad --thread api --json</span><span class="tool-out">created T13 · launchpad · #api</span></div>
-                  <div class="agent-tool"><span class="tool-name">Bash</span><span class="tool-arg">tsk steps T13 add "Reproduce duplicate delivery"</span><span class="tool-out">step added</span></div>
+                  <div class="agent-tool"><span class="tool-name">Bash</span><span class="tool-arg">tsk add -t "Make webhook delivery idempotent" -p launchpad --thread api --json</span><span class="tool-out" data-cli-add-output>&#123;"outcome":"created","id":"00000000-0000-4000-8000-000000000013","number":13,"title":"Make webhook delivery idempotent","project":"launchpad"&#125;</span></div>
+                  <div class="agent-tool"><span class="tool-name">Bash</span><span class="tool-arg">tsk steps T13 add "Reproduce duplicate delivery"</span><span class="tool-out" data-cli-step-output>added 3f Reproduce duplicate delivery</span></div>
                   <p class="agent-line say">T13 is ready with a checklist to reproduce duplicate delivery, persist processed event IDs, and test concurrent retries. Open it on the board to explore the steps.</p>
                 </div>
                 <div class="agent-input"><span class="agent-prompt">›</span><span class="cursor" aria-hidden="true"></span><span class="agent-shortcut">? for shortcuts</span></div>

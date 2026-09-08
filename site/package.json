@@ -11,7 +11,7 @@
     "astro": "astro",
     "generate-apple-touch": "node scripts/generate-apple-touch.mjs",
     "test": "node --test test/*.test.mjs",
-    "test:parity": "npm run parity:reference && playwright test",
+    "test:parity": "cargo build --manifest-path ../Cargo.toml --bin tsk && npm run build && npm run parity:reference && playwright test",
     "parity:reference": "TSK_PARITY_OUTPUT=\"$PWD/parity-reference\" cargo test --manifest-path ../Cargo.toml --test demo_parity"
   },
   "dependencies": {

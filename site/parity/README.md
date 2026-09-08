@@ -13,7 +13,7 @@ npx playwright install chromium
 npm run test:parity
 ```
 
-`PARITY_CHROME=/absolute/path/to/chrome` overrides the executable. The harness binds only to localhost port 4178. `npm run parity:reference` regenerates app references without starting a browser. Neither command reads the user's task store. Browser runs always use a fresh context.
+`PARITY_CHROME=/absolute/path/to/chrome` overrides the executable. The harness binds only to localhost: 4178 serves the shared fixture and 4180 serves the built production homepage. The parity command builds the CLI and site first. CI installs Rust and Chromium and runs this same command. `npm run parity:reference` regenerates app references without starting a browser. Neither command reads the user's task store. Browser runs always use a fresh context.
 
 The first nine scenarios cover the initial desk; keyboard selection/start/open/Escape; complete long-title text, continuation alignment and two-cell right clearance; project, thread and unlabeled peeks; and the 109/110-column threshold plus rail-click focus, and the landing column readout excluding padding. Browser shortcuts remain bare intentionally. The title lines are compared directly with the Rust renderer's output, not with independently authored expected strings. Other checks assert DOM outcomes and geometry; they are not a whole-frame pixel equality claim.
 
@@ -95,3 +95,16 @@ formatting, Clippy and the release build passed. All 19 site unit checks and
 correcting its selector). The isolated release-binary PTY flow passed at
 40/78/109/110 columns. Astro built successfully with its existing deprecation
 and missing 404-content notices. HERDR_ENV was unset; no Herdr host smoke ran.
+
+
+## PR review regressions
+
+The production-homepage scenarios exercise the real layout buttons and landing
+script, scoped done drawers, project count columns, thread labels and counted
+menu order. The CLI transcript is compared with actual add/steps output from a
+disposable store. Native selection checks cover bright/underlined active tabs,
+dim inactive tabs, and wrapped selected titles with no reverse fill.
+
+Before fixing the drawer and thread column, the new browser checks failed.
+Restoring reverse fill on selected continuation lines also made the native
+regression fail; the correct painter was then restored.

@@ -280,4 +280,49 @@ fn selection_uses_arrow_and_underlined_tab_without_reverse_fill() {
         frame.contains("▸ ■ T12"),
         "selection arrow must retain status and number: {frame}"
     );
+    let tab_row = buffer
+        .content
+        .chunks(78)
+        .find(|row| {
+            row.iter()
+                .map(|cell| cell.symbol())
+                .collect::<String>()
+                .contains("desk")
+        })
+        .unwrap();
+    let text = tab_row.iter().map(|cell| cell.symbol()).collect::<String>();
+    for (label, active) in [("desk", true), ("tsk-parity", false), ("projects", false)] {
+        let start = text[..text.find(label).unwrap()].chars().count();
+        for cell in &tab_row[start..start + label.len()] {
+            assert_eq!(
+                cell.modifier.contains(Modifier::UNDERLINED),
+                active,
+                "{label}"
+            );
+            assert_eq!(cell.modifier.contains(Modifier::BOLD), active, "{label}");
+            assert_eq!(cell.modifier.contains(Modifier::DIM), !active, "{label}");
+        }
+    }
+    key(
+        &mut state,
+        &mut model,
+        KeyCode::Down,
+        KeyModifiers::NONE,
+        78,
+    );
+    terminal
+        .draw(|f| {
+            draw_board(f, &model);
+        })
+        .unwrap();
+    assert!(capture(&model, 78, "wrapped-selection").contains("▸ ○ T13"));
+    assert!(
+        terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .all(|cell| !cell.modifier.contains(Modifier::REVERSED)),
+        "wrapped selected rows must not use reverse fill"
+    );
 }

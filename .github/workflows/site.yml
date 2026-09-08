@@ -17,7 +17,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: site
@@ -35,8 +35,13 @@ jobs:
       - name: Install
         run: npm ci
 
+      - uses: dtolnay/rust-toolchain@1.96.0
+
+      - name: Install browser
+        run: npx playwright install --with-deps chromium
+
       - name: Test
         run: npm test
 
-      - name: Build
-        run: npm run build
+      - name: Browser parity and production build
+        run: npm run test:parity
