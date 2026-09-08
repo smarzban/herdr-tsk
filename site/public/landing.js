@@ -28,11 +28,41 @@
   const cycle = document.querySelector("[data-cycle]");
   if (cycle) {
     const steps = [
-      { sec: "ON DECK", glyph: "○", status: "ready", key: "ctrl+s", next: "started" },
-      { sec: "IN MOTION", glyph: "▸", status: "started", key: "ctrl+b", next: "blocked" },
-      { sec: "ON DECK", glyph: "■", status: "blocked", key: "ctrl+b", next: "ready" },
-      { sec: "ON DECK", glyph: "○", status: "ready", key: ": review", next: "review" },
-      { sec: "ON DECK", glyph: "▲", status: "review", key: "ctrl+d", next: "done" },
+      {
+        sec: "ON DECK",
+        glyph: "○",
+        status: "ready",
+        key: "ctrl+s",
+        next: "started",
+      },
+      {
+        sec: "IN MOTION",
+        glyph: "●",
+        status: "started",
+        key: "ctrl+b",
+        next: "blocked",
+      },
+      {
+        sec: "ON DECK",
+        glyph: "■",
+        status: "blocked",
+        key: "ctrl+b",
+        next: "ready",
+      },
+      {
+        sec: "ON DECK",
+        glyph: "○",
+        status: "ready",
+        key: "ctrl+r",
+        next: "review",
+      },
+      {
+        sec: "ON DECK",
+        glyph: "▲",
+        status: "review",
+        key: "ctrl+d",
+        next: "done",
+      },
       { sec: "DONE", glyph: "✓", status: "done", key: "ctrl+o", next: "ready" },
     ];
     const sec = cycle.querySelector("[data-cycle-sec]");
@@ -122,34 +152,56 @@
     const DIVIDER = 9;
     const BESIDE_COLUMNS = 78;
 
-    const charWidth = () => (Number.parseFloat(getComputedStyle(board).fontSize) || 14) * 0.6;
+    const charWidth = () => {
+      const style = getComputedStyle(board);
+      const context = document.createElement("canvas").getContext("2d");
+      context.font = `${style.fontSize} ${style.fontFamily}`;
+      return context.measureText("0").width;
+    };
     const boardPadding = () => {
       const cs = getComputedStyle(board);
-      return (Number.parseFloat(cs.paddingLeft) || 0) + (Number.parseFloat(cs.paddingRight) || 0);
+      return (
+        (Number.parseFloat(cs.paddingLeft) || 0) +
+        (Number.parseFloat(cs.paddingRight) || 0)
+      );
     };
-    // Same measure the demo uses to pick peek vs slider: frame width over a 0.6em cell.
-    const columns = () => Math.floor(board.getBoundingClientRect().width / charWidth());
+    // Match the demo: usable content width divided by the measured monospace cell.
+    const columns = () =>
+      Math.round((board.clientWidth - boardPadding()) / charWidth());
     const minAgent = 180;
-    const maxAgent = () => split.clientWidth - DIVIDER - (40 * charWidth() + boardPadding());
+    const maxAgent = () =>
+      split.clientWidth - DIVIDER - (40 * charWidth() + boardPadding());
 
     const setAgent = (px) => {
       const w = Math.max(minAgent, Math.min(maxAgent(), Math.round(px)));
       split.style.setProperty("--agent-w", `${w}px`);
       if (divider) divider.setAttribute("aria-valuenow", String(w));
     };
-    const agentForBoardColumns = (n) => split.clientWidth - DIVIDER - n * charWidth();
+    const agentForBoardColumns = (n) =>
+      split.clientWidth - DIVIDER - (n * charWidth() + boardPadding());
 
+    let currentLayout = "full";
     const setLayout = (name) => {
+      currentLayout = name;
       const beside = name === "beside";
       split.classList.toggle("is-beside", beside);
       split.classList.toggle("is-full", !beside);
-      toggles.forEach((t) => t.setAttribute("aria-pressed", t.dataset.layout === name ? "true" : "false"));
+      toggles.forEach((t) =>
+        t.setAttribute(
+          "aria-pressed",
+          t.dataset.layout === name ? "true" : "false",
+        ),
+      );
       if (beside) setAgent(agentForBoardColumns(BESIDE_COLUMNS));
       readout();
       // Full terminal opens straight into the split (stage A); beside an agent the board is
       // narrow, so it returns to the plain board. The demo module registers this listener
-      // after the first call here, which is fine: the demo also starts on the plain board.
-      frame.dispatchEvent(new CustomEvent("tsk:set-stage", { detail: beside ? "board" : "split" }));
+      // after the first call here; tsk:ready replays the selected layout through this event.
+      frame.dispatchEvent(
+        new CustomEvent("tsk:set-stage", {
+          detail: beside ? "board" : "split",
+        }),
+      );
     };
 
     const readout = () => {
@@ -159,7 +211,9 @@
       cols.innerHTML = `<b>${n}</b> cols · ${wide ? "stage slider" : "peek"}`;
     };
 
-    toggles.forEach((t) => t.addEventListener("click", () => setLayout(t.dataset.layout)));
+    toggles.forEach((t) =>
+      t.addEventListener("click", () => setLayout(t.dataset.layout)),
+    );
 
     if (divider) {
       let dragging = false;
@@ -189,7 +243,10 @@
         e.preventDefault();
         e.stopPropagation();
         const step = 4 * charWidth();
-        const current = Number.parseFloat(getComputedStyle(split).getPropertyValue("--agent-w")) || 0;
+        const current =
+          Number.parseFloat(
+            getComputedStyle(split).getPropertyValue("--agent-w"),
+          ) || 0;
         setAgent(current + (e.key === "ArrowLeft" ? -step : step));
       });
     }
@@ -198,15 +255,20 @@
       new ResizeObserver(() => {
         if (split.classList.contains("is-beside")) {
           // Keep the board at 78 columns until the user drags the divider.
-          if (!split.dataset.userSized) setAgent(agentForBoardColumns(BESIDE_COLUMNS));
+          if (!split.dataset.userSized)
+            setAgent(agentForBoardColumns(BESIDE_COLUMNS));
         }
         readout();
       }).observe(split);
       new ResizeObserver(readout).observe(board);
-      if (divider) divider.addEventListener("pointerdown", () => { split.dataset.userSized = "1"; });
+      if (divider)
+        divider.addEventListener("pointerdown", () => {
+          split.dataset.userSized = "1";
+        });
     }
 
-    setLayout("beside");
+    frame.addEventListener("tsk:ready", () => setLayout(currentLayout));
+    setLayout("full");
   }
 
   // ── copy buttons ─────────────────────────────────────────────────────────

@@ -10,12 +10,20 @@
     "preview": "astro preview",
     "astro": "astro",
     "generate-apple-touch": "node scripts/generate-apple-touch.mjs",
-    "test": "node --test"
+    "test": "node --test test/*.test.mjs",
+    "test:parity": "cargo build --release --manifest-path ../Cargo.toml --bin tsk && npm run build && npm run parity:reference && playwright test",
+    "parity:reference": "TSK_PARITY_OUTPUT=\"$PWD/parity-reference\" cargo test --manifest-path ../Cargo.toml --test demo_parity -- --ignored",
+    "format": "prettier --write public/board-demo.js public/task-steps.js public/board-wrap.js public/landing.js \"parity/*.mjs\" playwright.config.mjs"
   },
   "dependencies": {
     "@astrojs/sitemap": "^3.7.2",
     "@astrojs/starlight": "^0.41.10",
+    "@vercel/analytics": "2.0.1",
     "astro": "^7.1.6",
     "sharp": "^0.35.3"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "prettier": "^3.9.6"
   }
 }

@@ -28,6 +28,8 @@ For scriptable board work, use `tsk add`, `tsk list`, `tsk status`, `tsk edit`, 
 
 ### Board
 
+- Selected tasks use a `▸` selection arrow beside the status glyph (`●` for Started) and number, with no filled highlight; active tabs are bright and underlined, inactive tabs dim.
+
 - The board keeps persistent destinations **desk** · **selected project** · **projects**
   (`1`/`2`/`3`) in every normal board surface. `p` opens the project picker; selecting a
   project fills slot 2 and opens its board. **desk**: NEEDS YOU across live scopes, global
@@ -75,7 +77,7 @@ For scriptable board work, use `tsk add`, `tsk list`, `tsk status`, `tsk edit`, 
   stage is never persisted and survives resizes (0/A render the single board below 110, G/F
   the single task page). Exactly one footer spans the frame: rule, status row (with a dim
   stage crumb on the right), verb bar following focus. The task column paints its header on
-  the selector row — `▸ T12 title … status · tsk` with the status glyph restored, DIM in A
+  the selector row — `● T12 title … started · tsk` with the status glyph restored, DIM in A
   and BOLD in G/F, the slot reading `editing <field>` or `unsaved` — and a dim dash rule on
   the row under it, instead of the in-page header. A click on the left side takes focus
   left: a rail row click selects the row and lands the board beside it. Starting a field edit

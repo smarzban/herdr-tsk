@@ -9,8 +9,8 @@
 │                                                                               ▌│
 │ IN MOTION ─────────────────────────────────────────────────────────────────2  ▌│
 │                                                                               ▌│
-│  ▸ T1 Smoke-test worktree dispatch                                            ▌│
-│  ▸ T2 Edit target binding pin                                                 ▌│
+│▸ ● T1 Smoke-test worktree dispatch                                            ▌│
+│  ● T2 Edit target binding pin                                                 ▌│
 │                                                                               ▌│
 │ ON DECK · desk ────────────────────────────────────────────────────────────1  ▌│
 │                                                                               ▌│

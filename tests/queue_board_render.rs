@@ -654,7 +654,7 @@ fn standard_78x24_fixture_has_selector_list_rule_status_verb_and_no_other_chrome
         "desk tab must include the desk ON DECK header:\n{list}"
     );
     assert!(
-        list.contains('▸') && list.contains('○'),
+        list.contains('●') && list.contains('○'),
         "status glyphs must appear:\n{list}"
     );
     assert!(
@@ -1157,7 +1157,7 @@ fn compact_77x24_and_48x19_and_40x10_paint_glyph_title_only_rows_and_leq_5_verb_
             .collect::<Vec<_>>()
             .join("\n");
         assert!(
-            body.contains('○') || body.contains('▸') || body.contains('■'),
+            body.contains('○') || body.contains('●') || body.contains('■'),
             "{w}x{h} must paint glyphs:\n{body}"
         );
         assert!(

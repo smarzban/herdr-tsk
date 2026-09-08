@@ -9,8 +9,8 @@
 │         │   set status: ready                                        │         │
 │ IN MOTIO│   set status: started                                      │───────2 │
 │         │ ▸ set status: blocked                                      │         │
-│  ▸ T1 Sm│   set status: review                                       │         │
-│  ▸ T2 Ed│                                                            │         │
+│▸ ● T1 Sm│   set status: review                                       │         │
+│  ● T2 Ed│                                                            │         │
 │         ├────────────────────────────────────────────────────────────┤         │
 │ ON DECK │ ↑↓ move · enter run · esc close                            │───────1 │
 │         └────────────────────────────────────────────────────────────┘         │

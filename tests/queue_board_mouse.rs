@@ -2263,7 +2263,7 @@ fn drag_selection_copies_painted_task_title_not_undeclared_chrome() {
         "selection should include the task title, got {text:?}"
     );
     assert!(
-        !text.contains('○') && !text.contains('▸'),
+        !text.contains('○') && !text.contains('●'),
         "status glyph is chrome and must stay out of the copy, got {text:?}"
     );
 
@@ -2417,7 +2417,7 @@ fn task_page_title_copy_excludes_glyph_and_status_word() {
         .position(|row| row.contains("title only please"))
         .expect("page paints the title") as u16;
     assert!(
-        rows[title_y as usize].contains('▸'),
+        rows[title_y as usize].contains('●'),
         "sanity: status glyph is on the title row"
     );
     assert!(
