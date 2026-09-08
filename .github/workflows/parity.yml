@@ -1,0 +1,43 @@
+name: Demo parity
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "tests/fixtures/demo-parity/**"
+      - "tests/demo_parity.rs"
+      - "site/public/**"
+      - "site/parity/**"
+      - "site/src/pages/index.astro"
+      - "site/src/styles/landing.css"
+      - "site/package*.json"
+      - "site/playwright.config.mjs"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/parity.yml"
+permissions:
+  contents: read
+concurrency:
+  group: parity-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  parity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: site
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+      - uses: dtolnay/rust-toolchain@1.96.0
+      - uses: Swatinem/rust-cache@v2
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:parity

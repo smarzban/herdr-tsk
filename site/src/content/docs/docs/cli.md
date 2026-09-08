@@ -203,7 +203,7 @@ tsk project unarchive <name> [--state-dir <dir>]
 
 `<name>` follows the `!p` rules: a project basename (case-insensitive) or a
 `/path` verbatim. Archiving writes one lazy project record; unarchiving removes
-it, and every task returns in the status it had — a task's own archived flag is
+it, and every task returns in the status it had. A task's own archived flag is
 independent. Output is `archived project <short>` / `unarchived project <short>`,
 idempotent on repeat. A name matching no project that has tasks exits 1 with
 `no project named <name> has tasks`.
@@ -220,7 +220,7 @@ idempotent on repeat. A name matching no project that has tasks exits 1 with
 Add refusal codes: `empty-title`, `invalid-title`, `invalid-thread`, `invalid-item`,
 `project-archived`. `project-archived` prints `project <name> is archived. Use
 --desk, -p <other project>, or tsk project unarchive <name>` and persists
-nothing — it covers the cwd default and an explicit `-p`.
+nothing. This covers the cwd default and an explicit `-p`.
 Any C0 control in a title or step text is `invalid-title` / `invalid-step-text`
 before trimming.
 

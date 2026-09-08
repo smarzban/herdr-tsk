@@ -7,7 +7,7 @@ Below 110 usable columns, `Enter` opens the selected task full height. At 110
 usable columns or wider the page is the right column of the
 [stage slider](/docs/board/#wide-stage-slider): a preview beside the board in stage
 A, the focused page beside a dim rail in G, or the whole frame in F. Its header sits
-on the selector row, `▸ T12 title … started · tsk` with the status glyph restored,
+on the selector row, `● T12 title … started · tsk` with the status glyph restored,
 dim in A and bold in G and F, and a dash rule on the row under it.
 With no selection the column reads `no task` and is inert. `←` from G parks the page
 beside the board without resetting page scroll or the step cursor; `→` brings it back.
@@ -89,13 +89,3 @@ updates the task column and no inline peek opens.
 Text on the page wraps. It does not truncate.
 
 See [keys](/docs/keys/) for the full chord table.
-
-## Website demo
-
-The browser demo includes task notes, step counts and rows, and pinned date metadata.
-Tab selects steps; Enter toggles completion without changing task status. Bare `a`
-adds, `e` renames the selected step, and two consecutive `x` presses remove it.
-Enter parks a rename; Shift+Enter saves it. Escape cancels the active editor, then
-a second Escape cancels staged changes. New steps save independently on Enter and
-open the next empty editor. Full task-field editing and save recovery are still
-outside this verified demo subset.

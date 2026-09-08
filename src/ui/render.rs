@@ -771,7 +771,7 @@ fn local_rect(area: Rect, local: Rect) -> Rect {
 pub fn status_glyph(status: HumanStatus) -> &'static str {
     match status {
         HumanStatus::Ready => "○",
-        HumanStatus::Started => "▸",
+        HumanStatus::Started => "●",
         HumanStatus::Blocked => "■",
         HumanStatus::Review => "▲",
         HumanStatus::Done => "✓",
@@ -793,7 +793,7 @@ pub fn draw_queue_frame(
 
 /// Paint the stage G rail: the board list at rail width, no meta column, no done drawer,
 /// wrapped titles with a four-cell continuation indent, and every cell dimmed. The selected
-/// row paints a hollow `▹` marker instead of reverse video. `geo` is a footer-less column
+/// row paints a selection arrow beside its status glyph, without reverse video. `geo` is a footer-less column
 /// geometry ([`crate::ui::tier::resolve_column`]); the shared footer paints separately.
 pub fn draw_rail_frame(
     frame: &mut Frame<'_>,
@@ -853,11 +853,11 @@ pub fn task_header_title_room(width: usize, glyph_w: usize, id_w: usize, state_w
         .saturating_sub(state_w)
 }
 
-/// Two-row header of the wide task column: `▸ T12 title … started · tsk` on the selector
+/// Two-row header of the wide task column: `● T12 title … started · tsk` on the selector
 /// row, then a full-width dash rule on the row under it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TaskColumnHeader<'a> {
-    /// Status glyph (`▸`, `○`, …) restored before the identifier.
+    /// Status glyph (`●`, `○`, …) restored before the identifier.
     pub glyph: &'a str,
     /// Dim `T<number>` prefix on a persisted task; drafts have none.
     pub identifier: Option<&'a str>,

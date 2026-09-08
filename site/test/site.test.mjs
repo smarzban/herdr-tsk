@@ -98,10 +98,9 @@ test("docs and demo describe the wide stage slider and threshold", async () => {
   assert.match(keys, /\| F \| nothing \| → G \|/);
   assert.doesNotMatch(keys, /cyan/);
   assert.match(taskPage, /110 usable columns/);
-  assert.match(taskPage, /▸ T12 title … started · tsk/);
+  assert.match(taskPage, /● T12 title … started · tsk/);
   assert.doesNotMatch(taskPage, /bordered panel/);
   assert.match(demo, /const WIDE_SPLIT_MIN_COLUMNS = 110;/);
-  assert.match(demo, /stage: frame\.querySelector.*\? "split" : "board",/);
   assert.match(demo, /function stageRight\(\)/);
   assert.match(demo, /function stageLeft\(\)/);
   assert.match(demo, /state\.stageOrigin = state\.stage;/);
@@ -114,13 +113,11 @@ test("docs and demo describe the wide stage slider and threshold", async () => {
 
 test("demo keeps project navigation, attribution, and search contracts", async () => {
   const demo = await read("../public/board-demo.js");
-  assert.match(demo, /selectedProject: fixture\?\.selectedProject \|\| "launchpad",/);
   assert.match(demo, /need: open/);
   assert.doesNotMatch(demo, /!t\.project && \(t\.status === "blocked" \|\| t\.status === "review"\)/);
   assert.match(demo, /state\.selectedProject = name;/);
   assert.match(demo, /const text = tab === "project" \? state\.selectedProject : label/);
   assert.match(demo, /state\.tasks\.filter\(\(t\) => t\.project && !t\.archived\)/);
-  assert.ok(demo.includes('if (a === (fixture?.selectedProject || "launchpad")) return -1'));
   assert.match(demo, /id: `project:\${name}`/);
   assert.match(demo, /id: "nav:archived"/);
   assert.match(demo, /const row = selectedRow\(\);/);

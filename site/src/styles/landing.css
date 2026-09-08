@@ -597,8 +597,8 @@ html[data-theme="light"] .pane {
 }
 
 .board .sel-text {
-  color: var(--sel-fg);
-  background: var(--accent-soft);
+  color: var(--bg);
+  background: var(--ink);
 }
 
 .board .meta,
@@ -622,7 +622,6 @@ html[data-theme="light"] .pane {
 }
 
 .tsk-tab,
-.tsk-chip,
 .tsk-group,
 .tsk-row,
 .tsk-done-count,
@@ -646,17 +645,9 @@ html[data-theme="light"] .pane {
   color: var(--ink-2);
 }
 
-.tsk-tab.is-on,
-.tsk-chip {
+.tsk-tab.is-on {
   color: var(--ink);
   font-weight: 500;
-}
-
-.tsk-tab.is-on {
-  text-decoration: underline;
-  text-decoration-color: var(--accent);
-  text-underline-offset: 0.35em;
-  text-decoration-thickness: 2px;
 }
 
 .tsk-list {
@@ -727,13 +718,7 @@ html[data-theme="light"] .pane {
   cursor: copy;
 }
 
-.tsk-row.is-sel .sel-text {
-  color: var(--sel-fg);
-  background: var(--accent-soft);
-}
-
-.tsk-row.is-flash,
-.tsk-row.is-flash .sel-text {
+.tsk-row.is-flash {
   background: var(--accent-glow);
 }
 
@@ -957,11 +942,6 @@ html[data-theme="light"] .pane {
 
 .tsk-rail {
   opacity: 0.65;
-}
-
-.tsk-rail .tsk-row.is-sel .sel-text {
-  background: transparent;
-  color: var(--ink);
 }
 
 .tsk-rail .tsk-row-main {
@@ -2522,15 +2502,8 @@ html[data-theme="light"] .pane {
   padding: 0;
   white-space: pre;
 }
-.board .sel-text, .board .tsk-row.is-sel .sel-text {
-  color: var(--bg);
-  background: var(--ink);
-}
 .board .tsk-row.is-flash {
   background: var(--line);
-}
-.board .tsk-tab.is-on {
-  text-decoration-color: currentColor;
 }
 .tsk-single-task {
   display: flex;
@@ -2577,9 +2550,6 @@ html[data-theme="light"] .pane {
 .board .tsk-tab {
   flex-shrink: 0;
 }
-.board .tsk-project-selector {
-  margin-bottom: 1lh;
-}
 
 /* Task page: one scrolling notes/steps stream and a pinned metadata row. */
 .tsk-task-column { min-height: 0; }
@@ -2619,25 +2589,21 @@ html[data-theme="light"] .pane {
 .board .tsk-tabs { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0; white-space: pre; }
 .tsk-tab-group { display: inline-flex; min-width: 0; }
 .tsk-tab-group .tsk-tab { padding: 0; }
-.tsk-tab-arrow, .tsk-view-control, .tsk-picker-tabs button { appearance: none; border: 0; padding: 0; background: none; font: inherit; color: inherit; cursor: pointer; }
+.tsk-tab-arrow, .tsk-view-control { appearance: none; border: 0; padding: 0; background: none; font: inherit; color: inherit; cursor: pointer; }
 .tsk-tab-group { color: var(--dim); }
 .tsk-tab-group.is-on { color: var(--ink); text-decoration: underline; text-underline-offset: .2em; }
 .tsk-view-control { margin-left: auto; }
-.board .tsk-row.is-sel, .board .tsk-row.is-sel .sel-text { background: transparent; color: var(--ink); }
+.board .tsk-row.is-sel { background: transparent; color: var(--ink); }
 .tsk-project-row, .tsk-project-legend { display: grid; grid-template-columns: minmax(0,1fr) 10ch 11ch 7ch; align-items: baseline; padding: 0 2ch 0 1ch; gap: 0; text-align: right; font: inherit; line-height: inherit; }
 .tsk-project-table.with-threads .tsk-project-row, .tsk-project-table.with-threads .tsk-project-legend { grid-template-columns: minmax(0,1fr) var(--project-thread-width) 10ch 11ch 7ch; }
 .tsk-project-row { appearance: none; border: 0; background: none; color: var(--ink); width: 100%; cursor: pointer; }
 .tsk-project-name, .tsk-project-legend > :first-child { text-align: left; white-space: pre; }
 .tsk-project-row.is-selected .tsk-project-name > span:first-child, .tsk-project-row .is-bold { font-weight: bold; }
 .tsk-project-legend { color: var(--dim); margin-bottom: 1lh; }
-.tsk-picker-tabs { padding-left: 1ch; color: var(--dim); }
-.tsk-picker-tabs .is-on { color: var(--ink); font-weight: bold; }
-.tsk-picker-rule { height: 1lh; background: linear-gradient(var(--dim),var(--dim)) center / 100% 1px no-repeat; }
 .board .tsk-box { top: 50%; transform: translate(-50%,-50%); width: min(62ch,calc(100% - 4ch)); background: var(--bg); border: 1px solid var(--dim); border-radius: 0; box-shadow: none; }
 .board .tsk-box-body { padding: 1lh 1ch; }
 .board .tsk-box-foot { padding: .5lh 1ch; }
 .board .tsk-pal-row { padding: 0; white-space: pre-wrap; }
-.board .tsk-pal-row .sel-text { background: var(--ink); color: var(--bg); }
 .board .tsk-rail .tsk-tab { max-width: 8ch; overflow: hidden; text-overflow: ellipsis; }
 .board .tsk-wide-split { min-height: 0; }
 .board .tsk-wide-split.is-rail { grid-template-columns: 32ch 2ch minmax(0,1fr); }
@@ -2651,7 +2617,6 @@ html[data-theme="light"] .pane {
 .tsk-rail-continuation { display: block; white-space: pre; }
 
 /* The group owns one underline, including the project dropdown arrow. */
-.board .tsk-tab-group .tsk-tab.is-on { text-decoration: none; }
 .demo-invitation { margin-bottom: 1.5rem; }
 .demo-invitation h2 { margin: 0 0 .5rem; font-size: 1.4rem; }
 .demo-invitation p { margin: 0; color: var(--ink); max-width: 65ch; }

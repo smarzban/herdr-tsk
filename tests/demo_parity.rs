@@ -34,7 +34,7 @@ fn key(
         apply_intent(state, model, intent, None).unwrap();
     }
 }
-fn capture(model: &BoardModel, width: u16, name: &str) -> String {
+fn capture(model: &BoardModel, width: u16, _name: &str) -> String {
     let mut terminal = Terminal::new(TestBackend::new(width, 24)).unwrap();
     terminal
         .draw(|f| {
@@ -50,10 +50,14 @@ fn capture(model: &BoardModel, width: u16, name: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n");
+
+    text
+}
+fn export_reference(text: &str, width: u16, name: &str) {
     if let Ok(dir) = std::env::var("TSK_PARITY_OUTPUT") {
         fs::create_dir_all(&dir).unwrap();
         let dir = PathBuf::from(dir);
-        fs::write(dir.join(format!("app-{width}-{name}.txt")), &text).unwrap();
+        fs::write(dir.join(format!("app-{width}-{name}.txt")), text).unwrap();
         if name == "page" {
             let lines: Vec<_> = text
                 .lines()
@@ -93,10 +97,27 @@ fn capture(model: &BoardModel, width: u16, name: &str) -> String {
             .unwrap();
         }
     }
-    text
 }
+
 #[test]
 fn shared_fixture_first_flow_and_peek_references() {
+    fixture_flow(false);
+}
+
+#[test]
+#[ignore = "regenerates browser reference artifacts"]
+fn regenerate_parity_references() {
+    fixture_flow(true);
+}
+
+fn fixture_flow(export: bool) {
+    let capture = |model: &BoardModel, width: u16, name: &str| {
+        let text = capture(model, width, name);
+        if export {
+            export_reference(&text, width, name);
+        }
+        text
+    };
     for width in [40, 78, 109, 110] {
         let mut state: DomainState =
             serde_json::from_str(include_str!("fixtures/demo-parity/store.json")).unwrap();

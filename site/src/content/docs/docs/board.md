@@ -9,6 +9,8 @@ from the keyboard.
 
 ## Tabs
 
+The active tab is bright and underlined; inactive tabs are dim.
+
 - **desk**: your overview. NEEDS YOU is blocked or review work across all live
   projects and your desk. IN MOTION is every started task, from any project. ON DECK is desk work
   that is ready: general to-dos, future projects, anything that belongs to no
@@ -53,14 +55,14 @@ while focused it shows the query and caret there. Letters, digits, Backspace, an
 bracketed paste edit the query, while Enter opens the selected match and Esc clears and
 closes it. No search row appears above the project table.
 
-Each persisted row begins with a dim store-global identifier such as
-`T30`. Click the identifier to copy it (`copy sent: T30`). Collapsed task rows
+Selected task rows use `▸` without a filled highlight. The status glyph follows
+(`●` for Started), then a dim store-global identifier such as `T30`. Click the identifier to copy it (`copy sent: T30`). Collapsed task rows
 show no project or thread label. Opening peek shows the project on global rows,
 or `#thread` on project rows, on a dim `└─ label` line below the peek notes.
 That line is read-only peek content, and long labels wrap without truncation.
 Titles use the full width and wrap two cells before the right edge.
 Task-page informational dates remain in the footer. A scoped
-group with nothing open reads `no open tasks here — p rescope or + add`.
+group with nothing open offers `p` to rescope or `+` to add a task.
 
 ## Sections
 
@@ -172,7 +174,7 @@ open, clicking a task row discards the draft and selects that row.
 `p` opens the project picker with two tabs: main (unarchived projects plus
 Home) and archived. `Tab` or the arrows flip tabs; the archived tab lists every
 archived project and reads `no archived projects` when empty. `ctrl+f` on a
-main-tab project archives it in place — the picker stays open and the project
+main-tab project archives it in place. The picker stays open and the project
 leaves the main list, the projects index, desk IN MOTION, and the rail.
 `ctrl+f` or `ctrl+u` on an archived-tab entry unarchives it, and every task
 returns in the status it had. A dim rule sits under the tabs row. The main tab's
@@ -238,7 +240,7 @@ letters appear in order anywhere in a label, so `ssr` finds `set status: review`
 Mutating keys always use Ctrl.
 
 `?` opens the help card, which lists the board chords and, below them, the task-page
-chords. Any key closes it. Help, the palette, and the project
+chords. `Esc`, `?`, or `q` closes it. Help, the palette, and the project
 picker are boxed cards: the `[x]` in the corner or a click outside also closes them.
 
 ## When a save fails
@@ -248,14 +250,3 @@ Retry or Cancel` and the board keeps your draft. `r` or `Enter` retries and
 answers `saved`; `c` or `Esc` cancels and drops the change (`save cancelled`).
 Until you choose, mutating verbs are held; moving around, peeking, and quitting
 still work. `Esc` does not skip the choice.
-
-## Website demo
-
-The browser demo supports a repeatable desk → select → start → open → Escape flow.
-Titles retain all text and align continuation lines beneath the title; collapsed rows
-have no attribution, and narrow peeks show project or thread labels beneath notes.
-Browser status shortcuts are bare letters. On an open task, Tab selects steps, Enter toggles, `a` adds, `e` renames the selected
-step, and `x` twice removes it. Shift+Enter saves a rename; Escape cancels.
-The demo is a subset: full task editing, project archive and save recovery are not yet reproduced. It is not a complete app emulator.
-
-Selected task rows use a plain selection arrow before the status symbol and task number, without a filled highlight. Active board tabs use bright underlined text; inactive tabs remain dim.

@@ -16,7 +16,7 @@ import time
 
 import pyte
 
-repo = pathlib.Path(__file__).resolve().parents[2]
+repo = pathlib.Path(__file__).resolve().parents[1]
 output = pathlib.Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else repo / 'site/parity-reference/pty'
 output.mkdir(parents=True, exist_ok=True)
 binary = repo / 'target/release/tsk'

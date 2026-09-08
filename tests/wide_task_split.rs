@@ -259,7 +259,7 @@ fn stage_zero_and_full_task_render_the_standard_tier_at_130x24() {
     assert!(rows[2].trim().is_empty(), "blank above IN MOTION");
     assert!(rows[3].starts_with(" IN MOTION ─"));
     assert!(rows[4].trim().is_empty(), "blank between header and rows");
-    assert!(rows[5].starts_with("▸ ▸ T12 Frame the wide task view"));
+    assert!(rows[5].starts_with("▸ ● T12 Frame the wide task view"));
     assert!(!rows.iter().any(|row| row.contains("└─ tsk")));
     assert!(rows[6].trim().is_empty());
     assert!(rows[7].starts_with(" ON DECK · desk ─"));
@@ -281,7 +281,7 @@ fn stage_zero_and_full_task_render_the_standard_tier_at_130x24() {
     );
     let (rows, _) = render(&model, 130, 24);
     assert!(rows[0].trim().is_empty(), "F keeps the blank row");
-    assert!(rows[1].starts_with(" ▸ T12 Frame the wide task view"));
+    assert!(rows[1].starts_with(" ● T12 Frame the wide task view"));
     assert!(rows[1].trim_end().ends_with("started · tsk"));
     assert!(
         rows[2].chars().all(|c| c == '─'),
@@ -304,7 +304,7 @@ fn task_column_header_replaces_the_in_pane_header_with_stage_weight() {
         let rows = rows_of(&buffer);
         let header = column_text(&rows, column, 1);
         assert!(
-            header.starts_with(" ▸ T12 Frame the wide task view"),
+            header.starts_with(" ● T12 Frame the wide task view"),
             "{stage:?}: {header}"
         );
         assert!(
@@ -317,7 +317,7 @@ fn task_column_header_replaces_the_in_pane_header_with_stage_weight() {
         );
         let body = region_text(&rows, Rect::new(column.x, 3, column.width, 18));
         assert!(
-            !body.contains("▸ T12"),
+            !body.contains("● T12"),
             "{stage:?}: in-pane header must not paint"
         );
         assert!(
@@ -352,7 +352,7 @@ fn stage_a_board_has_no_attribution_column() {
     let geometry = resolve_responsive(130, 24, WideStage::Split);
     let (rows, _) = render(&model, 130, 24);
     let row = column_text(&rows, geometry.board, 5);
-    assert!(row.starts_with("▸ ▸ T12 Frame"), "{row}");
+    assert!(row.starts_with("▸ ● T12 Frame"), "{row}");
     assert!(!rows.iter().any(|row| row.contains("└─ tsk")));
     assert_eq!(rows[5].chars().nth(geometry.rule.x as usize), Some('│'));
 }
@@ -372,7 +372,7 @@ fn rail_wraps_titles_with_indent_four_and_dims_every_cell() {
     let rail_rows: Vec<String> = (0..rule_y).map(|y| column_text(&rows, rail, y)).collect();
     let first = rail_rows
         .iter()
-        .position(|row| row.starts_with("▸ ▸ T12 "))
+        .position(|row| row.starts_with("▸ ● T12 "))
         .expect("selected rail row retains the status beside its selection arrow");
     let continuations: Vec<&String> = rail_rows[first + 1..]
         .iter()
@@ -766,7 +766,7 @@ fn narrow_board_is_unchanged_by_the_stage_model() {
         "selector: {:?}",
         rows[1]
     );
-    assert!(rows[5].starts_with("▸ ▸ T12 Frame the wide task view"));
+    assert!(rows[5].starts_with("▸ ● T12 Frame the wide task view"));
     assert!(
         !rows[22].contains("→ pane"),
         "no crumb below the wide threshold"
