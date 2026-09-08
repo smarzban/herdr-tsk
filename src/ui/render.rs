@@ -164,9 +164,7 @@ pub fn paint_task_row_lines(
         identifier,
     });
     let indent = " ".repeat(title_x);
-    let continuation_style = if row.selected {
-        style_reverse()
-    } else if row.dim {
+    let continuation_style = if row.dim {
         style_dim()
     } else if row.title_bold {
         style_bold()
@@ -206,7 +204,8 @@ fn paint_task_row_with_indent(
     let title_budget = row_w;
 
     let glyph = super::terminal_text(row.glyph);
-    let prefix = format!("{}  {glyph} ", " ".repeat(leading_indent));
+    let marker = if row.selected { "▸ " } else { "  " };
+    let prefix = format!("{}{marker}{glyph} ", " ".repeat(leading_indent));
     let identifier = row.identifier.unwrap_or_default();
     let identifier_gap = if identifier.is_empty() { "" } else { " " };
     let title_room = title_budget
@@ -221,9 +220,7 @@ fn paint_task_row_with_indent(
 
     let leader = " ".repeat(row_w.saturating_sub(left_w));
 
-    let (title_style, identifier_style, leader_style) = if row.selected {
-        (style_reverse(), style_reverse_dim(), style_reverse_dim())
-    } else if row.dim {
+    let (title_style, identifier_style, leader_style) = if row.dim {
         (style_dim(), style_dim(), style_dim())
     } else {
         (
@@ -4026,12 +4023,9 @@ fn paint_rail_row_lines(
     leading_indent: usize,
 ) -> Vec<TaskRowLine> {
     let row_w = row_width as usize;
-    let mark = if selected {
-        "▹"
-    } else {
-        status_glyph(task.status)
-    };
-    let prefix = format!("{}  {mark} ", " ".repeat(leading_indent));
+    let marker = if selected { "▸ " } else { "  " };
+    let glyph = status_glyph(task.status);
+    let prefix = format!("{}{marker}{glyph} ", " ".repeat(leading_indent));
     let identifier_width = identifier.map(display_width).unwrap_or(0);
     let identifier_gap = usize::from(identifier_width > 0);
     let prefix_cells = display_width(&prefix);
@@ -4427,11 +4421,7 @@ fn paint_selector_row(
         ));
         spans.push(Span::styled(
             shown,
-            if active {
-                style_reverse_bold()
-            } else {
-                style_dim()
-            },
+            if active { style_heading() } else { style_dim() },
         ));
         left_width += w;
     }
@@ -4927,7 +4917,7 @@ mod tests {
             .find(|span| span.content.as_ref() == "T30")
             .expect("selected identifier span");
         assert!(identifier.style.add_modifier.contains(Modifier::DIM));
-        assert!(identifier.style.add_modifier.contains(Modifier::REVERSED));
+        assert!(!identifier.style.add_modifier.contains(Modifier::REVERSED));
         assert!(!identifier.style.add_modifier.contains(Modifier::UNDERLINED));
     }
 

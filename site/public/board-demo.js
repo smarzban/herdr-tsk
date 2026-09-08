@@ -145,6 +145,11 @@ import { parseCapture } from "./capture.js";
     selectedProject: fixture?.selectedProject || "tsk",
     focusProject: null,
     projectQuery: "",
+    threadFilter: null,
+    projectView: null,
+    filterI: 0,
+    pickerArchived: false,
+    archivedProjects: new Set(),
     collapsed: new Set(),
     selectedId: "t1",
     peekId: null,
@@ -238,15 +243,18 @@ import { parseCapture } from "./capture.js";
       state.tasks.filter((t) => t.project && !t.archived).map((t) => t.project),
     );
     return [...names].sort((a, b) => {
-      if (a === "tsk") return -1;
-      if (b === "tsk") return 1;
+      if (a === (fixture?.selectedProject || "tsk")) return -1;
+      if (b === (fixture?.selectedProject || "tsk")) return 1;
       return a.localeCompare(b);
     });
   }
 
+  function projectPath(name) {
+    return state.tasks.find(t=>t.project===name)?.scope?.project?.path || `/projects/${name}`;
+  }
   function matchingProjectNames() {
     const query = state.projectQuery.trim().toLowerCase();
-    return projectNames().filter((name) => !query || name.toLowerCase().includes(query));
+    return projectNames().filter((name) => !state.archivedProjects.has(name) && (!query || name.toLowerCase().includes(query)));
   }
 
   function selectedTask() {
@@ -274,21 +282,49 @@ import { parseCapture } from "./capture.js";
 
   function archivedInScope() {
     const archived = state.tasks.filter((t) => t.archived).sort(byUpdated);
-    if (state.focusProject) {
+    if (state.focusProject || (state.tab === "projects" && state.projectView !== null)) {
       const inP = (t) =>
-        state.focusProject === "desk" ? !t.project : t.project === state.focusProject;
+        !state.focusProject || (state.focusProject === "desk" ? !t.project : t.project === state.focusProject);
       return archived.filter(inP);
     }
     return archived;
   }
 
+  function filterOptions() {
+    const project = state.focusProject;
+    const tasks = state.tasks.filter(t => !t.archived && !state.archivedProjects.has(t.project) && t.status !== "done" && (!project || t.project === project));
+    const names = [...new Set(tasks.map(t => t.thread).filter(Boolean))].sort();
+    return [
+      {value: null, label: project ? `All tasks  ${tasks.length}` : "Overview"},
+      ...names.map(name => ({value:name,label:`#${name}  ${tasks.filter(t=>t.thread===name).length}`})),
+      ...(project ? [{value:"",label:`Without a thread  ${tasks.filter(t=>!t.thread).length}`}] : []),
+    ];
+  }
+  function openFilter() {
+    if (steps.dirty || steps.editor) return;
+    state.overlay = "filter";
+    const value = state.focusProject ? state.threadFilter : state.projectView;
+    state.filterI = Math.max(0,filterOptions().findIndex(o=>o.value===value));
+  }
+  function chooseFilter(index) {
+    const option = filterOptions()[index];
+    if (!option) return;
+    if (state.focusProject) state.threadFilter=option.value;
+    else state.projectView=option.value;
+    state.overlay=null; state.peekId=null; state.stage="board";
+  }
+  function renderFilter() {
+    const title = state.focusProject ? "thread filter" : "projects View";
+    return `<div class="tsk-box" role="dialog" aria-label="${title}"><div class="tsk-box-top"><span class="tsk-box-title">${title}</span><button type="button" class="tsk-box-close" data-close="1">[x]</button></div><div class="tsk-box-body">${filterOptions().map((o,i)=>`<div class="tsk-pal-row" data-filter-option="${i}"><span class="${i===state.filterI ? "sel-text" : ""}">${i===state.filterI?"▸":" "} ${esc(o.label)}</span></div>`).join("")}</div><div class="tsk-box-foot">↑↓ move · enter choose · esc close</div></div>`;
+  }
   function visibleTasks() {
     // Hidden (archived) tasks leave every working view.
-    const open = state.tasks.filter((t) => t.status !== "done" && !t.archived);
+    const matchesThread = t => state.focusProject ? state.threadFilter === null || (t.thread || "") === state.threadFilter : state.tab !== "projects" || state.projectView === null || t.thread === state.projectView;
+    const open = state.tasks.filter((t) => t.status !== "done" && !t.archived && !state.archivedProjects.has(t.project) && matchesThread(t));
     const done = state.tasks.filter((t) => t.status === "done" && !t.archived).sort(byUpdated);
-    if (state.focusProject) {
+    if (state.focusProject || (state.tab === "projects" && state.projectView !== null)) {
       const inP = (t) =>
-        state.focusProject === "desk" ? !t.project : t.project === state.focusProject;
+        !state.focusProject || (state.focusProject === "desk" ? !t.project : t.project === state.focusProject);
       return {
         started: open.filter((t) => inP(t) && t.status === "started").sort(byUpdated),
         review: open.filter((t) => inP(t) && t.status === "review").sort(byUpdated),
@@ -343,7 +379,7 @@ import { parseCapture } from "./capture.js";
       return rows;
     }
 
-    if (state.focusProject) {
+    if (state.focusProject || (state.tab === "projects" && state.projectView !== null)) {
       const v = visibleTasks();
       const need = [...v.review, ...v.blocked].sort(byUpdated);
       if (need.length) {
@@ -426,7 +462,7 @@ import { parseCapture } from "./capture.js";
 
   function metaFor(task) {
     const bits = [];
-    if (state.tab === "desk") bits.push(projectName(task));
+    if (!state.focusProject && task.project) bits.push(projectName(task));
     if (state.focusProject && task.thread) bits.push(`#${task.thread}`);
     return bits.join(" · ");
   }
@@ -483,7 +519,7 @@ import { parseCapture } from "./capture.js";
 
   function runVerb(id) {
     if (id === "search") state.overlay = "search";
-    if (id === "open" && state.selectedId) openFullPage();
+    if (id === "open" && state.selectedId) { const row=selectedRow(); if(row?.kind==="project") openProject(row.project); else openFullPage(); }
     if (id === "capture") openQuickAdd();
     if (id === "help") state.overlay = "help";
     if (id === "palette") {
@@ -535,6 +571,7 @@ import { parseCapture } from "./capture.js";
 
   function goTab(tab) {
     if (steps.dirty || steps.editor) return;
+    state.threadFilter = null;
     state.tab = tab;
     state.focusProject = tab === "project" ? state.selectedProject : null;
     state.projectQuery = "";
@@ -550,6 +587,7 @@ import { parseCapture } from "./capture.js";
       goTab("desk");
       return;
     }
+    state.threadFilter = null;
     state.selectedProject = name;
     state.focusProject = name;
     state.tab = "project";
@@ -576,6 +614,11 @@ import { parseCapture } from "./capture.js";
 
   function resetDemo() {
     state.tasks = seed();
+    state.threadFilter = null;
+    state.projectView = null;
+    state.filterI = 0;
+    state.pickerArchived = false;
+    state.archivedProjects = new Set();
     state.tab = "desk";
     state.selectedProject = "tsk";
     state.focusProject = null;
@@ -709,22 +752,19 @@ import { parseCapture } from "./capture.js";
   }
 
   function renderPicker() {
-    const opts = knownProjects();
+    const opts = state.pickerArchived ? [...state.archivedProjects] : knownProjects().filter(p=>!state.archivedProjects.has(p));
     if (state.pickerI >= opts.length) state.pickerI = Math.max(0, opts.length - 1);
     const list = opts
       .map((name, i) => {
         const mark = i === state.pickerI ? "▸" : " ";
         const cls = i === state.pickerI ? "sel-text" : "";
-        const current = name === "desk"
-          ? !state.focusProject && state.tab === "desk"
-          : state.selectedProject === name;
-        return `<div class="tsk-pal-row ${cls}" data-pick="${esc(name)}">${mark} ${esc(name)}${current ? "  ·" : ""}</div>`;
+        return `<div class="tsk-pal-row" data-pick="${esc(name)}"><span class="${cls}">${mark} ${esc(name)}</span></div>`;
       })
       .join("");
     return `
       <div class="tsk-box tsk-palette" role="dialog" aria-label="project">
         <div class="tsk-box-top"><span class="tsk-box-title">project</span><button type="button" class="tsk-box-close" data-close="1" aria-label="close">[x]</button></div>
-        <div class="tsk-box-body">${list}</div>
+        <div class="tsk-box-body"><div class="tsk-picker-tabs"><button data-picker-tab="main" class="${!state.pickerArchived ? "is-on" : ""}">projects</button> · <button data-picker-tab="archived" class="${state.pickerArchived ? "is-on" : ""}">archived (${state.archivedProjects.size})</button></div><div class="tsk-picker-rule"></div>${list || `<span class="dim">  no archived projects</span>`}</div>
         <div class="tsk-box-foot">↑/↓ move · enter choose · esc close</div>
       </div>`;
   }
@@ -795,23 +835,23 @@ import { parseCapture } from "./capture.js";
   function stageHint() {
     if (!isWideSplit()) return "";
     if (state.editField) return "shift+enter save · esc cancel";
-    if (state.stage === "board") return "→ pane · enter open";
+    if (state.stage === "board") return "→ task pane";
     if (state.stage === "split") return "board ▸ task    → task · ← close · enter open";
     if (state.stage === "rail") return "board ◂ task    ← board · → full page";
-    return "← rail · esc back";
+    return "← rail";
   }
 
   function renderBoard(rows, rail = false, bare = false) {
     const tabs = TABS.map(([tab, label]) => {
       const on = state.tab === tab;
       const text = tab === "project" ? state.selectedProject : label;
-      return `<button type="button" class="tsk-tab ${on ? "is-on" : ""}" data-tab="${tab}">${esc(text)}</button>`;
-    }).join(`<span class="dim">  ·  </span>`);
-
-    const chip = state.focusProject
-      ? `<button type="button" class="tsk-chip" data-chip="1">P ▾ ${esc(state.focusProject)}</button>`
-      : "";
-
+      return `<span class="tsk-tab-group ${on ? "is-on" : ""}"><button type="button" class="tsk-tab ${on ? "is-on" : ""}" data-tab="${tab}">${esc(text)}</button>${tab === "project" ? `<button class="tsk-tab-arrow" data-chip="1" aria-label="choose project"> ▾</button>` : ""}</span>`;
+    }).join(`<span class="dim"> · </span>`);
+    const filter = state.focusProject ? (state.threadFilter === null ? "all" : state.threadFilter === "" ? "without a thread" : `#${state.threadFilter}`) : state.tab === "projects" ? (state.projectView === null ? "Overview" : `#${state.projectView}`) : null;
+    const control = filter === null ? "" : `<button class="tsk-view-control dim" data-filter="1">${esc(filter)} ▾</button>`;
+    const index = state.tab === "projects" && state.projectView === null && !state.focusProject;
+    const showThreads = terminalColumns() >= 100;
+    const count = n => n || "·";
     const body = rows
       .map((row) => {
         if (row.kind === "section" || row.kind === "sub") {
@@ -820,7 +860,8 @@ import { parseCapture } from "./capture.js";
         }
         if (row.kind === "project") {
           const selected = row.id === state.selectedId;
-          return `<button type="button" class="tsk-group ${selected ? "sel-text" : ""}" data-project-row="${esc(row.project)}" data-nav-id="${esc(row.id)}"><span class="sec">${selected ? "▸" : " "} ${esc(row.label)}</span><span class="count">${row.needs} needs · ${row.motion} motion · ${row.ready} ready</span></button>`;
+          const threads = new Set(state.tasks.filter(t=>t.project===row.project && !t.archived && t.status!=="done").map(t=>t.thread).filter(Boolean)).size;
+          return `<button type="button" class="tsk-project-row ${selected ? "is-selected" : ""}" data-project-row="${esc(row.project)}" data-nav-id="${esc(row.id)}"><span class="tsk-project-name">${selected ? "▸" : " "} <span>${esc(row.label)}</span>${row.project === (fixture?.selectedProject || "tsk") ? `<span class="dim"> · here</span>` : ""}</span>${showThreads ? `<span class="dim">${count(threads)}</span>` : ""}<span class="${row.needs ? "is-bold" : "dim"}">${count(row.needs)}</span><span>${count(row.motion)}</span><span class="dim">${count(row.ready)}</span></button>`;
         }
         if (row.kind === "group") {
           const mark = row.collapsed ? "▸" : "▾";
@@ -836,17 +877,17 @@ import { parseCapture } from "./capture.js";
         if (rail && task.status === "done") return "";
         const selected = task.id === state.selectedId;
         const flash = task.id === state.flashId;
-        const glyph = rail && selected ? "▹" : GLYPH[task.status] || "○";
+        const glyph = GLYPH[task.status] || "○";
         const indent = "  ".repeat(row.indent || 0);
         if (rail) {
-          return `<button type="button" class="tsk-row tsk-rail-row" data-task="${task.id}">
-          <span class="tsk-row-main">${indent}  <span class="glyph">${glyph}</span> <span class="tsk-task-id" data-copy-task="${esc(task.id)}" title="copy T${task.number}">T${task.number}</span> <span>${esc(task.title)}</span></span>
-        </button>`;
+          const prefix = `${selected ? "▸ " : "  "}${glyph} `;
+          const lines = wrapText(task.title, 32 - 1 - 4 - `T${task.number} `.length);
+          return `<button type="button" class="tsk-row tsk-rail-row" data-task="${task.id}"><span class="tsk-row-main">${prefix}<span class="tsk-task-id" data-copy-task="${esc(task.id)}">T${task.number}</span> ${esc(lines[0])}${lines.slice(1).map(line=>`<span class="tsk-rail-continuation">    ${esc(line)}</span>`).join("")}</span></button>`;
         }
         const columns = isWideSplit() && state.stage === "split"
           ? Math.floor(terminalColumns() * 0.4) : terminalColumns();
         const titleLines = wrapText(task.title, columns - 2 - 4 - `T${task.number} `.length);
-        const title = titleLines.map(line => `<span class="tsk-title-line ${selected ? "sel-text" : ""}">${esc(line)}</span>`).join("");
+        const title = titleLines.map(line => `<span class="tsk-title-line">${esc(line)}</span>`).join("");
         const noteLines = wrapText((task.notes || "").trim() || "no notes yet", columns - 7);
         const label = metaFor(task);
         const peek = state.peekId === task.id && !isWideSplit() ? [
@@ -855,15 +896,14 @@ import { parseCapture } from "./capture.js";
           ...(label ? wrapText(label, columns - 9).map((line, i) => `<div class="tsk-attribution dim">${i ? "       " : "    └─ "}${esc(line)}</div>`) : [`<div class="tsk-peek dim">    └</div>`]),
         ].join("") : "";
         const dimRow = row.dim ? "dim" : "";
-        return `<button type="button" class="tsk-row ${dimRow} ${selected ? "is-sel" : ""} ${flash ? "is-flash" : ""}" data-task="${task.id}"><span class="tsk-row-main"><span class="tsk-row-prefix">  <span class="tsk-row-glyph">${glyph}</span> <span class="tsk-task-id ${selected ? "sel-text" : ""}" data-copy-task="${esc(task.id)}" title="copy T${task.number}">T${task.number}</span> </span><span class="tsk-row-title">${title}</span></span></button>${peek}`;
+        return `<button type="button" class="tsk-row ${dimRow} ${selected ? "is-sel" : ""} ${flash ? "is-flash" : ""}" data-task="${task.id}"><span class="tsk-row-main"><span class="tsk-row-prefix">${selected ? "▸ " : "  "}<span class="tsk-row-glyph">${glyph}</span> <span class="tsk-task-id" data-copy-task="${esc(task.id)}" title="copy T${task.number}">T${task.number}</span> </span><span class="tsk-row-title">${title}</span></span></button>${peek}`;
 
       })
       .join("");
 
     const column = `
-      <div class="tsk-tabs">${tabs}</div>
-      ${chip ? `<div class="tsk-project-selector">${chip}</div>` : ""}
-      <div class="tsk-list">${body || `<div class="dim">  nothing here</div>`}</div>`;
+      <div class="tsk-tabs">${tabs}${control}</div>
+      <div class="tsk-list ${index ? "tsk-project-table" : ""} ${showThreads ? "with-threads" : ""}">${index ? `<div class="tsk-project-legend"><span>  PROJECT</span>${showThreads ? "<span>THREADS</span>" : ""}<span>NEEDS YOU</span><span>IN MOTION</span><span>READY</span></div>` : ""}${body || `<div class="dim">  nothing here</div>`}</div>`;
     // Wide stages paint one shared footer under both columns, so a column omits its own.
     return rail || bare ? column : column + renderFooter();
   }
@@ -886,7 +926,7 @@ import { parseCapture } from "./capture.js";
   // One footer for the frame: a rule, the status row (active lens · stage crumb), and the verb
   // bar for whichever side owns focus. Wide stages paint it under both columns, as the app does.
   function renderFooter() {
-    const context = state.tab === "desk" ? "desk" : state.focusProject || state.tab;
+    const context = state.tab === "projects" && state.projectView === null ? (selectedRow()?.project ? projectPath(selectedRow().project) : "projects") : state.tab === "desk" ? "desk" : state.focusProject ? `${state.focusProject}${state.threadFilter ? ` · #${state.threadFilter}` : ""}` : state.tab;
     const task = selectedTask();
     const verbs = taskFocus()
       ? pageVerbBar()
@@ -916,7 +956,7 @@ import { parseCapture } from "./capture.js";
     const wide = isWideSplit();
     let html;
     if (wide && state.stage === "split") {
-      html = `<div class="tsk-wide-split is-split">
+      html = `<div class="tsk-wide-split is-split" style="grid-template-columns:${Math.floor(terminalColumns()*.4)}ch 2ch minmax(0,1fr)">
            <div class="tsk-board-surface tsk-surface">${renderBoard(rows, false, true)}</div>
            <div class="tsk-rule-column dim" aria-hidden="true"></div>
            ${renderPage(true)}
@@ -937,6 +977,7 @@ import { parseCapture } from "./capture.js";
     if (state.overlay === "help") html += renderHelp();
     if (state.overlay === "palette") html += renderPalette();
     if (state.overlay === "picker") html += renderPicker();
+    if (state.overlay === "filter") html += renderFilter();
     const oldScroll = root.querySelector(".tsk-task-surface")?.scrollTop ?? 0;
     const activeSearch = document.activeElement?.id === "tsk-project-search";
     const keepKeys =
@@ -1204,8 +1245,19 @@ import { parseCapture } from "./capture.js";
       return;
     }
 
+    if (state.overlay === "filter") {
+      e.preventDefault();
+      if (e.key === "Escape") state.overlay=null;
+      else if (e.key === "Enter") chooseFilter(state.filterI);
+      else if (["ArrowDown","j"].includes(e.key)) state.filterI=Math.min(filterOptions().length-1,state.filterI+1);
+      else if (["ArrowUp","k"].includes(e.key)) state.filterI=Math.max(0,state.filterI-1);
+      render(); return;
+    }
+    if (!state.overlay && !taskPageActive && ((e.key === "t" && state.focusProject) || (e.key === "v" && state.tab === "projects"))) {
+      e.preventDefault(); openFilter(); render(); return;
+    }
     if (state.overlay === "picker") {
-      const opts = knownProjects();
+      const opts = state.pickerArchived ? [...state.archivedProjects] : knownProjects().filter(p=>!state.archivedProjects.has(p));
       if (e.key === "Escape") {
         e.preventDefault();
         state.overlay = null;
@@ -1286,7 +1338,8 @@ import { parseCapture } from "./capture.js";
     if (e.key === "p" || e.key === "P") {
       e.preventDefault();
       state.overlay = "picker";
-      state.pickerI = 0;
+      state.pickerArchived = false;
+      state.pickerI = Math.max(0,knownProjects().filter(p=>!state.archivedProjects.has(p)).indexOf(state.selectedProject));
       render();
       return;
     }
@@ -1420,6 +1473,12 @@ import { parseCapture } from "./capture.js";
 
   root.addEventListener("click", (e) => {
     // A stage A click inside the task column slides to G first, then the control runs.
+    const filterControl = e.target.closest("[data-filter]");
+    if (filterControl) { openFilter(); render(); return; }
+    const filterOption = e.target.closest("[data-filter-option]");
+    if (filterOption) { chooseFilter(Number(filterOption.dataset.filterOption)); render(); return; }
+    const pickerTab = e.target.closest("[data-picker-tab]");
+    if (pickerTab) { state.pickerArchived=pickerTab.dataset.pickerTab==="archived"; state.pickerI=0; render(); return; }
     const stepTarget = e.target.closest("[data-step], [data-step-add]");
     if (stepTarget && e.target.id !== "tsk-step-edit") {
       const task = selectedTask();
@@ -1456,7 +1515,8 @@ import { parseCapture } from "./capture.js";
     const chip = e.target.closest("[data-chip]");
     if (chip) {
       state.overlay = "picker";
-      state.pickerI = 0;
+      state.pickerArchived = false;
+      state.pickerI = Math.max(0,knownProjects().filter(p=>!state.archivedProjects.has(p)).indexOf(state.selectedProject));
       render();
       return;
     }
@@ -1468,7 +1528,10 @@ import { parseCapture } from "./capture.js";
     }
     const projectRow = e.target.closest("[data-project-row]");
     if (projectRow) {
-      openProject(projectRow.getAttribute("data-project"));
+      const id=projectRow.dataset.navId, now=Date.now();
+      if(lastClick.id===id && now-lastClick.at<350) openProject(projectRow.dataset.projectRow);
+      else state.selectedId=id;
+      lastClick={id,at:now};
       render();
       return;
     }

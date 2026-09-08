@@ -71,3 +71,27 @@ Validation for the step slice: the full Rust formatting/Clippy/test/release gree
 passed; 19 site unit checks and all 13 browser scenarios passed. The real isolated
 PTY flow passed at 40/78/109/110×24, and the Astro build passed with the existing
 deprecation/404-content notices. HERDR_ENV was unset, so no Herdr host smoke was run.
+
+## Navigation and selection alignment
+
+The user demonstrated the live app's desk, projects overview, project and thread
+pickers, peeks, task page, and all four wide stages. The demo now puts the project
+picker inside its navigation tab, uses a right-aligned counted thread/view chooser,
+and renders aligned project counts with single-click selection and double-click
+opening. Wide boards use the app's 40-percent split and 32-column rail.
+
+Two intentional changes apply to both app and demo: selected task rows use an
+arrow while retaining their status glyph and number, and active tabs use bright
+underlined text. Neither uses a filled selection background.
+The selection regression was observed failing before the native fix; the browser
+navigation scenario also failed before the demo change.
+
+These checks do not establish complete visual parity for field editing, archive
+workflows, quick-add, or every compact layout.
+
+Validation for navigation and selection: 958 Rust tests passed, 5 ignored;
+formatting, Clippy and the release build passed. All 19 site unit checks and
+14 browser scenarios passed (the navigation style assertion was rerun after
+correcting its selector). The isolated release-binary PTY flow passed at
+40/78/109/110 columns. Astro built successfully with its existing deprecation
+and missing 404-content notices. HERDR_ENV was unset; no Herdr host smoke ran.

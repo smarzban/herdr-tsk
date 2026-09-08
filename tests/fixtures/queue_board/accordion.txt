@@ -9,7 +9,7 @@
 │                                                                                │
 │ IN MOTION ───────────────────────────────────────────────────────────────────2 │
 │                                                                                │
-│  ▸ T1 Smoke-test worktree dispatch                                             │
+│▸ ▸ T1 Smoke-test worktree dispatch                                             │
 │    │ no notes yet                                                              │
 │    └─ tsk                                                                      │
 │  ▸ T2 Edit target binding pin                                                  │

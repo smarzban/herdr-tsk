@@ -257,3 +257,5 @@ have no attribution, and narrow peeks show project or thread labels beneath note
 Browser status shortcuts are bare letters. On an open task, Tab selects steps, Enter toggles, `a` adds, `e` renames the selected
 step, and `x` twice removes it. Shift+Enter saves a rename; Escape cancels.
 The demo is a subset: full task editing, project archive and save recovery are not yet reproduced. It is not a complete app emulator.
+
+Selected task rows use a plain selection arrow before the status symbol and task number, without a filled highlight. Active board tabs use bright underlined text; inactive tabs remain dim.

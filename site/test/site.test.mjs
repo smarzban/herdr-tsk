@@ -120,7 +120,7 @@ test("demo keeps project navigation, attribution, and search contracts", async (
   assert.match(demo, /state\.selectedProject = name;/);
   assert.match(demo, /const text = tab === "project" \? state\.selectedProject : label/);
   assert.match(demo, /state\.tasks\.filter\(\(t\) => t\.project && !t\.archived\)/);
-  assert.match(demo, /if \(a === "tsk"\) return -1/);
+  assert.ok(demo.includes('if (a === (fixture?.selectedProject || "tsk")) return -1'));
   assert.match(demo, /id: `project:\${name}`/);
   assert.match(demo, /id: "nav:archived"/);
   assert.match(demo, /const row = selectedRow\(\);/);

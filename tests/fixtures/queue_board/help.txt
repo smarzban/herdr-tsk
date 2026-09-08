@@ -9,7 +9,7 @@
 │         │  ctrl+r review | ctrl+e edit title                         │         │
 │ IN MOTIO│  ctrl+x / delete delete | ctrl+u undo                      │───────2 │
 │         │  ctrl+f archive | + add                                    │         │
-│  ▸ T1 Sm│  d done drawer | g archived group                          │         │
+│▸ ▸ T1 Sm│  d done drawer | g archived group                          │         │
 │  ▸ T2 Ed│  p projects | t threads                                    │         │
 │         │  v views | : palette                                       │         │
 │ ON DECK │  ? help | ctrl+q quit                                      │───────1 │

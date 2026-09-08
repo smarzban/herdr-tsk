@@ -240,3 +240,44 @@ fn shared_fixture_first_flow_and_peek_references() {
         }
     }
 }
+
+#[test]
+fn selection_uses_arrow_and_underlined_tab_without_reverse_fill() {
+    use ratatui::style::Modifier;
+    let mut state: DomainState =
+        serde_json::from_str(include_str!("fixtures/demo-parity/store.json")).unwrap();
+    let mut model = BoardModel::from_domain(&state, Some(PathBuf::from("/tmp/tsk-parity")));
+    apply_intent(
+        &mut state,
+        &mut model,
+        BoardIntent::SelectNavTab(NavTab::Desk),
+        None,
+    )
+    .unwrap();
+    let mut terminal = Terminal::new(TestBackend::new(78, 24)).unwrap();
+    terminal
+        .draw(|f| {
+            draw_board(f, &model);
+        })
+        .unwrap();
+    let buffer = terminal.backend().buffer();
+    assert!(
+        buffer
+            .content
+            .iter()
+            .all(|cell| !cell.modifier.contains(Modifier::REVERSED)),
+        "board and tabs must not use reverse fill"
+    );
+    assert!(
+        buffer
+            .content
+            .iter()
+            .any(|cell| cell.symbol() == "d" && cell.modifier.contains(Modifier::UNDERLINED)),
+        "active desk tab must be underlined"
+    );
+    let frame = capture(&model, 78, "selection-style");
+    assert!(
+        frame.contains("▸ ■ T12"),
+        "selection arrow must retain status and number: {frame}"
+    );
+}

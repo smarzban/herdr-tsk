@@ -243,3 +243,5 @@ If `HERDR_ENV` is unset, say that live smoke was not run.
   arriving task (the idle-merge tests pin that visibility). A pinned save pins the
   selection only when the current lens renders the saved task; otherwise it
   reanchors near the saved task's old position.
+
+Selected task rows use a plain selection arrow before the status symbol and task number, without a filled highlight. Active board tabs use bright underlined text; inactive tabs remain dim.

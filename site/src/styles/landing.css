@@ -2614,3 +2614,38 @@ html[data-theme="light"] .pane {
 
 #tsk-step-edit { display: block; resize: none; padding: 0; line-height: inherit; min-width: 0; }
 .tsk-step-refusal:empty { display: none; }
+
+/* App navigation: controls share the selector row; project entries are a table. */
+.board .tsk-tabs { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0; white-space: pre; }
+.tsk-tab-group { display: inline-flex; min-width: 0; }
+.tsk-tab-group .tsk-tab { padding: 0; }
+.tsk-tab-arrow, .tsk-view-control, .tsk-picker-tabs button { appearance: none; border: 0; padding: 0; background: none; font: inherit; color: inherit; cursor: pointer; }
+.tsk-tab-group { color: var(--dim); }
+.tsk-tab-group.is-on { color: var(--ink); text-decoration: underline; text-underline-offset: .2em; }
+.tsk-view-control { margin-left: auto; }
+.board .tsk-row.is-sel, .board .tsk-row.is-sel .sel-text { background: transparent; color: var(--ink); }
+.tsk-project-row, .tsk-project-legend { display: grid; grid-template-columns: minmax(0,1fr) 10ch 11ch 7ch; align-items: baseline; padding: 0 2ch 0 1ch; gap: 0; text-align: right; font: inherit; line-height: inherit; }
+.tsk-project-table.with-threads .tsk-project-row, .tsk-project-table.with-threads .tsk-project-legend { grid-template-columns: minmax(0,1fr) 9ch 10ch 11ch 7ch; }
+.tsk-project-row { appearance: none; border: 0; background: none; color: var(--ink); width: 100%; cursor: pointer; }
+.tsk-project-name, .tsk-project-legend > :first-child { text-align: left; white-space: pre; }
+.tsk-project-row.is-selected .tsk-project-name > span:first-child, .tsk-project-row .is-bold { font-weight: bold; }
+.tsk-project-legend { color: var(--dim); margin-bottom: 1lh; }
+.tsk-picker-tabs { padding-left: 1ch; color: var(--dim); }
+.tsk-picker-tabs .is-on { color: var(--ink); font-weight: bold; }
+.tsk-picker-rule { height: 1lh; background: linear-gradient(var(--dim),var(--dim)) center / 100% 1px no-repeat; }
+.board .tsk-box { top: 50%; transform: translate(-50%,-50%); width: min(62ch,calc(100% - 4ch)); background: var(--bg); border: 1px solid var(--dim); border-radius: 0; box-shadow: none; }
+.board .tsk-box-body { padding: 1lh 1ch; }
+.board .tsk-box-foot { padding: .5lh 1ch; }
+.board .tsk-pal-row { padding: 0; white-space: pre-wrap; }
+.board .tsk-pal-row .sel-text { background: var(--ink); color: var(--bg); }
+.board .tsk-rail .tsk-tab { max-width: 8ch; overflow: hidden; text-overflow: ellipsis; }
+.board .tsk-wide-split { min-height: 0; }
+.board .tsk-wide-split.is-rail { grid-template-columns: 32ch 2ch minmax(0,1fr); }
+.board .tsk-wide-split + .tsk-foot { margin-top: 0; }
+.board .tsk-rule-column { background: linear-gradient(var(--dim),var(--dim)) left / 1px 100% no-repeat; }
+.board .tsk-board-surface { padding: 0; }
+.board .tsk-task-column:not(.is-narrow) { padding: 0; }
+.board .tsk-task-column:not(.is-narrow) .tsk-task-header { padding: 1lh 1ch 0; gap: 1ch; }
+.board .tsk-task-column:not(.is-narrow) .tsk-task-rule { flex: none; height: 1lh; margin: 0; background: linear-gradient(var(--dim),var(--dim)) center / 100% 1px no-repeat; }
+.board .tsk-rail-row .tsk-row-main { display: block; white-space: pre; }
+.tsk-rail-continuation { display: block; white-space: pre; }
