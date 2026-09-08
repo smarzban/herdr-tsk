@@ -19,3 +19,7 @@ Cargo.lock.bak
 site/node_modules/
 site/dist/
 site/.astro/
+
+# Local release preparation and Python test caches
+/dist-release/
+__pycache__/

@@ -20,3 +20,5 @@ User guide: https://gettsk.sh/docs/
 - [CLI](https://gettsk.sh/docs/cli/)
 
 Source: https://github.com/smarzban/herdr-tsk
+
+Installation: source builds are currently the available route. Native packages are being prepared, not published yet: macOS ARM64/Intel and Linux ARM64/x86-64 musl archives; a checksum-verifying installer at /install.sh (latest published stable release, never main; TSK_VERSION pins a stable tag; TSK_INSTALL_DIR overrides ~/.local/bin); and smarzban/tap/tsk on Homebrew (explicit version-pinned URLs/checksums). No automatic sudo, PATH edits, plugin linking, or task-data removal. Upgrades use the same installation channel. crates.io is a separate unpublished follow-up.

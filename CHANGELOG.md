@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+Native distribution preparation: an owner-run draft-release workflow builds four
+macOS/Linux architectures, generates checksums and a version-pinned Homebrew formula.
+The installer downloads published releases only. Public binaries and the tap are
+not published yet; source installation remains available. crates.io is separate.
+
 Board attribution appears only inside an open peek, on a dim `└─ label` line
 below its notes. Collapsed rows show no labels. Titles wrap two cells before the right edge without a label column.
 

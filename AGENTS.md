@@ -155,6 +155,15 @@ For scriptable board work, use `tsk add`, `tsk list`, `tsk status`, `tsk edit`, 
 
 ## Build / test / verify
 
+- Native packaging lives in `scripts/release.py`, `site/public/install.sh`, and
+  `.github/workflows/release.yml`; see `packaging/README.md`. Python 3.11+ packaging
+  checks: `python3 -m unittest discover -s tests/packaging`. The release workflow is
+  manually dispatched against an existing stable tag and only creates a draft.
+  Installer payloads come from published release assets, never main. Homebrew uses
+  a generated, version-pinned formula for `smarzban/homebrew-tap`; formula updates
+  are separate from release publication. Do not document these routes as available
+  until public assets and the tap have been verified.
+
 - Build: `cargo build --release`
 - `herdr-plugin.toml` launches `./target/release/tsk`. Rebuild in-repo
   before live smoke. A running board keeps the old binary until you quit it.

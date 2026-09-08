@@ -16,6 +16,10 @@ Park, resume, attention, linking, and dispatch are not part of this tree.
 
 ## Quickstart
 
+Native release binaries, an installer and a Homebrew tap are being prepared,
+**not published yet**. For now, build from source as below. See the
+[install guide](https://gettsk.sh/docs/install/) for the planned release-only paths.
+
 ```bash
 git clone https://github.com/smarzban/herdr-tsk.git
 cd herdr-tsk
