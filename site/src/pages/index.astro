@@ -16,7 +16,7 @@ const REPO = 'https://github.com/smarzban/herdr-tsk';
     <title>tsk · a task board for you and your agents</title>
     <meta
       name="description"
-      content="tsk is a terminal task board for you and your agents. Plan in one place, move work through ready, started, blocked, review, done. Agents move tasks. Only a human marks them done. Ships as a herdr plugin, runs standalone."
+      content="tsk is a terminal task board for you and your agents. Plan in one place, move work through ready, started, blocked, review, done. You and your agents can create, edit, and complete tasks. Ships as a herdr plugin, runs standalone."
     />
     <link rel="canonical" href={`${SITE}/`} />
     <meta property="og:type" content="website" />
@@ -24,7 +24,7 @@ const REPO = 'https://github.com/smarzban/herdr-tsk';
     <meta property="og:title" content="tsk · a task board for you and your agents" />
     <meta
       property="og:description"
-      content="One board in your terminal where you and your agents plan and move work. Agents move tasks. Only a human marks them done."
+      content="One board in your terminal where you and your agents plan and move work. You and your agents can create, edit, and complete tasks."
     />
     <meta property="og:url" content={`${SITE}/`} />
     <meta property="og:image" content={`${SITE}/og.png`} />
@@ -34,7 +34,7 @@ const REPO = 'https://github.com/smarzban/herdr-tsk';
     <meta name="twitter:title" content="tsk · a task board for you and your agents" />
     <meta
       name="twitter:description"
-      content="One board in your terminal where you and your agents plan and move work. Agents move tasks. Only a human marks them done."
+      content="One board in your terminal where you and your agents plan and move work. You and your agents can create, edit, and complete tasks."
     />
     <meta name="twitter:image" content={`${SITE}/og.png`} />
     <script is:inline>
@@ -135,7 +135,7 @@ const REPO = 'https://github.com/smarzban/herdr-tsk';
             <p class="lede">
               One board where you both plan, pick up work, and move it through
               <b>ready</b>, <b>started</b>, <b>blocked</b>, <b>review</b>, <b>done</b>.
-              Agents move tasks. Only a human marks them done.
+              You and your agents can create, edit, and complete tasks.
             </p>
           </div>
 
@@ -144,7 +144,7 @@ const REPO = 'https://github.com/smarzban/herdr-tsk';
               <div><dt>binary</dt><dd>tsk</dd></div>
               <div><dt>store</dt><dd>~/.tsk/tsk.json</dd></div>
               <div><dt>pane</dt><dd>78×24 · operable to 40×10</dd></div>
-              <div><dt>done is</dt><dd>a human verb</dd></div>
+              <div><dt>control</dt><dd>board + CLI</dd></div>
               <div><dt>built with</dt><dd>Rust 1.96</dd></div>
               <div><dt>runs on</dt><dd>Linux · macOS</dd></div>
               <div><dt>license</dt><dd>MIT</dd></div>
@@ -160,8 +160,9 @@ const REPO = 'https://github.com/smarzban/herdr-tsk';
 
       <!-- ─────────────────────────── live demo ────────────────────────── -->
       <section class="stage" id="demo" aria-labelledby="demo-heading">
-        <h2 class="sr-only" id="demo-heading">Live demo</h2>
+
         <div class="stage-inner">
+          <div class="demo-invitation"><h2 id="demo-heading">Try it. This board is yours to play with.</h2><p>Double-click a task to open it, check off a step, or press + to add your own. Explore auth, API, and reliability work with threads and checklists. Changes stay in this demo; refresh to start over.</p></div>
           <div
             class="pane"
             id="board-demo"
@@ -172,8 +173,8 @@ const REPO = 'https://github.com/smarzban/herdr-tsk';
             <div class="pane-bar">
               <span class="pane-tab"><span class="pane-dot" aria-hidden="true"></span>tsk</span>
               <div class="layout-toggle" role="group" aria-label="Terminal layout">
-                <button type="button" data-layout="beside" aria-pressed="true">beside your agent</button>
-                <button type="button" data-layout="full" aria-pressed="false">full terminal</button>
+                <button type="button" data-layout="full" aria-pressed="true">full terminal</button>
+                <button type="button" data-layout="beside" aria-pressed="false">beside your agent</button>
               </div>
               <span class="pane-cols" data-cols aria-live="polite"></span>
               <span class="pane-hint">
@@ -181,19 +182,15 @@ const REPO = 'https://github.com/smarzban/herdr-tsk';
                 <kbd>+</kbd> capture · <kbd>?</kbd> help
               </span>
             </div>
-            <div class="split is-beside" data-split>
+            <div class="split is-full" data-split>
               <aside class="agent" aria-label="A coding agent session beside the board, static example">
-                <div class="agent-bar"><span><b>coding agent</b> · ~/work/herdr</span><span>static example</span></div>
+                <div class="agent-bar"><span><b>coding agent</b> · ~/work/launchpad</span><span>static example</span></div>
                 <div class="agent-body">
-                  <p class="agent-line you">the edit target pin drifts after a save. find out why and put it on the board.</p>
-                  <p class="agent-line say">I'll look at how the board re-pins selection after a save lands.</p>
-                  <div class="agent-tool"><span class="tool-name">Read</span><span class="tool-arg">src/ui/board/model.rs</span><span class="tool-out">Read 214 lines</span></div>
-                  <div class="agent-tool"><span class="tool-name">Bash</span><span class="tool-arg">cargo test --test queue_board_edit</span><span class="tool-out">14 tests · 13 passed · 1 failed: pin_follows_saved_row</span></div>
-                  <p class="agent-line say">Found it. The pin follows the saved id even when the current lens no longer paints that row, so it lands on a hidden task. It should reanchor to the row's old position instead.</p>
-                  <div class="agent-tool"><span class="tool-name">Bash</span><span class="tool-arg">tsk add -t "Edit target binding pin" -p herdr --json</span><span class="tool-out">&#123;"outcome":"created","number":13,"title":"Edit target binding pin","project":"herdr"&#125;</span></div>
-                  <div class="agent-tool"><span class="tool-name">Bash</span><span class="tool-arg">tsk steps T13 add "Write the failing reanchor test"</span><span class="tool-out">added 3f Write the failing reanchor test</span></div>
-                  <div class="agent-tool"><span class="tool-name">Bash</span><span class="tool-arg">tsk steps T13 add "Pin the saved id only while the lens paints it"</span><span class="tool-out">added 9c Pin the saved id only while the lens paints it</span></div>
-                  <p class="agent-line say">Created <b>T13 Edit target binding pin</b> on your board with two steps. It is ready, not started. Start it when you want me to pick it up.</p>
+                  <p class="agent-line you">webhook retries are applying the same event twice. investigate and add a task.</p>
+                  <p class="agent-line say">The handler applies side effects before recording the event ID. Concurrent retries can both get through.</p>
+                  <div class="agent-tool"><span class="tool-name">Bash</span><span class="tool-arg">tsk add -t "Make webhook delivery idempotent" -p launchpad --thread api --json</span><span class="tool-out">created T13 · launchpad · #api</span></div>
+                  <div class="agent-tool"><span class="tool-name">Bash</span><span class="tool-arg">tsk steps T13 add "Reproduce duplicate delivery"</span><span class="tool-out">step added</span></div>
+                  <p class="agent-line say">T13 is ready with a checklist to reproduce duplicate delivery, persist processed event IDs, and test concurrent retries. Open it on the board to explore the steps.</p>
                 </div>
                 <div class="agent-input"><span class="agent-prompt">›</span><span class="cursor" aria-hidden="true"></span><span class="agent-shortcut">? for shortcuts</span></div>
               </aside>
@@ -225,12 +222,11 @@ const REPO = 'https://github.com/smarzban/herdr-tsk';
         <div class="band-inner" data-reveal>
           <header class="band-head">
             <span class="index">01 <span class="index-label">status</span></span>
-            <h2 id="status-heading">Agents move work. You call it done.</h2>
+            <h2 id="status-heading">One workflow for you and your agents.</h2>
             <p class="band-lede">
-              Five states shared by everyone on the board. Today you set them from the board,
-              and agents capture and step work from the CLI; pick-up and hand-off are next.
-              <b>done</b> is the one verb reserved for a human, and checking every step never
-              flips it.
+              Five states shared by everyone on the board. You and your agents can create tasks,
+              edit titles and notes, manage steps, and move tasks through the board—from <b>ready</b>
+              to <b>done</b>—using the CLI. Checking every step leaves the task status unchanged until it is explicitly updated.
             </p>
           </header>
 
@@ -257,7 +253,7 @@ const REPO = 'https://github.com/smarzban/herdr-tsk';
               <span class="rail-glyph" aria-hidden="true">▲</span>
               <span class="rail-name">review</span>
               <span class="rail-how">check it</span>
-              <kbd>:</kbd>
+              <kbd>ctrl+r</kbd>
             </li>
             <li>
               <span class="rail-glyph" aria-hidden="true">✓</span>
@@ -283,13 +279,7 @@ const REPO = 'https://github.com/smarzban/herdr-tsk';
             </div>
           </div>
 
-          <ul class="next" aria-label="In progress">
-            <li class="next-label"><span class="prompt">▸</span> next</li>
-            <li>assign a task to an agent</li>
-            <li>start the agent from the board</li>
-            <li>agents move status through the CLI</li>
-            <li class="next-note dim">in progress · not in the current build</li>
-          </ul>
+
         </div>
       </section>
 
@@ -616,6 +606,25 @@ const REPO = 'https://github.com/smarzban/herdr-tsk';
               <li><a href="/docs/install/">Full install guide →</a></li>
             </ul>
           </div>
+        </div>
+      </section>
+      <section class="band" id="coming-soon" aria-labelledby="coming-soon-heading">
+        <div class="band-inner" data-reveal>
+          <header class="band-head">
+            <span class="index">07 <span class="index-label">next phase</span></span>
+            <p class="coming-announcement">Coming soon</p>
+            <h2 id="coming-soon-heading">From task to implementation.</h2>
+            <p class="band-lede">
+              The next phase brings agent execution into the board: assign a task to an agent,
+              start implementation from tsk, and run the work in Herdr worktrees.
+            </p>
+          </header>
+          <ol class="coming-steps" aria-label="Planned agent workflow">
+            <li><span class="dim">01</span><h3>Assign an agent.</h3><p>Choose who takes on the task, with its notes and steps as the brief.</p></li>
+            <li><span class="dim">02</span><h3>Start from the board.</h3><p>Initiate implementation where you already plan and track the work.</p></li>
+            <li><span class="dim">03</span><h3>Work in Herdr worktrees.</h3><p>Give the implementation its own worktree alongside your other work.</p></li>
+          </ol>
+          <p class="coming-availability">Planned for the next phase. Not available in the current build.</p>
         </div>
       </section>
     </main>

@@ -2649,3 +2649,36 @@ html[data-theme="light"] .pane {
 .board .tsk-task-column:not(.is-narrow) .tsk-task-rule { flex: none; height: 1lh; margin: 0; background: linear-gradient(var(--dim),var(--dim)) center / 100% 1px no-repeat; }
 .board .tsk-rail-row .tsk-row-main { display: block; white-space: pre; }
 .tsk-rail-continuation { display: block; white-space: pre; }
+
+/* The group owns one underline, including the project dropdown arrow. */
+.board .tsk-tab-group .tsk-tab.is-on { text-decoration: none; }
+.demo-invitation { margin-bottom: 1.5rem; }
+.demo-invitation h2 { margin: 0 0 .5rem; font-size: 1.4rem; }
+.demo-invitation p { margin: 0; color: var(--ink); max-width: 65ch; }
+
+.coming-steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); list-style: none; padding: 0; margin: 2rem 0; border: 1px solid var(--line); }
+.coming-steps li { padding: 1.5rem; }
+.coming-steps li + li { border-left: 1px solid var(--line); }
+.coming-steps h3 { margin: 1rem 0 .5rem; font-size: 1rem; }
+.coming-steps p { margin: 0; color: var(--dim); }
+@media (max-width: 700px) {
+  .coming-steps { grid-template-columns: 1fr; }
+  .coming-steps li + li { border-left: 0; border-top: 1px solid var(--line); }
+}
+
+#coming-soon .coming-announcement {
+  grid-column: 2;
+  margin: 0 0 .75rem;
+  color: var(--accent);
+  font-size: clamp(1.5rem, 4vw, 2.5rem);
+  font-weight: 700;
+  line-height: 1.15;
+}
+.coming-availability { font-size: 1rem; color: var(--ink); }
+@media (max-width: 700px) {
+  #coming-soon .coming-announcement { grid-column: 1 / -1; }
+}
+@media (min-width: 701px) {
+  #coming-soon .index { grid-row: 1 / span 3; }
+  #coming-soon .band-head h2, #coming-soon .band-lede { grid-column: 2; }
+}

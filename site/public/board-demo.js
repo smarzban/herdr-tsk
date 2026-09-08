@@ -46,95 +46,255 @@ import { parseCapture } from "./capture.js";
     });
     return [
       task({
-        title: "Smoke-test worktree dispatch",
-        status: "started",
-        project: "tsk",
-        thread: "dispatch",
-        notes:
-          "Drive the real herdr path, read the pane, and fix anything that only fails live.",
-        createdAt: NOW - 3 * MIN,
-        updatedAt: NOW - 3 * MIN,
+        "title": "Rotate refresh tokens on every use",
+        "status": "started",
+        "project": "launchpad",
+        "thread": "auth",
+        "notes": "Store a hash of each refresh token and revoke its token family if an old token is reused.",
+        "steps": [
+          {
+            "id": "sample-0-0",
+            "text": "Add token-family storage",
+            "done": true
+          },
+          {
+            "id": "sample-0-1",
+            "text": "Rotate tokens in the refresh endpoint",
+            "done": false
+          },
+          {
+            "id": "sample-0-2",
+            "text": "Test replay and expiry",
+            "done": false
+          }
+        ]
       }),
       task({
-        title: "Edit target binding pin",
-        steps: [
-          { id: "sample-step-1", text: "Write the failing reanchor test", done: false },
-          { id: "sample-step-2", text: "Pin the saved id only while the lens paints it", done: false },
+        "title": "Make webhook delivery idempotent",
+        "status": "ready",
+        "project": "launchpad",
+        "thread": "api",
+        "notes": "Retries can deliver the same event twice. Deduplicate by event ID before applying side effects.",
+        "steps": [
+          {
+            "id": "sample-1-0",
+            "text": "Reproduce duplicate delivery",
+            "done": false
+          },
+          {
+            "id": "sample-1-1",
+            "text": "Persist processed event IDs",
+            "done": false
+          },
+          {
+            "id": "sample-1-2",
+            "text": "Test concurrent retries",
+            "done": false
+          }
+        ]
+      }),
+      task({
+        "title": "Investigate slow integration tests",
+        "status": "ready",
+        "project": null,
+        "thread": null,
+        "notes": "The API suite takes twelve minutes in CI. Measure where the time goes before changing the runner.",
+        "steps": [
+          {
+            "id": "sample-2-0",
+            "text": "Capture per-test timings",
+            "done": false
+          },
+          {
+            "id": "sample-2-1",
+            "text": "Find repeated database setup",
+            "done": false
+          },
+          {
+            "id": "sample-2-2",
+            "text": "Compare the next CI run",
+            "done": false
+          }
+        ]
+      }),
+      task({
+        "title": "Unblock OIDC login in staging",
+        "status": "blocked",
+        "project": "launchpad",
+        "thread": "auth",
+        "notes": "Waiting for the identity provider's staging client registration. The callback handler is ready.",
+        "steps": [
+          {
+            "id": "sample-3-0",
+            "text": "Verify the redirect URI",
+            "done": true
+          },
+          {
+            "id": "sample-3-1",
+            "text": "Register the staging client",
+            "done": false
+          },
+          {
+            "id": "sample-3-2",
+            "text": "Run the end-to-end login test",
+            "done": false
+          }
+        ]
+      }),
+      task({
+        "title": "Review API key scope checks",
+        "status": "review",
+        "project": "launchpad",
+        "thread": "auth",
+        "notes": "The middleware now checks scopes before routing. Review the denial paths and ensure logs never include credentials.",
+        "steps": [
+          {
+            "id": "sample-4-0",
+            "text": "Add scope middleware",
+            "done": true
+          },
+          {
+            "id": "sample-4-1",
+            "text": "Test missing and insufficient scopes",
+            "done": false
+          },
+          {
+            "id": "sample-4-2",
+            "text": "Review the audit log fields",
+            "done": false
+          }
+        ]
+      }),
+      task({
+        "title": "Generate the TypeScript API client",
+        "status": "blocked",
+        "project": "website",
+        "thread": "api",
+        "notes": "Waiting for the pagination schema to be finalized before generating the client used by the console.",
+        "steps": [
+          {
+            "id": "sample-5-0",
+            "text": "Validate the OpenAPI schema",
+            "done": true
+          },
+          {
+            "id": "sample-5-1",
+            "text": "Generate typed request methods",
+            "done": false
+          },
+          {
+            "id": "sample-5-2",
+            "text": "Run the client against staging",
+            "done": false
+          }
+        ]
+      }),
+      task({
+        "title": "Review error states in the API console",
+        "status": "review",
+        "project": "website",
+        "thread": "api",
+        "notes": "Check how the console handles expired sessions, rate limits, and server errors without losing request input.",
+        "steps": [
+          {
+            "id": "sample-6-0",
+            "text": "Handle 401 and 429 responses",
+            "done": true
+          },
+          {
+            "id": "sample-6-1",
+            "text": "Preserve the request body on failure",
+            "done": false
+          },
+          {
+            "id": "sample-6-2",
+            "text": "Check retry and loading states",
+            "done": false
+          }
+        ]
+      }),
+      task({
+        "title": "Add cursor pagination to the events endpoint",
+        "status": "ready",
+        "project": "launchpad",
+        "thread": "api",
+        "notes": "Use a stable cursor for events with matching timestamps. Keep the response contract backwards compatible.",
+        "steps": [
+          {
+            "id": "sample-7-0",
+            "text": "Add the cursor query",
+            "done": false
+          },
+          {
+            "id": "sample-7-1",
+            "text": "Cover equal-timestamp boundaries",
+            "done": false
+          },
+          {
+            "id": "sample-7-2",
+            "text": "Document next-page tokens",
+            "done": false
+          }
+        ]
+      }),
+      task({
+        "title": "Add a health check for the worker pool",
+        "status": "done",
+        "project": "launchpad",
+        "thread": "reliability",
+        "notes": "Readiness now fails when workers stop consuming jobs; liveness stays independent.",
+        "steps": [
+          {
+            "id": "sample-8-0",
+            "text": "Expose readiness and liveness",
+            "done": true
+          },
+          {
+            "id": "sample-8-1",
+            "text": "Test a stalled worker",
+            "done": true
+          }
+        ]
+      }),
+      task({
+        "title": "Fix the console build cache",
+        "status": "done",
+        "project": "website",
+        "thread": "tooling",
+        "notes": "Cache dependencies by lockfile and runtime version so CI does not reuse incompatible artifacts.",
+        "steps": [
+          {
+            "id": "sample-9-0",
+            "text": "Update the cache key",
+            "done": true
+          },
+          {
+            "id": "sample-9-1",
+            "text": "Verify a clean CI build",
+            "done": true
+          }
+        ]
+      }),
+      task({
+        "title": "Prototype a GraphQL gateway",
+        "status": "ready",
+        "project": "launchpad",
+        "thread": "api",
+        "notes": "Keep the prototype for reference while the REST API stabilizes.",
+        "steps": [
+          {
+            "id": "sample-10-0",
+            "text": "Map the existing endpoints",
+            "done": false
+          },
+          {
+            "id": "sample-10-1",
+            "text": "Measure query overhead",
+            "done": false
+          }
         ],
-        status: "ready",
-        project: "herdr",
-        notes: "Keep the save pin on the row the current lens still paints.",
-        createdAt: NOW - 12 * MIN,
-        updatedAt: NOW - 12 * MIN,
-      }),
-      task({
-        title: "Global backlog note",
-        status: "ready",
-        notes: "Inbox capture. No project yet.",
-        createdAt: NOW - 2 * DAY,
-        updatedAt: NOW - 2 * DAY,
-      }),
-      task({
-        title: "Waiting on the herdr pane label",
-        status: "blocked",
-        notes: "Desk-scoped. Unblocks to ready, not started.",
-        createdAt: NOW - 9 * HOUR,
-        updatedAt: NOW - 50 * MIN,
-      }),
-      task({
-        title: "Check the landing copy once more",
-        status: "review",
-        notes: "Global review sits on desk NEEDS YOU with blocked.",
-        createdAt: NOW - 5 * HOUR,
-        updatedAt: NOW - 20 * MIN,
-      }),
-      task({
-        title: "Document the verb modifier flip",
-        status: "blocked",
-        project: "tsk",
-        thread: "docs",
-        notes: "Waiting on the settings.json copy before the keys page can land.",
-        createdAt: NOW - 6 * HOUR,
-        updatedAt: NOW - 40 * MIN,
-      }),
-      task({
-        title: "Review capture token edge cases",
-        status: "review",
-        project: "tsk",
-        thread: "dispatch",
-        notes: "Bare !p desk, !p /path verbatim, !t normalize to 32 chars.",
-        createdAt: NOW - 1 * DAY,
-        updatedAt: NOW - 90 * MIN,
-      }),
-      task({
-        title: "Pane label matches BOARD_PANE_LABEL",
-        status: "ready",
-        project: "herdr",
-        thread: "host",
-        createdAt: NOW - 8 * HOUR,
-        updatedAt: NOW - 8 * HOUR,
-      }),
-      task({
-        title: "Ship the queue board milestone",
-        status: "done",
-        project: "tsk",
-        createdAt: NOW - 2 * DAY,
-        updatedAt: NOW - 5 * HOUR,
-      }),
-      task({
-        title: "Retire classic board chrome",
-        status: "done",
-        createdAt: NOW - 2 * DAY,
-        updatedAt: NOW - 6 * HOUR,
-      }),
-      task({
-        title: "File the old vendored spike away",
-        status: "ready",
-        archived: true,
-        notes: "Archived: kept, off the radar. Find it in the drawer's archived group.",
-        createdAt: NOW - 3 * DAY,
-        updatedAt: NOW - 1 * DAY,
-      }),
+        "archived": true
+      })
     ];
   };
 
@@ -142,7 +302,7 @@ import { parseCapture } from "./capture.js";
     tasks: fixture ? structuredClone(fixture.tasks) : seed(),
     tab: "desk",
     // The focused scope is transient, while this is the project selected by tab 2.
-    selectedProject: fixture?.selectedProject || "tsk",
+    selectedProject: fixture?.selectedProject || "launchpad",
     focusProject: null,
     projectQuery: "",
     threadFilter: null,
@@ -169,7 +329,7 @@ import { parseCapture } from "./capture.js";
     nextId: 20,
     nextNumber: 22,
     // Wide stage slider: board · split · rail · page. Focus is the stage.
-    stage: "board",
+    stage: frame.querySelector('[data-layout="full"][aria-pressed="true"]') ? "split" : "board",
     stageOrigin: null,
   };
 
@@ -243,8 +403,8 @@ import { parseCapture } from "./capture.js";
       state.tasks.filter((t) => t.project && !t.archived).map((t) => t.project),
     );
     return [...names].sort((a, b) => {
-      if (a === (fixture?.selectedProject || "tsk")) return -1;
-      if (b === (fixture?.selectedProject || "tsk")) return 1;
+      if (a === (fixture?.selectedProject || "launchpad")) return -1;
+      if (b === (fixture?.selectedProject || "launchpad")) return 1;
       return a.localeCompare(b);
     });
   }
@@ -620,7 +780,7 @@ import { parseCapture } from "./capture.js";
     state.pickerArchived = false;
     state.archivedProjects = new Set();
     state.tab = "desk";
-    state.selectedProject = "tsk";
+    state.selectedProject = "launchpad";
     state.focusProject = null;
     state.projectQuery = "";
     state.collapsed = new Set();
@@ -861,7 +1021,7 @@ import { parseCapture } from "./capture.js";
         if (row.kind === "project") {
           const selected = row.id === state.selectedId;
           const threads = new Set(state.tasks.filter(t=>t.project===row.project && !t.archived && t.status!=="done").map(t=>t.thread).filter(Boolean)).size;
-          return `<button type="button" class="tsk-project-row ${selected ? "is-selected" : ""}" data-project-row="${esc(row.project)}" data-nav-id="${esc(row.id)}"><span class="tsk-project-name">${selected ? "▸" : " "} <span>${esc(row.label)}</span>${row.project === (fixture?.selectedProject || "tsk") ? `<span class="dim"> · here</span>` : ""}</span>${showThreads ? `<span class="dim">${count(threads)}</span>` : ""}<span class="${row.needs ? "is-bold" : "dim"}">${count(row.needs)}</span><span>${count(row.motion)}</span><span class="dim">${count(row.ready)}</span></button>`;
+          return `<button type="button" class="tsk-project-row ${selected ? "is-selected" : ""}" data-project-row="${esc(row.project)}" data-nav-id="${esc(row.id)}"><span class="tsk-project-name">${selected ? "▸" : " "} <span>${esc(row.label)}</span>${row.project === (fixture?.selectedProject || "launchpad") ? `<span class="dim"> · here</span>` : ""}</span>${showThreads ? `<span class="dim">${count(threads)}</span>` : ""}<span class="${row.needs ? "is-bold" : "dim"}">${count(row.needs)}</span><span>${count(row.motion)}</span><span class="dim">${count(row.ready)}</span></button>`;
         }
         if (row.kind === "group") {
           const mark = row.collapsed ? "▸" : "▾";
