@@ -2324,3 +2324,23 @@ fn rail_cells_carry_no_bold() {
         }
     }
 }
+
+#[test]
+fn collapsed_wide_board_titles_fill_the_space_previously_reserved_for_attribution() {
+    for stage in [WideStage::FullBoard, WideStage::Split] {
+        let (mut domain, mut model) = fixture_with_titles(&"X".repeat(180), "second");
+        to_stage(&mut domain, &mut model, stage);
+        let geometry = resolve_responsive(130, 40, stage);
+        let (rows, _) = render(&model, 130, 40);
+        let line = (0..rows.len())
+            .map(|y| column_text(&rows, geometry.board, y as u16))
+            .find(|line| line.contains("T12 X"))
+            .unwrap();
+        assert!(!line.contains("tsk"), "no row-end attribution: {line}");
+        assert_eq!(
+            line.trim_end().chars().count(),
+            geometry.board.width as usize - 2,
+            "title reaches two-cell margin: {line}"
+        );
+    }
+}

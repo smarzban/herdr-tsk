@@ -5296,15 +5296,45 @@ fn attribution_appears_only_at_bottom_of_open_peek() {
             .expect("L-shaped label line");
         assert!(label > title);
         assert!(!rows[title].contains("release"));
-        if peek {
-            let note = rows
-                .iter()
-                .position(|row| row.contains("Peek note body"))
-                .unwrap();
-            assert!(title < note && note < label);
-            assert_eq!(rows.iter().filter(|row| row.contains('└')).count(), 1);
-        } else {
-            assert_eq!(label, title + 1);
-        }
+        let note = rows
+            .iter()
+            .position(|row| row.contains("Peek note body"))
+            .unwrap();
+        assert!(title < note && note < label);
+        assert_eq!(rows.iter().filter(|row| row.contains('└')).count(), 1);
     }
+}
+
+#[test]
+fn peek_project_label_wraps_all_content_below_notes() {
+    let label = format!("{}end", "a".repeat(80));
+    let mut item = task(
+        9911,
+        "Wrapped label",
+        HumanStatus::Started,
+        project(&format!("/repos/{label}")),
+        0,
+    );
+    item.notes = Some("notes above".into());
+    let mut model = BoardModel::from_tasks(vec![item], None);
+    let mut domain = DomainState::new();
+    apply_intent(&mut domain, &mut model, BoardIntent::PeekDetail, None).unwrap();
+    let rows = board_rows(&model, 40, 24);
+    let note = rows
+        .iter()
+        .position(|row| row.contains("notes above"))
+        .unwrap();
+    let corner = rows.iter().position(|row| row.contains("└─")).unwrap();
+    assert!(corner > note);
+    let mut copied = rows[corner].trim().strip_prefix("└─ ").unwrap().to_string();
+    let mut continuation_count = 0;
+    for row in rows.iter().skip(corner + 1) {
+        if !row.starts_with("       ") || row.trim().is_empty() {
+            break;
+        }
+        copied.push_str(row.trim());
+        continuation_count += 1;
+    }
+    assert!(continuation_count >= 2);
+    assert_eq!(copied, label);
 }

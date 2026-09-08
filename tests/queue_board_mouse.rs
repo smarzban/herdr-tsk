@@ -1477,7 +1477,7 @@ fn section_headers_have_no_hits_and_collapsed_task_titles_are_selectable() {
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
     model.set_selected_project(Some(PathBuf::from(THIS_REPO)));
     let rows = page_rows(&model);
-    // The attribution line remains a task hit, never a section header.
+    // Collapsed task titles carry task hits; section headers are inert.
     let task_row = rows
         .iter()
         .position(|row| row.contains("threaded row"))
@@ -3278,4 +3278,33 @@ fn popup_typing_and_cursor_movement_restore_notes_after_manual_scroll() {
         apply_intent(&mut domain, &mut model, intent, None).unwrap();
         assert!(page_rows(&model).join("\n").contains("LASTLINE"));
     }
+}
+
+#[test]
+fn peek_attribution_is_copyable_but_not_a_task_click_target() {
+    let mut domain = DomainState::new();
+    domain
+        .create(
+            "peek target",
+            Some("note body".into()),
+            project(THIS_REPO),
+            ProvenanceOrigin::Manual,
+            Some("release".into()),
+        )
+        .unwrap();
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
+    model.set_selected_project(Some(PathBuf::from(THIS_REPO)));
+    apply_intent(&mut domain, &mut model, BoardIntent::PeekDetail, None).unwrap();
+    let rows = page_rows(&model);
+    let y = rows
+        .iter()
+        .position(|row| row.contains("└─ #release"))
+        .unwrap() as u16;
+    let hits = board_hit_map(STANDARD, &model);
+    assert!(!hits.regions.iter().any(|hit| hit.area.y == y));
+    assert!(hits
+        .copyable
+        .iter()
+        .any(|area| area.y == y && area.x == 7 && area.width == 8));
+    assert_eq!(map_board_mouse(&model, &hits, left_click(8, y)), None);
 }

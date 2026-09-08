@@ -211,7 +211,7 @@ shows at most once per session, and launching anywhere else paints nothing.
 | Pane | What you get |
 | --- | --- |
 | at least 110 columns | wide stage slider: board, board beside page, rail beside page, or page. The rail paints no meta, done drawer, or peek |
-| at least 78×24 and below 110 columns | standard single-pane board: section headers, row meta, full verb legend |
+| at least 78×24 and below 110 columns | standard single-pane board: section headers, peek-only attribution, full verb legend |
 | smaller | compact: glyph, `T<number>` identifier, and wrapped title; project/thread attribution appears only inside peek; help, palette, and the task page take the full pane |
 | down to 40×10 | still operable |
 
