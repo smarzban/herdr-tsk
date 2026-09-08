@@ -183,3 +183,18 @@ test("docs keep the phone layout until the right TOC fits", async () => {
   const links = await read("../src/components/DocsLinks.astro");
   assert.doesNotMatch(links, /install/);
 });
+
+test("attribution is peek-only in demo and static anatomy", async () => {
+  const demo = await read("../public/board-demo.js");
+  const page = await read("../src/pages/index.astro");
+  const styles = await read("../src/styles/landing.css");
+  const guide = await read("../src/content/docs/docs/board.md");
+  assert.ok(demo.includes('state.peekId === task.id && metaFor(task) ? `<div class="tsk-attribution dim">'));
+  assert.ok(demo.includes('└─ ${esc(metaFor(task))}'));
+  assert.doesNotMatch(demo, /<span class="meta">/);
+  assert.match(styles, /\.tsk-attribution\s*\{[^}]*white-space: pre-wrap;[^}]*overflow-wrap: anywhere;/);
+  assert.match(styles, /\.tsk-row-main\s*\{[^}]*padding-right: 2ch;/);
+  assert.doesNotMatch(page, /class="r meta"/);
+  assert.match(page, /└─ tsk/);
+  assert.doesNotMatch(guide, /section headers, row meta/);
+});

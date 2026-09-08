@@ -54,9 +54,12 @@ bracketed paste edit the query, while Enter opens the selected match and Esc cle
 closes it. No search row appears above the project table.
 
 Each persisted row begins with a dim store-global identifier such as
-`T30`. Click the identifier to copy it (`copy sent: T30`). At standard size a row
-ends with its project name on global rows, or its `#thread` attribution on project
-rows. Task-page informational dates remain in the footer. A scoped
+`T30`. Click the identifier to copy it (`copy sent: T30`). Collapsed task rows
+show no project or thread label. Opening peek shows the project on global rows,
+or `#thread` on project rows, on a dim `└─ label` line below the peek notes.
+That line is read-only peek content, and long labels wrap without truncation.
+Titles use the full width and wrap two cells before the right edge.
+Task-page informational dates remain in the footer. A scoped
 group with nothing open reads `no open tasks here — p rescope or + add`.
 
 ## Sections
@@ -69,7 +72,7 @@ only that project's tasks.
   board (that project). Omitted when empty. Sits above IN MOTION.
 - **IN MOTION**: work you have started
 - **ON DECK** when you are on a project board: that project's ready tasks, with
-  thread labels beside their rows
+  thread labels in their peek
 - **z** opens the done drawer
 
 An archived task keeps its human status and leaves every working lens (desk,
@@ -208,8 +211,8 @@ shows at most once per session, and launching anywhere else paints nothing.
 | Pane | What you get |
 | --- | --- |
 | at least 110 columns | wide stage slider: board, board beside page, rail beside page, or page. The rail paints no meta, done drawer, or peek |
-| at least 78×24 and below 110 columns | standard single-pane board: section headers, row meta, full verb legend |
-| smaller | compact: glyph, `T<number>` identifier, and wrapped title; short panes still show project/thread attribution when at least 78 columns wide; help, palette, and the task page take the full pane |
+| at least 78×24 and below 110 columns | standard single-pane board: section headers, peek-only attribution, full verb legend |
+| smaller | compact: glyph, `T<number>` identifier, and wrapped title; project/thread attribution appears only inside peek; help, palette, and the task page take the full pane |
 | down to 40×10 | still operable |
 
 A typical herdr split is 78 columns, which is the standard board.

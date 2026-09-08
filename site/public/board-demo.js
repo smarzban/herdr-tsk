@@ -845,14 +845,13 @@ import { parseCapture } from "./capture.js";
                 ...wrapPeek(peekLines(task), Math.max(20, terminalColumns() - indent.length - 12)).map(
                   (line) => `<div class="tsk-peek dim">${indent}    │ ${esc(line)}</div>`,
                 ),
-                `<div class="tsk-peek dim">${indent}    └</div>`,
+                ...(metaFor(task) ? [] : [`<div class="tsk-peek dim">${indent}    └</div>`]),
               ].join("")
             : "";
         const dimRow = row.dim ? "dim" : "";
         return `<button type="button" class="tsk-row ${dimRow} ${selected ? "is-sel" : ""} ${flash ? "is-flash" : ""}" data-task="${task.id}">
           <span class="tsk-row-main">${indent}  <span class="${selected ? "sel" : "glyph"}">${glyph}</span> <span class="tsk-task-id ${selected ? "sel-text" : ""}" data-copy-task="${esc(task.id)}" title="copy T${task.number}">T${task.number}</span> <span class="${selected ? "sel-text" : ""}">${esc(task.title)}</span></span>
-          <span class="meta">${esc(metaFor(task))}</span>
-        </button>${peek}`;
+        </button>${peek}${state.peekId === task.id && metaFor(task) ? `<div class="tsk-attribution dim">${indent}    └─ ${esc(metaFor(task))}</div>` : ""}`;
       })
       .join("");
 

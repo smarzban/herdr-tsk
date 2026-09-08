@@ -708,8 +708,18 @@ html[data-theme="light"] .pane {
 .tsk-row-main {
   min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: pre;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding-right: 2ch;
+}
+
+.tsk-attribution {
+  display: block;
+  width: 100%;
+  text-align: left;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding-right: 2ch;
 }
 
 .tsk-task-id {

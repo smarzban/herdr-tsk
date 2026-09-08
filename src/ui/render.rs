@@ -102,8 +102,6 @@ pub struct TaskRowPaint<'a> {
     /// Presentation-only task identifier, for example `T30`. Drafts have none.
     pub identifier: Option<&'a str>,
     pub title: &'a str,
-    /// Trailing age / project metadata. The task identifier belongs with the title, not here.
-    pub meta: &'a str,
     pub selected: bool,
     /// Bold the title when unselected (e.g. attention emphasis).
     pub title_bold: bool,
@@ -127,9 +125,8 @@ pub fn paint_task_row_lines(
     geo: &TierGeometry,
     leading_indent: usize,
 ) -> Vec<TaskRowLine> {
-    let row_w = geo.row_width as usize;
-    let meta_budget = task_meta_budget(row, geo);
-    let title_budget = row_w.saturating_sub(meta_budget);
+    let row_w = geo.row_width.saturating_sub(2) as usize;
+    let title_budget = row_w;
     let glyph_cells = display_width(&super::terminal_text(row.glyph));
     let prefix_cells = leading_indent + 2 + glyph_cells + 1;
     let identifier_width = row.identifier.map(display_width).unwrap_or(0);
@@ -158,8 +155,10 @@ pub fn paint_task_row_lines(
         title: &segments[0],
         ..*row
     };
+    let mut title_geo = *geo;
+    title_geo.row_width = row_w as u16;
     lines.push(TaskRowLine {
-        line: paint_task_row_with_indent(&head, geo, leading_indent),
+        line: paint_task_row_with_indent(&head, &title_geo, leading_indent),
         content_x: head_content_x,
         content_width: head_content_width,
         identifier,
@@ -191,13 +190,10 @@ pub fn paint_task_row_lines(
     lines
 }
 
-/// Paint one task row: glyph+title on the left, right-aligned meta in the meta budget.
-///
-/// Title and meta never share cells. Over-budget text is clipped through
-/// [`present_line`] so truncation always shows `…`. Compact geometry drops meta on
-/// narrow terminals, while wide compact frames retain a bounded identity column.
-pub fn paint_task_row(row: &TaskRowPaint<'_>, geo: &TierGeometry) -> Line<'static> {
-    paint_task_row_with_indent(row, geo, 0)
+// Unit-test adapter: inspect the same first wrapped line the board paints.
+#[cfg(test)]
+fn paint_task_row(row: &TaskRowPaint<'_>, geo: &TierGeometry) -> Line<'static> {
+    paint_task_row_lines(row, geo, 0).remove(0).line
 }
 
 /// Paint a task row with extra leading cells reserved for a containing visual group.
@@ -207,8 +203,7 @@ fn paint_task_row_with_indent(
     leading_indent: usize,
 ) -> Line<'static> {
     let row_w = geo.row_width as usize;
-    let meta_budget = task_meta_budget(row, geo);
-    let title_budget = row_w.saturating_sub(meta_budget);
+    let title_budget = row_w;
 
     let glyph = super::terminal_text(row.glyph);
     let prefix = format!("{}  {glyph} ", " ".repeat(leading_indent));
@@ -224,32 +219,12 @@ fn paint_task_row_with_indent(
         .saturating_add(display_width(identifier_gap))
         .saturating_add(display_width(&title));
 
-    let margin_w = if meta_budget == 0 { 0 } else { 1 };
-    let meta_content_budget = meta_budget.saturating_sub(margin_w);
-    let meta = if meta_budget == 0 || row.meta.is_empty() {
-        String::new()
-    } else {
-        present_line(row.meta, meta_content_budget)
-    };
-    let meta_w = display_width(&meta);
-    let leader_w = if meta.is_empty() {
-        row_w.saturating_sub(left_w)
-    } else {
-        let title_pad = title_budget.saturating_sub(left_w);
-        let meta_pad = meta_content_budget.saturating_sub(meta_w);
-        title_pad + meta_pad
-    };
-    let leader = " ".repeat(leader_w);
+    let leader = " ".repeat(row_w.saturating_sub(left_w));
 
-    let (title_style, identifier_style, leader_style, meta_style) = if row.selected {
-        (
-            style_reverse(),
-            style_reverse_dim(),
-            style_reverse_dim(),
-            style_reverse_dim(),
-        )
+    let (title_style, identifier_style, leader_style) = if row.selected {
+        (style_reverse(), style_reverse_dim(), style_reverse_dim())
     } else if row.dim {
-        (style_dim(), style_dim(), style_dim(), style_dim())
+        (style_dim(), style_dim(), style_dim())
     } else {
         (
             if row.title_bold {
@@ -257,7 +232,6 @@ fn paint_task_row_with_indent(
             } else {
                 style_plain()
             },
-            style_dim(),
             style_dim(),
             style_dim(),
         )
@@ -273,26 +247,7 @@ fn paint_task_row_with_indent(
     if !leader.is_empty() {
         spans.push(Span::styled(leader, leader_style));
     }
-    let meta_present = !meta.is_empty();
-    if meta_present {
-        spans.push(Span::styled(meta, meta_style));
-    }
-    if margin_w > 0 && meta_present {
-        spans.push(Span::styled(" ".repeat(margin_w), leader_style));
-    }
-
     bound_line(Line::from(spans), row_w)
-}
-
-fn task_meta_budget(row: &TaskRowPaint<'_>, geo: &TierGeometry) -> usize {
-    if geo.meta_column_width == 0 && geo.width >= 78 && !row.meta.is_empty() {
-        // A short pane may use compact density despite having standard-width room.
-        // Preserve project/thread identity there; genuinely narrow panes keep the
-        // existing title-first layout and task titles still wrap.
-        (geo.row_width as usize / 4).min(36)
-    } else {
-        geo.meta_column_width as usize
-    }
 }
 
 /// Present untrusted text into a single mono-styled line bounded to `width` cells.
@@ -3662,7 +3617,6 @@ fn build_list_rows(
                     glyph: status_glyph(task.status),
                     identifier: identifier.as_deref(),
                     title: &task.title,
-                    meta: &meta,
                     selected,
                     title_bold: false,
                     // AC-41: every row of a read-only archived focus paints dim.
@@ -3690,11 +3644,30 @@ fn build_list_rows(
             *selected_idx = Some(out.len() - 1);
         }
         if detail_target == Some(task.id) {
-            for (line, content_x, content_width) in detail_lines_for_task(task, geo.row_width) {
+            let mut details = detail_lines_for_task(task, geo.row_width);
+            if !meta.is_empty() {
+                details.pop();
+            }
+            for (line, content_x, content_width) in details {
                 out.push(ListRow::Detail {
                     line,
                     content_x,
                     content_width,
+                });
+            }
+            *anchor_last_idx = Some(out.len() - 1);
+        }
+        if detail_target == Some(task.id) && !meta.is_empty() {
+            let room = geo.row_width.saturating_sub(9).max(1) as usize;
+            for (index, row) in crate::ui::edit::wrap_text(&meta, room)
+                .into_iter()
+                .enumerate()
+            {
+                let prefix = if index == 0 { "    └─ " } else { "       " };
+                out.push(ListRow::Detail {
+                    line: Line::from(Span::styled(format!("{prefix}{}", row.text), style_dim())),
+                    content_x: 7,
+                    content_width: display_width(&row.text) as u16,
                 });
             }
             *anchor_last_idx = Some(out.len() - 1);
@@ -4546,26 +4519,6 @@ fn paint_verb_bar(
     (line, hits)
 }
 
-/// Widest row-meta display width across the tasks the view paints. The wide split's board
-/// column uses it to size its meta column to the content actually shown, instead of the
-/// narrow board's fixed reserve. Relative ages are deliberately excluded from row metadata.
-pub fn widest_row_meta_width(tasks: &[Task], view: &QueueView, now: SystemTime) -> usize {
-    let mut widest = 0usize;
-    for section in &view.sections {
-        let attribution = section.project_label.is_none();
-        for id in &section.task_ids {
-            if let Some(task) = tasks.iter().find(|task| task.id == *id) {
-                widest = widest.max(display_width(&row_meta(task, now, attribution, false)));
-                // Stage A may paint project-board thread attribution even though the
-                // section metadata does not carry that surface flag. Budget both real
-                // attribution shapes so a full valid thread is never clipped there.
-                widest = widest.max(display_width(&row_meta(task, now, false, true)));
-            }
-        }
-    }
-    widest
-}
-
 fn row_meta(
     task: &Task,
     _now: SystemTime,
@@ -4715,7 +4668,7 @@ fn sgr_params_contain_color(params: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ui::tier::{self, Tier};
+    use crate::ui::tier;
     use ratatui::backend::TestBackend;
     use ratatui::{widgets::Paragraph, Terminal};
 
@@ -4874,172 +4827,60 @@ mod tests {
     }
 
     #[test]
-    fn present_row_title_and_meta_never_overlap_and_truncation_uses_visible_omission_mark() {
+    fn task_titles_use_full_width_with_two_cells_at_right_edge() {
         let geo = tier::resolve(80, 24);
-        assert_eq!(geo.tier, Tier::Standard);
-        assert!(geo.meta_column_width > 0);
-
-        let long_title = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".repeat(4); // 104 chars
-        let long_meta = "meta-meta-meta-meta-meta-meta-meta"; // > 28
-
-        let line = paint_task_row(
-            &TaskRowPaint {
+        let room = geo.row_width as usize - 8 - 2;
+        let title = "X".repeat(room + 1);
+        for selected in [false, true] {
+            let row = TaskRowPaint {
                 glyph: "○",
-                identifier: None,
-                title: &long_title,
-                meta: long_meta,
-                selected: false,
+                identifier: Some("T28"),
+                title: &title,
+                selected,
                 title_bold: false,
-
                 dim: false,
-            },
-            &geo,
-        );
-
-        assert!(
-            line.width() <= geo.row_width as usize,
-            "row width {} exceeds budget {}",
-            line.width(),
-            geo.row_width
-        );
-
-        let text = plain(&line);
-        assert!(
-            text.contains('…'),
-            "truncation must use a visible omission mark, got {text:?}"
-        );
-
-        // Title lives in the left budget; meta in the trailing meta column.
-        let title_budget = geo.title_width as usize;
-        let meta_budget = geo.meta_column_width as usize;
-        let left_zone: String = text.chars().take(title_budget).collect();
-        let right_zone: String = text
-            .chars()
-            .skip(text.chars().count().saturating_sub(meta_budget))
-            .collect();
-
-        // Meta content (pre-truncation marker of the meta string) must not appear in the title zone.
-        assert!(
-            !left_zone.contains("meta-meta-meta"),
-            "meta leaked into title zone: left={left_zone:?}"
-        );
-        // Title alphabet run must not appear in the meta zone.
-        assert!(
-            !right_zone.contains("ABCDEFGHIJKLMNOPQRSTUVWXYZ"),
-            "title leaked into meta zone: right={right_zone:?}"
-        );
-
-        // Both sides truncated independently when over budget.
-        let title_only = paint_task_row(
-            &TaskRowPaint {
-                glyph: "○",
-                identifier: None,
-                title: &long_title,
-                meta: "1h",
-                selected: false,
-                title_bold: false,
-
-                dim: false,
-            },
-            &geo,
-        );
-        assert!(
-            plain(&title_only).contains('…'),
-            "long title must truncate with …"
-        );
-
-        let meta_only = paint_task_row(
-            &TaskRowPaint {
-                glyph: "○",
-                identifier: None,
-                title: "short",
-                meta: long_meta,
-                selected: false,
-                title_bold: false,
-
-                dim: false,
-            },
-            &geo,
-        );
-        let meta_text = plain(&meta_only);
-        assert!(
-            !meta_text.contains('…'),
-            "full task-row attribution should fit without the old age cap, got {meta_text:?}"
-        );
-        assert!(
-            meta_text.contains(long_meta),
-            "full metadata must remain readable when it fits, got {meta_text:?}"
-        );
+            };
+            let lines = paint_task_row_lines(&row, &geo, 0);
+            assert_eq!(lines.len(), 2);
+            assert_eq!(plain(&lines[0].line).matches('X').count(), room);
+            assert!(!plain(&lines[0].line).contains("public-launch"));
+            assert!(lines
+                .iter()
+                .all(|line| line.line.width() <= geo.row_width as usize - 2));
+        }
     }
 
     #[test]
     fn rendered_lines_are_display_width_bounded_for_standard_and_compact_budgets() {
-        let cases = [
-            tier::resolve(80, 24),  // standard
-            tier::resolve(120, 30), // standard (wide not returned in M1)
-            tier::resolve(77, 24),  // compact
-            tier::resolve(48, 18),  // compact
-            tier::resolve(40, 10),  // compact
-            tier::resolve(1, 1),    // tiny
-        ];
-
-        let titles = [
-            "",
-            "ok",
-            "a title with spaces",
-            &"很长的标题需要截断处理".repeat(3),
-            &"x".repeat(200),
-            "safe\u{1b}]52;clipboard\u{7}payload",
-        ];
-        let metas = ["", "1h", "tsk · 2d", &"m".repeat(80)];
-
-        for geo in cases {
-            for title in titles {
-                for meta in metas {
-                    for selected in [false, true] {
-                        let line = paint_task_row(
-                            &TaskRowPaint {
-                                glyph: "◓",
-                                identifier: None,
-                                title,
-                                meta,
-                                selected,
-                                title_bold: selected,
-
-                                dim: false,
-                            },
-                            &geo,
-                        );
+        for (width, height) in [(80, 24), (120, 30), (77, 24), (48, 18), (40, 10), (1, 1)] {
+            let geo = tier::resolve(width, height);
+            for title in [
+                "".to_string(),
+                "ok".into(),
+                "a title with spaces".into(),
+                "很长的标题需要换行处理".repeat(3),
+                "x".repeat(200),
+                "safe\u{1b}]52;clipboard\u{7}payload".into(),
+            ] {
+                for selected in [false, true] {
+                    let row = TaskRowPaint {
+                        glyph: "◓",
+                        identifier: None,
+                        title: &title,
+                        selected,
+                        title_bold: selected,
+                        dim: false,
+                    };
+                    for line in paint_task_row_lines(&row, &geo, 0) {
                         assert!(
-                            line.width() <= geo.row_width as usize,
-                            "tier={:?} {}x{} width {} > budget {} title={title:?} meta={meta:?}",
-                            geo.tier,
-                            geo.width,
-                            geo.height,
-                            line.width(),
-                            geo.row_width
-                        );
-
-                        // Compact never paints trailing meta.
-                        if geo.meta_column_width == 0 && !meta.is_empty() {
-                            let text = plain(&line);
-                            // Meta body should not appear; empty meta budget drops it.
-                            if display_width(meta) > 2 {
-                                assert!(
-                                    !text.contains(meta),
-                                    "compact row must drop meta, got {text:?}"
-                                );
-                            }
-                        }
-
-                        let bounded = paint_bounded_line(title, geo.row_width, style_bold());
-                        assert!(
-                            bounded.width() <= geo.row_width as usize,
-                            "bounded line exceeded row width on {}x{}",
-                            geo.width,
-                            geo.height
+                            line.line.width() <= geo.row_width as usize,
+                            "{width}x{height} overflow"
                         );
                     }
+                    assert!(
+                        paint_bounded_line(&title, geo.row_width, style_bold()).width()
+                            <= geo.row_width as usize
+                    );
                 }
             }
         }
@@ -5053,7 +4894,6 @@ mod tests {
                 glyph: "○",
                 identifier: Some("T30"),
                 title: "copy this",
-                meta: "1m",
                 selected: false,
                 title_bold: false,
 
@@ -5074,7 +4914,6 @@ mod tests {
                 glyph: "○",
                 identifier: Some("T30"),
                 title: "copy this",
-                meta: "1m",
                 selected: true,
                 title_bold: false,
 
@@ -5124,7 +4963,6 @@ mod tests {
                 glyph: "○",
                 identifier: None,
                 title: "plain row",
-                meta: "1h",
                 selected: false,
                 title_bold: false,
 
@@ -5134,7 +4972,6 @@ mod tests {
                 glyph: "▲",
                 identifier: None,
                 title: "bold title",
-                meta: "tsk · 2m",
                 selected: false,
                 title_bold: true,
 
@@ -5144,7 +4981,6 @@ mod tests {
                 glyph: "◓",
                 identifier: None,
                 title: "selected row",
-                meta: "3d",
                 selected: true,
                 title_bold: false,
 

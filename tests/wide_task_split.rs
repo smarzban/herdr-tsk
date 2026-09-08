@@ -260,11 +260,7 @@ fn stage_zero_and_full_task_render_the_standard_tier_at_130x24() {
     assert!(rows[3].starts_with(" IN MOTION ─"));
     assert!(rows[4].trim().is_empty(), "blank between header and rows");
     assert!(rows[5].starts_with("  ▸ T12 Frame the wide task view"));
-    assert!(
-        rows[5].trim_end().ends_with("tsk"),
-        "meta column: {}",
-        rows[5]
-    );
+    assert!(!rows.iter().any(|row| row.contains("└─ tsk")));
     assert!(rows[6].trim().is_empty());
     assert!(rows[7].starts_with(" ON DECK · desk ─"));
     assert!(rows[9].starts_with("  ○ T15 Renew domain"));
@@ -350,14 +346,14 @@ fn task_column_header_replaces_the_in_pane_header_with_stage_weight() {
 }
 
 #[test]
-fn stage_a_board_keeps_its_meta_column() {
+fn stage_a_board_has_no_attribution_column() {
     let (mut domain, mut model) = fixture();
     to_stage(&mut domain, &mut model, WideStage::Split);
     let geometry = resolve_responsive(130, 24, WideStage::Split);
     let (rows, _) = render(&model, 130, 24);
     let row = column_text(&rows, geometry.board, 5);
     assert!(row.starts_with("  ▸ T12 Frame"), "{row}");
-    assert!(row.trim_end().ends_with("tsk"), "meta column: {row}");
+    assert!(!rows.iter().any(|row| row.contains("└─ tsk")));
     assert_eq!(rows[5].chars().nth(geometry.rule.x as usize), Some('│'));
 }
 
@@ -2326,5 +2322,25 @@ fn rail_cells_carry_no_bold() {
                 cell.symbol()
             );
         }
+    }
+}
+
+#[test]
+fn collapsed_wide_board_titles_fill_the_space_previously_reserved_for_attribution() {
+    for stage in [WideStage::FullBoard, WideStage::Split] {
+        let (mut domain, mut model) = fixture_with_titles(&"X".repeat(180), "second");
+        to_stage(&mut domain, &mut model, stage);
+        let geometry = resolve_responsive(130, 40, stage);
+        let (rows, _) = render(&model, 130, 40);
+        let line = (0..rows.len())
+            .map(|y| column_text(&rows, geometry.board, y as u16))
+            .find(|line| line.contains("T12 X"))
+            .unwrap();
+        assert!(!line.contains("tsk"), "no row-end attribution: {line}");
+        assert_eq!(
+            line.trim_end().chars().count(),
+            geometry.board.width as usize - 2,
+            "title reaches two-cell margin: {line}"
+        );
     }
 }

@@ -1355,19 +1355,7 @@ fn draw_wide_board(
     let mut hits = render::QueueHitMap::default();
     let board_area = responsive.board;
     if board_area.width > 0 {
-        let mut board_geo = column_geo(board_area.width);
-        // Stage A only: size the board column's meta column to the widest meta actually
-        // painted (plus a small gap, floored), so long titles keep their room instead of
-        // yielding to the narrow board's fixed reserve. Narrow and the other stages are
-        // untouched.
-        if stage == tier::WideStage::Split {
-            let widest =
-                render::widest_row_meta_width(&model.tasks, &queue_view, SystemTime::now());
-            let budget = u16::try_from(widest.saturating_add(3).max(8)).unwrap_or(u16::MAX);
-            let budget = budget.min(board_geo.row_width);
-            board_geo.meta_column_width = budget;
-            board_geo.title_width = board_geo.row_width.saturating_sub(budget);
-        }
+        let board_geo = column_geo(board_area.width);
         if stage == tier::WideStage::Rail {
             let rail_frame = QueueFrameModel {
                 follow_list: true,
