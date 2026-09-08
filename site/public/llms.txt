@@ -21,4 +21,4 @@ User guide: https://gettsk.sh/docs/
 
 Source: https://github.com/smarzban/herdr-tsk
 
-Website demo: first parity slice covers desk selection/start/open/Escape, wrapped titles and peek attribution. It uses bare browser status keys. Steps, full editing, project archive and save recovery remain outside the implemented demo subset.
+Website demo: first parity slice covers desk selection/start/open/Escape, wrapped titles and peek attribution. It uses bare browser status keys. Task pages include notes, steps and pinned metadata. Tab selects steps, Enter toggles, bare a adds, e renames a selected step, and x twice removes it. Enter parks a rename; Shift+Enter saves staged step edits. New steps save independently. Full task-field editing, project archive and save recovery remain outside the verified demo subset.

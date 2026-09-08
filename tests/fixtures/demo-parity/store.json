@@ -39,7 +39,18 @@
       "scope": "global",
       "provenance": "selection",
       "history": [],
-      "steps": [],
+      "steps": [
+        {
+          "id": "20000000-0000-4000-8000-000000000001",
+          "text": "Read the sample notes",
+          "done": false
+        },
+        {
+          "id": "20000000-0000-4000-8000-000000000002",
+          "text": "Check the second step and preserve its text when it wraps onto another line",
+          "done": true
+        }
+      ],
       "soft_deleted": false,
       "created_at": [
         1700000000,

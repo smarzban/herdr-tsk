@@ -22,7 +22,7 @@ It is view-first. Nothing is in edit mode until you ask. `ctrl+e` edits the titl
 `ctrl+n` edits notes. In view, Tab and Shift+Tab loop only through stored steps and
 `+ step`, never task fields. The trailing dim target paints as `   + step`. `Enter`,
 `ctrl+a`, or a click on it opens its independent editor, then Enter saves one step
-and selects that new stored step.
+and opens the next empty step editor.
 
 Bare `↓` activates the first stored step, then arrows move the selection. `Enter` on
 that selected step toggles it done ↔ ready without changing the task's human status.
@@ -89,3 +89,13 @@ updates the task column and no inline peek opens.
 Text on the page wraps. It does not truncate.
 
 See [keys](/docs/keys/) for the full chord table.
+
+## Website demo
+
+The browser demo includes task notes, step counts and rows, and pinned date metadata.
+Tab selects steps; Enter toggles completion without changing task status. Bare `a`
+adds, `e` renames the selected step, and two consecutive `x` presses remove it.
+Enter parks a rename; Shift+Enter saves it. Escape cancels the active editor, then
+a second Escape cancels staged changes. New steps save independently on Enter and
+open the next empty editor. Full task-field editing and save recovery are still
+outside this verified demo subset.

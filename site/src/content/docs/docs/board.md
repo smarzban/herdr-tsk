@@ -254,5 +254,6 @@ still work. `Esc` does not skip the choice.
 The browser demo supports a repeatable desk → select → start → open → Escape flow.
 Titles retain all text and align continuation lines beneath the title; collapsed rows
 have no attribution, and narrow peeks show project or thread labels beneath notes.
-Browser status shortcuts are bare letters. The demo is a subset: steps, full editing,
-project archive and save recovery are not yet reproduced. It is not a complete app emulator.
+Browser status shortcuts are bare letters. On an open task, Tab selects steps, Enter toggles, `a` adds, `e` renames the selected
+step, and `x` twice removes it. Shift+Enter saves a rename; Escape cancels.
+The demo is a subset: full task editing, project archive and save recovery are not yet reproduced. It is not a complete app emulator.

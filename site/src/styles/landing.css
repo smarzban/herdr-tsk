@@ -2580,3 +2580,37 @@ html[data-theme="light"] .pane {
 .board .tsk-project-selector {
   margin-bottom: 1lh;
 }
+
+/* Task page: one scrolling notes/steps stream and a pinned metadata row. */
+.tsk-task-column { min-height: 0; }
+.tsk-task-column.is-narrow { padding: 1lh 2ch 0; }
+.tsk-task-header.tsk-narrow-header { display: grid; grid-template-columns: 6ch minmax(0, 1fr) auto; gap: 0; padding: 0; flex-wrap: nowrap; align-items: start; }
+.tsk-narrow-header .tsk-page-prefix { white-space: pre; }
+.tsk-narrow-header .tsk-page-title { font-weight: bold; }
+.tsk-narrow-header .tsk-page-title > span { display: block; white-space: pre; }
+.tsk-narrow-header .tsk-state-slot { padding: 0; }
+.tsk-task-column .tsk-task-surface { min-height: 0; padding-top: 0; }
+.tsk-task-column .tsk-page-notes { margin: 0; padding-right: 2ch; overflow-wrap: anywhere; }
+.tsk-page-meta { flex: none; min-height: 1lh; white-space: pre-wrap; overflow-wrap: anywhere; }
+.tsk-steps { margin-top: 2lh; }
+.tsk-step { display: flex; align-items: start; cursor: pointer; }
+.tsk-step-glyph { flex: none; white-space: pre; }
+.tsk-step-text { white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; }
+.tsk-step-add { font: inherit; border: 0; background: none; padding: 0; cursor: pointer; }
+.tsk-step-new { padding-left: 4ch; }
+.tsk-step-refusal { white-space: nowrap; }
+.tsk-step input { min-width: 0; }
+
+.tsk-step { margin-left: -2ch; }
+.tsk-step-text > span { display: block; white-space: pre; }
+.tsk-step-add { white-space: pre; margin-left: -2ch; }
+.tsk-page-meta { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tsk-task-column.is-narrow .tsk-task-rule { flex: none; height: 1lh; margin: 0; background: linear-gradient(var(--line-2), var(--line-2)) center / 100% 1px no-repeat; }
+
+.tsk-page-notes > span { display: block; white-space: pre; }
+.tsk-task-surface { font-weight: normal; }
+.tsk-task-column:not(.is-narrow) .tsk-task-surface,
+.tsk-task-column:not(.is-narrow) .tsk-page-meta { padding-inline: 2ch; }
+
+#tsk-step-edit { display: block; resize: none; padding: 0; line-height: inherit; min-width: 0; }
+.tsk-step-refusal:empty { display: none; }

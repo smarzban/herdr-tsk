@@ -4,7 +4,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { test, expect } from '@playwright/test';
 test.beforeAll(async ({browser}) => {
  const root = new URL('../../', import.meta.url);
- const files=['site/public/board-demo.js','site/public/board-wrap.js','site/public/landing.js','site/src/styles/landing.css','tests/fixtures/demo-parity/store.json'];
+ const files=['site/public/board-demo.js','site/public/board-wrap.js','site/public/task-steps.js','site/public/landing.js','site/src/styles/landing.css','tests/fixtures/demo-parity/store.json'];
  const hashes=Object.fromEntries(await Promise.all(files.map(async path=>[path,createHash('sha256').update(await readFile(new URL(path,root))).digest('hex')])));
  await writeFile(new URL('../parity-reference/browser-provenance.json',import.meta.url),JSON.stringify({kind:'actual Chrome screenshots cropped to board root; not approved baselines',browser:browser.version(),head:execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),diff:execFileSync('git',['diff','--stat'],{encoding:'utf8'}),hashes},null,2));
 });
@@ -44,7 +44,7 @@ for (const width of [40,78,109,110]) {
   await expect(row(page,13)).toHaveClass(/is-sel/);
   await capture(page,info,'started');
   await page.keyboard.press('Enter');
-  await expect(page.locator('.tsk-task-header')).toContainText('started');
+  await expect(page.locator('.tsk-task-column')).toHaveAttribute('data-status','started');
   await expect(page.locator('.tsk-page-notes')).toHaveText('A plain note for the first matched task-page flow.');
   await expect(page.locator('.tsk-list')).toHaveCount(0);
   await expect(page.locator('.tsk-foot')).toHaveCount(1);

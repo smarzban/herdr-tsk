@@ -1,3 +1,4 @@
+import { TaskSteps } from "./task-steps.js";
 import { wrapText } from "./board-wrap.js";
 import { parseCapture } from "./capture.js";
 
@@ -35,6 +36,7 @@ import { parseCapture } from "./capture.js";
       id: `t${n}`,
       number: n++,
       notes: "",
+      steps: [],
       thread: null,
       project: null,
       archived: false,
@@ -55,6 +57,10 @@ import { parseCapture } from "./capture.js";
       }),
       task({
         title: "Edit target binding pin",
+        steps: [
+          { id: "sample-step-1", text: "Write the failing reanchor test", done: false },
+          { id: "sample-step-2", text: "Pin the saved id only while the lens paints it", done: false },
+        ],
         status: "ready",
         project: "herdr",
         notes: "Keep the save pin on the row the current lens still paints.",
@@ -162,6 +168,8 @@ import { parseCapture } from "./capture.js";
     stageOrigin: null,
   };
 
+  const steps = new TaskSteps();
+
   const TASK_STAGES = ["rail", "page"];
   function taskFocus() {
     return TASK_STAGES.includes(state.stage);
@@ -189,6 +197,7 @@ import { parseCapture } from "./capture.js";
     state.stage = "page";
   }
   function leaveTaskPage() {
+    steps.reset();
     if (state.stage === "page") {
       state.stage = state.stageOrigin || "board";
       state.stageOrigin = null;
@@ -525,6 +534,7 @@ import { parseCapture } from "./capture.js";
   }
 
   function goTab(tab) {
+    if (steps.dirty || steps.editor) return;
     state.tab = tab;
     state.focusProject = tab === "project" ? state.selectedProject : null;
     state.projectQuery = "";
@@ -535,6 +545,7 @@ import { parseCapture } from "./capture.js";
   }
 
   function openProject(name) {
+    if (steps.dirty || steps.editor) return;
     if (!name || name === "desk") {
       goTab("desk");
       return;
@@ -670,6 +681,8 @@ import { parseCapture } from "./capture.js";
           <div>e edit title | x delete | u undo | f archive | + add</div>
           <div>z or D drawer (app: d) | g archived group | p projects | 1 2 3 destinations</div>
           <div>/ search projects | : palette | ? help</div>
+          <div>steps: tab / shift+tab select | enter toggle | a add</div>
+          <div>e rename selected step | x twice delete | shift+enter save | esc cancel</div>
           <div class="dim">app needs ctrl on verbs · demo also accepts bare keys</div>
         </div>
         <div class="tsk-box-foot">esc close</div>
@@ -720,6 +733,9 @@ import { parseCapture } from "./capture.js";
     enterTaskStage();
     const task = selectedTask();
     if (!task) return;
+    if (id === "edit" && steps.selected && steps.selected !== "add") {
+      steps.begin(task, steps.selected); return;
+    }
     if (id === "edit") {
       state.editField = "title";
       state.editDraft = task.title;
@@ -735,6 +751,11 @@ import { parseCapture } from "./capture.js";
 
   // The wide task column: a header rule on the selector row (dim in split, bold when the task
   // owns focus) and the page body under it. Narrow: the same page fills the frame.
+  function taskColumnWidth() {
+    const cols = terminalColumns();
+    return state.stage === "split" ? cols - Math.floor(cols * .4) - 2 : state.stage === "rail" ? cols - 34 : cols;
+  }
+
   function renderPage(embedded = false) {
     const task = selectedTask();
     const focused = taskFocus();
@@ -744,29 +765,31 @@ import { parseCapture } from "./capture.js";
       }
       return `<div class="tsk-overlay"><div class="dim">no task</div><div class="dim">  select a task to preview it here</div></div>`;
     }
+    steps.bind(task);
     const editing = state.editField;
-    const stateSlot = editing ? `editing ${editing}` : `${task.status} · ${projectName(task)}`;
+    const narrow = !isWideSplit();
+    const stateSlot = steps.editor ? "editing step" : steps.dirty ? "unsaved" : editing ? `editing ${editing}` : narrow ? task.status : `${task.status} · ${projectName(task)}`;
     const headTitle =
       editing === "title"
         ? `<input class="tsk-field" id="tsk-edit" value="${esc(state.editDraft)}" />`
         : esc(task.title);
     const glyph = GLYPH[task.status] || "○";
-    const header = `<div class="tsk-task-header ${focused ? "is-bold" : "dim"}"><span class="glyph">${glyph}</span> <span class="tsk-task-id" data-copy-task="${esc(task.id)}" title="copy T${task.number}">T${task.number}</span> <span class="sec">${headTitle}</span><span class="tsk-state-slot">${esc(stateSlot)}</span></div><div class="tsk-task-rule" aria-hidden="true"></div>`;
+    let header = `<div class="tsk-task-header ${focused ? "is-bold" : "dim"}"><span class="glyph">${glyph}</span> <span class="tsk-task-id" data-copy-task="${esc(task.id)}" title="copy T${task.number}">T${task.number}</span> <span class="sec">${headTitle}</span><span class="tsk-state-slot">${esc(stateSlot)}</span></div><div class="tsk-task-rule" aria-hidden="true"></div>`;
+    if (narrow && !editing) {
+      const room = terminalColumns() - 9 - stateSlot.length;
+      const titleRows = wrapText(task.title, room);
+      const headerStatus = titleRows[0].length + 8 + stateSlot.length <= terminalColumns() - 2 ? stateSlot : "";
+      header = `<div class="tsk-task-header tsk-narrow-header"><span class="tsk-page-prefix">${glyph} <span class="tsk-task-id" data-copy-task="${esc(task.id)}">T${task.number}</span> </span><span class="tsk-page-title">${titleRows.map(line => `<span>${esc(line)}</span>`).join("")}</span><span class="tsk-state-slot">${esc(headerStatus)}</span></div><div class="tsk-task-rule"></div>`;
+    }
     const notes =
       editing === "notes"
         ? `<textarea class="tsk-field tsk-notes" id="tsk-edit">${esc(state.editDraft)}</textarea>`
-        : `<div class="tsk-page-notes">${esc(task.notes || "no notes yet")}</div>`;
-    const meta = `<div class="dim">${task.thread ? `#${esc(task.thread)} · ` : ""}created ${esc(age(task.createdAt))} ago · updated ${esc(age(task.updatedAt))} ago</div>`;
-    if (embedded) {
-      return `<div class="tsk-task-column tsk-surface" aria-label="T${task.number} task column">${header}<div class="tsk-task-surface tsk-page">${notes}${meta}</div></div>`;
-    }
-    return `
-      <div class="tsk-overlay tsk-page">
-        ${header}
-        ${notes}
-        ${meta}
-        <div class="foot dim tsk-verbs">${pageVerbBar()}</div>
-      </div>`;
+        : `<div class="tsk-page-notes">${wrapText(task.notes || "no notes yet", taskColumnWidth() - 6).map(line => `<span>${esc(line) || " "}</span>`).join("")}</div>`;
+    const stepRows = steps.rows(task);
+    const inlineEditor = `<textarea id="tsk-step-edit" class="tsk-field" aria-label="Step text" rows="${wrapText(steps.editor?.text ?? "", taskColumnWidth() - 8).length}">${esc(steps.editor?.text ?? "")}</textarea><span class="tsk-step-refusal">${esc(steps.refusal)}</span>`;
+    const stepList = `<div class="tsk-steps"><div class="tsk-steps-heading dim">steps ${stepRows.filter(step => step.done).length}/${stepRows.length}</div>${stepRows.map(step => `<div class="tsk-step" data-step="${esc(step.id)}" role="option" aria-selected="${steps.selected === step.id}"><span class="tsk-step-glyph">${steps.selected === step.id ? "▸ " : "  "}${steps.marked === step.id ? "✗" : step.done ? "✓" : "▪"} </span>${steps.editor?.id === step.id ? inlineEditor : `<span class="tsk-step-text">${wrapText(step.text, narrow ? terminalColumns() - 8 : Math.max(8, taskColumnWidth() - 8)).map(line => `<span>${esc(line)}</span>`).join("")}</span>`}</div>`).join("")}${steps.editor && !steps.editor.id ? `<div class="tsk-step-new">${inlineEditor}</div>` : `<button type="button" class="tsk-step-add dim" data-step-add="1">   + step</button>`}</div>`;
+    const meta = `<div class="tsk-page-meta dim">${narrow ? `${esc(projectName(task))} · ` : ""}${task.thread ? `#${esc(task.thread)} · ` : ""}created ${esc(age(task.createdAt))} ago · updated ${esc(age(task.updatedAt))} ago</div>`;
+    return `<div class="tsk-task-column tsk-surface ${narrow ? "is-narrow" : ""}" aria-label="T${task.number} task column" data-status="${esc(task.status)}" data-edit-state="${steps.editor ? "editing" : steps.dirty ? "unsaved" : "view"}">${header}<div class="tsk-task-surface tsk-page">${notes}${stepList}</div>${meta}</div>`;
   }
 
   function stageHint() {
@@ -852,6 +875,7 @@ import { parseCapture } from "./capture.js";
   ];
 
   function pageVerbBar() {
+    if (steps.editor || steps.dirty) return "shift+enter save · esc cancel";
     return (
       PAGE_VERBS.map((v) => `<button type="button" class="tsk-verb" data-page-verb="${v.id}">${v.label}</button>`).join(
         "<span> · </span>",
@@ -913,10 +937,25 @@ import { parseCapture } from "./capture.js";
     if (state.overlay === "help") html += renderHelp();
     if (state.overlay === "palette") html += renderPalette();
     if (state.overlay === "picker") html += renderPicker();
+    const oldScroll = root.querySelector(".tsk-task-surface")?.scrollTop ?? 0;
     const activeSearch = document.activeElement?.id === "tsk-project-search";
     const keepKeys =
       document.activeElement === frame || frame.contains(document.activeElement);
     root.innerHTML = html;
+    const content = root.querySelector(".tsk-task-surface");
+    if (content) content.scrollTop = oldScroll;
+    const stepInput = root.querySelector("#tsk-step-edit");
+    if (stepInput) {
+      stepInput.addEventListener("input", () => {
+        steps.editor.text = stepInput.value;
+        steps.refusal = "";
+        root.querySelector(".tsk-step-refusal").textContent = "";
+        stepInput.rows = wrapText(stepInput.value, taskColumnWidth() - 8).length;
+      });
+      stepInput.focus({preventScroll:true});
+      stepInput.setSelectionRange(stepInput.value.length, stepInput.value.length);
+      stepInput.scrollIntoView({block:"nearest"});
+    }
     const add = document.getElementById("tsk-add");
     const edit = document.getElementById("tsk-edit");
     const search = document.getElementById("tsk-project-search");
@@ -926,7 +965,9 @@ import { parseCapture } from "./capture.js";
         render();
       });
     }
-    if (add) {
+    if (stepInput) {
+      // The step editor owns focus.
+    } else if (add) {
       add.focus();
       add.selectionStart = add.value.length;
       add.addEventListener("input", () => {
@@ -952,6 +993,7 @@ import { parseCapture } from "./capture.js";
   }
 
   function move(delta) {
+    if (steps.dirty || steps.editor) return;
     const ids = selectableIds(buildRows());
     if (!ids.length) return;
     let i = ids.indexOf(state.selectedId);
@@ -1038,6 +1080,29 @@ import { parseCapture } from "./capture.js";
       return;
     }
 
+    if (taskPageActive && !state.overlay && !state.editField) {
+      const task = selectedTask();
+      const bare = !e.ctrlKey && !e.metaKey && !e.altKey;
+      if (steps.editor) {
+        if (e.key === "Escape") { e.preventDefault(); steps.cancel(); render(); }
+        else if (e.key === "Enter" && bare) { e.preventDefault(); const persists = !steps.editor.id || e.shiftKey; if (steps.save(task, e.shiftKey) && persists) task.updatedAt = clock(); render(); }
+        return;
+      }
+      if (steps.dirty && e.key === "Escape") { e.preventDefault(); steps.cancel(); render(); return; }
+      if (steps.dirty && e.key === "Enter" && e.shiftKey && bare) { e.preventDefault(); steps.save(task,true); task.updatedAt=clock(); render(); return; }
+      if (bare && ["Tab","ArrowDown","ArrowUp","j","k"].includes(e.key)) {
+        e.preventDefault(); steps.move(task, e.shiftKey || ["ArrowUp","k"].includes(e.key) ? -1 : 1); render();
+        root.querySelector(`[data-step="${steps.selected}"]`)?.scrollIntoView({block:"nearest"}); return;
+      }
+      if (bare && e.key === "Enter" && steps.selected) {
+        e.preventDefault(); if (steps.selected === "add") steps.begin(task); else { steps.toggle(task); task.updatedAt=clock(); } render(); return;
+      }
+      if (bare && e.key === "a") { e.preventDefault(); steps.begin(task); render(); return; }
+      if (bare && e.key === "e" && steps.selected && steps.selected !== "add") { e.preventDefault(); steps.begin(task,steps.selected); render(); return; }
+      if (bare && e.key === "x" && steps.selected && steps.selected !== "add") { e.preventDefault(); if (steps.remove(task)) task.updatedAt=clock(); render(); return; }
+      steps.marked = null;
+      if (steps.dirty && ["e", "n", "f", "p"].includes(e.key)) { e.preventDefault(); return; }
+    }
     if (taskPageActive && state.editField) {
       if (e.key === "Escape") {
         e.preventDefault();
@@ -1355,6 +1420,16 @@ import { parseCapture } from "./capture.js";
 
   root.addEventListener("click", (e) => {
     // A stage A click inside the task column slides to G first, then the control runs.
+    const stepTarget = e.target.closest("[data-step], [data-step-add]");
+    if (stepTarget && e.target.id !== "tsk-step-edit") {
+      const task = selectedTask();
+      if (steps.editor && !steps.editor.text.trim() && !steps.editor.id) steps.cancel();
+      else if (steps.editor && !steps.save(task,false)) { render(); return; }
+      enterTaskStage();
+      if (stepTarget.hasAttribute("data-step-add")) steps.begin(task);
+      else { steps.selected = stepTarget.dataset.step; steps.marked = null; }
+      render(); return;
+    }
     const taskColumn = e.target.closest(".tsk-task-column");
     if (taskColumn && isWideSplit() && state.stage === "split") stageRight();
     const close = e.target.closest("[data-close]");
@@ -1414,6 +1489,7 @@ import { parseCapture } from "./capture.js";
     const row = e.target.closest("[data-task]");
     if (row) {
       const id = row.getAttribute("data-task");
+      if ((steps.dirty || steps.editor) && id !== state.selectedId) return;
       const now = Date.now();
       if (lastClick.id === id && now - lastClick.at < 350) {
         state.selectedId = id;

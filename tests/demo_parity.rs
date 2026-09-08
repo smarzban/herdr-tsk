@@ -54,6 +54,25 @@ fn capture(model: &BoardModel, width: u16, name: &str) -> String {
         fs::create_dir_all(&dir).unwrap();
         let dir = PathBuf::from(dir);
         fs::write(dir.join(format!("app-{width}-{name}.txt")), &text).unwrap();
+        if name == "page" {
+            let lines: Vec<_> = text
+                .lines()
+                .skip_while(|line| !line.contains("✓ Check"))
+                .take_while(|line| !line.contains("+ step"))
+                .map(|line| {
+                    line.chars()
+                        .skip(4)
+                        .collect::<String>()
+                        .trim_end()
+                        .to_string()
+                })
+                .collect();
+            fs::write(
+                dir.join(format!("steps-{width}.json")),
+                serde_json::to_string_pretty(&lines).unwrap(),
+            )
+            .unwrap();
+        }
         if name == "initial" {
             let lines: Vec<_> = text
                 .lines()
@@ -132,6 +151,46 @@ fn shared_fixture_first_flow_and_peek_references() {
         );
         let page = capture(&model, width, "page");
         assert!(page.contains("plain note"));
+        assert!(page.contains("steps 1/2"));
+        apply_intent(&mut state, &mut model, BoardIntent::FormFocusNext, None).unwrap();
+        // The app keyboard boundary resolves Enter on a stored step to ToggleStep.
+        apply_intent(&mut state, &mut model, BoardIntent::ToggleStep, None).unwrap();
+        assert!(capture(&model, width, "step-toggled").contains("steps 2/2"));
+        let task = state
+            .tasks()
+            .iter()
+            .find(|task| task.number == Some(13))
+            .unwrap();
+        assert_eq!(task.status, tsk_tui::domain::HumanStatus::Started);
+        apply_intent(&mut state, &mut model, BoardIntent::BeginAddStep, None).unwrap();
+        for ch in "New step".chars() {
+            apply_intent(&mut state, &mut model, BoardIntent::EditInsert(ch), None).unwrap();
+        }
+        key(
+            &mut state,
+            &mut model,
+            KeyCode::Enter,
+            KeyModifiers::NONE,
+            width,
+        );
+        assert_eq!(
+            state
+                .tasks()
+                .iter()
+                .find(|task| task.number == Some(13))
+                .unwrap()
+                .steps
+                .len(),
+            3
+        );
+        capture(&model, width, "step-added");
+        key(
+            &mut state,
+            &mut model,
+            KeyCode::Esc,
+            KeyModifiers::NONE,
+            width,
+        );
         key(
             &mut state,
             &mut model,

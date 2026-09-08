@@ -90,12 +90,22 @@ for width in (40, 78, 109, 110):
             assert next(t for t in saved['tasks'] if t['number'] == 13)['status'] == 'started'
             key(b'\r', 'page')
             assert 'plain note' in '\n'.join(screen.display)
+            key(b'\t', 'step-selected')
+            key(b'\r', 'step-toggled')
+            saved = json.loads((state / 'tsk.json').read_text())
+            task = next(t for t in saved['tasks'] if t['number'] == 13)
+            assert task['steps'][0]['done'] and task['status'] == 'started'
+            key(b'\x01', 'step-add-editor')
+            key(b'New step\r', 'step-added')
+            saved = json.loads((state / 'tsk.json').read_text())
+            assert len(next(t for t in saved['tasks'] if t['number'] == 13)['steps']) == 3
+            key(b'\x1b', 'step-add-canceled')
             key(b'\x1b', 'back')
             assert 'IN MOTION' in '\n'.join(screen.display)
             key(b'\x11', 'quit')
             child.wait(timeout=5)
             assert child.returncode == 0
-            print(f'{width}x24: initial, peek/split, select, persisted start, page, back, clean quit OK')
+            print(f'{width}x24: initial, peek/split, select, persisted start, page, persisted step toggle/add, back, clean quit OK')
         finally:
             if child.poll() is None:
                 child.kill()

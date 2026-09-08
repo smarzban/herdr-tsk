@@ -1,4 +1,4 @@
-# First board parity slice
+# Board and task-step parity checks
 
 This harness exercises the shipping `public/board-demo.js` and `src/styles/landing.css`, with the same four tasks as the Rust app. It does not serve a second implementation of the board. The fixture is `../../tests/fixtures/demo-parity/store.json`: fixed IDs, numbers, timestamps, project/thread labels and a title that crosses every tested width.
 
@@ -15,7 +15,7 @@ npm run test:parity
 
 `PARITY_CHROME=/absolute/path/to/chrome` overrides the executable. The harness binds only to localhost port 4178. `npm run parity:reference` regenerates app references without starting a browser. Neither command reads the user's task store. Browser runs always use a fresh context.
 
-The nine scenarios cover the initial desk; keyboard selection/start/open/Escape; complete long-title text, continuation alignment and two-cell right clearance; project, thread and unlabeled peeks; and the 109/110-column threshold plus rail-click focus, and the landing column readout excluding padding. Browser shortcuts remain bare intentionally. The title lines are compared directly with the Rust renderer's output, not with independently authored expected strings. Other checks assert DOM outcomes and geometry; they are not a whole-frame pixel equality claim.
+The first nine scenarios cover the initial desk; keyboard selection/start/open/Escape; complete long-title text, continuation alignment and two-cell right clearance; project, thread and unlabeled peeks; and the 109/110-column threshold plus rail-click focus, and the landing column readout excluding padding. Browser shortcuts remain bare intentionally. The title lines are compared directly with the Rust renderer's output, not with independently authored expected strings. Other checks assert DOM outcomes and geometry; they are not a whole-frame pixel equality claim.
 
 Outputs (gitignored):
 
@@ -45,6 +45,29 @@ The implementation started from clean `36ed5c4` (PR #45), following the earlier 
 
 The regression scenario failed against the landed demo with only fixture injection retained: initial desk incorrectly contained IN MOTION 0. The padding/readout check also failed with its measurement fix removed (82 reported columns instead of 78). Both fixes were restored before final checks. Existing source-presence assertions for replaced rendering expressions were removed in favor of behavioral checks; docs/static anatomy checks remain.
 
-Remaining work from the inventory is not silently excluded: transactional creation/editing and validation, steps, local/cross-project thread filters, project archive/read-only focus, save recovery, deletion/undo, palette/help completeness, project index clicks/search, scroll/copy behavior and complete Unicode/markdown rendering. Full task-page visual equivalence (including steps and metadata geometry), compact height behavior at 40×10, typography/style parity and whole-frame visual baselines are also outstanding. CLI, host launch/reopen, persistence simulation and website-only controls still need explicit scope choices. This first slice does not claim those features match.
+Remaining work from the inventory is not silently excluded: transactional task creation/field editing and validation, local/cross-project thread filters, project archive/read-only focus, save recovery, deletion/undo, palette/help completeness, project index clicks/search, scroll/copy behavior and complete Unicode/markdown rendering. Full task-page visual equivalence (including compact header behavior), compact height behavior at 40×10, typography/style parity and whole-frame visual baselines are also outstanding. CLI, host launch/reopen, persistence simulation and website-only controls still need explicit scope choices. These slices do not claim those features match.
 
 Validation for the initial slice: 957 Rust tests passed, 5 ignored; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo build --release` passed. Site unit checks: 16 passed. Browser checks: 9 passed. Real isolated PTY flow: all four sizes passed. Astro production build passed with existing deprecation/404-content notices. No Herdr smoke was run because `HERDR_ENV` was unset.
+
+## Task-page and step slice
+
+The shared T13 fixture now has two steps, including a wrapping completed step. Four
+additional browser scenarios (40/78/109/110 columns) compare its rendered step lines
+to `parity-reference/steps-*.json` exported from the app. They exercise selection,
+completion without task-status changes, staged rename/cancel/save, blank refusal,
+independent add-next/save, consecutive-press removal and reopening the page.
+The browser regression failed before implementation because the steps section was absent.
+Node tests also cover canceling a rename after independently adding/toggling steps,
+interrupted deletion, staged removal cancellation and reverse selection.
+
+Task notes and steps share a scroll area; metadata stays above the common footer.
+The production sample contains the two steps described by its agent transcript.
+Full task-field editing remains separate work, including its shared field focus loop
+and persistence failure recovery. These captures are inspection artifacts, not approved
+whole-page visual baselines. The real PTY smoke additionally verifies persisted step
+completion and addition in its disposable store at all four sizes.
+
+Validation for the step slice: the full Rust formatting/Clippy/test/release green bar
+passed; 19 site unit checks and all 13 browser scenarios passed. The real isolated
+PTY flow passed at 40/78/109/110×24, and the Astro build passed with the existing
+deprecation/404-content notices. HERDR_ENV was unset, so no Herdr host smoke was run.
