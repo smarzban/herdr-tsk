@@ -1,5 +1,6 @@
 ---
 import Wordmark from '../components/Wordmark.astro';
+import SharedHead from '../components/SharedHead.astro';
 import '../styles/landing.css';
 
 import { VERSION } from '../version.mjs';
@@ -83,6 +84,7 @@ const REPO = 'https://github.com/smarzban/herdr-tsk';
       href="/apple-touch-icon-light.png"
       media="(prefers-color-scheme: light)"
     />
+    <SharedHead />
   </head>
   <body class="landing">
     <a class="skip" href="#main">skip to content</a>
