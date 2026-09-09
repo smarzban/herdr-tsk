@@ -182,3 +182,52 @@ test("every_docs_entry_has_description_and_an_answer_first_paragraph", async () 
     );
   }
 });
+
+const DEFINITION_SENTENCE =
+  "tsk is a terminal task board for you and your agents: one board, five statuses, agents work through the CLI.";
+
+const SIDEBAR_TITLES = [
+  "Overview",
+  "Install",
+  "Board",
+  "Keys",
+  "Capture",
+  "Task page",
+  "Steps",
+  "CLI",
+];
+
+test("llms_txt_is_under_60_lines_starts_with_definition_sentence_and_has_no_key_chords", async () => {
+  const text = await read(join(siteRoot, "public/llms.txt"));
+  const lines = text.replace(/\s+$/, "").split("\n");
+  assert.ok(lines.length < 60, `llms.txt is ${lines.length} lines`);
+  assert.equal(lines[0], "# tsk");
+  assert.match(text, new RegExp(`^> ${DEFINITION_SENTENCE}$`, "m"));
+  assert.doesNotMatch(text, /ctrl\+/i);
+  assert.doesNotMatch(text, /prefix\+/);
+  assert.doesNotMatch(text, /\bj\/k\b/);
+});
+
+test("every_llms_txt_gettsk_sh_link_except_agents_md_resolves_in_dist", async () => {
+  ensureDist();
+  const text = await read(join(siteRoot, "public/llms.txt"));
+  const links = [...text.matchAll(/https:\/\/gettsk\.sh(\/[^\s)]+)/g)].map((match) => match[1]);
+  assert.ok(links.length > 0, "expected gettsk.sh links");
+  for (const path of links) {
+    if (path === "/docs/agents.md") continue;
+    const filePath = join(distDir, path.replace(/^\//, ""));
+    assert.equal(existsSync(filePath), true, `missing ${filePath} for ${path}`);
+  }
+});
+
+test("llms_full_txt_contains_every_docs_title_in_sidebar_order", async () => {
+  ensureDist();
+  const text = await read(join(distDir, "llms-full.txt"));
+  let cursor = 0;
+  for (const title of SIDEBAR_TITLES) {
+    const heading = `# ${title}`;
+    const index = text.indexOf(heading, cursor);
+    assert.ok(index >= 0, `missing title ${title}`);
+    cursor = index + heading.length;
+  }
+});

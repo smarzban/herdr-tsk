@@ -5,6 +5,18 @@ import { spawnSync } from "node:child_process";
 import { basename, dirname, resolve } from "node:path";
 
 export const SITE = "https://gettsk.sh";
+export const DEFINITION_SENTENCE =
+  "tsk is a terminal task board for you and your agents: one board, five statuses, agents work through the CLI.";
+export const SIDEBAR_SLUGS = [
+  "index",
+  "install",
+  "board",
+  "keys",
+  "capture",
+  "task-page",
+  "steps",
+  "cli",
+];
 export const SOURCE_BASE =
   "https://github.com/smarzban/herdr-tsk/blob/main/site/src/content/docs/docs";
 
