@@ -4393,25 +4393,43 @@ fn selector_chip_wraps(model: &QueueFrameModel<'_>, width: u16) -> bool {
     tabs_width.saturating_add(chip_width) > width as usize
 }
 
-/// Active tab labels keep a cell of padding for hit targets; underline only the word.
+/// Active tab labels keep a cell of padding for hit targets; underline only the word,
+/// never the padding or the slot-2 chevron.
 fn push_selector_tab_spans(spans: &mut Vec<Span<'static>>, text: &str, active: bool) {
     if !active {
         spans.push(Span::styled(text.to_string(), style_dim()));
         return;
     }
-    let trimmed = text.trim();
+    let chevron_at = text
+        .char_indices()
+        .rev()
+        .find_map(|(i, ch)| (ch == '\u{25be}' || ch == '\u{25b8}').then_some(i));
+    let (label_part, chevron_part) = match chevron_at {
+        Some(i) => {
+            let label_end = text[..i]
+                .rfind(|ch: char| !ch.is_whitespace())
+                .map(|j| j + text[j..].chars().next().map(char::len_utf8).unwrap_or(0))
+                .unwrap_or(0);
+            (&text[..label_end], &text[label_end..])
+        }
+        None => (text, ""),
+    };
+    let trimmed = label_part.trim();
     if trimmed.is_empty() {
         spans.push(Span::styled(text.to_string(), style_heading()));
         return;
     }
-    let start = text.find(trimmed).expect("trim is a substring");
+    let start = label_part.find(trimmed).expect("trim is a substring");
     let end = start + trimmed.len();
     if start > 0 {
-        spans.push(Span::styled(text[..start].to_string(), style_plain()));
+        spans.push(Span::styled(label_part[..start].to_string(), style_plain()));
     }
     spans.push(Span::styled(trimmed.to_string(), style_heading()));
-    if end < text.len() {
-        spans.push(Span::styled(text[end..].to_string(), style_plain()));
+    if end < label_part.len() {
+        spans.push(Span::styled(label_part[end..].to_string(), style_plain()));
+    }
+    if !chevron_part.is_empty() {
+        spans.push(Span::styled(chevron_part.to_string(), style_bold()));
     }
 }
 
@@ -4816,6 +4834,40 @@ mod tests {
                 assert!(
                     !span.style.add_modifier.contains(Modifier::UNDERLINED),
                     "padding must not be underlined: {span:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn active_project_tab_underlines_the_name_not_the_chevron() {
+        let (line, _) = paint_selector_row(
+            &selector_model(NavTab::ProjectBoard),
+            &tier::resolve(78, 24),
+        );
+        let text = plain(&line);
+        assert!(
+            text.contains('▾'),
+            "project tab keeps its chevron: {text:?}"
+        );
+        let underlined: String = line
+            .spans
+            .iter()
+            .filter(|span| span.style.add_modifier.contains(Modifier::UNDERLINED))
+            .map(|span| span.content.as_ref())
+            .collect();
+        assert_eq!(underlined, "tsk");
+        for span in &line.spans {
+            if span.content.contains('▾') || span.content.contains('▸') {
+                assert!(
+                    !span.style.add_modifier.contains(Modifier::UNDERLINED),
+                    "chevron must not be underlined: {span:?}"
+                );
+            }
+            if span.content.as_ref().chars().all(|ch| ch == ' ') {
+                assert!(
+                    !span.style.add_modifier.contains(Modifier::UNDERLINED),
+                    "space around the chevron must not be underlined: {span:?}"
                 );
             }
         }
