@@ -3,30 +3,63 @@ title: Install
 description: Install tsk, open the board, and connect it to Herdr.
 ---
 
-## Homebrew
+## Install
+
+```sh
+curl -fsSL https://gettsk.sh/install.sh | sh
+```
+
+Or install with Homebrew:
 
 ```sh
 brew install smarzban/tap/tsk
 ```
 
-Use `brew update && brew upgrade tsk` to upgrade and `brew uninstall tsk` to remove
-it. The formula pins a release's platform URL and checksum, not `main`.
+The installer sets up PATH for Bash and Zsh. If prompted, reopen your terminal
+or run the printed `export` command before continuing.
 
-## Install script
+## Add to Herdr (optional)
 
-Download and inspect the script, then run it:
+With Herdr 0.9+ installed:
 
 ```sh
-curl -fsSL https://gettsk.sh/install.sh -o install-tsk.sh
-sh install-tsk.sh
+tsk setup herdr
+herdr server reload-config
 ```
 
-It verifies the latest stable release's SHA-256 and installs to `~/.local/bin`.
-Add that directory to PATH. Requires `curl`, `tar`, and `sha256sum` or `shasum`.
-`TSK_INSTALL_DIR` selects another absolute directory; `TSK_VERSION=vX.Y.Z` pins a
+## Open the board
+
+Run `tsk`, or press **prefix+t** in Herdr.
+
+## Add a task
+
+```sh
+tsk add -t "your task title"
+```
+
+Or press **prefix+a** in Herdr.
+
+## Installer details
+
+The script verifies the latest stable release's SHA-256 and installs to `~/.local/bin`.
+It adds a duplicate-safe PATH entry to Bash or Zsh startup files when the directory
+isn't already on PATH, without replacing existing content. Reopen the terminal or
+run the printed `export` command to use `tsk` in the current shell.
+
+Zsh uses `$ZDOTDIR/.zshrc` (otherwise `~/.zshrc`). Bash uses `~/.bashrc` and the
+first existing login file (`~/.bash_profile`, `~/.bash_login`, or `~/.profile`).
+Symlinked, non-regular or unwritable startup files are left alone. Other shells
+require manual PATH setup; the installer prints guidance without undoing the install.
+
+Requires `curl`, `tar`, `sed`, and `sha256sum` or `shasum`. `TSK_INSTALL_DIR` selects
+another absolute directory (no colons or newlines); `TSK_VERSION=vX.Y.Z` pins a
 stable release tag. `--help` makes no downloads. Rerun to upgrade; remove the
-installed executable to uninstall. No sudo, shell edits, or task-data changes.
-Checksum failures and symlink destinations are refused without replacing the binary.
+installed executable to uninstall. To undo PATH setup too, remove the `# tsk PATH`
+comment and its following `case` line from the startup files listed above.
+No sudo or task-data changes. Checksum failures
+and symlink destinations are refused without replacing the binary or editing PATH.
+For Homebrew upgrades, use `brew update && brew upgrade tsk`; remove it with
+`brew uninstall tsk`. Reopen running boards after upgrades.
 
 ## Manual archives
 

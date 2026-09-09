@@ -561,51 +561,52 @@ const REPO = 'https://github.com/smarzban/herdr-tsk';
         <div class="band-inner" data-reveal>
           <header class="band-head">
             <span class="index">06 <span class="index-label">install</span></span>
-            <h2 id="install-heading">Build it. Open the board.</h2>
+            <h2 id="install-heading">Install it. Open the board.</h2>
             <p class="band-lede">
-              One binary, built from source. State lives in <code>~/.tsk</code> whether you run it
+              One binary, standalone or in Herdr. State lives in <code>~/.tsk</code> whether you run it
               bare or inside herdr.
             </p>
           </header>
 
           <div class="install" data-install>
             <div class="tabs" role="tablist" aria-label="Install mode">
-              <button type="button" role="tab" id="tab-standalone" aria-selected="true" aria-controls="panel-standalone" data-install-tab="standalone">standalone</button>
-              <button type="button" role="tab" id="tab-plugin" aria-selected="false" aria-controls="panel-plugin" data-install-tab="plugin" tabindex="-1">herdr plugin</button>
+              <button type="button" role="tab" id="tab-standalone" aria-selected="true" aria-controls="panel-standalone" data-install-tab="standalone">install</button>
+              <button type="button" role="tab" id="tab-plugin" aria-selected="false" aria-controls="panel-plugin" data-install-tab="plugin" tabindex="-1">add to herdr</button>
             </div>
 
             <div class="tabpanel" role="tabpanel" id="panel-standalone" aria-labelledby="tab-standalone" data-install-panel="standalone">
               <div class="shell-wrap">
-                <pre class="shell" data-copy-source><span class="prompt">$</span> git clone https://github.com/smarzban/herdr-tsk.git
-<span class="prompt">$</span> cd herdr-tsk
-<span class="prompt">$</span> cargo build --release
-<span class="prompt">$</span> ./target/release/tsk</pre>
-                <button type="button" class="copy" data-copy aria-label="Copy commands">copy</button>
+                <pre class="shell" data-copy-source><span class="prompt">$</span> curl -fsSL https://gettsk.sh/install.sh | sh</pre>
+                <button type="button" class="copy" data-copy aria-label="Copy install command">copy</button>
+              </div>
+              <p class="install-note">Or install with Homebrew:</p>
+              <div class="shell-wrap">
+                <pre class="shell" data-copy-source><span class="prompt">$</span> brew install smarzban/tap/tsk</pre>
+                <button type="button" class="copy" data-copy aria-label="Copy Homebrew command">copy</button>
               </div>
               <p class="install-note">
-                Add <code>target/release</code> to your <code>PATH</code> and <code>tsk add -t "First task"</code>
-                from anywhere. The board reads it on the next tick.
-                Install native binaries with Homebrew, the release installer, or manual archives. <code>tsk setup herdr</code> connects the same binary to Herdr, with no extra build. <a href="/docs/install/">Installation details</a>.
+                If prompted, reopen your terminal or run the installer's printed <code>export</code> command.
+                Open the board with <code>tsk</code>. Add a task with <code>tsk add -t "your task title"</code>.
+                <a href="/docs/install/">Installation details</a>.
               </p>
             </div>
 
             <div class="tabpanel" role="tabpanel" id="panel-plugin" aria-labelledby="tab-plugin" data-install-panel="plugin" hidden>
               <div class="shell-wrap">
-                <pre class="shell" data-copy-source><span class="prompt">$</span> cargo build --release
-<span class="prompt">$</span> herdr plugin link "$PWD"
-<span class="prompt">$</span> herdr plugin action invoke open-board --plugin herdr-tsk</pre>
-                <button type="button" class="copy" data-copy aria-label="Copy commands">copy</button>
+                <pre class="shell" data-copy-source><span class="prompt">$</span> tsk setup herdr
+<span class="prompt">$</span> herdr server reload-config</pre>
+                <button type="button" class="copy" data-copy aria-label="Copy Herdr setup commands">copy</button>
               </div>
               <p class="install-note">
-                The pane runs <code>./target/release/tsk</code>, so build before you link. A running
-                board keeps the old binary until you quit it.
+                After installing, connect the same binary to Herdr. Press <code>prefix+t</code> to open
+                the board, or <code>prefix+a</code> to add a task. Setup asks before replacing conflicting shortcuts.
               </p>
             </div>
 
             <ul class="reqs" aria-label="Requirements">
-              <li><span class="dim">needs</span> Rust 1.96.0</li>
+              <li><span class="dim">install</span> script or Homebrew</li>
               <li><span class="dim">on</span> Linux · macOS</li>
-              <li><span class="dim">plugin mode</span> herdr 0.7.5+</li>
+              <li><span class="dim">plugin mode</span> herdr 0.9+</li>
               <li><a href="/docs/install/">Full install guide →</a></li>
             </ul>
           </div>

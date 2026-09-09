@@ -16,29 +16,43 @@ Park, resume, attention, linking, and dispatch are not part of this tree.
 
 ## Quickstart
 
-Install with Homebrew:
+### Install
+
+```sh
+curl -fsSL https://gettsk.sh/install.sh | sh
+```
+
+Or install with Homebrew:
 
 ```sh
 brew install smarzban/tap/tsk
-tsk add -t "Draft release notes"
-tsk
 ```
 
-Or use the checksum-verifying installer:
+The installer sets up PATH for Bash and Zsh. If prompted, reopen your terminal
+or run the printed `export` command before continuing.
+
+### Add to Herdr (optional)
+
+With Herdr 0.9+ installed:
 
 ```sh
-curl -fsSL https://gettsk.sh/install.sh -o install-tsk.sh
-sh install-tsk.sh
+tsk setup herdr
+herdr server reload-config
 ```
 
-It installs the latest stable release to `~/.local/bin`; add that directory to PATH.
-Manual release archives and source builds are covered in the
-[install guide](https://gettsk.sh/docs/install/).
+### Open the board
 
-For Herdr 0.9+, run `tsk setup herdr`, then `herdr server reload-config`.
-The board and quick capture share your installed binary. Setup adds prefix+t /
-prefix+a and asks before replacing conflicts. Rerun setup after upgrades; no second
-build or checkout is needed. Reopen running boards to use the upgraded binary.
+Run `tsk`, or press **prefix+t** in Herdr.
+
+### Add a task
+
+```sh
+tsk add -t "your task title"
+```
+
+Or press **prefix+a** in Herdr.
+
+[Installation details and upgrades](https://gettsk.sh/docs/install/).
 
 ## Usage
 
