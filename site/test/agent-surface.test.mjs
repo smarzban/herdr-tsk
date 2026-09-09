@@ -164,3 +164,21 @@ test("robots_txt_allows_star_and_listed_crawlers_and_names_the_sitemap", async (
   }
   assert.match(robots, /Sitemap: https:\/\/gettsk\.sh\/sitemap-index\.xml/);
 });
+
+test("every_docs_entry_has_description_and_an_answer_first_paragraph", async () => {
+  const files = await docsFiles();
+  assert.ok(files.length >= 8, "docs collection should have the current pages");
+  for (const fileName of files) {
+    const source = await read(join(docsDir, fileName));
+    const description = source.match(/^description:\s*(.+)$/m)?.[1]?.replace(/^"|"$/g, "").trim();
+    assert.ok(description, `${fileName} needs a description`);
+    const body = stripFrontmatter(source);
+    const first = body.split(/\r?\n/).map((line) => line.trim()).find((line) => line.length > 0) || "";
+    assert.ok(first, `${fileName} needs a first paragraph`);
+    assert.equal(
+      /^#|^-|^`|^:::|^</.test(first),
+      false,
+      `${fileName} should open on a paragraph, not ${first}`,
+    );
+  }
+});
