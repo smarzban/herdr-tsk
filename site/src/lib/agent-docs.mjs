@@ -2,6 +2,7 @@
 // site tests can load it with node --test.
 
 import { spawnSync } from "node:child_process";
+import { statSync } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
 
 export const SITE = "https://gettsk.sh";
@@ -51,14 +52,22 @@ export function newestCommitIso(filePath) {
   const absolute = resolve(process.cwd(), filePath);
   const result = spawnSync(
     "git",
-    ["log", "--format=%ct", "--max-count=1", basename(absolute)],
+    ["log", "--format=%ct", "--max-count=1", "--", basename(absolute)],
     { cwd: dirname(absolute), encoding: "utf-8" },
   );
   const timestamp = Number(String(result.stdout || "").trim());
-  if (result.error || !Number.isFinite(timestamp) || timestamp <= 0) {
-    throw new Error(`Failed to retrieve git history for ${filePath}`);
+  if (!result.error && Number.isFinite(timestamp) && timestamp > 0) {
+    return new Date(timestamp * 1000).toISOString();
   }
-  return new Date(timestamp * 1000).toISOString();
+  try {
+    return statSync(absolute).mtime.toISOString();
+  } catch {
+    return new Date(0).toISOString();
+  }
+}
+
+export function serializeJsonLd(value) {
+  return JSON.stringify(value).replace(/</g, "\\u003c");
 }
 
 export function formatTwin({ title, slug, fileName, updatedIso, body }) {

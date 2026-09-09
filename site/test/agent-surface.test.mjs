@@ -1,14 +1,17 @@
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { readFile, readdir } from "node:fs/promises";
-import { dirname, extname, join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+import { tmpdir } from "node:os";
 import test from "node:test";
 
 import {
   formatTwin,
   htmlUrlForSlug,
+  newestCommitIso,
+  serializeJsonLd,
   slugFromDocsId,
   sourceFileName,
   stripFrontmatter,
@@ -63,6 +66,27 @@ test("markdown_twin_formatter_prefixes_title_html_source_and_updated", () => {
   assert.equal(slugFromDocsId("docs/cli"), "cli");
   assert.equal(slugFromDocsId("docs/index"), "index");
   assert.equal(sourceFileName("src/content/docs/docs/index.mdx"), "index.mdx");
+});
+
+test("serializeJsonLd_escapes_script_breakout_and_round_trips", () => {
+  const raw = serializeJsonLd({ headline: "</script><script>alert(1)</script>" });
+  assert.doesNotMatch(raw, /<\/script>/i);
+  assert.match(raw, /\\u003c/);
+  assert.equal(JSON.parse(raw).headline, "</script><script>alert(1)</script>");
+});
+
+test("newestCommitIso_falls_back_to_mtime_when_git_history_is_missing", () => {
+  const dir = mkdtempSync(join(tmpdir(), "tsk-twin-"));
+  const filePath = join(dir, "orphan.md");
+  writeFileSync(filePath, "hi\n");
+  try {
+    const iso = newestCommitIso(filePath);
+    assert.match(iso, /^\d{4}-\d{2}-\d{2}T/);
+    const mtimeIso = statSync(filePath).mtime.toISOString();
+    assert.equal(iso, mtimeIso);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("dist_has_a_markdown_twin_for_every_docs_entry_with_matching_body", async () => {
@@ -129,8 +153,11 @@ test("vercel_json_rewrites_docs_html_to_markdown_twin_when_accept_contains_text_
     String(entry.source).includes("/docs/:path"),
   );
   assert.ok(rewrite, "expected a docs rewrite");
-  assert.match(String(rewrite.source), /\/docs\/:path\*/);
+  assert.match(String(rewrite.source), /\/docs\/:path/);
+  assert.match(String(rewrite.source), /\\\.md/);
   assert.match(String(rewrite.destination), /\.md$/);
+  assert.doesNotMatch(String(rewrite.destination), /\.md\.md/);
+  assert.doesNotMatch(String(rewrite.source), /:path\*$/);
   const accept = (rewrite.has || []).find(
     (item) => item.type === "header" && String(item.key).toLowerCase() === "accept",
   );

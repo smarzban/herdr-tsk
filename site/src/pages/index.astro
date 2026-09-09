@@ -3,6 +3,7 @@ import Wordmark from '../components/Wordmark.astro';
 import SharedHead from '../components/SharedHead.astro';
 import '../styles/landing.css';
 
+import { serializeJsonLd } from '../lib/agent-docs.mjs';
 import { VERSION } from '../version.mjs';
 const SITE = 'https://gettsk.sh';
 const REPO = 'https://github.com/smarzban/herdr-tsk';
@@ -100,7 +101,7 @@ const softwareApplication = {
       media="(prefers-color-scheme: light)"
     />
     <SharedHead />
-    <script type="application/ld+json" set:html={JSON.stringify(softwareApplication)} />
+    <script type="application/ld+json" set:html={serializeJsonLd(softwareApplication)} />
   </head>
   <body class="landing">
     <a class="skip" href="#main">skip to content</a>
