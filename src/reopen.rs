@@ -18,7 +18,7 @@ use crate::store::{StoreSignature, TaskStore};
 
 const REQUEST_FILE: &str = "reopen.json";
 /// How long `acknowledge` waits for a momentarily held lock before leaving the file.
-const ACK_LOCK_BUDGET: Duration = Duration::from_millis(100);
+const ACK_LOCK_BUDGET: Duration = Duration::from_millis(250);
 const LOCK_FILE: &str = "reopen.json.lock";
 const MAX_REQUEST_BYTES: usize = 8 * 1024;
 const MAX_PROJECT_BYTES: usize = 4096;
@@ -302,7 +302,7 @@ impl ReopenWatch {
         self.last_seen = Some(signature);
         self.deferred_notice_sent = false;
 
-        // Bounded (about 100 ms), not nonblocking: this runs once per applied request, not
+        // Bounded (ACK_LOCK_BUDGET), not nonblocking: this runs once per applied request, not
         // on the idle tick, and giving up on a momentarily held lock leaves the file behind.
         let Ok(_lock) = RequestLock::acquire_bounded(&self.state_dir, ACK_LOCK_BUDGET) else {
             return;
@@ -558,12 +558,14 @@ mod tests {
             .expect("request a");
         assert!(watch.poll().is_some(), "request applied");
         let holder_dir = dir.clone();
+        let (held_tx, held_rx) = std::sync::mpsc::channel();
         let holder = std::thread::spawn(move || {
             let lock = RequestLock::acquire(&holder_dir).expect("brief holder");
+            held_tx.send(()).expect("signal held");
             std::thread::sleep(Duration::from_millis(30));
             drop(lock);
         });
-        std::thread::sleep(Duration::from_millis(5));
+        held_rx.recv().expect("holder acquired the lock");
         watch.acknowledge();
         holder.join().expect("holder thread");
         assert!(
