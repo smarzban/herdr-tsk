@@ -23,6 +23,8 @@ const techArticle =
         headline: entry.data.title,
         description: entry.data.description,
         dateModified,
+        author: { '@type': 'Organization', name: 'tsk', url: `${SITE}/` },
+        image: `${SITE}/og.png`,
         isPartOf: { '@type': 'WebSite', url: `${SITE}/` },
       }
     : null;
