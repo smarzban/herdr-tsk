@@ -210,14 +210,15 @@ const DEFINITION_SENTENCE =
 
 const SIDEBAR_TITLES = [
   "Overview",
-  "tsk for agents",
   "Install",
   "Board",
   "Keys",
   "Capture",
   "Task page",
   "Steps",
+  "tsk for agents",
   "CLI",
+  "Storage",
 ];
 
 test("llms_txt_is_under_60_lines_starts_with_definition_sentence_and_has_no_key_chords", async () => {
@@ -304,12 +305,11 @@ test("docs_jsonld_is_tech_article_with_headline_description_date_and_is_part_of"
   }
 });
 
-test("definition_sentence_appears_verbatim_in_index_astro_llms_txt_docs_index_and_readme", async () => {
+test("definition_sentence_appears_in_discovery_surfaces_and_readme_keeps_the_tagline", async () => {
   const files = [
     join(siteRoot, "src/pages/index.astro"),
     join(siteRoot, "public/llms.txt"),
     join(docsDir, "index.mdx"),
-    join(repoRoot, "README.md"),
   ];
   for (const filePath of files) {
     const text = await read(filePath);
@@ -318,6 +318,8 @@ test("definition_sentence_appears_verbatim_in_index_astro_llms_txt_docs_index_an
       `${filePath} is missing the definition sentence`,
     );
   }
+  const readme = await read(join(repoRoot, "README.md"));
+  assert.ok(readme.includes("A terminal task board for you and your agents: one shared queue, a TUI for you, a CLI for them."));
 });
 
 const NOTICE =
@@ -384,4 +386,3 @@ test("npm_start_and_deploy_paths_watch_the_skill", async () => {
   const vercelJson = JSON.parse(await read(join(siteRoot, "vercel.json")));
   assert.match(String(vercelJson.ignoreCommand), /\.\.\/skills/);
 });
-

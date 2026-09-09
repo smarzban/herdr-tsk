@@ -64,6 +64,9 @@ installs the skill in its user-level skills directory.
 
 Run `tsk`, or press **prefix+t** in Herdr.
 
+**No project setup needed.** Open tsk in your project directory and add your first
+task—the project appears on your board automatically.
+
 ### Add a task
 
 ```sh

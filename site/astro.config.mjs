@@ -91,14 +91,25 @@ export default defineConfig({
           label: 'Start here',
           items: [
             { label: 'Overview', slug: 'docs' },
-            { label: 'tsk for agents', slug: 'docs/agents' },
             { label: 'Install', slug: 'docs/install' },
+          ],
+        },
+        {
+          label: 'Use tsk',
+          items: [
             { label: 'Board', slug: 'docs/board' },
             { label: 'Keys', slug: 'docs/keys' },
             { label: 'Capture', slug: 'docs/capture' },
             { label: 'Task page', slug: 'docs/task-page' },
             { label: 'Steps', slug: 'docs/steps' },
+          ],
+        },
+        {
+          label: 'Reference',
+          items: [
+            { label: 'tsk for agents', slug: 'docs/agents' },
             { label: 'CLI', slug: 'docs/cli' },
+            { label: 'Storage', slug: 'docs/storage' },
           ],
         },
       ],
