@@ -59,11 +59,7 @@ export function newestCommitIso(filePath) {
   if (!result.error && Number.isFinite(timestamp) && timestamp > 0) {
     return new Date(timestamp * 1000).toISOString();
   }
-  try {
-    return statSync(absolute).mtime.toISOString();
-  } catch {
-    return new Date(0).toISOString();
-  }
+  return statSync(absolute).mtime.toISOString();
 }
 
 export function serializeJsonLd(value) {

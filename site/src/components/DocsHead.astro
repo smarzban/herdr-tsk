@@ -9,10 +9,16 @@ import {
   twinUrlForSlug,
 } from '../lib/agent-docs.mjs';
 
-const { entry } = Astro.locals.starlightRoute;
+const { entry, lastUpdated } = Astro.locals.starlightRoute;
 const isDocsPage = entry.id !== '404' && !entry.id.endsWith('/404');
 const href = isDocsPage ? twinUrlForSlug(slugFromDocsId(entry.id)) : '';
-const dateModified = entry.filePath ? newestCommitIso(entry.filePath) : undefined;
+const dateModified = isDocsPage
+  ? lastUpdated instanceof Date
+    ? lastUpdated.toISOString()
+    : entry.filePath
+      ? newestCommitIso(entry.filePath)
+      : undefined
+  : undefined;
 const techArticle =
   isDocsPage && dateModified
     ? {
