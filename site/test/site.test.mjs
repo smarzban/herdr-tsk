@@ -164,7 +164,7 @@ test("docs paint keys as keycaps and leave flags as code", async () => {
 
 test("docs open on the two-party board and let agents set status", async () => {
   const overview = await read("../src/content/docs/docs/index.mdx");
-  assert.match(overview, /a task board for you and your agents/);
+  assert.match(overview, /a terminal task board for you and your agents/);
   assert.match(overview, /tsk status/);
   assert.doesNotMatch(overview, /Done is a human verb/);
   const cli = await read("../src/content/docs/docs/cli.md");

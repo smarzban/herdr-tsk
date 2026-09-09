@@ -1,6 +1,6 @@
 # tsk
 
-**A task board for you and your agents.**
+tsk is a terminal task board for you and your agents: one board, five statuses, agents work through the CLI.
 
 You and your agents put work on one board and move it through human status:
 ready, started, blocked, review, done. Agents reach the board through the CLI.
