@@ -190,10 +190,17 @@ For scriptable board work, use `tsk add`, `tsk list`, `tsk status`, `tsk edit`, 
   fail, restore the fix. Use content that actually crosses the boundary under test.
 - Temp state dirs need a per-binary atomic counter, not just `SystemTime::now()`.
 - Green bar: `cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && cargo build --release`
+  Warm, it takes about three minutes (`cargo test` alone runs 1000+ tests in under 30 s). If
+  it takes 20 minutes, a second cargo process is holding the `target/` lock: cargo waits
+  silently on it for every one of the 40+ test binaries. Never run two cargo commands in this
+  checkout at once, including a background release build or another agent's run. Run the bar
+  once at the end, as a single chain, not after every edit.
 - CI installs Rust **1.96.0** with `rustfmt` + `clippy` on ubuntu and macos. The
-  frame-time bench is Linux-only. While the repository is private, workflows run
-  automatically only on pushes to `main` to conserve Actions usage; PR checks are
-  not required. Site-only pushes skip the Rust matrix (`paths-ignore: site/**`).
+  frame-time bench is Linux-only. In this public repository, Rust CI and Site validation
+  run on pushes to `main` and pull requests targeting `main`, with the same path filters
+  for both events. Site-only changes skip the Rust matrix (`paths-ignore: site/**`).
+  Validation uses read-only permissions and no repository secrets, including on fork PRs.
+  Vercel production deployment runs only on pushes to `main`.
   Site CI is `npm ci && npm test && npm run build` in `site/`.
 - `site/vercel.json` is validated by Vercel's own route parser in `npm test`
   (`@vercel/routing-utils`, the same check `vercel deploy` runs before upload). Its

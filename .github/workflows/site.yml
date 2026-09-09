@@ -7,6 +7,12 @@ on:
       - "site/**"
       - "skills/**"
       - ".github/workflows/site.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "site/**"
+      - "skills/**"
+      - ".github/workflows/site.yml"
 
 permissions:
   contents: read
@@ -17,6 +23,7 @@ concurrency:
 
 jobs:
   build:
+    name: site build
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:

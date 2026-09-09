@@ -10,7 +10,6 @@ on:
       - "site/**"
       - "skills/**"
       - ".github/workflows/vercel.yml"
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -23,8 +22,8 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # Manual runs are allowed only from main, matching the automatic trigger.
-    if: github.ref == 'refs/heads/main'
+    # Keep repository secrets out of every pull-request event.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v4
         with:
