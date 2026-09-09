@@ -171,6 +171,14 @@ For scriptable board work, use `tsk add`, `tsk list`, `tsk status`, `tsk edit`, 
   are separate from release publication. Installer-only changes run the packaging
   tests and ShellCheck via `.github/workflows/installer.yml`; Rust CI also exercises
   binary-dependent packaging/PTY tests after building the release executable.
+- The install script appends a duplicate-safe PATH entry for Bash (`.bashrc` plus
+  the first existing login profile, default `.profile`) or Zsh (`$ZDOTDIR/.zshrc`,
+  otherwise `~/.zshrc`) only when the install directory is absent from PATH.
+  It never sources startup files; symlinked, non-regular, or unwritable files are
+  skipped with manual guidance. Partial success preserves completed edits and names
+  skipped files. Successful setup prints reopen-terminal/export instructions.
+  Tests must isolate HOME and ZDOTDIR, never edit the caller's startup files.
+  Website installer updates do not replace an already-published release's assets.
 
 - Build: `cargo build --release`
 - `herdr-plugin.toml` launches `./target/release/tsk`. Rebuild in-repo
