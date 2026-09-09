@@ -2344,3 +2344,43 @@ fn collapsed_wide_board_titles_fill_the_space_previously_reserved_for_attributio
         );
     }
 }
+
+/// Regression: at wide widths `Tab` on the quick-add line used to expand into a draft that
+/// the slider never painted (the wide column paints only task forms), so the board stayed
+/// on screen while keys went to an invisible page.
+#[test]
+fn expanded_quick_add_draft_paints_at_wide_widths_and_esc_returns_to_the_line() {
+    let (mut domain, mut model) = fixture();
+    go(&mut domain, &mut model, BoardIntent::OpenCapture);
+    for c in "buy milk".chars() {
+        go(&mut domain, &mut model, BoardIntent::QuickAddInsert(c));
+    }
+    go(&mut domain, &mut model, BoardIntent::ExpandQuickAdd);
+    assert_eq!(model.input_mode(), BoardInputMode::EditNotes);
+    for width in [110u16, 140, 200] {
+        let (buffer, _) = render_buffer(&model, width, 30);
+        let rows = rows_of(&buffer);
+        let text = rows.join("\n");
+        assert!(
+            text.contains("buy milk"),
+            "{width} cols: draft title missing\n{text}"
+        );
+        assert!(
+            text.contains("shift+enter save"),
+            "{width} cols: draft verb bar missing\n{text}"
+        );
+        assert!(
+            !text.contains("IN MOTION"),
+            "{width} cols: board still painted\n{text}"
+        );
+    }
+    go(&mut domain, &mut model, BoardIntent::CloseLayer);
+    assert_eq!(model.input_mode(), BoardInputMode::QuickAdd);
+    let (buffer, _) = render_buffer(&model, 140, 30);
+    let text = rows_of(&buffer).join("\n");
+    assert!(text.contains("IN MOTION"), "board should be back\n{text}");
+    assert!(
+        text.contains("buy milk"),
+        "quick-add line should keep the title\n{text}"
+    );
+}

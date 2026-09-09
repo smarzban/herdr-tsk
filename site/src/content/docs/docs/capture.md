@@ -9,7 +9,8 @@ stays open, and is listed in help rather than the short prompt.
 
 - `Enter` saves and closes
 - `Shift+Enter` saves and stays open
-- `Tab` expands onto the [task page](/docs/task-page/) (title · notes · scope)
+- `Tab` expands onto the [task page](/docs/task-page/) (title · notes · scope), full
+  width at any terminal size
 
 A project board defaults the draft to that project. A project-less board defaults
 to your desk. Home keeps the cwd-derived default (the repo you opened from, or

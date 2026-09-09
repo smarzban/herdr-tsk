@@ -461,3 +461,42 @@ fn reopen_request_rejects_oversized_or_symlinked_state_payload() {
     }
     let _ = fs::remove_dir_all(dir);
 }
+
+/// Regression (CI macOS flake): the poll preflight compared `(dev, ino, mtime, len)` only.
+/// APFS reuses the inode of a just-unlinked file and two same-length requests written in one
+/// mtime tick collide, so the watch kept delivering the first request. Force the collision
+/// by replacing the request bytes in place with the same length and the same mtime.
+#[test]
+fn reopen_watch_notices_a_same_size_same_mtime_replacement() {
+    let dir = state_dir();
+    let store = TaskStore::new(&dir);
+    let mut watch = ReopenWatch::seeded(&store);
+    ReopenRequest::new(Some(PathBuf::from("/repo/a")))
+        .write(&dir)
+        .expect("request a");
+    let first = watch.poll().expect("first request");
+    assert_eq!(
+        first.project.as_deref(),
+        Some(std::path::Path::new("/repo/a"))
+    );
+    let path = dir.join("reopen.json");
+    let before = fs::metadata(&path).expect("metadata a");
+    let bytes = fs::read(&path).expect("read a");
+    let replaced = String::from_utf8(bytes)
+        .expect("utf8")
+        .replace("/repo/a", "/repo/b");
+    fs::write(&path, replaced.as_bytes()).expect("overwrite in place");
+    let file = fs::File::options().write(true).open(&path).expect("open b");
+    file.set_modified(before.modified().expect("mtime a"))
+        .expect("pin mtime");
+    drop(file);
+    let after = fs::metadata(&path).expect("metadata b");
+    assert_eq!(after.len(), before.len(), "fixture must keep the length");
+    assert_eq!(after.modified().unwrap(), before.modified().unwrap());
+    let second = watch.poll().expect("replacement request");
+    assert_eq!(
+        second.project.as_deref(),
+        Some(std::path::Path::new("/repo/b"))
+    );
+    let _ = fs::remove_dir_all(dir);
+}

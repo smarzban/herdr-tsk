@@ -104,7 +104,9 @@ For scriptable board work, use `tsk add`, `tsk list`, `tsk status`, `tsk edit`, 
   title input on the status-row slot with a blank row above and below, list still
   visible. `Enter` saves and closes, `Shift+Enter` saves and stays open, `Tab`
   expands the draft onto the task page with a title·notes·thread·scope stash and a
-  `+ step` row, so Esc returns to the line and a second `Tab` restores what was typed. A project board
+  `+ step` row, so Esc returns to the line and a second `Tab` restores what was typed. The
+  expanded draft owns the whole frame at every width (`capture_draft_open`): the wide slider
+  has no column for a non-task form, so it never paints beside the board. A project board
   defaults the draft to that project, a project-less board defaults it to your desk, and home
   keeps the invocation cwd-derived default. Capture tokens in the title: `!p` and
   `!t` each consume one whitespace-delimited argument. Bare `!p` selects your desk,

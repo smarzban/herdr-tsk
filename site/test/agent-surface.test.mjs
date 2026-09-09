@@ -296,6 +296,11 @@ test("docs_jsonld_is_tech_article_with_headline_description_date_and_is_part_of"
     assert.equal(article.description, description);
     assert.match(String(article.dateModified), /^\d{4}-\d{2}-\d{2}T/);
     assert.equal(article.isPartOf?.url, "https://gettsk.sh/");
+    // Rich Results test flagged author and image as missing (optional). Both are real.
+    assert.equal(article.author?.["@type"], "Organization");
+    assert.equal(article.author?.name, "tsk");
+    assert.equal(article.author?.url, "https://gettsk.sh/");
+    assert.equal(article.image, "https://gettsk.sh/og.png");
   }
 });
 
