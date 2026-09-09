@@ -171,6 +171,30 @@ test("vercel_json_rewrites_docs_html_to_markdown_twin_when_accept_contains_text_
   assert.ok(vary, "expected Vary: Accept on /docs/(.*)");
 });
 
+test("vercel_json_docs_rewrite_does_not_capture_a_trailing_slash", async () => {
+  const config = JSON.parse(await read(join(siteRoot, "vercel.json")));
+  const rewrites = (config.rewrites || []).filter((entry) =>
+    String(entry.source).includes("/docs/:path"),
+  );
+  assert.ok(rewrites.length > 0, "expected a docs path rewrite");
+  let matchesTrailingSlash = false;
+  for (const rewrite of rewrites) {
+    const source = String(rewrite.source);
+    const inner = source.match(/:path\((.*)\)(?:\/\?|\/)?$/)?.[1];
+    assert.ok(inner, `${source} needs a custom :path regex`);
+    const innerRe = new RegExp(`^(?:${inner})$`);
+    assert.match("cli", innerRe);
+    assert.doesNotMatch("cli/", innerRe);
+    assert.doesNotMatch("cli.md", innerRe);
+    assert.match(String(rewrite.destination), /^\/docs\/:path\.md$/);
+    if (/\/\?$|\/$/.test(source)) matchesTrailingSlash = true;
+  }
+  assert.ok(
+    matchesTrailingSlash,
+    "expected a rewrite that matches /docs/<slug>/",
+  );
+});
+
 test("robots_txt_allows_star_and_listed_crawlers_and_names_the_sitemap", async () => {
   const robots = await read(join(siteRoot, "public/robots.txt"));
   assert.match(robots, /^User-agent: \*\nAllow: \//m);
