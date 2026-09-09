@@ -12,8 +12,8 @@ stays open, and is listed in help rather than the short prompt.
 - `Tab` expands onto the [task page](/docs/task-page/) (title · notes · scope)
 
 A project board defaults the draft to that project. A project-less board defaults
-to your desk. Home keeps the cwd-derived default (the repo you opened from, or
-desk if there is no repo).
+to your desk. Home keeps the cwd-derived default (the Git repo root, or the directory you
+opened from outside Git). Use bare `!p` to explicitly file a draft on your desk.
 
 A saved task becomes the selection. Success has no status message. The row flash
 is the feedback. Refusals (empty title, bad thread) paint while the line is open
@@ -61,7 +61,8 @@ save fails, the popup stays open with the draft editable and the usual retry/can
 recovery.
 
 If text is selected in the pane you invoked it from, it arrives as the title. Scope
-defaults to the repo of the focused pane, or the desk outside one; change it on the
+defaults to the Git repo root of the focused pane, or its current directory outside
+Git; change it on the
 page's scope field, or with `!p` tokens in the title. An archived project is never
 a default: the draft falls back to the desk.
 

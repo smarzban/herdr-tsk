@@ -915,7 +915,7 @@ fn list_equals_state_dir_form_accepts_dash_leading_value() {
 }
 
 #[test]
-fn bare_list_outside_a_repo_falls_back_to_global_scope() {
+fn bare_list_outside_a_repo_uses_directory_project_scope() {
     let _env = env_lock();
     let outside = temp_state_dir("outside-repo");
     let _context = EnvironmentGuard::context_for(&outside);
@@ -929,9 +929,9 @@ fn bare_list_outside_a_repo_falls_back_to_global_scope() {
     );
     create_task(
         &mut state,
-        "project hidden",
+        "directory task",
         TaskScope::Project {
-            path: "/projects/hidden".into(),
+            path: outside.to_string_lossy().into_owned(),
         },
         HumanStatus::Ready,
     );
@@ -947,6 +947,20 @@ fn bare_list_outside_a_repo_falls_back_to_global_scope() {
 
     assert_eq!(output.code, 0);
     let rows: Vec<serde_json::Value> = serde_json::from_str(&output.stdout).expect("JSON rows");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["title"], "directory task");
+    assert_eq!(rows[0]["project"], outside.to_string_lossy().as_ref());
+
+    let desk = list(&[
+        "tsk".into(),
+        "list".into(),
+        "--desk".into(),
+        "--json".into(),
+        "--state-dir".into(),
+        state_dir_arg(&dir),
+    ]);
+    assert_eq!(desk.code, 0);
+    let rows: Vec<serde_json::Value> = serde_json::from_str(&desk.stdout).expect("desk JSON");
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0]["title"], "global task");
     assert!(rows[0]["project"].is_null());

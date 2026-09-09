@@ -8,6 +8,7 @@ It ships as a [herdr](https://herdr.dev) plugin, and the `tsk` binary also runs
 standalone against `~/.tsk`.
 
 - Queue board with desk, a selected project, a projects index, and cross-project thread views
+- Starts in your Git repo’s project, or the current directory’s project outside Git
 - Quick-add on the board, plus a herdr quick-capture popup
 - Task page for notes, thread, scope, and steps
 - Headless `tsk add`, `tsk list`, `tsk status`, `tsk edit`, and `tsk steps`

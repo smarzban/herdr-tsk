@@ -969,9 +969,9 @@ impl BoardModel {
 
     /// Snapshot tasks from domain state (default agent kind; seed env at open).
     ///
-    /// Directory-aware startup: launching inside a live repository opens that
-    /// project's board, empty or not (an empty board paints its own add hint).
-    /// Launching anywhere else opens the desk. An archived invocation repository is
+    /// Directory-aware startup: an invocation project opens its board, empty or
+    /// not (an empty board paints its own add hint). Explicitly absent project
+    /// context opens the desk. An archived invocation project is
     /// handled by [`Self::offer_launch_card`] instead and stays on the desk.
     pub fn from_domain(state: &DomainState, this_repo: Option<PathBuf>) -> Self {
         let mut model = Self::from_tasks(state.tasks().to_vec(), this_repo);

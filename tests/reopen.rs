@@ -117,7 +117,7 @@ fn resolve_context_rejects_malformed_json_without_publishing_a_request() {
 }
 
 #[test]
-fn resolve_context_publishes_project_and_desk_requests_without_using_process_cwd() {
+fn resolve_context_publishes_repo_and_directory_projects_without_using_process_cwd() {
     let dir = state_dir();
     let repo = dir.join("repo");
     fs::create_dir_all(repo.join(".git")).expect("repo");
@@ -152,8 +152,8 @@ fn resolve_context_publishes_project_and_desk_requests_without_using_process_cwd
     let request = fs::read_to_string(dir.join("reopen.json")).expect("request");
     assert!(request.contains(&repo.display().to_string()));
 
-    // A host invocation outside any repository must publish an explicit Desk
-    // request, even though this test process itself runs from the repository.
+    // A host invocation outside Git selects that directory, even though this
+    // test process itself runs from a repository.
     let outside = dir.join("outside");
     fs::create_dir_all(&outside).expect("outside");
     // Keep the process cwd in-repo while the host JSON supplies the outside cwd.
@@ -163,7 +163,7 @@ fn resolve_context_publishes_project_and_desk_requests_without_using_process_cwd
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .spawn()
-        .expect("resolve desk context");
+        .expect("resolve directory context");
     child
         .stdin
         .take()
@@ -178,9 +178,13 @@ fn resolve_context_publishes_project_and_desk_requests_without_using_process_cwd
         .expect("context");
     let output = child.wait_with_output().expect("output");
     assert!(output.status.success());
-    assert!(String::from_utf8_lossy(&output.stdout).trim().is_empty());
-    let request = fs::read_to_string(dir.join("reopen.json")).expect("desk request");
-    assert!(request.contains(r#""project":null"#));
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        outside.to_string_lossy()
+    );
+    let request = fs::read_to_string(dir.join("reopen.json")).expect("directory request");
+    let request: serde_json::Value = serde_json::from_str(&request).unwrap();
+    assert_eq!(request["project"], outside.to_string_lossy().as_ref());
     let _ = fs::remove_dir_all(dir);
 }
 

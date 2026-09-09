@@ -4,6 +4,7 @@
 
 Install with `curl -fsSL https://gettsk.sh/install.sh | sh` or `brew install smarzban/tap/tsk`.
 Details: https://gettsk.sh/docs/install.md
+The default project is the Git repo root, or the current directory outside Git. Use `--desk` for unscoped tasks.
 The board checks GitHub releases at most daily and shows a dim `vX.Y.Z available` on the status row; set `TSK_NO_UPDATE_CHECK` to disable.
 
 ## For agents

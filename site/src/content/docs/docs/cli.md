@@ -87,7 +87,7 @@ Plan JSON is an array:
 ```
 
 `project` null means desk; a missing `project` means the invocation default (the
-repo you ran from, or desk). `thread` may be `null` or missing. The result is
+Git repo root, or the current directory outside Git). `thread` may be `null` or missing. The result is
 `{ "created": [...], "existing": [...], "failed": [...] }`, each item carrying its
 index `i`; failed items add `code` and `error`. Notes are not echoed.
 
@@ -104,8 +104,8 @@ Prints tasks. It does not change them.
 tsk list [<task>] [-p <project> | --desk | --all] [--thread <name>] [--done | --deleted] [--json] [--state-dir <dir>]
 ```
 
-Default: ready, started, blocked, and review in the invocation project, or your
-desk outside a repository.
+Default: ready, started, blocked, and review in the invocation project: the Git
+repo root, or the current directory outside Git. Use `--desk` for unscoped tasks.
 
 - `--desk` selects desk
 - `--all` every scope

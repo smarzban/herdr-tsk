@@ -14,7 +14,7 @@ The active tab is bright and underlined; inactive tabs are dim.
 - **desk**: your overview. NEEDS YOU is blocked or review work across all live
   projects and your desk. IN MOTION is every started task, from any project. ON DECK is desk work
   that is ready: general to-dos, future projects, anything that belongs to no
-  repository, with project attribution on other work.
+  project, with project attribution on other work.
 - **selected project**: the project board for slot 2. Its local thread filter (shown as
   `all` or `#name`) can narrow every status section.
 - **projects**: one selectable overview row per live project, with NEEDS YOU,
@@ -32,9 +32,11 @@ The active tab is bright and underlined; inactive tabs are dim.
   returns to navigation. The `Overview` selector (`v`) can replace the index with a
   flat cross-project thread board, with project attribution (including `desk`).
 
-At startup, a pane inside a repository opens that project, including when it is
-empty. Outside a repository it opens Desk. Reopening tsk from another project
-updates the existing board to that invocation project, or Desk outside a repository.
+At startup, tsk opens the Git repo root as its project when launched anywhere
+inside a repository. Outside Git, it opens the current directory as the project,
+including when it is empty. Each non-Git directory is its own project; parent
+directories are not grouped automatically. Reopening tsk from another directory
+updates the existing board to that invocation project. Press `1` for Desk.
 
 The three navigation slots stay visible everywhere as **desk** · **selected project** ·
 **projects**. Their keyboard shortcuts remain `1`, `2`, and `3`. The selected-project

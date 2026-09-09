@@ -3,8 +3,8 @@ title: Install
 description: Install tsk, open the board, and connect it to Herdr.
 ---
 
-Install tsk with the installer or Homebrew, then open the board from a
-repository. Optional Herdr setup registers the plugin and shortcuts.
+Install tsk with the installer or Homebrew, then open the board from any
+directory. Optional Herdr setup registers the plugin and shortcuts.
 
 ## Install
 

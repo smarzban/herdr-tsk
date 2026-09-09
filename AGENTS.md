@@ -237,6 +237,11 @@ If `HERDR_ENV` is unset, say that live smoke was not run.
 
 ## Conventions
 
+- Invocation scope is the nearest Git repo root, or the current directory when outside
+  Git. This applies to board launch/reopen, capture, and CLI defaults. Desk remains an
+  destination (`1` for navigation; `--desk` or bare `!p` for capture); existing task
+  scopes never move.
+
 - Human status is source of truth. Never auto-complete tasks from agent status.
 - The projectless scope displays as `desk` but serializes as `global` in tsk.json and
   keeps its internal name `TaskScope::Global`; do not "fix" either without a store

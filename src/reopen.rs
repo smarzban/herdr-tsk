@@ -24,7 +24,7 @@ const FORMAT_VERSION: u32 = 1;
 static REQUEST_SEQ: AtomicU64 = AtomicU64::new(0);
 
 /// A validated invocation context handoff. `project: None` means the invoking
-/// directory was outside a repository and the board should select Desk.
+/// context explicitly selects Desk rather than a directory project.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReopenRequest {
     pub project: Option<PathBuf>,
