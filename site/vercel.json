@@ -48,7 +48,7 @@
       "destination": "/docs/index.md"
     },
     {
-      "source": "/docs/:path((?!.*\\.md$)[^/]+)/?",
+      "source": "/docs/:path((?!.*\\.md$)[^/]+(?:/[^/]+)*)/?",
       "has": [
         {
           "type": "header",

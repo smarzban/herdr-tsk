@@ -4,9 +4,11 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "node scripts/generate-apple-touch.mjs && astro dev",
+    "dev": "node scripts/generate-apple-touch.mjs && node scripts/sync-agents-page.mjs && astro dev",
     "start": "astro dev",
-    "build": "node scripts/generate-apple-touch.mjs && astro build",
+    "prebuild": "node scripts/generate-apple-touch.mjs && node scripts/sync-agents-page.mjs",
+    "build": "astro build",
+    "pretest": "node scripts/sync-agents-page.mjs",
     "preview": "astro preview",
     "astro": "astro",
     "generate-apple-touch": "node scripts/generate-apple-touch.mjs",

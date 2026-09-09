@@ -90,6 +90,7 @@ export default defineConfig({
           label: 'Start here',
           items: [
             { label: 'Overview', slug: 'docs' },
+            { label: 'tsk for agents', slug: 'docs/agents' },
             { label: 'Install', slug: 'docs/install' },
             { label: 'Board', slug: 'docs/board' },
             { label: 'Keys', slug: 'docs/keys' },

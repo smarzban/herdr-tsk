@@ -10,6 +10,7 @@ export const DEFINITION_SENTENCE =
   "tsk is a terminal task board for you and your agents: one board, five statuses, agents work through the CLI.";
 export const SIDEBAR_SLUGS = [
   "index",
+  "agents",
   "install",
   "board",
   "keys",

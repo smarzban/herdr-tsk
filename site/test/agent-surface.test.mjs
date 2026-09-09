@@ -239,6 +239,7 @@ const DEFINITION_SENTENCE =
 
 const SIDEBAR_TITLES = [
   "Overview",
+  "tsk for agents",
   "Install",
   "Board",
   "Keys",
@@ -265,7 +266,6 @@ test("every_llms_txt_gettsk_sh_link_except_agents_md_resolves_in_dist", async ()
   const links = [...text.matchAll(/https:\/\/gettsk\.sh(\/[^\s)]+)/g)].map((match) => match[1]);
   assert.ok(links.length > 0, "expected gettsk.sh links");
   for (const path of links) {
-    if (path === "/docs/agents.md") continue;
     const filePath = join(distDir, path.replace(/^\//, ""));
     assert.equal(existsSync(filePath), true, `missing ${filePath} for ${path}`);
   }
@@ -342,4 +342,68 @@ test("definition_sentence_appears_verbatim_in_index_astro_llms_txt_docs_index_an
       `${filePath} is missing the definition sentence`,
     );
   }
+});
+
+const NOTICE =
+  "tsk is a terminal task board for you and your agents: one board, five statuses, agents work through the CLI.";
+
+function syncAgentsPage() {
+  const result = spawnSync("node", ["scripts/sync-agents-page.mjs"], {
+    cwd: siteRoot,
+    encoding: "utf8",
+    stdio: "pipe",
+  });
+  assert.equal(result.status, 0, result.stderr || result.stdout || "sync-agents-page failed");
+}
+
+test("agents_page_notice_plus_skill_body_matches_source", async () => {
+  syncAgentsPage();
+  const generated = await read(join(docsDir, "agents.md"));
+  const skill = await read(join(repoRoot, "skills/tsk-cli/SKILL.md"));
+  const skillBody = stripFrontmatter(skill).replace(/\s+$/, "");
+  const body = stripFrontmatter(generated).replace(/\s+$/, "");
+  assert.match(generated, /^title:\s*tsk for agents/m);
+  assert.equal(body, `${NOTICE}\n\n${skillBody}`);
+});
+
+test("dist_docs_agents_md_exists", async () => {
+  ensureDist();
+  assert.equal(existsSync(join(distDir, "docs/agents.md")), true);
+  assert.equal(existsSync(join(distDir, "docs/agents/index.html")), true);
+});
+
+test("llms_txt_agents_md_link_resolves", async () => {
+  ensureDist();
+  assert.equal(existsSync(join(distDir, "docs/agents.md")), true);
+});
+
+test("definition_sentence_appears_in_agents_page", async () => {
+  syncAgentsPage();
+  const generated = await read(join(docsDir, "agents.md"));
+  assert.ok(generated.includes(DEFINITION_SENTENCE));
+});
+
+test("vercel_docs_rewrite_matches_nested_slug_and_skips_md", async () => {
+  const config = JSON.parse(await read(join(siteRoot, "vercel.json")));
+  const rewrites = (config.rewrites || []).filter((entry) =>
+    String(entry.source).includes("/docs/:path"),
+  );
+  assert.ok(rewrites.length > 0, "expected a docs path rewrite");
+  let matchesNested = false;
+  let skipsMd = true;
+  for (const rewrite of rewrites) {
+    const source = String(rewrite.source);
+    const inner = source.match(/:path\((.*)\)(?:\/\?|\/)?$/)?.[1];
+    assert.ok(inner, `${source} needs a custom :path regex`);
+    const innerRe = new RegExp(`^(?:${inner})$`);
+    assert.match("cli", innerRe);
+    assert.match("a/b", innerRe, `${source} should match nested slugs`);
+    assert.doesNotMatch("cli.md", innerRe);
+    assert.doesNotMatch("a/b.md", innerRe);
+    assert.match(String(rewrite.destination), /^\/docs\/:path\.md$/);
+    matchesNested = true;
+    if (innerRe.test("cli.md") || innerRe.test("a/b.md")) skipsMd = false;
+  }
+  assert.ok(matchesNested, "expected a rewrite that matches /docs/a/b/");
+  assert.ok(skipsMd, "/docs/a/b.md and /docs/cli.md must not match");
 });
