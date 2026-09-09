@@ -7,6 +7,10 @@ ready, started, blocked, review, done. Agents reach the board through the CLI.
 It ships as a [herdr](https://herdr.dev) plugin, and the `tsk` binary also runs
 standalone against `~/.tsk`.
 
+![The tsk board in a Herdr pane beside a working agent: NEEDS YOU, IN MOTION and ON DECK sections, with a task peeked open](docs/images/board-in-herdr.png)
+
+![At 110 columns or wider the board and the task page sit side by side: notes, steps 2 of 4 ticked, thread and status](docs/images/wide-task-page.png)
+
 - Queue board with desk, a selected project, a projects index, and cross-project thread views
 - Quick-add on the board, plus a herdr quick-capture popup
 - Task page for notes, thread, scope, and steps
