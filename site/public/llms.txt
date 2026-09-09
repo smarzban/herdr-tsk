@@ -7,6 +7,7 @@ Details: https://gettsk.sh/docs/install.md
 
 ## For agents
 
+- `tsk guide` prints the workflow; `tsk setup <agent>` installs the skill
 - Guide: https://gettsk.sh/docs/agents.md
 - CLI: https://gettsk.sh/docs/cli.md
 - Full docs: https://gettsk.sh/llms-full.txt

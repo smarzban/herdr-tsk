@@ -115,6 +115,7 @@ const softwareApplication = {
           <a href="#board">board</a>
           <a href="#keys">keys</a>
           <a href="#cli">cli</a>
+          <a href="#agents">agents</a>
           <a href="#install">install</a>
           <a href="/docs/">docs</a>
           <a href={REPO} rel="noopener noreferrer">github</a>
@@ -573,11 +574,40 @@ const softwareApplication = {
         </div>
       </section>
 
-      <!-- ──────────────────────────── install ─────────────────────────── -->
-      <section class="band band-alt" id="install" aria-labelledby="install-heading">
+      <!-- ──────────────────────────── agents ─────────────────────────── -->
+      <section class="band band-alt" id="agents" aria-labelledby="agents-heading">
         <div class="band-inner" data-reveal>
           <header class="band-head">
-            <span class="index">06 <span class="index-label">install</span></span>
+            <span class="index">06 <span class="index-label">agents</span></span>
+            <h2 id="agents-heading">Hand it to your agent.</h2>
+            <p class="band-lede">
+              Everything an agent needs is one command or one URL.
+            </p>
+          </header>
+
+          <div class="cli-grid">
+            <div class="shell-wrap">
+              <pre class="shell" data-copy-source>Use tsk for my task board. Run `tsk guide` and follow it;
+if tsk is not installed, read https://gettsk.sh/docs/agents/
+and ask me before installing.</pre>
+              <button type="button" class="copy" data-copy aria-label="Copy bootstrap prompt">copy</button>
+            </div>
+            <div class="cli-side">
+              <dl class="spec" aria-label="Agent surfaces">
+                <div><dt>skill</dt><dd>tsk setup claude</dd></div>
+                <div><dt>markdown</dt><dd>any /docs/ URL + .md</dd></div>
+                <div><dt>index</dt><dd>gettsk.sh/llms.txt</dd></div>
+              </dl>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ──────────────────────────── install ─────────────────────────── -->
+      <section class="band" id="install" aria-labelledby="install-heading">
+        <div class="band-inner" data-reveal>
+          <header class="band-head">
+            <span class="index">07 <span class="index-label">install</span></span>
             <h2 id="install-heading">Install it. Open the board.</h2>
             <p class="band-lede">
               One binary, standalone or in Herdr. State lives in <code>~/.tsk</code> whether you run it
@@ -629,10 +659,10 @@ const softwareApplication = {
           </div>
         </div>
       </section>
-      <section class="band" id="coming-soon" aria-labelledby="coming-soon-heading">
+      <section class="band band-alt" id="coming-soon" aria-labelledby="coming-soon-heading">
         <div class="band-inner" data-reveal>
           <header class="band-head">
-            <span class="index">07 <span class="index-label">next phase</span></span>
+            <span class="index">08 <span class="index-label">next phase</span></span>
             <p class="coming-announcement">Coming soon</p>
             <h2 id="coming-soon-heading">From task to implementation.</h2>
             <p class="band-lede">
