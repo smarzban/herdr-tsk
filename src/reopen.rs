@@ -17,6 +17,8 @@ use crate::fsperm;
 use crate::store::{StoreSignature, TaskStore};
 
 const REQUEST_FILE: &str = "reopen.json";
+/// How long `acknowledge` waits for a momentarily held lock before leaving the file.
+const ACK_LOCK_BUDGET: Duration = Duration::from_millis(100);
 const LOCK_FILE: &str = "reopen.json.lock";
 const MAX_REQUEST_BYTES: usize = 8 * 1024;
 const MAX_PROJECT_BYTES: usize = 4096;
@@ -159,21 +161,25 @@ impl RequestLock {
     /// Acquire the persistent lock inode with a bounded wait. Ownership is the OS
     /// advisory lock, not the inode, so a crash releases it without unlinking anything.
     fn acquire(state_dir: &Path) -> io::Result<Self> {
-        Self::acquire_bounded(state_dir, 100)
+        Self::acquire_bounded(state_dir, Duration::from_millis(500))
     }
 
-    /// Wait at most `tries` × 5 ms for the lock. Acknowledgement uses a short bound: a
-    /// forked child (test harnesses, host launchers) briefly holds a copy of another
-    /// thread's lock fd until its exec closes it, and one immediate `try_lock` then
-    /// leaves a handled request file behind.
-    fn acquire_bounded(state_dir: &Path, tries: u32) -> io::Result<Self> {
+    /// Wait at most `budget` (wall clock, so a slow machine cannot stretch it) for the
+    /// lock. Acknowledgement uses a short budget: a forked child (test harnesses, host
+    /// launchers) briefly holds a copy of another thread's lock fd until its exec closes
+    /// it, and one immediate `try_lock` then leaves a handled request file behind.
+    fn acquire_bounded(state_dir: &Path, budget: Duration) -> io::Result<Self> {
         let path = state_dir.join(LOCK_FILE);
         let file = crate::fsperm::open_lock_file(&path)?;
         crate::fsperm::tighten_file(&path);
-        for _ in 0..tries {
+        let deadline = std::time::Instant::now() + budget;
+        loop {
             match file.try_lock() {
                 Ok(()) => return Ok(Self { _file: file }),
                 Err(std::fs::TryLockError::WouldBlock) => {
+                    if std::time::Instant::now() >= deadline {
+                        break;
+                    }
                     std::thread::sleep(Duration::from_millis(5));
                 }
                 Err(std::fs::TryLockError::Error(error)) => return Err(error),
@@ -298,7 +304,7 @@ impl ReopenWatch {
 
         // Bounded (about 100 ms), not nonblocking: this runs once per applied request, not
         // on the idle tick, and giving up on a momentarily held lock leaves the file behind.
-        let Ok(_lock) = RequestLock::acquire_bounded(&self.state_dir, 20) else {
+        let Ok(_lock) = RequestLock::acquire_bounded(&self.state_dir, ACK_LOCK_BUDGET) else {
             return;
         };
         let path = self.request_path();
@@ -585,8 +591,8 @@ mod tests {
         let started = std::time::Instant::now();
         watch.acknowledge();
         assert!(
-            started.elapsed() < Duration::from_millis(200),
-            "acknowledgement waits at most its own short bound, never the writer's 500ms"
+            started.elapsed() < ACK_LOCK_BUDGET + Duration::from_millis(300),
+            "acknowledgement waits at most its own budget plus scheduling slack, never the writer's 500ms"
         );
         drop(lock);
         assert_eq!(watch.poll(), None, "handled request must not replay");
