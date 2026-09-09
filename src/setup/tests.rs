@@ -170,3 +170,125 @@ fn descriptor_writes_and_cleanup_stay_pinned_after_parent_swap() {
     dir.remove(Path::new("config.toml"), false).unwrap();
     assert!(!temp.0.join("moved/config.toml").exists());
 }
+
+#[test]
+fn cleanup_keeps_external_checkout_and_tolerates_missing_roots() {
+    let temp = Temp::new();
+    let base = Dir::open(&temp.0.join("tsk-plugins"), true).unwrap();
+    let current = base.child(Path::new("current"), true).unwrap();
+    let checkout = temp.0.join("checkout");
+    fs::create_dir(&checkout).unwrap();
+    fs::write(checkout.join("README.md"), "source checkout").unwrap();
+    for old in [
+        &checkout,
+        &temp.0.join("missing/checkout"),
+        &base.path.join("removed"),
+    ] {
+        cleanup_old(&base, &current, old).unwrap();
+    }
+    assert_eq!(
+        fs::read_to_string(checkout.join("README.md")).unwrap(),
+        "source checkout"
+    );
+    assert!(current.path.exists());
+}
+#[test]
+fn cleanup_preserves_modified_or_incomplete_managed_roots() {
+    for missing in [false, true] {
+        let temp = Temp::new();
+        let config = temp.0.join("config.toml");
+        let registry = RefCell::new(None::<PathBuf>);
+        let mut host = |args: &[&str], _: &Path| -> io::Result<String> {
+            if args.starts_with(&["plugin", "link"]) {
+                *registry.borrow_mut() = Some(args[2].into());
+            }
+            Ok(serde_json::json!({"result":{"plugins":registry.borrow().iter().map(|p|serde_json::json!({"plugin_id":"herdr-tsk","plugin_root":p})).collect::<Vec<_>>()}}).to_string())
+        };
+        let a = run_at(
+            &config,
+            "0.5.0",
+            &mut io::Cursor::new(""),
+            &mut Vec::new(),
+            false,
+            &mut host,
+        )
+        .unwrap();
+        let file = a.root.join("scripts/open-capture.sh");
+        if missing {
+            fs::remove_file(&file).unwrap();
+        } else {
+            fs::write(&file, "user edit").unwrap();
+        }
+        let error = run_at(
+            &config,
+            "0.5.1",
+            &mut io::Cursor::new(""),
+            &mut Vec::new(),
+            false,
+            &mut host,
+        )
+        .err()
+        .unwrap()
+        .to_string();
+        assert!(error.contains(if missing {
+            "stale asset missing"
+        } else {
+            "stale plugin root was modified"
+        }));
+        assert!(error.contains(a.root.to_str().unwrap()));
+        assert!(a.root.join("herdr-plugin.toml").exists());
+        assert!(a.root.join("scripts/open-board.sh").exists());
+        if !missing {
+            assert_eq!(fs::read_to_string(file).unwrap(), "user edit");
+        }
+    }
+}
+
+#[test]
+fn asset_root_name_has_a_fixed_byte_encoding_and_known_digest() {
+    assert_eq!(
+        asset_root_name(&[("a", "hello".into()), ("notes", "world\n".into())]),
+        "2e96f2c494750a92"
+    );
+    assert_ne!(
+        asset_root_name(&[("ab", "c".into())]),
+        asset_root_name(&[("a", "bc".into())])
+    );
+}
+
+#[test]
+fn setup_replaces_source_checkout_and_missing_registrations_without_deleting_source() {
+    for missing in [false, true] {
+        let temp = Temp::new();
+        let config = temp.0.join("config.toml");
+        let checkout = temp.0.join("source-checkout");
+        if !missing {
+            fs::create_dir(&checkout).unwrap();
+            fs::write(checkout.join("README.md"), "source").unwrap();
+        }
+        let registered = RefCell::new(checkout.clone());
+        let mut host = |args: &[&str], _: &Path| -> io::Result<String> {
+            if args.starts_with(&["plugin", "link"]) {
+                *registered.borrow_mut() = args[2].into();
+            }
+            Ok(serde_json::json!({"result":{"plugins":[{"plugin_id":"herdr-tsk","plugin_root":*registered.borrow()}]}}).to_string())
+        };
+        let result = run_at(
+            &config,
+            "0.5.0",
+            &mut io::Cursor::new(""),
+            &mut Vec::new(),
+            false,
+            &mut host,
+        )
+        .unwrap();
+        assert_eq!(*registered.borrow(), result.root);
+        if !missing {
+            assert_eq!(
+                fs::read_to_string(checkout.join("README.md")).unwrap(),
+                "source"
+            );
+        }
+        assert!(config.exists());
+    }
+}

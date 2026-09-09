@@ -58,6 +58,21 @@ fn bare_path_install_materializes_capture_and_version_and_reports_root() {
         .unwrap()
         .parse::<toml_edit::DocumentMut>()
         .unwrap();
+    let actions = doc["actions"].as_array_of_tables().unwrap();
+    assert_eq!(actions.len(), 2);
+    for (id, script) in [
+        ("open-board", "scripts/open-board.sh"),
+        ("quick-capture", "scripts/open-capture.sh"),
+    ] {
+        let action = actions
+            .iter()
+            .find(|a| a["id"].as_str() == Some(id))
+            .unwrap();
+        let command = action["command"].as_array().unwrap();
+        assert_eq!(command.len(), 2);
+        assert_eq!(command.get(0).unwrap().as_str(), Some("bash"));
+        assert_eq!(command.get(1).unwrap().as_str(), Some(script));
+    }
     assert_eq!(doc["version"].as_str(), Some(env!("CARGO_PKG_VERSION")));
     assert_eq!(doc["min_herdr_version"].as_str(), Some("0.9.0"));
     assert_eq!(
@@ -237,4 +252,88 @@ fn modified_asset_error_names_file() {
     let output = h.run("");
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains(path.to_str().unwrap()));
+}
+
+#[test]
+fn setup_resolves_default_config_paths_and_ignores_empty_environment_values() {
+    for (override_value, xdg_value, home_value, expected) in [
+        (
+            None,
+            Some("xdg"),
+            Some("home"),
+            Some("xdg/herdr/config.toml"),
+        ),
+        (
+            Some(""),
+            Some("xdg"),
+            Some("home"),
+            Some("xdg/herdr/config.toml"),
+        ),
+        (
+            None,
+            None,
+            Some("home"),
+            Some("home/.config/herdr/config.toml"),
+        ),
+        (
+            Some(""),
+            Some(""),
+            Some("home"),
+            Some("home/.config/herdr/config.toml"),
+        ),
+        (
+            Some(""),
+            Some("xdg"),
+            Some(""),
+            Some("xdg/herdr/config.toml"),
+        ),
+        (Some(""), Some(""), Some(""), None),
+    ] {
+        let h = host();
+        let mut command = h.command();
+        command
+            .current_dir(&h.root)
+            .env_remove("HERDR_CONFIG_PATH")
+            .env_remove("XDG_CONFIG_HOME")
+            .env_remove("HOME");
+        for (key, value) in [
+            ("HERDR_CONFIG_PATH", override_value),
+            ("XDG_CONFIG_HOME", xdg_value),
+            ("HOME", home_value),
+        ] {
+            if let Some(value) = value {
+                command.env(
+                    key,
+                    if value.is_empty() {
+                        String::new()
+                    } else {
+                        h.root.join(value).display().to_string()
+                    },
+                );
+            }
+        }
+        let output = command.output().unwrap();
+        if let Some(expected) = expected {
+            ok(output);
+            assert!(h.root.join(expected).is_file(), "{expected}");
+        } else {
+            assert!(!output.status.success());
+            assert_eq!(h.calls(), "");
+        }
+        assert!(!h.root.join("herdr/config.toml").exists());
+    }
+}
+#[test]
+fn failed_link_leaves_no_config_backup() {
+    let h = host();
+    fs::write(&h.config, "# original\n").unwrap();
+    assert!(!h.run("link-fail").status.success());
+    for entry in fs::read_dir(h.config.parent().unwrap()).unwrap() {
+        assert!(!entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .contains("backup"));
+    }
+    assert_eq!(fs::read_to_string(&h.config).unwrap(), "# original\n");
 }

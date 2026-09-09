@@ -16,12 +16,20 @@ WORKFLOW = ROOT / ".github/workflows/release.yml"
 
 
 class WorkflowTests(unittest.TestCase):
-    def test_packaging_checks_live_only_in_rust_ci(self):
+    def test_packaging_checks_cover_rust_and_installer_changes_not_site_builds(self):
         site = (ROOT / ".github/workflows/site.yml").read_text()
         ci = (ROOT / ".github/workflows/ci.yml").read_text()
+        installer = (ROOT / ".github/workflows/installer.yml").read_text()
         for token in ["actions/setup-python", "Packaging contract tests", "python3 -m unittest discover -s tests/packaging"]:
             self.assertNotIn(token, site)
             self.assertIn(token, ci)
+            self.assertIn(token, installer)
+        self.assertIn("branches: [main]", installer)
+        for path in ["site/public/install.sh", "scripts/release.py", "tests/packaging/**"]:
+            self.assertIn(f'- "{path}"', installer)
+        self.assertIn("shellcheck site/public/install.sh", installer)
+        self.assertIn("TSK_TEST_BINARY: ${{ github.workspace }}/target/release/tsk", ci)
+        self.assertLess(ci.index("name: Verify"), ci.index("name: Packaging contract tests"))
 
     def test_release_handoff_creates_only_a_draft_for_an_existing_tag(self):
         source = WORKFLOW.read_text()

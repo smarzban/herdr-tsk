@@ -63,7 +63,8 @@ Setup registers bundled plugin assets and the same stable installed binary, with
 a checkout or second build. It adds **prefix+t** for the board and **prefix+a** for
 quick capture, asking before replacing conflicts. Declining preserves the shortcut;
 a noninteractive conflict aborts without changes. Accepted builtin conflicts remove
-the override, restoring Herdr's default for that action. Config edits get a backup.
+the override, restoring Herdr's default for that action. Successful config edits get a backup;
+failed linking leaves no backup file.
 
 Rerun setup after upgrading: it replaces the registration and removes the intact old
 managed asset root. Use the normal PATH command, not a versioned Homebrew Cellar path.

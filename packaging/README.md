@@ -19,7 +19,7 @@ Names are `tsk-vX.Y.Z-<target>.tar.gz`, containing `tsk`, `LICENSE`, and `README
 
 ## Local packaging
 
-Python 3.11+ is required for maintainer scripts, not end-user installation.
+Python 3.11+ is required for maintainer scripts, not end-user installation. Set `TSK_TEST_BINARY` to a built binary to include the installer binary smoke and setup PTY test; Rust CI runs these after its release build. The installer workflow runs packaging tests and ShellCheck on installer, release-script, or packaging-test changes without rebuilding Rust.
 
 ```sh
 python3 -m unittest discover -s tests/packaging
@@ -34,7 +34,7 @@ python3 scripts/release.py package <tag> <target> <binary-path> <output-director
 python3 scripts/release.py assemble <tag> <output-directory>
 ```
 
-Package refuses to overwrite an archive. Assemble requires all four platform archives and validates their contents before writing checksums or a formula. These commands do not build or validate the machine architecture of a supplied binary; the workflow's native build matrix owns that contract. Do not feed one host binary into multiple targets for a real release.
+Package refuses to overwrite an archive. Assemble requires all four platform archives and validates their contents before writing checksums or a formula. It refuses existing files or symlinks for every output (install.sh, SHA256SUMS, tsk.rb); use a clean output directory. These commands do not build or validate the machine architecture of a supplied binary; the workflow's native build matrix owns that contract. Do not feed one host binary into multiple targets for a real release.
 
 ## Owner-gated release sequence
 
@@ -63,19 +63,19 @@ crates.io publishing is separate task T29. `publish = false` remains in Cargo.to
 
 `tsk setup herdr` requires Herdr 0.9+ on PATH. It uses `HERDR_CONFIG_PATH`, otherwise
 `$XDG_CONFIG_HOME/herdr/config.toml`, otherwise `~/.config/herdr/config.toml`.
-Config symlinks are refused. An open directory descriptor anchors all setup writes,
+Empty config-path environment values are treated as unset. Config-file and final-directory symlinks are refused. An open directory descriptor anchors all setup writes,
 backups, renames and cleanup; a replaced parent cannot redirect them. A kernel lock
 on `.tsk-setup.lock` serializes setup and is released on process death. The lock file
 stays on disk and does not imply a running setup.
 
 The embedded manifest and launchers are materialized in `tsk-plugins/<content-hash>`
-beside that config. The manifest includes the crate version, so upgrading changes
+beside that config. The root name uses fixed FNV-1a-64 over versioned, length-prefixed UTF-8 asset names and contents, not Rust's implementation-dependent DefaultHasher. This is change detection, not cryptographic authentication. The manifest includes the crate version, so upgrading changes
 the root. Herdr 0.9.0 replaces registrations by plugin ID: the online handler inserts
 into its ID-keyed map; the offline CLI removes entries with that ID then inserts
 the replacement. Setup checks the new registration before removing the intact old
 managed root. It does not call `plugin unlink herdr-tsk` after linking: that would
 unlink the new registration. Source-checkout and other installation roots are never
-removed. Modified stale assets are retained and reported with their path.
+removed. A missing prior root needs no cleanup. Modified stale assets are retained and reported with their path.
 
 References: Herdr 0.9.0
 [`handle_plugin_link`](https://github.com/herdrdev/herdr/blob/v0.9.0/src/app/api/plugins/mod.rs)
@@ -91,7 +91,7 @@ It asks before replacing each conflicting prefix+t / prefix+a binding. Declining
 keeps that shortcut; a noninteractive conflict aborts before filesystem or host
 changes. If an accepted builtin override has no remaining bindings, it is removed,
 restoring Herdr's default. Candidate config is checked by Herdr before registration;
-existing config bytes are backed up before linking and replaced atomically afterward.
+existing config bytes are staged in a temporary backup before linking. The config is replaced atomically afterward, then the backup gets its final name. A failed link removes the temporary backup; a config replacement or backup-promotion failure names any retained recovery copy.
 Registration failure leaves config intact; post-registration failures identify the
 partial state. Success prints the plugin root and any backup path. Reload config
 with `herdr server reload-config` or restart Herdr to apply shortcuts.
@@ -106,3 +106,12 @@ as well as `TSK_STATE_DIR` / `TSK_CONFIG_DIR`. `HERDR_CONFIG_PATH` alone does no
 isolate Herdr's running session or plugin registry. Never relink a daily plugin for
 a test. A failed asset integrity check names the file to inspect; do not erase an
 unrelated checkout or package-manager installation to recover setup.
+
+Review scope decisions (F-1/F-7/F-16, F-6, F-11): ancestor symlinks in the Herdr
+config path are trusted; the final directory is fd-pinned and final-component
+symlinks are refused. Rejecting a symlinked `~/.config` would break common dotfile
+setups, and Herdr follows that ancestor too. `TSK_INSTALL_DIR` is likewise a trusted
+installation location: an attacker who can swap it can replace the executable
+directly, so protecting that directory is the owner's boundary (F-6). F-11 is an
+accepted workflow-wiring coverage limitation: artifact and draft-handoff tests do
+not prove the native runner matrix; owner-run release smoke remains that check.

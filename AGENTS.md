@@ -168,7 +168,9 @@ For scriptable board work, use `tsk add`, `tsk list`, `tsk status`, `tsk edit`, 
   manually dispatched against an existing stable tag and only creates a draft.
   Installer payloads come from published release assets, never main. Homebrew uses
   a generated, version-pinned formula for `smarzban/homebrew-tap`; formula updates
-  are separate from release publication.
+  are separate from release publication. Installer-only changes run the packaging
+  tests and ShellCheck via `.github/workflows/installer.yml`; Rust CI also exercises
+  binary-dependent packaging/PTY tests after building the release executable.
 
 - Build: `cargo build --release`
 - `herdr-plugin.toml` launches `./target/release/tsk`. Rebuild in-repo

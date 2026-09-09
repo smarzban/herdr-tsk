@@ -186,8 +186,15 @@ pub(super) struct TempFile<'a> {
     pub dir: &'a Dir,
     pub name: PathBuf,
 }
+impl TempFile<'_> {
+    pub fn preserve(&mut self) {
+        self.name = PathBuf::new();
+    }
+}
 impl Drop for TempFile<'_> {
     fn drop(&mut self) {
-        let _ = self.dir.remove(&self.name, false);
+        if !self.name.as_os_str().is_empty() {
+            let _ = self.dir.remove(&self.name, false);
+        }
     }
 }

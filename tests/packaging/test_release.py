@@ -23,6 +23,27 @@ class ReleaseTests(unittest.TestCase):
         self.binary.chmod(0o755)
         self.out = self.root / "out"
 
+    def test_assemble_refuses_every_existing_output_without_touching_it(self):
+        for target in release.TARGETS:
+            release.package("v1.2.3", target, self.binary, self.out)
+        victim = self.root / "victim"
+        victim.write_text("keep me")
+        for name in ["install.sh", "SHA256SUMS", "tsk.rb"]:
+            for kind in ["file", "symlink", "dangling"]:
+                with self.subTest(name=name, kind=kind):
+                    path = self.out / name
+                    if kind == "file": path.write_text("keep me")
+                    else: path.symlink_to(victim if kind == "symlink" else self.root / "absent")
+                    try:
+                        with self.assertRaises((ValueError, FileExistsError)):
+                            release.assemble("v1.2.3", self.out)
+                        self.assertEqual(victim.read_text(), "keep me")
+                        self.assertFalse((self.root / "absent").exists())
+                        self.assertEqual({p.name for p in self.out.iterdir() if not p.name.endswith(".tar.gz")}, {name})
+                    finally:
+                        for output in ["install.sh", "SHA256SUMS", "tsk.rb"]:
+                            (self.out / output).unlink(missing_ok=True)
+
     def test_package_and_formula_pin_all_platforms(self):
         for target in release.TARGETS:
             release.package("v1.2.3", target, self.binary, self.out)

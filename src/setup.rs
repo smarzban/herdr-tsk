@@ -1,8 +1,6 @@
 //! Explicit, user-approved registration of the installed binary with Herdr.
 use std::{
-    collections::hash_map::DefaultHasher,
     env, fs,
-    hash::{Hash, Hasher},
     io::{self, BufRead, Write},
     path::{Path, PathBuf},
     process::Command,
@@ -145,12 +143,17 @@ fn absolute(path: PathBuf) -> io::Result<PathBuf> {
     }
 }
 fn config_path() -> io::Result<PathBuf> {
-    if let Some(path) = env::var_os("HERDR_CONFIG_PATH") {
+    if let Some(path) = env::var_os("HERDR_CONFIG_PATH").filter(|v| !v.is_empty()) {
         return absolute(path.into());
     }
     let root = env::var_os("XDG_CONFIG_HOME")
+        .filter(|v| !v.is_empty())
         .map(PathBuf::from)
-        .or_else(|| env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
+        .or_else(|| {
+            env::var_os("HOME")
+                .filter(|v| !v.is_empty())
+                .map(|h| PathBuf::from(h).join(".config"))
+        })
         .ok_or_else(|| error("HOME or XDG_CONFIG_HOME is required"))?;
     absolute(root.join("herdr/config.toml"))
 }
@@ -174,6 +177,26 @@ fn installed_binary() -> io::Result<PathBuf> {
         return Err(error("invoked tsk path does not match running binary"));
     }
     Ok(candidate)
+}
+
+/// Persisted format: FNV-1a-64 over a domain tag, then each ordered UTF-8 name/body,
+/// each prefixed by its byte length as a u64 little-endian integer. No std Hash encoding.
+/// Integrity/change detection in a user-owned directory, not cryptographic authentication.
+fn asset_root_name(assets: &[(&str, String)]) -> String {
+    let mut hash = 0xcbf29ce484222325_u64;
+    let mut feed = |bytes: &[u8]| {
+        for byte in bytes {
+            hash = (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3);
+        }
+    };
+    feed(b"tsk-assets-v1\0");
+    for (name, body) in assets {
+        for bytes in [name.as_bytes(), body.as_bytes()] {
+            feed(&(bytes.len() as u64).to_le_bytes());
+            feed(bytes);
+        }
+    }
+    format!("{hash:016x}")
 }
 
 fn managed_assets(binary: &Path, version: &str) -> io::Result<Vec<(&'static str, String)>> {
@@ -396,10 +419,8 @@ fn run_at(
     unchanged()?;
     let old = registered_root(config, host)?;
     unchanged()?;
-    let mut hash = DefaultHasher::new();
-    assets.hash(&mut hash);
     let base = parent.child(Path::new("tsk-plugins"), true)?;
-    let root = base.child(Path::new(&format!("{:016x}", hash.finish())), true)?;
+    let root = base.child(Path::new(&asset_root_name(&assets)), true)?;
     for (name, contents) in &assets {
         let path = Path::new(name);
         let directory = if path.parent().is_some_and(|p| p != Path::new("")) {
@@ -420,18 +441,26 @@ fn run_at(
             None => directory.write_new(file, contents)?,
         }
     }
-    // Back up before registering, so backup failures cannot leave a partial registration.
-    let backup = if before.as_deref() != Some(&edited) {
+    // Stage the recovery copy before registration; failed links leave no backup behind.
+    let mut staged_backup = if before.as_deref() != Some(&edited) {
         if let Some(original) = &before {
-            let name = PathBuf::from(format!("config.toml.tsk-backup-{}", uuid::Uuid::new_v4()));
-            parent.write_new(&name, original)?;
-            Some(parent.path.join(name))
+            let staged = TempFile {
+                dir: &parent,
+                name: format!(".tsk-backup-{}.tmp", uuid::Uuid::new_v4()).into(),
+            };
+            parent.write_new(&staged.name, original)?;
+            Some(staged)
         } else {
             None
         }
     } else {
         None
     };
+    let backup = staged_backup.as_ref().map(|_| {
+        parent
+            .path
+            .join(format!("config.toml.tsk-backup-{}", uuid::Uuid::new_v4()))
+    });
     unchanged()?;
     base.validate()?;
     root.validate()?;
@@ -459,7 +488,31 @@ fn run_at(
         }
         unchanged()?;
         if before.as_deref() != Some(&edited) {
-            parent.rename(&staged.name, filename)?;
+            if let Err(e) = parent.rename(&staged.name, filename) {
+                let recovery = if let Some(backup) = staged_backup.as_mut() {
+                    let path = parent.path.join(&backup.name);
+                    backup.preserve();
+                    format!("backup retained at {}", path.display())
+                } else {
+                    "no previous config to back up".into()
+                };
+                return Err(error(format!("config replacement failed: {e}; {recovery}")));
+            }
+            if let Some(mut staged) = staged_backup.take() {
+                let final_path = backup.as_ref().expect("staged backup has a destination");
+                if let Err(e) =
+                    parent.rename(&staged.name, Path::new(final_path.file_name().unwrap()))
+                {
+                    let pending_path = parent.path.join(&staged.name);
+                    // Keep the recovery bytes if promotion or its directory sync failed.
+                    staged.preserve();
+                    return Err(error(format!(
+                        "config saved, backup promotion failed: {e}; inspect {} and {}",
+                        pending_path.display(),
+                        final_path.display()
+                    )));
+                }
+            }
         }
         if let Some(old) = old {
             cleanup_old(&base, &root, &old)?;
@@ -482,20 +535,30 @@ fn run_at(
 fn cleanup_old(base: &Dir, current: &Dir, old: &Path) -> io::Result<()> {
     base.validate()?;
     current.validate()?;
-    if fs::canonicalize(old)? == fs::canonicalize(&current.path)? {
-        return Ok(());
-    }
     // Never remove a source checkout or another installation. Only an intact generated root
     // directly in this setup's pinned asset base, with its content hash matching its name.
     let Some(name) = old.file_name() else {
         return Ok(());
     };
-    if old.parent().map(fs::canonicalize).transpose()?.as_deref()
-        != Some(fs::canonicalize(&base.path)?.as_path())
-    {
+    let Some(parent) = old.parent() else {
+        return Ok(());
+    };
+    let parent = match fs::canonicalize(parent) {
+        Ok(path) => path,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e),
+    };
+    if parent != fs::canonicalize(&base.path)? {
         return Ok(());
     }
-    let old = base.child(Path::new(name), false)?;
+    let old = match base.child(Path::new(name), false) {
+        Ok(dir) => dir,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e),
+    };
+    if Some(name) == current.path.file_name() {
+        return Ok(());
+    }
     let scripts = old.child(Path::new("scripts"), false)?;
     let mut contents = Vec::new();
     for file in [
@@ -519,9 +582,7 @@ fn cleanup_old(base: &Dir, current: &Dir, old: &Path) -> io::Result<()> {
             })?;
         contents.push((file, body));
     }
-    let mut hash = DefaultHasher::new();
-    contents.hash(&mut hash);
-    if name != std::ffi::OsStr::new(&format!("{:016x}", hash.finish())) {
+    if name != std::ffi::OsStr::new(&asset_root_name(&contents)) {
         return Err(error(format!(
             "stale plugin root was modified; kept {}",
             old.path.display()
