@@ -1,7 +1,13 @@
 ---
 import Head from '@astrojs/starlight/components/Head.astro';
 import SharedHead from './SharedHead.astro';
+import { slugFromDocsId, twinUrlForSlug } from '../lib/agent-docs.mjs';
+
+const { entry } = Astro.locals.starlightRoute;
+const isDocsPage = entry.id !== '404' && !entry.id.endsWith('/404');
+const href = isDocsPage ? twinUrlForSlug(slugFromDocsId(entry.id)) : '';
 ---
 
 <Head />
 <SharedHead />
+{isDocsPage && <link rel="alternate" type="text/markdown" href={href} />}

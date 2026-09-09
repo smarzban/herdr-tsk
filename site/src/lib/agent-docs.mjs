@@ -1,0 +1,64 @@
+// Shared helpers for docs markdown twins. Keep this free of astro: imports so
+// site tests can load it with node --test.
+
+import { spawnSync } from "node:child_process";
+import { basename, dirname, resolve } from "node:path";
+
+export const SITE = "https://gettsk.sh";
+export const SOURCE_BASE =
+  "https://github.com/smarzban/herdr-tsk/blob/main/site/src/content/docs/docs";
+
+export function slugFromDocsId(id) {
+  const value = String(id);
+  if (value === "docs" || value === "docs/index" || value === "index") return "index";
+  const rest = value.replace(/^docs\//, "");
+  return rest === "" ? "index" : rest;
+}
+
+export function htmlUrlForSlug(slug) {
+  return slug === "index" ? `${SITE}/docs/` : `${SITE}/docs/${slug}/`;
+}
+
+export function twinUrlForSlug(slug) {
+  return `${SITE}/docs/${slug}.md`;
+}
+
+export function sourceFileName(filePath) {
+  const normalized = String(filePath).replaceAll("\\", "/");
+  const parts = normalized.split("/");
+  return parts[parts.length - 1];
+}
+
+export function stripFrontmatter(source) {
+  const match = String(source).match(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/);
+  if (!match) return String(source);
+  return String(source).slice(match[0].length).replace(/^\r?\n/, "");
+}
+
+export function newestCommitIso(filePath) {
+  const absolute = resolve(process.cwd(), filePath);
+  const result = spawnSync(
+    "git",
+    ["log", "--format=%ct", "--max-count=1", basename(absolute)],
+    { cwd: dirname(absolute), encoding: "utf-8" },
+  );
+  const timestamp = Number(String(result.stdout || "").trim());
+  if (result.error || !Number.isFinite(timestamp) || timestamp <= 0) {
+    throw new Error(`Failed to retrieve git history for ${filePath}`);
+  }
+  return new Date(timestamp * 1000).toISOString();
+}
+
+export function formatTwin({ title, slug, fileName, updatedIso, body }) {
+  const trimmed = String(body).replace(/^\uFEFF/, "").replace(/\s+$/, "");
+  return [
+    `# ${title}`,
+    "",
+    `- html: ${htmlUrlForSlug(slug)}`,
+    `- source: ${SOURCE_BASE}/${fileName}`,
+    `- updated: ${updatedIso}`,
+    "",
+    trimmed,
+    "",
+  ].join("\n");
+}
