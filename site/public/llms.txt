@@ -11,6 +11,8 @@ The board checks GitHub releases at most daily and shows a dim `vX.Y.Z available
 - `tsk guide` prints the workflow; `tsk setup <agent>` installs the skill
 - Guide: https://gettsk.sh/docs/agents.md
 - CLI: https://gettsk.sh/docs/cli.md
+
+Storage, backups, and release-check settings: https://gettsk.sh/docs/storage.md
 - Full docs: https://gettsk.sh/llms-full.txt
 
 ## Docs

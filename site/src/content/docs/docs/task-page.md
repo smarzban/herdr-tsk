@@ -1,91 +1,87 @@
 ---
 title: Task page
-description: "View and edit one task: title, notes, thread, and scope."
+description: Read and edit a task's title, notes, project, and thread.
 ---
 
-Below 110 usable columns, `Enter` opens the selected task full height. At 110
-usable columns or wider the page is the right column of the
-[stage slider](/docs/board/#wide-stage-slider): a preview beside the board in stage
-A, the focused page beside a dim rail in G, or the whole frame in F. Its header sits
-on the selector row, `● T12 title … started · tsk` with the status glyph restored,
-dim in A and bold in G and F, and a dash rule on the row under it.
-With no selection the column reads `no task` and is inert. `←` from G parks the page
-beside the board without resetting page scroll or the step cursor; `→` brings it back.
+Read notes and steps, then edit the task when you need to change it.
 
-The dim `T30` prefix in the header copies that task identifier when clicked. A click
-inside the stage A task column moves to G before running the same action the control
-has in the single-pane page. The footer reads `scope · #thread · created … · updated …`. In a wide column
-the project lives in the header slot and the scope slot shows only while an edit
-session can change it.
+## Open
 
-It is view-first. Nothing is in edit mode until you ask. `ctrl+e` edits the title,
-`ctrl+n` edits notes. In view, Tab and Shift+Tab loop only through stored steps and
-`+ step`, never task fields. The trailing dim target paints as `   + step`. `Enter`,
-`ctrl+a`, or a click on it opens its independent editor, then Enter saves one step
-and opens the next empty step editor.
+Double-click a task or select it and press `Enter`.
 
-Bare `↓` activates the first stored step, then arrows move the selection. `Enter` on
-that selected step toggles it done ↔ ready without changing the task's human status.
-The status verbs (`ctrl+s`, `ctrl+d`, `ctrl+o`, `ctrl+b`, `ctrl+r`) always act on the
-task, whatever the step cursor is doing.
+At 110 usable columns or wider, `→` opens details beside the board. Use `→` and `←` to move between [board and task views](/docs/board/#wide-stage-slider). Press `Enter` from the board for full screen; `Esc` returns.
 
-`ctrl+e` on a stored-step selection starts task editing with the step inline. In task
-editing, Tab runs Title, Notes, stored steps, `+ step`, Scope, Thread, then Title.
-Shift+Tab reverses that same loop. Clicking a field or another existing step moves
-the one active text cursor there and stages the prior step change. Scope and Thread
-first show as selected controls, with no blinking cursor. `Enter` on Scope opens its
-picker and `Enter` again chooses the highlighted scope. `Enter` on Thread, or a
-second click, opens or closes its text editor without leaving the task edit session.
-The scope footer does nothing until task editing starts.
+Click the task's `T` number to copy it. The page shows its status, notes, steps, project, thread, and dates. Long text wraps.
 
-Plain `Enter` parks an existing-step rename without saving the task session, and in
-the Title editor it moves on to Notes. `Shift+Enter` is the one task-session save
-chord: it saves Title, Notes, Thread, Scope, staged existing-step edits, and staged
-removals, then exits editing. `Alt+Enter` does nothing on the board. A staged
-`ctrl+x` removal disappears immediately and returns if task editing is cancelled. New
-steps save independently from view or task edit: Enter saves one and opens the next empty
-editor, Shift+Enter saves that step and the task-edit session. An empty new-step row
-discards if you click elsewhere. Field `Esc` cancels that
-field, while Esc from task editing restores staged removals.
+## Edit
 
-Notes are multiline, so `Enter` inserts a line. `Shift+Enter` saves and does not
-insert a line. Mouse-wheel scrolling and the page scrollbar work during field editing,
-so long notes do not hide `+ step`. Scrolling leaves the draft intact; typing or
-moving the Notes cursor brings it back into view.
+The page opens in view mode.
 
-Thread uses the same name rules as capture `!t`. The field is optional.
+| Action | Key |
+| --- | --- |
+| Edit title, or the selected step | `ctrl+e` |
+| Edit notes | `ctrl+n` |
+| Move through editable fields | `Tab` / `Shift+Tab`, after starting an edit |
+| Save the task edit | `Shift+Enter` |
+| Cancel the current field | `Esc` or `ctrl+c` |
 
-While an edit is unsaved, moving the selection to another task refuses with
-`save or cancel edits before switching tasks`. Saving a task that another writer
-deleted meanwhile answers `that task is deleted`. An empty step paints
-`text required` on its own row.
+Clicking Title, Notes, Scope, or Thread does not start an edit from view mode. Start editing first; then click the field you want.
+
+In view mode, `Tab` selects steps and **+ step**. It does not cycle task fields.
+
+During task editing, the order is Title → Notes → steps → **+ step** → Scope → Thread. A field click moves the cursor and retains staged changes.
+
+## Scope and thread
+
+**Scope** is the task's project or desk. **Thread** groups related work within a project.
+
+| Field | Change it |
+| --- | --- |
+| Scope | Select it while editing, press `Enter`, choose a destination, then `Enter` again |
+| Thread | Select it, then press `Enter` or click again to edit its name |
+
+Scope also supports cycling with `Space`, `←`, or `→`. Archived projects are not offered.
+
+Thread is optional and follows the [thread name rules](/docs/capture/#thread-names).
+
+## Save
+
+`Shift+Enter` saves the task's title, notes, scope, thread, and staged changes to existing steps.
+
+| While editing | `Enter` does this |
+| --- | --- |
+| Title | Move to Notes |
+| Notes | Insert a line |
+| Existing step | Keep the rename in the current edit session |
+| New step | Save that step and open another empty row |
+
+New steps save independently. Cancelling the task edit does not remove new steps already saved. [Step editing details](/docs/steps/).
+
+Press `Esc` to discard changes to the current field. Other staged changes remain until you save or cancel the task edit. Cancelling the task edit also restores removed steps. Save or cancel before selecting a different task.
+
+If another writer deletes the task, saving refuses. If a save fails, use [retry or cancel](/docs/board/#save-failures).
+
+## Status and steps
+
+In task view, status shortcuts act on the task even when a step is selected. `Enter` toggles the selected step only.
+
+While editing a field, use its edit keys. Save or cancel to return to the task's status actions.
+
+Scroll with the wheel or scrollbar while editing. Typing or moving the Notes cursor brings it back into view.
 
 ## Notes markdown
 
-View and peek style a small markdown subset. Edit is always the raw source. No
-color.
+Notes display basic Markdown. Editing shows the original text.
 
-| Marker | Paint |
+| Write | Display |
 | --- | --- |
-| `**bold**` | bold |
-| `*em*` or `_em_` | underline |
-| `` `code` `` | dim, ticks kept |
-| `#` … `######` | bold + underline, dim hashes |
-| `-` or `*` lists | dim bullet |
-| fenced ` ``` ` | dim fence and body, no inline inside |
+| `**bold**` | Bold |
+| `*emphasis*` or `_emphasis_` | Underlined |
+| `` `code` `` | Dim, with backticks |
+| `# Heading` through `###### Heading` | Bold and underlined |
+| `- item` or `* item` | List |
+| Triple-backtick fenced block | Dim block; inline styling disabled |
 
-Unmatched `*` and word-internal `_` stay literal. `- [ ]` stays text.
-[Steps](/docs/steps/) own checklists.
+Unmatched asterisks and underscores inside words stay literal. Markdown checkboxes such as `- [ ]` are text; use [steps](/docs/steps/) for an interactive checklist.
 
-Peek paints the same markers, then dims every span, with a `│` gutter closed by
-an L-shaped `└` connector.
-
-## Peek vs page
-
-Below 110 columns, `→` or a row click peeks up to five wrapped note lines, then
-`… N more lines` if there are more, or `no notes yet`. At wide widths, selection
-updates the task column and no inline peek opens.
-
-Text on the page wraps. It does not truncate.
-
-See [keys](/docs/keys/) for the full chord table.
+Peeks use the same formatting, dimmed. Narrow-pane peeks show up to five wrapped lines; open the task for the full notes.
