@@ -43,3 +43,7 @@ Canonical terms for this repo. No implementation detail.
 - **NEEDS YOU**: queue section for non-deleted, non-archived blocked and review tasks. Desk shows desk/global ones; project focus shows that project's. Omitted when empty. Sits above IN MOTION.
 - **session**: one board process from launch to quit. Session-only state (collapse, wide stage, the launch card having been shown) resets on relaunch.
 - **hidden**: a task that is archived, or whose project is archived. The single predicate every working lens filters on; distinct from soft-deleted.
+- **guide**: the agent workflow doc, `skills/tsk-cli/SKILL.md`, printed by `tsk guide` and published at `/docs/agents/`.
+- **twin**: the Markdown representation of a docs page at `/docs/<slug>.md`.
+- **bootstrap prompt**: the three-line text a human pastes to an agent to start using tsk.
+- **definition sentence**: `tsk is a terminal task board for you and your agents: one board, five statuses, agents work through the CLI.`
