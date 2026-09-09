@@ -3,8 +3,9 @@
 ## Unreleased
 
 Fixed: a reopen request replaced by another of the same length within one mtime tick
-(inode reuse on APFS) was delivered as the first request. The request watch now also
-hashes the file bytes.
+(inode reuse on APFS) was delivered as the first request, and a busy writer lock made
+the idle poll re-deliver the previous one. The request watch now hashes the file bytes
+and reads without the lock; writes are atomic renames, so every read is whole.
 
 Fixed: at 110 columns or wider, `Tab` on the quick-add line expanded into a draft page
 that was never painted, so the board stayed on screen while keys went to the hidden
