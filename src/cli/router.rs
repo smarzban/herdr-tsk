@@ -15,6 +15,7 @@ pub enum Surface {
     Unarchive,
     Project,
     Setup,
+    Guide,
     FindBoardPane,
     ResolveContext,
     GlobalHelp,
@@ -64,6 +65,7 @@ pub fn route<S: AsRef<str>>(
             "unarchive" => Surface::Unarchive,
             "project" => Surface::Project,
             "setup" => Surface::Setup,
+            "guide" => Surface::Guide,
             _ => Surface::Usage,
         };
     }
@@ -172,5 +174,10 @@ mod tests {
     #[test]
     fn no_args_selects_board() {
         assert_eq!(route(["tsk"], None), Surface::Board);
+    }
+
+    #[test]
+    fn guide_selects_guide_surface() {
+        assert_eq!(route(["tsk", "guide"], None), Surface::Guide);
     }
 }

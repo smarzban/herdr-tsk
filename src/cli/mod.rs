@@ -8,6 +8,7 @@ use serde_json::Value;
 pub mod add;
 pub mod archive;
 pub mod edit;
+pub mod guide;
 pub mod list;
 pub mod parser;
 pub mod presenter;
@@ -37,6 +38,7 @@ where
         .collect::<Vec<_>>();
     match args.get(1).map(String::as_str) {
         Some("setup") => run_setup(args, &mut stdin, stdin_is_tty),
+        Some("guide") => guide::run(),
         Some("add") => run_add(args, &mut stdin, stdin_is_tty),
         Some("steps") => run_steps(args),
         Some("list") => run_list(args),

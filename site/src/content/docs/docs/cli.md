@@ -27,6 +27,7 @@ The CLI is how an agent reaches the board. The rules that matter:
 
 The repo ships the same rules as an agent skill in
 [`skills/tsk-cli/SKILL.md`](https://github.com/smarzban/herdr-tsk/blob/main/skills/tsk-cli/SKILL.md).
+`tsk guide` prints that skill with the YAML frontmatter removed.
 
 ## Commands
 
@@ -35,10 +36,21 @@ The repo ships the same rules as an agent skill in
 | `tsk` | opens the board |
 | `tsk capture` | opens quick capture: the expanded quick-add page (also `TSK_MODE=capture`) |
 | `tsk add` · `tsk list` · `tsk steps` · `tsk status` · `tsk edit` · `tsk trash` · `tsk archive` · `tsk unarchive` · `tsk project` | headless; below |
+| `tsk guide` | print the agent workflow skill (frontmatter stripped), exit 0 |
 | `tsk --help` | usage, exit 0 |
 | `tsk --find-board-pane` | herdr helper: reads `pane list` JSON on stdin, prints the id of the pane labelled `tsk`; exit 1 when none |
 
 Every headless command takes `--state-dir <dir>` to work against another store.
+
+## guide
+
+Print the embedded agent skill, YAML frontmatter stripped. Stderr is empty.
+
+```
+tsk guide
+```
+
+Exit 0. The same body is the source for `/docs/agents/` and `tsk setup <agent>`.
 
 Human-readable stdout and stderr escape C0/C1 controls in stored titles, step
 text, and project names as `\u{00xx}`. JSON keeps the underlying values.
