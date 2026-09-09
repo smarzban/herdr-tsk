@@ -30,6 +30,11 @@ tsk setup herdr
 herdr server reload-config
 ```
 
+To give an agent the CLI skill instead, run `tsk setup claude` (or `pi`,
+`cursor`, `codex`) after tsk is on PATH. That writes `tsk-cli/SKILL.md` into
+the tool's user-level skills directory. `tsk setup --skill-dir <path>` is the
+same write against any directory. See [CLI setup](/docs/cli/#setup).
+
 ## Open the board
 
 Run `tsk`, or press **prefix+t** in Herdr.

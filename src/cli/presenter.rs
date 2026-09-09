@@ -783,7 +783,80 @@ pub fn rejected(error: AddError) -> CliOutput {
 }
 
 pub fn setup_help() -> CliOutput {
-    CliOutput {stdout:"usage: tsk setup herdr\nRegister the installed binary and bundled plugin assets.\nAdds prefix+t for board and prefix+a for capture; asks before replacing conflicts.\nUses HERDR_CONFIG_PATH, or XDG_CONFIG_HOME/herdr/config.toml, or ~/.config/herdr/config.toml.\n".into(),stderr:String::new(),code:0}
+    CliOutput {
+        stdout: concat!(
+            "usage: tsk setup herdr | claude | pi | cursor | codex | --skill-dir <path> [--force] [--json]\n",
+            "Register the installed binary and bundled plugin assets.\n",
+            "Adds prefix+t for board and prefix+a for capture; asks before replacing conflicts.\n",
+            "Uses HERDR_CONFIG_PATH, or XDG_CONFIG_HOME/herdr/config.toml, or ~/.config/herdr/config.toml.\n",
+            "Agent targets write skills/tsk-cli/SKILL.md into that tool's user-level skills directory.\n",
+            "--force overwrites an existing skill. Without it, an existing file exits 1 with skill-exists.\n",
+        )
+        .into(),
+        stderr: String::new(),
+        code: 0,
+    }
+}
+
+pub fn setup_agent_listed(json: bool) -> CliOutput {
+    if json {
+        return setup_agent_json("listed", None, None, 0);
+    }
+    CliOutput {
+        stdout: crate::setup_agent::list_text(),
+        stderr: String::new(),
+        code: 0,
+    }
+}
+
+pub fn setup_agent_written(
+    target: &crate::setup_agent::Target,
+    path: &std::path::Path,
+    json: bool,
+) -> CliOutput {
+    if json {
+        return setup_agent_json("written", Some(target.name()), Some(path), 0);
+    }
+    CliOutput {
+        stdout: format!("{}\n", path.display()),
+        stderr: String::new(),
+        code: 0,
+    }
+}
+
+pub fn setup_agent_exists(
+    target: &crate::setup_agent::Target,
+    path: &std::path::Path,
+    json: bool,
+) -> CliOutput {
+    if json {
+        return setup_agent_json("exists", Some(target.name()), Some(path), 1);
+    }
+    CliOutput {
+        stdout: String::new(),
+        stderr: "tsk setup: skill-exists\n".into(),
+        code: 1,
+    }
+}
+
+fn setup_agent_json(
+    outcome: &str,
+    target: Option<&str>,
+    path: Option<&std::path::Path>,
+    code: u8,
+) -> CliOutput {
+    CliOutput {
+        stdout: format!(
+            "{}\n",
+            serde_json::json!({
+                "outcome": outcome,
+                "target": target,
+                "path": path.map(|value| value.display().to_string()),
+            })
+        ),
+        stderr: String::new(),
+        code,
+    }
 }
 pub fn setup_error(reason: &str, code: u8) -> CliOutput {
     CliOutput {

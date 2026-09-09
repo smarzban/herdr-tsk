@@ -12,7 +12,7 @@ fn main() -> ExitCode {
         Surface::ResolveContext => resolve_context_main(),
         Surface::GlobalHelp => {
             println!(
-                "usage: tsk [capture] | add | steps | list | status | edit | trash | archive | unarchive | project | setup herdr | guide | --find-board-pane | --help\n\nCommands:\n  guide          print the agent workflow skill\n  setup herdr    register plugin and shortcuts for this installed binary\n  add    create one task or apply a JSON plan\n  steps  add, toggle, rename, or remove one step on a task\n  list   inspect tasks\n  status set a task's human status\n  edit   update a task's title or notes\n  trash  restore a trashed task\n  archive    keep a task off the working views\n  unarchive  put an archived task back\n  project    archive or unarchive a project\n\nRun `tsk add --help`, `tsk steps --help`, `tsk list --help`, `tsk status --help`, `tsk edit --help`, `tsk trash --help`, `tsk archive --help`, `tsk unarchive --help`, or `tsk project --help` for command details.\n\nAgents: run `tsk guide`, or read https://gettsk.sh/docs/agents.md"
+                "usage: tsk [capture] | add | steps | list | status | edit | trash | archive | unarchive | project | setup | guide | --find-board-pane | --help\n\nCommands:\n  guide          print the agent workflow skill\n  setup          register herdr, or install the agent skill\n  add    create one task or apply a JSON plan\n  steps  add, toggle, rename, or remove one step on a task\n  list   inspect tasks\n  status set a task's human status\n  edit   update a task's title or notes\n  trash  restore a trashed task\n  archive    keep a task off the working views\n  unarchive  put an archived task back\n  project    archive or unarchive a project\n\nRun `tsk add --help`, `tsk steps --help`, `tsk list --help`, `tsk status --help`, `tsk edit --help`, `tsk trash --help`, `tsk archive --help`, `tsk unarchive --help`, or `tsk project --help` for command details.\n\nAgents: run `tsk guide`, or read https://gettsk.sh/docs/agents.md"
             );
             ExitCode::SUCCESS
         }
@@ -40,7 +40,7 @@ fn main() -> ExitCode {
 
 fn usage_exit() -> ExitCode {
     eprintln!(
-        "usage: tsk [capture] | add | steps | list | status | edit | trash | archive | unarchive | project | setup herdr | guide | --find-board-pane | --help"
+        "usage: tsk [capture] | add | steps | list | status | edit | trash | archive | unarchive | project | setup | guide | --find-board-pane | --help"
     );
     ExitCode::from(2)
 }

@@ -244,14 +244,37 @@ Status refusals (exit 1): `unknown-task`, `soft-deleted-task`.
 Edit refusals (exit 1): `unknown-task`, `soft-deleted-task`, `empty-title`,
 `invalid-title`.
 
-## Register the installed binary with Herdr
+## setup
 
-`tsk setup herdr` registers the embedded plugin assets and adds prefix+t (board)
-and prefix+a (quick capture). It uses the same installed binary, with no source
-checkout or second build. Herdr 0.9+ must be on PATH. Conflicting shortcuts require
-interactive confirmation; declining preserves them. A noninteractive conflict aborts
-without writes. `tsk setup herdr --help` is read-only.
+```
+tsk setup
+tsk setup herdr
+tsk setup claude | pi | cursor | codex
+tsk setup --skill-dir <path> [--force] [--json]
+```
 
-Exit codes: 0 success/help, 1 setup or confirmation failure, 2 invalid arguments.
-The command does not edit task data. See [installation](/docs/install/#herdr-setup-with-an-installed-binary)
+Bare `tsk setup` lists targets and writes nothing. `tsk setup herdr` registers
+the embedded plugin assets and adds prefix+t (board) and prefix+a (quick capture).
+It uses the same installed binary, with no source checkout or second build. Herdr
+0.9+ must be on PATH. Conflicting shortcuts require interactive confirmation;
+declining preserves them. A noninteractive conflict aborts without writes.
+`tsk setup herdr --help` is read-only.
+
+Agent targets write the embedded `skills/tsk-cli/SKILL.md` (frontmatter kept) into
+that tool's user-level skills directory as `tsk-cli/SKILL.md`:
+
+- `claude` → `~/.claude/skills/`
+- `pi` → `~/.pi/agent/skills/`
+- `cursor` → `~/.cursor/skills/`
+- `codex` → `~/.agents/skills/`
+- `--skill-dir <path>` → `<path>/tsk-cli/SKILL.md`
+
+A second run without `--force` exits 1 with `skill-exists` and leaves the file.
+`--force` overwrites. `--json` emits `outcome` (`written`, `exists`, or `listed`),
+`target`, and `path`. Two targets, or `herdr` plus `--skill-dir`, is usage (exit 2).
+A symlink at the skills root is refused.
+
+Exit codes: 0 success/help/list, 1 setup or confirmation failure or `skill-exists`,
+2 invalid arguments. Herdr setup does not edit task data. See
+[installation](/docs/install/#herdr-setup-with-an-installed-binary)
 for config paths, backups, reload, upgrades and removing integration.

@@ -12,6 +12,7 @@ pub mod reopen;
 pub mod save_recovery;
 pub mod scope;
 pub mod setup;
+pub mod setup_agent;
 pub mod store;
 pub(crate) mod text;
 pub mod ui;
