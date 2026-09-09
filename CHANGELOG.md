@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+Fixed: at 110 columns or wider, `Tab` on the quick-add line expanded into a draft page
+that was never painted, so the board stayed on screen while keys went to the hidden
+draft. The draft now fills the frame at every width.
+
 The board checks GitHub for a newer release at most once a day and paints a dim
 `vX.Y.Z available` on the status row. Set `TSK_NO_UPDATE_CHECK` to disable it.
 

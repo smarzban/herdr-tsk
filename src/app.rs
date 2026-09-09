@@ -766,8 +766,7 @@ fn clamp_position_to_area(position: Position, area: Rect) -> Position {
 
 /// Content rect that edge auto-scroll watches during a text drag.
 pub fn drag_content_area(model: &BoardModel, area: Rect) -> Rect {
-    let responsive =
-        crate::ui::tier::resolve_responsive(area.width, area.height, model.wide_stage());
+    let responsive = model.responsive_geometry(area);
     let surface = if model.focused_surface() == crate::ui::tier::FocusedSurface::Task {
         responsive.task_content()
     } else {
@@ -987,9 +986,7 @@ fn board_keyboard_intent_for_area(
     mode: BoardInputMode,
     key: crossterm::event::KeyEvent,
 ) -> Option<BoardIntent> {
-    let presentation =
-        crate::ui::tier::resolve_responsive(area.width, area.height, model.wide_stage())
-            .presentation;
+    let presentation = model.responsive_geometry(area).presentation;
     match route_responsive_key(mode, model.wide_stage(), presentation, key) {
         ResponsiveKeyRoute::Intent(intent) => Some(intent),
         ResponsiveKeyRoute::Inert => None,

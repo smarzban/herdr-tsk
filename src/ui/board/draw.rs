@@ -1116,7 +1116,9 @@ fn draw_board_impl(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap
 
 fn draw_board_hits(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap {
     let area = frame.area();
-    let responsive = tier::resolve_responsive(area.width, area.height, model.wide_stage());
+    // A capture draft (quick-add expanded with Tab) owns the whole frame at every width; the
+    // wide task column paints task forms only. `responsive_geometry` folds that rule in.
+    let responsive = model.responsive_geometry(area);
     if responsive.presentation == tier::ResponsivePresentation::WideSplit {
         return draw_wide_board(frame, model, area, responsive);
     }
