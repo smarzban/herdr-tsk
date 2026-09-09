@@ -122,3 +122,24 @@ test("docs_html_has_rel_alternate_to_the_twin_once_and_landing_has_none", async 
   const landing = await read(join(distDir, "index.html"));
   assert.doesNotMatch(landing, /rel="alternate" type="text\/markdown"/);
 });
+
+test("vercel_json_rewrites_docs_html_to_markdown_twin_when_accept_contains_text_markdown", async () => {
+  const config = JSON.parse(await read(join(siteRoot, "vercel.json")));
+  const rewrite = (config.rewrites || []).find((entry) =>
+    String(entry.source).includes("/docs/:path"),
+  );
+  assert.ok(rewrite, "expected a docs rewrite");
+  assert.match(String(rewrite.source), /\/docs\/:path\*/);
+  assert.match(String(rewrite.destination), /\.md$/);
+  const accept = (rewrite.has || []).find(
+    (item) => item.type === "header" && String(item.key).toLowerCase() === "accept",
+  );
+  assert.ok(accept, "expected an Accept header matcher");
+  assert.match(String(accept.value), /text\/markdown/);
+  const vary = (config.headers || []).find(
+    (entry) =>
+      /\/docs\/\(\.\*\)$/.test(String(entry.source)) &&
+      (entry.headers || []).some((header) => header.key === "Vary" && header.value === "Accept"),
+  );
+  assert.ok(vary, "expected Vary: Accept on /docs/(.*)");
+});
