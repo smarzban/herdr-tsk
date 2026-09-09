@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "site/**"
+      - "skills/**"
       - ".github/workflows/site.yml"
 
 permissions:

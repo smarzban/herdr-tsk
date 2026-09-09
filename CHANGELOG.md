@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+`tsk setup grok` installs the CLI skill into `~/.grok/skills/`. Empty `--skill-dir` is usage. A symlink at the skill folder or `SKILL.md` is refused.
+
 The installer configures PATH for Bash and Zsh, then tells you to reopen the terminal or run an export command.
 
 ## 0.6.0

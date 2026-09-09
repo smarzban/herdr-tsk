@@ -55,7 +55,7 @@ test("the Astro site and sitemap build on the canonical URL", async () => {
 
 test("Vercel ignores unchanged files relative to the site root", async () => {
   const config = JSON.parse(await read("../vercel.json"));
-  assert.equal(config.ignoreCommand, "git diff --quiet HEAD^ HEAD -- .");
+  assert.equal(config.ignoreCommand, "git diff --quiet HEAD^ HEAD -- . ../skills");
 });
 
 test("demo capture keeps an absolute project path verbatim", () => {

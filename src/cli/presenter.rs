@@ -784,15 +784,14 @@ pub fn rejected(error: AddError) -> CliOutput {
 
 pub fn setup_help() -> CliOutput {
     CliOutput {
-        stdout: concat!(
-            "usage: tsk setup herdr | claude | pi | cursor | codex | --skill-dir <path> [--force] [--json]\n",
-            "Register the installed binary and bundled plugin assets.\n",
-            "Adds prefix+t for board and prefix+a for capture; asks before replacing conflicts.\n",
-            "Uses HERDR_CONFIG_PATH, or XDG_CONFIG_HOME/herdr/config.toml, or ~/.config/herdr/config.toml.\n",
-            "Agent targets write skills/tsk-cli/SKILL.md into that tool's user-level skills directory.\n",
-            "--force overwrites an existing skill. Without it, an existing file exits 1 with skill-exists.\n",
-        )
-        .into(),
+        stdout: format!(
+            "{}\nRegister the installed binary and bundled plugin assets.\n\
+             Adds prefix+t for board and prefix+a for capture; asks before replacing conflicts.\n\
+             Uses HERDR_CONFIG_PATH, or XDG_CONFIG_HOME/herdr/config.toml, or ~/.config/herdr/config.toml.\n\
+             Agent targets write skills/tsk-cli/SKILL.md into that tool's user-level skills directory.\n\
+             --force overwrites an existing skill. Without it, an existing file exits 1 with skill-exists.\n",
+            crate::setup_agent::USAGE
+        ),
         stderr: String::new(),
         code: 0,
     }

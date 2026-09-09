@@ -5,7 +5,7 @@
   "private": true,
   "scripts": {
     "dev": "node scripts/generate-apple-touch.mjs && node scripts/sync-agents-page.mjs && astro dev",
-    "start": "astro dev",
+    "start": "npm run dev",
     "prebuild": "node scripts/generate-apple-touch.mjs && node scripts/sync-agents-page.mjs",
     "build": "astro build",
     "pretest": "node scripts/sync-agents-page.mjs",

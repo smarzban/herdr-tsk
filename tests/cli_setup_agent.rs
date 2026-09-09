@@ -138,13 +138,26 @@ fn bare_setup_lists_targets_and_writes_nothing() {
         None => std::env::remove_var("XDG_CONFIG_HOME"),
     }
     assert_eq!(output.code, 0);
-    for token in ["herdr", "claude", "pi", "codex", "cursor", "--skill-dir"] {
+    for token in [
+        "herdr",
+        "claude",
+        "pi",
+        "codex",
+        "cursor",
+        "grok",
+        "--skill-dir",
+    ] {
         assert!(
             output.stdout.contains(token),
             "bare setup should list {token}, got {:?}",
             output.stdout
         );
     }
+    assert!(
+        output.stdout.contains(".grok/skills"),
+        "bare setup should advertise the grok skills dir, got {:?}",
+        output.stdout
+    );
     assert!(
         !home.join(".claude").exists(),
         "bare setup must not write agent skills"
@@ -206,4 +219,107 @@ fn setup_herdr_still_matches_existing_tests() {
     assert!(help.stdout.contains("prefix+t"));
     let bad = cli(&["tsk", "setup", "herdr", "--force"]);
     assert_eq!(bad.code, 2);
+}
+
+#[test]
+fn empty_skill_dir_is_usage_and_writes_nothing() {
+    let _lock = env_lock();
+    let root = temp_dir("empty-dir");
+    let previous = std::env::current_dir().expect("cwd");
+    std::env::set_current_dir(&root).expect("chdir temp");
+    let space = cli(&["tsk", "setup", "--skill-dir", ""]);
+    let equals = cli(&["tsk", "setup", "--skill-dir="]);
+    std::env::set_current_dir(&previous).expect("restore cwd");
+    assert_eq!(space.code, 2, "{space:?}");
+    assert_eq!(equals.code, 2, "{equals:?}");
+    assert!(
+        !root.join("tsk-cli").exists(),
+        "empty --skill-dir must not write into cwd"
+    );
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn named_agent_targets_write_under_home() {
+    let _lock = env_lock();
+    let root = temp_dir("named");
+    let home = root.join("home");
+    fs::create_dir_all(&home).expect("home");
+    let previous_home = std::env::var_os("HOME");
+    std::env::set_var("HOME", &home);
+    let cases = [
+        ("claude", ".claude/skills"),
+        ("pi", ".pi/agent/skills"),
+        ("cursor", ".cursor/skills"),
+        ("codex", ".agents/skills"),
+        ("grok", ".grok/skills"),
+    ];
+    for (name, suffix) in cases {
+        let dest = home.join(suffix).join("tsk-cli/SKILL.md");
+        let output = cli(&["tsk", "setup", name, "--force"]);
+        assert_eq!(output.code, 0, "{name}: {output:?}");
+        assert_eq!(
+            fs::read_to_string(&dest).expect("written skill"),
+            skill_source(),
+            "{name} path"
+        );
+    }
+    match previous_home {
+        Some(value) => std::env::set_var("HOME", value),
+        None => std::env::remove_var("HOME"),
+    }
+    let _ = fs::remove_dir_all(root);
+}
+
+#[cfg(unix)]
+#[test]
+fn force_refuses_a_symlinked_skill_file_and_directory() {
+    let _lock = env_lock();
+    let root = temp_dir("symlink");
+    let skill_dir = root.join("skills");
+    let outside = root.join("outside");
+    fs::create_dir_all(&outside).expect("outside");
+    let planted = outside.join("SKILL.md");
+    fs::write(&planted, "do-not-clobber\n").expect("plant");
+
+    fs::create_dir_all(skill_dir.join("tsk-cli")).expect("skill folder");
+    std::os::unix::fs::symlink(&planted, skill_dir.join("tsk-cli/SKILL.md")).expect("link file");
+    let file = cli(&[
+        "tsk",
+        "setup",
+        "--skill-dir",
+        skill_dir.to_str().expect("utf-8"),
+        "--force",
+    ]);
+    assert_eq!(file.code, 1, "{file:?}");
+    assert!(
+        file.stderr.contains("refusing symlink"),
+        "stderr should refuse the file symlink, got {:?}",
+        file.stderr
+    );
+    assert_eq!(
+        fs::read_to_string(&planted).expect("untouched file"),
+        "do-not-clobber\n"
+    );
+
+    let _ = fs::remove_dir_all(skill_dir.join("tsk-cli"));
+    std::os::unix::fs::symlink(&outside, skill_dir.join("tsk-cli")).expect("link dir");
+    let dir = cli(&[
+        "tsk",
+        "setup",
+        "--skill-dir",
+        skill_dir.to_str().expect("utf-8"),
+        "--force",
+    ]);
+    assert_eq!(dir.code, 1, "{dir:?}");
+    assert!(
+        dir.stderr.contains("refusing symlink"),
+        "stderr should refuse the directory symlink, got {:?}",
+        dir.stderr
+    );
+    assert_eq!(
+        fs::read_to_string(&planted).expect("untouched dir target"),
+        "do-not-clobber\n"
+    );
+    let _ = fs::remove_dir_all(root);
 }

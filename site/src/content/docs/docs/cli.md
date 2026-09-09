@@ -249,7 +249,7 @@ Edit refusals (exit 1): `unknown-task`, `soft-deleted-task`, `empty-title`,
 ```
 tsk setup
 tsk setup herdr
-tsk setup claude | pi | cursor | codex
+tsk setup claude | pi | cursor | grok | codex
 tsk setup --skill-dir <path> [--force] [--json]
 ```
 
@@ -266,13 +266,15 @@ that tool's user-level skills directory as `tsk-cli/SKILL.md`:
 - `claude` → `~/.claude/skills/`
 - `pi` → `~/.pi/agent/skills/`
 - `cursor` → `~/.cursor/skills/`
+- `grok` → `~/.grok/skills/`
 - `codex` → `~/.agents/skills/`
 - `--skill-dir <path>` → `<path>/tsk-cli/SKILL.md`
 
 A second run without `--force` exits 1 with `skill-exists` and leaves the file.
 `--force` overwrites. `--json` emits `outcome` (`written`, `exists`, or `listed`),
 `target`, and `path`. Two targets, or `herdr` plus `--skill-dir`, is usage (exit 2).
-A symlink at the skills root is refused.
+An empty `--skill-dir` is usage. A symlink at the skills root, the `tsk-cli`
+directory, or `SKILL.md` is refused.
 
 Exit codes: 0 success/help/list, 1 setup or confirmation failure or `skill-exists`,
 2 invalid arguments. Herdr setup does not edit task data. See

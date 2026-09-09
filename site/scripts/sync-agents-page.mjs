@@ -12,7 +12,10 @@ const repoRoot = dirname(siteRoot);
 const destDir = join(siteRoot, "src/content/docs/docs");
 const dest = join(destDir, "agents.md");
 const skill = readFileSync(join(repoRoot, "skills/tsk-cli/SKILL.md"), "utf8");
-const body = stripFrontmatter(skill).replace(/^\uFEFF/, "").replace(/\s+$/, "");
+const body = stripFrontmatter(skill)
+  .replace(/^\uFEFF/, "")
+  .replace(/^# [^\n]+\n+/, "")
+  .replace(/\s+$/, "");
 
 mkdirSync(destDir, { recursive: true });
 writeFileSync(

@@ -1274,7 +1274,7 @@ import { parseCapture } from "./capture.js";
     const tabs = TABS.map(([tab, label]) => {
       const on = state.tab === tab;
       const text = tab === "project" ? state.selectedProject : label;
-      return `<span class="tsk-tab-group ${on ? "is-on" : ""}"><button type="button" class="tsk-tab ${on ? "is-on" : ""}" data-tab="${tab}">${esc(text)}</button>${tab === "project" ? `<button class="tsk-tab-arrow" data-chip="1" aria-label="choose project"> ▾</button>` : ""}</span>`;
+      return `<span class="tsk-tab-group ${on ? "is-on" : ""}"><button type="button" class="tsk-tab ${on ? "is-on" : ""}" data-tab="${tab}">${esc(text)}</button>${tab === "project" ? `<button class="tsk-tab-arrow" data-chip="1" aria-label="choose project">▾</button>` : ""}</span>`;
     }).join(`<span class="dim"> · </span>`);
     const filter = state.focusProject
       ? state.threadFilter === null

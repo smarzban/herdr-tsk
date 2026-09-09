@@ -19,8 +19,11 @@ export const SIDEBAR_SLUGS = [
   "steps",
   "cli",
 ];
-export const SOURCE_BASE =
-  "https://github.com/smarzban/herdr-tsk/blob/main/site/src/content/docs/docs";
+export const SOURCE_REPO_BASE = "https://github.com/smarzban/herdr-tsk/blob/main";
+export const AGENTS_SKILL_REPO_PATH = "skills/tsk-cli/SKILL.md";
+export function agentsSkillFsPath() {
+  return resolve(process.cwd(), "../skills/tsk-cli/SKILL.md");
+}
 
 export function slugFromDocsId(id) {
   const value = String(id);
@@ -67,13 +70,27 @@ export function serializeJsonLd(value) {
   return JSON.stringify(value).replace(/</g, "\\u003c");
 }
 
-export function formatTwin({ title, slug, fileName, updatedIso, body }) {
+export function twinSource(slug, filePath) {
+  if (slug === "agents") {
+    return {
+      sourcePath: AGENTS_SKILL_REPO_PATH,
+      updatedIso: newestCommitIso(agentsSkillFsPath()),
+    };
+  }
+  return {
+    sourcePath: `site/src/content/docs/docs/${sourceFileName(filePath)}`,
+    updatedIso: newestCommitIso(filePath),
+  };
+}
+
+export function formatTwin({ title, slug, sourcePath, fileName, updatedIso, body }) {
   const trimmed = String(body).replace(/^\uFEFF/, "").replace(/\s+$/, "");
+  const path = sourcePath || `site/src/content/docs/docs/${fileName}`;
   return [
     `# ${title}`,
     "",
     `- html: ${htmlUrlForSlug(slug)}`,
-    `- source: ${SOURCE_BASE}/${fileName}`,
+    `- source: ${SOURCE_REPO_BASE}/${path}`,
     `- updated: ${updatedIso}`,
     "",
     trimmed,

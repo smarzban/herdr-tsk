@@ -4,10 +4,9 @@ import { getCollection } from "astro:content";
 
 import {
   formatTwin,
-  newestCommitIso,
   slugFromDocsId,
-  sourceFileName,
   stripFrontmatter,
+  twinSource,
 } from "../../lib/agent-docs.mjs";
 
 export async function getStaticPaths() {
@@ -28,11 +27,13 @@ export async function GET({
     throw new Error(`docs entry ${entry.id} has no filePath`);
   }
   const source = await readFile(join(process.cwd(), entry.filePath), "utf8");
+  const slug = slugFromDocsId(entry.id);
+  const { sourcePath, updatedIso } = twinSource(slug, entry.filePath);
   const twin = formatTwin({
     title: entry.data.title,
-    slug: slugFromDocsId(entry.id),
-    fileName: sourceFileName(entry.filePath),
-    updatedIso: newestCommitIso(entry.filePath),
+    slug,
+    sourcePath,
+    updatedIso,
     body: stripFrontmatter(source),
   });
   return new Response(twin, {

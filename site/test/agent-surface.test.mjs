@@ -44,7 +44,7 @@ test("markdown_twin_formatter_prefixes_title_html_source_and_updated", () => {
   const rendered = formatTwin({
     title: "CLI",
     slug: "cli",
-    fileName: "cli.md",
+    sourcePath: "site/src/content/docs/docs/cli.md",
     updatedIso: "2026-09-09T00:00:00.000Z",
     body: "The same store backs the board.\n",
   });
@@ -105,12 +105,11 @@ test("dist_has_a_markdown_twin_for_every_docs_entry_with_matching_body", async (
     const title = source.match(/^title:\s*(.+)$/m)?.[1]?.replace(/^"|"$/g, "");
     assert.match(twin, new RegExp(`^# ${title}\\n`));
     assert.match(twin, /- html: https:\/\/gettsk\.sh\/docs\//);
-    assert.match(
-      twin,
-      new RegExp(
-        `- source: https://github.com/smarzban/herdr-tsk/blob/main/site/src/content/docs/docs/${fileName}`,
-      ),
-    );
+    const sourceLine =
+      slug === "agents"
+        ? "- source: https://github.com/smarzban/herdr-tsk/blob/main/skills/tsk-cli/SKILL.md"
+        : `- source: https://github.com/smarzban/herdr-tsk/blob/main/site/src/content/docs/docs/${fileName}`;
+    assert.match(twin, new RegExp(sourceLine.replaceAll(".", "\\.")));
     assert.match(twin, /- updated: \d{4}-\d{2}-\d{2}T/);
   }
 });
@@ -360,9 +359,12 @@ test("agents_page_notice_plus_skill_body_matches_source", async () => {
   syncAgentsPage();
   const generated = await read(join(docsDir, "agents.md"));
   const skill = await read(join(repoRoot, "skills/tsk-cli/SKILL.md"));
-  const skillBody = stripFrontmatter(skill).replace(/\s+$/, "");
+  const skillBody = stripFrontmatter(skill)
+    .replace(/^# [^\n]+\n+/, "")
+    .replace(/\s+$/, "");
   const body = stripFrontmatter(generated).replace(/\s+$/, "");
   assert.match(generated, /^title:\s*tsk for agents/m);
+  assert.doesNotMatch(body, /^# /m);
   assert.equal(body, `${NOTICE}\n\n${skillBody}`);
 });
 
@@ -381,6 +383,29 @@ test("definition_sentence_appears_in_agents_page", async () => {
   syncAgentsPage();
   const generated = await read(join(docsDir, "agents.md"));
   assert.ok(generated.includes(DEFINITION_SENTENCE));
+});
+
+test("agents_markdown_twin_points_source_and_updated_at_the_skill", async () => {
+  ensureDist();
+  const twin = await read(join(distDir, "docs/agents.md"));
+  assert.match(
+    twin,
+    /- source: https:\/\/github.com\/smarzban\/herdr-tsk\/blob\/main\/skills\/tsk-cli\/SKILL.md/,
+  );
+  const expected = newestCommitIso(join(repoRoot, "skills/tsk-cli/SKILL.md"));
+  assert.match(twin, new RegExp(`- updated: ${expected.replaceAll(".", "\\.")}`));
+});
+
+test("npm_start_and_deploy_paths_watch_the_skill", async () => {
+  const pkg = JSON.parse(await read(join(siteRoot, "package.json")));
+  assert.match(String(pkg.scripts.dev), /sync-agents-page/);
+  assert.equal(pkg.scripts.start, "npm run dev");
+  const siteYml = await read(join(repoRoot, ".github/workflows/site.yml"));
+  const vercelYml = await read(join(repoRoot, ".github/workflows/vercel.yml"));
+  assert.match(siteYml, /skills\/\*\*/);
+  assert.match(vercelYml, /skills\/\*\*/);
+  const vercelJson = JSON.parse(await read(join(siteRoot, "vercel.json")));
+  assert.match(String(vercelJson.ignoreCommand), /\.\.\/skills/);
 });
 
 test("vercel_docs_rewrite_matches_nested_slug_and_skips_md", async () => {

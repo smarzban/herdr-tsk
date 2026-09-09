@@ -2576,7 +2576,13 @@ html[data-theme="light"] .pane {
 .tsk-tab-group .tsk-tab { padding: 0; }
 .tsk-tab-arrow, .tsk-view-control { appearance: none; border: 0; padding: 0; background: none; font: inherit; color: inherit; cursor: pointer; }
 .tsk-tab-group { color: var(--dim); }
-.tsk-tab-group.is-on { color: var(--ink); text-decoration: underline; text-underline-offset: .2em; }
+.tsk-tab-group.is-on { color: var(--ink); }
+.tsk-tab-group.is-on .tsk-tab,
+.tsk-tab-group.is-on .tsk-tab-arrow {
+  text-decoration: underline;
+  text-underline-offset: .2em;
+}
+.tsk-tab-arrow { padding-left: 1ch; }
 .tsk-view-control { margin-left: auto; }
 .board .tsk-row.is-sel { background: transparent; color: var(--ink); }
 .tsk-project-row, .tsk-project-legend { display: grid; grid-template-columns: minmax(0,1fr) 10ch 11ch 7ch; align-items: baseline; padding: 0 2ch 0 1ch; gap: 0; text-align: right; font: inherit; line-height: inherit; }
@@ -2601,7 +2607,7 @@ html[data-theme="light"] .pane {
 .board .tsk-rail-row .tsk-row-main { display: block; white-space: pre; }
 .tsk-rail-continuation { display: block; white-space: pre; }
 
-/* The group owns one underline, including the project dropdown arrow. */
+/* Underline the tab word and the chevron, not the padding around them. */
 .demo-invitation { margin-bottom: 1.5rem; }
 .demo-invitation h2 { margin: 0 0 .5rem; font-size: 1.4rem; }
 .demo-invitation p { margin: 0; color: var(--ink); max-width: 65ch; }
