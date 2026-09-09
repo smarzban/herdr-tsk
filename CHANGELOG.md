@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+`tsk setup herdr` registers embedded plugin assets with Herdr 0.9+, sharing the
+installed standalone binary. It adds prefix+t board and prefix+a quick capture,
+asks before replacing conflicting shortcuts, and refuses noninteractive conflicts
+without changes. No source checkout, separate build, or automatic install-time link.
+
+Native distribution: an owner-run draft-release workflow builds four
+macOS/Linux architectures, generates checksums and a version-pinned Homebrew formula.
+The installer downloads stable release assets, verifies SHA-256, and installs to
+~/.local/bin. Homebrew installs from the checksum-pinned smarzban/tap/tsk formula.
+
 Board attribution appears only inside an open peek, on a dim `└─ label` line
 below its notes. Collapsed rows show no labels. Titles wrap two cells before the right edge without a label column.
 

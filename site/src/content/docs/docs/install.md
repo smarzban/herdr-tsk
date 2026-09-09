@@ -1,90 +1,87 @@
 ---
 title: Install
-description: Build tsk and open the board.
+description: Install tsk, open the board, and connect it to Herdr.
 ---
 
-## Requirements
+## Homebrew
 
-- Rust 1.96.0 (pinned in `rust-toolchain.toml`)
-- Linux or macOS (Windows is not tested in CI)
-- herdr 0.7.5 or newer, for plugin mode only
+```sh
+brew install smarzban/tap/tsk
+```
 
-## Build
+Use `brew update && brew upgrade tsk` to upgrade and `brew uninstall tsk` to remove
+it. The formula pins a release's platform URL and checksum, not `main`.
 
-```bash
+## Install script
+
+Download and inspect the script, then run it:
+
+```sh
+curl -fsSL https://gettsk.sh/install.sh -o install-tsk.sh
+sh install-tsk.sh
+```
+
+It verifies the latest stable release's SHA-256 and installs to `~/.local/bin`.
+Add that directory to PATH. Requires `curl`, `tar`, and `sha256sum` or `shasum`.
+`TSK_INSTALL_DIR` selects another absolute directory; `TSK_VERSION=vX.Y.Z` pins a
+stable release tag. `--help` makes no downloads. Rerun to upgrade; remove the
+installed executable to uninstall. No sudo, shell edits, or task-data changes.
+Checksum failures and symlink destinations are refused without replacing the binary.
+
+## Manual archives
+
+Download `tsk-vX.Y.Z-<target>.tar.gz` and `SHA256SUMS` from the same
+[release](https://github.com/smarzban/herdr-tsk/releases). Choose macOS ARM64/Intel
+or Linux ARM64/x86-64 musl. Check the archive with `sha256sum` (Linux) or
+`shasum -a 256` (macOS), compare its full digest with `SHA256SUMS`, then extract
+`tsk` into a directory on PATH. Never run a binary whose checksum differs.
+
+## Source build
+
+Requires Rust 1.96.0 and Linux or macOS:
+
+```sh
 git clone https://github.com/smarzban/herdr-tsk.git
 cd herdr-tsk
 cargo build --release
-```
-
-The binary is `target/release/tsk`. Run it with that path, or put the directory
-on `PATH` for this shell:
-
-```bash
 export PATH="$PWD/target/release:$PATH"
 ```
 
-## Standalone
+For source-checkout plugin development with Herdr 0.7.5+, run
+`herdr plugin link "$PWD"` after building. Rebuild after pulling changes.
 
-```bash
-./target/release/tsk
+## Herdr setup with an installed binary
+
+Requires Herdr 0.9+ on PATH:
+
+```sh
+tsk setup herdr
+herdr server reload-config
 ```
 
-State lives in `~/.tsk/tsk.json`, with the previous version in `tsk.json.1`, a
-pre-format-version backup in `tsk.json.v<N>` after a format migration, deleted
-tasks in `trash.jsonl`, and a `tsk.json.lock` guarding writers. Everything there
-is user-private on Unix: the directory is `0700` and the files `0600`. Looser
-modes left by an older version are tightened on the next launch; stricter ones
-are kept. Override the directory with `TSK_STATE_DIR` (`TSK_CONFIG_DIR` for
-config). Board, CLI, and agents share the store safely: saves merge by task and
-revision, and an idle board picks up an outside change within a quarter of a
-second.
+Setup registers bundled plugin assets and the same stable installed binary, without
+a checkout or second build. It adds **prefix+t** for the board and **prefix+a** for
+quick capture, asking before replacing conflicts. Declining preserves the shortcut;
+a noninteractive conflict aborts without changes. Accepted builtin conflicts remove
+the override, restoring Herdr's default for that action. Successful config edits get a backup;
+failed linking leaves no backup file.
 
-Keep `~/.tsk` on a local disk. The writer lock is `flock`-style and every save
-is a rename-based atomic replace; NFS, Dropbox, iCloud Drive, and similar
-synced folders can break both. `TSK_STATE_DIR` is the escape hatch: point it
-at a directory on a local disk. State and config directory roots must be real
-directories, not symlinks.
+Rerun setup after upgrading: it replaces the registration and removes the intact old
+managed asset root. Use the normal PATH command, not a versioned Homebrew Cellar path.
+Installation alone never relinks a plugin. To remove integration, run
+`herdr plugin unlink herdr-tsk`, remove its two command bindings, and reload Herdr.
+[Setup details and recovery](https://github.com/smarzban/herdr-tsk/blob/main/packaging/README.md#herdr-setup-and-upgrades).
 
-```bash
-./target/release/tsk add -t "Draft release notes"
-./target/release/tsk list
-```
+## Run and store
 
-After `export PATH="$PWD/target/release:$PATH"`, the same commands work as
-`tsk add` and `tsk list`.
+Run `tsk` to open the board, or `tsk add -t "Draft release notes"` to capture from
+the CLI. Use one installation channel and reopen running boards after upgrading.
+An older binary may refuse a newer store format.
 
-## As a herdr plugin
-
-The pane runs `./target/release/tsk`, so build before you link:
-
-```bash
-herdr plugin link "$PWD"
-```
-
-`herdr plugin list` should show `herdr-tsk` enabled against that path.
-
-Then **Open tsk board**, or:
-
-```bash
-herdr plugin action invoke open-board --plugin herdr-tsk
-```
-
-It opens a **tsk** split beside the current pane. Invoke it again to focus the
-board you already have.
-
-**Quick capture** opens the expanded quick-add page in a short-lived popup, without
-a persistent board. Selected text in the focused pane becomes the title:
-
-```bash
-herdr plugin action invoke quick-capture --plugin herdr-tsk
-```
-
-Rebuild after you pull. A running board keeps the old binary until you quit it.
-
-herdr injects `HERDR_PLUGIN_STATE_DIR` / `HERDR_PLUGIN_CONFIG_DIR`. tsk ignores
-them on purpose: one store (`~/.tsk`) whether you are in herdr, another
-multiplexer, or a bare terminal.
+Board and CLI share `~/.tsk/tsk.json`. Uninstalling the binary keeps task data.
+Use `TSK_STATE_DIR` / `TSK_CONFIG_DIR` to override state/config directories. Keep them
+on a local disk, not NFS or a synced folder, and use real directories, not symlinks.
+Herdr-injected plugin directories do not change where tsk stores tasks.
 
 ## Next
 

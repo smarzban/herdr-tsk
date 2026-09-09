@@ -1,7 +1,7 @@
 //! Process command-line routing and headless command execution.
 
 use std::fs;
-use std::io::Read;
+use std::io::{IsTerminal, Read};
 
 use serde_json::Value;
 
@@ -36,6 +36,7 @@ where
         .map(|argument| argument.as_ref().to_owned())
         .collect::<Vec<_>>();
     match args.get(1).map(String::as_str) {
+        Some("setup") => run_setup(args, &mut stdin, stdin_is_tty),
         Some("add") => run_add(args, &mut stdin, stdin_is_tty),
         Some("steps") => run_steps(args),
         Some("list") => run_list(args),
@@ -263,4 +264,21 @@ fn parse_plan(source: &str) -> Result<Vec<Value>, String> {
         .as_array()
         .cloned()
         .ok_or_else(|| "JSON plan must be an array".into())
+}
+
+fn run_setup<R: Read>(args: Vec<String>, stdin: &mut R, stdin_is_tty: bool) -> CliOutput {
+    let tail: Vec<_> = args.iter().skip(2).map(String::as_str).collect();
+    match tail.as_slice() {
+        ["--help"] | ["herdr", "--help"] => presenter::setup_help(),
+        ["herdr"] => {
+            let mut reader = std::io::BufReader::new(stdin);
+            let mut stderr = std::io::stderr();
+            let interactive = stdin_is_tty && stderr.is_terminal();
+            match crate::setup::run(&mut reader, &mut stderr, interactive) {
+                Ok(result) => presenter::setup(result),
+                Err(error) => presenter::setup_error(&error.to_string(), 1),
+            }
+        }
+        _ => presenter::setup_error("usage: tsk setup herdr", 2),
+    }
 }

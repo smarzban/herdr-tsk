@@ -781,3 +781,34 @@ pub fn rejected(error: AddError) -> CliOutput {
         code,
     }
 }
+
+pub fn setup_help() -> CliOutput {
+    CliOutput {stdout:"usage: tsk setup herdr\nRegister the installed binary and bundled plugin assets.\nAdds prefix+t for board and prefix+a for capture; asks before replacing conflicts.\nUses HERDR_CONFIG_PATH, or XDG_CONFIG_HOME/herdr/config.toml, or ~/.config/herdr/config.toml.\n".into(),stderr:String::new(),code:0}
+}
+pub fn setup_error(reason: &str, code: u8) -> CliOutput {
+    CliOutput {
+        stdout: String::new(),
+        stderr: format!("tsk setup: {}\n", human_reason(reason)),
+        code,
+    }
+}
+pub fn setup(result: crate::setup::SetupResult) -> CliOutput {
+    let mut stdout = String::new();
+    if let Some(backup) = result.backup {
+        stdout.push_str(&format!(
+            "Herdr config backup: {}\n",
+            terminal_text(&backup.display().to_string())
+        ));
+    }
+    stdout.push_str(&format!(
+        "Herdr plugin registered, using {}\nPlugin root: {}\n",
+        terminal_text(&result.binary.display().to_string()),
+        terminal_text(&result.root.display().to_string())
+    ));
+    stdout.push_str("Configured available shortcuts: prefix+t board, prefix+a quick capture. Declined conflicts were left unchanged.\nReload Herdr configuration (herdr server reload-config), or restart Herdr, to apply shortcuts.\n");
+    CliOutput {
+        stdout,
+        stderr: String::new(),
+        code: 0,
+    }
+}

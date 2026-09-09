@@ -231,3 +231,15 @@ Status refusals (exit 1): `unknown-task`, `soft-deleted-task`.
 
 Edit refusals (exit 1): `unknown-task`, `soft-deleted-task`, `empty-title`,
 `invalid-title`.
+
+## Register the installed binary with Herdr
+
+`tsk setup herdr` registers the embedded plugin assets and adds prefix+t (board)
+and prefix+a (quick capture). It uses the same installed binary, with no source
+checkout or second build. Herdr 0.9+ must be on PATH. Conflicting shortcuts require
+interactive confirmation; declining preserves them. A noninteractive conflict aborts
+without writes. `tsk setup herdr --help` is read-only.
+
+Exit codes: 0 success/help, 1 setup or confirmation failure, 2 invalid arguments.
+The command does not edit task data. See [installation](/docs/install/#herdr-setup-with-an-installed-binary)
+for config paths, backups, reload, upgrades and removing integration.
