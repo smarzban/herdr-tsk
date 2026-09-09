@@ -81,6 +81,7 @@ export default defineConfig({
       },
       components: {
         Head: './src/components/DocsHead.astro',
+        PageTitle: './src/components/DocsPageTitle.astro',
         SiteTitle: './src/components/DocsTitle.astro',
         ThemeSelect: './src/components/ThemeSelect.astro',
         SocialIcons: './src/components/DocsLinks.astro',
@@ -111,6 +112,10 @@ export default defineConfig({
         {
           tag: 'script',
           attrs: { src: '/theme.js' },
+        },
+        {
+          tag: 'script',
+          attrs: { src: '/docs-copy.js' },
         },
         {
           tag: 'link',

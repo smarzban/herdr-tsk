@@ -1,0 +1,24 @@
+---
+import { slugFromDocsId, SITE } from '../lib/agent-docs.mjs';
+
+const { entry } = Astro.locals.starlightRoute;
+const isDocsPage = entry.id !== '404' && !entry.id.endsWith('/404');
+const slug = isDocsPage ? slugFromDocsId(entry.id) : '';
+const twinHref = slug ? `/docs/${slug}.md` : '';
+const copyText = slug ? `Read ${SITE}/docs/${slug}.md and follow it.` : '';
+---
+
+<div class="docs-title-block">
+  <h1 id="_top">{entry.data.title}</h1>
+  {
+    isDocsPage && (
+      <p class="docs-agent-row">
+        <a href={twinHref}>markdown</a>
+        <span aria-hidden="true"> · </span>
+        <button type="button" data-agent-copy data-copy-text={copyText}>
+          copy for agent
+        </button>
+      </p>
+    )
+  }
+</div>
