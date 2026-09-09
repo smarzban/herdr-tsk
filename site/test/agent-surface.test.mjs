@@ -143,3 +143,24 @@ test("vercel_json_rewrites_docs_html_to_markdown_twin_when_accept_contains_text_
   );
   assert.ok(vary, "expected Vary: Accept on /docs/(.*)");
 });
+
+test("robots_txt_allows_star_and_listed_crawlers_and_names_the_sitemap", async () => {
+  const robots = await read(join(siteRoot, "public/robots.txt"));
+  assert.match(robots, /^User-agent: \*\nAllow: \//m);
+  for (const agent of [
+    "GPTBot",
+    "ClaudeBot",
+    "Claude-SearchBot",
+    "PerplexityBot",
+    "Google-Extended",
+    "Applebot-Extended",
+    "Bingbot",
+  ]) {
+    assert.match(
+      robots,
+      new RegExp(`User-agent: ${agent}\nAllow: /`),
+      `missing allow for ${agent}`,
+    );
+  }
+  assert.match(robots, /Sitemap: https:\/\/gettsk\.sh\/sitemap-index\.xml/);
+});
