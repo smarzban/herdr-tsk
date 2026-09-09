@@ -46,4 +46,4 @@ Canonical terms for this repo. No implementation detail.
 - **guide**: the agent workflow doc, `skills/tsk-cli/SKILL.md`, printed by `tsk guide` and published at `/docs/agents/`.
 - **twin**: the Markdown representation of a docs page at `/docs/<slug>.md`.
 - **bootstrap prompt**: the three-line text a human pastes to an agent to start using tsk.
-- **definition sentence**: `tsk is a terminal task board for you and your agents: one board, five statuses, agents work through the CLI.`
+- **definition sentence**: `tsk is a terminal task board for you and your agents: one shared queue, a TUI for you, a CLI for them.`

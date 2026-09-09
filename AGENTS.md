@@ -195,6 +195,11 @@ For scriptable board work, use `tsk add`, `tsk list`, `tsk status`, `tsk edit`, 
   automatically only on pushes to `main` to conserve Actions usage; PR checks are
   not required. Site-only pushes skip the Rust matrix (`paths-ignore: site/**`).
   Site CI is `npm ci && npm test && npm run build` in `site/`.
+- `site/vercel.json` is validated by Vercel's own route parser in `npm test`
+  (`@vercel/routing-utils`, the same check `vercel deploy` runs before upload). Its
+  `:param(...)` patterns reject regex lookaheads; a bad pattern fails every production
+  deploy silently from the site's point of view, so never edit that file without the test.
+  Markdown twins are reached by `.md` URLs and `rel=alternate`, not `Accept` negotiation.
 - Landing page and Starlight docs live in `site/` (Astro). They are not part of
   the `tsk` binary. Production: https://gettsk.sh. Point Vercel at
   this repo with Root Directory `site`.

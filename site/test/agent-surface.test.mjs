@@ -146,52 +146,24 @@ test("docs_html_has_rel_alternate_to_the_twin_once_and_landing_has_none", async 
   assert.doesNotMatch(landing, /rel="alternate" type="text\/markdown"/);
 });
 
-test("vercel_json_rewrites_docs_html_to_markdown_twin_when_accept_contains_text_markdown", async () => {
+test("vercel_json_has_no_accept_rewrites_and_no_regex_lookaheads", async () => {
+  // Vercel's route parser rejects lookaheads inside :param patterns, and static
+  // files win over rewrites anyway. Markdown is reached by .md URLs and rel=alternate.
   const config = JSON.parse(await read(join(siteRoot, "vercel.json")));
-  const rewrite = (config.rewrites || []).find((entry) =>
-    String(entry.source).includes("/docs/:path"),
-  );
-  assert.ok(rewrite, "expected a docs rewrite");
-  assert.match(String(rewrite.source), /\/docs\/:path/);
-  assert.match(String(rewrite.source), /\\\.md/);
-  assert.match(String(rewrite.destination), /\.md$/);
-  assert.doesNotMatch(String(rewrite.destination), /\.md\.md/);
-  assert.doesNotMatch(String(rewrite.source), /:path\*$/);
-  const accept = (rewrite.has || []).find(
-    (item) => item.type === "header" && String(item.key).toLowerCase() === "accept",
-  );
-  assert.ok(accept, "expected an Accept header matcher");
-  assert.match(String(accept.value), /text\/markdown/);
-  const vary = (config.headers || []).find(
-    (entry) =>
-      /\/docs\/\(\.\*\)$/.test(String(entry.source)) &&
-      (entry.headers || []).some((header) => header.key === "Vary" && header.value === "Accept"),
-  );
-  assert.ok(vary, "expected Vary: Accept on /docs/(.*)");
+  assert.equal(config.rewrites, undefined, "no rewrites expected");
+  for (const entry of [...(config.headers || []), ...(config.redirects || [])]) {
+    assert.doesNotMatch(String(entry.source), /\(\?/, `${entry.source} uses a lookahead`);
+  }
+  const markdown = (config.headers || []).find((entry) => String(entry.source) === "/docs/(.*).md");
+  assert.ok(markdown, "expected the Content-Type header for .md twins");
 });
 
-test("vercel_json_docs_rewrite_does_not_capture_a_trailing_slash", async () => {
+test("vercel_json_passes_vercels_own_route_validator", async () => {
+  // Same check `vercel deploy` runs client-side before uploading.
+  const { getTransformedRoutes } = await import("@vercel/routing-utils");
   const config = JSON.parse(await read(join(siteRoot, "vercel.json")));
-  const rewrites = (config.rewrites || []).filter((entry) =>
-    String(entry.source).includes("/docs/:path"),
-  );
-  assert.ok(rewrites.length > 0, "expected a docs path rewrite");
-  let matchesTrailingSlash = false;
-  for (const rewrite of rewrites) {
-    const source = String(rewrite.source);
-    const inner = source.match(/:path\((.*)\)(?:\/\?|\/)?$/)?.[1];
-    assert.ok(inner, `${source} needs a custom :path regex`);
-    const innerRe = new RegExp(`^(?:${inner})$`);
-    assert.match("cli", innerRe);
-    assert.doesNotMatch("cli/", innerRe);
-    assert.doesNotMatch("cli.md", innerRe);
-    assert.match(String(rewrite.destination), /^\/docs\/:path\.md$/);
-    if (/\/\?$|\/$/.test(source)) matchesTrailingSlash = true;
-  }
-  assert.ok(
-    matchesTrailingSlash,
-    "expected a rewrite that matches /docs/<slug>/",
-  );
+  const result = getTransformedRoutes(config);
+  assert.equal(result.error, null, result.error?.message);
 });
 
 test("robots_txt_allows_star_and_listed_crawlers_and_names_the_sitemap", async () => {
@@ -234,7 +206,7 @@ test("every_docs_entry_has_description_and_an_answer_first_paragraph", async () 
 });
 
 const DEFINITION_SENTENCE =
-  "tsk is a terminal task board for you and your agents: one board, five statuses, agents work through the CLI.";
+  "tsk is a terminal task board for you and your agents: one shared queue, a TUI for you, a CLI for them.";
 
 const SIDEBAR_TITLES = [
   "Overview",
@@ -344,7 +316,7 @@ test("definition_sentence_appears_verbatim_in_index_astro_llms_txt_docs_index_an
 });
 
 const NOTICE =
-  "tsk is a terminal task board for you and your agents: one board, five statuses, agents work through the CLI.";
+  "tsk is a terminal task board for you and your agents: one shared queue, a TUI for you, a CLI for them.";
 
 function syncAgentsPage() {
   const result = spawnSync("node", ["scripts/sync-agents-page.mjs"], {
@@ -408,27 +380,3 @@ test("npm_start_and_deploy_paths_watch_the_skill", async () => {
   assert.match(String(vercelJson.ignoreCommand), /\.\.\/skills/);
 });
 
-test("vercel_docs_rewrite_matches_nested_slug_and_skips_md", async () => {
-  const config = JSON.parse(await read(join(siteRoot, "vercel.json")));
-  const rewrites = (config.rewrites || []).filter((entry) =>
-    String(entry.source).includes("/docs/:path"),
-  );
-  assert.ok(rewrites.length > 0, "expected a docs path rewrite");
-  let matchesNested = false;
-  let skipsMd = true;
-  for (const rewrite of rewrites) {
-    const source = String(rewrite.source);
-    const inner = source.match(/:path\((.*)\)(?:\/\?|\/)?$/)?.[1];
-    assert.ok(inner, `${source} needs a custom :path regex`);
-    const innerRe = new RegExp(`^(?:${inner})$`);
-    assert.match("cli", innerRe);
-    assert.match("a/b", innerRe, `${source} should match nested slugs`);
-    assert.doesNotMatch("cli.md", innerRe);
-    assert.doesNotMatch("a/b.md", innerRe);
-    assert.match(String(rewrite.destination), /^\/docs\/:path\.md$/);
-    matchesNested = true;
-    if (innerRe.test("cli.md") || innerRe.test("a/b.md")) skipsMd = false;
-  }
-  assert.ok(matchesNested, "expected a rewrite that matches /docs/a/b/");
-  assert.ok(skipsMd, "/docs/a/b.md and /docs/cli.md must not match");
-});
