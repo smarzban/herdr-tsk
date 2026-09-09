@@ -25,6 +25,9 @@ TSK_STATE_DIR=/tmp/tsk-dev-state TSK_CONFIG_DIR=/tmp/tsk-dev-config cargo run
 
 Do not point development builds at a board containing data you care about.
 
+For local website setup, builds, and deployment configuration, see the
+[site README](site/README.md).
+
 ## Making a change
 
 Keep changes focused and add regression coverage for behavior changes. A regression test must fail without its fix and pass with it. User-visible behavior changes must update the relevant page under `site/src/content/docs/docs/`, plus the README, landing page, demo, or `site/public/llms.txt` when they describe the changed behavior.
