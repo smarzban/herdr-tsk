@@ -159,10 +159,18 @@ impl RequestLock {
     /// Acquire the persistent lock inode with a bounded wait. Ownership is the OS
     /// advisory lock, not the inode, so a crash releases it without unlinking anything.
     fn acquire(state_dir: &Path) -> io::Result<Self> {
+        Self::acquire_bounded(state_dir, 100)
+    }
+
+    /// Wait at most `tries` × 5 ms for the lock. Acknowledgement uses a short bound: a
+    /// forked child (test harnesses, host launchers) briefly holds a copy of another
+    /// thread's lock fd until its exec closes it, and one immediate `try_lock` then
+    /// leaves a handled request file behind.
+    fn acquire_bounded(state_dir: &Path, tries: u32) -> io::Result<Self> {
         let path = state_dir.join(LOCK_FILE);
         let file = crate::fsperm::open_lock_file(&path)?;
         crate::fsperm::tighten_file(&path);
-        for _ in 0..100 {
+        for _ in 0..tries {
             match file.try_lock() {
                 Ok(()) => return Ok(Self { _file: file }),
                 Err(std::fs::TryLockError::WouldBlock) => {
@@ -288,7 +296,9 @@ impl ReopenWatch {
         self.last_seen = Some(signature);
         self.deferred_notice_sent = false;
 
-        let Ok(_lock) = RequestLock::try_acquire(&self.state_dir) else {
+        // Bounded (about 100 ms), not nonblocking: this runs once per applied request, not
+        // on the idle tick, and giving up on a momentarily held lock leaves the file behind.
+        let Ok(_lock) = RequestLock::acquire_bounded(&self.state_dir, 20) else {
             return;
         };
         let path = self.request_path();
@@ -525,6 +535,39 @@ mod tests {
     }
 
     #[test]
+    fn acknowledge_outlasts_a_briefly_held_lock_and_still_removes_the_file() {
+        // CI saw try_acquire report the lock busy with no live holder (a forked test child
+        // inherits another thread's lock fd until its exec closes it). Acknowledge is not on
+        // the idle tick, so it may wait a little rather than leave the file behind.
+        let dir = std::env::temp_dir().join(format!(
+            "tsk-reopen-ack-brief-lock-{}-{}",
+            std::process::id(),
+            REQUEST_SEQ.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&dir).expect("state dir");
+        let store = TaskStore::new(&dir);
+        let mut watch = ReopenWatch::seeded(&store);
+        ReopenRequest::new(Some(PathBuf::from("/repo/a")))
+            .write(&dir)
+            .expect("request a");
+        assert!(watch.poll().is_some(), "request applied");
+        let holder_dir = dir.clone();
+        let holder = std::thread::spawn(move || {
+            let lock = RequestLock::acquire(&holder_dir).expect("brief holder");
+            std::thread::sleep(Duration::from_millis(30));
+            drop(lock);
+        });
+        std::thread::sleep(Duration::from_millis(5));
+        watch.acknowledge();
+        holder.join().expect("holder thread");
+        assert!(
+            !dir.join(REQUEST_FILE).exists(),
+            "acknowledge must remove the handled request once the brief holder is gone"
+        );
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn acknowledge_is_nonblocking_and_consumes_a_request_when_cleanup_is_busy() {
         let dir = std::env::temp_dir().join(format!(
             "tsk-reopen-ack-nonblocking-{}-{}",
@@ -543,7 +586,7 @@ mod tests {
         watch.acknowledge();
         assert!(
             started.elapsed() < Duration::from_millis(200),
-            "acknowledgement must not wait for the writer's 500ms bounded acquisition"
+            "acknowledgement waits at most its own short bound, never the writer's 500ms"
         );
         drop(lock);
         assert_eq!(watch.poll(), None, "handled request must not replay");
