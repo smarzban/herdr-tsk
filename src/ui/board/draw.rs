@@ -660,6 +660,15 @@ fn build_task_page_overlay<'a>(
 
 /// Idle status-row context for the active lens. Stored paths and thread names reach the
 /// renderer only through its `present_line` path before they are painted.
+fn status_idle(model: &BoardModel, surface: BoardSurface, has_message: bool) -> String {
+    if !has_message {
+        if let Some(notice) = model.update_notice() {
+            return format!(" {notice}");
+        }
+    }
+    footer_context(model, surface)
+}
+
 fn footer_context(model: &BoardModel, surface: BoardSurface) -> String {
     match surface {
         BoardSurface::Desk => " desk".to_string(),
@@ -1149,7 +1158,7 @@ fn draw_board_hits(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap
         projects_cursor: model.projects_cursor(),
         projects_query: model.projects_query(),
         summary: None,
-        context: footer_context(model, surface),
+        context: status_idle(model, surface, status_owned.is_some()),
         status_message: status_owned.as_deref(),
         status_undo_offset,
         verb_items: &verbs,
@@ -1318,7 +1327,7 @@ fn draw_wide_board(
         projects_cursor: model.projects_cursor(),
         projects_query: model.projects_query(),
         summary: None,
-        context: footer_context(model, surface),
+        context: status_idle(model, surface, status_owned.is_some()),
         status_message: status_owned.as_deref(),
         status_undo_offset,
         verb_items: &verbs,

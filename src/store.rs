@@ -717,9 +717,11 @@ fn is_private_state_name(name: &str) -> bool {
         || name == BACKUP_FILE
         || name == LOCK_FILE
         || name == TRASH_FILE
+        || name == "update.json"
         || name.starts_with(&format!("{STATE_FILE}.v"))
         || name.starts_with(&format!(".{STATE_FILE}.tmp."))
         || name.starts_with(&format!(".{TRASH_FILE}.tmp."))
+        || name.starts_with(".update.json.tmp.")
 }
 
 /// RAII exclusive lock on the store lock file (released on drop via `File::unlock`).

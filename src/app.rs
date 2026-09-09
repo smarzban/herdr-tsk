@@ -100,13 +100,18 @@ pub fn load_board_for_quick_capture() -> Result<(TaskStore, DomainState, BoardMo
 fn load_board_inner(
     offer_launch_card: bool,
 ) -> Result<(TaskStore, DomainState, BoardModel), Box<dyn Error>> {
-    let store = TaskStore::new(default_state_dir());
+    let state_dir = default_state_dir();
+    let store = TaskStore::new(state_dir.clone());
     let state = store.load()?;
     let snapshot = load_snapshot();
     let mut model = BoardModel::from_domain(&state, snapshot.this_repo.clone());
     if offer_launch_card {
         model.offer_launch_card(&state, &snapshot);
     }
+    model.set_update_notice(crate::update::startup(
+        &state_dir,
+        env!("CARGO_PKG_VERSION"),
+    ));
     Ok((store, state, model))
 }
 

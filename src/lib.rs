@@ -16,6 +16,7 @@ pub mod setup_agent;
 pub mod store;
 pub(crate) mod text;
 pub mod ui;
+pub mod update;
 
 pub use board_pane::{find_board_pane_from_stdin, find_board_pane_id};
 

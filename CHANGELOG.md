@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+The board checks GitHub for a newer release at most once a day and paints a dim
+`vX.Y.Z available` on the status row. Set `TSK_NO_UPDATE_CHECK` to disable it.
+
 `tsk setup grok` installs the CLI skill into `~/.grok/skills/`. Empty `--skill-dir` is usage. A symlink at the skill folder or `SKILL.md` is refused.
 
 The installer configures PATH for Bash and Zsh, then tells you to reopen the terminal or run an export command.

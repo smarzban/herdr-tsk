@@ -2577,8 +2577,7 @@ html[data-theme="light"] .pane {
 .tsk-tab-arrow, .tsk-view-control { appearance: none; border: 0; padding: 0; background: none; font: inherit; color: inherit; cursor: pointer; }
 .tsk-tab-group { color: var(--dim); }
 .tsk-tab-group.is-on { color: var(--ink); }
-.tsk-tab-group.is-on .tsk-tab,
-.tsk-tab-group.is-on .tsk-tab-arrow {
+.tsk-tab-group.is-on .tsk-tab {
   text-decoration: underline;
   text-underline-offset: .2em;
 }

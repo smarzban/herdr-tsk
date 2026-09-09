@@ -716,6 +716,8 @@ pub struct BoardModel {
     pub(super) hold_task_edit_save: bool,
     /// Last board action feedback or empty-selection chrome message.
     pub(super) message: Option<String>,
+    /// Dim status-row notice when a cached release tag is newer than this binary.
+    pub(super) update_notice: Option<String>,
     /// Title of the task the last soft-delete removed, captured at delete time.
     ///
     /// Transient presentation only: it is never persisted, and it is the whole of the delete
@@ -814,6 +816,7 @@ impl BoardModel {
             task_edit_save: None,
             hold_task_edit_save: false,
             message: None,
+            update_notice: None,
             delete_notice: None,
             suspended_delete_notice: None,
             pending_delete: None,
@@ -2608,6 +2611,14 @@ impl BoardModel {
     /// Chrome status/message line feedback.
     pub fn message(&self) -> Option<&str> {
         self.message.as_deref()
+    }
+
+    pub fn update_notice(&self) -> Option<&str> {
+        self.update_notice.as_deref()
+    }
+
+    pub fn set_update_notice(&mut self, notice: Option<String>) {
+        self.update_notice = notice;
     }
 
     pub fn set_message(&mut self, msg: impl Into<String>) {
