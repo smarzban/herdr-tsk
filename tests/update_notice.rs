@@ -11,10 +11,11 @@ use ratatui::style::Modifier;
 use ratatui::Terminal;
 use tsk_tui::app::load_board_model;
 use tsk_tui::domain::DomainState;
+use tsk_tui::ui::queue::NavTab;
 use tsk_tui::ui::{apply_intent, draw_board, BoardIntent, BoardModel};
 use tsk_tui::update::{
-    apply_fetch, is_stale, notice_for, plan, read_cache, unix_now, write_cache, CheckPlan,
-    UpdateCache, STALE_AFTER_SECS,
+    apply_fetch, is_stale, mark_check_started, notice_for, plan, read_cache,
+    suppress_background_fetch, unix_now, write_cache, CheckPlan, UpdateCache, STALE_AFTER_SECS,
 };
 
 static TEMP_SEQ: AtomicU64 = AtomicU64::new(0);
@@ -90,6 +91,26 @@ fn opt_out_env_disables_notice_and_fetch() {
             should_fetch: false,
         }
     );
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn starting_a_check_stamps_last_check_and_keeps_the_cached_tag() {
+    let _lock = env_lock();
+    std::env::remove_var("TSK_NO_UPDATE_CHECK");
+    let dir = temp_dir("stamp");
+    seed_cache(&dir, 1, "v9.0.0");
+    mark_check_started(&dir, 99);
+    assert_eq!(
+        read_cache(&dir),
+        Some(UpdateCache {
+            last_check_unix: 99,
+            latest: "v9.0.0".into(),
+        })
+    );
+    let planned = plan(&dir, "0.6.0", 99);
+    assert!(!planned.should_fetch);
+    assert_eq!(planned.notice.as_deref(), Some("v9.0.0 available"));
     let _ = fs::remove_dir_all(dir);
 }
 
@@ -184,11 +205,42 @@ fn footer_paints_dim_notice_from_a_seeded_cache_and_hides_for_a_message() {
         }
     }
     assert!(!on_input, "a bottom input hides the update notice");
+
+    apply_intent(&mut domain, &mut model, BoardIntent::CancelQuickAdd, None)
+        .expect("close quick-add");
+    model.set_update_notice(Some(notice.clone()));
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::SelectNavTab(NavTab::Projects),
+        None,
+    )
+    .expect("open projects");
+    terminal
+        .draw(|frame| {
+            let _ = draw_board(frame, &model);
+        })
+        .expect("draw projects");
+    let buffer = terminal.backend().buffer();
+    let mut on_projects = false;
+    for y in 0..24 {
+        let row: String = (0..80)
+            .map(|x| buffer[(x, y)].symbol().to_string())
+            .collect();
+        if row.contains(&notice) {
+            on_projects = true;
+        }
+    }
+    assert!(
+        on_projects,
+        "Projects Overview idle status shows the update notice"
+    );
 }
 
 #[test]
 fn load_board_uses_seeded_update_json_in_state_dir() {
     let _lock = env_lock();
+    suppress_background_fetch();
     std::env::remove_var("TSK_NO_UPDATE_CHECK");
     let dir = temp_dir("load");
     seed_cache(&dir, unix_now(), "v9.9.9");

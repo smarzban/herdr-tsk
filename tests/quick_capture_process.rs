@@ -102,6 +102,7 @@ fn capture_entrypoint_skips_launch_card_preserves_reopen_and_exits_on_escape() {
         .arg("capture")
         .current_dir(&repo)
         .env("TSK_STATE_DIR", store.path())
+        .env("TSK_NO_UPDATE_CHECK", "1")
         .env("TSK_CONFIG_DIR", root.join("config"))
         .env_remove("TSK_MODE")
         .env("TERM", "xterm-256color")

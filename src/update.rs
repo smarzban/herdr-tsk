@@ -4,6 +4,7 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -14,6 +15,7 @@ const UPDATE_FILE: &str = "update.json";
 const UPDATE_TEMP_PREFIX: &str = ".update.json.tmp.";
 pub const STALE_AFTER_SECS: u64 = 24 * 60 * 60;
 const RELEASES_URL: &str = "https://api.github.com/repos/smarzban/herdr-tsk/releases/latest";
+static BACKGROUND_FETCH: AtomicBool = AtomicBool::new(true);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UpdateCache {
@@ -29,6 +31,25 @@ pub struct CheckPlan {
 
 pub fn opt_out() -> bool {
     std::env::var_os("TSK_NO_UPDATE_CHECK").is_some()
+}
+
+/// Integration tests link the library without `cfg(test)`, so `spawn_fetch` cannot
+/// use that cfg. Tests that load the board call this before `load_board*`.
+pub fn suppress_background_fetch() {
+    BACKGROUND_FETCH.store(false, Ordering::SeqCst);
+}
+
+pub fn mark_check_started(dir: &Path, now: u64) {
+    let latest = read_cache(dir)
+        .map(|cache| cache.latest)
+        .unwrap_or_default();
+    let _ = write_cache(
+        dir,
+        &UpdateCache {
+            last_check_unix: now,
+            latest,
+        },
+    );
 }
 
 pub fn unix_now() -> u64 {
@@ -145,13 +166,14 @@ pub fn startup(state_dir: &Path, current: &str) -> Option<String> {
     let now = unix_now();
     let planned = plan(state_dir, current, now);
     if planned.should_fetch {
+        mark_check_started(state_dir, now);
         spawn_fetch(state_dir.to_path_buf());
     }
     planned.notice
 }
 
 fn spawn_fetch(dir: PathBuf) {
-    if cfg!(test) {
+    if cfg!(test) || !BACKGROUND_FETCH.load(Ordering::SeqCst) {
         return;
     }
     std::thread::spawn(move || {

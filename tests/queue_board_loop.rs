@@ -17,6 +17,7 @@ use tsk_tui::app::{
 use tsk_tui::domain::{DomainState, ProvenanceOrigin, TaskScope};
 use tsk_tui::ui::scheduler::{next_wait, DEFAULT_BASE_TICK};
 use tsk_tui::ui::{apply_intent, draw_board, BoardIntent, BoardModel, IntentOutcome};
+use tsk_tui::update::suppress_background_fetch;
 
 /// A directory this test owns alone, removed on drop even if the test panics.
 struct TempDirGuard(PathBuf);
@@ -203,6 +204,7 @@ fn autoscroll_shortens_the_board_frame_wait() {
 /// leaves this as the one open-path exercise: load, then draw).
 #[test]
 fn load_board_and_draw_path_smoke_at_80x24() {
+    suppress_background_fetch();
     let dir = temp_state_dir("smoke");
     let _dir_guard = TempDirGuard(dir.clone());
     let _env_guard = EnvVarGuard::set("TSK_STATE_DIR", &dir);

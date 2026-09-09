@@ -1304,9 +1304,11 @@ fn paint_footer(
                 _ => {}
             }
         } else {
-            let idle = if model.projects_index {
+            let idle = if model.projects_index && !model.context.trim_end().ends_with(" available")
+            {
                 // The index's status row names the selected project's full path; rows
-                // carry only the basename.
+                // carry only the basename. An update notice already in `context` keeps
+                // this idle slot, same as desk and project boards.
                 index_selected_path(model)
             } else {
                 model.context.clone()
