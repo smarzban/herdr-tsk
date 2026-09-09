@@ -40,6 +40,8 @@ or run the printed `export` command before continuing.
 
 ### Add to Herdr
 
+[Install Herdr](https://herdr.dev/docs/install/) if you haven't already, then:
+
 ```sh
 tsk setup herdr
 herdr server reload-config
