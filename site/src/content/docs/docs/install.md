@@ -124,6 +124,13 @@ Use `TSK_STATE_DIR` / `TSK_CONFIG_DIR` to override state/config directories. Kee
 on a local disk, not NFS or a synced folder, and use real directories, not symlinks.
 Herdr-injected plugin directories do not change where tsk stores tasks.
 
+On launch the board reads `update.json` in the state directory. If that check is
+older than 24 hours and `TSK_NO_UPDATE_CHECK` is unset, it `GET`s
+`https://api.github.com/repos/smarzban/herdr-tsk/releases/latest` and stores the
+`tag_name`. The request sends nothing else. A tag newer than this binary paints a
+dim `vX.Y.Z available` on the status row, behind any other status message or
+bottom input. Set `TSK_NO_UPDATE_CHECK` to skip the check and the notice.
+
 ## Next
 
 [Board](/docs/board/) · [Keys](/docs/keys/) · [Capture](/docs/capture/)

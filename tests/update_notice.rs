@@ -1,0 +1,212 @@
+//! Update-notice cache, opt-out, fetch failure, and footer paint.
+
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, MutexGuard, OnceLock};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use ratatui::backend::TestBackend;
+use ratatui::style::Modifier;
+use ratatui::Terminal;
+use tsk_tui::app::load_board_model;
+use tsk_tui::domain::DomainState;
+use tsk_tui::ui::{apply_intent, draw_board, BoardIntent, BoardModel};
+use tsk_tui::update::{
+    apply_fetch, is_stale, notice_for, plan, read_cache, unix_now, write_cache, CheckPlan,
+    UpdateCache, STALE_AFTER_SECS,
+};
+
+static TEMP_SEQ: AtomicU64 = AtomicU64::new(0);
+static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+fn env_lock() -> MutexGuard<'static, ()> {
+    ENV_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner())
+}
+
+fn temp_dir(label: &str) -> PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock after epoch")
+        .as_nanos();
+    let seq = TEMP_SEQ.fetch_add(1, Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("tsk-update-{label}-{nanos}-{seq}"));
+    fs::create_dir_all(&dir).expect("create temp dir");
+    dir
+}
+
+fn seed_cache(dir: &Path, last_check_unix: u64, latest: &str) {
+    write_cache(
+        dir,
+        &UpdateCache {
+            last_check_unix,
+            latest: latest.to_string(),
+        },
+    )
+    .expect("write cache");
+}
+
+#[test]
+fn twenty_four_hour_freshness_and_future_timestamp_are_eligible() {
+    let _lock = env_lock();
+    std::env::remove_var("TSK_NO_UPDATE_CHECK");
+    let dir = temp_dir("fresh");
+    let now = 1_700_000_000u64;
+    seed_cache(&dir, now - 60, "v9.0.0");
+    let fresh = plan(&dir, "0.6.0", now);
+    assert_eq!(
+        fresh,
+        CheckPlan {
+            notice: Some("v9.0.0 available".into()),
+            should_fetch: false,
+        }
+    );
+    seed_cache(&dir, now - STALE_AFTER_SECS, "v9.0.0");
+    let stale = plan(&dir, "0.6.0", now);
+    assert!(stale.should_fetch);
+    assert_eq!(stale.notice.as_deref(), Some("v9.0.0 available"));
+    seed_cache(&dir, now + 3_600, "v9.0.0");
+    let future = plan(&dir, "0.6.0", now);
+    assert!(!future.should_fetch, "future last_check stays eligible");
+    assert!(!is_stale(now + 3_600, now));
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn opt_out_env_disables_notice_and_fetch() {
+    let _lock = env_lock();
+    let dir = temp_dir("opt-out");
+    seed_cache(&dir, 1, "v9.0.0");
+    std::env::set_var("TSK_NO_UPDATE_CHECK", "1");
+    let planned = plan(&dir, "0.6.0", 1_700_000_000);
+    std::env::remove_var("TSK_NO_UPDATE_CHECK");
+    assert_eq!(
+        planned,
+        CheckPlan {
+            notice: None,
+            should_fetch: false,
+        }
+    );
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn curl_failure_leaves_cache_and_footer_untouched() {
+    let _lock = env_lock();
+    std::env::remove_var("TSK_NO_UPDATE_CHECK");
+    let dir = temp_dir("fail");
+    let original = UpdateCache {
+        last_check_unix: 42,
+        latest: "v0.1.0".into(),
+    };
+    write_cache(&dir, &original).expect("seed");
+    let before = fs::read_to_string(dir.join("update.json")).expect("read");
+    apply_fetch(&dir, 99, || None);
+    let after = fs::read_to_string(dir.join("update.json")).expect("reread");
+    assert_eq!(after, before);
+    assert_eq!(read_cache(&dir), Some(original));
+    assert_eq!(notice_for("v0.1.0", "0.6.0"), None);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn footer_paints_dim_notice_from_a_seeded_cache_and_hides_for_a_message() {
+    let mut model = BoardModel::from_domain(&DomainState::new(), None);
+    let notice = notice_for("v9.9.9", "0.6.0").expect("newer");
+    model.set_update_notice(Some(notice.clone()));
+
+    let backend = TestBackend::new(80, 24);
+    let mut terminal = Terminal::new(backend).expect("terminal");
+    terminal
+        .draw(|frame| {
+            let _ = draw_board(frame, &model);
+        })
+        .expect("draw");
+    let buffer = terminal.backend().buffer();
+    let mut found = None;
+    for y in 0..24 {
+        let row: String = (0..80)
+            .map(|x| buffer[(x, y)].symbol().to_string())
+            .collect();
+        if let Some(x) = row.find(&notice) {
+            found = Some((x as u16, y));
+            break;
+        }
+    }
+    let (x, y) = found.expect("status row should paint the update notice");
+    assert!(
+        buffer[(x, y)].style().add_modifier.contains(Modifier::DIM),
+        "notice must be dim"
+    );
+    assert!(
+        !buffer[(x, y)].style().add_modifier.contains(Modifier::BOLD),
+        "notice must not use the message style"
+    );
+
+    model.set_message("copied");
+    terminal
+        .draw(|frame| {
+            let _ = draw_board(frame, &model);
+        })
+        .expect("draw message");
+    let buffer = terminal.backend().buffer();
+    let mut still = false;
+    for y in 0..24 {
+        let row: String = (0..80)
+            .map(|x| buffer[(x, y)].symbol().to_string())
+            .collect();
+        if row.contains(&notice) {
+            still = true;
+        }
+    }
+    assert!(!still, "any other status message hides the update notice");
+
+    let mut domain = DomainState::new();
+    model.set_update_notice(Some(notice.clone()));
+    model.clear_message();
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenCapture, None).expect("open quick-add");
+    terminal
+        .draw(|frame| {
+            let _ = draw_board(frame, &model);
+        })
+        .expect("draw quick-add");
+    let buffer = terminal.backend().buffer();
+    let mut on_input = false;
+    for y in 0..24 {
+        let row: String = (0..80)
+            .map(|x| buffer[(x, y)].symbol().to_string())
+            .collect();
+        if row.contains(&notice) {
+            on_input = true;
+        }
+    }
+    assert!(!on_input, "a bottom input hides the update notice");
+}
+
+#[test]
+fn load_board_uses_seeded_update_json_in_state_dir() {
+    let _lock = env_lock();
+    std::env::remove_var("TSK_NO_UPDATE_CHECK");
+    let dir = temp_dir("load");
+    seed_cache(&dir, unix_now(), "v9.9.9");
+    let previous = std::env::var_os("TSK_STATE_DIR");
+    std::env::set_var("TSK_STATE_DIR", &dir);
+    let model = load_board_model().expect("load board");
+    match previous {
+        Some(value) => std::env::set_var("TSK_STATE_DIR", value),
+        None => std::env::remove_var("TSK_STATE_DIR"),
+    }
+    assert_eq!(model.update_notice(), Some("v9.9.9 available"));
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn semver_notice_matches_public_compare() {
+    assert_eq!(
+        notice_for("v0.6.1", env!("CARGO_PKG_VERSION")).is_some(),
+        tsk_tui::update::is_newer("v0.6.1", env!("CARGO_PKG_VERSION"))
+    );
+}

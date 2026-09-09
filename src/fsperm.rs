@@ -2,7 +2,8 @@
 //!
 //! State files hold the user's tasks; they are nobody else's business. On Unix
 //! the state/config directories are `0700` and the files `0600` (`tsk.json`,
-//! `trash.jsonl`, backups, the lock file, temp files, `walkthrough.json`), both
+//! `trash.jsonl`, backups, the lock file, temp files, `walkthrough.json`,
+//! `update.json`), both
 //! for fresh creation and tightened after the fact for paths an older version
 //! or a looser umask left readable. Tightening only ever strips bits: an
 //! existing stricter mode (a file an admin locked to `0400`, a read-only

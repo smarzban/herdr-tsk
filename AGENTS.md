@@ -235,8 +235,12 @@ If `HERDR_ENV` is unset, say that live smoke was not run.
   keeps its internal name `TaskScope::Global`; do not "fix" either without a store
   migration.
 - State is `$HOME/.tsk/tsk.json`, walkthrough dismissal is
-  `$HOME/.tsk/walkthrough.json`, overridable with `TSK_STATE_DIR` / `TSK_CONFIG_DIR`.
+  `$HOME/.tsk/walkthrough.json`, the release-check cache is `$HOME/.tsk/update.json`,
+  overridable with `TSK_STATE_DIR` / `TSK_CONFIG_DIR`.
   Host-injected `HERDR_PLUGIN_*` dirs are ignored. Mutating verbs always use Ctrl.
+  On board launch, if `TSK_NO_UPDATE_CHECK` is unset and that cache is older than 24h,
+  a background `curl` of the GitHub latest-release tag updates it; a newer tag paints a
+  dim `v<tag> available` on the idle status row. Any check failure is silent.
 - Store format is versioned (`STORE_FORMAT_VERSION`, currently 2). Any schema change bumps it
   and adds a `vN → vN+1` step to `MIGRATIONS` in `src/store.rs`; `deny_unknown_fields` stays on
   `Task` and `DomainState` so an older binary refuses a newer file instead of dropping fields.
@@ -251,6 +255,10 @@ If `HERDR_ENV` is unset, say that live smoke was not run.
   `tsk project archive|unarchive <name>`, `tsk list --archived`; `tsk add` into an archived
   project refuses with error code `project-archived`. `tsk status` accepts ready, started
   (or start), blocked, review, or done. `tsk steps` also renames and removes.
+  `tsk guide` prints the embedded `skills/tsk-cli/SKILL.md` body (also published at
+  `/docs/agents/`, generated at site build). `tsk setup <claude|pi|cursor|codex|--skill-dir p>`
+  writes that skill into the agent's skills dir (`src/setup_agent.rs`); bare `tsk setup` lists
+  and writes nothing. `tsk --help` ends with a two-line agent footer.
 - `~/.tsk` must live on a local disk (flock plus rename-based replace); synced folders are
   unsupported, `TSK_STATE_DIR` is the escape hatch. State/config directory roots must be real
   directories, not symlinks; permission hardening refuses a symlink instead of chmodding its target.
