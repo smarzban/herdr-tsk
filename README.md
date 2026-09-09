@@ -1,8 +1,8 @@
 # tsk
 
-tsk is a terminal task board for you and your agents: one board, five statuses, agents work through the CLI.
+tsk is a terminal task board for you and your agents: one shared queue, a TUI for you, a CLI for them.
 
-You and your agents put work on one board and move it through human status:
+You and your agents put work on one board and move it through:
 ready, started, blocked, review, done. Agents reach the board through the CLI.
 It ships as a [herdr](https://herdr.dev) plugin, and the `tsk` binary also runs
 standalone against `~/.tsk`.
@@ -31,7 +31,7 @@ brew install smarzban/tap/tsk
 The installer sets up PATH for Bash and Zsh. If prompted, reopen your terminal
 or run the printed `export` command before continuing.
 
-### Add to Herdr (optional)
+### Add to Herdr
 
 With Herdr 0.9+ installed:
 

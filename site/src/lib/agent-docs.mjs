@@ -7,7 +7,7 @@ import { basename, dirname, resolve } from "node:path";
 
 export const SITE = "https://gettsk.sh";
 export const DEFINITION_SENTENCE =
-  "tsk is a terminal task board for you and your agents: one board, five statuses, agents work through the CLI.";
+  "tsk is a terminal task board for you and your agents: one shared queue, a TUI for you, a CLI for them.";
 export const SIDEBAR_SLUGS = [
   "index",
   "agents",

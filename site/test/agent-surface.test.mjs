@@ -234,7 +234,7 @@ test("every_docs_entry_has_description_and_an_answer_first_paragraph", async () 
 });
 
 const DEFINITION_SENTENCE =
-  "tsk is a terminal task board for you and your agents: one board, five statuses, agents work through the CLI.";
+  "tsk is a terminal task board for you and your agents: one shared queue, a TUI for you, a CLI for them.";
 
 const SIDEBAR_TITLES = [
   "Overview",
@@ -344,7 +344,7 @@ test("definition_sentence_appears_verbatim_in_index_astro_llms_txt_docs_index_an
 });
 
 const NOTICE =
-  "tsk is a terminal task board for you and your agents: one board, five statuses, agents work through the CLI.";
+  "tsk is a terminal task board for you and your agents: one shared queue, a TUI for you, a CLI for them.";
 
 function syncAgentsPage() {
   const result = spawnSync("node", ["scripts/sync-agents-page.mjs"], {
