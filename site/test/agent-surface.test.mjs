@@ -231,3 +231,64 @@ test("llms_full_txt_contains_every_docs_title_in_sidebar_order", async () => {
     cursor = index + heading.length;
   }
 });
+
+function jsonLdBlocks(html) {
+  return [...html.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)].map(
+    (match) => JSON.parse(match[1]),
+  );
+}
+
+test("landing_jsonld_is_software_application_with_required_fields", async () => {
+  ensureDist();
+  const html = await read(join(distDir, "index.html"));
+  const blobs = jsonLdBlocks(html);
+  const app = blobs.find((blob) => blob["@type"] === "SoftwareApplication");
+  assert.ok(app, "missing SoftwareApplication json-ld");
+  assert.equal(app.name, "tsk");
+  assert.equal(app.applicationCategory, "DeveloperApplication");
+  assert.match(String(app.operatingSystem), /macOS/);
+  assert.match(String(app.operatingSystem), /Linux/);
+  assert.match(String(app.license), /MIT/i);
+  assert.equal(app.codeRepository, "https://github.com/smarzban/herdr-tsk");
+  const version = (await read(join(siteRoot, "src/version.mjs"))).match(/VERSION = '([^']+)'/)?.[1];
+  assert.equal(app.softwareVersion, version);
+  assert.equal(String(app.offers?.price), "0");
+});
+
+test("docs_jsonld_is_tech_article_with_headline_description_date_and_is_part_of", async () => {
+  ensureDist();
+  const files = await docsFiles();
+  for (const fileName of files) {
+    const slug = fileName.replace(/\.(md|mdx)$/, "");
+    const htmlPath =
+      slug === "index"
+        ? join(distDir, "docs", "index.html")
+        : join(distDir, "docs", slug, "index.html");
+    const source = await read(join(docsDir, fileName));
+    const title = source.match(/^title:\s*(.+)$/m)?.[1]?.replace(/^"|"$/g, "");
+    const description = source.match(/^description:\s*(.+)$/m)?.[1]?.replace(/^"|"$/g, "");
+    const html = await read(htmlPath);
+    const article = jsonLdBlocks(html).find((blob) => blob["@type"] === "TechArticle");
+    assert.ok(article, `${slug} missing TechArticle json-ld`);
+    assert.equal(article.headline, title);
+    assert.equal(article.description, description);
+    assert.match(String(article.dateModified), /^\d{4}-\d{2}-\d{2}T/);
+    assert.equal(article.isPartOf?.url, "https://gettsk.sh/");
+  }
+});
+
+test("definition_sentence_appears_verbatim_in_index_astro_llms_txt_docs_index_and_readme", async () => {
+  const files = [
+    join(siteRoot, "src/pages/index.astro"),
+    join(siteRoot, "public/llms.txt"),
+    join(docsDir, "index.mdx"),
+    join(repoRoot, "README.md"),
+  ];
+  for (const filePath of files) {
+    const text = await read(filePath);
+    assert.ok(
+      text.includes(DEFINITION_SENTENCE),
+      `${filePath} is missing the definition sentence`,
+    );
+  }
+});

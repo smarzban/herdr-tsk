@@ -6,6 +6,21 @@ import '../styles/landing.css';
 import { VERSION } from '../version.mjs';
 const SITE = 'https://gettsk.sh';
 const REPO = 'https://github.com/smarzban/herdr-tsk';
+const softwareApplication = {
+  '@context': 'https://schema.org',
+  '@type': 'SoftwareApplication',
+  name: 'tsk',
+  applicationCategory: 'DeveloperApplication',
+  operatingSystem: 'macOS, Linux',
+  license: 'https://opensource.org/licenses/MIT',
+  codeRepository: REPO,
+  softwareVersion: VERSION,
+  offers: {
+    '@type': 'Offer',
+    price: '0',
+    priceCurrency: 'USD',
+  },
+};
 ---
 
 <!DOCTYPE html>
@@ -85,6 +100,7 @@ const REPO = 'https://github.com/smarzban/herdr-tsk';
       media="(prefers-color-scheme: light)"
     />
     <SharedHead />
+    <script type="application/ld+json" set:html={JSON.stringify(softwareApplication)} />
   </head>
   <body class="landing">
     <a class="skip" href="#main">skip to content</a>
