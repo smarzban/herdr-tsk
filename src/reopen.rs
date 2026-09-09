@@ -198,9 +198,9 @@ impl RequestLock {
 #[derive(Debug, Default)]
 pub struct ReopenWatch {
     state_dir: PathBuf,
-    last_seen: Option<StoreSignature>,
+    last_seen: Option<RequestSignature>,
     pending: Option<ReopenRequest>,
-    pending_signature: Option<StoreSignature>,
+    pending_signature: Option<RequestSignature>,
     deferred_notice_sent: bool,
 }
 
@@ -328,26 +328,46 @@ impl ReopenWatch {
     }
 }
 
-fn request_signature(path: &Path) -> Option<StoreSignature> {
+/// Identity of the pending request file. The stat signature alone is not enough: APFS reuses
+/// the inode of a just-unlinked file, and two requests of equal length written inside one
+/// mtime tick then look identical, so the watch kept delivering the first. The file is capped
+/// at `MAX_REQUEST_BYTES`, so hashing its bytes on every preflight is cheap.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RequestSignature {
+    stat: StoreSignature,
+    digest: u64,
+}
+
+fn request_signature(path: &Path) -> Option<RequestSignature> {
     let metadata = fs::metadata(path).ok()?;
     let modified = metadata.modified().ok()?;
     #[cfg(unix)]
-    {
+    let stat = {
         use std::os::unix::fs::MetadataExt;
-        Some(StoreSignature {
+        StoreSignature {
             dev: metadata.dev(),
             ino: metadata.ino(),
             modified,
             len: metadata.len(),
-        })
-    }
+        }
+    };
     #[cfg(not(unix))]
-    {
-        Some(StoreSignature {
-            modified,
-            len: metadata.len(),
-        })
+    let stat = StoreSignature {
+        modified,
+        len: metadata.len(),
+    };
+    if metadata.len() as usize > MAX_REQUEST_BYTES {
+        // Oversized files are rejected by `read_request`; a fixed digest keeps the signature
+        // stable without reading them.
+        return Some(RequestSignature { stat, digest: 0 });
     }
+    let bytes = fs::read(path).ok()?;
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    std::hash::Hash::hash(&bytes, &mut hasher);
+    Some(RequestSignature {
+        stat,
+        digest: std::hash::Hasher::finish(&hasher),
+    })
 }
 
 #[cfg(test)]

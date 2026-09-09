@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+Fixed: a reopen request replaced by another of the same length within one mtime tick
+(inode reuse on APFS) was delivered as the first request. The request watch now also
+hashes the file bytes.
+
 Fixed: at 110 columns or wider, `Tab` on the quick-add line expanded into a draft page
 that was never painted, so the board stayed on screen while keys went to the hidden
 draft. The draft now fills the frame at every width.
