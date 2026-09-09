@@ -8,9 +8,13 @@ test("project navigation, counted views and selection match the app", async ({
     "background-color",
     "rgba(0, 0, 0, 0)",
   );
-  await expect(page.locator(".tsk-tab-group.is-on")).toHaveCSS(
+  await expect(page.locator(".tsk-tab-group.is-on .tsk-tab")).toHaveCSS(
     "text-decoration-line",
     "underline",
+  );
+  await expect(page.locator(".tsk-tab-group.is-on")).toHaveCSS(
+    "text-decoration-line",
+    "none",
   );
   for (const inactive of await page
     .locator(".tsk-tab-group:not(.is-on)")

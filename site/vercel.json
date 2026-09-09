@@ -3,7 +3,7 @@
   "outputDirectory": "dist",
   "framework": "astro",
   "installCommand": "npm ci",
-  "ignoreCommand": "git diff --quiet HEAD^ HEAD -- .",
+  "ignoreCommand": "git diff --quiet HEAD^ HEAD -- . ../skills",
   "headers": [
     {
       "source": "/docs/(.*).md",
@@ -48,7 +48,7 @@
       "destination": "/docs/index.md"
     },
     {
-      "source": "/docs/:path((?!.*\\.md$)[^/]+)/?",
+      "source": "/docs/:path((?!.*\\.md$)[^/]+(?:/[^/]+)*)/?",
       "has": [
         {
           "type": "header",

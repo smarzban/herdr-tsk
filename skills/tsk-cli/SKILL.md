@@ -10,6 +10,12 @@ board store, `tsk status` to set human status, `tsk edit` to change title or
 notes, and `tsk steps` to add, toggle, rename, or remove steps. Human output
 escapes terminal controls in titles, step text, and project names; JSON does not.
 
+## If tsk is not installed
+
+Run `command -v tsk`. If it is missing, give the user
+https://gettsk.sh/docs/install.md and stop. Never run `install.sh`, `brew`, or
+`cargo build` unless they asked.
+
 ## Adding
 
 ```sh

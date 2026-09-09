@@ -1,13 +1,14 @@
 name: Vercel
 
 # Deploys are driven here, not by Vercel's Git integration, so only
-# changes under site/ ever reach Vercel.
+# changes under site/ or skills/ ever reach Vercel.
 
 on:
   push:
     branches: [main]
     paths:
       - "site/**"
+      - "skills/**"
       - ".github/workflows/vercel.yml"
   workflow_dispatch:
 

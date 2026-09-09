@@ -4,11 +4,10 @@ import { getCollection } from "astro:content";
 
 import {
   formatTwin,
-  newestCommitIso,
   SIDEBAR_SLUGS,
   slugFromDocsId,
-  sourceFileName,
   stripFrontmatter,
+  twinSource,
 } from "../lib/agent-docs.mjs";
 
 export async function GET() {
@@ -19,12 +18,13 @@ export async function GET() {
     const entry = bySlug.get(slug);
     if (!entry?.filePath) continue;
     const source = await readFile(join(process.cwd(), entry.filePath), "utf8");
+    const { sourcePath, updatedIso } = twinSource(slug, entry.filePath);
     parts.push(
       formatTwin({
         title: entry.data.title,
         slug,
-        fileName: sourceFileName(entry.filePath),
-        updatedIso: newestCommitIso(entry.filePath),
+        sourcePath,
+        updatedIso,
         body: stripFrontmatter(source),
       }).trimEnd(),
     );

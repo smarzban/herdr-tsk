@@ -2,23 +2,19 @@
 import Head from '@astrojs/starlight/components/Head.astro';
 import SharedHead from './SharedHead.astro';
 import {
-  newestCommitIso,
   serializeJsonLd,
   SITE,
   slugFromDocsId,
+  twinSource,
   twinUrlForSlug,
 } from '../lib/agent-docs.mjs';
 
-const { entry, lastUpdated } = Astro.locals.starlightRoute;
+const { entry } = Astro.locals.starlightRoute;
 const isDocsPage = entry.id !== '404' && !entry.id.endsWith('/404');
-const href = isDocsPage ? twinUrlForSlug(slugFromDocsId(entry.id)) : '';
-const dateModified = isDocsPage
-  ? lastUpdated instanceof Date
-    ? lastUpdated.toISOString()
-    : entry.filePath
-      ? newestCommitIso(entry.filePath)
-      : undefined
-  : undefined;
+const slug = isDocsPage ? slugFromDocsId(entry.id) : '';
+const href = isDocsPage ? twinUrlForSlug(slug) : '';
+const dateModified =
+  isDocsPage && entry.filePath ? twinSource(slug, entry.filePath).updatedIso : undefined;
 const techArticle =
   isDocsPage && dateModified
     ? {

@@ -8,6 +8,7 @@ use serde_json::Value;
 pub mod add;
 pub mod archive;
 pub mod edit;
+pub mod guide;
 pub mod list;
 pub mod parser;
 pub mod presenter;
@@ -37,6 +38,7 @@ where
         .collect::<Vec<_>>();
     match args.get(1).map(String::as_str) {
         Some("setup") => run_setup(args, &mut stdin, stdin_is_tty),
+        Some("guide") => guide::run(),
         Some("add") => run_add(args, &mut stdin, stdin_is_tty),
         Some("steps") => run_steps(args),
         Some("list") => run_list(args),
@@ -267,10 +269,11 @@ fn parse_plan(source: &str) -> Result<Vec<Value>, String> {
 }
 
 fn run_setup<R: Read>(args: Vec<String>, stdin: &mut R, stdin_is_tty: bool) -> CliOutput {
-    let tail: Vec<_> = args.iter().skip(2).map(String::as_str).collect();
-    match tail.as_slice() {
-        ["--help"] | ["herdr", "--help"] => presenter::setup_help(),
-        ["herdr"] => {
+    match crate::setup_agent::parse(&args) {
+        Err(error) => presenter::setup_error(&error.to_string(), 2),
+        Ok(crate::setup_agent::Command::Help) => presenter::setup_help(),
+        Ok(crate::setup_agent::Command::List { json }) => presenter::setup_agent_listed(json),
+        Ok(crate::setup_agent::Command::Herdr) => {
             let mut reader = std::io::BufReader::new(stdin);
             let mut stderr = std::io::stderr();
             let interactive = stdin_is_tty && stderr.is_terminal();
@@ -279,6 +282,17 @@ fn run_setup<R: Read>(args: Vec<String>, stdin: &mut R, stdin_is_tty: bool) -> C
                 Err(error) => presenter::setup_error(&error.to_string(), 1),
             }
         }
-        _ => presenter::setup_error("usage: tsk setup herdr", 2),
+        Ok(crate::setup_agent::Command::Skill {
+            target,
+            force,
+            json,
+        }) => match crate::setup_agent::install(&target, force) {
+            Ok(path) => presenter::setup_agent_written(&target, &path, json),
+            Err(crate::setup_agent::Error::Exists(path)) => {
+                presenter::setup_agent_exists(&target, &path, json)
+            }
+            Err(crate::setup_agent::Error::Usage(reason)) => presenter::setup_error(&reason, 2),
+            Err(error) => presenter::setup_error(&error.to_string(), 1),
+        },
     }
 }

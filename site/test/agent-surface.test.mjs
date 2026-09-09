@@ -44,7 +44,7 @@ test("markdown_twin_formatter_prefixes_title_html_source_and_updated", () => {
   const rendered = formatTwin({
     title: "CLI",
     slug: "cli",
-    fileName: "cli.md",
+    sourcePath: "site/src/content/docs/docs/cli.md",
     updatedIso: "2026-09-09T00:00:00.000Z",
     body: "The same store backs the board.\n",
   });
@@ -105,12 +105,11 @@ test("dist_has_a_markdown_twin_for_every_docs_entry_with_matching_body", async (
     const title = source.match(/^title:\s*(.+)$/m)?.[1]?.replace(/^"|"$/g, "");
     assert.match(twin, new RegExp(`^# ${title}\\n`));
     assert.match(twin, /- html: https:\/\/gettsk\.sh\/docs\//);
-    assert.match(
-      twin,
-      new RegExp(
-        `- source: https://github.com/smarzban/herdr-tsk/blob/main/site/src/content/docs/docs/${fileName}`,
-      ),
-    );
+    const sourceLine =
+      slug === "agents"
+        ? "- source: https://github.com/smarzban/herdr-tsk/blob/main/skills/tsk-cli/SKILL.md"
+        : `- source: https://github.com/smarzban/herdr-tsk/blob/main/site/src/content/docs/docs/${fileName}`;
+    assert.match(twin, new RegExp(sourceLine.replaceAll(".", "\\.")));
     assert.match(twin, /- updated: \d{4}-\d{2}-\d{2}T/);
   }
 });
@@ -239,6 +238,7 @@ const DEFINITION_SENTENCE =
 
 const SIDEBAR_TITLES = [
   "Overview",
+  "tsk for agents",
   "Install",
   "Board",
   "Keys",
@@ -265,7 +265,6 @@ test("every_llms_txt_gettsk_sh_link_except_agents_md_resolves_in_dist", async ()
   const links = [...text.matchAll(/https:\/\/gettsk\.sh(\/[^\s)]+)/g)].map((match) => match[1]);
   assert.ok(links.length > 0, "expected gettsk.sh links");
   for (const path of links) {
-    if (path === "/docs/agents.md") continue;
     const filePath = join(distDir, path.replace(/^\//, ""));
     assert.equal(existsSync(filePath), true, `missing ${filePath} for ${path}`);
   }
@@ -342,4 +341,94 @@ test("definition_sentence_appears_verbatim_in_index_astro_llms_txt_docs_index_an
       `${filePath} is missing the definition sentence`,
     );
   }
+});
+
+const NOTICE =
+  "tsk is a terminal task board for you and your agents: one board, five statuses, agents work through the CLI.";
+
+function syncAgentsPage() {
+  const result = spawnSync("node", ["scripts/sync-agents-page.mjs"], {
+    cwd: siteRoot,
+    encoding: "utf8",
+    stdio: "pipe",
+  });
+  assert.equal(result.status, 0, result.stderr || result.stdout || "sync-agents-page failed");
+}
+
+test("agents_page_notice_plus_skill_body_matches_source", async () => {
+  syncAgentsPage();
+  const generated = await read(join(docsDir, "agents.md"));
+  const skill = await read(join(repoRoot, "skills/tsk-cli/SKILL.md"));
+  const skillBody = stripFrontmatter(skill)
+    .replace(/^# [^\n]+\n+/, "")
+    .replace(/\s+$/, "");
+  const body = stripFrontmatter(generated).replace(/\s+$/, "");
+  assert.match(generated, /^title:\s*tsk for agents/m);
+  assert.doesNotMatch(body, /^# /m);
+  assert.equal(body, `${NOTICE}\n\n${skillBody}`);
+});
+
+test("dist_docs_agents_md_exists", async () => {
+  ensureDist();
+  assert.equal(existsSync(join(distDir, "docs/agents.md")), true);
+  assert.equal(existsSync(join(distDir, "docs/agents/index.html")), true);
+});
+
+test("llms_txt_agents_md_link_resolves", async () => {
+  ensureDist();
+  assert.equal(existsSync(join(distDir, "docs/agents.md")), true);
+});
+
+test("definition_sentence_appears_in_agents_page", async () => {
+  syncAgentsPage();
+  const generated = await read(join(docsDir, "agents.md"));
+  assert.ok(generated.includes(DEFINITION_SENTENCE));
+});
+
+test("agents_markdown_twin_points_source_and_updated_at_the_skill", async () => {
+  ensureDist();
+  const twin = await read(join(distDir, "docs/agents.md"));
+  assert.match(
+    twin,
+    /- source: https:\/\/github.com\/smarzban\/herdr-tsk\/blob\/main\/skills\/tsk-cli\/SKILL.md/,
+  );
+  const expected = newestCommitIso(join(repoRoot, "skills/tsk-cli/SKILL.md"));
+  assert.match(twin, new RegExp(`- updated: ${expected.replaceAll(".", "\\.")}`));
+});
+
+test("npm_start_and_deploy_paths_watch_the_skill", async () => {
+  const pkg = JSON.parse(await read(join(siteRoot, "package.json")));
+  assert.match(String(pkg.scripts.dev), /sync-agents-page/);
+  assert.equal(pkg.scripts.start, "npm run dev");
+  const siteYml = await read(join(repoRoot, ".github/workflows/site.yml"));
+  const vercelYml = await read(join(repoRoot, ".github/workflows/vercel.yml"));
+  assert.match(siteYml, /skills\/\*\*/);
+  assert.match(vercelYml, /skills\/\*\*/);
+  const vercelJson = JSON.parse(await read(join(siteRoot, "vercel.json")));
+  assert.match(String(vercelJson.ignoreCommand), /\.\.\/skills/);
+});
+
+test("vercel_docs_rewrite_matches_nested_slug_and_skips_md", async () => {
+  const config = JSON.parse(await read(join(siteRoot, "vercel.json")));
+  const rewrites = (config.rewrites || []).filter((entry) =>
+    String(entry.source).includes("/docs/:path"),
+  );
+  assert.ok(rewrites.length > 0, "expected a docs path rewrite");
+  let matchesNested = false;
+  let skipsMd = true;
+  for (const rewrite of rewrites) {
+    const source = String(rewrite.source);
+    const inner = source.match(/:path\((.*)\)(?:\/\?|\/)?$/)?.[1];
+    assert.ok(inner, `${source} needs a custom :path regex`);
+    const innerRe = new RegExp(`^(?:${inner})$`);
+    assert.match("cli", innerRe);
+    assert.match("a/b", innerRe, `${source} should match nested slugs`);
+    assert.doesNotMatch("cli.md", innerRe);
+    assert.doesNotMatch("a/b.md", innerRe);
+    assert.match(String(rewrite.destination), /^\/docs\/:path\.md$/);
+    matchesNested = true;
+    if (innerRe.test("cli.md") || innerRe.test("a/b.md")) skipsMd = false;
+  }
+  assert.ok(matchesNested, "expected a rewrite that matches /docs/a/b/");
+  assert.ok(skipsMd, "/docs/a/b.md and /docs/cli.md must not match");
 });

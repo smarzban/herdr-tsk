@@ -4391,6 +4391,28 @@ fn selector_chip_wraps(model: &QueueFrameModel<'_>, width: u16) -> bool {
     tabs_width.saturating_add(chip_width) > width as usize
 }
 
+/// Active tab labels keep a cell of padding for hit targets; underline only the word.
+fn push_selector_tab_spans(spans: &mut Vec<Span<'static>>, text: &str, active: bool) {
+    if !active {
+        spans.push(Span::styled(text.to_string(), style_dim()));
+        return;
+    }
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        spans.push(Span::styled(text.to_string(), style_heading()));
+        return;
+    }
+    let start = text.find(trimmed).expect("trim is a substring");
+    let end = start + trimmed.len();
+    if start > 0 {
+        spans.push(Span::styled(text[..start].to_string(), style_plain()));
+    }
+    spans.push(Span::styled(trimmed.to_string(), style_heading()));
+    if end < text.len() {
+        spans.push(Span::styled(text[end..].to_string(), style_plain()));
+    }
+}
+
 /// Paint the selector row's persistent tabs. Tabs never disappear, so `1`/`2`/`3`
 /// keep their keyboard mappings even though the digit labels are not shown.
 fn paint_selector_row(
@@ -4419,10 +4441,7 @@ fn paint_selector_row(
             left_width as u16,
             w.max(1) as u16,
         ));
-        spans.push(Span::styled(
-            shown,
-            if active { style_heading() } else { style_dim() },
-        ));
+        push_selector_tab_spans(&mut spans, &shown, active);
         left_width += w;
     }
 
@@ -4732,6 +4751,71 @@ mod tests {
                 x.saturating_add(width) <= 40,
                 "{target:?} overflows selector"
             );
+        }
+    }
+
+    fn selector_model(active: NavTab) -> QueueFrameModel<'static> {
+        static VIEW: std::sync::OnceLock<QueueView> = std::sync::OnceLock::new();
+        let view = VIEW.get_or_init(|| QueueView {
+            sections: vec![],
+            counts: crate::ui::queue::StatusCounts::default(),
+            projects: vec![],
+        });
+        QueueFrameModel {
+            tasks: &[],
+            view,
+            selection_id: None,
+            nav: NavPaint {
+                active,
+                slot2_label: "tsk".to_string(),
+                slot2_project: true,
+                chip: None,
+            },
+            surface: BoardSurface::Desk,
+            thread_labels: false,
+            show_project_meta: false,
+            projects: &[],
+            projects_index: false,
+            projects_cursor: 0,
+            projects_query: "",
+            summary: None,
+            context: " desk".to_string(),
+            status_message: None,
+            status_undo_offset: None,
+            verb_items: &[],
+            now: SystemTime::UNIX_EPOCH,
+            overlay: QueueOverlay::None,
+            detail_open: None,
+            list_scroll: 0,
+            follow_list: false,
+            archived_collapsed: true,
+            archived_header_selected: false,
+            rows_dim: false,
+        }
+    }
+
+    #[test]
+    fn active_tab_underlines_the_word_not_its_padding() {
+        let (line, _) = paint_selector_row(&selector_model(NavTab::Desk), &tier::resolve(78, 24));
+        let text = plain(&line);
+        assert!(
+            text.contains(" desk "),
+            "padding around the word stays for hits: {text:?}"
+        );
+        let underlined: String = line
+            .spans
+            .iter()
+            .filter(|span| span.style.add_modifier.contains(Modifier::UNDERLINED))
+            .map(|span| span.content.as_ref())
+            .collect();
+        assert_eq!(underlined, "desk");
+        for span in &line.spans {
+            if span.content.as_ref().chars().all(|ch| ch == ' ') {
+                assert!(
+                    !span.style.add_modifier.contains(Modifier::UNDERLINED),
+                    "padding must not be underlined: {span:?}"
+                );
+            }
         }
     }
 

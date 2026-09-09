@@ -27,6 +27,7 @@ The CLI is how an agent reaches the board. The rules that matter:
 
 The repo ships the same rules as an agent skill in
 [`skills/tsk-cli/SKILL.md`](https://github.com/smarzban/herdr-tsk/blob/main/skills/tsk-cli/SKILL.md).
+`tsk guide` prints that skill with the YAML frontmatter removed.
 
 ## Commands
 
@@ -35,10 +36,21 @@ The repo ships the same rules as an agent skill in
 | `tsk` | opens the board |
 | `tsk capture` | opens quick capture: the expanded quick-add page (also `TSK_MODE=capture`) |
 | `tsk add` · `tsk list` · `tsk steps` · `tsk status` · `tsk edit` · `tsk trash` · `tsk archive` · `tsk unarchive` · `tsk project` | headless; below |
+| `tsk guide` | print the agent workflow skill (frontmatter stripped), exit 0 |
 | `tsk --help` | usage, exit 0 |
 | `tsk --find-board-pane` | herdr helper: reads `pane list` JSON on stdin, prints the id of the pane labelled `tsk`; exit 1 when none |
 
 Every headless command takes `--state-dir <dir>` to work against another store.
+
+## guide
+
+Print the embedded agent skill, YAML frontmatter stripped. Stderr is empty.
+
+```
+tsk guide
+```
+
+Exit 0. The same body is the source for `/docs/agents/` and `tsk setup <agent>`.
 
 Human-readable stdout and stderr escape C0/C1 controls in stored titles, step
 text, and project names as `\u{00xx}`. JSON keeps the underlying values.
@@ -232,14 +244,39 @@ Status refusals (exit 1): `unknown-task`, `soft-deleted-task`.
 Edit refusals (exit 1): `unknown-task`, `soft-deleted-task`, `empty-title`,
 `invalid-title`.
 
-## Register the installed binary with Herdr
+## setup
 
-`tsk setup herdr` registers the embedded plugin assets and adds prefix+t (board)
-and prefix+a (quick capture). It uses the same installed binary, with no source
-checkout or second build. Herdr 0.9+ must be on PATH. Conflicting shortcuts require
-interactive confirmation; declining preserves them. A noninteractive conflict aborts
-without writes. `tsk setup herdr --help` is read-only.
+```
+tsk setup
+tsk setup herdr
+tsk setup claude | pi | cursor | grok | codex
+tsk setup --skill-dir <path> [--force] [--json]
+```
 
-Exit codes: 0 success/help, 1 setup or confirmation failure, 2 invalid arguments.
-The command does not edit task data. See [installation](/docs/install/#herdr-setup-with-an-installed-binary)
+Bare `tsk setup` lists targets and writes nothing. `tsk setup herdr` registers
+the embedded plugin assets and adds prefix+t (board) and prefix+a (quick capture).
+It uses the same installed binary, with no source checkout or second build. Herdr
+0.9+ must be on PATH. Conflicting shortcuts require interactive confirmation;
+declining preserves them. A noninteractive conflict aborts without writes.
+`tsk setup herdr --help` is read-only.
+
+Agent targets write the embedded `skills/tsk-cli/SKILL.md` (frontmatter kept) into
+that tool's user-level skills directory as `tsk-cli/SKILL.md`:
+
+- `claude` → `~/.claude/skills/`
+- `pi` → `~/.pi/agent/skills/`
+- `cursor` → `~/.cursor/skills/`
+- `grok` → `~/.grok/skills/`
+- `codex` → `~/.agents/skills/`
+- `--skill-dir <path>` → `<path>/tsk-cli/SKILL.md`
+
+A second run without `--force` exits 1 with `skill-exists` and leaves the file.
+`--force` overwrites. `--json` emits `outcome` (`written`, `exists`, or `listed`),
+`target`, and `path`. Two targets, or `herdr` plus `--skill-dir`, is usage (exit 2).
+An empty `--skill-dir` is usage. A symlink at the skills root, the `tsk-cli`
+directory, or `SKILL.md` is refused.
+
+Exit codes: 0 success/help/list, 1 setup or confirmation failure or `skill-exists`,
+2 invalid arguments. Herdr setup does not edit task data. See
+[installation](/docs/install/#herdr-setup-with-an-installed-binary)
 for config paths, backups, reload, upgrades and removing integration.
