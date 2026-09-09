@@ -1,44 +1,14 @@
 # Changelog
 
-## Unreleased
+## 0.6.0
 
-`tsk setup herdr` registers embedded plugin assets with Herdr 0.9+, sharing the
-installed standalone binary. It adds prefix+t board and prefix+a quick capture,
-asks before replacing conflicting shortcuts, and refuses noninteractive conflicts
-without changes. No source checkout, separate build, or automatic install-time link.
-
-Native distribution: an owner-run draft-release workflow builds four
-macOS/Linux architectures, generates checksums and a version-pinned Homebrew formula.
-The installer downloads stable release assets, verifies SHA-256, and installs to
-~/.local/bin. Homebrew installs from the checksum-pinned smarzban/tap/tsk formula.
-
-Board attribution appears only inside an open peek, on a dim `└─ label` line
-below its notes. Collapsed rows show no labels. Titles wrap two cells before the right edge without a label column.
-
-Quick capture opens the expanded quick-add page in a herdr popup instead of the old
-capture form. It is the same page as `+` then `Tab` on the board, opening with the
-cursor in Title: scope and selected-text prefill from the focused pane, `Shift+Enter`
-saves and closes the popup, `Esc` cancels and closes without creating a task, and a
-failed save keeps the draft editable with retry/cancel. `tsk capture` (or
-`TSK_MODE=capture`) opens the same page.
-
-Thread names accept dots (`v0.0.6`). A refusal names the rule instead of `invalid thread name`.
-
-Expanded quick-add can set thread and add steps. Enter on a new step saves it and opens the next empty row; Shift+Enter saves the step and the task-edit session. An empty new-step row discards if you click elsewhere. Deleting a task asks `press ctrl+x again to delete` first.
-
-NEEDS YOU section: blocked and review tasks sit above IN MOTION on desk and on a
-project board. Desk ON DECK / project ON DECK keep ready work. An empty deck
-header is omitted while NEEDS YOU has rows.
-
-`tsk edit --notes` keeps newlines and tabs, same as `tsk add -n`.
-
-Agent CLI mutations: `tsk status T<n> <status>` sets ready, started, blocked, or
-review, or done (`start` is an alias for `started`; idempotent on repeat), `tsk edit T<n>`
-updates title and/or notes, and `tsk steps` gains `rename` and `remove`.
-
-Human CLI output escapes C0/C1 controls in titles, step text, project names, and usage reasons that echo argv.
-`tsk list T<n>` documents live-store lookup vs `trash.jsonl`. Install docs keep
-`./target/release/tsk` after build, with an optional PATH export.
+- Native macOS/Linux binaries, a checksum-verifying installer, and Homebrew packaging. `tsk setup herdr` connects the same binary to Herdr with board and capture shortcuts.
+- Agent CLI commands to change status, edit tasks, and rename or remove steps.
+- **NEEDS YOU** brings blocked and review tasks to the top of the board.
+- Redesigned projects index with search, status counts, and persistent desk/project navigation.
+- Quick capture opens the task editor in a Herdr popup. Expanded quick-add supports threads and steps.
+- Clearer keyboard controls and help: `Ctrl+R` toggles review, `Enter` toggles stored steps, and `Shift+Enter` saves edits. Task deletion asks for confirmation.
+- Cleaner task rows: project and thread labels appear only in an open peek, leaving more room for titles.
 
 ## 0.5.0
 
