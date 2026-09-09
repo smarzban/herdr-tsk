@@ -44,7 +44,9 @@ test("crate, plugin, lockfile, and site share one release version", async () => 
   const pluginVersion = plugin.match(/^version = "([^"]+)"/m)?.[1];
   const lockVersion = lockfile.match(/\[\[package\]\]\nname = "tsk-tui"\nversion = "([^"]+)"/)?.[1];
   const renderedVersion = siteVersion.match(/VERSION = '([^']+)'/)?.[1];
-  assert.equal(cargoVersion, "0.6.0");
+  const changelog = await read("../../CHANGELOG.md");
+  const releasedVersion = changelog.match(/^## v(\d+\.\d+\.\d+)/m)?.[1];
+  assert.equal(cargoVersion, releasedVersion, "Cargo.toml must match the top CHANGELOG section");
   assert.deepEqual([pluginVersion, lockVersion, renderedVersion], [cargoVersion, cargoVersion, cargoVersion]);
 });
 
