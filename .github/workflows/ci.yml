@@ -6,6 +6,11 @@ on:
     paths-ignore:
       - "site/**"
       - ".github/workflows/site.yml"
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - "site/**"
+      - ".github/workflows/site.yml"
 
 # Validation never needs more than reading the repo. Fork PRs run under this
 # token too (read-only, no secrets), and checkout leaves no credentials behind

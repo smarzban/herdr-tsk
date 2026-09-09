@@ -16,6 +16,30 @@ WORKFLOW = ROOT / ".github/workflows/release.yml"
 
 
 class WorkflowTests(unittest.TestCase):
+    def test_public_pr_validation_is_read_only_and_secret_free(self):
+        for name in ["ci", "site"]:
+            with self.subTest(workflow=name):
+                source = (ROOT / f".github/workflows/{name}.yml").read_text()
+                triggers = source.split("on:\n", 1)[1].split("\npermissions:", 1)[0]
+                events = dict(re.findall(r"^  (\w+):\n((?:    .*\n|\n)*)", triggers, re.M))
+                self.assertEqual(set(events), {"push", "pull_request"})
+                self.assertEqual(events["push"].strip(), events["pull_request"].strip())
+                self.assertIn("branches: [main]", events["pull_request"])
+                self.assertIn("paths-ignore:" if name == "ci" else "paths:", events["pull_request"])
+                self.assertIn("permissions:\n  contents: read", source)
+                self.assertEqual(source.count("permissions:"), 1)
+                self.assertNotRegex(source, r"secrets\s*[.\[]")
+                self.assertIn("persist-credentials: false", source)
+
+    def test_vercel_secret_is_only_available_to_main_push_deployment(self):
+        source = (ROOT / ".github/workflows/vercel.yml").read_text()
+        triggers = source.split("on:\n", 1)[1].split("\npermissions:", 1)[0]
+        self.assertEqual(re.findall(r"^  ([a-z_]+):", triggers, re.M), ["push"])
+        self.assertIn("branches: [main]", triggers)
+        self.assertIn("if: github.event_name == 'push' && github.ref == 'refs/heads/main'", source)
+        self.assertIn("permissions:\n  contents: read", source)
+        self.assertEqual(source.count("permissions:"), 1)
+
     def test_packaging_checks_cover_rust_and_installer_changes_not_site_builds(self):
         site = (ROOT / ".github/workflows/site.yml").read_text()
         ci = (ROOT / ".github/workflows/ci.yml").read_text()
