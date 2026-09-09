@@ -1,5 +1,5 @@
 #!/bin/sh
-# Install a published tsk release, never a build of main. No sudo or shell edits.
+# Install a published tsk release, never a build of main. No sudo or task-data changes.
 set -eu
 
 fail() { printf 'tsk install: %s\n' "$*" >&2; exit 1; }
@@ -8,7 +8,7 @@ if [ "$#" -eq 1 ] && [ "$1" = --help ]; then
     exit 0
 fi
 [ "$#" -eq 0 ] || fail 'unexpected arguments; use --help'
-for command in curl tar uname awk grep mktemp chmod mv mkdir; do
+for command in curl tar uname awk grep sed mktemp chmod mv mkdir; do
     command -v "$command" >/dev/null 2>&1 || fail "missing required command: $command"
 done
 if command -v sha256sum >/dev/null 2>&1; then
@@ -40,6 +40,10 @@ printf '%s\n' "$version" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' || fail 'TSK_VER
 
 install_dir=${TSK_INSTALL_DIR:-${HOME:?HOME is required}/.local/bin}
 case "$install_dir" in /*) ;; *) fail 'TSK_INSTALL_DIR must be an absolute path' ;; esac
+case "$install_dir" in
+    *:*|*'
+'*) fail 'installation directory cannot contain a colon or newline (PATH separators)' ;;
+esac
 [ ! -L "$install_dir/tsk" ] || fail 'destination is a symlink; use its package manager or a different TSK_INSTALL_DIR'
 [ ! -d "$install_dir/tsk" ] || fail 'destination is a directory'
 work=$(mktemp -d "${TMPDIR:-/tmp}/tsk-install.XXXXXX")
@@ -66,7 +70,63 @@ chmod 755 "$staged"
 mv -f "$staged" "$install_dir/tsk"
 staged=
 printf 'Installed tsk %s to %s/tsk\n' "$version" "$install_dir"
+
+# Only append to safe regular startup files, never source/evaluate user config.
+# Bash reads .bashrc for interactive shells and the first available login file.
+# Zsh reads .zshrc for both login and non-login interactive shells.
+append_path_to() {
+    rc=$1
+    case "$rc" in /*) ;; *) return 1 ;; esac
+    [ ! -L "$rc" ] || return 1
+    if [ -e "$rc" ]; then
+        [ -f "$rc" ] && [ -r "$rc" ] && [ -w "$rc" ] || return 1
+        if grep -F -x "$path_line" "$rc" >/dev/null; then return 0; fi
+    fi
+    mkdir -p "${rc%/*}" || return 1
+    (umask 077; printf '\n# tsk PATH\n%s\n' "$path_line" >> "$rc") || return 1
+    printf 'Configured PATH in %s\n' "$rc"
+}
+add_path_to() {
+    if append_path_to "$1"; then return 0; fi
+    printf 'Skipped PATH setup in %s (not a writable regular file or write failed).\n' "$1" >&2
+    return 1
+}
+configure_path() {
+    case "${SHELL##*/}" in
+        zsh)
+            zsh_dir=${ZDOTDIR-${HOME:-}}
+            case "$zsh_dir" in /*) ;; *) return 1 ;; esac
+            add_path_to "$zsh_dir/.zshrc"
+            ;;
+        bash)
+            case "${HOME:-}" in /*) ;; *) return 1 ;; esac
+            login_rc=$HOME/.profile
+            for candidate in "$HOME/.bash_profile" "$HOME/.bash_login" "$HOME/.profile"; do
+                if [ -e "$candidate" ] || [ -L "$candidate" ]; then login_rc=$candidate; break; fi
+            done
+            path_complete=1
+            add_path_to "$HOME/.bashrc" || path_complete=0
+            add_path_to "$login_rc" || path_complete=0
+            [ "$path_complete" = 1 ]
+            ;;
+        *) return 1 ;;
+    esac
+}
 case ":${PATH:-}:" in
     *":$install_dir:"*) ;;
-    *) printf 'Add this directory to PATH in your shell configuration: %s\n' "$install_dir" ;;
+    *)
+        # Single-quote the literal path, including embedded quotes, so neither the
+        # printed export nor the startup line can execute path metacharacters.
+        quoted_dir="'$(printf '%s' "$install_dir" | sed "s/'/'\\\\''/g")'"
+        path_export="export PATH=$quoted_dir:\"\$PATH\""
+        path_line="case \":\${PATH:-}:\" in *:$quoted_dir:*) ;; *) $path_export ;; esac"
+        SHELL=${SHELL:-}
+        if configure_path; then
+            printf 'Reopen your terminal, or run this in the current shell:\n  %s\n' "$path_export"
+        else
+            printf 'Could not update all shell startup files; any successful edits were kept. Please configure PATH manually for the remaining files. Automatic setup supports Bash and Zsh.\n' >&2
+            printf 'For Bash, Zsh or sh, run:\n  %s\n' "$path_export"
+            printf 'For other shells, add %s to PATH using your shell configuration.\n' "$install_dir"
+        fi
+        ;;
 esac

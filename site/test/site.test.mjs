@@ -191,3 +191,14 @@ test("attribution is peek-only in demo and static anatomy", async () => {
   assert.match(page, /└─ tsk/);
   assert.doesNotMatch(guide, /section headers, row meta/);
 });
+
+test("quickstarts use the installer, optional Herdr setup, and task capture", async () => {
+  for (const file of ["../../README.md", "../src/content/docs/docs/install.md", "../src/pages/index.astro"]) {
+    const text = await read(file);
+    assert.ok(text.includes("curl -fsSL https://gettsk.sh/install.sh | sh"), file);
+    for (const command of ["brew install smarzban/tap/tsk", "tsk setup herdr", "herdr server reload-config", 'tsk add -t "your task title"', "prefix+t", "prefix+a"]) {
+      assert.ok(text.includes(command), `${file}: ${command}`);
+    }
+    assert.ok(!text.includes("-o install-tsk.sh"), file);
+  }
+});

@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+The installer configures PATH for Bash and Zsh, then tells you to reopen the terminal or run an export command.
+
 ## 0.6.0
 
 - Native macOS/Linux binaries, a checksum-verifying installer, and Homebrew packaging. `tsk setup herdr` connects the same binary to Herdr with board and capture shortcuts.

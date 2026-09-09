@@ -4,6 +4,7 @@ import io
 import json
 import os
 import platform
+import shutil
 from pathlib import Path
 import subprocess
 import tarfile
@@ -24,6 +25,8 @@ class InstallerTests(unittest.TestCase):
         self.assets = self.root / "assets"
         self.assets.mkdir()
         self.env = dict(os.environ, HOME=str(self.root / "home"), PATH=f"{self.bin}:{os.environ['PATH']}", CURL_ARGS=str(self.root / "curl-args"), ASSETS=str(self.assets), REQUESTS=str(self.root / "requests"), MOCK_OS="Linux", MOCK_ARCH="x86_64")
+        self.env["SHELL"] = "/bin/bash"
+        self.env.pop("ZDOTDIR", None)
         self.env.pop("TSK_VERSION", None)
         self.env.pop("TSK_INSTALL_DIR", None)
         self.command("uname", '#!/bin/sh\ncase "$1" in -s) echo "$MOCK_OS";; -m) echo "$MOCK_ARCH";; esac\n')
@@ -80,6 +83,163 @@ else:
         subprocess.run([str(installed), "add", "--desk", "-t", "Installed smoke"], env=isolated, check=True, capture_output=True)
         listed = subprocess.run([str(installed), "list", "--desk"], env=isolated, check=True, text=True, capture_output=True)
         self.assertIn("Installed smoke", listed.stdout)
+
+    def test_path_setup_preserves_config_and_is_idempotent(self):
+        self.archive()
+        home = Path(self.env["HOME"])
+        home.mkdir()
+        rc = home / ".bashrc"
+        rc.write_text("# existing config without final newline")
+        for _ in range(2):
+            result = self.run_install()
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("Reopen your terminal", result.stdout)
+            self.assertIn("export PATH=", result.stdout)
+        self.assertTrue(rc.read_text().startswith("# existing config without final newline\n"))
+        self.assertEqual(rc.read_text().count("# tsk PATH"), 1)
+        self.assertTrue((home / ".profile").exists())
+        # Sourcing both login and interactive config twice must not duplicate PATH.
+        command = '. "$HOME/.profile"; . "$HOME/.bashrc"; . "$HOME/.bashrc"; printf "%s" "$PATH"'
+        activated = subprocess.run(["sh", "-c", command], env=self.env, text=True, capture_output=True, check=True)
+        self.assertEqual(activated.stdout.split(":").count(str(home / ".local/bin")), 1)
+
+    def test_bash_uses_existing_login_profile_without_shadowing_it(self):
+        self.archive()
+        home = Path(self.env["HOME"])
+        home.mkdir()
+        profile = home / ".bash_login"
+        profile.write_text("# existing login\n")
+        result = self.run_install()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((home / ".bash_profile").exists())
+        self.assertIn("# tsk PATH", profile.read_text())
+
+    def test_zsh_uses_zdotdir_and_printed_export_handles_shell_metacharacters(self):
+        self.archive()
+        zdot = self.root / "zsh-config"
+        dest = self.root / "bin ' $(touch INJECTED) $x `touch INJECTED`"
+        result = self.run_install(SHELL="/bin/zsh", ZDOTDIR=str(zdot), TSK_INSTALL_DIR=str(dest))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((zdot / ".zshrc").exists())
+        self.assertFalse((Path(self.env["HOME"]) / ".zshrc").exists())
+        export = next(line.strip() for line in result.stdout.splitlines() if line.strip().startswith("export PATH="))
+        for command in [export, '. "$1"']:
+            activated = subprocess.run(["sh", "-c", command + '; command -v tsk', "sh", str(zdot / ".zshrc")], env=self.env, cwd=self.root, text=True, capture_output=True, check=True)
+            self.assertEqual(activated.stdout.strip(), str(dest / "tsk"))
+        self.assertFalse((self.root / "INJECTED").exists())
+
+    def test_existing_path_needs_no_shell_edits(self):
+        self.archive()
+        home = Path(self.env["HOME"])
+        result = self.run_install(PATH=f"{home / '.local/bin'}:{self.env['PATH']}")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((home / ".bashrc").exists())
+        self.assertFalse((home / ".profile").exists())
+        self.assertNotIn("Reopen your terminal", result.stdout)
+
+    def test_failed_download_never_edits_shell_config(self):
+        self.archive(bad_checksum=True)
+        result = self.run_install()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((Path(self.env["HOME"]) / ".bashrc").exists())
+        self.assertFalse((Path(self.env["HOME"]) / ".profile").exists())
+
+    def test_unsafe_or_unsupported_shell_config_keeps_install_and_gives_manual_guidance(self):
+        self.archive()
+        home = Path(self.env["HOME"])
+        home.mkdir()
+        target = self.root / "dotfile"
+        target.write_text("# leave this alone\n")
+        rc = home / ".zshrc"
+        rc.symlink_to(target)
+        result = self.run_install(SHELL="/bin/zsh")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(target.read_text(), "# leave this alone\n")
+        self.assertIn("Could not update", result.stderr)
+        self.assertIn("export PATH=", result.stdout)
+        self.assertNotIn("Reopen your terminal", result.stdout)
+        rc.unlink()
+        result = self.run_install(SHELL="/bin/fish")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("configure PATH manually", result.stderr)
+        self.assertFalse(rc.exists())
+        self.assertFalse((home / ".config/fish").exists())
+
+    def test_piped_script_configures_default_zsh_and_new_shell_finds_tsk(self):
+        self.archive()
+        environment = dict(self.env, SHELL="/bin/zsh")
+        result = subprocess.run(["sh"], input=INSTALLER.read_text(), env=environment, cwd=self.root, text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        home = Path(self.env["HOME"])
+        self.assertTrue((home / ".zshrc").exists())
+        # Execute the generated source, not just a substring assertion.
+        activated = subprocess.run(["sh", "-c", '. "$HOME/.zshrc"; tsk'], env=environment, text=True, capture_output=True, check=True)
+        self.assertEqual(activated.stdout.strip(), "installed-fixture")
+
+    @unittest.skipIf(os.geteuid() == 0, "root bypasses write permissions")
+    def test_unwritable_startup_file_keeps_binary_and_reports_manual_setup(self):
+        self.archive()
+        home = Path(self.env["HOME"])
+        home.mkdir()
+        rc = home / ".zshrc"
+        rc.write_text("# read only\n")
+        rc.chmod(0o400)
+        result = self.run_install(SHELL="/bin/zsh")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(rc.read_text(), "# read only\n")
+        self.assertIn("configure PATH manually", result.stderr)
+        self.assertNotIn("Reopen your terminal", result.stdout)
+        self.assertTrue((home / ".local/bin/tsk").exists())
+
+    def test_fresh_interactive_shells_find_the_installed_binary(self):
+        self.archive()
+        for name in ["bash", "zsh"]:
+            with self.subTest(shell=name):
+                shell = shutil.which(name)
+                if not shell:
+                    self.skipTest(f"{name} is not installed")
+                result = self.run_install(SHELL=shell)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                fresh = subprocess.run([shell, "-i", "-c", "tsk"], env=self.env, stdin=subprocess.DEVNULL, text=True, capture_output=True)
+                self.assertEqual(fresh.returncode, 0, fresh.stderr)
+                self.assertEqual(fresh.stdout.strip(), "installed-fixture")
+
+    def test_path_separator_directories_are_refused_before_asset_download(self):
+        self.archive()
+        for name in ["bad:bin", "bad\nbin"]:
+            result = self.run_install(TSK_VERSION="v1.2.3", TSK_INSTALL_DIR=str(self.root / name))
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("PATH separators", result.stderr)
+            self.assertFalse((self.root / "requests").exists())
+            self.assertFalse((self.root / name).exists())
+
+    def test_glob_characters_in_install_directory_are_literal(self):
+        self.archive()
+        for name in ["tsk*", "tsk?", "tsk[ab]"]:
+            with self.subTest(name=name):
+                dest = self.root / name
+                result = self.run_install(TSK_INSTALL_DIR=str(dest), PATH=f"{self.root / 'tsk-old'}:{self.root / 'tska'}:{self.env['PATH']}")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("Reopen your terminal", result.stdout)
+                self.assertIn(str(dest), result.stdout)
+                active = subprocess.run(["sh", "-c", '. "$HOME/.bashrc"; command -v tsk'], env=self.env, text=True, capture_output=True, check=True)
+                self.assertEqual(active.stdout.strip(), str(dest / "tsk"))
+
+    def test_partial_bash_setup_names_skipped_file_and_keeps_successful_edit(self):
+        self.archive()
+        home = Path(self.env["HOME"])
+        home.mkdir()
+        target = self.root / "login-config"
+        target.write_text("# managed elsewhere\n")
+        login = home / ".bash_profile"
+        login.symlink_to(target)
+        result = self.run_install()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("# tsk PATH", (home / ".bashrc").read_text())
+        self.assertEqual(target.read_text(), "# managed elsewhere\n")
+        self.assertIn(str(login), result.stderr)
+        self.assertIn("successful edits were kept", result.stderr)
+        self.assertIn("export PATH=", result.stdout)
 
     def test_latest_release_and_all_platforms(self):
         for system, arch, target in [("Linux", "x86_64", "x86_64-unknown-linux-musl"), ("Linux", "aarch64", "aarch64-unknown-linux-musl"), ("Darwin", "arm64", "aarch64-apple-darwin"), ("Darwin", "x86_64", "x86_64-apple-darwin")]:
