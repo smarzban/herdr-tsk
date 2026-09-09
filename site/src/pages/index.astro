@@ -3,9 +3,25 @@ import Wordmark from '../components/Wordmark.astro';
 import SharedHead from '../components/SharedHead.astro';
 import '../styles/landing.css';
 
+import { serializeJsonLd } from '../lib/agent-docs.mjs';
 import { VERSION } from '../version.mjs';
 const SITE = 'https://gettsk.sh';
 const REPO = 'https://github.com/smarzban/herdr-tsk';
+const softwareApplication = {
+  '@context': 'https://schema.org',
+  '@type': 'SoftwareApplication',
+  name: 'tsk',
+  applicationCategory: 'DeveloperApplication',
+  operatingSystem: 'macOS, Linux',
+  license: 'https://opensource.org/licenses/MIT',
+  codeRepository: REPO,
+  softwareVersion: VERSION,
+  offers: {
+    '@type': 'Offer',
+    price: '0',
+    priceCurrency: 'USD',
+  },
+};
 ---
 
 <!DOCTYPE html>
@@ -17,7 +33,7 @@ const REPO = 'https://github.com/smarzban/herdr-tsk';
     <title>tsk · a task board for you and your agents</title>
     <meta
       name="description"
-      content="tsk is a terminal task board for you and your agents. Plan in one place, move work through ready, started, blocked, review, done. You and your agents can create, edit, and complete tasks. Ships as a herdr plugin, runs standalone."
+      content="tsk is a terminal task board for you and your agents: one board, five statuses, agents work through the CLI."
     />
     <link rel="canonical" href={`${SITE}/`} />
     <meta property="og:type" content="website" />
@@ -85,6 +101,7 @@ const REPO = 'https://github.com/smarzban/herdr-tsk';
       media="(prefers-color-scheme: light)"
     />
     <SharedHead />
+    <script type="application/ld+json" set:html={serializeJsonLd(softwareApplication)} />
   </head>
   <body class="landing">
     <a class="skip" href="#main">skip to content</a>

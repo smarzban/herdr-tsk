@@ -1,7 +1,38 @@
 ---
 import Head from '@astrojs/starlight/components/Head.astro';
 import SharedHead from './SharedHead.astro';
+import {
+  newestCommitIso,
+  serializeJsonLd,
+  SITE,
+  slugFromDocsId,
+  twinUrlForSlug,
+} from '../lib/agent-docs.mjs';
+
+const { entry, lastUpdated } = Astro.locals.starlightRoute;
+const isDocsPage = entry.id !== '404' && !entry.id.endsWith('/404');
+const href = isDocsPage ? twinUrlForSlug(slugFromDocsId(entry.id)) : '';
+const dateModified = isDocsPage
+  ? lastUpdated instanceof Date
+    ? lastUpdated.toISOString()
+    : entry.filePath
+      ? newestCommitIso(entry.filePath)
+      : undefined
+  : undefined;
+const techArticle =
+  isDocsPage && dateModified
+    ? {
+        '@context': 'https://schema.org',
+        '@type': 'TechArticle',
+        headline: entry.data.title,
+        description: entry.data.description,
+        dateModified,
+        isPartOf: { '@type': 'WebSite', url: `${SITE}/` },
+      }
+    : null;
 ---
 
 <Head />
 <SharedHead />
+{isDocsPage && <link rel="alternate" type="text/markdown" href={href} />}
+{techArticle && <script type="application/ld+json" set:html={serializeJsonLd(techArticle)} />}

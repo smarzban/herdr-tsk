@@ -35,7 +35,9 @@ export default defineConfig({
     rehypePlugins: [rehypeKbd],
   },
   integrations: [
-    sitemap(),
+    sitemap({
+      filter: (page) => !page.endsWith('.md'),
+    }),
     starlight({
       title: 'tsk',
       description: 'A task board for you and your agents, in your terminal.',

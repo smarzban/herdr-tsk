@@ -1,24 +1,27 @@
 # tsk
 
-> A task board for you and your agents, in your terminal. Both put work on one board and move it through ready, started, blocked, review, done. Agents reach it through the CLI.
+> tsk is a terminal task board for you and your agents: one board, five statuses, agents work through the CLI.
 
-Open or reopen from a repository to view that project. Persistent navigation is Desk, selected project, Projects. Desk shows global attention and active work plus its own backlog. Projects offers a searchable index and an Overview selector for threads across projects; project boards have their own thread filter. The index right-aligns NEEDS YOU, IN MOTION, and READY counts (zero paints as a dim dot, a live NEEDS YOU count is bold), shows basenames only with `here` on the launch project, adds a THREADS column at 100 columns or wider, and names the selected project's full path on the status row (above the query while search is open). A click selects an index row; a fast double-click or Enter opens it.
+Install with `curl -fsSL https://gettsk.sh/install.sh | sh` or `brew install smarzban/tap/tsk`.
+Details: https://gettsk.sh/docs/install.md
 
-Keys: mutating verbs take Ctrl (ctrl+s start/reopen, ctrl+d done, ctrl+o reopen, ctrl+b block, ctrl+r review, ctrl+e edit, ctrl+x delete, ctrl+u undo, ctrl+f archive, ctrl+q quit); bare keys navigate (j/k, Enter open, + add, d done drawer, g archived group, p project picker, t threads, v views, 1/2/3 destinations, : palette, ? help). The help card lists every key of every surface and scrolls. On the task page Enter toggles a selected stored step; the status verbs act on the task. Enter in the Title editor moves to Notes; Shift+Enter is the only task-edit save chord. The footer status row names the active lens (desk, project basename plus an active thread, archived focus, or selected Projects path) and carries feedback. Its verb row is a short prompt (open, status verbs, add, help; edit/status/close on the page; save/cancel while editing), not a keymap; a visible delete notice prefixes it with ctrl+u undo.
+## For agents
 
-On Projects, `/` opens the live project search in the shared footer slot, Enter opens the selected match, and Esc clears and closes it. Collapsed task rows show no labels. Project or thread attribution appears only at the bottom of an open peek, on a dim L-shaped line beneath its notes. Titles wrap two cells before the right edge, without reserving an attribution column; task-page dates remain informational. Thread selectors accept typing and paste, including j/k as query text; unmatched queries stay visible. Wrapped selectors have one blank line below the tabs before the selected value. Project and cross-project thread views omit a separate task-count summary.
+- Guide: https://gettsk.sh/docs/agents.md
+- CLI: https://gettsk.sh/docs/cli.md
+- Full docs: https://gettsk.sh/llms-full.txt
 
-User guide: https://gettsk.sh/docs/
+## Docs
 
-- [Overview](https://gettsk.sh/docs/)
-- [Install](https://gettsk.sh/docs/install/)
-- [Board](https://gettsk.sh/docs/board/)
-- [Keys](https://gettsk.sh/docs/keys/)
-- [Capture](https://gettsk.sh/docs/capture/)
-- [Task page](https://gettsk.sh/docs/task-page/)
-- [Steps](https://gettsk.sh/docs/steps/)
-- [CLI](https://gettsk.sh/docs/cli/)
+- Overview: https://gettsk.sh/docs/index.md
+- Install: https://gettsk.sh/docs/install.md
+- Board: https://gettsk.sh/docs/board.md
+- Keys: https://gettsk.sh/docs/keys.md
+- Capture: https://gettsk.sh/docs/capture.md
+- Task page: https://gettsk.sh/docs/task-page.md
+- Steps: https://gettsk.sh/docs/steps.md
+- CLI: https://gettsk.sh/docs/cli.md
 
-Source: https://github.com/smarzban/herdr-tsk
+## Source
 
-Installation: macOS ARM64/Intel and Linux ARM64/x86-64 musl archives; a checksum-verifying installer at /install.sh (latest published stable release, never main; TSK_VERSION pins a stable tag; TSK_INSTALL_DIR overrides ~/.local/bin); and smarzban/tap/tsk on Homebrew (explicit version-pinned URLs/checksums). Install with `curl -fsSL https://gettsk.sh/install.sh | sh` or `brew install smarzban/tap/tsk`. The installer adds a duplicate-safe PATH entry to Bash/Zsh startup files if needed, then asks users to reopen the terminal or run the printed export command. It leaves symlinked/non-regular/unwritable startup files alone; other shells need manual PATH setup. No automatic sudo, plugin linking, or task-data removal. Explicit `tsk setup herdr` registers embedded plugin assets using the same stable installed binary (Herdr 0.9+), and adds prefix+t board / prefix+a capture with confirmation before conflicting bindings are replaced. Noninteractive conflicts abort without changes. Reruns are idempotent; upgrades replace the registration and remove the intact stale managed root. Reload Herdr config or restart to activate bindings. Upgrades use the same installation channel.
+https://github.com/smarzban/herdr-tsk
