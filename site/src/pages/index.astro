@@ -310,47 +310,72 @@ const softwareApplication = {
             <span class="index">02 <span class="index-label">why</span></span>
             <h2 id="why-heading">Not another to-do app.</h2>
             <p class="band-lede">
-              tsk is the shared surface between a developer and the agents working beside
-              them. It lives in the pane you already have open. No browser tab, no sync
-              service, no form takeover.
+              Start from the failure. Your agent ends a session. Two tasks are blocked, one
+              wants a review, and you find out tomorrow. Each why below is the cause of the
+              one above it.
             </p>
           </header>
 
-          <div class="pillars">
-            <article class="pillar">
-              <h3>Capture never leaves the list.</h3>
+          <ol class="pillars is-chain" aria-label="Five whys">
+            <li class="pillar">
+              <h3>Why isn't a to-do app enough?</h3>
               <p>
-                <kbd>+</kbd> opens one line on the status row. <kbd>Enter</kbd> saves,
-                <kbd>Shift+Enter</kbd> keeps the line open, <kbd>Tab</kbd> expands onto the task
-                page. Two tokens set project and thread from inside the title.
+                You and the agent both plan, pick up, and finish work. A personal list is a tab
+                the agent cannot open. tsk is one board both of you write: a TUI for you,
+                <code>tsk add</code>, <code>tsk list</code>, <code>tsk status</code>, and
+                <code>tsk steps</code> for them.
+              </p>
+            </li>
+
+            <li class="pillar">
+              <h3>Why isn't the chat the board?</h3>
+              <p>
+                A transcript has no <b>ready</b>, <b>started</b>, <b>blocked</b>, <b>review</b>,
+                or <b>done</b>. It has no <code>T12</code> you can click to copy and paste into
+                the agent. A checklist in a reply dies with the session. The board keeps the
+                number, the status, and the steps.
+              </p>
+            </li>
+
+            <li class="pillar">
+              <h3>Why isn't a web tracker the board?</h3>
+              <p>
+                The work is already in a pane. In Herdr, prefix+t opens the board and prefix+a
+                opens capture. <code>tsk</code> also runs standalone. <kbd>+</kbd> opens one
+                line on the status row. <kbd>Enter</kbd> saves, <kbd>Shift+Enter</kbd> keeps
+                the line open, <kbd>Tab</kbd> expands onto the task page. Two tokens in the
+                title set project and thread. You never leave the list to add to it.
               </p>
               <pre class="mini" aria-label="Quick-add example"><span class="prompt">+</span> Fix the flaky bench <span class="tok">!p</span> tsk <span class="tok">!t</span> ci<span class="cursor" aria-hidden="true">█</span>
 <span class="dim">enter save · shift+enter stay · tab page · esc close</span></pre>
-            </article>
+            </li>
 
-            <article class="pillar">
-              <h3>Nothing completes itself.</h3>
+            <li class="pillar">
+              <h3>Why isn't a markdown file the board?</h3>
               <p>
-                Every mutating verb needs <kbd>Ctrl</kbd>. Bare letters do nothing, so a stray
-                keystroke in a focused board cannot finish or delete work. Undo is one chord
-                away.
+                A file is not a board. There is no NEEDS YOU, IN MOTION, or ON DECK. Whoever
+                writes the file can mark the work done. Checking every step on tsk leaves the
+                task status unchanged. You press <kbd>ctrl+d</kbd>, or the agent runs
+                <code>tsk status T12 done</code>. Mutating keys need <kbd>Ctrl</kbd>. Bare
+                letters do nothing.
               </p>
               <pre class="mini" aria-label="Verb bar"><span class="dim">enter</span> open · <span class="dim">ctrl+d</span> done · <span class="dim">ctrl+b</span> block · <span class="dim">:</span> palette
 <span class="dim">ctrl+x</span> delete · <span class="dim">ctrl+u</span> undo · <span class="dim">?</span> help · <span class="dim">+</span> capture</pre>
-            </article>
+            </li>
 
-            <article class="pillar">
-              <h3>One store. Everyone at the table.</h3>
+            <li class="pillar">
+              <h3>Why a file on disk, then?</h3>
               <p>
-                You, herdr's quick-capture popup, and your agents edit the same
-                <code>~/.tsk</code>. An agent drops a plan in as JSON and the board shows it on
-                the next tick.
+                The TUI, the CLI, and Herdr's capture popup all edit <code>~/.tsk/tsk.json</code>.
+                No account. No sync service. An agent pipes a plan in as JSON and the next
+                board tick shows it. Human status is the source of truth on that file. That is
+                the root.
               </p>
               <pre class="mini" aria-label="Three ways in"><span class="prompt">$</span> cat plan.json | tsk add
 <span class="dim">&#123; "created": [T33, T34, T35], "existing": [], "failed": [] &#125;</span>
 <span class="prompt">$</span> herdr plugin action invoke quick-capture --plugin herdr-tsk</pre>
-            </article>
-          </div>
+            </li>
+          </ol>
         </div>
       </section>
 

@@ -1711,6 +1711,57 @@ html[data-theme="light"] .pane {
   white-space: pre-wrap;
 }
 
+ol.pillars.is-chain {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  grid-template-columns: 1fr;
+  gap: 0;
+  background: transparent;
+  border: none;
+  overflow: visible;
+}
+
+.pillars.is-chain > .pillar {
+  --chain-indent: 0;
+  background: transparent;
+  padding-left: 1.25rem;
+  margin-left: var(--chain-indent);
+}
+
+.pillars.is-chain > .pillar:nth-child(2) {
+  --chain-indent: 1.15rem;
+}
+
+.pillars.is-chain > .pillar:nth-child(3) {
+  --chain-indent: 2.3rem;
+}
+
+.pillars.is-chain > .pillar:nth-child(4) {
+  --chain-indent: 3.45rem;
+}
+
+.pillars.is-chain > .pillar:nth-child(5) {
+  --chain-indent: 4.6rem;
+}
+
+.pillars.is-chain > .pillar:not(:first-child) {
+  border-left: 1px solid var(--line);
+}
+
+.pillars.is-chain > .pillar:last-child {
+  position: relative;
+}
+
+.pillars.is-chain > .pillar:last-child::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: 1.4rem;
+  width: 0.7rem;
+  border-bottom: 1px solid var(--line);
+}
+
 /* ── 03 · board anatomy ──────────────────────────────────────────────────── */
 
 .anatomy {
@@ -2332,6 +2383,22 @@ html[data-theme="light"] .pane {
 
   .pillars {
     grid-template-columns: 1fr;
+  }
+
+  ol.pillars.is-chain {
+    border-left: 1px solid var(--line);
+  }
+
+  .pillars.is-chain > .pillar {
+    --chain-indent: 0;
+  }
+
+  .pillars.is-chain > .pillar:not(:first-child) {
+    border-left: 0;
+  }
+
+  .pillars.is-chain > .pillar:last-child::after {
+    content: none;
   }
 
   .anatomy,

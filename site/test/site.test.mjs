@@ -194,6 +194,16 @@ test("attribution is peek-only in demo and static anatomy", async () => {
   assert.doesNotMatch(guide, /section headers, row meta/);
 });
 
+test("why band is five substitute pillars in one chain", async () => {
+  const page = await read("../src/pages/index.astro");
+  const why = page.match(/<section class="band band-alt" id="why"[\s\S]*?<\/section>/)?.[0];
+  assert.ok(why, "expected the #why band");
+  const chain = why.match(/<ol class="pillars is-chain"[^>]*>[\s\S]*?<\/ol>/)?.[0];
+  assert.ok(chain, "expected #why .pillars.is-chain");
+  const pillars = chain.match(/<li class="pillar">/g) ?? [];
+  assert.equal(pillars.length, 5);
+});
+
 test("quickstarts use the installer, Herdr setup, and task capture", async () => {
   for (const file of ["../../README.md", "../src/content/docs/docs/install.md", "../src/pages/index.astro"]) {
     const text = await read(file);
