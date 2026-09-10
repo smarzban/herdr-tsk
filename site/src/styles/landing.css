@@ -1729,37 +1729,39 @@ ol.pillars.is-chain {
   margin-left: var(--chain-indent);
 }
 
-.pillars.is-chain > .pillar:nth-child(2) {
-  --chain-indent: 1.15rem;
-}
+@media (min-width: 961px) {
+  .pillars.is-chain > .pillar:nth-child(2) {
+    --chain-indent: 1.15rem;
+  }
 
-.pillars.is-chain > .pillar:nth-child(3) {
-  --chain-indent: 2.3rem;
-}
+  .pillars.is-chain > .pillar:nth-child(3) {
+    --chain-indent: 2.3rem;
+  }
 
-.pillars.is-chain > .pillar:nth-child(4) {
-  --chain-indent: 3.45rem;
-}
+  .pillars.is-chain > .pillar:nth-child(4) {
+    --chain-indent: 3.45rem;
+  }
 
-.pillars.is-chain > .pillar:nth-child(5) {
-  --chain-indent: 4.6rem;
-}
+  .pillars.is-chain > .pillar:nth-child(5) {
+    --chain-indent: 4.6rem;
+  }
 
-.pillars.is-chain > .pillar:not(:first-child) {
-  border-left: 1px solid var(--line);
-}
+  .pillars.is-chain > .pillar:not(:first-child) {
+    border-left: 1px solid var(--line);
+  }
 
-.pillars.is-chain > .pillar:last-child {
-  position: relative;
-}
+  .pillars.is-chain > .pillar:last-child {
+    position: relative;
+  }
 
-.pillars.is-chain > .pillar:last-child::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  bottom: 1.4rem;
-  width: 0.7rem;
-  border-bottom: 1px solid var(--line);
+  .pillars.is-chain > .pillar:last-child::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    bottom: 1.4rem;
+    width: 0.7rem;
+    border-bottom: 1px solid var(--line);
+  }
 }
 
 /* ── 03 · board anatomy ──────────────────────────────────────────────────── */
@@ -2387,18 +2389,6 @@ ol.pillars.is-chain {
 
   ol.pillars.is-chain {
     border-left: 1px solid var(--line);
-  }
-
-  .pillars.is-chain > .pillar {
-    --chain-indent: 0;
-  }
-
-  .pillars.is-chain > .pillar:not(:first-child) {
-    border-left: 0;
-  }
-
-  .pillars.is-chain > .pillar:last-child::after {
-    content: none;
   }
 
   .anatomy,
