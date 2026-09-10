@@ -730,10 +730,12 @@ fn is_private_state_name(name: &str) -> bool {
         || name == LOCK_FILE
         || name == TRASH_FILE
         || name == "update.json"
+        || name == crate::delivery::DELIVERY_FILE
         || name.starts_with(&format!("{STATE_FILE}.v"))
         || name.starts_with(&format!(".{STATE_FILE}.tmp."))
         || name.starts_with(&format!(".{TRASH_FILE}.tmp."))
         || name.starts_with(".update.json.tmp.")
+        || name.starts_with(crate::delivery::DELIVERY_TEMP_PREFIX)
 }
 
 /// RAII exclusive lock on the store lock file (released on drop via `File::unlock`).

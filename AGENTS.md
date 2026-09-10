@@ -245,11 +245,19 @@ If `HERDR_ENV` is unset, say that live smoke was not run.
   migration.
 - State is `$HOME/.tsk/tsk.json`, walkthrough dismissal is
   `$HOME/.tsk/walkthrough.json`, the release-check cache is `$HOME/.tsk/update.json`,
+  the notice delivery record is `$HOME/.tsk/delivery.json`,
   overridable with `TSK_STATE_DIR` / `TSK_CONFIG_DIR`.
   Host-injected `HERDR_PLUGIN_*` dirs are ignored. Mutating verbs always use Ctrl.
   On board launch, if `TSK_NO_UPDATE_CHECK` is unset and that cache is older than 24h,
   a background `curl` of the GitHub latest-release tag updates it; a newer tag paints a
   dim `v<tag> available` on the idle status row. Any check failure is silent.
+- Starter guides (`src/guides.rs`, catalog ids `guide.*`) are desk notice rows seeded once
+  per state dir by the full board open only (`load_board`, never quick capture, the CLI, or
+  the installer). `delivery.json` (`src/delivery.rs`) holds the delivered or dismissed catalog
+  ids and the announcement watermark; the seeder dedupes by catalog id in the store, so a
+  lost record converges without duplicates. `ctrl+d`, `ctrl+f`, and `ctrl+x` on a notice
+  share one dismiss rule: the persist boundary marks its catalog id and it never re-seeds.
+  Seed and dismiss are silent; neither writes `status_message`.
 - Store format is versioned (`STORE_FORMAT_VERSION`, currently 3). Any schema change bumps it
   and adds a `vN → vN+1` step to `MIGRATIONS` in `src/store.rs`; `deny_unknown_fields` stays on
   `Task` and `DomainState` so an older binary refuses a newer file instead of dropping fields.

@@ -84,28 +84,38 @@ fn load_snapshot() -> InvocationSnapshot {
 }
 
 /// Load store + snapshot into domain and board view-model (no TTY).
+///
+/// The full board open is the one path that seeds the starter guides (see
+/// [`crate::guides::seed_on_open`]): the CLI, the install script, and the quick-capture
+/// popup never do.
 pub fn load_board() -> Result<(TaskStore, DomainState, BoardModel), Box<dyn Error>> {
     load_board_inner(true)
 }
 
 /// Load store + snapshot for the quick-capture popup (no TTY).
 ///
-/// The launch card is a board-open concern; the popup opens straight onto the draft
-/// page, and its archived-project scope fallback happens when the draft opens.
+/// The launch card and the guide seed are board-open concerns; the popup opens straight
+/// onto the draft page, and its archived-project scope fallback happens when the draft opens.
 pub fn load_board_for_quick_capture() -> Result<(TaskStore, DomainState, BoardModel), Box<dyn Error>>
 {
     load_board_inner(false)
 }
 
 fn load_board_inner(
-    offer_launch_card: bool,
+    full_board_open: bool,
 ) -> Result<(TaskStore, DomainState, BoardModel), Box<dyn Error>> {
     let state_dir = default_state_dir();
     let store = TaskStore::new(state_dir.clone());
+    if full_board_open {
+        // A board that could not seed its guides is still a usable board: the next open
+        // converges (`seed_on_open` dedupes by catalog id), and a message here would take
+        // the status slot from the update notice.
+        let _ = crate::guides::seed_on_open(&store);
+    }
     let state = store.load()?;
     let snapshot = load_snapshot();
     let mut model = BoardModel::from_domain(&state, snapshot.this_repo.clone());
-    if offer_launch_card {
+    if full_board_open {
         model.offer_launch_card(&state, &snapshot);
     }
     model.set_update_notice(crate::update::startup(
@@ -1623,7 +1633,7 @@ fn handle_board_intent(
         None
     };
 
-    match apply_board_intent_presenting_rejection(
+    let outcome = apply_board_intent_presenting_rejection(
         domain,
         model,
         save_recovery,
@@ -1637,7 +1647,13 @@ fn handle_board_intent(
                 .reload_merge_save(state)
                 .map_err(|error| error.to_string())
         },
-    ) {
+    );
+    if outcome == IntentOutcome::Persisted {
+        // The store already holds the dismissed guide; the delivery mark keeps a later open
+        // from seeding it back. Best effort, like the seed: nothing here fails the board.
+        let _ = crate::delivery::record_dismissed_notices(store.path(), domain.tasks());
+    }
+    match outcome {
         IntentOutcome::Quit => Ok(true),
         IntentOutcome::Persist | IntentOutcome::Persisted | IntentOutcome::None => {
             Ok(quick_capture && quick_capture_finished(model))

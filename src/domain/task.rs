@@ -384,9 +384,10 @@ impl DomainState {
     }
 
     /// Seeder-only create for a human notice row. Marks the task as a notice with the
-    /// given status and steps (no step events); history is the single `Created` event,
-    /// as for `create`. The `N` number is assigned only under the store lock in
-    /// [`Self::assign_numbers_for_persistence`], the same boundary that numbers tasks.
+    /// given status and steps (text, checked, no step events); history is the single
+    /// `Created` event, as for `create`. The `N` number is assigned only under the
+    /// store lock in [`Self::assign_numbers_for_persistence`], the same boundary that
+    /// numbers tasks.
     pub fn create_notice(
         &mut self,
         catalog_id: impl Into<String>,
@@ -394,7 +395,7 @@ impl DomainState {
         notes: Option<String>,
         status: HumanStatus,
         scope: TaskScope,
-        steps: Vec<String>,
+        steps: Vec<(String, bool)>,
     ) -> Result<Uuid, DomainError> {
         let id = self.create(title, notes, scope, ProvenanceOrigin::Manual, None)?;
         let task = self.task_mut(id).expect("the notice was just pushed");
@@ -405,10 +406,10 @@ impl DomainState {
         task.status = status;
         task.steps = steps
             .into_iter()
-            .map(|text| Step {
+            .map(|(text, done)| Step {
                 id: Uuid::new_v4(),
                 text,
-                done: false,
+                done,
             })
             .collect();
         Ok(id)
@@ -1695,7 +1696,7 @@ mod tests {
                 Some("read me".into()),
                 HumanStatus::Ready,
                 TaskScope::Global,
-                vec!["open the board".into(), "press ?".into()],
+                vec![("open the board".into(), false), ("press ?".into(), true)],
             )
             .expect("notice");
         let second = state
@@ -1739,7 +1740,7 @@ mod tests {
                 .iter()
                 .map(|step| (step.text.as_str(), step.done))
                 .collect::<Vec<_>>(),
-            vec![("open the board", false), ("press ?", false)]
+            vec![("open the board", false), ("press ?", true)]
         );
         assert_eq!(
             task.history
