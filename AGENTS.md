@@ -250,7 +250,7 @@ If `HERDR_ENV` is unset, say that live smoke was not run.
   On board launch, if `TSK_NO_UPDATE_CHECK` is unset and that cache is older than 24h,
   a background `curl` of the GitHub latest-release tag updates it; a newer tag paints a
   dim `v<tag> available` on the idle status row. Any check failure is silent.
-- Store format is versioned (`STORE_FORMAT_VERSION`, currently 2). Any schema change bumps it
+- Store format is versioned (`STORE_FORMAT_VERSION`, currently 3). Any schema change bumps it
   and adds a `vN → vN+1` step to `MIGRATIONS` in `src/store.rs`; `deny_unknown_fields` stays on
   `Task` and `DomainState` so an older binary refuses a newer file instead of dropping fields.
   A lower version loads migrated in memory and the first save writes `tsk.json.v<N>` beside the

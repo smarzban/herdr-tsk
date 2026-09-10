@@ -10,7 +10,7 @@ use ratatui::layout::Rect;
 use ratatui::style::Modifier;
 use ratatui::{Frame, Terminal};
 use tsk_tui::domain::{
-    DomainState, HumanStatus, ProvenanceOrigin, Task, TaskEvent, TaskEventKind, TaskScope,
+    DomainState, HumanStatus, Notice, ProvenanceOrigin, Task, TaskEvent, TaskEventKind, TaskScope,
 };
 use tsk_tui::ui::input::map_key;
 use tsk_tui::ui::queue::{self, BoardLens, NavTab, QueueView, ThreadFilter};
@@ -42,6 +42,7 @@ fn task(id: u128, title: &str, status: HumanStatus, scope: TaskScope, secs_ago: 
     Task {
         id: Uuid::from_u128(id),
         number: None,
+        notice: None,
         revision: Uuid::from_u128(id),
         merge_base_revision: None,
         title: title.to_string(),
@@ -1238,6 +1239,27 @@ fn board_row_leads_title_with_uppercase_t_identifier() {
     assert!(
         !body.contains("12 · tsk · 3m"),
         "trailing meta must not repeat the identifier:\n{body}"
+    );
+}
+
+#[test]
+fn notice_row_leads_title_with_uppercase_n_identifier() {
+    let mut tasks = fixture_tasks();
+    tasks[0].notice = Some(Notice {
+        catalog_id: "welcome".into(),
+        number: 3,
+    });
+    let view = fixture_view(&tasks, false);
+    let model = fixture_model(&tasks, &view);
+    let body = paint(80, 24, &model).0.join("\n");
+
+    assert!(
+        body.contains("N3 Smoke-test worktree dispatch"),
+        "notice identifier must lead the title:\n{body}"
+    );
+    assert!(
+        !body.contains("T3 "),
+        "a notice never paints a T number:\n{body}"
     );
 }
 

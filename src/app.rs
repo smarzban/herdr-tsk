@@ -1551,10 +1551,9 @@ fn copy_task_number_with(
     id: uuid::Uuid,
     copy: impl FnOnce(&str) -> bool,
 ) {
-    let Some(number) = domain.get(id).and_then(|task| task.number) else {
+    let Some(identifier) = domain.get(id).and_then(|task| task.board_identifier()) else {
         return;
     };
-    let identifier = format!("T{number}");
     let message = if copy(&identifier) {
         format!("copy sent: {identifier}")
     } else {
