@@ -554,6 +554,103 @@ fn flag_add_ignores_soft_deleted_title_and_scope_matches() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// Seeded notice rows live at the desk with no `T` number, so a title collision must
+/// create an ordinary task instead of resolving the notice as `existing` (which would
+/// unwrap-panic on its missing number).
+#[test]
+fn flag_add_with_a_seeded_notice_title_creates_an_ordinary_task() {
+    let _env = env_lock();
+    let dir = temp_state_dir("flag-notice-title");
+    let store = task_store(&dir);
+    assert_eq!(tsk_tui::guides::seed_on_open(&store), Ok(5));
+    let notice_title = tsk_tui::guides::CATALOG[0].title;
+
+    let output = add(
+        &[
+            "tsk".into(),
+            "add".into(),
+            "--state-dir".into(),
+            state_dir_arg(&dir),
+            "--title".into(),
+            notice_title.into(),
+            "--desk".into(),
+        ],
+        true,
+    );
+
+    assert_eq!(output.code, 0, "a notice title must not panic the CLI");
+    assert_eq!(output.stdout, format!("added {notice_title}\n"));
+    let state = store.load().expect("reload state");
+    assert_eq!(
+        state.tasks().iter().filter(|task| task.is_notice()).count(),
+        5
+    );
+    let ordinary: Vec<_> = state
+        .tasks()
+        .iter()
+        .filter(|task| !task.is_notice())
+        .collect();
+    assert_eq!(ordinary.len(), 1);
+    assert_eq!(ordinary[0].title, notice_title);
+    assert_eq!(ordinary[0].scope, TaskScope::Global);
+    assert_eq!(ordinary[0].board_identifier().as_deref(), Some("T1"));
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// The JSON plan shares `existing_task` with flag add: a notice-titled item must land in
+/// `created` with a `T` number, never panic mid-batch.
+#[test]
+fn plan_add_with_a_seeded_notice_title_creates_an_ordinary_task() {
+    let _env = env_lock();
+    let dir = temp_state_dir("plan-notice-title");
+    let store = task_store(&dir);
+    assert_eq!(tsk_tui::guides::seed_on_open(&store), Ok(5));
+    let notice_title = tsk_tui::guides::CATALOG[0].title;
+
+    let plan = run_with(
+        [
+            "tsk",
+            "add",
+            "--state-dir",
+            &state_dir_arg(&dir),
+            "--file",
+            "-",
+        ],
+        Cursor::new(
+            serde_json::to_string(&serde_json::json!([
+                {"title": notice_title, "project": null},
+                {"title": "ordinary plan item", "project": null}
+            ]))
+            .expect("plan payload"),
+        ),
+        true,
+    );
+
+    assert_eq!(plan.code, 0, "a notice title must not panic the plan batch");
+    let result: serde_json::Value = serde_json::from_str(&plan.stdout).expect("plan result");
+    assert_eq!(result["failed"].as_array().expect("failed").len(), 0);
+    let created = result["created"].as_array().expect("created");
+    assert_eq!(created.len(), 2);
+    assert_eq!(created[0]["i"], 0);
+    assert_eq!(created[0]["number"], 1);
+    let state = store.load().expect("reload state");
+    let ordinary: Vec<_> = state
+        .tasks()
+        .iter()
+        .filter(|task| !task.is_notice())
+        .collect();
+    assert_eq!(
+        ordinary
+            .iter()
+            .map(|task| task.title.as_str())
+            .collect::<Vec<_>>(),
+        vec![notice_title, "ordinary plan item"]
+    );
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 #[test]
 fn flag_add_does_not_read_piped_stdin() {
     let _env = env_lock();

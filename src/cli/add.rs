@@ -300,8 +300,12 @@ fn existing_task<'a>(
     scope: &TaskScope,
     thread: Option<&str>,
 ) -> Option<&'a crate::domain::Task> {
+    // Notice rows are board-only (no CLI address reaches them, not even their UUID) and
+    // deliberately carry no T number, so a title collision with a seeded guide or the
+    // announcement must never resolve as existing: the add creates an ordinary task.
     domain.tasks().iter().find(|task| {
         !task.soft_deleted
+            && !task.is_notice()
             && task.title == title
             && &task.scope == scope
             && task.thread.as_deref() == thread

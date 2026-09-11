@@ -25,10 +25,17 @@ Herdr's plugin-specific state/config directories do not override these locations
 | `tsk.json.1` | Previous valid task document |
 | `tsk.json.v<N>` | Backup made when migrating an older store format |
 | `walkthrough.json` | Whether onboarding was dismissed |
+| `delivery.json` | Which starter guides this install has received or dismissed, and the newest release note it has seen |
 
 An older binary refuses a newer or unversioned store instead of rewriting it. Use a compatible tsk version to open it.
 
 Archived tasks stay in the task document with their existing status. [Archive and restore](/docs/board/#archive).
+
+## Starter guides and release notes
+
+The starter guides (`N1`… on your desk) are seeded once per state directory on the first board open. Mark one done, archive it, or delete it and it never returns. Deleting `delivery.json` seeds any guide the task document no longer holds.
+
+After an upgrade, the first board open adds one `What's new in tsk` row to your desk when the new version bundles release notes you have not seen. That includes upgrading from a build that only had starter guides. Every missed release lands in that one row, newest first, with its changelog link in the notes. The notes ship inside the binary; a blank first install records them as seen and shows none. Clear the row like any guide.
 
 ## Deleted tasks
 

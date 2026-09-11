@@ -35,9 +35,9 @@ type MigrationStep = fn(serde_json::Value) -> Result<serde_json::Value, StoreErr
 
 /// Document-format migrations: the index `i` step converts version `i + 1` to `i + 2`.
 ///
-/// v1 documents gain the empty per-project record map; a later format lands its
-/// steps here and rides the load/save seam already wired below.
-const MIGRATIONS: &[MigrationStep] = &[migrate_v1_to_v2];
+/// v1 documents gain the empty per-project record map, v2 documents the notice
+/// counter; a later format lands its step here and rides the load/save seam below.
+const MIGRATIONS: &[MigrationStep] = &[migrate_v1_to_v2, migrate_v2_to_v3];
 
 /// v1 -> v2: a v1 store has no archived projects, so it gains an empty project map.
 /// A v1 binary never wrote an `archived` task key either; one is stripped defensively
@@ -59,6 +59,18 @@ fn migrate_v1_to_v2(mut document: serde_json::Value) -> Result<serde_json::Value
             task_object.remove("archived");
         }
     }
+    Ok(document)
+}
+
+/// v2 -> v3: a v2 store holds no notice rows, so it gains the notice counter at 1.
+/// Tasks need no change: a missing `notice` key already reads as none.
+fn migrate_v2_to_v3(mut document: serde_json::Value) -> Result<serde_json::Value, StoreError> {
+    let object = document
+        .as_object_mut()
+        .ok_or_else(|| StoreError::Io(io::Error::other("store document must be a JSON object")))?;
+    object
+        .entry("next_notice_number".to_string())
+        .or_insert_with(|| serde_json::json!(1));
     Ok(document)
 }
 
@@ -150,7 +162,8 @@ impl std::error::Error for TrashError {}
 /// Filesystem operations that make atomic replacement durable.
 ///
 /// Keeping the stages separate lets tests verify their ordering and failure propagation.
-trait AtomicFilesystem {
+/// Shared with `delivery`, whose record replaces itself through the same stages.
+pub(crate) trait AtomicFilesystem {
     type File;
 
     fn create_file(&self, path: &Path) -> io::Result<Self::File>;
@@ -161,7 +174,7 @@ trait AtomicFilesystem {
     fn remove_file(&self, path: &Path) -> io::Result<()>;
 }
 
-struct StdFilesystem;
+pub(crate) struct StdFilesystem;
 
 impl AtomicFilesystem for StdFilesystem {
     type File = File;
@@ -384,6 +397,55 @@ impl TaskStore {
                 .map_err(|error| error.to_string())?;
         }
         Ok(result)
+    }
+
+    /// Hold the exclusive store lock across a domain transition and a delivery-record
+    /// read-modify-write, so a seeder's guide marks or watermark cannot be written from
+    /// a record that went stale while the state transition ran, losing another process's
+    /// concurrent dismissal or watermark write. The transition receives the freshly
+    /// loaded state and record and returns its result, whether the state changed, and
+    /// whether the record changed. A changed record is persisted under the same lock;
+    /// an unchanged one writes nothing.
+    pub(crate) fn locked_transition_with_delivery<T>(
+        &self,
+        transition: impl FnOnce(
+            &mut DomainState,
+            &mut crate::delivery::DeliveryDocument,
+        ) -> Result<(T, bool, bool), String>,
+    ) -> Result<T, String> {
+        let _guard = self.lock_exclusive().map_err(|error| error.to_string())?;
+        let mut state = self.load_unlocked().map_err(|error| error.to_string())?;
+        let mut record = crate::delivery::load(self.path());
+        let (result, state_changed, record_changed) = transition(&mut state, &mut record)?;
+        if state_changed {
+            state.assign_numbers_for_persistence();
+            state.clear_merge_bases();
+            self.save_unlocked(&mut state)
+                .map_err(|error| error.to_string())?;
+        }
+        if record_changed {
+            crate::delivery::save(self.path(), &record).map_err(|error| error.to_string())?;
+        }
+        Ok(result)
+    }
+
+    /// Hold the exclusive store lock across a delivery-record read-modify-write alone,
+    /// so a dismissal recorded by one process cannot overwrite the record a concurrent
+    /// seeder wrote between this record's load and its save. The update receives the
+    /// freshly loaded record and returns whether it changed; an unchanged record writes
+    /// nothing.
+    pub(crate) fn locked_delivery_update(
+        &self,
+        update: impl FnOnce(&mut crate::delivery::DeliveryDocument) -> bool,
+    ) -> io::Result<()> {
+        let _guard = self
+            .lock_exclusive()
+            .map_err(|error| io::Error::other(error.to_string()))?;
+        let mut record = crate::delivery::load(self.path());
+        if update(&mut record) {
+            crate::delivery::save(self.path(), &record)?;
+        }
+        Ok(())
     }
 
     /// Under exclusive lock: load disk, validate each local mutation against the revision it
@@ -718,10 +780,12 @@ fn is_private_state_name(name: &str) -> bool {
         || name == LOCK_FILE
         || name == TRASH_FILE
         || name == "update.json"
+        || name == crate::delivery::DELIVERY_FILE
         || name.starts_with(&format!("{STATE_FILE}.v"))
         || name.starts_with(&format!(".{STATE_FILE}.tmp."))
         || name.starts_with(&format!(".{TRASH_FILE}.tmp."))
         || name.starts_with(".update.json.tmp.")
+        || name.starts_with(crate::delivery::DELIVERY_TEMP_PREFIX)
 }
 
 /// RAII exclusive lock on the store lock file (released on drop via `File::unlock`).
@@ -996,6 +1060,103 @@ mod tests {
             );
             assert_eq!(filesystem.events(), expected[..=index]);
         }
+    }
+
+    /// A delivery-record read-modify-write holds the exclusive store lock for its whole
+    /// critical section: while the update is stalled inside, a second writer's open file
+    /// description cannot take the lock, so its stale record cannot be renamed over the
+    /// first writer's result.
+    #[test]
+    fn locked_delivery_update_holds_the_store_lock_for_the_whole_read_modify_write() {
+        let dir = temp_dir("delivery-lock");
+        fs::create_dir_all(&dir).expect("mkdir");
+        let _guard = TempDirGuard(dir.clone());
+        let (inside_tx, inside_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+        let writer_store = TaskStore::new(&dir);
+        let writer = std::thread::spawn(move || {
+            writer_store
+                .locked_delivery_update(|record| {
+                    record.announcement_watermark = 4;
+                    inside_tx.send(()).expect("signal inside");
+                    release_rx.recv().expect("release");
+                    true
+                })
+                .expect("locked delivery update");
+        });
+        inside_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("writer entered its read-modify-write");
+
+        let contender = fs::OpenOptions::new()
+            .write(true)
+            .open(dir.join(LOCK_FILE))
+            .expect("open lock file");
+        assert!(
+            matches!(contender.try_lock(), Err(std::fs::TryLockError::WouldBlock)),
+            "the lock must stay held for the whole read-modify-write"
+        );
+
+        release_tx.send(()).expect("release writer");
+        writer.join().expect("writer thread");
+        assert!(contender.try_lock().is_ok(), "the lock is free again");
+        assert_eq!(
+            crate::delivery::load(&dir).announcement_watermark,
+            4,
+            "the record write landed"
+        );
+    }
+
+    /// The delivery-capable transition holds the same exclusive lock across its state
+    /// transition and record update, so a seeder's two writes land as one critical
+    /// section no other writer can interleave with.
+    #[test]
+    fn locked_transition_with_delivery_holds_the_store_lock_across_state_and_record() {
+        let dir = temp_dir("transition-delivery-lock");
+        fs::create_dir_all(&dir).expect("mkdir");
+        let _guard = TempDirGuard(dir.clone());
+        let store = TaskStore::new(&dir);
+        let (inside_tx, inside_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+        let writer_store = TaskStore::new(&dir);
+        let writer = std::thread::spawn(move || {
+            let created = writer_store
+                .locked_transition_with_delivery(|state, record| {
+                    state
+                        .create(
+                            "under lock",
+                            None,
+                            TaskScope::Global,
+                            ProvenanceOrigin::Manual,
+                            None,
+                        )
+                        .expect("create under lock");
+                    record.guides.insert("guide.lock".to_string());
+                    inside_tx.send(()).expect("signal inside");
+                    release_rx.recv().expect("release");
+                    Ok((1_usize, true, true))
+                })
+                .expect("locked transition");
+            assert_eq!(created, 1);
+        });
+        inside_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("writer entered the transition");
+
+        let contender = fs::OpenOptions::new()
+            .write(true)
+            .open(dir.join(LOCK_FILE))
+            .expect("open lock file");
+        assert!(
+            matches!(contender.try_lock(), Err(std::fs::TryLockError::WouldBlock)),
+            "state and record must be written under one lock acquisition"
+        );
+
+        release_tx.send(()).expect("release writer");
+        writer.join().expect("writer thread");
+        let state = store.load().expect("load state");
+        assert!(state.tasks().iter().any(|task| task.title == "under lock"));
+        assert!(crate::delivery::load(&dir).guides.contains("guide.lock"));
     }
 
     #[cfg(unix)]
@@ -1288,7 +1449,7 @@ mod tests {
     }
 
     #[test]
-    fn save_emits_format_version_two() {
+    fn save_emits_format_version_three() {
         let dir = temp_dir("format-stamp");
         let _guard = TempDirGuard(dir.clone());
         let store = TaskStore::new(&dir);
@@ -1297,7 +1458,8 @@ mod tests {
         let value: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(dir.join(STATE_FILE)).expect("read"))
                 .expect("json");
-        assert_eq!(value["format_version"], 2);
+        assert_eq!(value["format_version"], 3);
+        assert_eq!(value["next_notice_number"], 1);
     }
 
     #[test]
@@ -1314,7 +1476,7 @@ mod tests {
             error,
             StoreError::UnsupportedFormat {
                 found: 0,
-                supported: 2
+                supported: 3
             }
         ));
         let on_disk: serde_json::Value =
@@ -1325,7 +1487,7 @@ mod tests {
 
     #[test]
     fn load_refuses_noncurrent_format_without_rewriting() {
-        for format_version in [0, 3] {
+        for format_version in [0, 4] {
             let dir = temp_dir("format-noncurrent");
             let _guard = TempDirGuard(dir.clone());
             let document = serde_json::json!({
@@ -1343,7 +1505,7 @@ mod tests {
                     error,
                     StoreError::UnsupportedFormat {
                         found,
-                        supported: 2
+                        supported: 3
                     } if found == format_version
                 ),
                 "{error}"
@@ -1360,7 +1522,7 @@ mod tests {
         let dir = temp_dir("format-save-state");
         let _guard = TempDirGuard(dir.clone());
         let state: DomainState = serde_json::from_value(serde_json::json!({
-            "format_version": 3,
+            "format_version": 4,
             "next_task_number": 1,
             "tasks": [],
             "undo_stack": []
@@ -1373,8 +1535,8 @@ mod tests {
         assert!(matches!(
             error,
             StoreError::UnsupportedFormat {
-                found: 3,
-                supported: 2
+                found: 4,
+                supported: 3
             }
         ));
         assert!(!dir.join(STATE_FILE).exists());
@@ -1385,10 +1547,10 @@ mod tests {
         let dir = temp_dir("format-merge-local");
         let _guard = TempDirGuard(dir.clone());
         let store = TaskStore::new(&dir);
-        store.save(&DomainState::new()).expect("seed v2 store");
-        let before = fs::read(dir.join(STATE_FILE)).expect("read v2 store");
+        store.save(&DomainState::new()).expect("seed current store");
+        let before = fs::read(dir.join(STATE_FILE)).expect("read current store");
         let mut local: DomainState = serde_json::from_value(serde_json::json!({
-            "format_version": 3,
+            "format_version": 4,
             "next_task_number": 1,
             "tasks": [],
             "undo_stack": []
@@ -1401,8 +1563,8 @@ mod tests {
         assert!(matches!(
             error,
             StoreError::UnsupportedFormat {
-                found: 3,
-                supported: 2
+                found: 4,
+                supported: 3
             }
         ));
         assert_eq!(
@@ -1416,7 +1578,7 @@ mod tests {
         let dir = temp_dir("format-save-newer");
         let _guard = TempDirGuard(dir.clone());
         let newer = serde_json::json!({
-            "format_version": 3,
+            "format_version": 4,
             "tasks": [],
             "undo_stack": []
         });
@@ -1429,8 +1591,8 @@ mod tests {
             matches!(
                 error,
                 StoreError::UnsupportedFormat {
-                    found: 3,
-                    supported: 2
+                    found: 4,
+                    supported: 3
                 }
             ),
             "{error}"
@@ -2485,12 +2647,11 @@ mod tests {
         );
     }
 
-    /// Injected v2 -> v3 step for the migration seam tests. It sits at chain index 1
-    /// (next to the shipped v1 -> v2 step, which a v2 document never reaches), so a
-    /// seam load stamped from v2 applies exactly this step.
-    fn identity_v2_to_v3(document: serde_json::Value) -> Result<serde_json::Value, StoreError> {
+    fn seam_noop_v3_to_v4(document: serde_json::Value) -> Result<serde_json::Value, StoreError> {
         Ok(document)
     }
+
+    const SEAM_CHAIN: &[MigrationStep] = &[migrate_v1_to_v2, migrate_v2_to_v3, seam_noop_v3_to_v4];
 
     #[test]
     fn migrate_with_walks_the_chain_from_the_given_version() {
@@ -2538,16 +2699,14 @@ mod tests {
         let _guard = TempDirGuard(dir.clone());
         let store = TaskStore::new(&dir);
         let original = round_tripped_current_state("migrate me");
-        let original_bytes = serde_json::to_vec_pretty(&original).expect("encode v2");
+        let original_bytes = serde_json::to_vec_pretty(&original).expect("encode v3");
         fs::create_dir_all(&dir).expect("mkdir");
-        fs::write(dir.join(STATE_FILE), &original_bytes).expect("seed v2 file");
+        fs::write(dir.join(STATE_FILE), &original_bytes).expect("seed v3 file");
 
         let mut state = store
-            .load_unlocked_supported(3, |document, from| {
-                migrate_with(document, from, &[migrate_v1_to_v2, identity_v2_to_v3])
-            })
-            .expect("v2 file loads through the injected v2 -> v3 step");
-        assert_eq!(state.format_version(), 3);
+            .load_unlocked_supported(4, |document, from| migrate_with(document, from, SEAM_CHAIN))
+            .expect("v3 file loads through the injected v3 -> v4 step");
+        assert_eq!(state.format_version(), 4);
         assert_eq!(
             state.tasks()[0].title,
             "migrate me",
@@ -2555,20 +2714,20 @@ mod tests {
         );
 
         store
-            .save_unlocked_supported(&mut state, &StdFilesystem, 3)
-            .expect("first save at v3");
+            .save_unlocked_supported(&mut state, &StdFilesystem, 4)
+            .expect("first save at v4");
         assert_eq!(
-            fs::read(dir.join("tsk.json.v2")).expect("read version backup"),
+            fs::read(dir.join("tsk.json.v3")).expect("read version backup"),
             original_bytes,
             "the first backup of the pre-migration version is byte-identical"
         );
         let live: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(dir.join(STATE_FILE)).expect("read live"))
                 .expect("json");
-        assert_eq!(live["format_version"], 3);
+        assert_eq!(live["format_version"], 4);
         assert_eq!(live["tasks"][0]["title"], "migrate me");
         assert_eq!(
-            fs::read(dir.join("tsk.json.1")).expect("last-good holds the v2 original"),
+            fs::read(dir.join("tsk.json.1")).expect("last-good holds the v3 original"),
             original_bytes,
             "tsk.json.1 semantics are unchanged"
         );
@@ -2583,12 +2742,12 @@ mod tests {
             )
             .expect("create");
         store
-            .save_unlocked_supported(&mut state, &StdFilesystem, 3)
-            .expect("second save at v3");
+            .save_unlocked_supported(&mut state, &StdFilesystem, 4)
+            .expect("second save at v4");
         assert_eq!(
-            fs::read(dir.join("tsk.json.v2")).expect("read version backup"),
+            fs::read(dir.join("tsk.json.v3")).expect("read version backup"),
             original_bytes,
-            "a second save must not touch tsk.json.v2"
+            "a second save must not touch tsk.json.v3"
         );
     }
 
@@ -2598,21 +2757,19 @@ mod tests {
         let _guard = TempDirGuard(dir.clone());
         let store = TaskStore::new(&dir);
         let original = round_tripped_current_state("first backup wins");
-        let original_bytes = serde_json::to_vec_pretty(&original).expect("encode v2");
+        let original_bytes = serde_json::to_vec_pretty(&original).expect("encode v3");
         fs::create_dir_all(&dir).expect("mkdir");
-        fs::write(dir.join(STATE_FILE), &original_bytes).expect("seed v2 file");
-        fs::write(dir.join("tsk.json.v2"), b"existing backup").expect("seed existing backup");
+        fs::write(dir.join(STATE_FILE), &original_bytes).expect("seed v3 file");
+        fs::write(dir.join("tsk.json.v3"), b"existing backup").expect("seed existing backup");
 
         let mut state = store
-            .load_unlocked_supported(3, |document, from| {
-                migrate_with(document, from, &[migrate_v1_to_v2, identity_v2_to_v3])
-            })
+            .load_unlocked_supported(4, |document, from| migrate_with(document, from, SEAM_CHAIN))
             .expect("load");
         store
-            .save_unlocked_supported(&mut state, &StdFilesystem, 3)
+            .save_unlocked_supported(&mut state, &StdFilesystem, 4)
             .expect("save");
         assert_eq!(
-            fs::read(dir.join("tsk.json.v2")).expect("read backup"),
+            fs::read(dir.join("tsk.json.v3")).expect("read backup"),
             b"existing backup",
             "the first backup of a given version is the one that matters"
         );
@@ -2620,7 +2777,7 @@ mod tests {
 
     #[test]
     fn load_refuses_a_higher_version_and_changes_nothing_in_the_state_dir() {
-        for (format_version, supported) in [(4u32, 2u32), (4, 3)] {
+        for (format_version, supported) in [(5u32, 3u32), (5, 4)] {
             let dir = temp_dir("format-higher");
             let _guard = TempDirGuard(dir.clone());
             let document = serde_json::json!({
@@ -2641,7 +2798,7 @@ mod tests {
             assert!(
                 matches!(
                     error,
-                    StoreError::UnsupportedFormat { found, supported: 2 } if found == format_version
+                    StoreError::UnsupportedFormat { found, supported: 3 } if found == format_version
                 ),
                 "{error}"
             );
@@ -2675,14 +2832,18 @@ mod tests {
         let dir = temp_dir("migration-fails");
         let _guard = TempDirGuard(dir.clone());
         let original = round_tripped_current_state("fragile");
-        let original_bytes = serde_json::to_vec_pretty(&original).expect("encode v2");
+        let original_bytes = serde_json::to_vec_pretty(&original).expect("encode v3");
         fs::create_dir_all(&dir).expect("mkdir");
-        fs::write(dir.join(STATE_FILE), &original_bytes).expect("seed v2 file");
+        fs::write(dir.join(STATE_FILE), &original_bytes).expect("seed v3 file");
         let before = dir_listing_with_bytes(&dir);
 
         let error = TaskStore::new(&dir)
-            .load_unlocked_supported(3, |document, from| {
-                migrate_with(document, from, &[migrate_v1_to_v2, failing_step])
+            .load_unlocked_supported(4, |document, from| {
+                migrate_with(
+                    document,
+                    from,
+                    &[migrate_v1_to_v2, migrate_v2_to_v3, failing_step],
+                )
             })
             .expect_err("a failing migration step must fail the load");
         assert!(error.to_string().contains("migration exploded"), "{error}");

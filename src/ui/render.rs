@@ -3607,7 +3607,7 @@ fn build_list_rows(
             && !matches!(model.overlay, QueueOverlay::ScopeDropdown { .. });
         // A long title wraps onto continuation lines indented under its own first
         // row; every painted line carries the task's hit target and selection.
-        let identifier = task.number.map(|number| format!("T{number}"));
+        let identifier = task.board_identifier();
         let lines = if rail {
             paint_rail_row_lines(task, identifier.as_deref(), selected, geo.row_width, 0)
         } else {

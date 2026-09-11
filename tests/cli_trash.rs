@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use tsk_tui::cli::{run_with, CliOutput};
-use tsk_tui::domain::{HumanStatus, TaskEventKind};
+use tsk_tui::domain::{HumanStatus, TaskEventKind, TaskScope};
 use tsk_tui::store::TaskStore;
 
 static TEMP_SEQ: AtomicU64 = AtomicU64::new(0);
@@ -299,4 +299,48 @@ fn list_deleted_skips_malformed_trash_lines() {
     assert_eq!(output.code, 0, "{}", output.stderr);
     assert!(output.stdout.contains("1 one"), "{}", output.stdout);
     assert!(!output.stdout.contains("torn"), "{}", output.stdout);
+}
+
+#[test]
+fn restore_notice_by_uuid_prints_n_id_and_does_not_panic() {
+    let dir = temp_state_dir("restore-notice");
+    let _guard = TempDirGuard(dir.clone());
+    assert_eq!(add_task(&dir, "ordinary").code, 0);
+
+    let store = TaskStore::new(&dir);
+    let mut state = store.load().expect("load");
+    let notice_id = state
+        .create_notice(
+            "announce.1",
+            "What's new in tsk",
+            Some("notes".into()),
+            HumanStatus::Ready,
+            TaskScope::Global,
+            Vec::new(),
+        )
+        .expect("notice");
+    let ordinary = state
+        .tasks()
+        .iter()
+        .find(|task| task.title == "ordinary")
+        .expect("ordinary")
+        .id;
+    state.soft_delete(notice_id).expect("soft delete notice");
+    state.complete(ordinary).expect("flush undo");
+    store.save(&state).expect("save");
+    assert_eq!(trash_line_count(&dir), 1);
+
+    let output = restore(&dir, &notice_id.to_string());
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    assert!(
+        output.stdout.contains("N1") && output.stdout.contains("What's new in tsk"),
+        "restore paints the notice id:\n{}",
+        output.stdout
+    );
+    let state = store.load().expect("reload");
+    let restored = state.get(notice_id).expect("live");
+    assert!(!restored.soft_deleted);
+    assert!(restored.is_notice());
+    assert_eq!(restored.number, None);
+    assert_eq!(restored.board_identifier().as_deref(), Some("N1"));
 }

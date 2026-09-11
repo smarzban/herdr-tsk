@@ -748,6 +748,7 @@ mod tests {
         Task {
             id: Uuid::from_u128(id),
             number: None,
+            notice: None,
             revision: Uuid::from_u128(id),
             merge_base_revision: None,
             title: format!("task-{id}"),
