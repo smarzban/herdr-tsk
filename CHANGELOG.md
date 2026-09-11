@@ -4,7 +4,7 @@
 
 ### Added
 
-- `tsk guide` prints the agent workflow, and `tsk setup <claude|pi|cursor|grok|codex|--skill-dir>` installs it as a skill. `tsk --help` ends with a pointer for agents.
+- `tsk guide` prints the agent workflow, and `tsk setup <claude|pi|cursor|grok|codex|opencode|--skill-dir>` installs it as a skill. `tsk --help` ends with a pointer for agents.
 - The installer adds `~/.local/bin` to PATH for Bash and Zsh.
 
 ### Fixed

@@ -240,11 +240,13 @@ Recent deletions may still be in the main store; use board undo until they move 
 ```sh
 tsk setup
 tsk setup herdr
+tsk setup agents --yes
 tsk setup pi
 tsk setup --skill-dir /path/to/skills
+tsk setup --detected-ids
 ```
 
-Bare `tsk setup` lists targets and writes nothing. Choose one target per call.
+On a TTY, bare `tsk setup` detects global agent skill roots and asks once to install or update the embedded skill for every detected agent. Without a TTY it prints guidance (and the list of named targets) and does not hang. `tsk setup --json` prints a detection report. `tsk setup --detected-ids` prints space-separated detected agent ids for installers.
 
 ### Herdr
 
@@ -261,18 +263,21 @@ Requires Herdr 0.9+ on PATH. Registers the installed binary and adds **prefix+t*
 | `cursor` | `~/.cursor/skills/` |
 | `grok` | `~/.grok/skills/` |
 | `codex` | `~/.agents/skills/` |
+| `opencode` | `~/.config/opencode/skills/` |
 | `--skill-dir <path>` | The supplied directory |
 
-Setup writes `tsk-cli/SKILL.md` under the selected directory.
+Setup writes `tsk-cli/SKILL.md` under the selected directory. Skill `version:` is independent of the crate version. A matching installed version exits 1 with `skill-exists`; a missing or different version updates without `--force`. `--force` always overwrites. `tsk setup agents --yes` installs or updates every detected agent without asking. Only global skill roots are offered (project-local roots are out of scope).
 
 | Option | Action |
 | --- | --- |
-| `--force` | Replace an existing skill |
-| `--json` | Return `outcome`, `target`, and `path` |
+| `--yes` | With `agents`, install/update detected agents without asking |
+| `--force` | Replace an existing skill even when versions match |
+| `--json` | Machine-readable outcome |
+| `--detected-ids` | Print detected agent ids (installer use) |
 
-Without `--force`, an existing skill returns `skill-exists` and exits 1. Symlinks at the skills root, skill directory, or file are refused. Herdr setup does not accept these agent options.
+Symlinks at the skills root, skill directory, or file are refused. Herdr setup does not accept these agent options.
 
-Setup exits 0 for success/help/list, 1 for setup failure, or 2 for invalid arguments.
+Setup exits 0 for success/help/list/detection, 1 for setup failure or `skill-exists`, or 2 for invalid arguments.
 
 ## guide
 

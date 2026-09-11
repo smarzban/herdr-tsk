@@ -19,6 +19,8 @@ brew install smarzban/tap/tsk
 
 Reopen your terminal if prompted, or run the printed `export` command.
 
+If Herdr is already installed, the curl installer asks whether to run `tsk setup herdr` when a terminal is available. When global agent skill roots are detected, it also asks once whether to install or update the tsk skill for those agents. After install it prints a short wrap-up: board-only when Herdr is absent; board plus `prefix+t` when you accept Herdr setup; board plus `tsk setup herdr` when you decline Herdr, or when CI / no TTY skips that ask; plus `tsk setup` when agent skill setup was declined or skipped. Homebrew stays noninteractive and prints the Herdr setup command as a caveat.
+
 ## Add to Herdr
 
 [Install Herdr](https://herdr.dev/docs/install/) first. Installed-binary setup requires Herdr 0.9+.
@@ -38,12 +40,13 @@ Use your configured Herdr prefix. [Herdr keyboard guide](https://herdr.dev/docs/
 ## Agent skill
 
 ```sh
+tsk setup
 tsk setup pi
 ```
 
-Use `claude`, `cursor`, `grok`, or `codex` instead of `pi` for another agent. Setup installs the CLI skill in that agent's user-level skills directory.
+On a TTY, bare `tsk setup` detects installed agents and asks once to install or update the skill. Use `claude`, `cursor`, `grok`, `codex`, or `opencode` instead of `pi` for a single named target. Setup installs the CLI skill in that agent's user-level skills directory.
 
-[Custom directories and overwrite options](/docs/cli/#setup).
+[Detection, version updates, and overwrite options](/docs/cli/#setup).
 
 ## First task
 
@@ -105,6 +108,22 @@ If the install directory is missing from PATH, the installer adds it to:
 
 The installer does not source these files. Symlinked, non-regular, or unwritable files are skipped with manual instructions. Other shells require manual PATH setup. Successful edits remain if another file cannot be updated.
 
+### Herdr prompt
+
+When `herdr` is on PATH after the binary is installed, the installer may ask to run plugin setup:
+
+- Interactive terminal (stdin TTY, or `/dev/tty` under `curl | sh`) using the default `~/.local/bin` destination: asks `[y/N]`. Yes runs the newly installed `tsk setup herdr`. An overridden `TSK_INSTALL_DIR` never executes the newly published binary; run `tsk setup` yourself after install.
+- `CI` set, or no usable TTY: skips the ask so the install never hangs.
+- Herdr absent: no Herdr prompt.
+
+The install always ends with a short wrap-up:
+
+- Setup accepted: open the board with `tsk`, or press `prefix+t` in Herdr.
+- Declined, CI/no-TTY skip, or setup failure: open the board with `tsk`, and run `tsk setup herdr` when ready.
+- Herdr absent: open the board with `tsk` only (no setup nudge).
+
+Setup failures do not undo the install. Homebrew does not run this prompt; use the formula caveat or run `tsk setup herdr` yourself.
+
 ## Herdr setup with an installed binary
 
 Setup registers bundled plugin files using the installed executable. No source checkout is needed.
@@ -115,7 +134,7 @@ Setup registers bundled plugin files using the installed executable. No source c
 - Rerunning setup updates the registration without duplicating bindings.
 - Use the stable command on PATH, not a versioned Homebrew Cellar path.
 
-Installation alone does not update an existing plugin registration. [Setup recovery and configuration](https://github.com/smarzban/herdr-tsk/blob/main/packaging/README.md#herdr-setup-and-upgrades).
+Installation alone does not update an existing plugin registration unless you answer yes to the curl installer's Herdr prompt. [Setup recovery and configuration](https://github.com/smarzban/herdr-tsk/blob/main/packaging/README.md#herdr-setup-and-upgrades).
 
 ## Manual archives
 

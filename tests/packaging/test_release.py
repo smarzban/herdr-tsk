@@ -68,6 +68,7 @@ class ReleaseTests(unittest.TestCase):
         self.assertIn('bin.install "tsk"', formula)
         self.assertIn('def caveats', formula)
         self.assertIn('tsk setup herdr', formula)
+        self.assertIn('Homebrew installs are noninteractive', formula)
         self.assertIn('TSK_STATE_DIR', formula)
 
     def test_formula_platform_blocks_pair_the_correct_url_and_digest(self):

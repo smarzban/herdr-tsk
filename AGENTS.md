@@ -285,7 +285,7 @@ If `HERDR_ENV` is unset, say that live smoke was not run.
   project refuses with error code `project-archived`. `tsk status` accepts ready, started
   (or start), blocked, review, or done. `tsk steps` also renames and removes.
   `tsk guide` prints the embedded `skills/tsk-cli/SKILL.md` body (also published at
-  `/docs/agents/`, generated at site build). `tsk setup <claude|pi|cursor|codex|--skill-dir p>`
+  `/docs/agents/`, generated at site build). `tsk setup <claude|pi|cursor|grok|codex|opencode|--skill-dir p>`
   writes that skill into the agent's skills dir (`src/setup_agent.rs`); bare `tsk setup` lists
   and writes nothing. `tsk --help` ends with a two-line agent footer.
 - `~/.tsk` must live on a local disk (flock plus rename-based replace); synced folders are

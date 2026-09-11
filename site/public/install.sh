@@ -130,3 +130,133 @@ case ":${PATH:-}:" in
         fi
         ;;
 esac
+
+# Offer Herdr plugin registration when the host binary is already on PATH.
+# Curl|sh often has a non-TTY stdin; prefer /dev/tty so an interactive terminal can still answer.
+# CI and headless installs skip the ask so they never hang on a prompt.
+# Probe /dev/tty in a child shell: a failed `exec <>/dev/tty` in this shell would exit under set -e.
+# herdr_wrap selects the install-completed closing lines (not mid-stream coaching):
+#   board         — Herdr absent
+#   board_prefix  — setup ran successfully (prefix+t is available)
+#   board_setup   — declined, CI/no-TTY skip, or setup failed (nudge tsk setup herdr)
+herdr_wrap=board
+# skills_wrap: empty | nudge — print "Set up agent skills with tsk setup." when agents were
+# detected but the batch ask was declined, skipped (CI/no-TTY), or agents --yes failed.
+skills_wrap=
+tsk_bin=$install_dir/tsk
+# An overridden destination can be a shared directory. Do not execute a newly
+# published path there: the user can run `tsk setup` after choosing the directory.
+post_install_setup=1
+if [ -n "${TSK_INSTALL_DIR:-}" ]; then
+    post_install_setup=0
+fi
+
+maybe_setup_herdr() {
+    command -v herdr >/dev/null 2>&1 || return 0
+    [ "$post_install_setup" = 1 ] || { herdr_wrap=board_setup; return 0; }
+    [ -x "$tsk_bin" ] || return 0
+    setup_cmd=$(printf '%s setup herdr' "$tsk_bin")
+    if [ -n "${CI:-}" ]; then
+        herdr_wrap=board_setup
+        return 0
+    fi
+    answer=
+    setup_stdin=
+    if [ -t 0 ]; then
+        printf 'Herdr detected. Set up the Herdr plugin now? [y/N] ' >&2
+        read -r answer || true
+    elif sh -c 'exec <>/dev/tty' 2>/dev/null; then
+        printf 'Herdr detected. Set up the Herdr plugin now? [y/N] ' >&2
+        read -r answer </dev/tty || true
+        setup_stdin=/dev/tty
+    else
+        herdr_wrap=board_setup
+        return 0
+    fi
+    case $answer in
+        y|Y|yes|YES)
+            printf 'Running %s...\n' "$setup_cmd"
+            setup_status=0
+            if [ -n "$setup_stdin" ]; then
+                "$tsk_bin" setup herdr <"$setup_stdin" || setup_status=$?
+            else
+                "$tsk_bin" setup herdr || setup_status=$?
+            fi
+            if [ "$setup_status" -ne 0 ]; then
+                printf 'tsk setup herdr failed; install succeeded.\n' >&2
+                herdr_wrap=board_setup
+            else
+                herdr_wrap=board_prefix
+            fi
+            ;;
+        *)
+            herdr_wrap=board_setup
+            ;;
+    esac
+}
+
+maybe_setup_agent_skills() {
+    [ "$post_install_setup" = 1 ] || return 0
+    [ -x "$tsk_bin" ] || return 0
+    detected_ids=
+    detected_ids=$("$tsk_bin" setup --detected-ids 2>/dev/null) || detected_ids=
+    detected_ids=$(printf '%s' "$detected_ids" | tr -s '[:space:]' ' ' | sed 's/^ *//;s/ *$//')
+    [ -n "$detected_ids" ] || return 0
+
+    if [ -n "${CI:-}" ]; then
+        skills_wrap=nudge
+        return 0
+    fi
+
+    answer=
+    setup_stdin=
+    if [ -t 0 ]; then
+        printf 'Install or update the tsk skill for %s? [y/N] ' "$detected_ids" >&2
+        read -r answer || true
+    elif sh -c 'exec <>/dev/tty' 2>/dev/null; then
+        printf 'Install or update the tsk skill for %s? [y/N] ' "$detected_ids" >&2
+        read -r answer </dev/tty || true
+        setup_stdin=/dev/tty
+    else
+        skills_wrap=nudge
+        return 0
+    fi
+    case $answer in
+        y|Y|yes|YES)
+            printf 'Running %s setup agents --yes...\n' "$tsk_bin"
+            setup_status=0
+            if [ -n "$setup_stdin" ]; then
+                "$tsk_bin" setup agents --yes <"$setup_stdin" || setup_status=$?
+            else
+                "$tsk_bin" setup agents --yes || setup_status=$?
+            fi
+            if [ "$setup_status" -ne 0 ]; then
+                printf 'tsk setup agents --yes failed; install succeeded.\n' >&2
+                skills_wrap=nudge
+            fi
+            ;;
+        *)
+            skills_wrap=nudge
+            ;;
+    esac
+}
+
+maybe_setup_herdr
+maybe_setup_agent_skills
+
+printf 'tsk install completed.\n'
+case $herdr_wrap in
+    board_prefix)
+        printf 'In a project directory run tsk to open the board, or press prefix+t to start tsk.\n'
+        ;;
+    board_setup)
+        printf 'In a project directory run tsk to open the board.\n'
+        printf 'Set up the Herdr plugin with tsk setup herdr.\n'
+        ;;
+    *)
+        printf 'In a project directory run tsk to open the board.\n'
+        ;;
+esac
+if [ "$skills_wrap" = nudge ]; then
+    printf 'Set up agent skills with tsk setup.\n'
+fi

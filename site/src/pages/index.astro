@@ -633,6 +633,9 @@ and ask me before installing.</pre>
               </div>
               <p class="install-note">
                 If prompted, reopen your terminal or run the installer's printed <code>export</code> command.
+                When Herdr is already installed, an interactive curl install may ask to run <code>tsk setup herdr</code>;
+                when agent skill roots are detected it also asks once to install the tsk skill.
+                The wrap-up then points at the board (<code>prefix+t</code> after Herdr setup, or <code>tsk setup herdr</code> / <code>tsk setup</code> when those asks are skipped).
                 Open the board with <code>tsk</code>. Add a task with <code>tsk add -t "your task title"</code>.
                 <a href="/docs/install/">Installation details</a>.
               </p>
@@ -645,7 +648,7 @@ and ask me before installing.</pre>
                 <button type="button" class="copy" data-copy aria-label="Copy Herdr setup commands">copy</button>
               </div>
               <p class="install-note">
-                After installing, connect the same binary to Herdr. Press <code>prefix+t</code> to open
+                After installing, connect the same binary to Herdr (the curl installer may offer this when Herdr is already present). Press <code>prefix+t</code> to open
                 the board, or <code>prefix+a</code> to add a task. Setup asks before replacing conflicting shortcuts.
               </p>
             </div>

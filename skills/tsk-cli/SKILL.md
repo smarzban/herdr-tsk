@@ -1,6 +1,7 @@
 ---
 name: tsk-cli
 description: Use when asked to add, list, edit, or change status of Tasks board items. Use `tsk add`, `tsk list`, `tsk status`, `tsk edit`, and `tsk steps`, never the TUI.
+version: 1.0.0
 ---
 
 # tsk CLI
