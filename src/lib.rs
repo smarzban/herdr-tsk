@@ -1,5 +1,6 @@
 //! tsk library root.
 
+pub mod announcements;
 pub mod app;
 pub mod board_pane;
 pub mod capture;

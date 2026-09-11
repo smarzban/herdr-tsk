@@ -1,0 +1,20 @@
+# Release announcements, compiled into the binary (src/announcements.rs).
+#
+# One entry per release worth a desk notice. Append at the end with the next id;
+# ids increase and are never reused. An install records the highest id it has seen,
+# so an upgrade delivers every newer entry as one "What's new in tsk" row. A fresh
+# install records the highest bundled id and receives none of these.
+#
+# The changelog link belongs in `notes`, never in `title`.
+
+[[announcement]]
+id = 1
+title = "Guides and release notes on your desk"
+notes = """
+Your desk now carries `N` rows: starter guides on a first install, and a
+what's-new note like this one after an upgrade. They sit like tasks and leave
+like tasks: `ctrl+d`, `ctrl+f`, or `ctrl+x` clears one for good. `tsk list`
+never shows them to agents.
+
+Changelog: https://github.com/smarzban/herdr-tsk/releases
+"""

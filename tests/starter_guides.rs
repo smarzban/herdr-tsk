@@ -1,5 +1,6 @@
-//! Starter guides on the open path: the full board seeds them once, quick capture never
-//! does, and a dismissed guide is recorded so no later open brings it back.
+//! Notice seeds on the open path: the full board seeds the guides once and records the
+//! bundled announcements as seen, quick capture never does, and a dismissed guide is
+//! recorded so no later open brings it back.
 #![cfg(unix)]
 #[path = "support/pty.rs"]
 mod pty;
@@ -10,6 +11,7 @@ use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::time::Duration;
 
+use tsk_tui::announcements;
 use tsk_tui::app::{load_board_for_quick_capture, load_board_model};
 use tsk_tui::delivery;
 use tsk_tui::domain::{DomainState, HumanStatus, ProvenanceOrigin, Task, TaskScope};
@@ -99,6 +101,25 @@ fn full_board_open_seeds_the_guides_once_beside_existing_tasks() {
 
     let _ = load_board_model().expect("second open");
     assert_eq!(notices(&store.load().expect("reload")).len(), 5);
+}
+
+#[test]
+fn a_fresh_full_board_open_records_the_bundled_announcements_without_seeding_them() {
+    let _lock = env_lock();
+    suppress_background_fetch();
+    let env = StateDirEnv::set("announcements");
+    let bundled = announcements::catalog().expect("bundled catalog");
+    let newest = bundled.last().expect("at least one entry").id;
+
+    let _ = load_board_model().expect("first open");
+    let state = TaskStore::new(&env.dir).load().expect("load");
+    assert_eq!(notices(&state).len(), 5, "guides only");
+    assert!(notices(&state)
+        .iter()
+        .all(|task| task.title != announcements::TITLE));
+    let record = delivery::load(&env.dir);
+    assert_eq!(record.announcement_watermark, newest);
+    assert_eq!(record.guides, catalog_ids());
 }
 
 #[test]
