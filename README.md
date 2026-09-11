@@ -71,8 +71,8 @@ user-level skills directory.
 
 Run `tsk`, or press **prefix+t** in Herdr.
 
-**No project setup needed.** Open tsk in any directory and add your first task.
-Inside Git, the repository root becomes the project; outside Git, the current directory does.
+**No project setup needed.** Inside Git, tsk opens the repository project. Outside
+Git, it opens your desk and keeps the current directory ready on the project tab.
 
 ### Add a task
 

@@ -199,6 +199,46 @@ fn home_board_quick_add_keeps_the_invocation_default_scope() {
 }
 
 #[test]
+fn non_git_desk_quick_add_stays_on_desk_until_the_directory_project_is_opened() {
+    let mut domain = DomainState::new();
+    let outside = PathBuf::from("/work/outside-git");
+    let snap = InvocationSnapshot {
+        default_scope: TaskScope::Global,
+        this_repo: Some(outside.clone()),
+        title_prefill: None,
+        provenance: ProvenanceOrigin::Capture,
+    };
+    let mut model = BoardModel::from_domain_for_snapshot(&domain, &snap);
+
+    open(&mut domain, &mut model, &snap);
+    type_title(&mut domain, &mut model, "desk task");
+    assert_eq!(
+        apply(&mut domain, &mut model, BoardIntent::QuickAddSave, None),
+        IntentOutcome::Persist
+    );
+    model.sync_from_domain(&domain);
+    assert_eq!(
+        domain.tasks().last().expect("desk task").scope,
+        TaskScope::Global
+    );
+
+    model.set_selected_project(Some(outside.clone()));
+    open(&mut domain, &mut model, &snap);
+    type_title(&mut domain, &mut model, "directory task");
+    assert_eq!(
+        apply(&mut domain, &mut model, BoardIntent::QuickAddSave, None),
+        IntentOutcome::Persist
+    );
+    model.sync_from_domain(&domain);
+    assert_eq!(
+        domain.tasks().last().expect("directory task").scope,
+        TaskScope::Project {
+            path: outside.to_string_lossy().into_owned()
+        }
+    );
+}
+
+#[test]
 fn quick_add_project_token_overrides_the_selected_project() {
     let mut domain = DomainState::new();
     create_project_fixture(&mut domain, "/repos/project-x");

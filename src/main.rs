@@ -68,7 +68,7 @@ fn resolve_context_main() -> ExitCode {
     };
     let snapshot = tsk_tui::context::build_snapshot(&raw, std::path::PathBuf::new());
     let project = snapshot.this_repo.clone();
-    if let Err(error) = tsk_tui::reopen::ReopenRequest::new(project.clone())
+    if let Err(error) = tsk_tui::reopen::ReopenRequest::from_snapshot(&snapshot)
         .write(&tsk_tui::store::default_state_dir())
     {
         eprintln!("tsk --resolve-context: {error}");

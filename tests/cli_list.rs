@@ -915,7 +915,7 @@ fn list_equals_state_dir_form_accepts_dash_leading_value() {
 }
 
 #[test]
-fn bare_list_outside_a_repo_uses_directory_project_scope() {
+fn bare_list_outside_a_repo_stays_on_desk_while_the_directory_is_addressable() {
     let _env = env_lock();
     let outside = temp_state_dir("outside-repo");
     let _context = EnvironmentGuard::context_for(&outside);
@@ -948,22 +948,23 @@ fn bare_list_outside_a_repo_uses_directory_project_scope() {
     assert_eq!(output.code, 0);
     let rows: Vec<serde_json::Value> = serde_json::from_str(&output.stdout).expect("JSON rows");
     assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0]["title"], "directory task");
-    assert_eq!(rows[0]["project"], outside.to_string_lossy().as_ref());
+    assert_eq!(rows[0]["title"], "global task");
+    assert!(rows[0]["project"].is_null());
 
-    let desk = list(&[
+    let project = list(&[
         "tsk".into(),
         "list".into(),
-        "--desk".into(),
+        "--project".into(),
+        outside.to_string_lossy().into_owned(),
         "--json".into(),
         "--state-dir".into(),
         state_dir_arg(&dir),
     ]);
-    assert_eq!(desk.code, 0);
-    let rows: Vec<serde_json::Value> = serde_json::from_str(&desk.stdout).expect("desk JSON");
+    assert_eq!(project.code, 0);
+    let rows: Vec<serde_json::Value> = serde_json::from_str(&project.stdout).expect("project JSON");
     assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0]["title"], "global task");
-    assert!(rows[0]["project"].is_null());
+    assert_eq!(rows[0]["title"], "directory task");
+    assert_eq!(rows[0]["project"], outside.to_string_lossy().as_ref());
 
     let _ = std::fs::remove_dir_all(outside);
     let _ = std::fs::remove_dir_all(dir);

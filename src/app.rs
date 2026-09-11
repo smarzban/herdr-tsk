@@ -104,7 +104,7 @@ fn load_board_inner(
     }
     let state = store.load()?;
     let snapshot = load_snapshot();
-    let mut model = BoardModel::from_domain(&state, snapshot.this_repo.clone());
+    let mut model = BoardModel::from_domain_for_snapshot(&state, &snapshot);
     if full_board_open {
         model.offer_launch_card(&state, &snapshot);
     }
@@ -869,7 +869,7 @@ pub fn apply_reopen_request(
         }
         return false;
     }
-    if !model.apply_reopen_project(request.project.clone()) {
+    if !model.apply_reopen_context(request.project.clone(), request.open_project) {
         return false;
     }
     watch.acknowledge();

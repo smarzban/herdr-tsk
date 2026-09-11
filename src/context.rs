@@ -1,7 +1,7 @@
 //! Context Resolver: host context → invocation snapshot.
 //!
-//! Parses `HERDR_PLUGIN_CONTEXT_JSON`, uses the nearest `.git` root or the current directory,
-//! and keeps only the fields that affect current capture behavior.
+//! Parses `HERDR_PLUGIN_CONTEXT_JSON`, finds the nearest `.git` root, and keeps the
+//! current directory as a project candidate outside Git.
 
 use std::env;
 use std::path::{Path, PathBuf};
@@ -34,7 +34,7 @@ pub struct RawHostContext {
 pub struct InvocationSnapshot {
     /// Default capture scope before user override.
     pub default_scope: TaskScope,
-    /// Invocation project (Git root or current directory); also used as board "this repo".
+    /// Project candidate (Git root or current directory); also used as board slot 2.
     pub this_repo: Option<PathBuf>,
     /// Title pre-fill when selected text is present.
     pub title_prefill: Option<String>,
@@ -84,21 +84,20 @@ pub fn resolve_repo_root(cwd: &Path) -> Option<PathBuf> {
 
 /// Build an [`InvocationSnapshot`] from raw host context and a process-cwd fallback.
 ///
-/// Outside Git, the invocation directory itself is the project.
+/// Outside Git, Desk remains the default while the invocation directory is available as a project.
 pub fn build_snapshot(raw: &RawHostContext, fallback_cwd: impl AsRef<Path>) -> InvocationSnapshot {
     let fallback = fallback_cwd.as_ref();
     let cwd = raw
         .effective_cwd()
         .unwrap_or_else(|| fallback.to_path_buf());
 
-    let this_repo =
-        resolve_repo_root(&cwd).or_else(|| (!cwd.as_os_str().is_empty()).then_some(cwd));
-    let default_scope = match &this_repo {
-        Some(root) => TaskScope::Project {
-            path: root.to_string_lossy().into_owned(),
-        },
-        None => TaskScope::Global,
-    };
+    let repo_root = resolve_repo_root(&cwd);
+    let this_repo = repo_root
+        .clone()
+        .or_else(|| (!cwd.as_os_str().is_empty()).then_some(cwd));
+    let default_scope = repo_root.map_or(TaskScope::Global, |root| TaskScope::Project {
+        path: root.to_string_lossy().into_owned(),
+    });
 
     let selected = non_empty(raw.selected_text.as_deref()).map(str::to_string);
     let (title_prefill, provenance) = match &selected {
@@ -189,7 +188,7 @@ mod tests {
     }
 
     #[test]
-    fn cwd_with_no_git_ancestors_defaults_to_directory_project() {
+    fn cwd_with_no_git_ancestors_defaults_to_desk_with_a_directory_project_candidate() {
         let root = temp_dir("nongit");
         let _guard = TempDirGuard(root.clone());
         // No git init.
@@ -202,12 +201,7 @@ mod tests {
         };
         let snap = build_snapshot(&raw, PathBuf::from("/tmp/fallback-unused"));
 
-        assert_eq!(
-            snap.default_scope,
-            TaskScope::Project {
-                path: nested.to_string_lossy().into_owned()
-            }
-        );
+        assert_eq!(snap.default_scope, TaskScope::Global);
         assert_eq!(snap.this_repo.as_deref(), Some(nested.as_path()));
         assert_eq!(snap.provenance, ProvenanceOrigin::Capture);
         assert!(snap.title_prefill.is_none());

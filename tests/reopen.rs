@@ -150,7 +150,9 @@ fn resolve_context_publishes_repo_and_directory_projects_without_using_process_c
         repo.display().to_string()
     );
     let request = fs::read_to_string(dir.join("reopen.json")).expect("request");
-    assert!(request.contains(&repo.display().to_string()));
+    let request: serde_json::Value = serde_json::from_str(&request).unwrap();
+    assert_eq!(request["project"], repo.to_string_lossy().as_ref());
+    assert_eq!(request["open_project"], true);
 
     // A host invocation outside Git selects that directory, even though this
     // test process itself runs from a repository.
@@ -185,7 +187,18 @@ fn resolve_context_publishes_repo_and_directory_projects_without_using_process_c
     let request = fs::read_to_string(dir.join("reopen.json")).expect("directory request");
     let request: serde_json::Value = serde_json::from_str(&request).unwrap();
     assert_eq!(request["project"], outside.to_string_lossy().as_ref());
+    assert_eq!(request["open_project"], false);
     let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn non_git_reopen_keeps_the_directory_in_slot_two_and_opens_desk() {
+    let mut model = BoardModel::from_domain(&DomainState::new(), None);
+    let outside = PathBuf::from("/work/outside-git");
+
+    assert!(model.apply_reopen_context(Some(outside.clone()), false));
+    assert_eq!(model.nav_tab(), tsk_tui::ui::queue::NavTab::Desk);
+    assert_eq!(model.selected_project(), Some(outside.as_path()));
 }
 
 #[cfg(unix)]
