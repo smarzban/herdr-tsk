@@ -116,6 +116,44 @@ fn launch_in_an_archived_project_paints_the_two_choice_card_before_any_key() {
 }
 
 #[test]
+fn archived_non_git_directory_opens_desk_with_the_existing_archive_card() {
+    let dir = temp_dir("non-git-archived");
+    let store = TaskStore::new(&dir);
+    let mut state = DomainState::new();
+    state
+        .create(
+            "archived directory task",
+            None,
+            TaskScope::Project {
+                path: PROJ.to_string(),
+            },
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create task");
+    state.archive_project(PROJ).expect("archive project");
+    store.save(&state).expect("save archived project");
+    let state = store.load().expect("reload");
+    let snapshot = InvocationSnapshot {
+        default_scope: TaskScope::Global,
+        this_repo: Some(PathBuf::from(PROJ)),
+        title_prefill: None,
+        provenance: ProvenanceOrigin::Capture,
+    };
+    let mut model = BoardModel::from_domain_for_snapshot(&state, &snapshot);
+
+    assert_eq!(model.nav_tab(), tsk_tui::ui::queue::NavTab::Desk);
+    assert_eq!(
+        model.selected_project(),
+        None,
+        "archived projects remain outside live navigation"
+    );
+    assert!(model.offer_launch_card(&state, &snapshot));
+    assert_eq!(model.input_mode(), BoardInputMode::LaunchCard);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn no_card_when_the_default_is_desk_or_an_unarchived_project() {
     // Unarchived project default: no card.
     let (_store, _state, model, dir) = setup(false);

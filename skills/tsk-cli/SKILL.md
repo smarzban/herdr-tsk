@@ -61,7 +61,7 @@ reports it in `existing` with its `i`, `id`, and `title`.
 
 `tsk list` defaults to ready, started, blocked, and review tasks in the
 Git repo root when inside a repository, otherwise on your desk. The current directory
-outside Git remains available through `-p`/`--project <scope>`. Use that option
+outside Git remains available through its full path with `-p`/`--project <scope>`. Use that option
 for the same basename-or-path resolution as add, `--desk` for desk tasks, or `--all`
 for every scope. `--thread <name>` normalizes then filters tasks after scope
 selection. An invalid thread name is a usage error (exit 2), not an empty result.

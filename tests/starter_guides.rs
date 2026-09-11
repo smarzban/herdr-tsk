@@ -9,11 +9,15 @@ use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::time::Duration;
 
 use tsk_tui::announcements;
-use tsk_tui::app::{load_board_for_quick_capture, load_board_model};
+use tsk_tui::app::{load_board, load_board_for_quick_capture, load_board_model};
+use tsk_tui::context::{build_snapshot, RawHostContext, CONTEXT_JSON_ENV};
 use tsk_tui::delivery;
 use tsk_tui::domain::{DomainState, HumanStatus, ProvenanceOrigin, Task, TaskScope};
 use tsk_tui::guides::CATALOG;
 use tsk_tui::store::TaskStore;
+use tsk_tui::ui::board::{apply_intent, IntentOutcome};
+use tsk_tui::ui::input::BoardIntent;
+use tsk_tui::ui::queue::NavTab;
 use tsk_tui::update::suppress_background_fetch;
 
 static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -46,6 +50,26 @@ impl Drop for StateDirEnv {
             None => std::env::remove_var("TSK_STATE_DIR"),
         }
         let _ = fs::remove_dir_all(self.dir.parent().unwrap_or(&self.dir));
+    }
+}
+
+struct ContextEnv(Option<std::ffi::OsString>);
+
+impl ContextEnv {
+    fn set(cwd: &std::path::Path) -> Self {
+        let previous = std::env::var_os(CONTEXT_JSON_ENV);
+        let context = serde_json::json!({"focused_pane_cwd": cwd}).to_string();
+        std::env::set_var(CONTEXT_JSON_ENV, context);
+        Self(previous)
+    }
+}
+
+impl Drop for ContextEnv {
+    fn drop(&mut self) {
+        match self.0.take() {
+            Some(value) => std::env::set_var(CONTEXT_JSON_ENV, value),
+            None => std::env::remove_var(CONTEXT_JSON_ENV),
+        }
     }
 }
 
@@ -135,6 +159,59 @@ fn a_fresh_full_board_open_records_the_bundled_announcements_without_seeding_the
     let record = delivery::load(&env.dir);
     assert_eq!(record.announcement_watermark, newest);
     assert_eq!(record.guides, catalog_ids());
+}
+
+#[test]
+fn non_git_full_board_open_keeps_the_directory_in_slot_two_and_captures_on_desk() {
+    let _lock = env_lock();
+    suppress_background_fetch();
+    let env = StateDirEnv::set("non-git-board");
+    let outside = env.dir.parent().unwrap().join("outside");
+    fs::create_dir_all(&outside).expect("outside directory");
+    let _context = ContextEnv::set(&outside);
+
+    let (_store, mut state, mut model) = load_board().expect("full board open");
+    assert_eq!(model.nav_tab(), NavTab::Desk);
+    assert_eq!(model.selected_project(), Some(outside.as_path()));
+
+    let snapshot = build_snapshot(
+        &RawHostContext {
+            focused_pane_cwd: Some(outside.to_string_lossy().into_owned()),
+            ..RawHostContext::default()
+        },
+        PathBuf::new(),
+    );
+    assert_eq!(
+        apply_intent(
+            &mut state,
+            &mut model,
+            BoardIntent::OpenCapture,
+            Some(&snapshot),
+        )
+        .expect("open quick add"),
+        IntentOutcome::None
+    );
+    apply_intent(
+        &mut state,
+        &mut model,
+        BoardIntent::QuickAddInsertText("desk capture".into()),
+        None,
+    )
+    .expect("type title");
+    assert_eq!(
+        apply_intent(&mut state, &mut model, BoardIntent::QuickAddSave, None)
+            .expect("save quick add"),
+        IntentOutcome::Persist
+    );
+    assert_eq!(
+        state
+            .tasks()
+            .iter()
+            .find(|task| task.title == "desk capture")
+            .expect("saved task")
+            .scope,
+        TaskScope::Global
+    );
 }
 
 #[test]

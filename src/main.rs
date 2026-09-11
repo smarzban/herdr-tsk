@@ -75,7 +75,10 @@ fn resolve_context_main() -> ExitCode {
         return ExitCode::from(1);
     }
     if let Some(project) = project {
-        println!("{}", project.display());
+        println!(
+            "{}",
+            tsk_tui::ui::terminal_text(&project.display().to_string())
+        );
     }
     ExitCode::SUCCESS
 }

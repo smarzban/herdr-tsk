@@ -213,6 +213,13 @@ mod tests {
     }
 
     #[test]
+    fn empty_host_and_fallback_context_keeps_desk_without_a_project_candidate() {
+        let snap = build_snapshot(&RawHostContext::default(), PathBuf::new());
+        assert_eq!(snap.default_scope, TaskScope::Global);
+        assert_eq!(snap.this_repo, None);
+    }
+
+    #[test]
     fn selected_text_prefills_title_and_sets_selection_origin() {
         let raw = RawHostContext {
             cwd: Some("/tmp/no-git-here-hopefully".into()),

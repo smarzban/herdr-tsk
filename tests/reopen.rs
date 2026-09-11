@@ -192,6 +192,45 @@ fn resolve_context_publishes_repo_and_directory_projects_without_using_process_c
 }
 
 #[test]
+fn resolve_context_escapes_control_characters_in_the_printed_project_candidate() {
+    use std::io::Write;
+
+    let dir = state_dir();
+    let candidate = dir.join("outside\n\u{1b}]52;clipboard\u{7}");
+    let binary = env!("CARGO_BIN_EXE_tsk");
+    let mut child = Command::new(binary)
+        .arg("--resolve-context")
+        .env("TSK_STATE_DIR", &dir)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("resolve unsafe directory context");
+    child
+        .stdin
+        .take()
+        .expect("stdin")
+        .write_all(
+            format!(
+                r#"{{"focused_pane_cwd":{}}}"#,
+                serde_json::to_string(&candidate).unwrap()
+            )
+            .as_bytes(),
+        )
+        .expect("context");
+
+    let output = child.wait_with_output().expect("output");
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("UTF-8 output");
+    assert!(!stdout.contains('\n') || stdout.ends_with('\n') && stdout.matches('\n').count() == 1);
+    assert!(!stdout.contains('\u{1b}'));
+    assert!(!stdout.contains('\u{7}'));
+    assert!(stdout.contains(r"\u{000a}"));
+    assert!(stdout.contains(r"\u{001b}"));
+    assert!(stdout.contains(r"\u{0007}"));
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
 fn non_git_reopen_keeps_the_directory_in_slot_two_and_opens_desk() {
     let mut model = BoardModel::from_domain(&DomainState::new(), None);
     let outside = PathBuf::from("/work/outside-git");
