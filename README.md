@@ -63,7 +63,7 @@ tsk setup
 ```
 
 On a TTY that detects agents once and asks to install. Or name one agent
-(`pi`, `claude`, `cursor`, `grok`, `codex`, or `opencode`) to install into its
+(`pi`, `omp`, `claude`, `cursor`, `grok`, `codex`, or `opencode`) to install into its
 user-level skills directory.
 [Other skill directories and setup options](https://gettsk.sh/docs/cli/#setup).
 
