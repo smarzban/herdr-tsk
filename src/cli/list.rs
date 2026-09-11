@@ -241,6 +241,7 @@ pub fn run(input: ListInput) -> Result<ListResult, ListError> {
     let mut rows = domain
         .tasks()
         .iter()
+        .filter(|task| !task.is_notice())
         .filter(|task| scope.as_ref().is_none_or(|scope| task.scope == *scope))
         .filter(|task| {
             input
@@ -287,7 +288,8 @@ pub fn run(input: ListInput) -> Result<ListResult, ListError> {
 
 /// `--deleted` listing: live soft-deleted tasks plus trash entries, deduped by id
 /// with the live copy winning, ordered by `deleted_at` descending. Trash entries
-/// render exactly like live rows and keep their `T<n>` number.
+/// render exactly like live rows and keep their `T<n>` number. Notices are skipped
+/// in both places.
 fn deleted_rows(
     store: &TaskStore,
     domain: &crate::domain::DomainState,
@@ -299,7 +301,8 @@ fn deleted_rows(
         .load_trash()
         .map_err(|error| ListError::Store(error.to_string()))?;
     let in_scope = |task: &crate::domain::Task| {
-        scope.as_ref().is_none_or(|scope| task.scope == *scope)
+        !task.is_notice()
+            && scope.as_ref().is_none_or(|scope| task.scope == *scope)
             && thread.is_none_or(|thread| task.thread.as_deref() == Some(thread))
     };
     let mut dated: Vec<(std::time::SystemTime, ListRow)> = domain

@@ -620,8 +620,8 @@ pub fn trash_usage(reason: &str) -> CliOutput {
 pub fn trash_restored(result: TrashRestoreResult) -> CliOutput {
     CliOutput {
         stdout: format!(
-            "restored T{} {}\n",
-            result.number,
+            "restored {} {}\n",
+            result.identifier,
             terminal_text(&result.title)
         ),
         stderr: String::new(),

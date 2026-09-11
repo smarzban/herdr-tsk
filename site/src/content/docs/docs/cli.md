@@ -47,6 +47,8 @@ Data commands accept `--state-dir <dir>`. Setup and guide do not use that flag.
 
 `T12`, `t12`, `12`, and a task UUID identify the same task. Direct lookup ignores the current project.
 
+Board notice tasks paint as `N1`… (starter tasks and `What's new in tsk`). Those ids are board-only: the CLI does not accept `N1`, and default `tsk list` omits them. Agents ignore them.
+
 ### Scope
 
 Without a scope flag, `add` and filtered `list` use the launch repository, or the current directory outside Git. Commands addressed to a task ignore that default.
@@ -136,7 +138,7 @@ tsk list [<task>] [-p <project> | --desk | --all] [--thread <name>] [--done | --
 
 | Filter | Result |
 | --- | --- |
-| Default | Ready, started, blocked, and review tasks; excludes archived and deleted work |
+| Default | Ready, started, blocked, and review tasks; excludes archived, deleted, and notice (`N`) rows |
 | `--done` | Completed tasks |
 | `--archived` | Individually archived tasks and tasks in archived projects, across statuses |
 | `--deleted` | Deleted tasks in the main store and trash, newest first |

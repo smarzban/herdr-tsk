@@ -40,6 +40,18 @@ pub struct Step {
     pub done: bool,
 }
 
+/// Marks a human-only notice row. A notice never receives a `T` number; the board
+/// paints it as `N{number}` and the CLI never lists or addresses it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Notice {
+    /// Stable catalog key the seeder uses to recognise a notice it already delivered.
+    pub catalog_id: String,
+    /// Board-only public id. Absent until the locked persistence boundary assigns it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub number: Option<u64>,
+}
+
 /// One unit of intended work.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -48,6 +60,9 @@ pub struct Task {
     /// Store-global human task number. Absent until the locked persistence boundary assigns it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub number: Option<u64>,
+    /// Present on notice rows only; such a task has no `number`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notice: Option<Notice>,
     /// Opaque semantic revision used to guard concurrent operations.
     pub revision: Uuid,
     /// Revision observed before an in-memory mutation. It is transient save intent carried to
@@ -124,7 +139,11 @@ fn record_mutation(task: &mut Task, kind: TaskEventKind) {
 }
 
 /// Document version written by this binary.
-pub const STORE_FORMAT_VERSION: u32 = 2;
+pub const STORE_FORMAT_VERSION: u32 = 3;
+
+fn default_next_notice_number() -> u64 {
+    1
+}
 
 /// One per-project record, keyed by the project's scope path. Lazy: a project
 /// appears in the map only while it is archived; the set of projects the board
@@ -140,6 +159,20 @@ pub struct ProjectRecord {
 const TRASH_AFTER: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 
 impl Task {
+    pub fn is_notice(&self) -> bool {
+        self.notice.is_some()
+    }
+
+    /// The painted public id: `N{n}` for a numbered notice, `T{n}` for a numbered
+    /// task, none until the persistence boundary assigns one.
+    pub fn board_identifier(&self) -> Option<String> {
+        match (&self.notice, self.number) {
+            (Some(notice), _) => notice.number.map(|number| format!("N{number}")),
+            (None, Some(number)) => Some(format!("T{number}")),
+            (None, None) => None,
+        }
+    }
+
     /// The `at` of the last `soft_deleted` history event, if any.
     pub fn soft_deleted_at(&self) -> Option<SystemTime> {
         self.last_event_at(TaskEventKind::SoftDeleted)
@@ -165,6 +198,9 @@ pub struct DomainState {
     format_version: u32,
     /// The next store-global task number, allocated only while holding the store lock.
     pub next_task_number: u64,
+    /// The next `N` number for notice rows. Absent from v2 documents, so it defaults.
+    #[serde(default = "default_next_notice_number")]
+    pub next_notice_number: u64,
     tasks: Vec<Task>,
     /// Per-project records keyed by scope path. Always serialized: an empty map
     /// writes `"projects": {}` so the v2 wire shape is pinned.
@@ -191,6 +227,7 @@ impl DomainState {
         Self {
             format_version: STORE_FORMAT_VERSION,
             next_task_number: 1,
+            next_notice_number: 1,
             tasks: Vec::new(),
             projects: BTreeMap::new(),
             project_intents: BTreeMap::new(),
@@ -324,6 +361,7 @@ impl DomainState {
         self.tasks.push(Task {
             id,
             number: None,
+            notice: None,
             revision: Uuid::new_v4(),
             merge_base_revision: None,
             title: title.to_string(),
@@ -342,6 +380,38 @@ impl DomainState {
             created_at: now,
             updated_at: now,
         });
+        Ok(id)
+    }
+
+    /// Seeder-only create for a human notice row. Marks the task as a notice with the
+    /// given status and steps (text, checked, no step events); history is the single
+    /// `Created` event, as for `create`. The `N` number is assigned only under the
+    /// store lock in [`Self::assign_numbers_for_persistence`], the same boundary that
+    /// numbers tasks.
+    pub fn create_notice(
+        &mut self,
+        catalog_id: impl Into<String>,
+        title: impl AsRef<str>,
+        notes: Option<String>,
+        status: HumanStatus,
+        scope: TaskScope,
+        steps: Vec<(String, bool)>,
+    ) -> Result<Uuid, DomainError> {
+        let id = self.create(title, notes, scope, ProvenanceOrigin::Manual, None)?;
+        let task = self.task_mut(id).expect("the notice was just pushed");
+        task.notice = Some(Notice {
+            catalog_id: catalog_id.into(),
+            number: None,
+        });
+        task.status = status;
+        task.steps = steps
+            .into_iter()
+            .map(|(text, done)| Step {
+                id: Uuid::new_v4(),
+                text,
+                done,
+            })
+            .collect();
         Ok(id)
     }
 
@@ -672,6 +742,7 @@ impl DomainState {
             }
         }
         self.next_task_number = self.next_task_number.max(disk.next_task_number);
+        self.next_notice_number = self.next_notice_number.max(disk.next_notice_number);
         self.merge_project_records(&disk.projects);
         self.drop_tasks_trashed_elsewhere(disk);
         self.merge_undo_entries(disk);
@@ -712,8 +783,9 @@ impl DomainState {
         }
     }
 
-    /// Assign missing task numbers in deterministic creation order. The store calls this only
-    /// under its exclusive lock, immediately before the durable replacement.
+    /// Assign missing `T` and `N` numbers in deterministic creation order. The store
+    /// calls this only under its exclusive lock, immediately before the durable
+    /// replacement. Notice rows never receive a `T` number.
     pub(crate) fn assign_numbers_for_persistence(&mut self) {
         let next_after_existing = self
             .tasks
@@ -727,7 +799,9 @@ impl DomainState {
             .tasks
             .iter()
             .enumerate()
-            .filter_map(|(index, task)| task.number.is_none().then_some(index))
+            .filter_map(|(index, task)| {
+                (task.number.is_none() && !task.is_notice()).then_some(index)
+            })
             .collect();
         missing.sort_by_key(|&index| (self.tasks[index].created_at, self.tasks[index].id));
         for index in missing {
@@ -737,14 +811,47 @@ impl DomainState {
                 .checked_add(1)
                 .expect("task number exhausted");
         }
+
+        let next_after_existing_notices = self
+            .tasks
+            .iter()
+            .filter_map(|task| task.notice.as_ref().and_then(|notice| notice.number))
+            .max()
+            .and_then(|number| number.checked_add(1))
+            .unwrap_or(1);
+        self.next_notice_number = self.next_notice_number.max(next_after_existing_notices);
+        let mut missing_notices: Vec<usize> = self
+            .tasks
+            .iter()
+            .enumerate()
+            .filter_map(|(index, task)| {
+                task.notice
+                    .as_ref()
+                    .is_some_and(|notice| notice.number.is_none())
+                    .then_some(index)
+            })
+            .collect();
+        missing_notices.sort_by_key(|&index| (self.tasks[index].created_at, self.tasks[index].id));
+        for index in missing_notices {
+            let notice = self.tasks[index]
+                .notice
+                .as_mut()
+                .expect("missing-notice index was filtered for notice rows");
+            notice.number = Some(self.next_notice_number);
+            self.next_notice_number = self
+                .next_notice_number
+                .checked_add(1)
+                .expect("notice number exhausted");
+        }
     }
 
     pub(crate) fn sync_numbers_from_persisted(&mut self, persisted: &DomainState) {
         self.next_task_number = persisted.next_task_number;
+        self.next_notice_number = persisted.next_notice_number;
         for task in &mut self.tasks {
-            task.number = persisted
-                .get(task.id)
-                .and_then(|persisted_task| persisted_task.number);
+            let persisted_task = persisted.get(task.id);
+            task.number = persisted_task.and_then(|persisted_task| persisted_task.number);
+            task.notice = persisted_task.and_then(|persisted_task| persisted_task.notice.clone());
         }
     }
 
@@ -1575,6 +1682,236 @@ mod tests {
         let state = store.load().expect("load");
         assert_eq!(state.get(first).and_then(|task| task.number), Some(1));
         assert_eq!(state.get(second).and_then(|task| task.number), Some(2));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn create_notice_defers_n_until_persistence_and_never_gets_a_t_number() {
+        let mut state = DomainState::new();
+        let first = state
+            .create_notice(
+                "welcome",
+                "  Welcome to tsk  ",
+                Some("read me".into()),
+                HumanStatus::Ready,
+                TaskScope::Global,
+                vec![("open the board".into(), false), ("press ?".into(), true)],
+            )
+            .expect("notice");
+        let second = state
+            .create_notice(
+                "whats-new",
+                "What's new",
+                None,
+                HumanStatus::Started,
+                TaskScope::Global,
+                Vec::new(),
+            )
+            .expect("notice");
+        assert_eq!(
+            state.create_notice(
+                "empty",
+                "  ",
+                None,
+                HumanStatus::Ready,
+                TaskScope::Global,
+                Vec::new()
+            ),
+            Err(DomainError::EmptyTitle)
+        );
+        assert_eq!(state.next_notice_number, 1);
+        assert_eq!(state.next_task_number, 1);
+
+        let task = state.get(first).expect("first notice");
+        assert_eq!(task.title, "Welcome to tsk");
+        assert_eq!(task.notes.as_deref(), Some("read me"));
+        assert_eq!(task.number, None);
+        assert_eq!(
+            task.notice,
+            Some(Notice {
+                catalog_id: "welcome".into(),
+                number: None,
+            })
+        );
+        assert_eq!(task.board_identifier(), None);
+        assert_eq!(
+            task.steps
+                .iter()
+                .map(|step| (step.text.as_str(), step.done))
+                .collect::<Vec<_>>(),
+            vec![("open the board", false), ("press ?", true)]
+        );
+        assert_eq!(
+            task.history
+                .iter()
+                .map(|event| event.kind)
+                .collect::<Vec<_>>(),
+            vec![TaskEventKind::Created]
+        );
+        let task = state.get(second).expect("second notice");
+        assert_eq!(task.status, HumanStatus::Started);
+        assert_eq!(task.notice.as_ref().map(|notice| notice.number), Some(None));
+
+        state.assign_numbers_for_persistence();
+        assert_eq!(
+            state
+                .get(first)
+                .expect("notice")
+                .notice
+                .as_ref()
+                .and_then(|notice| notice.number),
+            Some(1)
+        );
+        assert_eq!(
+            state
+                .get(second)
+                .expect("notice")
+                .notice
+                .as_ref()
+                .and_then(|notice| notice.number),
+            Some(2)
+        );
+        assert_eq!(state.next_notice_number, 3);
+
+        let ordinary = create_sample(&mut state);
+        state.assign_numbers_for_persistence();
+        assert_eq!(state.get(first).expect("notice").number, None);
+        assert_eq!(state.get(second).expect("notice").number, None);
+        assert_eq!(state.get(ordinary).expect("task").number, Some(1));
+        assert_eq!(state.next_task_number, 2);
+    }
+
+    #[test]
+    fn concurrent_notice_creates_get_distinct_n_numbers_under_merge_and_assign() {
+        let mut left = DomainState::new();
+        let mut right = DomainState::new();
+        let left_id = left
+            .create_notice(
+                "left",
+                "Left notice",
+                None,
+                HumanStatus::Ready,
+                TaskScope::Global,
+                Vec::new(),
+            )
+            .expect("left");
+        let right_id = right
+            .create_notice(
+                "right",
+                "Right notice",
+                None,
+                HumanStatus::Ready,
+                TaskScope::Global,
+                Vec::new(),
+            )
+            .expect("right");
+
+        left.merge_for_save(&right).expect("merge");
+        left.assign_numbers_for_persistence();
+
+        let left_n = left
+            .get(left_id)
+            .expect("left")
+            .notice
+            .as_ref()
+            .and_then(|notice| notice.number);
+        let right_n = left
+            .get(right_id)
+            .expect("right")
+            .notice
+            .as_ref()
+            .and_then(|notice| notice.number);
+        assert_eq!(left_n, Some(1));
+        assert_eq!(right_n, Some(2));
+        assert_ne!(left_n, right_n);
+        assert_eq!(left.next_notice_number, 3);
+        assert_eq!(
+            left.get(left_id)
+                .expect("left")
+                .board_identifier()
+                .as_deref(),
+            Some("N1")
+        );
+        assert_eq!(
+            left.get(right_id)
+                .expect("right")
+                .board_identifier()
+                .as_deref(),
+            Some("N2")
+        );
+    }
+
+    #[test]
+    fn board_identifier_paints_n_for_notices_and_t_for_numbered_tasks() {
+        let mut state = DomainState::new();
+        let notice = state
+            .create_notice(
+                "welcome",
+                "Welcome",
+                None,
+                HumanStatus::Ready,
+                TaskScope::Global,
+                Vec::new(),
+            )
+            .expect("notice");
+        let draft = create_sample(&mut state);
+        assert_eq!(state.get(notice).expect("notice").board_identifier(), None);
+        assert_eq!(state.get(draft).expect("draft").board_identifier(), None);
+        state.assign_numbers_for_persistence();
+        assert_eq!(
+            state.get(notice).expect("notice").board_identifier(),
+            Some("N1".to_string())
+        );
+        assert_eq!(
+            state.get(draft).expect("task").board_identifier(),
+            Some("T1".to_string())
+        );
+        assert!(state.get(notice).expect("notice").is_notice());
+        assert!(!state.get(draft).expect("task").is_notice());
+    }
+
+    #[test]
+    fn locked_notice_and_task_keep_separate_counters_across_a_save() {
+        let dir = std::env::temp_dir().join(format!("tsk-notice-domain-{}", Uuid::new_v4()));
+        let store = crate::store::TaskStore::new(&dir);
+        let notice = store
+            .locked_transition(|state| {
+                state
+                    .create_notice(
+                        "welcome",
+                        "Welcome",
+                        None,
+                        HumanStatus::Ready,
+                        TaskScope::Global,
+                        Vec::new(),
+                    )
+                    .map_err(|error| error.to_string())
+            })
+            .expect("persist notice");
+        let task = store
+            .locked_transition(|state| {
+                state
+                    .create(
+                        "ordinary",
+                        None,
+                        TaskScope::Global,
+                        ProvenanceOrigin::Manual,
+                        None,
+                    )
+                    .map_err(|error| error.to_string())
+            })
+            .expect("persist task");
+        let state = store.load().expect("load");
+        assert_eq!(
+            state.get(notice).expect("notice").board_identifier(),
+            Some("N1".to_string())
+        );
+        assert_eq!(
+            state.get(task).expect("task").board_identifier(),
+            Some("T1".to_string())
+        );
+        assert_eq!(state.next_notice_number, 2);
+        assert_eq!(state.next_task_number, 2);
         let _ = std::fs::remove_dir_all(dir);
     }
 

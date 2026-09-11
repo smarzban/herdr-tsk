@@ -30,6 +30,7 @@ fn task(id: u128, title: &str, status: HumanStatus, scope: TaskScope, updated_se
     Task {
         id: Uuid::from_u128(id),
         number: None,
+        notice: None,
         revision: Uuid::from_u128(id),
         merge_base_revision: None,
         title: title.into(),
