@@ -75,7 +75,10 @@ fn parse_entry(table: &Table) -> Result<Announcement, String> {
     })
 }
 
-/// Whether this state dir has never received guides or announcements before.
+/// Whether this state dir has never held notices: an empty delivery record and no state
+/// file. Freshness is the directory's history, not its current task count: an existing
+/// store with zero live rows (or only soft-deleted ones) is an upgrade, and must still
+/// receive bundled announcements.
 /// Call before [`crate::guides::seed_on_open`] so a same-open guide write is not
 /// mistaken for an upgrade from a guides-only binary.
 pub fn is_fresh_install(store: &TaskStore) -> bool {
@@ -83,10 +86,7 @@ pub fn is_fresh_install(store: &TaskStore) -> bool {
     if record.announcement_watermark > 0 || !record.guides.is_empty() {
         return false;
     }
-    match store.load() {
-        Ok(state) => !state.tasks().iter().any(|task| !task.soft_deleted),
-        Err(_) => true,
-    }
+    !store.state_file().exists()
 }
 
 /// Seed the bundled catalog. Returns how many notice rows were created (0 or 1).
@@ -100,15 +100,24 @@ fn seed(store: &TaskStore, catalog: &[Announcement], fresh_install: bool) -> Res
     let Some(bundled) = catalog.last().map(|entry| entry.id) else {
         return Ok(0);
     };
-    let dir = store.path();
-    let mut record = delivery::load(dir);
-    if record.announcement_watermark >= bundled {
+    // The watermark never lowers, so a record already at or past the bundled id skips
+    // the lock entirely; anything else re-derives its work from the record under it.
+    if delivery::load(store.path()).announcement_watermark >= bundled {
         return Ok(0);
     }
-    let created = store.locked_transition_if_changed(|state| {
+    // The record is read and written under the store's exclusive lock beside the state
+    // transition, so this process's stale record cannot overwrite a concurrent process's
+    // dismissal or watermark write.
+    store.locked_transition_with_delivery(|state, record| {
+        if record.announcement_watermark >= bundled {
+            return Ok((0, false, false));
+        }
         let seen = highest_seen_announce_id(state, record.announcement_watermark);
+        // Fresh installs and stores already showing this announcement take the bundled
+        // watermark without a row; missed entries become one What's new notice.
         if fresh_install || seen >= bundled {
-            return Ok((0, false));
+            record.announcement_watermark = bundled;
+            return Ok((0, false, true));
         }
         let missed = catalog.iter().filter(|entry| entry.id > seen);
         state
@@ -121,11 +130,9 @@ fn seed(store: &TaskStore, catalog: &[Announcement], fresh_install: bool) -> Res
                 Vec::new(),
             )
             .map_err(|error| error.to_string())?;
-        Ok((1, true))
-    })?;
-    record.announcement_watermark = bundled;
-    delivery::save(dir, &record).map_err(|error| error.to_string())?;
-    Ok(created)
+        record.announcement_watermark = bundled;
+        Ok((1, true, true))
+    })
 }
 
 fn highest_seen_announce_id(state: &crate::domain::DomainState, watermark: u64) -> u64 {
@@ -153,7 +160,7 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     use super::*;
-    use crate::domain::{DomainState, Task};
+    use crate::domain::{DomainState, ProvenanceOrigin, Task};
     use crate::guides;
 
     static SEQ: AtomicU64 = AtomicU64::new(0);
@@ -225,6 +232,51 @@ mod tests {
         let record = delivery::load(store.path());
         assert_eq!(record.announcement_watermark, 2);
         assert_eq!(record.guides.len(), 5, "the guide marks survive");
+        let _ = fs::remove_dir_all(store.path());
+    }
+
+    #[test]
+    fn an_existing_store_with_no_tasks_is_an_upgrade_and_still_gets_the_announcement() {
+        let store = temp_store("empty-store");
+        // A store file with zero tasks is a real installation that happens to be empty:
+        // taking the fresh-install watermark here would silence every later upgrade.
+        store.save(&DomainState::new()).expect("write empty store");
+        assert!(
+            !is_fresh_install(&store),
+            "an existing file is an upgrade, not a fresh install"
+        );
+
+        let catalog = [announcement(1), announcement(2)];
+        assert_eq!(seed(&store, &catalog, false), Ok(1));
+        assert_eq!(announced(&store.load().expect("load")).len(), 1);
+        assert_eq!(delivery::load(store.path()).announcement_watermark, 2);
+        assert_eq!(seed(&store, &catalog, false), Ok(0));
+        let _ = fs::remove_dir_all(store.path());
+    }
+
+    #[test]
+    fn a_store_with_only_soft_deleted_tasks_is_an_upgrade_and_still_gets_the_announcement() {
+        let store = temp_store("trashed-only");
+        let mut state = DomainState::new();
+        let id = state
+            .create(
+                "deleted long ago",
+                None,
+                TaskScope::Global,
+                ProvenanceOrigin::Manual,
+                None,
+            )
+            .expect("task");
+        state.soft_delete(id).expect("soft delete");
+        store.save(&state).expect("write store");
+        assert!(
+            !is_fresh_install(&store),
+            "soft-deleted-only rows are an upgrade, not a fresh install"
+        );
+        assert_eq!(
+            seed(&store, &[announcement(1), announcement(2)], false),
+            Ok(1)
+        );
         let _ = fs::remove_dir_all(store.path());
     }
 
@@ -312,7 +364,7 @@ mod tests {
         let id = announced(&state)[0].id;
         state.complete(id).expect("complete");
         store.save(&state).expect("save");
-        delivery::record_dismissed_notices(store.path(), state.tasks()).expect("record");
+        delivery::record_dismissed_notices(&store, state.tasks()).expect("record");
         assert!(delivery::load(store.path()).guides.contains("announce.2"));
 
         store.save(&DomainState::new()).expect("forget the row");

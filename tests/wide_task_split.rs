@@ -8,7 +8,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Modifier;
 use ratatui::Terminal;
-use tsk_tui::domain::{DomainState, HumanStatus, ProvenanceOrigin, TaskScope};
+use tsk_tui::domain::{DomainState, HumanStatus, Notice, ProvenanceOrigin, TaskScope};
 use tsk_tui::ui::capture::CaptureField;
 use tsk_tui::ui::input::{map_key, route_responsive_key, ResponsiveKeyRoute};
 use tsk_tui::ui::mouse::{
@@ -2243,6 +2243,70 @@ fn task_column_header_number_click_copies_in_g_and_f() {
             intent,
             Some(BoardIntent::CopyTaskNumber(model.selected_id().unwrap())),
             "{stage:?}: clicking T<n> in the column header copies it"
+        );
+    }
+}
+
+/// The wide column derives its header identifier from the task, not a stored literal:
+/// a notice must paint `N<n>` in both task stages and keep its click-to-copy hit, or
+/// every seeded guide loses its header id when the slider is wide.
+#[test]
+fn wide_task_column_header_derives_the_notice_n_identifier_and_its_copy_hit() {
+    let mut domain = DomainState::new();
+    let notice = domain
+        .create_notice(
+            "guide.wide",
+            "Wide guide header",
+            None,
+            HumanStatus::Ready,
+            TaskScope::Global,
+            Vec::new(),
+        )
+        .expect("seed notice");
+    // The model carries the persisted N number; the domain shares the id.
+    let mut tasks = domain.tasks().to_vec();
+    tasks[0].notice = Some(Notice {
+        catalog_id: "guide.wide".into(),
+        number: Some(2),
+    });
+    let model = BoardModel::from_tasks(tasks, Some(PathBuf::from(REPO)));
+    assert_eq!(model.selected_id(), Some(notice));
+
+    for stage in [WideStage::Rail, WideStage::FullTask] {
+        let (mut domain, mut model) = (domain.clone(), model.clone());
+        to_stage(&mut domain, &mut model, stage);
+        let geometry = resolve_responsive(130, 24, stage);
+        let (rows, hits) = render(&model, 130, 24);
+        let header = column_text(&rows, geometry.task_content(), 1);
+        assert!(
+            header.contains("N2 Wide guide header"),
+            "{stage:?}: header must derive the notice identifier: {header}"
+        );
+        let identifier = hits
+            .regions
+            .iter()
+            .find(|hit| {
+                matches!(hit.target, QueueHitTarget::TaskNumber(id) if id == notice)
+                    && geometry.task.contains(hit.area.as_position())
+            })
+            .expect("header identifier copy hit")
+            .area;
+        let painted: String = rows[identifier.y as usize]
+            .chars()
+            .skip(identifier.x as usize)
+            .take(identifier.width as usize)
+            .collect();
+        assert_eq!(painted, "N2", "{stage:?}: the hit covers the identifier");
+        let intent = map_responsive_board_mouse(
+            &model,
+            &hits,
+            Rect::new(0, 0, 130, 24),
+            left_click(identifier.x, identifier.y),
+        );
+        assert_eq!(
+            intent,
+            Some(BoardIntent::CopyTaskNumber(notice)),
+            "{stage:?}: clicking N<n> in the column header copies it"
         );
     }
 }

@@ -122,7 +122,7 @@ fn seed_notices_without_blocking_open(store: &TaskStore) {
 }
 
 fn record_notice_dismissals_without_blocking_persist(store: &TaskStore, domain: &DomainState) {
-    let _ = crate::delivery::record_dismissed_notices(store.path(), domain.tasks());
+    let _ = crate::delivery::record_dismissed_notices(store, domain.tasks());
 }
 
 /// The one walkthrough read on the open path: no record means the card opens.
@@ -3211,6 +3211,93 @@ mod tests {
         assert_eq!(domain.get(id).expect("task").number, Some(number));
         let message = format!("copy sent: T{number}");
         assert_eq!(model.message(), Some(message.as_str()));
+    }
+
+    #[test]
+    fn copy_task_number_intent_sends_a_notice_identifier_through_the_app_handoff() {
+        let temp = TempStore::new("copy-notice-number");
+        let mut domain = DomainState::new();
+        let id = domain
+            .create_notice(
+                "guide.copy",
+                "Copy notice",
+                None,
+                HumanStatus::Ready,
+                TaskScope::Global,
+                Vec::new(),
+            )
+            .expect("seed notice");
+        temp.store.save(&domain).expect("persist notice");
+        let mut domain = temp.store.load().expect("reload numbered notice");
+        let mut model = BoardModel::from_domain(&domain, None);
+        let mut recovery = SaveRecovery::new();
+
+        let quit = handle_board_intent(
+            &temp.store,
+            &mut domain,
+            &mut model,
+            BoardIntent::CopyTaskNumber(id),
+            &mut recovery,
+            false,
+        )
+        .expect("copy intent");
+
+        assert!(!quit);
+        assert_eq!(model.message(), Some("copy sent: N1"));
+    }
+
+    /// Reverting the dismissal to the done-only flow leaves the archive and delete
+    /// guides unrecorded here: the record was dropped before the handoff, so only the
+    /// real board persistence handoff can put the catalog id back.
+    #[test]
+    fn archiving_or_deleting_a_guide_on_the_board_records_its_dismissal() {
+        let run_case = |label: &str, intents: &[BoardIntent]| {
+            let temp = TempStore::new(label);
+            assert_eq!(crate::guides::seed_on_open(&temp.store), Ok(5));
+            std::fs::remove_file(temp.dir.join(crate::delivery::DELIVERY_FILE))
+                .expect("drop the delivery record");
+            let mut domain = temp.store.load().expect("load seeded board");
+            let mut model = BoardModel::from_domain(&domain, None);
+            let selected = model.selected_id().expect("seeded selection");
+            let mut recovery = SaveRecovery::new();
+            for intent in intents {
+                handle_board_intent(
+                    &temp.store,
+                    &mut domain,
+                    &mut model,
+                    intent.clone(),
+                    &mut recovery,
+                    false,
+                )
+                .expect("dismiss intent");
+            }
+            let task = domain.get(selected).expect("selected guide");
+            assert!(
+                crate::delivery::is_dismissed(task),
+                "{label}: the guide must be dismissed on the board"
+            );
+            let catalog_id = task.notice.as_ref().expect("notice").catalog_id.clone();
+            let recorded = crate::delivery::load(temp.store.path());
+            assert_eq!(
+                recorded.guides,
+                [catalog_id]
+                    .into_iter()
+                    .collect::<std::collections::BTreeSet<_>>(),
+                "{label}: the persistence handoff must record the dismissed guide"
+            );
+            // A dismissed guide never comes back, even when the record was lost.
+            assert_eq!(
+                crate::guides::seed_on_open(&temp.store),
+                Ok(0),
+                "{label}: the other guides stay present, none is created"
+            );
+        };
+        // ctrl+f files the selected guide; two ctrl+x arm, then delete it.
+        run_case("dismiss-archive", &[BoardIntent::File]);
+        run_case(
+            "dismiss-delete",
+            &[BoardIntent::SoftDelete, BoardIntent::SoftDelete],
+        );
     }
 
     #[test]

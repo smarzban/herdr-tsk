@@ -162,7 +162,8 @@ impl std::error::Error for TrashError {}
 /// Filesystem operations that make atomic replacement durable.
 ///
 /// Keeping the stages separate lets tests verify their ordering and failure propagation.
-trait AtomicFilesystem {
+/// Shared with `delivery`, whose record replaces itself through the same stages.
+pub(crate) trait AtomicFilesystem {
     type File;
 
     fn create_file(&self, path: &Path) -> io::Result<Self::File>;
@@ -173,7 +174,7 @@ trait AtomicFilesystem {
     fn remove_file(&self, path: &Path) -> io::Result<()>;
 }
 
-struct StdFilesystem;
+pub(crate) struct StdFilesystem;
 
 impl AtomicFilesystem for StdFilesystem {
     type File = File;
@@ -396,6 +397,55 @@ impl TaskStore {
                 .map_err(|error| error.to_string())?;
         }
         Ok(result)
+    }
+
+    /// Hold the exclusive store lock across a domain transition and a delivery-record
+    /// read-modify-write, so a seeder's guide marks or watermark cannot be written from
+    /// a record that went stale while the state transition ran, losing another process's
+    /// concurrent dismissal or watermark write. The transition receives the freshly
+    /// loaded state and record and returns its result, whether the state changed, and
+    /// whether the record changed. A changed record is persisted under the same lock;
+    /// an unchanged one writes nothing.
+    pub(crate) fn locked_transition_with_delivery<T>(
+        &self,
+        transition: impl FnOnce(
+            &mut DomainState,
+            &mut crate::delivery::DeliveryDocument,
+        ) -> Result<(T, bool, bool), String>,
+    ) -> Result<T, String> {
+        let _guard = self.lock_exclusive().map_err(|error| error.to_string())?;
+        let mut state = self.load_unlocked().map_err(|error| error.to_string())?;
+        let mut record = crate::delivery::load(self.path());
+        let (result, state_changed, record_changed) = transition(&mut state, &mut record)?;
+        if state_changed {
+            state.assign_numbers_for_persistence();
+            state.clear_merge_bases();
+            self.save_unlocked(&mut state)
+                .map_err(|error| error.to_string())?;
+        }
+        if record_changed {
+            crate::delivery::save(self.path(), &record).map_err(|error| error.to_string())?;
+        }
+        Ok(result)
+    }
+
+    /// Hold the exclusive store lock across a delivery-record read-modify-write alone,
+    /// so a dismissal recorded by one process cannot overwrite the record a concurrent
+    /// seeder wrote between this record's load and its save. The update receives the
+    /// freshly loaded record and returns whether it changed; an unchanged record writes
+    /// nothing.
+    pub(crate) fn locked_delivery_update(
+        &self,
+        update: impl FnOnce(&mut crate::delivery::DeliveryDocument) -> bool,
+    ) -> io::Result<()> {
+        let _guard = self
+            .lock_exclusive()
+            .map_err(|error| io::Error::other(error.to_string()))?;
+        let mut record = crate::delivery::load(self.path());
+        if update(&mut record) {
+            crate::delivery::save(self.path(), &record)?;
+        }
+        Ok(())
     }
 
     /// Under exclusive lock: load disk, validate each local mutation against the revision it
@@ -1010,6 +1060,103 @@ mod tests {
             );
             assert_eq!(filesystem.events(), expected[..=index]);
         }
+    }
+
+    /// A delivery-record read-modify-write holds the exclusive store lock for its whole
+    /// critical section: while the update is stalled inside, a second writer's open file
+    /// description cannot take the lock, so its stale record cannot be renamed over the
+    /// first writer's result.
+    #[test]
+    fn locked_delivery_update_holds_the_store_lock_for_the_whole_read_modify_write() {
+        let dir = temp_dir("delivery-lock");
+        fs::create_dir_all(&dir).expect("mkdir");
+        let _guard = TempDirGuard(dir.clone());
+        let (inside_tx, inside_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+        let writer_store = TaskStore::new(&dir);
+        let writer = std::thread::spawn(move || {
+            writer_store
+                .locked_delivery_update(|record| {
+                    record.announcement_watermark = 4;
+                    inside_tx.send(()).expect("signal inside");
+                    release_rx.recv().expect("release");
+                    true
+                })
+                .expect("locked delivery update");
+        });
+        inside_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("writer entered its read-modify-write");
+
+        let contender = fs::OpenOptions::new()
+            .write(true)
+            .open(dir.join(LOCK_FILE))
+            .expect("open lock file");
+        assert!(
+            matches!(contender.try_lock(), Err(std::fs::TryLockError::WouldBlock)),
+            "the lock must stay held for the whole read-modify-write"
+        );
+
+        release_tx.send(()).expect("release writer");
+        writer.join().expect("writer thread");
+        assert!(contender.try_lock().is_ok(), "the lock is free again");
+        assert_eq!(
+            crate::delivery::load(&dir).announcement_watermark,
+            4,
+            "the record write landed"
+        );
+    }
+
+    /// The delivery-capable transition holds the same exclusive lock across its state
+    /// transition and record update, so a seeder's two writes land as one critical
+    /// section no other writer can interleave with.
+    #[test]
+    fn locked_transition_with_delivery_holds_the_store_lock_across_state_and_record() {
+        let dir = temp_dir("transition-delivery-lock");
+        fs::create_dir_all(&dir).expect("mkdir");
+        let _guard = TempDirGuard(dir.clone());
+        let store = TaskStore::new(&dir);
+        let (inside_tx, inside_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+        let writer_store = TaskStore::new(&dir);
+        let writer = std::thread::spawn(move || {
+            let created = writer_store
+                .locked_transition_with_delivery(|state, record| {
+                    state
+                        .create(
+                            "under lock",
+                            None,
+                            TaskScope::Global,
+                            ProvenanceOrigin::Manual,
+                            None,
+                        )
+                        .expect("create under lock");
+                    record.guides.insert("guide.lock".to_string());
+                    inside_tx.send(()).expect("signal inside");
+                    release_rx.recv().expect("release");
+                    Ok((1_usize, true, true))
+                })
+                .expect("locked transition");
+            assert_eq!(created, 1);
+        });
+        inside_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("writer entered the transition");
+
+        let contender = fs::OpenOptions::new()
+            .write(true)
+            .open(dir.join(LOCK_FILE))
+            .expect("open lock file");
+        assert!(
+            matches!(contender.try_lock(), Err(std::fs::TryLockError::WouldBlock)),
+            "state and record must be written under one lock acquisition"
+        );
+
+        release_tx.send(()).expect("release writer");
+        writer.join().expect("writer thread");
+        let state = store.load().expect("load state");
+        assert!(state.tasks().iter().any(|task| task.title == "under lock"));
+        assert!(crate::delivery::load(&dir).guides.contains("guide.lock"));
     }
 
     #[cfg(unix)]

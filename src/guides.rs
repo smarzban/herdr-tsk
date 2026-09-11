@@ -96,17 +96,27 @@ pub const CATALOG: [Guide; 5] = [
 
 /// Seed every guide this state dir has not delivered, then record the whole catalog as
 /// delivered. Returns how many notice rows were created.
+///
+/// The record is read and written under the store's exclusive lock beside the state
+/// transition, so this process's stale record cannot overwrite a concurrent process's
+/// dismissal or watermark write. Marks only ever accumulate, so a record already naming
+/// every catalog id skips the lock entirely.
 pub fn seed_on_open(store: &TaskStore) -> Result<usize, String> {
-    let dir = store.path();
-    let mut record = delivery::load(dir);
-    let pending: Vec<&Guide> = CATALOG
-        .iter()
-        .filter(|guide| !record.guides.contains(guide.catalog_id))
-        .collect();
-    if pending.is_empty() {
+    if CATALOG.iter().all(|guide| {
+        delivery::load(store.path())
+            .guides
+            .contains(guide.catalog_id)
+    }) {
         return Ok(0);
     }
-    let created = store.locked_transition_if_changed(|state| {
+    store.locked_transition_with_delivery(|state, record| {
+        let pending: Vec<&Guide> = CATALOG
+            .iter()
+            .filter(|guide| !record.guides.contains(guide.catalog_id))
+            .collect();
+        if pending.is_empty() {
+            return Ok((0, false, false));
+        }
         let present: BTreeSet<String> = state
             .tasks()
             .iter()
@@ -134,13 +144,11 @@ pub fn seed_on_open(store: &TaskStore) -> Result<usize, String> {
                 .map_err(|error| error.to_string())?;
             created += 1;
         }
-        Ok((created, created > 0))
-    })?;
-    record
-        .guides
-        .extend(pending.iter().map(|guide| guide.catalog_id.to_string()));
-    delivery::save(dir, &record).map_err(|error| error.to_string())?;
-    Ok(created)
+        record
+            .guides
+            .extend(pending.iter().map(|guide| guide.catalog_id.to_string()));
+        Ok((created, created > 0, true))
+    })
 }
 
 #[cfg(test)]
@@ -270,7 +278,7 @@ mod tests {
         state.archive_task(ids[1]).expect("archive");
         state.soft_delete(ids[2]).expect("delete");
         store.save(&state).expect("save");
-        delivery::record_dismissed_notices(store.path(), state.tasks()).expect("record");
+        delivery::record_dismissed_notices(&store, state.tasks()).expect("record");
 
         replace_store_with_ordinary_task_only(&store);
         assert_eq!(seed_on_open(&store), Ok(0));
