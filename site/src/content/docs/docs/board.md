@@ -68,7 +68,7 @@ Agents can set any status with [the CLI](/docs/cli/#status). Task status does no
 
 ## Notices
 
-Your first board open seeds about five desk rows with `N` ids (not `T`). They teach the board by being ordinary tasks: open, peek, change status, archive, or delete. `ctrl+d`, `ctrl+f`, and `ctrl+x` all dismiss a notice the same way; that guide never re-seeds. After an upgrade, one `What's new in tsk` row can appear the same way. Details and the delivery record live under [storage](/docs/storage/#starter-guides-and-release-notes).
+Your first board open seeds four desk tasks with `N` ids (not `T`). They teach the board by being ordinary tasks: open, peek, change status, archive, or delete. `ctrl+d`, `ctrl+f`, and `ctrl+x` all dismiss a notice the same way; that starter task never re-seeds. After an upgrade, one `What's new in tsk` task can appear the same way. Details and the delivery record live under [storage](/docs/storage/#starter-guides-and-release-notes).
 
 ## Mouse
 

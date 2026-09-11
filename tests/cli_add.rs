@@ -562,7 +562,7 @@ fn flag_add_with_a_seeded_notice_title_creates_an_ordinary_task() {
     let _env = env_lock();
     let dir = temp_state_dir("flag-notice-title");
     let store = task_store(&dir);
-    assert_eq!(tsk_tui::guides::seed_on_open(&store), Ok(5));
+    assert_eq!(tsk_tui::guides::seed_on_open(&store), Ok(4));
     let notice_title = tsk_tui::guides::CATALOG[0].title;
 
     let output = add(
@@ -583,7 +583,7 @@ fn flag_add_with_a_seeded_notice_title_creates_an_ordinary_task() {
     let state = store.load().expect("reload state");
     assert_eq!(
         state.tasks().iter().filter(|task| task.is_notice()).count(),
-        5
+        4
     );
     let ordinary: Vec<_> = state
         .tasks()
@@ -605,7 +605,7 @@ fn plan_add_with_a_seeded_notice_title_creates_an_ordinary_task() {
     let _env = env_lock();
     let dir = temp_state_dir("plan-notice-title");
     let store = task_store(&dir);
-    assert_eq!(tsk_tui::guides::seed_on_open(&store), Ok(5));
+    assert_eq!(tsk_tui::guides::seed_on_open(&store), Ok(4));
     let notice_title = tsk_tui::guides::CATALOG[0].title;
 
     let plan = run_with(

@@ -47,7 +47,7 @@ Data commands accept `--state-dir <dir>`. Setup and guide do not use that flag.
 
 `T12`, `t12`, `12`, and a task UUID identify the same task. Direct lookup ignores the current project.
 
-Board notice rows paint as `N1`… (starter guides and `What's new in tsk`). Those ids are board-only: the CLI does not accept `N1`, and default `tsk list` omits them. Agents ignore them.
+Board notice tasks paint as `N1`… (starter tasks and `What's new in tsk`). Those ids are board-only: the CLI does not accept `N1`, and default `tsk list` omits them. Agents ignore them.
 
 ### Scope
 

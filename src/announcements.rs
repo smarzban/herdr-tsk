@@ -221,17 +221,17 @@ mod tests {
     fn a_fresh_install_takes_the_bundled_watermark_and_no_announcement_row() {
         let store = temp_store("fresh");
         assert!(is_fresh_install(&store));
-        assert_eq!(guides::seed_on_open(&store), Ok(5));
+        assert_eq!(guides::seed_on_open(&store), Ok(4));
         assert_eq!(
             seed(&store, &[announcement(1), announcement(2)], true),
             Ok(0)
         );
         let state = store.load().expect("load");
-        assert_eq!(state.tasks().iter().filter(|t| t.is_notice()).count(), 5);
+        assert_eq!(state.tasks().iter().filter(|t| t.is_notice()).count(), 4);
         assert!(announced(&state).is_empty());
         let record = delivery::load(store.path());
         assert_eq!(record.announcement_watermark, 2);
-        assert_eq!(record.guides.len(), 5, "the guide marks survive");
+        assert_eq!(record.guides.len(), 4, "the guide marks survive");
         let _ = fs::remove_dir_all(store.path());
     }
 
@@ -283,7 +283,7 @@ mod tests {
     #[test]
     fn upgrading_from_guides_only_seeds_whats_new_for_bundled_entries() {
         let store = temp_store("guides-upgrade");
-        assert_eq!(guides::seed_on_open(&store), Ok(5));
+        assert_eq!(guides::seed_on_open(&store), Ok(4));
         assert_eq!(delivery::load(store.path()).announcement_watermark, 0);
         assert!(
             !is_fresh_install(&store),

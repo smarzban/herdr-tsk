@@ -3253,7 +3253,7 @@ mod tests {
     fn archiving_or_deleting_a_guide_on_the_board_records_its_dismissal() {
         let run_case = |label: &str, intents: &[BoardIntent]| {
             let temp = TempStore::new(label);
-            assert_eq!(crate::guides::seed_on_open(&temp.store), Ok(5));
+            assert_eq!(crate::guides::seed_on_open(&temp.store), Ok(4));
             std::fs::remove_file(temp.dir.join(crate::delivery::DELIVERY_FILE))
                 .expect("drop the delivery record");
             let mut domain = temp.store.load().expect("load seeded board");

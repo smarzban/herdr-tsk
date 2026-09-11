@@ -74,7 +74,7 @@ exclusive, as are `--done` and `--deleted`.
 A typo in a project name silently files the task under a new scope. Use
 `tsk list --all --json` to recover the resulting scope.
 
-Rows the board paints as `N1`… are human-only notices: starter guides and the
+Rows the board paints as `N1`… are human-only notices: starter tasks and the
 `What's new in tsk` release note. `tsk list` never shows them, no command addresses
 them, and agents ignore them.
 
