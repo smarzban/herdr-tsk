@@ -3,7 +3,7 @@
 > tsk is a terminal task board for you and your agents: one shared queue, a TUI for you, a CLI for them.
 
 Install with `curl -fsSL https://gettsk.sh/install.sh | sh` or `brew install smarzban/tap/tsk`.
-If Herdr is on PATH, the curl installer asks to run `tsk setup herdr` on a TTY; the install wrap-up points at the board (and `prefix+t` after a successful setup, or `tsk setup herdr` when skipped). Homebrew prints the setup command as a caveat.
+If Herdr is on PATH, the curl installer asks to run `tsk setup herdr` on a TTY; the install wrap-up points at the board (and the Herdr board shortcut after a successful setup, or `tsk setup herdr` when skipped). Homebrew prints the setup command as a caveat.
 Details: https://gettsk.sh/docs/install.md
 The board checks GitHub releases at most daily and shows a dim `vX.Y.Z available` on the status row; set `TSK_NO_UPDATE_CHECK` to disable.
 
