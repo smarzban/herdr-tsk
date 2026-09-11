@@ -84,10 +84,7 @@ pub fn is_fresh_install(store: &TaskStore) -> bool {
         return false;
     }
     match store.load() {
-        Ok(state) => !state
-            .tasks()
-            .iter()
-            .any(|task| !task.soft_deleted),
+        Ok(state) => !state.tasks().iter().any(|task| !task.soft_deleted),
         Err(_) => true,
     }
 }
@@ -328,10 +325,16 @@ mod tests {
     fn a_lost_record_is_rebuilt_from_the_store_and_only_newer_entries_are_delivered() {
         let store = temp_store("lost");
         set_watermark(&store, 1);
-        assert_eq!(seed(&store, &[announcement(1), announcement(2)], false), Ok(1));
+        assert_eq!(
+            seed(&store, &[announcement(1), announcement(2)], false),
+            Ok(1)
+        );
         fs::remove_file(store.path().join(delivery::DELIVERY_FILE)).expect("lose record");
 
-        assert_eq!(seed(&store, &[announcement(1), announcement(2)], false), Ok(0));
+        assert_eq!(
+            seed(&store, &[announcement(1), announcement(2)], false),
+            Ok(0)
+        );
         assert_eq!(delivery::load(store.path()).announcement_watermark, 2);
         assert_eq!(announced(&store.load().expect("load")).len(), 1);
 

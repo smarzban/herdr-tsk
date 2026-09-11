@@ -831,8 +831,7 @@ impl DomainState {
                     .then_some(index)
             })
             .collect();
-        missing_notices
-            .sort_by_key(|&index| (self.tasks[index].created_at, self.tasks[index].id));
+        missing_notices.sort_by_key(|&index| (self.tasks[index].created_at, self.tasks[index].id));
         for index in missing_notices {
             let notice = self.tasks[index]
                 .notice
@@ -1827,7 +1826,10 @@ mod tests {
         assert_ne!(left_n, right_n);
         assert_eq!(left.next_notice_number, 3);
         assert_eq!(
-            left.get(left_id).expect("left").board_identifier().as_deref(),
+            left.get(left_id)
+                .expect("left")
+                .board_identifier()
+                .as_deref(),
             Some("N1")
         );
         assert_eq!(
