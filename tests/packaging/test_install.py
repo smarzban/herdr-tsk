@@ -427,7 +427,10 @@ echo installed-fixture
         self.assertEqual(result.returncode, 0, result.stderr)
         combined = result.stdout + result.stderr
         self.assertNotIn("Herdr detected", combined)
-        self.assertNotIn("setup herdr", combined)
+        self.assertNotIn("Set up the Herdr plugin with", combined)
+        self.assertNotIn("prefix+t", combined)
+        self.assertIn("tsk install completed.", combined)
+        self.assertIn("In a project directory run tsk to open the board.", combined)
         self.assertFalse(self.setup_log.exists())
 
     def test_herdr_present_without_tty_skips_with_guidance(self):
@@ -436,10 +439,11 @@ echo installed-fixture
         result = self.run_install(TSK_SETUP_LOG=str(self.setup_log))
         self.assertEqual(result.returncode, 0, result.stderr)
         combined = result.stdout + result.stderr
-        self.assertIn("Herdr detected", combined)
-        self.assertIn("Skipping plugin setup (no TTY)", combined)
-        installed = self.root / "home/.local/bin/tsk"
-        self.assertIn(f"{installed} setup herdr", combined)
+        self.assertNotIn("[y/N]", combined)
+        self.assertIn("tsk install completed.", combined)
+        self.assertIn("In a project directory run tsk to open the board.", combined)
+        self.assertIn("Set up the Herdr plugin with tsk setup herdr.", combined)
+        self.assertNotIn("prefix+t", combined)
         self.assertFalse(self.setup_log.exists())
 
     def test_herdr_present_in_ci_skips_without_asking(self):
@@ -448,9 +452,10 @@ echo installed-fixture
         result = self.run_install(TSK_SETUP_LOG=str(self.setup_log), CI="1")
         self.assertEqual(result.returncode, 0, result.stderr)
         combined = result.stdout + result.stderr
-        self.assertIn("Skipping plugin setup (CI)", combined)
-        self.assertIn("setup herdr", combined)
         self.assertNotIn("[y/N]", combined)
+        self.assertIn("tsk install completed.", combined)
+        self.assertIn("Set up the Herdr plugin with tsk setup herdr.", combined)
+        self.assertNotIn("prefix+t", combined)
         self.assertFalse(self.setup_log.exists())
 
     @unittest.skipUnless(os.name == "posix", "PTY prompt requires POSIX")
@@ -465,6 +470,12 @@ echo installed-fixture
         self.assertTrue(self.setup_log.exists(), result.stdout)
         self.assertEqual(self.setup_log.read_text().strip(), "setup herdr")
         self.assertTrue(installed.exists())
+        self.assertIn("tsk install completed.", result.stdout)
+        self.assertIn(
+            "In a project directory run tsk to open the board, or press prefix+t to start tsk.",
+            result.stdout,
+        )
+        self.assertNotIn("Set up the Herdr plugin with tsk setup herdr.", result.stdout)
 
     @unittest.skipUnless(os.name == "posix", "PTY prompt requires POSIX")
     def test_herdr_prompt_no_skips_setup_with_guidance(self):
@@ -473,9 +484,10 @@ echo installed-fixture
         result = self.run_install_with_answer(b"n\n", TSK_SETUP_LOG=str(self.setup_log))
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("[y/N]", result.stdout)
-        self.assertIn("Skipped Herdr plugin setup", result.stdout)
-        installed = self.root / "home/.local/bin/tsk"
-        self.assertIn(f"{installed} setup herdr", result.stdout)
+        self.assertIn("tsk install completed.", result.stdout)
+        self.assertIn("In a project directory run tsk to open the board.", result.stdout)
+        self.assertIn("Set up the Herdr plugin with tsk setup herdr.", result.stdout)
+        self.assertNotIn("prefix+t", result.stdout)
         self.assertFalse(self.setup_log.exists())
 
     @unittest.skipUnless(os.name == "posix", "PTY prompt requires POSIX")
@@ -500,6 +512,9 @@ echo installed-fixture
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("tsk setup herdr failed", result.stdout)
         self.assertTrue((self.root / "home/.local/bin/tsk").exists())
+        self.assertIn("tsk install completed.", result.stdout)
+        self.assertIn("Set up the Herdr plugin with tsk setup herdr.", result.stdout)
+        self.assertNotIn("prefix+t", result.stdout)
 
 
 if __name__ == "__main__":

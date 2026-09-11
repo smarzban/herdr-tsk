@@ -135,13 +135,18 @@ esac
 # Curl|sh often has a non-TTY stdin; prefer /dev/tty so an interactive terminal can still answer.
 # CI and headless installs skip the ask so they never hang on a prompt.
 # Probe /dev/tty in a child shell: a failed `exec <>/dev/tty` in this shell would exit under set -e.
+# herdr_wrap selects the install-completed closing lines (not mid-stream coaching):
+#   board         — Herdr absent
+#   board_prefix  — setup ran successfully (prefix+t is available)
+#   board_setup   — declined, CI/no-TTY skip, or setup failed (nudge tsk setup herdr)
+herdr_wrap=board
 maybe_setup_herdr() {
     command -v herdr >/dev/null 2>&1 || return 0
     tsk_bin=$install_dir/tsk
     [ -x "$tsk_bin" ] || return 0
     setup_cmd=$(printf '%s setup herdr' "$tsk_bin")
     if [ -n "${CI:-}" ]; then
-        printf 'Herdr detected. Skipping plugin setup (CI). Run:\n  %s\n' "$setup_cmd"
+        herdr_wrap=board_setup
         return 0
     fi
     answer=
@@ -154,7 +159,7 @@ maybe_setup_herdr() {
         read -r answer </dev/tty || true
         setup_stdin=/dev/tty
     else
-        printf 'Herdr detected. Skipping plugin setup (no TTY). Run:\n  %s\n' "$setup_cmd"
+        herdr_wrap=board_setup
         return 0
     fi
     case $answer in
@@ -167,12 +172,29 @@ maybe_setup_herdr() {
                 "$tsk_bin" setup herdr || setup_status=$?
             fi
             if [ "$setup_status" -ne 0 ]; then
-                printf 'tsk setup herdr failed; install succeeded. Run it manually:\n  %s\n' "$setup_cmd" >&2
+                printf 'tsk setup herdr failed; install succeeded.\n' >&2
+                herdr_wrap=board_setup
+            else
+                herdr_wrap=board_prefix
             fi
             ;;
         *)
-            printf 'Skipped Herdr plugin setup. Run later:\n  %s\n' "$setup_cmd"
+            herdr_wrap=board_setup
             ;;
     esac
 }
 maybe_setup_herdr
+
+printf 'tsk install completed.\n'
+case $herdr_wrap in
+    board_prefix)
+        printf 'In a project directory run tsk to open the board, or press prefix+t to start tsk.\n'
+        ;;
+    board_setup)
+        printf 'In a project directory run tsk to open the board.\n'
+        printf 'Set up the Herdr plugin with tsk setup herdr.\n'
+        ;;
+    *)
+        printf 'In a project directory run tsk to open the board.\n'
+        ;;
+esac

@@ -19,7 +19,7 @@ brew install smarzban/tap/tsk
 
 Reopen your terminal if prompted, or run the printed `export` command.
 
-If Herdr is already installed, the curl installer asks whether to run `tsk setup herdr` when a terminal is available. Noninteractive installs (no TTY or `CI`) skip the ask and print the command to run later. Homebrew stays noninteractive and prints the same setup command as a caveat.
+If Herdr is already installed, the curl installer asks whether to run `tsk setup herdr` when a terminal is available. After install it prints a short wrap-up: board-only when Herdr is absent; board plus `prefix+t` when you accept setup; board plus `tsk setup herdr` when you decline, or when CI / no TTY skips the ask. Homebrew stays noninteractive and prints the same setup command as a caveat.
 
 ## Add to Herdr
 
@@ -111,9 +111,15 @@ The installer does not source these files. Symlinked, non-regular, or unwritable
 
 When `herdr` is on PATH after the binary is installed, the installer may ask to run plugin setup:
 
-- Interactive terminal (stdin TTY, or `/dev/tty` under `curl | sh`): asks `[y/N]`. Yes runs the newly installed `tsk setup herdr`; no prints that command for later.
-- `CI` set, or no usable TTY: skips the ask and prints the same command so the install never hangs.
-- Herdr absent: no Herdr output.
+- Interactive terminal (stdin TTY, or `/dev/tty` under `curl | sh`): asks `[y/N]`. Yes runs the newly installed `tsk setup herdr`.
+- `CI` set, or no usable TTY: skips the ask so the install never hangs.
+- Herdr absent: no Herdr prompt.
+
+The install always ends with a short wrap-up:
+
+- Setup accepted: open the board with `tsk`, or press `prefix+t` in Herdr.
+- Declined, CI/no-TTY skip, or setup failure: open the board with `tsk`, and run `tsk setup herdr` when ready.
+- Herdr absent: open the board with `tsk` only (no setup nudge).
 
 Setup failures do not undo the install. Homebrew does not run this prompt; use the formula caveat or run `tsk setup herdr` yourself.
 
