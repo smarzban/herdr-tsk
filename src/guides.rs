@@ -13,84 +13,115 @@ pub struct Guide {
     pub steps: &'static [(&'static str, bool)],
 }
 
-pub const CATALOG: [Guide; 5] = [
+pub const CATALOG: [Guide; 4] = [
     Guide {
-        catalog_id: "guide.start-here",
-        title: "Start here: Enter opens a task, Esc comes back",
-        notes: "These `N` rows are guides. They sit on your desk like tasks and leave like tasks.\n\
+        catalog_id: "guide.welcome",
+        title: "Welcome to tsk, start here",
+        notes: "Hi. This is your board. Every task you make lives here. Take a minute with this one.\n\
                 \n\
-                - `j` `k` or the arrows move the selection\n\
-                - `Enter` opens the selected task, `Esc` returns to the board\n\
-                - `?` lists every key\n\
+                **Three tabs, always**\n\
+                - `1` is your desk. It shows anything that needs you or is in motion, from every project, plus the ready tasks that belong to no project.\n\
+                - `2` is one project. Press `p` to pick it.\n\
+                - `3` lists every project. `Enter` on a row opens that project's board.\n\
                 \n\
-                Review rows wait in NEEDS YOU until you decide. `ctrl+r` sends this one to ON DECK.",
+                **Three sections, decided by status**\n\
+                - **NEEDS YOU** holds `blocked` and `review` tasks. Something is waiting on you. This task is in review, so it sits here until you act on it.\n\
+                - **IN MOTION** holds `started` tasks. Work you are doing right now.\n\
+                - **ON DECK** holds `ready` tasks. Up next. A new task lands here.\n\
+                - `done` tasks leave the board for the drawer. Press `d` to open it, `d` again to close it.\n\
+                \n\
+                **Moving around**\n\
+                - `j` and `k` or the arrows move the selection. `Enter` opens a task, `Esc` comes back.\n\
+                - Status keys use Ctrl, so a stray letter never changes anything. `ctrl+s` starts, `ctrl+b` blocks, `ctrl+r` marks review or takes it back to ready, `ctrl+d` finishes, `ctrl+o` reopens.\n\
+                - `ctrl+u` undoes the last change.\n\
+                \n\
+                Try it now. Press `ctrl+r` on this task and watch it move from NEEDS YOU to ON DECK.",
         status: HumanStatus::Review,
         steps: &[
-            ("Find this guide in NEEDS YOU", true),
-            ("Press Enter on this step to check it", false),
-            ("Press Esc to return to the board", false),
+            ("Open this task with Enter", true),
+            ("Press Esc, then 1, 2, and 3 to visit each tab", false),
+            ("Press ctrl+r and watch this task move to ON DECK", false),
         ],
     },
     Guide {
-        catalog_id: "guide.needs-you",
-        title: "Blocked rows wait in NEEDS YOU on every board",
-        notes: "NEEDS YOU collects blocked and review tasks from every project, so the desk \
-                shows what waits on you.\n\
+        catalog_id: "guide.tasks",
+        title: "Make a task, open it, check off steps",
+        notes: "A task holds a title, notes (the description), and steps. You set its status yourself. Optionally put it on a thread to group related work inside a project, and file it under a project (or leave it on your desk).\n\
                 \n\
-                - `ctrl+b` toggles blocked, `ctrl+r` toggles review\n\
-                - `1` desk · `2` selected project · `3` projects\n\
-                - `p` picks a project\n\
+                **Make one**\n\
+                - Press `+`, type a title, press `Enter`. It lands in ON DECK as `ready`.\n\
+                - Press `Tab` instead of `Enter` to open the full page first, where you can add notes, steps, a thread, and a project before you save.\n\
+                - Type `!p widget` in the title to file it under the project named widget. Bare `!p` keeps it on your desk.\n\
+                - Type `!t release` in the title to tag it with the thread `release`. Threads group related work inside one project, and the project board can filter by them.\n\
                 \n\
-                Unblock this guide with `ctrl+b` and watch it move to ON DECK.",
-        status: HumanStatus::Blocked,
-        steps: &[("Press ctrl+b to unblock this guide", false)],
-    },
-    Guide {
-        catalog_id: "guide.in-motion",
-        title: "Started rows sit in IN MOTION, steps never finish a task",
-        notes: "`ctrl+s` starts a task. Steps are a checklist inside it: check them all and the \
-                task still reads started, because only you set status.\n\
+                **Read one**\n\
+                - `→` peeks at the notes under the task. `←` or `Esc` closes the peek.\n\
+                - `Enter` opens the full page. `Esc` comes back.\n\
+                - On a terminal 110 columns or wider there is no peek. `→` slides the task page open beside the board, `→` again gives it more room, and `←` slides it back.\n\
                 \n\
-                - `Enter` on a step checks it\n\
-                - the `+ step` row at the end of the list adds one\n\
-                - `ctrl+d` marks the task done, `ctrl+o` reopens it",
+                **Change one**\n\
+                - On the page, `ctrl+e` edits the title and `ctrl+n` edits the notes. `shift+enter` saves.\n\
+                - `Enter` on a step checks it. The `+ step` row at the bottom adds one.\n\
+                - Steps never finish a task. Check every step below and this task stays `started` until you press `ctrl+d`. You decide when work is done.",
         status: HumanStatus::Started,
         steps: &[
-            ("Check this step with Enter", false),
+            ("Press Enter on this step to check it", false),
             ("Check this one too", false),
             ("Notice the task is still started", false),
+            ("Press + and add a task of your own", false),
         ],
     },
     Guide {
-        catalog_id: "guide.on-deck",
-        title: "Ready rows live in ON DECK until ctrl+s",
-        notes: "`+` adds a task to ON DECK. Type a title and press `Enter`; `Tab` expands the \
-                draft into a full page first.\n\
+        catalog_id: "guide.cli-agents",
+        title: "The command line, and how agents use it",
+        notes: "Everything on this board is also a command. Open another terminal and try these.\n\
                 \n\
-                - `!p name` in the title files the task under a project, bare `!p` keeps it on the desk\n\
-                - `!t name` puts it on a thread\n\
-                - `ctrl+e` edits the open task, `ctrl+n` its notes\n\
+                ```\n\
+                tsk add -t \"Try the CLI\"\n\
+                tsk list\n\
+                tsk status T1 start\n\
+                tsk steps 1 add \"First step\"\n\
+                tsk edit T1 --notes \"Written from the CLI\"\n\
+                ```\n\
                 \n\
-                Agents add and update tasks with `tsk add`, `tsk list`, and `tsk status`. \
-                `tsk guide` prints their instructions.",
+                Every task gets a `T` number, and that number is how each command finds it. Use the number `tsk list` prints for your new task in place of `T1`.\n\
+                \n\
+                `tsk list` shows the tasks of the project you are standing in, or your desk outside a repository. Add `--all` for every project or `--json` for output another program can read.\n\
+                \n\
+                **Let an agent work the board**\n\
+                Run `tsk setup claude` once (or `pi`, `cursor`, `codex`) and that agent learns the CLI. Then ask it in plain words. \"Add a task for each failing test.\" \"Mark T7 as review.\" `tsk guide` prints the same instructions if you want to read them yourself.\n\
+                \n\
+                These starter tasks are yours alone. `tsk list` never shows them, so an agent never sees them.",
         status: HumanStatus::Ready,
         steps: &[
-            ("Press + and add a task of your own", false),
-            ("Press ctrl+s on it", false),
+            ("Run tsk add -t \"Try the CLI\" in another terminal", false),
+            ("Watch it appear in ON DECK", false),
+            ("Run tsk status on it with start", false),
         ],
     },
     Guide {
-        catalog_id: "guide.dismiss",
-        title: "Archive or delete a guide when you are done with it",
-        notes: "Guides are yours to clear. Any of these takes one off the board for good:\n\
+        catalog_id: "guide.wrap-up",
+        title: "That's the tour, clear these when you're ready",
+        notes: "You know the tabs, the sections, and how a task moves between them. That is most of tsk.\n\
                 \n\
-                - `ctrl+d` marks it done, into the `d` drawer\n\
-                - `ctrl+f` files it in the drawer's archived group\n\
-                - `ctrl+x` twice deletes it, `ctrl+u` undoes\n\
+                **Clear these starter tasks**\n\
+                Any of these works. A cleared starter task never comes back.\n\
+                - `ctrl+d` marks it done. Done tasks wait in the drawer. `d` opens and closes it.\n\
+                - `ctrl+f` archives it. Archived tasks fold into a group at the end of the drawer.\n\
+                - `ctrl+x` twice deletes it. `ctrl+u` brings it back if you change your mind.\n\
                 \n\
-                A cleared guide never comes back, and `tsk list` never shows guides to agents.",
+                **When you forget a key**\n\
+                Press `?`. Every key of every screen is on one card.\n\
+                \n\
+                **Say hello**\n\
+                - Something broke, or something is missing? Tell us at https://github.com/smarzban/herdr-tsk/issues\n\
+                - A star at https://github.com/smarzban/herdr-tsk helps other people find tsk.\n\
+                - Say hi at https://x.com/smarzbanX",
         status: HumanStatus::Ready,
-        steps: &[("Press ctrl+d on this guide", false)],
+        steps: &[
+            ("Press ctrl+d on this task", false),
+            ("Press d and find it in the drawer", false),
+        ],
     },
 ];
 
@@ -202,9 +233,9 @@ mod tests {
     }
 
     #[test]
-    fn first_open_seeds_five_desk_notices_and_a_second_open_adds_none() {
+    fn first_open_seeds_four_desk_notices_and_a_second_open_adds_none() {
         let store = temp_store("empty");
-        assert_eq!(seed_on_open(&store), Ok(5));
+        assert_eq!(seed_on_open(&store), Ok(4));
         let state = store.load().expect("load");
         let seeded = notices(&state);
         assert_eq!(
@@ -212,15 +243,12 @@ mod tests {
                 .iter()
                 .map(|task| task.board_identifier())
                 .collect::<Vec<_>>(),
-            (1..=5).map(|n| Some(format!("N{n}"))).collect::<Vec<_>>()
+            (1..=4).map(|n| Some(format!("N{n}"))).collect::<Vec<_>>()
         );
         assert!(seeded.iter().all(|task| task.scope == TaskScope::Global));
         assert!(seeded.iter().all(|task| task.number.is_none()));
         let start = seeded[0];
-        assert_eq!(
-            start.title,
-            "Start here: Enter opens a task, Esc comes back"
-        );
+        assert_eq!(start.title, "Welcome to tsk, start here");
         assert_eq!(start.status, HumanStatus::Review);
         assert_eq!(
             start.steps.iter().map(|step| step.done).collect::<Vec<_>>(),
@@ -229,11 +257,11 @@ mod tests {
         assert!(start
             .notes
             .as_deref()
-            .is_some_and(|notes| notes.contains("`Esc`")));
+            .is_some_and(|notes| notes.contains("NEEDS YOU")));
         assert_eq!(delivery::load(store.path()).guides, catalog_ids());
 
         assert_eq!(seed_on_open(&store), Ok(0));
-        assert_eq!(notices(&store.load().expect("reload")).len(), 5);
+        assert_eq!(notices(&store.load().expect("reload")).len(), 4);
         let _ = fs::remove_dir_all(store.path());
     }
 
@@ -254,7 +282,7 @@ mod tests {
         }
         store.save(&state).expect("save");
 
-        assert_eq!(seed_on_open(&store), Ok(5));
+        assert_eq!(seed_on_open(&store), Ok(4));
         let state = store.load().expect("load");
         let ordinary: Vec<Option<u64>> = state
             .tasks()
@@ -264,14 +292,14 @@ mod tests {
             .collect();
         assert_eq!(ordinary, vec![Some(1), Some(2)]);
         assert_eq!(state.next_task_number, 3);
-        assert_eq!(notices(&state).len(), 5);
+        assert_eq!(notices(&state).len(), 4);
         let _ = fs::remove_dir_all(store.path());
     }
 
     #[test]
     fn a_dismissed_guide_is_not_seeded_again_even_after_it_leaves_the_store() {
         let store = temp_store("dismiss");
-        assert_eq!(seed_on_open(&store), Ok(5));
+        assert_eq!(seed_on_open(&store), Ok(4));
         let mut state = store.load().expect("load");
         let ids: Vec<uuid::Uuid> = notices(&state).iter().map(|task| task.id).collect();
         state.complete(ids[0]).expect("complete");
@@ -289,7 +317,7 @@ mod tests {
     #[test]
     fn a_lost_delivery_record_is_rebuilt_from_the_store_without_duplicates() {
         let store = temp_store("crash");
-        assert_eq!(seed_on_open(&store), Ok(5));
+        assert_eq!(seed_on_open(&store), Ok(4));
         fs::remove_file(store.path().join(delivery::DELIVERY_FILE)).expect("simulate crash");
 
         assert_eq!(seed_on_open(&store), Ok(0));
@@ -298,7 +326,7 @@ mod tests {
             .iter()
             .map(|task| task.notice.as_ref().expect("notice").catalog_id.clone())
             .collect();
-        assert_eq!(notices(&state).len(), 5, "no catalog id is created twice");
+        assert_eq!(notices(&state).len(), 4, "no catalog id is created twice");
         assert_eq!(ids, catalog_ids());
         assert_eq!(delivery::load(store.path()).guides, catalog_ids());
         let _ = fs::remove_dir_all(store.path());

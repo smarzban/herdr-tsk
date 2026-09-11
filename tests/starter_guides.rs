@@ -91,8 +91,8 @@ fn full_board_open_seeds_the_guides_once_beside_existing_tasks() {
     let state = store.load().expect("load");
     assert_eq!(
         notices(&state).len(),
-        6,
-        "five guides plus What's new for an existing desk"
+        5,
+        "four starter tasks plus What's new for an existing desk"
     );
     assert_eq!(
         notices(&state)
@@ -115,7 +115,7 @@ fn full_board_open_seeds_the_guides_once_beside_existing_tasks() {
     assert_eq!(record.announcement_watermark, newest);
 
     let _ = load_board_model().expect("second open");
-    assert_eq!(notices(&store.load().expect("reload")).len(), 6);
+    assert_eq!(notices(&store.load().expect("reload")).len(), 5);
 }
 
 #[test]
@@ -128,7 +128,7 @@ fn a_fresh_full_board_open_records_the_bundled_announcements_without_seeding_the
 
     let _ = load_board_model().expect("first open");
     let state = TaskStore::new(&env.dir).load().expect("load");
-    assert_eq!(notices(&state).len(), 5, "guides only");
+    assert_eq!(notices(&state).len(), 4, "starter tasks only");
     assert!(notices(&state)
         .iter()
         .all(|task| task.title != announcements::TITLE));
@@ -159,9 +159,9 @@ fn completing_a_guide_on_the_real_board_records_its_dismissal() {
     fs::create_dir_all(&outside).unwrap();
     let state_dir = root.join("state");
     let mut session = pty::Session::spawn(root, &outside, &[], &[], 24, 78);
-    // Painted words are split by cursor moves, so wait on the last guide's `N` prefix.
-    let painted = session.output_until("N5");
-    for prefix in ["N1", "N2", "N3", "N4"] {
+    // Painted words are split by cursor moves, so wait on the last starter task's `N` prefix.
+    let painted = session.output_until("N4");
+    for prefix in ["N1", "N2", "N3"] {
         assert!(painted.contains(prefix), "{prefix} painted: {painted}");
     }
     let store = TaskStore::new(&state_dir);
@@ -178,7 +178,7 @@ fn completing_a_guide_on_the_real_board_records_its_dismissal() {
         .filter(|task| task.status == HumanStatus::Done)
         .collect();
     assert_eq!(done.len(), 1, "ctrl+d completed the selected guide");
-    assert_eq!(notices(&state).len(), 5, "the other guides stay");
+    assert_eq!(notices(&state).len(), 4, "the other starter tasks stay");
     let dismissed = done[0].notice.as_ref().unwrap().catalog_id.clone();
     assert_eq!(
         delivery::load(&state_dir).guides,

@@ -251,7 +251,7 @@ If `HERDR_ENV` is unset, say that live smoke was not run.
   On board launch, if `TSK_NO_UPDATE_CHECK` is unset and that cache is older than 24h,
   a background `curl` of the GitHub latest-release tag updates it; a newer tag paints a
   dim `v<tag> available` on the idle status row. Any check failure is silent.
-- Starter guides (`src/guides.rs`, catalog ids `guide.*`) are desk notice rows seeded once
+- Starter tasks (`src/guides.rs`, catalog ids `guide.*`) are four desk notice tasks seeded once
   per state dir by the full board open only (`load_board`, never quick capture, the CLI, or
   the installer). `delivery.json` (`src/delivery.rs`) holds the delivered or dismissed catalog
   ids and the announcement watermark; the seeder dedupes by catalog id in the store, so a
