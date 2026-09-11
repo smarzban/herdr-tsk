@@ -66,6 +66,10 @@ Select a task, then click a footer action or use:
 
 Agents can set any status with [the CLI](/docs/cli/#status). Task status does not change automatically when steps are checked or an agent stops.
 
+## Notices
+
+Your first board open seeds about five desk rows with `N` ids (not `T`). They teach the board by being ordinary tasks: open, peek, change status, archive, or delete. `ctrl+d`, `ctrl+f`, and `ctrl+x` all dismiss a notice the same way; that guide never re-seeds. After an upgrade, one `What's new in tsk` row can appear the same way. Details and the delivery record live under [storage](/docs/storage/#starter-guides-and-release-notes).
+
 ## Mouse
 
 | Action | Result |
@@ -74,7 +78,7 @@ Agents can set any status with [the CLI](/docs/cli/#status). Task status does no
 | Click a task | Peek in narrow panes; select in wide panes |
 | Click the same task again in a narrow pane | Close its peek |
 | Double-click a task | Open it full screen |
-| Click its `T` number | Copy the task number |
+| Click its `T` or `N` number | Copy that id |
 | Click a footer action | Run that action |
 | Wheel or drag a scrollbar | Scroll |
 | Drag across text | Select and copy on release |

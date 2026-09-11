@@ -5,6 +5,7 @@
 Install with `curl -fsSL https://gettsk.sh/install.sh | sh` or `brew install smarzban/tap/tsk`.
 Details: https://gettsk.sh/docs/install.md
 The board checks GitHub releases at most daily and shows a dim `vX.Y.Z available` on the status row; set `TSK_NO_UPDATE_CHECK` to disable.
+`N` rows on the desk are human-only notices: starter guides on a first open, one `What's new in tsk` row after an upgrade. `tsk list` never shows them.
 
 ## For agents
 

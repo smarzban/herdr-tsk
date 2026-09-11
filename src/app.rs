@@ -89,23 +89,23 @@ pub fn load_board() -> Result<(TaskStore, DomainState, BoardModel), Box<dyn Erro
 }
 
 /// Load store + snapshot for the quick-capture popup (no TTY).
-///
-/// The launch card is a board-open concern; the popup opens straight onto the draft
-/// page, and its archived-project scope fallback happens when the draft opens.
 pub fn load_board_for_quick_capture() -> Result<(TaskStore, DomainState, BoardModel), Box<dyn Error>>
 {
     load_board_inner(false)
 }
 
 fn load_board_inner(
-    offer_launch_card: bool,
+    full_board_open: bool,
 ) -> Result<(TaskStore, DomainState, BoardModel), Box<dyn Error>> {
     let state_dir = default_state_dir();
     let store = TaskStore::new(state_dir.clone());
+    if full_board_open {
+        seed_notices_without_blocking_open(&store);
+    }
     let state = store.load()?;
     let snapshot = load_snapshot();
     let mut model = BoardModel::from_domain(&state, snapshot.this_repo.clone());
-    if offer_launch_card {
+    if full_board_open {
         model.offer_launch_card(&state, &snapshot);
     }
     model.set_update_notice(crate::update::startup(
@@ -113,6 +113,16 @@ fn load_board_inner(
         env!("CARGO_PKG_VERSION"),
     ));
     Ok((store, state, model))
+}
+
+fn seed_notices_without_blocking_open(store: &TaskStore) {
+    let announcement_fresh = crate::announcements::is_fresh_install(store);
+    let _ = crate::guides::seed_on_open(store);
+    let _ = crate::announcements::seed_on_open(store, announcement_fresh);
+}
+
+fn record_notice_dismissals_without_blocking_persist(store: &TaskStore, domain: &DomainState) {
+    let _ = crate::delivery::record_dismissed_notices(store.path(), domain.tasks());
 }
 
 /// The one walkthrough read on the open path: no record means the card opens.
@@ -1623,7 +1633,7 @@ fn handle_board_intent(
         None
     };
 
-    match apply_board_intent_presenting_rejection(
+    let outcome = apply_board_intent_presenting_rejection(
         domain,
         model,
         save_recovery,
@@ -1637,7 +1647,11 @@ fn handle_board_intent(
                 .reload_merge_save(state)
                 .map_err(|error| error.to_string())
         },
-    ) {
+    );
+    if outcome == IntentOutcome::Persisted {
+        record_notice_dismissals_without_blocking_persist(store, domain);
+    }
+    match outcome {
         IntentOutcome::Quit => Ok(true),
         IntentOutcome::Persist | IntentOutcome::Persisted | IntentOutcome::None => {
             Ok(quick_capture && quick_capture_finished(model))

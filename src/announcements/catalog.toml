@@ -1,0 +1,14 @@
+# Maintainer catalog for `src/announcements.rs`. Append with the next id; ids
+# increase and are never reused. Changelog URLs go in `notes`, never in `title`.
+
+[[announcement]]
+id = 1
+title = "Guides and release notes on your desk"
+notes = """
+Your desk now carries `N` rows: starter guides on a first install, and a
+what's-new note like this one after an upgrade. They sit like tasks and leave
+like tasks: `ctrl+d`, `ctrl+f`, or `ctrl+x` clears one for good. `tsk list`
+never shows them to agents.
+
+Changelog: https://github.com/smarzban/herdr-tsk/releases
+"""

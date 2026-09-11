@@ -223,7 +223,7 @@ fn notice_round_trips_with_its_n_number_and_no_t_number() {
                     Some("hello".into()),
                     HumanStatus::Ready,
                     TaskScope::Global,
-                    vec!["first".into()],
+                    vec![("first".into(), true)],
                 )
                 .map_err(|error| error.to_string())
         })
@@ -245,6 +245,7 @@ fn notice_round_trips_with_its_n_number_and_no_t_number() {
     assert_eq!(task.board_identifier().as_deref(), Some("N1"));
     assert_eq!(task.number, None);
     assert_eq!(task.steps[0].text, "first");
+    assert!(task.steps[0].done, "a pre-checked step survives the reload");
 }
 
 #[test]
