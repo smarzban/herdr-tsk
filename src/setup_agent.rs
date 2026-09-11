@@ -4,19 +4,20 @@ use std::env;
 use std::fmt;
 use std::fs;
 use std::io::{self, BufRead, Write};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use crate::cli::guide::SKILL_MD;
 
 const SKILL_FOLDER: &str = "tsk-cli";
 const SKILL_FILE: &str = "SKILL.md";
 
-pub const USAGE: &str = "usage: tsk setup [herdr | agents | claude | pi | cursor | grok | codex | opencode | --skill-dir <path>] [--yes] [--force] [--json]\n       tsk setup --detected-ids";
+pub const USAGE: &str = "usage: tsk setup [herdr | agents | claude | pi | omp | cursor | grok | codex | opencode | --skill-dir <path>] [--yes] [--force] [--json]\n       tsk setup --detected-ids";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Target {
     Claude,
     Pi,
+    Omp,
     Cursor,
     Grok,
     Codex,
@@ -29,6 +30,7 @@ impl Target {
         match self {
             Self::Claude => "claude",
             Self::Pi => "pi",
+            Self::Omp => "omp",
             Self::Cursor => "cursor",
             Self::Grok => "grok",
             Self::Codex => "codex",
@@ -42,6 +44,7 @@ impl Target {
             Self::SkillDir(path) => Ok(path.clone()),
             Self::Claude => Ok(home_dir()?.join(".claude/skills")),
             Self::Pi => Ok(home_dir()?.join(".pi/agent/skills")),
+            Self::Omp => Ok(omp_agent_dir()?.join("skills")),
             Self::Cursor => Ok(home_dir()?.join(".cursor/skills")),
             Self::Grok => Ok(home_dir()?.join(".grok/skills")),
             Self::Codex => Ok(home_dir()?.join(".agents/skills")),
@@ -55,10 +58,11 @@ impl Target {
         Ok(self.skills_root()?.join(SKILL_FOLDER).join(SKILL_FILE))
     }
 
-    fn named_agents() -> [Target; 6] {
+    fn named_agents() -> [Target; 7] {
         [
             Target::Claude,
             Target::Pi,
+            Target::Omp,
             Target::Cursor,
             Target::Grok,
             Target::Codex,
@@ -147,6 +151,7 @@ pub enum Error {
     Symlink(PathBuf),
     Home,
     Io(String),
+    InvalidOmpProfile(String),
     Ended,
 }
 
@@ -158,6 +163,10 @@ impl fmt::Display for Error {
             Self::Symlink(path) => write!(f, "refusing symlink: {}", path.display()),
             Self::Home => write!(f, "HOME is not set"),
             Self::Io(detail) => write!(f, "{detail}"),
+            Self::InvalidOmpProfile(profile) => write!(
+                f,
+                "invalid OMP profile {profile:?}; expected [a-z0-9][a-z0-9._-]{{0,63}}, not ending in a dot or using a reserved device name"
+            ),
             Self::Ended => write!(f, "confirmation ended; no changes made"),
         }
     }
@@ -195,6 +204,7 @@ pub fn parse(args: &[String]) -> Result<Command, Error> {
             }
             "claude" => push_agent(&mut agents, Target::Claude)?,
             "pi" => push_agent(&mut agents, Target::Pi)?,
+            "omp" => push_agent(&mut agents, Target::Omp)?,
             "cursor" => push_agent(&mut agents, Target::Cursor)?,
             "grok" => push_agent(&mut agents, Target::Grok)?,
             "codex" => push_agent(&mut agents, Target::Codex)?,
@@ -368,8 +378,12 @@ pub fn detect() -> Result<Vec<AgentStatus>, Error> {
     let embedded = embedded_skill_version();
     let mut out = Vec::new();
     for target in Target::named_agents() {
-        let skills_root = target.skills_root()?;
-        let skill_path = target.skill_path()?;
+        let skills_root = match target.skills_root() {
+            Ok(path) => path,
+            Err(Error::InvalidOmpProfile(_)) if target == Target::Omp => continue,
+            Err(error) => return Err(error),
+        };
+        let skill_path = skills_root.join(SKILL_FOLDER).join(SKILL_FILE);
         if !agent_present(&home, &target, &skills_root) {
             continue;
         }
@@ -564,6 +578,7 @@ pub fn list_text() -> String {
          agents    detect agents; --yes installs/updates without asking\n\
          claude    {}\n\
          pi        {}\n\
+         omp       {}\n\
          cursor    {}\n\
          grok      {}\n\
          codex     {}\n\
@@ -572,6 +587,7 @@ pub fn list_text() -> String {
          --detected-ids      print detected agent ids (for installers)\n",
         display(".claude/skills"),
         display(".pi/agent/skills"),
+        omp_skill_display_path(),
         display(".cursor/skills"),
         display(".grok/skills"),
         display(".agents/skills"),
@@ -605,6 +621,7 @@ fn named_target(id: &str) -> Result<Target, Error> {
     match id {
         "claude" => Ok(Target::Claude),
         "pi" => Ok(Target::Pi),
+        "omp" => Ok(Target::Omp),
         "cursor" => Ok(Target::Cursor),
         "grok" => Ok(Target::Grok),
         "codex" => Ok(Target::Codex),
@@ -617,16 +634,21 @@ fn agent_present(home: &Path, target: &Target, skills_root: &Path) -> bool {
     let marker = match target {
         Target::Claude => home.join(".claude"),
         Target::Pi => home.join(".pi"),
+        Target::Omp => omp_config_root().unwrap_or_else(|_| home.join(".omp")),
         Target::Cursor => home.join(".cursor"),
         Target::Grok => home.join(".grok"),
         Target::Codex => home.join(".codex"),
         Target::OpenCode => home.join(".config/opencode"),
         Target::SkillDir(_) => return true,
     };
+    let omp_agent_dir_present =
+        matches!(target, Target::Omp) && skills_root.parent().is_some_and(real_dir);
     real_dir(&marker)
         || real_dir(skills_root)
+        || omp_agent_dir_present
         || match target {
             Target::Claude => cli_on_path("claude"),
+            Target::Omp => executable_cli_on_path("omp"),
             Target::Cursor => cli_on_path("cursor"),
             Target::Codex => cli_on_path("codex"),
             Target::OpenCode => cli_on_path("opencode"),
@@ -642,16 +664,37 @@ fn real_dir(path: &Path) -> bool {
 }
 
 fn cli_on_path(name: &str) -> bool {
+    path_contains(name, |candidate| {
+        fs::symlink_metadata(candidate).is_ok_and(|meta| meta.is_file())
+    })
+}
+
+fn executable_cli_on_path(name: &str) -> bool {
+    path_contains(name, |candidate| {
+        fs::metadata(candidate).is_ok_and(|meta| executable_file(&meta))
+    })
+}
+
+fn path_contains(name: &str, predicate: impl Fn(&Path) -> bool) -> bool {
     let Some(path) = env::var_os("PATH") else {
         return false;
     };
-    env::split_paths(&path).any(|dir| {
-        let candidate = dir.join(name);
-        match fs::symlink_metadata(&candidate) {
-            Ok(meta) => meta.is_file(),
-            Err(_) => false,
-        }
-    })
+    env::split_paths(&path).any(|dir| predicate(&dir.join(name)))
+}
+
+fn executable_file(meta: &fs::Metadata) -> bool {
+    if !meta.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        meta.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    {
+        true
+    }
 }
 
 enum SkillStatusDetail {
@@ -711,6 +754,137 @@ fn home_dir() -> Result<PathBuf, Error> {
         .ok_or(Error::Home)
 }
 
+/// Resolve OMP's active user agent directory. Named profiles are rooted under
+/// `PI_CONFIG_DIR` and ignore `PI_CODING_AGENT_DIR`; the default profile honors
+/// that agent-directory override, matching OMP's `getAgentDir()` contract.
+fn omp_agent_dir() -> Result<PathBuf, Error> {
+    if let Some(profile) = active_omp_profile()? {
+        return Ok(omp_config_root()?
+            .join("profiles")
+            .join(profile)
+            .join("agent"));
+    }
+    if let Some(override_dir) = env::var_os("PI_CODING_AGENT_DIR").filter(|value| !value.is_empty())
+    {
+        if !profile_derived_agent_override(&override_dir)? {
+            let path = PathBuf::from(override_dir);
+            let absolute = if path.is_absolute() {
+                path
+            } else {
+                env::current_dir().map_err(io_error)?.join(path)
+            };
+            return Ok(normalize_absolute_path(&absolute));
+        }
+    }
+    Ok(omp_config_root()?.join("agent"))
+}
+
+fn omp_config_root() -> Result<PathBuf, Error> {
+    let config_dir = PathBuf::from(
+        env::var_os("PI_CONFIG_DIR")
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| ".omp".into()),
+    );
+    let relative: PathBuf = config_dir
+        .components()
+        .filter_map(|component| match component {
+            Component::Prefix(_) | Component::RootDir => None,
+            Component::CurDir => None,
+            Component::ParentDir => Some("..".into()),
+            Component::Normal(part) => Some(part.to_owned()),
+        })
+        .collect();
+    Ok(normalize_absolute_path(&home_dir()?.join(relative)))
+}
+
+fn profile_derived_agent_override(override_dir: &std::ffi::OsStr) -> Result<bool, Error> {
+    let Some(pi_profile) = env::var_os("PI_PROFILE") else {
+        return Ok(false);
+    };
+    let Ok(Some(pi_profile)) = normalize_omp_profile(pi_profile) else {
+        return Ok(false);
+    };
+    let profile_agent_dir = omp_config_root()?
+        .join("profiles")
+        .join(pi_profile)
+        .join("agent");
+    Ok(Path::new(override_dir) == profile_agent_dir)
+}
+
+fn active_omp_profile() -> Result<Option<String>, Error> {
+    let raw = match env::var_os("OMP_PROFILE") {
+        Some(value) => Some(value),
+        None => env::var_os("PI_PROFILE"),
+    };
+    let Some(raw) = raw else {
+        return Ok(None);
+    };
+    normalize_omp_profile(raw)
+}
+
+fn normalize_omp_profile(raw: std::ffi::OsString) -> Result<Option<String>, Error> {
+    let profile = raw
+        .into_string()
+        .map_err(|value| Error::InvalidOmpProfile(value.to_string_lossy().into_owned()))?;
+    let profile = profile.trim();
+    if profile.is_empty() || profile == "default" {
+        return Ok(None);
+    }
+    if !valid_omp_profile(profile) {
+        return Err(Error::InvalidOmpProfile(profile.to_owned()));
+    }
+    Ok(Some(profile.to_owned()))
+}
+
+fn valid_omp_profile(profile: &str) -> bool {
+    let bytes = profile.as_bytes();
+    if bytes.is_empty()
+        || bytes.len() > 64
+        || !(bytes[0].is_ascii_lowercase() || bytes[0].is_ascii_digit())
+        || profile.ends_with('.')
+        || !bytes.iter().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'.' | b'_' | b'-')
+        })
+    {
+        return false;
+    }
+    let base = profile.split('.').next().unwrap_or_default();
+    !matches!(base, "con" | "prn" | "aux" | "nul")
+        && !(base.len() == 4
+            && (base.starts_with("com") || base.starts_with("lpt"))
+            && base.as_bytes()[3].is_ascii_digit())
+}
+
+fn normalize_absolute_path(path: &Path) -> PathBuf {
+    debug_assert!(path.is_absolute());
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
+            Component::RootDir => normalized.push(component.as_os_str()),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            Component::Normal(part) => normalized.push(part),
+        }
+    }
+    normalized
+}
+
+fn omp_skill_display_path() -> String {
+    match omp_agent_dir() {
+        Ok(path) => path
+            .join("skills")
+            .join(SKILL_FOLDER)
+            .join(SKILL_FILE)
+            .display()
+            .to_string(),
+        Err(Error::Home) => "$HOME/.omp/agent/skills/tsk-cli/SKILL.md".to_owned(),
+        Err(error) => format!("<{}>", error),
+    }
+}
+
 fn refuse_symlink(path: &Path) -> Result<(), Error> {
     match fs::symlink_metadata(path) {
         Ok(meta) if meta.file_type().is_symlink() => Err(Error::Symlink(path.to_path_buf())),
@@ -739,6 +913,38 @@ mod tests {
             .unwrap_or_else(|poison| poison.into_inner())
     }
 
+    struct OmpEnvGuard(Vec<(&'static str, Option<std::ffi::OsString>)>);
+
+    impl OmpEnvGuard {
+        fn cleared() -> Self {
+            let values = [
+                "OMP_PROFILE",
+                "PI_PROFILE",
+                "PI_CONFIG_DIR",
+                "PI_CODING_AGENT_DIR",
+            ]
+            .into_iter()
+            .map(|key| {
+                let value = env::var_os(key);
+                env::remove_var(key);
+                (key, value)
+            })
+            .collect();
+            Self(values)
+        }
+    }
+
+    impl Drop for OmpEnvGuard {
+        fn drop(&mut self) {
+            for (key, value) in self.0.drain(..) {
+                match value {
+                    Some(value) => env::set_var(key, value),
+                    None => env::remove_var(key),
+                }
+            }
+        }
+    }
+
     #[test]
     fn embedded_skill_declares_semver() {
         let version = embedded_skill_version();
@@ -762,6 +968,7 @@ mod tests {
     #[test]
     fn interactive_batch_yes_installs_detected_agent() {
         let _lock = env_lock();
+        let _omp_env = OmpEnvGuard::cleared();
         let root =
             std::env::temp_dir().join(format!("tsk-setup-agent-batch-yes-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
@@ -799,6 +1006,7 @@ mod tests {
     #[test]
     fn interactive_batch_no_skips_write() {
         let _lock = env_lock();
+        let _omp_env = OmpEnvGuard::cleared();
         let root =
             std::env::temp_dir().join(format!("tsk-setup-agent-batch-no-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
