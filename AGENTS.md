@@ -19,7 +19,7 @@ The committed `.gitignore` already covers it.
 board for capture and human-status verbs. It ships as the herdr plugin
 `herdr-tsk`, and the built binary (`tsk`) also runs standalone. Attention,
 park/resume, linking, and dispatch are not in this tree; reference lives on
-`archive/dark-engine-pre-v1`. Crate (`tsk-tui`) and plugin are `0.6.0`.
+`archive/dark-engine-pre-v1`. Crate (`tsk-tui`) and plugin are `0.7.0`.
 
 A gitignored `HANDOFF.md` may hold this clone’s live working state.
 
@@ -104,7 +104,9 @@ For scriptable board work, use `tsk add`, `tsk list`, `tsk status`, `tsk edit`, 
   title input on the status-row slot with a blank row above and below, list still
   visible. `Enter` saves and closes, `Shift+Enter` saves and stays open, `Tab`
   expands the draft onto the task page with a title·notes·thread·scope stash and a
-  `+ step` row, so Esc returns to the line and a second `Tab` restores what was typed. A project board
+  `+ step` row, so Esc returns to the line and a second `Tab` restores what was typed. The
+  expanded draft owns the whole frame at every width (`capture_draft_open`): the wide slider
+  has no column for a non-task form, so it never paints beside the board. A project board
   defaults the draft to that project, a project-less board defaults it to your desk, and home
   keeps the invocation cwd-derived default. Capture tokens in the title: `!p` and
   `!t` each consume one whitespace-delimited argument. Bare `!p` selects your desk,
@@ -248,12 +250,32 @@ If `HERDR_ENV` is unset, say that live smoke was not run.
   migration.
 - State is `$HOME/.tsk/tsk.json`, walkthrough dismissal is
   `$HOME/.tsk/walkthrough.json`, the release-check cache is `$HOME/.tsk/update.json`,
+  the notice delivery record is `$HOME/.tsk/delivery.json`,
   overridable with `TSK_STATE_DIR` / `TSK_CONFIG_DIR`.
   Host-injected `HERDR_PLUGIN_*` dirs are ignored. Mutating verbs always use Ctrl.
   On board launch, if `TSK_NO_UPDATE_CHECK` is unset and that cache is older than 24h,
   a background `curl` of the GitHub latest-release tag updates it; a newer tag paints a
   dim `v<tag> available` on the idle status row. Any check failure is silent.
-- Store format is versioned (`STORE_FORMAT_VERSION`, currently 2). Any schema change bumps it
+- Starter tasks (`src/guides.rs`, catalog ids `guide.*`) are four desk notice tasks seeded once
+  per state dir by the full board open only (`load_board`, never quick capture, the CLI, or
+  the installer). `delivery.json` (`src/delivery.rs`) holds the delivered or dismissed catalog
+  ids and the announcement watermark; the seeder dedupes by catalog id in the store, so a
+  lost record converges without duplicates. `ctrl+d`, `ctrl+f`, and `ctrl+x` on a notice
+  share one dismiss rule: the persist boundary marks its catalog id and it never re-seeds.
+  Seed and dismiss are silent; neither writes `status_message`.
+- Release announcements (`src/announcements.rs`) are the maintainer-edited
+  `src/announcements/catalog.toml`, compiled in with `include_str!`: `[[announcement]]` tables
+  with exactly `id`, `title`, `notes`; ids positive and increasing in file order; the
+  changelog link lives in `notes`, never in `title` (the parser refuses otherwise). Append one
+  entry per release worth a row. `seed_on_open` runs right after the guide seed on the full
+  board open: it takes the higher of `delivery.announcement_watermark` and any `announce.<id>`
+  notice in the store as "seen". A blank state checked before guide seeding (watermark 0, no
+  delivered guide ids, no live tasks) is a fresh install: jump the watermark to the bundled
+  maximum and create nothing. Otherwise every entry above seen becomes one desk notice
+  `What's new in tsk` (catalog id `announce.<max>`, notes newest first) and the watermark
+  moves to the maximum. That includes upgrading from a guides-only install whose watermark
+  is still 0.
+- Store format is versioned (`STORE_FORMAT_VERSION`, currently 3). Any schema change bumps it
   and adds a `vN → vN+1` step to `MIGRATIONS` in `src/store.rs`; `deny_unknown_fields` stays on
   `Task` and `DomainState` so an older binary refuses a newer file instead of dropping fields.
   A lower version loads migrated in memory and the first save writes `tsk.json.v<N>` beside the
@@ -268,7 +290,7 @@ If `HERDR_ENV` is unset, say that live smoke was not run.
   project refuses with error code `project-archived`. `tsk status` accepts ready, started
   (or start), blocked, review, or done. `tsk steps` also renames and removes.
   `tsk guide` prints the embedded `skills/tsk-cli/SKILL.md` body (also published at
-  `/docs/agents/`, generated at site build). `tsk setup <claude|pi|cursor|codex|--skill-dir p>`
+  `/docs/agents/`, generated at site build). `tsk setup <claude|pi|cursor|grok|codex|opencode|--skill-dir p>`
   writes that skill into the agent's skills dir (`src/setup_agent.rs`); bare `tsk setup` lists
   and writes nothing. `tsk --help` ends with a two-line agent footer.
 - `~/.tsk` must live on a local disk (flock plus rename-based replace); synced folders are

@@ -1,84 +1,105 @@
 ---
 title: Capture
-description: Quick-add on the board, title tokens, and the herdr quick-capture popup.
+description: Add a task without leaving your work.
 ---
 
-Press `+` for a one-line title on the status-row slot. The list stays visible. Its
-prompt reads `enter save · tab details · esc close`; `Shift+Enter` still saves and
-stays open, and is listed in help rather than the short prompt.
+Press `+` or click **+ add**. Type a title, then press `Enter`.
 
-- `Enter` saves and closes
-- `Shift+Enter` saves and stays open
-- `Tab` expands onto the [task page](/docs/task-page/) (title · notes · scope)
+## Quick-add
 
-A project board defaults the draft to that project. A project-less board defaults
-to your desk. Home keeps the cwd-derived default (the Git repo root, or the directory you
-opened from outside Git). Use bare `!p` to explicitly file a draft on your desk.
+| Key | Action |
+| --- | --- |
+| `Enter` | Save and close |
+| `Shift+Enter` | Save and add another |
+| `Tab` | Open details |
+| `Esc` | Cancel |
 
-A saved task becomes the selection. Success has no status message. The row flash
-is the feedback. Refusals (empty title, bad thread) paint while the line is open
-and clear when it closes.
+The board stays visible. A saved task flashes and becomes selected. Invalid input stays open with an explanation.
 
-Title is required.
+Clicking a task while the quick-add line is open discards the draft and selects that task.
+
+## Details
+
+Press `Tab` from quick-add to add notes, steps, a scope, or a thread. The draft uses the full pane and opens in Notes.
+
+- `Shift+Enter` saves.
+- `Esc` returns to the quick-add line.
+- `Tab` from the line restores your draft details.
+
+Scroll to reach steps below long notes. Typing brings the notes cursor back into view.
+
+## Destination
+
+| Where you add | Default destination |
+| --- | --- |
+| Project board | That project |
+| Desk or Projects | The launch/reopen repository, or directory outside Git |
+| Herdr quick-capture popup | The focused pane's repository, or directory outside Git |
+
+Use title tokens or the draft's scope control to change the destination. Archived projects cannot receive new tasks.
+
+Keeping an archived launch project archived changes the session's default to desk.
 
 ## Title tokens
 
-`!p` and `!t` each consume one whitespace-delimited argument. They can sit anywhere
-in the line, in either order. A token followed by another token or by a `#word` is
-bare. Tokens are stripped from the saved title, and the remaining words are
-rejoined with single spaces.
+Add a project or thread while typing the title:
 
-| Token | Effect |
+```text
+Fix login timeout !p atlas !t auth
+Buy coffee !p
+```
+
+| Token | Destination or thread |
 | --- | --- |
-| `!p` | desk |
-| `!p name` | project by basename (case-insensitive) |
-| `!p /path` | that path verbatim |
-| `!t` | unthread |
-| `!t name` | normalized thread (lowercase ASCII alphanumerics, hyphens, and dots, first character alphanumeric, at most 32 characters) |
+| `!p` | Desk |
+| `!p name` | Project matching that basename, ignoring case |
+| `!p /path` | Project at that path |
+| `!t` | No thread |
+| `!t name` | Named thread |
 
-An ambiguous project basename is stored as typed. `tsk list --all --json` is how
-you find a typo scope later.
+Each token takes one whitespace-separated argument. Put bare `!p` or `!t` at the end, or before another token. A following `#word` also leaves the token bare.
 
-An archived project refuses capture: a title token naming one leaves the line
-open with a refusal that names the project (`project <name> is archived`), and
-the refusal clears when the line closes. `tsk add` refuses the same way with
-error code `project-archived`.
+Tokens are removed from the saved title. Remaining words are joined with single spaces. A title is required.
 
-## Quick capture (herdr)
+A missing or ambiguous project name is kept as typed. Check spelling; use `tsk list --all --json` to find tasks filed under an unexpected project.
 
-**Quick capture** opens the expanded quick-add page in a short-lived popup, without
-first opening a split board:
+## Thread names
 
-```bash
+Thread names are lowercased and must:
+
+- Start with an ASCII letter or digit.
+- Contain only ASCII letters, digits, `-`, or `.`.
+- Be at most 32 characters.
+
+Invalid names leave the draft open with the rule that failed.
+
+## Quick capture
+
+In Herdr, press **prefix+a** after [setup](/docs/install/#add-to-herdr). A popup opens with Title focused.
+
+| Action | Result |
+| --- | --- |
+| Type or edit the title | Name the task |
+| Add notes, a thread, or steps | Include details before saving |
+| `Shift+Enter` | Save and close the popup |
+| `Esc` | Discard and close |
+
+If a step editor or scope picker is open, `Esc` closes that first. During save recovery, it cancels the pending save.
+
+Selected text from the invoking pane prefills the title. An archived launch project falls back to desk. A failed save keeps the draft open for retry or cancel.
+
+You can also invoke the popup explicitly:
+
+```sh
 herdr plugin action invoke quick-capture --plugin herdr-tsk
 ```
 
-It is the same expanded page you get with `+` then `Tab` on the board, but it opens
-with the cursor in Title. Type the title on the page header, notes under it; thread
-and `+ step` are on the page. `Shift+Enter` saves and closes the popup. `Esc` cancels:
-one press discards the draft and closes the popup without creating a task. If the
-save fails, the popup stays open with the draft editable and the usual retry/cancel
-recovery.
+For the same capture flow in your terminal, run `tsk capture`. `TSK_MODE=capture tsk` is equivalent.
 
-If text is selected in the pane you invoked it from, it arrives as the title. Scope
-defaults to the Git repo root of the focused pane, or its current directory outside
-Git; change it on the
-page's scope field, or with `!p` tokens in the title. An archived project is never
-a default: the draft falls back to the desk.
+## From an agent or script
 
-An idle board watching the same `~/.tsk` picks up the new task on the next tick.
+```sh
+tsk add -t "Fix login timeout" --thread auth
+```
 
-## Expanded form
-
-From the `+` line, `Tab` opens the task page in notes edit because a draft has
-nothing to view yet. Thread and `+ step` are on that page. `Esc` returns to the
-line. A second `Tab` restores what you typed.
-
-The mouse wheel and page scrollbar can reach `+ step` below long notes without
-leaving the draft. Typing or moving the Notes cursor brings it back into view.
-
-In the capture popup, clicking Title or Notes places the cursor at the clicked
-character, including wrapped and scrolled note lines.
-
-The page scrollbar also works while a new step is being typed. A field click
-that refuses to leave an unfinished step keeps that step’s cursor unchanged.
+[CLI options](/docs/cli/#add) · [Editing tasks](/docs/task-page/)

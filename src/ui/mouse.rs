@@ -19,7 +19,7 @@ use super::capture::{
 };
 use super::input::{BoardIntent, CaptureIntent, PrimaryCaptureAction, PRIMARY_CAPTURE_ACTIONS};
 use super::render::{form_verb_items, QueueHitMap, QueueHitTarget, QUICK_ADD_VERBS};
-use super::tier::{resolve, resolve_responsive, FocusedSurface, ResponsivePresentation, WideStage};
+use super::tier::{resolve, FocusedSurface, ResponsivePresentation, WideStage};
 
 /// Transient presentation that still exists on the V1 queue board.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -362,7 +362,7 @@ fn hit_at(hits: &QueueHitMap, pos: Position) -> Option<QueueHitTarget> {
 
 /// Rectangle that currently owns pointer input for this presentation.
 pub fn focused_mouse_area(model: &BoardModel, area: Rect) -> Rect {
-    let responsive = resolve_responsive(area.width, area.height, model.wide_stage());
+    let responsive = model.responsive_geometry(area);
     if model.focused_surface() == FocusedSurface::Task {
         responsive.task_content()
     } else {
@@ -377,7 +377,7 @@ pub fn press_on_focused_surface(model: &BoardModel, area: Rect, pos: Position) -
     if focused_mouse_area(model, area).contains(pos) {
         return true;
     }
-    let responsive = resolve_responsive(area.width, area.height, model.wide_stage());
+    let responsive = model.responsive_geometry(area);
     responsive.presentation == ResponsivePresentation::WideSplit
         && area.contains(pos)
         && pos.y >= wide_footer_top(area)
@@ -406,7 +406,7 @@ pub fn wide_mouse_focus_intent(
     {
         return None;
     }
-    let responsive = resolve_responsive(area.width, area.height, model.wide_stage());
+    let responsive = model.responsive_geometry(area);
     if responsive.presentation != ResponsivePresentation::WideSplit {
         return None;
     }
@@ -424,7 +424,7 @@ pub fn map_responsive_board_mouse(
     area: Rect,
     mouse: MouseEvent,
 ) -> Option<BoardIntent> {
-    let responsive = resolve_responsive(area.width, area.height, model.wide_stage());
+    let responsive = model.responsive_geometry(area);
     if responsive.presentation != ResponsivePresentation::WideSplit {
         return map_board_mouse(model, hits, mouse);
     }

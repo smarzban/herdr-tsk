@@ -1,19 +1,25 @@
 # tsk
 
-tsk is a terminal task board for you and your agents: one shared queue, a TUI for you, a CLI for them.
+A terminal task board for you and your agents: one shared queue, a TUI for you, a CLI for them.
 
-You and your agents put work on one board and move it through:
-ready, started, blocked, review, done. Agents reach the board through the CLI.
-It ships as a [herdr](https://herdr.dev) plugin, and the `tsk` binary also runs
-standalone against `~/.tsk`.
+Keep the next task, the work in progress, and the things waiting on you in view.
+Press `+` to capture a thought, add notes and steps when it needs a plan, and give
+your agent the task number when you're ready to work on it.
 
-- Queue board with desk, a selected project, a projects index, and cross-project thread views
-- Starts in your Git repo’s project, or the current directory’s project outside Git
-- Quick-add on the board, plus a herdr quick-capture popup
-- Task page for notes, thread, scope, and steps
-- Headless `tsk add`, `tsk list`, `tsk status`, `tsk edit`, and `tsk steps`
+### the flow
 
-Park, resume, attention, linking, and dispatch are not part of this tree.
+![The tsk board beside an agent working on the selected Redis-to-Postgres migration task](docs/images/board-in-herdr.png)
+
+In Herdr, **prefix+t** opens your board and **prefix+a** opens quick capture.
+Click a task's `T` number to copy it, then paste it into your agent conversation.
+
+### Room to think
+
+![A wide tsk board with the selected task's notes and steps open alongside it](docs/images/wide-task-page.png)
+
+In a wide pane, `→` opens task details beside the board; `←` brings you back.
+Press `Enter` for a full-screen task and `Esc` to return. For a standalone board,
+run `tsk` in your terminal.
 
 ## Quickstart
 
@@ -30,20 +36,43 @@ brew install smarzban/tap/tsk
 ```
 
 The installer sets up PATH for Bash and Zsh. If prompted, reopen your terminal
-or run the printed `export` command before continuing.
+or run the printed `export` command before continuing. When Herdr is already
+installed, an interactive curl install may also ask to run `tsk setup herdr`.
+When agent skill roots are detected, it asks once to install or update the tsk
+skill. The install wrap-up then points at the board (`prefix+t` after a
+successful Herdr setup, or `tsk setup herdr` / `tsk setup` when those asks are
+skipped). Noninteractive installs and Homebrew print the Herdr setup command
+without asking.
 
 ### Add to Herdr
 
-With Herdr 0.9+ installed:
+[Install Herdr](https://herdr.dev/docs/install/) if you haven't already, then:
 
 ```sh
 tsk setup herdr
 herdr server reload-config
 ```
 
+### Give your agent the skill
+
+Install the tsk skill so your agent knows how to read the board, add tasks, and
+update their status and steps:
+
+```sh
+tsk setup
+```
+
+On a TTY that detects agents once and asks to install. Or name one agent
+(`pi`, `claude`, `cursor`, `grok`, `codex`, or `opencode`) to install into its
+user-level skills directory.
+[Other skill directories and setup options](https://gettsk.sh/docs/cli/#setup).
+
 ### Open the board
 
 Run `tsk`, or press **prefix+t** in Herdr.
+
+**No project setup needed.** Open tsk in any directory and add your first task.
+Inside Git, the repository root becomes the project; outside Git, the current directory does.
 
 ### Add a task
 
@@ -51,58 +80,42 @@ Run `tsk`, or press **prefix+t** in Herdr.
 tsk add -t "your task title"
 ```
 
-Or press **prefix+a** in Herdr.
+Or press **prefix+a** in Herdr, or ask your agent to add a task to the board.
+
+For example: “Add a task to the board to fix the login timeout, with steps to reproduce
+the bug.”
 
 [Installation details and upgrades](https://gettsk.sh/docs/install/).
 
 ## Usage
 
-How to use the board and CLI lives on the site, not in this file:
+Mouse or keyboard, your choice. Click tabs to switch views, double-click a task
+to open it, and scroll through your board. The actions along the bottom are
+clickable too, including adding a task and changing its status.
 
-- [Overview](https://gettsk.sh/docs/)
-- [Board](https://gettsk.sh/docs/board/)
-- [Keys](https://gettsk.sh/docs/keys/)
-- [Capture](https://gettsk.sh/docs/capture/)
-- [Task page](https://gettsk.sh/docs/task-page/)
-- [Steps](https://gettsk.sh/docs/steps/)
-- [CLI](https://gettsk.sh/docs/cli/)
+Prefer the keyboard? A few keys for everyday use:
 
-The store is `~/.tsk/tsk.json`; walkthrough dismissal is kept beside it in
-`walkthrough.json`. Deleted tasks live in `trash.jsonl` beside the store; the
-previous document is kept as `tsk.json.1`, and a format migration backs up the
-pre-migration document as `tsk.json.v<N>`. Override with `TSK_STATE_DIR` /
-`TSK_CONFIG_DIR`. herdr's injected plugin dirs are ignored, so
-the pane and the CLI edit the same board. Archived tasks and projects stay on
-the board but out of every working view (`ctrl+f`, `tsk archive`,
-`tsk project archive`, `tsk list --archived`).
+| Key | Action |
+| --- | --- |
+| `↑` / `↓` or `j` / `k` | Move between tasks |
+| `→` / `←` | Peek at a task and close the peek in narrow panes; move between board and task views in wide panes |
+| `+` | Add a task |
+| `Enter` | Open the selected task |
+| `ctrl+s` | Start a ready task or reopen a done task |
+| `ctrl+r` | Move an open task to review, or back to ready |
+| `ctrl+d` | Mark the selected task done |
+| `p` | Switch projects |
+| `d` | Show or hide completed tasks |
+| `?` | Show all shortcuts |
 
-Keep `~/.tsk` on a local disk. The writer lock is `flock`-style and every save
-is a rename-based atomic replace; NFS, Dropbox, iCloud Drive, and similar
-synced folders can break both. Point `TSK_STATE_DIR` at a local disk instead.
-State and config directory roots must be real directories, not symlinks.
-Windows is not tested in CI.
-
-Mutating keys need Ctrl. Bare letters do nothing. Legacy modifier settings are ignored.
+[Full keymap](https://gettsk.sh/docs/keys/) ·
+[Board guide](https://gettsk.sh/docs/board/) ·
+[CLI reference](https://gettsk.sh/docs/cli/)
 
 ## Docs
 
-The user guide lives at https://gettsk.sh/docs/ and is built from `site/`.
-
-```bash
-cd site
-npm install
-npm run dev
-```
-
-`npm run build` writes `site/dist/`. Vercel Root Directory is `site`.
-
-## Verify
-
-```bash
-cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && cargo build --release
-```
-
-Site-only: `cd site && npm ci && npm test && npm run build`.
+See the [user guide](https://gettsk.sh/docs/) for installation, task management,
+agent setup, and the full CLI reference.
 
 ## Contributing and security
 

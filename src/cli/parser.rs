@@ -15,11 +15,13 @@ pub enum TaskAddress {
 }
 
 impl TaskAddress {
+    /// A notice row is board-only, so no CLI address reaches it, not even its UUID.
     pub fn matches(self, task: &crate::domain::Task) -> bool {
-        match self {
-            Self::Id(id) => task.id == id,
-            Self::Number(number) => task.number == Some(number),
-        }
+        !task.is_notice()
+            && match self {
+                Self::Id(id) => task.id == id,
+                Self::Number(number) => task.number == Some(number),
+            }
     }
 
     pub fn display(self) -> String {

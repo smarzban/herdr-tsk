@@ -1979,6 +1979,34 @@ impl BoardModel {
         self.wide_stage.focused_surface()
     }
 
+    /// Whether a capture draft (quick-add expanded with `Tab`) owns the frame. The draft is
+    /// neither the board nor a task, so the wide slider has no column for it: while it is open
+    /// the frame is painted and pointer-routed as a single surface at every width.
+    pub fn capture_draft_open(&self) -> bool {
+        self.form.as_ref().is_some_and(|form| !form.is_task())
+    }
+
+    /// Live responsive geometry for `area`: the slider stage, unless a capture draft owns the
+    /// frame (see [`Self::capture_draft_open`]).
+    pub fn responsive_geometry(
+        &self,
+        area: ratatui::layout::Rect,
+    ) -> crate::ui::tier::ResponsiveGeometry {
+        use crate::ui::tier::{
+            resolve, resolve_responsive, ResponsiveGeometry, ResponsivePresentation,
+        };
+        if self.capture_draft_open() {
+            return ResponsiveGeometry {
+                presentation: ResponsivePresentation::SingleBoard,
+                board: area,
+                rule: ratatui::layout::Rect::default(),
+                task: ratatui::layout::Rect::default(),
+                density: resolve(area.width, area.height).tier,
+            };
+        }
+        resolve_responsive(area.width, area.height, self.wide_stage)
+    }
+
     /// Session-only wide-slider stage. The board always opens in `FullBoard`.
     pub fn wide_stage(&self) -> WideStage {
         self.wide_stage

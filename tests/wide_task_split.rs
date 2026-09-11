@@ -8,7 +8,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Modifier;
 use ratatui::Terminal;
-use tsk_tui::domain::{DomainState, HumanStatus, ProvenanceOrigin, TaskScope};
+use tsk_tui::domain::{DomainState, HumanStatus, Notice, ProvenanceOrigin, TaskScope};
 use tsk_tui::ui::capture::CaptureField;
 use tsk_tui::ui::input::{map_key, route_responsive_key, ResponsiveKeyRoute};
 use tsk_tui::ui::mouse::{
@@ -2247,6 +2247,70 @@ fn task_column_header_number_click_copies_in_g_and_f() {
     }
 }
 
+/// The wide column derives its header identifier from the task, not a stored literal:
+/// a notice must paint `N<n>` in both task stages and keep its click-to-copy hit, or
+/// every seeded guide loses its header id when the slider is wide.
+#[test]
+fn wide_task_column_header_derives_the_notice_n_identifier_and_its_copy_hit() {
+    let mut domain = DomainState::new();
+    let notice = domain
+        .create_notice(
+            "guide.wide",
+            "Wide guide header",
+            None,
+            HumanStatus::Ready,
+            TaskScope::Global,
+            Vec::new(),
+        )
+        .expect("seed notice");
+    // The model carries the persisted N number; the domain shares the id.
+    let mut tasks = domain.tasks().to_vec();
+    tasks[0].notice = Some(Notice {
+        catalog_id: "guide.wide".into(),
+        number: Some(2),
+    });
+    let model = BoardModel::from_tasks(tasks, Some(PathBuf::from(REPO)));
+    assert_eq!(model.selected_id(), Some(notice));
+
+    for stage in [WideStage::Rail, WideStage::FullTask] {
+        let (mut domain, mut model) = (domain.clone(), model.clone());
+        to_stage(&mut domain, &mut model, stage);
+        let geometry = resolve_responsive(130, 24, stage);
+        let (rows, hits) = render(&model, 130, 24);
+        let header = column_text(&rows, geometry.task_content(), 1);
+        assert!(
+            header.contains("N2 Wide guide header"),
+            "{stage:?}: header must derive the notice identifier: {header}"
+        );
+        let identifier = hits
+            .regions
+            .iter()
+            .find(|hit| {
+                matches!(hit.target, QueueHitTarget::TaskNumber(id) if id == notice)
+                    && geometry.task.contains(hit.area.as_position())
+            })
+            .expect("header identifier copy hit")
+            .area;
+        let painted: String = rows[identifier.y as usize]
+            .chars()
+            .skip(identifier.x as usize)
+            .take(identifier.width as usize)
+            .collect();
+        assert_eq!(painted, "N2", "{stage:?}: the hit covers the identifier");
+        let intent = map_responsive_board_mouse(
+            &model,
+            &hits,
+            Rect::new(0, 0, 130, 24),
+            left_click(identifier.x, identifier.y),
+        );
+        assert_eq!(
+            intent,
+            Some(BoardIntent::CopyTaskNumber(notice)),
+            "{stage:?}: clicking N<n> in the column header copies it"
+        );
+    }
+}
+
 #[test]
 fn rail_without_a_selection_cannot_slide_into_full_task() {
     // F-5/F-7: a disk merge can remove the task shown in G. `→` must then stay in G (AC-21:
@@ -2343,4 +2407,44 @@ fn collapsed_wide_board_titles_fill_the_space_previously_reserved_for_attributio
             "title reaches two-cell margin: {line}"
         );
     }
+}
+
+/// Regression: at wide widths `Tab` on the quick-add line used to expand into a draft that
+/// the slider never painted (the wide column paints only task forms), so the board stayed
+/// on screen while keys went to an invisible page.
+#[test]
+fn expanded_quick_add_draft_paints_at_wide_widths_and_esc_returns_to_the_line() {
+    let (mut domain, mut model) = fixture();
+    go(&mut domain, &mut model, BoardIntent::OpenCapture);
+    for c in "buy milk".chars() {
+        go(&mut domain, &mut model, BoardIntent::QuickAddInsert(c));
+    }
+    go(&mut domain, &mut model, BoardIntent::ExpandQuickAdd);
+    assert_eq!(model.input_mode(), BoardInputMode::EditNotes);
+    for width in [110u16, 140, 200] {
+        let (buffer, _) = render_buffer(&model, width, 30);
+        let rows = rows_of(&buffer);
+        let text = rows.join("\n");
+        assert!(
+            text.contains("buy milk"),
+            "{width} cols: draft title missing\n{text}"
+        );
+        assert!(
+            text.contains("shift+enter save"),
+            "{width} cols: draft verb bar missing\n{text}"
+        );
+        assert!(
+            !text.contains("IN MOTION"),
+            "{width} cols: board still painted\n{text}"
+        );
+    }
+    go(&mut domain, &mut model, BoardIntent::CloseLayer);
+    assert_eq!(model.input_mode(), BoardInputMode::QuickAdd);
+    let (buffer, _) = render_buffer(&model, 140, 30);
+    let text = rows_of(&buffer).join("\n");
+    assert!(text.contains("IN MOTION"), "board should be back\n{text}");
+    assert!(
+        text.contains("buy milk"),
+        "quick-add line should keep the title\n{text}"
+    );
 }

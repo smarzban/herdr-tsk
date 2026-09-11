@@ -10,14 +10,15 @@ export const DEFINITION_SENTENCE =
   "tsk is a terminal task board for you and your agents: one shared queue, a TUI for you, a CLI for them.";
 export const SIDEBAR_SLUGS = [
   "index",
-  "agents",
   "install",
   "board",
   "keys",
   "capture",
   "task-page",
   "steps",
+  "agents",
   "cli",
+  "storage",
 ];
 export const SOURCE_REPO_BASE = "https://github.com/smarzban/herdr-tsk/blob/main";
 export const AGENTS_SKILL_REPO_PATH = "skills/tsk-cli/SKILL.md";

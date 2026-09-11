@@ -24,8 +24,10 @@ brew uninstall tsk
 ```
 
 The formula installs versioned, checksummed GitHub release binaries, not builds
-from main. Run `tsk setup herdr` explicitly to register that same binary and bundled
-plugin assets with Herdr 0.9+, adding prefix+t / prefix+a with conflict confirmation.
+from main. Homebrew installs are noninteractive, so they do not offer the curl
+installer's Herdr setup prompt; the formula caveat tells you to run
+`tsk setup herdr` to register that same binary and bundled plugin assets with
+Herdr 0.9+, adding prefix+t / prefix+a with conflict confirmation.
 Homebrew installation itself does not relink plugins or remove task data.
 
 ## Maintenance

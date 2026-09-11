@@ -408,11 +408,7 @@ fn build_task_page_overlay<'a>(
     // The uniform budget keeps every row's wrap identical.
     let editing_title = model.input_mode() == BoardInputMode::EditTitle;
     let header_identifier = (!editing_title)
-        .then(|| {
-            bound_task
-                .and_then(|task| task.number)
-                .map(|number| format!("T{number}"))
-        })
+        .then(|| bound_task.and_then(|task| task.board_identifier()))
         .flatten();
     let mut header_rows: Vec<String> = Vec::new();
     let mut title_cursor = None;
@@ -1116,7 +1112,9 @@ fn draw_board_impl(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap
 
 fn draw_board_hits(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap {
     let area = frame.area();
-    let responsive = tier::resolve_responsive(area.width, area.height, model.wide_stage());
+    // A capture draft (quick-add expanded with Tab) owns the whole frame at every width; the
+    // wide task column paints task forms only. `responsive_geometry` folds that rule in.
+    let responsive = model.responsive_geometry(area);
     if responsive.presentation == tier::ResponsivePresentation::WideSplit {
         return draw_wide_board(frame, model, area, responsive);
     }
@@ -1272,9 +1270,7 @@ fn draw_wide_board(
             .and_then(|id| model.tasks.iter().find(|task| task.id == id))
             .map(|task| (form, task))
     });
-    let header_identifier = header_task
-        .and_then(|(_, task)| task.number)
-        .map(|number| format!("T{number}"));
+    let header_identifier = header_task.and_then(|(_, task)| task.board_identifier());
     let header_state = header_task.map(|(form, task)| task_header_state(model, form, task));
     let editing_title = task_focus && model.input_mode() == BoardInputMode::EditTitle;
     let header_title: Option<(String, Option<u16>)> = header_task.map(|(form, task)| {

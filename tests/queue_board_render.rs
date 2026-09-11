@@ -10,7 +10,7 @@ use ratatui::layout::Rect;
 use ratatui::style::Modifier;
 use ratatui::{Frame, Terminal};
 use tsk_tui::domain::{
-    DomainState, HumanStatus, ProvenanceOrigin, Task, TaskEvent, TaskEventKind, TaskScope,
+    DomainState, HumanStatus, Notice, ProvenanceOrigin, Task, TaskEvent, TaskEventKind, TaskScope,
 };
 use tsk_tui::ui::input::map_key;
 use tsk_tui::ui::queue::{self, BoardLens, NavTab, QueueView, ThreadFilter};
@@ -42,6 +42,7 @@ fn task(id: u128, title: &str, status: HumanStatus, scope: TaskScope, secs_ago: 
     Task {
         id: Uuid::from_u128(id),
         number: None,
+        notice: None,
         revision: Uuid::from_u128(id),
         merge_base_revision: None,
         title: title.to_string(),
@@ -1239,6 +1240,90 @@ fn board_row_leads_title_with_uppercase_t_identifier() {
         !body.contains("12 · tsk · 3m"),
         "trailing meta must not repeat the identifier:\n{body}"
     );
+}
+
+#[test]
+fn notice_row_leads_title_with_uppercase_n_identifier() {
+    let mut tasks = fixture_tasks();
+    tasks[0].notice = Some(Notice {
+        catalog_id: "welcome".into(),
+        number: Some(3),
+    });
+    let view = fixture_view(&tasks, false);
+    let model = fixture_model(&tasks, &view);
+    let body = paint(80, 24, &model).0.join("\n");
+
+    assert!(
+        body.contains("N3 Smoke-test worktree dispatch"),
+        "notice identifier must lead the title:\n{body}"
+    );
+    assert!(
+        !body.contains("T3 "),
+        "a notice never paints a T number:\n{body}"
+    );
+}
+
+/// The page header derives its identifier through the real payload builder, not the
+/// literal fixture above: a persisted notice must paint `N<n>` and register the
+/// click-to-copy hit region, or the guide flow the page header teaches loses both.
+#[test]
+fn notice_task_page_header_derives_the_n_identifier_and_its_copy_hit() {
+    let mut domain = DomainState::new();
+    let id = domain
+        .create_notice(
+            "guide.page",
+            "Guide page render",
+            None,
+            HumanStatus::Review,
+            TaskScope::Global,
+            Vec::new(),
+        )
+        .expect("seed notice");
+    // Persistence assigns the notice's `N` number exactly as the board sees it.
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!(
+        "tsk-render-notice-page-{}-{nanos}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let store = tsk_tui::store::TaskStore::new(&dir);
+    store.save(&domain).expect("persist notice");
+    let mut domain = store.load().expect("reload numbered notice");
+    drop(store);
+    let _ = std::fs::remove_dir_all(&dir);
+
+    let mut model = BoardModel::from_domain(&domain, None);
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open task page");
+    let rows = board_rows(&model, 80, 24);
+    let body = rows.join("\n");
+    assert!(
+        body.contains("N1 Guide page render"),
+        "the page header must derive the notice identifier:\n{body}"
+    );
+    assert!(
+        !body.contains("T1 "),
+        "a notice never paints a T number:\n{body}"
+    );
+
+    let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("test terminal");
+    let mut hit_map = tsk_tui::ui::render::QueueHitMap::default();
+    terminal
+        .draw(|frame| hit_map = draw_board(frame, &model))
+        .expect("draw board");
+    let hit = hit_map
+        .regions
+        .iter()
+        .find(|hit| hit.target == tsk_tui::ui::render::QueueHitTarget::TaskNumber(id))
+        .expect("the header identifier registers a copy hit");
+    let painted: String = rows[hit.area.y as usize]
+        .chars()
+        .skip(hit.area.x as usize)
+        .take(hit.area.width as usize)
+        .collect();
+    assert_eq!(painted, "N1", "the hit region must cover the identifier");
 }
 
 #[test]

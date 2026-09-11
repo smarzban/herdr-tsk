@@ -1,282 +1,316 @@
 ---
 title: CLI
-description: Headless tsk add, list, steps, status, edit, trash, and archive. The agents' door to the board.
+description: Commands, arguments, output, and retry rules for the shared task board.
 ---
 
-The same `~/.tsk` store backs the board, herdr, and these commands. The board
-reads a change on its next tick.
+The CLI reads and updates the same tasks as the board. A running board picks up saved changes automatically.
 
-```bash
-tsk add -t "Draft release notes"
+```sh
+tsk add -t "Fix login timeout"
 tsk list
 ```
 
 ## For agents
 
-The CLI is how an agent reaches the board. The rules that matter:
+Install the skill with `tsk setup pi`, or use your [agent's setup target](#setup). `tsk guide` prints the workflow.
 
-- Put work on the board with `tsk add`, one task per call or a JSON plan through
-  `--file`. A repeat of the same title, project, and thread returns the existing
-  task, so a retried plan is safe.
-- Plan with `tsk steps <task> add`. Read back with `tsk list <task>` before a
-  toggle or remove, because those are not idempotent.
-- Move work with `tsk status <task> start` (or `started`, `blocked`, `review`, `ready`, `done`).
-  Repeating the same status is safe. Rewrite title or notes with `tsk edit`.
-- Prefer `--json` and read the exit code. Exit 1 means retry only the failed
-  items. Exit 3 means list before retrying.
+1. Read the task with `tsk list T12`.
+2. Set its status with `tsk status T12 started`.
+3. Update notes or steps as work progresses.
+4. Set `review`, `blocked`, or `done` explicitly.
 
-The repo ships the same rules as an agent skill in
-[`skills/tsk-cli/SKILL.md`](https://github.com/smarzban/herdr-tsk/blob/main/skills/tsk-cli/SKILL.md).
-`tsk guide` prints that skill with the YAML frontmatter removed.
+The CLI can mark a task done with `tsk status <task> done`. Agent lifecycle does not change task status automatically.
+
+Use `--json` on `add` or `list` for machine-readable output. Read the [exit contract](#exit-contract) before retrying a write.
 
 ## Commands
 
-| Command | Does |
+| Command | Action |
 | --- | --- |
-| `tsk` | opens the board |
-| `tsk capture` | opens quick capture: the expanded quick-add page (also `TSK_MODE=capture`) |
-| `tsk add` · `tsk list` · `tsk steps` · `tsk status` · `tsk edit` · `tsk trash` · `tsk archive` · `tsk unarchive` · `tsk project` | headless; below |
-| `tsk guide` | print the agent workflow skill (frontmatter stripped), exit 0 |
-| `tsk --help` | usage, exit 0 |
-| `tsk --find-board-pane` | herdr helper: reads `pane list` JSON on stdin, prints the id of the pane labelled `tsk`; exit 1 when none |
+| `tsk` | Open the board |
+| `tsk capture` | Open capture; save or discard exits |
+| `tsk add` | Add a task or JSON plan |
+| `tsk list` | Read tasks |
+| `tsk status` | Set task status |
+| `tsk edit` | Replace title or notes |
+| `tsk steps` | Add, toggle, rename, or remove steps |
+| `tsk archive` / `tsk unarchive` | Hide or restore a task |
+| `tsk project archive` / `tsk project unarchive` | Hide or restore a project |
+| `tsk trash restore` | Restore a task from trash |
+| `tsk setup` | Configure Herdr or install an agent skill |
+| `tsk guide` | Print the agent workflow |
+| `tsk --help` | Show help |
 
-Every headless command takes `--state-dir <dir>` to work against another store.
+Data commands accept `--state-dir <dir>`. Setup and guide do not use that flag.
 
-## guide
+### Task addresses
 
-Print the embedded agent skill, YAML frontmatter stripped. Stderr is empty.
+`T12`, `t12`, `12`, and a task UUID identify the same task. Direct lookup ignores the current project.
 
-```
-tsk guide
-```
+Board notice tasks paint as `N1`… (starter tasks and `What's new in tsk`). Those ids are board-only: the CLI does not accept `N1`, and default `tsk list` omits them. Agents ignore them.
 
-Exit 0. The same body is the source for `/docs/agents/` and `tsk setup <agent>`.
+### Scope
 
-Human-readable stdout and stderr escape C0/C1 controls in stored titles, step
-text, and project names as `\u{00xx}`. JSON keeps the underlying values.
+Without a scope flag, `add` and filtered `list` use the launch repository, or the current directory outside Git. Commands addressed to a task ignore that default.
+
+| Flag | Scope |
+| --- | --- |
+| `--desk` | Desk |
+| `-p name` / `--project name` | Project matching that basename, ignoring case |
+| `-p /path` | Project path |
+| `--all` on list | All scopes |
+
+A missing or ambiguous basename stays as typed. A typo can create a separate scope. Check with `tsk list --all --json`.
 
 ## add
 
-Create one task, or apply a JSON plan. Human output is `added <title>` or
-`task already exists`.
-
-```
-tsk add -t <title> [-n <notes>] [-p <project> | --desk] [--thread <name>] [--json] [--state-dir <dir>]
-tsk add [--file <path|->] [--state-dir <dir>]
+```sh
+tsk add -t "Fix login timeout" -n "Reproduce on a slow connection" --thread auth
+tsk add -t "Buy coffee" --desk
+tsk add -t "Draft release notes" -p atlas --json
 ```
 
-`--desk` is your desk (stored as scope `global`). `-p` / `--project` uses the
-same basename-or-path rules as capture `!p`. `--thread` normalizes like `!t`.
+| Option | Purpose |
+| --- | --- |
+| `-t`, `--title` | Required task title |
+| `-n`, `--notes` | Optional notes |
+| `-p`, `--project` or `--desk` | Destination |
+| `--thread` | [Thread name](/docs/capture/#thread-names) |
+| `--json` | One result object |
+| `--file <path>` or `--file -` | Read a JSON plan |
+| `--state-dir <dir>` | Alternate state directory |
 
-An add whose trimmed title, resolved project, and normalized thread already
-exist succeeds without changing the task.
+Duplicate detection compares the trimmed title, resolved project, and normalized thread. A matching non-deleted task returns successfully without changes, even if done or individually archived. Adding into an archived project refuses.
 
-Values that start with `-` need `--title=…`, `--notes=…`, `--project=…`,
-`--state-dir=…`, or `--file=…`. Item flags plus `--file` is usage (exit 2,
-nothing persists). Piped stdin with item flags is ignored and not read.
+Plain output: `added <title>` or `task already exists`.
 
-Notes that trim to nothing are dropped.
+JSON output: `outcome` (`created` or `existing`), `id`, `number`, `title`, and `project` (`null` for desk).
 
-`--json` on a flag add prints one object: `outcome` (`created` or `existing`),
-`id`, `number`, `title`, and `project` (or `null`).
+Values starting with `-` use equals syntax: `--title="-fix parser"`, `--notes="-5 degrees"`, `--project="-maintenance"`, `--file=...`, or `--state-dir=...`.
 
-Plan JSON is an array:
+Blank notes are omitted. C0 control characters in titles are rejected before trimming.
+
+### JSON plans
 
 ```json
-[{"title": "...", "notes": "...", "project": "...", "thread": "..."}]
+[
+  {"title": "Reproduce login timeout", "project": "atlas", "thread": "auth"},
+  {"title": "Draft release notes", "notes": "Include migration instructions"}
+]
 ```
 
-`project` null means desk; a missing `project` means the invocation default (the
-Git repo root, or the current directory outside Git). `thread` may be `null` or missing. The result is
-`{ "created": [...], "existing": [...], "failed": [...] }`, each item carrying its
-index `i`; failed items add `code` and `error`. Notes are not echoed.
-
-```bash
+```sh
 tsk add --file plan.json
 cat plan.json | tsk add
 ```
 
+| Field | Meaning |
+| --- | --- |
+| `title` | Required string |
+| `notes` | Optional notes |
+| `project` omitted | Invocation default |
+| `project: null` | Desk |
+| `project` string | Project name or path |
+| `thread` omitted or `null` | No thread |
+| `thread` string | Normalized thread |
+
+Output contains `created`, `existing`, and `failed` arrays. Items carry their input index `i`; failures include `code` and `error`. Successful entries include task ID, number, and title. Notes are not echoed.
+
+Valid items persist even if another item fails. Retry only failed or confirmed-missing items.
+
+Do not mix item flags with `--file`. Piped input is ignored when item flags are present.
+
 ## list
 
-Prints tasks. It does not change them.
-
+```sh
+tsk list
+tsk list T12
+tsk list --all --json
+tsk list -p atlas --thread auth
+tsk list --done --all
+tsk list --archived --all
+tsk list --deleted --all
 ```
-tsk list [<task>] [-p <project> | --desk | --all] [--thread <name>] [--done | --deleted] [--json] [--state-dir <dir>]
+
+```text
+tsk list [<task>] [-p <project> | --desk | --all] [--thread <name>] [--done | --deleted | --archived] [--json] [--state-dir <dir>]
 ```
 
-Default: ready, started, blocked, and review in the invocation project: the Git
-repo root, or the current directory outside Git. Use `--desk` for unscoped tasks.
+| Filter | Result |
+| --- | --- |
+| Default | Ready, started, blocked, and review tasks; excludes archived, deleted, and notice (`N`) rows |
+| `--done` | Completed tasks |
+| `--archived` | Individually archived tasks and tasks in archived projects, across statuses |
+| `--deleted` | Deleted tasks in the main store and trash, newest first |
+| `--thread` | Filter within the selected scope |
 
-- `--desk` selects desk
-- `--all` every scope
-- `--done` done only
-- `--deleted` soft-deleted only: live soft-deletes plus trash entries from
-  `trash.jsonl` (kept 30 days), deduped by task with the live copy winning,
-  newest deletion first
-- `--archived` archived only: individually archived tasks plus tasks of
-  archived projects, one row per id, each marked `archived` or
-  `project archived`; JSON rows carry the mark in `archived`. Default views
-  never list archived tasks or tasks of archived projects
-- `--thread` filters within the selected scope
+Scope flags are mutually exclusive. So are `--done`, `--deleted`, and `--archived`.
 
-Human output groups rows under `STARTED`, `READY`, `BLOCKED`, `REVIEW`, then
-`DONE` or `DELETED` when asked, as `- <number> <title> #thread`. With `--all`, a
-trailing scope label (`desk` or `project: <path>`) tells the groups apart.
+A direct task address searches the main store, including done, archived, and recently deleted tasks. It cannot be combined with scope, thread, or status filters. A missing task exits 2. Tasks already moved to trash require `--deleted`.
 
-A store-global task number (`T12`, `t12`, or bare `12`) or a task UUID lists
-that one task and its steps (`[x]` / `[ ]` plus the step short id). Direct lookup
-ignores cwd and searches the live store, including done and live soft-deleted
-tasks. A task that has moved to `trash.jsonl` is not found by `tsk list T12`;
-use `tsk list --deleted`, then `tsk trash restore T12`. A task operand cannot
-combine with scope, thread, or status filters. An address that matches nothing
-is a usage error (exit 2).
+Human output groups by status and includes the task number and thread. `--all` adds scope labels. Single-task output includes steps and their short IDs.
 
-`--json` is a flat array of `id`, `number`, `title`, `status`, `project`, and
-`thread`. Single-task JSON also attaches `steps`.
+JSON returns an array with `id`, `number`, `title`, `status`, `project`, and `thread`. Direct lookup also includes `steps`. Archived listings include an `archived` mark: `archived` or `project archived`.
 
-To recover a typo scope: `tsk list --all --json`.
+## status
+
+```sh
+tsk status T12 started
+tsk status T12 review
+```
+
+Accepts `ready`, `started` (or `start`), `blocked`, `review`, and `done`.
+
+Unlike keyboard toggles, this command sets the requested status directly. Repeating the same value is safe.
+
+Output: `status T12 <status> <title>`. The output uses `started`, even when the input was `start`.
+
+## edit
+
+```sh
+tsk edit T12 --title "Fix timeout on slow connections"
+tsk edit T12 --notes "Reproduced with a delayed response"
+```
+
+Requires `--title`, `--notes`, or both. Scope and thread stay unchanged.
+
+Blank notes clear the field. Notes preserve newlines and tabs. Use `--title=...` or `--notes=...` for values starting with `-`.
+
+Output: `edited T12 <title>`. Repeating the same values is safe.
 
 ## steps
 
-```
+```text
 tsk steps <task> add <text> [--state-dir <dir>]
 tsk steps <task> toggle <step-short-id> [--state-dir <dir>]
 tsk steps <task> rename <step-short-id> <text> [--state-dir <dir>]
 tsk steps <task> remove <step-short-id> [--state-dir <dir>]
 ```
 
-Output is `added <short-id> <text>`, `toggled <short-id> [x] <text>`,
-`renamed <short-id> <text>`, or `removed <short-id> <text>`.
+Read short IDs with `tsk list T12`. Full step UUIDs also work.
 
-See [steps](/docs/steps/) for the board side. `toggle` and `remove` are not
-idempotent. `rename` is idempotent on the trimmed text. Verify with
-`tsk list <task>` before a retry of toggle or remove.
+| Action | Output prefix | Safe to repeat unchanged? |
+| --- | --- | --- |
+| Add | `added <short-id> <text>` | No; creates another step |
+| Toggle | `toggled <short-id> [x] <text>` | No; flips the value again |
+| Rename | `renamed <short-id> <text>` | Yes |
+| Remove | `removed <short-id> <text>` | No; refuses after removal |
 
-## status
-
-```
-tsk status <task> <status> [--state-dir <dir>]
-```
-
-`<status>` is `ready`, `started` (or `start`), `blocked`, `review`, or `done` (`tsk status <task> done`). Output is
-`status T<n> <status> <title>` and always uses the stored name (`started`). Repeating the same status is idempotent.
-
-Unknown task: `unknown-task`. Soft-deleted: `soft-deleted-task`.
-
-## edit
-
-```
-tsk edit <task> [--title <title>] [--notes <notes>] [--state-dir <dir>]
-```
-
-At least one of `--title` or `--notes` is required. Scope and thread are
-unchanged. Notes that trim to nothing are cleared. Newlines and tabs in notes are kept, same as add. Output is
-`edited T<n> <title>`. Repeating the stored values is idempotent.
-
-Values that start with `-` need `--title=…` or `--notes=…`.
-
-Refusal tokens: `unknown-task`, `soft-deleted-task`, `empty-title`,
-`invalid-title`.
-
-## trash
-
-```
-tsk trash restore <task> [--state-dir <dir>]
-```
-
-A soft-deleted task leaves the board store once it is no longer undoable, or
-after 7 days, and lives in `trash.jsonl` for 30 days. `tsk list --deleted`
-shows trash entries beside live soft-deletes, with their `T<n>` number.
-
-`tsk trash restore T<n>` puts the task back on the board: not soft-deleted,
-with a `restored` history event, a new revision, and its old number. A missing
-line, or a task that is already live, refuses with `T<n> is not in trash`
-(exit 1). Usage errors exit 2; store I/O exits 3.
+Read back before retrying an uncertain result. [Using steps on the board](/docs/steps/).
 
 ## archive and unarchive
 
-```
-tsk archive <task> [--state-dir <dir>]
-tsk unarchive <task> [--state-dir <dir>]
+```sh
+tsk archive T12
+tsk unarchive T12
 ```
 
-`archive` sets a task's archived flag; `unarchive` clears it. The task keeps its
-human status and its `T<n>`. Repeating the verb is idempotent: the same
-`archived T7 <title>` / `unarchived T7 <title>` line prints and nothing changes.
-An unknown task refuses with `T<n> is not on the board` and a soft-deleted task
-with `T<n> is deleted` (both exit 1); usage errors exit 2; store I/O exits 3.
+Keep the task's status and number. Repeating either command is safe.
+
+Output: `archived T12 <title>` or `unarchived T12 <title>`.
+
+Unknown tasks refuse with `T12 is not on the board`; deleted tasks with `T12 is deleted`.
 
 ## project archive / unarchive
 
+```sh
+tsk project archive atlas
+tsk project unarchive atlas
 ```
-tsk project archive <name> [--state-dir <dir>]
-tsk project unarchive <name> [--state-dir <dir>]
+
+Accepts a project basename or path. Repeating an action is safe. An unknown project refuses with `no project named <name> has tasks`.
+
+Restoring a project preserves task statuses and leaves individually archived tasks archived.
+
+Output: `archived project <name>` or `unarchived project <name>`.
+
+## trash
+
+```sh
+tsk list --deleted --all
+tsk trash restore T12
 ```
 
-`<name>` follows the `!p` rules: a project basename (case-insensitive) or a
-`/path` verbatim. Archiving writes one lazy project record; unarchiving removes
-it, and every task returns in the status it had. A task's own archived flag is
-independent. Output is `archived project <short>` / `unarchived project <short>`,
-idempotent on repeat. A name matching no project that has tasks exits 1 with
-`no project named <name> has tasks`.
+Restore returns a task from trash with its original number. A task absent from trash, or already live, refuses with `T12 is not in trash`.
 
-## Exit contract
-
-| Exit | Meaning |
-| --- | --- |
-| 0 | listed, every add item created/existed, the step applied, status or edit written (or already had the value), the task restored, or the archive flag written (or already had the value) |
-| 1 | one or more item refusals (add/steps/status/edit), a trash restore with no matching line, an unknown or deleted `archive`/`unarchive` task, or a project action matching nothing. Retry only the failed subset. For toggle and remove, list first. |
-| 2 | usage or parse error, including a `list` address that matches nothing. Nothing persisted. |
-| 3 | store I/O. Commit is indeterminate. `tsk list` before retrying. |
-
-Add refusal codes: `empty-title`, `invalid-title`, `invalid-thread`, `invalid-item`,
-`project-archived`. `project-archived` prints `project <name> is archived. Use
---desk, -p <other project>, or tsk project unarchive <name>` and persists
-nothing. This covers the cwd default and an explicit `-p`.
-Any C0 control in a title or step text is `invalid-title` / `invalid-step-text`
-before trimming.
-
-Steps refusals (exit 1): `empty-step-text`, `invalid-step-text`, `unknown-task`,
-`soft-deleted-task`, `unknown-step`, `ambiguous-step`.
-
-Status refusals (exit 1): `unknown-task`, `soft-deleted-task`.
-
-Edit refusals (exit 1): `unknown-task`, `soft-deleted-task`, `empty-title`,
-`invalid-title`.
+Recent deletions may still be in the main store; use board undo until they move to trash. [Retention and storage](/docs/storage/#deleted-tasks).
 
 ## setup
 
-```
+```sh
 tsk setup
 tsk setup herdr
-tsk setup claude | pi | cursor | grok | codex
-tsk setup --skill-dir <path> [--force] [--json]
+tsk setup agents --yes
+tsk setup pi
+tsk setup --skill-dir /path/to/skills
+tsk setup --detected-ids
 ```
 
-Bare `tsk setup` lists targets and writes nothing. `tsk setup herdr` registers
-the embedded plugin assets and adds prefix+t (board) and prefix+a (quick capture).
-It uses the same installed binary, with no source checkout or second build. Herdr
-0.9+ must be on PATH. Conflicting shortcuts require interactive confirmation;
-declining preserves them. A noninteractive conflict aborts without writes.
-`tsk setup herdr --help` is read-only.
+On a TTY, bare `tsk setup` detects global agent skill roots and asks once to install or update the embedded skill for every detected agent. Without a TTY it prints guidance (and the list of named targets) and does not hang. `tsk setup --json` prints a detection report. `tsk setup --detected-ids` prints space-separated detected agent ids for installers.
 
-Agent targets write the embedded `skills/tsk-cli/SKILL.md` (frontmatter kept) into
-that tool's user-level skills directory as `tsk-cli/SKILL.md`:
+### Herdr
 
-- `claude` → `~/.claude/skills/`
-- `pi` → `~/.pi/agent/skills/`
-- `cursor` → `~/.cursor/skills/`
-- `grok` → `~/.grok/skills/`
-- `codex` → `~/.agents/skills/`
-- `--skill-dir <path>` → `<path>/tsk-cli/SKILL.md`
+Requires Herdr 0.9+ on PATH. Registers the installed binary and adds **prefix+t** and **prefix+a**. Shortcut conflicts require confirmation; noninteractive conflicts stop before writes.
 
-A second run without `--force` exits 1 with `skill-exists` and leaves the file.
-`--force` overwrites. `--json` emits `outcome` (`written`, `exists`, or `listed`),
-`target`, and `path`. Two targets, or `herdr` plus `--skill-dir`, is usage (exit 2).
-An empty `--skill-dir` is usage. A symlink at the skills root, the `tsk-cli`
-directory, or `SKILL.md` is refused.
+[Reload, upgrades, and removal](/docs/install/#herdr-setup-with-an-installed-binary).
 
-Exit codes: 0 success/help/list, 1 setup or confirmation failure or `skill-exists`,
-2 invalid arguments. Herdr setup does not edit task data. See
-[installation](/docs/install/#herdr-setup-with-an-installed-binary)
-for config paths, backups, reload, upgrades and removing integration.
+### Agent skills
+
+| Target | Skills directory |
+| --- | --- |
+| `pi` | `~/.pi/agent/skills/` |
+| `claude` | `~/.claude/skills/` |
+| `cursor` | `~/.cursor/skills/` |
+| `grok` | `~/.grok/skills/` |
+| `codex` | `~/.agents/skills/` |
+| `opencode` | `~/.config/opencode/skills/` |
+| `--skill-dir <path>` | The supplied directory |
+
+Setup writes `tsk-cli/SKILL.md` under the selected directory. Skill `version:` is independent of the crate version. A matching installed version exits 1 with `skill-exists`; a missing or different version updates without `--force`. `--force` always overwrites. `tsk setup agents --yes` installs or updates every detected agent without asking. Only global skill roots are offered (project-local roots are out of scope).
+
+| Option | Action |
+| --- | --- |
+| `--yes` | With `agents`, install/update detected agents without asking |
+| `--force` | Replace an existing skill even when versions match |
+| `--json` | Machine-readable outcome |
+| `--detected-ids` | Print detected agent ids (installer use) |
+
+Symlinks at the skills root, skill directory, or file are refused. Herdr setup does not accept these agent options.
+
+Setup exits 0 for success/help/list/detection, 1 for setup failure or `skill-exists`, or 2 for invalid arguments.
+
+## guide
+
+```sh
+tsk guide
+```
+
+Prints the embedded [agent skill](/docs/agents/) without YAML frontmatter. Exits 0. It is the same workflow installed by agent setup.
+
+## Exit contract
+
+For data commands:
+
+| Exit | Meaning | Next step |
+| --- | --- | --- |
+| `0` | Success, including an already-existing task or unchanged value | Continue |
+| `1` | Refusal; a plan may have saved other items | Correct refusals; retry only failed items |
+| `2` | Invalid arguments or input; nothing saved | Fix the invocation |
+| `3` | Storage error; a write may have committed | Read back before retrying |
+
+After an uncertain add, inspect `tsk list --all --json`. Also check `--done` and `--archived` when a duplicate could be hidden there. If you know the task number, use direct lookup.
+
+| Command | Refusal codes |
+| --- | --- |
+| Add | `empty-title`, `invalid-title`, `invalid-thread`, `invalid-item`, `project-archived` |
+| Steps | `empty-step-text`, `invalid-step-text`, `unknown-task`, `soft-deleted-task`, `unknown-step`, `ambiguous-step` |
+| Status | `unknown-task`, `soft-deleted-task` |
+| Edit | `unknown-task`, `soft-deleted-task`, `empty-title`, `invalid-title` |
+
+Invalid thread flags fail argument parsing with exit 2; an invalid thread in a JSON plan is an item refusal with exit 1. An archived-project refusal saves nothing for that item; other valid plan items can still save.
+
+Human-readable output escapes stored terminal control characters. JSON retains the underlying text.
+
+## Herdr helper
+
+`tsk --find-board-pane` reads Herdr `pane list` JSON from stdin and prints the ID of the pane labelled `tsk`. It exits 1 if none matches.

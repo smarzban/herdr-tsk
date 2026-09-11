@@ -1,6 +1,7 @@
 ---
 name: tsk-cli
 description: Use when asked to add, list, edit, or change status of Tasks board items. Use `tsk add`, `tsk list`, `tsk status`, `tsk edit`, and `tsk steps`, never the TUI.
+version: 1.0.0
 ---
 
 # tsk CLI
@@ -48,9 +49,11 @@ persist and the command exits 1.
   `existing` items both succeeded, so you must never whole-plan-retry an exit 1 run.
 - exit 2: usage or parse error, nothing persisted. Correct the invocation, then run it.
 - exit 3: store I/O, commit indeterminate. Run `tsk list --all --json` to
-  check every scope, then retry only missing work. You must never whole-plan-retry an exit 3 run.
+  check open work across scopes. Also check `--done` and `--archived` if a matching
+  task could be hidden there; use direct lookup when its number is known. Retry
+  only missing work. Never whole-plan-retry an exit 3 run.
 
-Add is idempotent by trimmed title and resolved project scope. A non-soft-deleted
+Add is idempotent by trimmed title, resolved project scope, and normalized thread. A non-soft-deleted
 matching task is a success: plain flag add prints `task already exists`, and plan add
 reports it in `existing` with its `i`, `id`, and `title`.
 
@@ -72,6 +75,10 @@ exclusive, as are `--done` and `--deleted`.
 
 A typo in a project name silently files the task under a new scope. Use
 `tsk list --all --json` to recover the resulting scope.
+
+Rows the board paints as `N1`… are human-only notices: starter tasks and the
+`What's new in tsk` release note. `tsk list` never shows them, no command addresses
+them, and agents ignore them.
 
 ## Direct task lookup and steps
 

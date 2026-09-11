@@ -1913,6 +1913,86 @@ fn default_list_views_exclude_archived_tasks_and_tasks_of_archived_projects() {
 }
 
 #[test]
+fn every_list_view_omits_notices_and_a_notice_uuid_is_unknown() {
+    let dir = temp_state_dir("notices-omitted");
+    let mut state = DomainState::new();
+    create_task(
+        &mut state,
+        "ordinary task",
+        TaskScope::Global,
+        HumanStatus::Ready,
+    );
+    create_task(
+        &mut state,
+        "ordinary done",
+        TaskScope::Global,
+        HumanStatus::Done,
+    );
+    let notice = |state: &mut DomainState, catalog_id: &str, title: &str, status| {
+        state
+            .create_notice(
+                catalog_id,
+                title,
+                None,
+                status,
+                TaskScope::Global,
+                Vec::new(),
+            )
+            .expect("create notice")
+    };
+    let open_notice = notice(&mut state, "welcome", "open notice", HumanStatus::Ready);
+    notice(&mut state, "seen", "done notice", HumanStatus::Done);
+    let deleted_notice = notice(&mut state, "gone", "deleted notice", HumanStatus::Ready);
+    state.soft_delete(deleted_notice).expect("soft delete");
+    let archived_notice = notice(&mut state, "filed", "archived notice", HumanStatus::Ready);
+    state.archive_task(archived_notice).expect("archive");
+    TaskStore::new(&dir).save(&state).expect("seed store");
+
+    let run = |extra: &[&str]| {
+        let mut args: Vec<String> = vec!["tsk".into(), "list".into(), "--desk".into()];
+        args.extend(extra.iter().map(|flag| flag.to_string()));
+        args.push("--state-dir".into());
+        args.push(state_dir_arg(&dir));
+        list(&args)
+    };
+
+    let open = run(&[]);
+    assert_eq!(open.code, 0);
+    assert_eq!(open.stdout, "READY\n - 1 ordinary task\n");
+
+    let done = run(&["--done"]);
+    assert_eq!(done.code, 0);
+    assert_eq!(done.stdout, "DONE\n - 2 ordinary done\n");
+
+    let deleted = run(&["--deleted"]);
+    assert_eq!(deleted.code, 0);
+    assert_eq!(deleted.stdout, "", "a deleted notice is not a deleted row");
+
+    let archived = run(&["--archived"]);
+    assert_eq!(archived.code, 0);
+    assert_eq!(
+        archived.stdout, "",
+        "an archived notice is not an archived row"
+    );
+
+    let json = run(&["--json"]);
+    let rows: Vec<serde_json::Value> = serde_json::from_str(&json.stdout).expect("JSON rows");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["number"], 1);
+    assert!(rows[0].get("notice").is_none());
+
+    let by_uuid = list(&[
+        "tsk".into(),
+        "list".into(),
+        open_notice.to_string(),
+        "--state-dir".into(),
+        state_dir_arg(&dir),
+    ]);
+    assert_eq!(by_uuid.code, 2);
+    assert!(by_uuid.stderr.contains("unknown task"), "{by_uuid:?}");
+}
+
+#[test]
 fn list_archived_marks_task_and_project_rows_once_per_id() {
     let dir = temp_state_dir("archived-view");
     let mut state = DomainState::new();

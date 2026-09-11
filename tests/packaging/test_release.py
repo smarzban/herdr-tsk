@@ -62,10 +62,13 @@ class ReleaseTests(unittest.TestCase):
                 self.assertEqual(contents.getmember("tsk").mode, 0o755)
         self.assertNotIn("/latest/", formula)
         self.assertNotIn("/main/", formula)
-        self.assertIn('version "1.2.3"', formula)
+        self.assertNotIn('version "', formula, "brew audit --strict: version is redundant with the URL")
+        self.assertIn("tsk-v1.2.3-", formula)
+        self.assertNotRegex(formula, r'desc "(A|An|The) ', "brew audit --strict: no leading article")
         self.assertIn('bin.install "tsk"', formula)
         self.assertIn('def caveats', formula)
         self.assertIn('tsk setup herdr', formula)
+        self.assertIn('Homebrew installs are noninteractive', formula)
         self.assertIn('TSK_STATE_DIR', formula)
 
     def test_formula_platform_blocks_pair_the_correct_url_and_digest(self):

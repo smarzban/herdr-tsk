@@ -1,72 +1,71 @@
 ---
 title: Steps
-description: Flat checklists on a task, from the page and from the CLI.
+description: Add, check, rename, and remove checklist steps.
 ---
 
-A task can carry a flat, ordered list of steps. One level. No nesting. Each step
-has a stable id, one line of text, and a done flag.
+Steps are a flat, ordered checklist. Checking every step does not complete the task.
 
-Checking every step does **not** mark the task done. Steps are progress on the
-page, not a second status.
+## Add
 
-Markdown `- [ ]` in notes is ordinary text. Use steps for checklists.
+1. Open a task.
+2. Click **+ step**, or press `ctrl+a`.
+3. Type the step and press `Enter`.
 
-## On the task page
+`Enter` saves the step and opens another empty row. `Shift+Enter` saves it and finishes any active task edit. Click elsewhere to discard an empty new-step row.
 
-Open the task with `Enter`. The step cursor begins inactive. In view mode, `Tab`
-and `Shift+Tab` cycle stored steps and the trailing dim `+ step` target without
-leaving task view. The target sits immediately below the final stored step as `   + step`.
-`Enter`, `ctrl+a`, or a click on it opens an independent new-step editor, it does not
-start task editing. `ctrl+a` also opens that editor from every task-edit field or
-inline step state.
+New steps save independently, including during task editing. Cancelling the task edit does not undo steps already added.
 
-- `Enter` on a selected stored step toggles it done ↔ ready
-- `ctrl+s`, `ctrl+d`, `ctrl+o`, `ctrl+b`, `ctrl+r` act on the task, never the step
-- `ctrl+e` on a selected stored step starts task editing and opens it inline
-- In task editing, Tab runs Title, Notes, stored steps, `+ step`, Scope, Thread
-- Reaching a stored step through Tab or arrows opens its inline editor
-- `ctrl+x` in view first marks the selected step and the second press removes it,
-  while task editing immediately hides and stages its removal until save
+## Complete
 
-The section is labelled `steps <done>/<total>`. Rows paint `▪` open, `✓` done, and
-`✗` while a step is marked for removal.
+Select a step with a click, `Tab`, or the arrows. Press `Enter` to check or uncheck it.
 
-A new-step draft lives in the steps section. From view or task edit, it persists
-independently: it never joins the enclosing task edit session. Plain `Enter` saves one new
-step and opens the next empty editor. `Shift+Enter` saves that step and the enclosing
-task-edit session. An empty new-step row discards if you click elsewhere. Existing-step
-renames and removals are staged with Title, Notes, Thread, and Scope. Plain `Enter` parks
-an existing-step rename in that session, then `Shift+Enter` saves all staged changes
-(the only session save chord; `Alt+Enter` does nothing on the board). `Esc` cancels a
-field; Esc from task
-editing restores staged removals. A failed save keeps its drafts until you retry or cancel.
+| Mark | Meaning |
+| --- | --- |
+| `▪` | Open |
+| `✓` | Done |
+| `✗` | Marked for removal |
 
-Wheel still scrolls the page. Bare `↓` activates the first stored step, then arrows
-move the selected stored step. In an existing-step editor, arrows move among stored
-steps and stage the prior draft; in an add editor, arrows scroll the shared page
-without closing or trapping that row.
+The heading shows completed/total steps. In view mode, status shortcuts change the task, not the selected step.
 
-## From the CLI
+## Rename
 
-```bash
-tsk steps <task> add "Write the failing test"
-tsk steps <task> toggle <step-short-id>
-tsk steps <task> rename <step-short-id> "Pin the saved id"
-tsk steps <task> remove <step-short-id>
-tsk list <task>
+1. Select a step and press `ctrl+e`.
+2. Edit its text.
+3. Press `Shift+Enter` to save the task edit.
+
+`Enter` retains the rename in the edit session without saving that session. Moving to another existing step retains the previous draft. `Esc` cancels the field; cancelling task editing restores staged changes.
+
+## Remove
+
+| Mode | Action |
+| --- | --- |
+| Task view | Select a step; press `ctrl+x` to mark it, then again to remove it |
+| Task editing | Select a step; `ctrl+x` stages removal; `Shift+Enter` saves |
+
+Cancelling task editing restores staged removals.
+
+## Navigate
+
+- In view mode, `Tab` / `Shift+Tab` cycle steps and **+ step**.
+- `↓` activates the first stored step; arrows then move between steps.
+- During task editing, `Tab` includes the task fields.
+- While adding a step, arrows scroll the page.
+- Wheel and scrollbar remain available during editing.
+
+## CLI
+
+Use the task number and the step's short ID from `tsk list`:
+
+```sh
+tsk list T12
+tsk steps T12 add "Reproduce the timeout"
+tsk steps T12 toggle <step-short-id>
+tsk steps T12 rename <step-short-id> "Reproduce on a slow connection"
+tsk steps T12 remove <step-short-id>
 ```
 
-The task is a store-global number (`T12`, `t12`, or bare `12`) or a UUID from
-`tsk add --json` or `tsk list --json`. Direct lookup ignores cwd.
+A short ID is the shortest unique prefix of a step ID. Full UUIDs also work.
 
-A step short id is the shortest unambiguous prefix of that step's id, as printed
-by `tsk list <task>`.
+Read the task before retrying an uncertain change. Repeating `add` adds another step; repeating `toggle` reverses it; repeating `remove` refuses after success. Repeating the same rename is safe.
 
-`toggle` flips the flag. A blind retry after an unseen success flips it back.
-`rename` is idempotent on the trimmed text. `remove` is not: a retry after an
-unseen success is `unknown-step`. Verify with `tsk list <task>` before retrying
-toggle or remove.
-
-Soft-deleted tasks refuse step changes.
-
-Full flags and exit codes: [CLI](/docs/cli/).
+Deleted tasks refuse step changes. [CLI errors and exit codes](/docs/cli/#exit-contract).

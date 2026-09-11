@@ -1,45 +1,49 @@
 ---
 title: Overview
-description: What tsk is, who moves the work, and where to read next.
+description: A shared task board for you and your agents.
 ---
 
-**tsk is a terminal task board for you and your agents: one shared queue, a TUI for you, a CLI for them.** You both put work on one board and move it through human status: ready, started, blocked, review, done.
+**tsk is a terminal task board for you and your agents: one shared queue, a TUI for you, a CLI for them.**
 
-It ships as the herdr plugin `herdr-tsk`. The `tsk` binary also runs standalone
-against `~/.tsk`. The pane, the quick-capture popup, and the CLI edit the same store.
-
-This site is the user guide.
-
-## One board, two kinds of hands
-
-- **You** work the board: tabs, peek, the task page, and the status verbs behind
-  Ctrl.
-- **Agents** work the [CLI](/docs/cli/): `tsk add` puts work on the board,
-  `tsk steps` plans it, `tsk status` and `tsk edit` move it, `tsk list` reads it
-  back. Adding a task that already exists returns the existing one, so a retried
-  plan is safe.
-- **Status is shared.** Agents set ready, started, blocked, review, or done with
-  `tsk status`. Nothing auto-completes a task from agent lifecycle.
-
-Assigning a task to an agent, and starting that agent from the board, are in
-progress. They are not in the current build.
-
-## What you can do
-
-- Keep a queue with **desk**, a selected project board, and a **projects** index.
-  The desk is your own planning space: general to-dos, future projects, anything outside
-  a repository. The projects index can show a flat cross-project thread.
-- Capture with `+` on the board, or the herdr quick-capture popup
-- Open a task page for title, notes, thread, scope, and steps
-- Script the same store with `tsk add`, `tsk list`, `tsk status`, `tsk edit`, and `tsk steps`
-
-Park, resume, attention, linking, and dispatch are not in this product.
+Use it beside your agent in Herdr, or run `tsk` in any terminal. Both use the same tasks.
 
 ## Start here
 
-1. [Install](/docs/install/) and open the board
-2. [Board](/docs/board/) for tabs, sections, and status
-3. [Keys](/docs/keys/) for the keymap
-4. [Capture](/docs/capture/) to add work
-5. [Task page](/docs/task-page/) and [steps](/docs/steps/) for detail
-6. [CLI](/docs/cli/) for agents, scripts, and the board without the TUI
+1. [Install tsk and connect Herdr](/docs/install/).
+2. Your first board opens with four `N` starter tasks on the desk. Open one with `Enter`; clear it with `ctrl+d`, `ctrl+f`, or `ctrl+x` when you are done. After an upgrade, a `What's new in tsk` task arrives the same way.
+3. Press `+`, type a title, and press `Enter`.
+4. Open the task for notes and steps.
+5. Give your agent its task number.
+
+Agents read tasks with `tsk list` and update them with `tsk status`. [Install the agent skill](/docs/cli/#setup) for the full workflow.
+
+## Find your work
+
+**No project setup needed.** Open tsk in your project directory and add your first task—the project appears on your board automatically. To add a task to another project, include `!p /path/to/project` in quick add, or use `-p /path/to/project` with `tsk add`.
+
+| View | Use it for |
+| --- | --- |
+| **desk** | Personal tasks, plus work needing attention across projects |
+| **selected project** | One project's tasks |
+| **projects** | Browse projects or follow a thread across them |
+
+| Section | Contains |
+| --- | --- |
+| **NEEDS YOU** | Blocked tasks and work ready for review |
+| **IN MOTION** | Started tasks |
+| **ON DECK** | Ready tasks |
+
+You or your agent set task status. Completing steps or ending an agent session does not mark a task done.
+
+## Guides
+
+| I want to… | Read |
+| --- | --- |
+| Find, filter, or archive work | [Board](/docs/board/) |
+| Use keyboard shortcuts | [Keys](/docs/keys/) |
+| Add a task or capture an idea | [Capture](/docs/capture/) |
+| Edit notes, scope, or thread | [Task page](/docs/task-page/) |
+| Break work into a checklist | [Steps](/docs/steps/) |
+| Work through an agent | [Agent guide](/docs/agents/) |
+| Script the board | [CLI](/docs/cli/) |
+| Find data, backups, or settings | [Storage](/docs/storage/) |

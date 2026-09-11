@@ -8,7 +8,8 @@ use crate::store::{default_state_dir, TaskStore, TrashError, TrashTarget};
 /// A successful trash restore.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TrashRestoreResult {
-    pub number: u64,
+    /// Painted id (`T<n>` or `N<n>`), from [`Task::board_identifier`].
+    pub identifier: String,
     pub title: String,
 }
 
@@ -34,13 +35,17 @@ pub fn run_restore(
         TaskAddress::Id(id) => (TrashTarget::Id(id), id.to_string()),
     };
     match store.restore_from_trash(target) {
-        Ok(line) => Ok(TrashRestoreResult {
-            number: line
-                .task
-                .number
-                .expect("trashed tasks were numbered before removal"),
-            title: line.task.title,
-        }),
+        Ok(line) => {
+            let Some(identifier) = line.task.board_identifier() else {
+                return Err(TrashCliError::Store(
+                    "trashed task has no board identifier".to_string(),
+                ));
+            };
+            Ok(TrashRestoreResult {
+                identifier,
+                title: line.task.title,
+            })
+        }
         Err(TrashError::NotInTrash) => Err(TrashCliError::NotInTrash(format!(
             "{display} is not in trash"
         ))),

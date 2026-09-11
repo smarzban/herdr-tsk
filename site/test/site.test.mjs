@@ -44,7 +44,9 @@ test("crate, plugin, lockfile, and site share one release version", async () => 
   const pluginVersion = plugin.match(/^version = "([^"]+)"/m)?.[1];
   const lockVersion = lockfile.match(/\[\[package\]\]\nname = "tsk-tui"\nversion = "([^"]+)"/)?.[1];
   const renderedVersion = siteVersion.match(/VERSION = '([^']+)'/)?.[1];
-  assert.equal(cargoVersion, "0.6.0");
+  const changelog = await read("../../CHANGELOG.md");
+  const releasedVersion = changelog.match(/^## v(\d+\.\d+\.\d+)/m)?.[1];
+  assert.equal(cargoVersion, releasedVersion, "Cargo.toml must match the top CHANGELOG section");
   assert.deepEqual([pluginVersion, lockVersion, renderedVersion], [cargoVersion, cargoVersion, cargoVersion]);
 });
 
@@ -92,13 +94,13 @@ test("docs and demo describe the wide stage slider and threshold", async () => {
 
   assert.match(board, /110 usable columns/);
   assert.match(board, /four-stage slider/);
-  assert.match(board, /\| G \| dim rail, 32 columns \| task page \| task \|/);
+  assert.match(board, /\| Task \| Task details beside a narrow board rail \|/);
   assert.doesNotMatch(board, /bordered|cyan/);
   assert.match(keys, /Wide stage slider/);
-  assert.match(keys, /\| F \| nothing \| → G \|/);
+  assert.match(keys, /\| Full screen \| No change \| Task with rail \|/);
   assert.doesNotMatch(keys, /cyan/);
   assert.match(taskPage, /110 usable columns/);
-  assert.match(taskPage, /● T12 title … started · tsk/);
+  assert.match(taskPage, /Click the task's `T` number to copy it/);
   assert.doesNotMatch(taskPage, /bordered panel/);
   assert.match(demo, /const WIDE_SPLIT_MIN_COLUMNS = 110;/);
   assert.match(demo, /function stageRight\(\)/);
@@ -192,7 +194,7 @@ test("attribution is peek-only in demo and static anatomy", async () => {
   assert.doesNotMatch(guide, /section headers, row meta/);
 });
 
-test("quickstarts use the installer, optional Herdr setup, and task capture", async () => {
+test("quickstarts use the installer, Herdr setup, and task capture", async () => {
   for (const file of ["../../README.md", "../src/content/docs/docs/install.md", "../src/pages/index.astro"]) {
     const text = await read(file);
     assert.ok(text.includes("curl -fsSL https://gettsk.sh/install.sh | sh"), file);

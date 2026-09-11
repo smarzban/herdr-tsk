@@ -620,8 +620,8 @@ pub fn trash_usage(reason: &str) -> CliOutput {
 pub fn trash_restored(result: TrashRestoreResult) -> CliOutput {
     CliOutput {
         stdout: format!(
-            "restored T{} {}\n",
-            result.number,
+            "restored {} {}\n",
+            result.identifier,
             terminal_text(&result.title)
         ),
         stderr: String::new(),
@@ -788,8 +788,10 @@ pub fn setup_help() -> CliOutput {
             "{}\nRegister the installed binary and bundled plugin assets.\n\
              Adds prefix+t for board and prefix+a for capture; asks before replacing conflicts.\n\
              Uses HERDR_CONFIG_PATH, or XDG_CONFIG_HOME/herdr/config.toml, or ~/.config/herdr/config.toml.\n\
-             Agent targets write skills/tsk-cli/SKILL.md into that tool's user-level skills directory.\n\
-             --force overwrites an existing skill. Without it, an existing file exits 1 with skill-exists.\n",
+             On a TTY, bare `tsk setup` detects global agent skill roots and asks once to install or update.\n\
+             Named agent targets write skills/tsk-cli/SKILL.md into that tool's user-level skills directory.\n\
+             Matching skill version exits 1 with skill-exists; a missing or different version updates without --force.\n\
+             --force always overwrites. `tsk setup agents --yes` installs or updates every detected agent.\n",
             crate::setup_agent::USAGE
         ),
         stderr: String::new(),
@@ -799,7 +801,14 @@ pub fn setup_help() -> CliOutput {
 
 pub fn setup_agent_listed(json: bool) -> CliOutput {
     if json {
-        return setup_agent_json("listed", None, None, 0);
+        return match crate::setup_agent::detection_json() {
+            Ok(text) => CliOutput {
+                stdout: text,
+                stderr: String::new(),
+                code: 0,
+            },
+            Err(error) => setup_error(&error.to_string(), 1),
+        };
     }
     CliOutput {
         stdout: crate::setup_agent::list_text(),
@@ -808,13 +817,34 @@ pub fn setup_agent_listed(json: bool) -> CliOutput {
     }
 }
 
+pub fn setup_agent_detected_json(text: String) -> CliOutput {
+    CliOutput {
+        stdout: text,
+        stderr: String::new(),
+        code: 0,
+    }
+}
+
+pub fn setup_agent_detected_ids(ids: Vec<String>) -> CliOutput {
+    CliOutput {
+        stdout: if ids.is_empty() {
+            String::new()
+        } else {
+            format!("{}\n", ids.join(" "))
+        },
+        stderr: String::new(),
+        code: 0,
+    }
+}
+
 pub fn setup_agent_written(
     target: &crate::setup_agent::Target,
-    path: &std::path::Path,
+    outcome: &crate::setup_agent::InstallOutcome,
     json: bool,
 ) -> CliOutput {
+    let path = outcome.path();
     if json {
-        return setup_agent_json("written", Some(target.name()), Some(path), 0);
+        return setup_agent_json(outcome.kind(), Some(target.name()), Some(path), 0);
     }
     CliOutput {
         stdout: format!("{}\n", path.display()),
@@ -835,6 +865,70 @@ pub fn setup_agent_exists(
         stdout: String::new(),
         stderr: "tsk setup: skill-exists\n".into(),
         code: 1,
+    }
+}
+
+pub fn setup_agent_batch(result: crate::setup_agent::BatchResult, json: bool) -> CliOutput {
+    if json {
+        let payload = serde_json::json!({
+            "outcome": if result.declined {
+                "declined"
+            } else if result.none_detected {
+                "none-detected"
+            } else if result.applied.is_empty() {
+                "current"
+            } else {
+                "batch"
+            },
+            "applied": result.applied.iter().map(|(id, outcome)| serde_json::json!({
+                "id": id,
+                "kind": outcome.kind(),
+                "path": outcome.path().display().to_string(),
+            })).collect::<Vec<_>>(),
+            "skipped_current": result.skipped_current,
+            "blocked": result.blocked,
+            "declined": result.declined,
+            "none_detected": result.none_detected,
+        });
+        return CliOutput {
+            stdout: format!("{payload}\n"),
+            stderr: batch_blocked_error(&result.blocked),
+            code: u8::from(!result.blocked.is_empty()),
+        };
+    }
+    // Interactive path already wrote progress to stderr; keep stdout quiet unless scripted batch.
+    let mut stdout = String::new();
+    for (id, outcome) in &result.applied {
+        stdout.push_str(&format!(
+            "{id}: {} {}\n",
+            outcome.kind(),
+            outcome.path().display()
+        ));
+    }
+    for id in &result.skipped_current {
+        stdout.push_str(&format!("{id}: current\n"));
+    }
+    for id in &result.blocked {
+        stdout.push_str(&format!("{id}: blocked (symlink)\n"));
+    }
+    if result.none_detected && stdout.is_empty() {
+        stdout.push_str("No agent skill roots detected.\n");
+    }
+    CliOutput {
+        stdout,
+        stderr: batch_blocked_error(&result.blocked),
+        code: u8::from(!result.blocked.is_empty()),
+    }
+}
+
+fn batch_blocked_error(blocked: &[String]) -> String {
+    if blocked.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "tsk setup: blocked agent skill roots: {}\n",
+            blocked.join(", ")
+        )
     }
 }
 
