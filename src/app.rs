@@ -116,8 +116,9 @@ fn load_board_inner(
 }
 
 fn seed_notices_without_blocking_open(store: &TaskStore) {
+    let announcement_fresh = crate::announcements::is_fresh_install(store);
     let _ = crate::guides::seed_on_open(store);
-    let _ = crate::announcements::seed_on_open(store);
+    let _ = crate::announcements::seed_on_open(store, announcement_fresh);
 }
 
 fn record_notice_dismissals_without_blocking_persist(store: &TaskStore, domain: &DomainState) {

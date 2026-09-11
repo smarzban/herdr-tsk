@@ -75,12 +75,31 @@ fn parse_entry(table: &Table) -> Result<Announcement, String> {
     })
 }
 
-/// Seed the bundled catalog. Returns how many notice rows were created (0 or 1).
-pub fn seed_on_open(store: &TaskStore) -> Result<usize, String> {
-    seed(store, &catalog()?)
+/// Whether this state dir has never received guides or announcements before.
+/// Call before [`crate::guides::seed_on_open`] so a same-open guide write is not
+/// mistaken for an upgrade from a guides-only binary.
+pub fn is_fresh_install(store: &TaskStore) -> bool {
+    let record = delivery::load(store.path());
+    if record.announcement_watermark > 0 || !record.guides.is_empty() {
+        return false;
+    }
+    match store.load() {
+        Ok(state) => !state
+            .tasks()
+            .iter()
+            .any(|task| !task.soft_deleted),
+        Err(_) => true,
+    }
 }
 
-fn seed(store: &TaskStore, catalog: &[Announcement]) -> Result<usize, String> {
+/// Seed the bundled catalog. Returns how many notice rows were created (0 or 1).
+///
+/// `fresh_install` must be computed with [`is_fresh_install`] before guide seeding.
+pub fn seed_on_open(store: &TaskStore, fresh_install: bool) -> Result<usize, String> {
+    seed(store, &catalog()?, fresh_install)
+}
+
+fn seed(store: &TaskStore, catalog: &[Announcement], fresh_install: bool) -> Result<usize, String> {
     let Some(bundled) = catalog.last().map(|entry| entry.id) else {
         return Ok(0);
     };
@@ -91,7 +110,6 @@ fn seed(store: &TaskStore, catalog: &[Announcement]) -> Result<usize, String> {
     }
     let created = store.locked_transition_if_changed(|state| {
         let seen = highest_seen_announce_id(state, record.announcement_watermark);
-        let fresh_install = seen == 0;
         if fresh_install || seen >= bundled {
             return Ok((0, false));
         }
@@ -198,8 +216,12 @@ mod tests {
     #[test]
     fn a_fresh_install_takes_the_bundled_watermark_and_no_announcement_row() {
         let store = temp_store("fresh");
+        assert!(is_fresh_install(&store));
         assert_eq!(guides::seed_on_open(&store), Ok(5));
-        assert_eq!(seed(&store, &[announcement(1), announcement(2)]), Ok(0));
+        assert_eq!(
+            seed(&store, &[announcement(1), announcement(2)], true),
+            Ok(0)
+        );
         let state = store.load().expect("load");
         assert_eq!(state.tasks().iter().filter(|t| t.is_notice()).count(), 5);
         assert!(announced(&state).is_empty());
@@ -210,11 +232,35 @@ mod tests {
     }
 
     #[test]
+    fn upgrading_from_guides_only_seeds_whats_new_for_bundled_entries() {
+        let store = temp_store("guides-upgrade");
+        assert_eq!(guides::seed_on_open(&store), Ok(5));
+        assert_eq!(delivery::load(store.path()).announcement_watermark, 0);
+        assert!(
+            !is_fresh_install(&store),
+            "guides already delivered means this is an upgrade"
+        );
+        let catalog = [announcement(1), announcement(2)];
+        assert_eq!(seed(&store, &catalog, false), Ok(1));
+        let state = store.load().expect("load");
+        let rows = announced(&state);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].notice.as_ref().unwrap().catalog_id, "announce.2");
+        assert!(rows[0]
+            .notes
+            .as_deref()
+            .is_some_and(|notes| notes.contains("Release 2") && notes.contains("Release 1")));
+        assert_eq!(delivery::load(store.path()).announcement_watermark, 2);
+        assert_eq!(seed(&store, &catalog, false), Ok(0));
+        let _ = fs::remove_dir_all(store.path());
+    }
+
+    #[test]
     fn two_missed_entries_become_one_notice_newest_first_and_a_second_open_adds_none() {
         let store = temp_store("missed");
         set_watermark(&store, 1);
         let catalog = [announcement(1), announcement(2), announcement(3)];
-        assert_eq!(seed(&store, &catalog), Ok(1));
+        assert_eq!(seed(&store, &catalog, false), Ok(1));
         let state = store.load().expect("load");
         let rows = announced(&state);
         assert_eq!(rows.len(), 1);
@@ -233,7 +279,7 @@ mod tests {
         );
         assert_eq!(delivery::load(store.path()).announcement_watermark, 3);
 
-        assert_eq!(seed(&store, &catalog), Ok(0));
+        assert_eq!(seed(&store, &catalog, false), Ok(0));
         assert_eq!(announced(&store.load().expect("reload")).len(), 1);
         let _ = fs::remove_dir_all(store.path());
     }
@@ -243,7 +289,11 @@ mod tests {
         let store = temp_store("gap");
         set_watermark(&store, 1);
         assert_eq!(
-            seed(&store, &[announcement(1), announcement(3), announcement(5)]),
+            seed(
+                &store,
+                &[announcement(1), announcement(3), announcement(5)],
+                false
+            ),
             Ok(1)
         );
         let state = store.load().expect("load");
@@ -260,7 +310,7 @@ mod tests {
         let store = temp_store("dismiss");
         set_watermark(&store, 1);
         let catalog = [announcement(1), announcement(2)];
-        assert_eq!(seed(&store, &catalog), Ok(1));
+        assert_eq!(seed(&store, &catalog, false), Ok(1));
         let mut state = store.load().expect("load");
         let id = announced(&state)[0].id;
         state.complete(id).expect("complete");
@@ -269,7 +319,7 @@ mod tests {
         assert!(delivery::load(store.path()).guides.contains("announce.2"));
 
         store.save(&DomainState::new()).expect("forget the row");
-        assert_eq!(seed(&store, &catalog), Ok(0));
+        assert_eq!(seed(&store, &catalog, false), Ok(0));
         assert!(announced(&store.load().expect("reload")).is_empty());
         let _ = fs::remove_dir_all(store.path());
     }
@@ -278,16 +328,16 @@ mod tests {
     fn a_lost_record_is_rebuilt_from_the_store_and_only_newer_entries_are_delivered() {
         let store = temp_store("lost");
         set_watermark(&store, 1);
-        assert_eq!(seed(&store, &[announcement(1), announcement(2)]), Ok(1));
+        assert_eq!(seed(&store, &[announcement(1), announcement(2)], false), Ok(1));
         fs::remove_file(store.path().join(delivery::DELIVERY_FILE)).expect("lose record");
 
-        assert_eq!(seed(&store, &[announcement(1), announcement(2)]), Ok(0));
+        assert_eq!(seed(&store, &[announcement(1), announcement(2)], false), Ok(0));
         assert_eq!(delivery::load(store.path()).announcement_watermark, 2);
         assert_eq!(announced(&store.load().expect("load")).len(), 1);
 
         fs::remove_file(store.path().join(delivery::DELIVERY_FILE)).expect("lose again");
         let newer = [announcement(1), announcement(2), announcement(3)];
-        assert_eq!(seed(&store, &newer), Ok(1));
+        assert_eq!(seed(&store, &newer, false), Ok(1));
         let state = store.load().expect("reload");
         let rows = announced(&state);
         assert_eq!(rows.len(), 2);

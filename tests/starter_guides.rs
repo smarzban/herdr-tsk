@@ -81,10 +81,26 @@ fn full_board_open_seeds_the_guides_once_beside_existing_tasks() {
         )
         .expect("task");
     store.save(&seeded).expect("save");
+    let newest = announcements::catalog()
+        .expect("bundled catalog")
+        .last()
+        .expect("at least one entry")
+        .id;
 
     let _ = load_board_model().expect("first open");
     let state = store.load().expect("load");
-    assert_eq!(notices(&state).len(), 5);
+    assert_eq!(
+        notices(&state).len(),
+        6,
+        "five guides plus What's new for an existing desk"
+    );
+    assert_eq!(
+        notices(&state)
+            .iter()
+            .filter(|task| task.title == announcements::TITLE)
+            .count(),
+        1
+    );
     assert_eq!(
         state
             .tasks()
@@ -94,10 +110,12 @@ fn full_board_open_seeds_the_guides_once_beside_existing_tasks() {
             .collect::<Vec<_>>(),
         vec![("existing work", Some(1))]
     );
-    assert_eq!(delivery::load(&env.dir).guides, catalog_ids());
+    let record = delivery::load(&env.dir);
+    assert_eq!(record.guides, catalog_ids());
+    assert_eq!(record.announcement_watermark, newest);
 
     let _ = load_board_model().expect("second open");
-    assert_eq!(notices(&store.load().expect("reload")).len(), 5);
+    assert_eq!(notices(&store.load().expect("reload")).len(), 6);
 }
 
 #[test]

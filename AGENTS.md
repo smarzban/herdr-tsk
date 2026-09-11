@@ -264,11 +264,12 @@ If `HERDR_ENV` is unset, say that live smoke was not run.
   changelog link lives in `notes`, never in `title` (the parser refuses otherwise). Append one
   entry per release worth a row. `seed_on_open` runs right after the guide seed on the full
   board open: it takes the higher of `delivery.announcement_watermark` and any `announce.<id>`
-  notice in the store as "seen"; seen `0` is a fresh install, which jumps the watermark to the
-  bundled maximum and creates nothing; otherwise every entry above seen becomes one desk
-  notice `What's new in tsk` (catalog id `announce.<max>`, notes newest first) and the
-  watermark moves to the maximum. Nobody ever sees the entries bundled with the binary that
-  introduced their install.
+  notice in the store as "seen". A blank state checked before guide seeding (watermark 0, no
+  delivered guide ids, no live tasks) is a fresh install: jump the watermark to the bundled
+  maximum and create nothing. Otherwise every entry above seen becomes one desk notice
+  `What's new in tsk` (catalog id `announce.<max>`, notes newest first) and the watermark
+  moves to the maximum. That includes upgrading from a guides-only install whose watermark
+  is still 0.
 - Store format is versioned (`STORE_FORMAT_VERSION`, currently 3). Any schema change bumps it
   and adds a `vN → vN+1` step to `MIGRATIONS` in `src/store.rs`; `deny_unknown_fields` stays on
   `Task` and `DomainState` so an older binary refuses a newer file instead of dropping fields.
