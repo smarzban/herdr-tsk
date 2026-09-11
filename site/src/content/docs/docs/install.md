@@ -19,7 +19,7 @@ brew install smarzban/tap/tsk
 
 Reopen your terminal if prompted, or run the printed `export` command.
 
-If Herdr is already installed, the curl installer asks whether to run `tsk setup herdr` when a terminal is available. After install it prints a short wrap-up: board-only when Herdr is absent; board plus `prefix+t` when you accept setup; board plus `tsk setup herdr` when you decline, or when CI / no TTY skips the ask. Homebrew stays noninteractive and prints the same setup command as a caveat.
+If Herdr is already installed, the curl installer asks whether to run `tsk setup herdr` when a terminal is available. When global agent skill roots are detected, it also asks once whether to install or update the tsk skill for those agents. After install it prints a short wrap-up: board-only when Herdr is absent; board plus `prefix+t` when you accept Herdr setup; board plus `tsk setup herdr` when you decline Herdr, or when CI / no TTY skips that ask; plus `tsk setup` when agent skill setup was declined or skipped. Homebrew stays noninteractive and prints the Herdr setup command as a caveat.
 
 ## Add to Herdr
 
@@ -40,12 +40,13 @@ Use your configured Herdr prefix. [Herdr keyboard guide](https://herdr.dev/docs/
 ## Agent skill
 
 ```sh
+tsk setup
 tsk setup pi
 ```
 
-Use `claude`, `cursor`, `grok`, or `codex` instead of `pi` for another agent. Setup installs the CLI skill in that agent's user-level skills directory.
+On a TTY, bare `tsk setup` detects installed agents and asks once to install or update the skill. Use `claude`, `cursor`, `grok`, or `codex` instead of `pi` for a single named target. Setup installs the CLI skill in that agent's user-level skills directory.
 
-[Custom directories and overwrite options](/docs/cli/#setup).
+[Detection, version updates, and overwrite options](/docs/cli/#setup).
 
 ## First task
 

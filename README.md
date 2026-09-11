@@ -38,9 +38,11 @@ brew install smarzban/tap/tsk
 The installer sets up PATH for Bash and Zsh. If prompted, reopen your terminal
 or run the printed `export` command before continuing. When Herdr is already
 installed, an interactive curl install may also ask to run `tsk setup herdr`.
-The install wrap-up then points at the board (`prefix+t` after a successful
-setup, or `tsk setup herdr` when skipped). Noninteractive installs and Homebrew
-print the setup command without asking.
+When agent skill roots are detected, it asks once to install or update the tsk
+skill. The install wrap-up then points at the board (`prefix+t` after a
+successful Herdr setup, or `tsk setup herdr` / `tsk setup` when those asks are
+skipped). Noninteractive installs and Homebrew print the Herdr setup command
+without asking.
 
 ### Add to Herdr
 
@@ -57,11 +59,12 @@ Install the tsk skill so your agent knows how to read the board, add tasks, and
 update their status and steps:
 
 ```sh
-tsk setup pi
+tsk setup
 ```
 
-Replace `pi` with `claude`, `cursor`, `grok`, or `codex` for your agent. This
-installs the skill in its user-level skills directory.
+On a TTY that detects agents once and asks to install. Or name one agent
+(`pi`, `claude`, `cursor`, `grok`, or `codex`) to install into its user-level
+skills directory.
 [Other skill directories and setup options](https://gettsk.sh/docs/cli/#setup).
 
 ### Open the board

@@ -269,14 +269,34 @@ fn parse_plan(source: &str) -> Result<Vec<Value>, String> {
 }
 
 fn run_setup<R: Read>(args: Vec<String>, stdin: &mut R, stdin_is_tty: bool) -> CliOutput {
-    match crate::setup_agent::parse(&args) {
+    let interactive = stdin_is_tty && std::io::stderr().is_terminal();
+    match crate::setup_agent::parse_bare(&args, interactive) {
         Err(error) => presenter::setup_error(&error.to_string(), 2),
         Ok(crate::setup_agent::Command::Help) => presenter::setup_help(),
         Ok(crate::setup_agent::Command::List { json }) => presenter::setup_agent_listed(json),
+        Ok(crate::setup_agent::Command::DetectedIds) => match crate::setup_agent::detected_ids() {
+            Ok(ids) => presenter::setup_agent_detected_ids(ids),
+            Err(error) => presenter::setup_error(&error.to_string(), 1),
+        },
+        Ok(crate::setup_agent::Command::Interactive { json: _ }) => {
+            let mut reader = std::io::BufReader::new(stdin);
+            let mut stderr = std::io::stderr();
+            match crate::setup_agent::run_interactive_batch(&mut reader, &mut stderr, interactive) {
+                Ok(result) => presenter::setup_agent_batch(result, false),
+                Err(crate::setup_agent::Error::Usage(reason)) => presenter::setup_error(&reason, 2),
+                Err(error) => presenter::setup_error(&error.to_string(), 1),
+            }
+        }
+        Ok(crate::setup_agent::Command::AgentsYes { json }) => {
+            match crate::setup_agent::install_detected(false) {
+                Ok(result) => presenter::setup_agent_batch(result, json),
+                Err(crate::setup_agent::Error::Usage(reason)) => presenter::setup_error(&reason, 2),
+                Err(error) => presenter::setup_error(&error.to_string(), 1),
+            }
+        }
         Ok(crate::setup_agent::Command::Herdr) => {
             let mut reader = std::io::BufReader::new(stdin);
             let mut stderr = std::io::stderr();
-            let interactive = stdin_is_tty && stderr.is_terminal();
             match crate::setup::run(&mut reader, &mut stderr, interactive) {
                 Ok(result) => presenter::setup(result),
                 Err(error) => presenter::setup_error(&error.to_string(), 1),
@@ -287,7 +307,7 @@ fn run_setup<R: Read>(args: Vec<String>, stdin: &mut R, stdin_is_tty: bool) -> C
             force,
             json,
         }) => match crate::setup_agent::install(&target, force) {
-            Ok(path) => presenter::setup_agent_written(&target, &path, json),
+            Ok(outcome) => presenter::setup_agent_written(&target, &outcome, json),
             Err(crate::setup_agent::Error::Exists(path)) => {
                 presenter::setup_agent_exists(&target, &path, json)
             }

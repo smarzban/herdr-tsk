@@ -59,6 +59,18 @@ else:
         with tarfile.open(archive, "w:gz") as out:
             if record_setup:
                 data = b"""#!/bin/sh
+if [ "${1:-}" = setup ] && [ "${2:-}" = --detected-ids ]; then
+    if [ -n "${TSK_DETECT_AGENTS:-}" ]; then
+        printf '%s\\n' "$TSK_DETECT_AGENTS"
+    fi
+    exit 0
+fi
+if [ "${1:-}" = setup ] && [ "${2:-}" = agents ] && [ "${3:-}" = --yes ]; then
+    if [ -n "${TSK_SETUP_LOG:-}" ]; then
+        printf '%s\\n' "$*" >> "$TSK_SETUP_LOG"
+    fi
+    exit 0
+fi
 if [ "${1:-}" = setup ] && [ "${2:-}" = herdr ]; then
     if [ -n "${TSK_SETUP_LOG:-}" ]; then
         printf '%s\\n' "$*" >> "$TSK_SETUP_LOG"
@@ -102,7 +114,10 @@ echo installed-fixture
             )
             os.close(slave)
             slave = None
-            replied = False
+            answers = [line + b"\n" for line in answer.split(b"\n") if line != b""]
+            if not answers:
+                answers = [b"\n"]
+            answered = 0
             deadline = time.monotonic() + 20
             while time.monotonic() < deadline:
                 if not select.select([master], [], [], 0.1)[0]:
@@ -118,9 +133,11 @@ echo installed-fixture
                 if not chunk:
                     break
                 transcript += chunk
-                if b"[y/N]" in transcript and not replied:
-                    os.write(master, answer)
-                    replied = True
+                seen = transcript.count(b"[y/N]")
+                while answered < seen:
+                    reply = answers[answered] if answered < len(answers) else answers[-1]
+                    os.write(master, reply)
+                    answered += 1
             code = process.wait(timeout=5)
             output = transcript.decode(errors="replace")
             return subprocess.CompletedProcess(["sh", str(INSTALLER)], code, output, "")
@@ -515,6 +532,81 @@ echo installed-fixture
         self.assertIn("tsk install completed.", result.stdout)
         self.assertIn("Set up the Herdr plugin with tsk setup herdr.", result.stdout)
         self.assertNotIn("prefix+t", result.stdout)
+
+    def test_agent_skills_absent_stays_silent(self):
+        self.archive(record_setup=True)
+        result = self.run_install(TSK_SETUP_LOG=str(self.setup_log))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        combined = result.stdout + result.stderr
+        self.assertNotIn("Set up agent skills with tsk setup.", combined)
+        self.assertNotIn("Install or update the tsk skill for", combined)
+
+    def test_agent_skills_detected_without_tty_nudge(self):
+        self.archive(record_setup=True)
+        result = self.run_install(
+            TSK_SETUP_LOG=str(self.setup_log),
+            TSK_DETECT_AGENTS="cursor claude",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        combined = result.stdout + result.stderr
+        self.assertNotIn("[y/N]", combined)
+        self.assertIn("Set up agent skills with tsk setup.", combined)
+        self.assertFalse(self.setup_log.exists())
+
+    def test_agent_skills_detected_in_ci_nudge(self):
+        self.archive(record_setup=True)
+        result = self.run_install(
+            TSK_SETUP_LOG=str(self.setup_log),
+            TSK_DETECT_AGENTS="cursor",
+            CI="1",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        combined = result.stdout + result.stderr
+        self.assertNotIn("Install or update the tsk skill for", combined)
+        self.assertIn("Set up agent skills with tsk setup.", combined)
+
+    @unittest.skipUnless(os.name == "posix", "PTY prompt requires POSIX")
+    def test_agent_skills_prompt_yes_runs_agents_yes(self):
+        self.archive(record_setup=True)
+        result = self.run_install_with_answer(
+            b"y\n",
+            TSK_SETUP_LOG=str(self.setup_log),
+            TSK_DETECT_AGENTS="cursor",
+        )
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("Install or update the tsk skill for cursor", result.stdout)
+        self.assertIn("setup agents --yes", self.setup_log.read_text())
+        self.assertNotIn("Set up agent skills with tsk setup.", result.stdout)
+
+    @unittest.skipUnless(os.name == "posix", "PTY prompt requires POSIX")
+    def test_agent_skills_prompt_no_nudge(self):
+        self.archive(record_setup=True)
+        result = self.run_install_with_answer(
+            b"n\n",
+            TSK_SETUP_LOG=str(self.setup_log),
+            TSK_DETECT_AGENTS="cursor claude",
+        )
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("Set up agent skills with tsk setup.", result.stdout)
+        self.assertFalse(self.setup_log.exists())
+
+    @unittest.skipUnless(os.name == "posix", "PTY prompt requires POSIX")
+    def test_herdr_and_skills_yes_answers_both_prompts(self):
+        self.archive(record_setup=True)
+        self.command("herdr", "#!/bin/sh\nexit 0\n")
+        result = self.run_install_with_answer(
+            b"y\ny\n",
+            TSK_SETUP_LOG=str(self.setup_log),
+            TSK_DETECT_AGENTS="cursor",
+        )
+        self.assertEqual(result.returncode, 0, result.stdout)
+        log = self.setup_log.read_text()
+        self.assertIn("setup herdr", log)
+        self.assertIn("setup agents --yes", log)
+        self.assertIn("prefix+t", result.stdout)
+        self.assertNotIn("Set up the Herdr plugin with tsk setup herdr.", result.stdout)
+        self.assertNotIn("Set up agent skills with tsk setup.", result.stdout)
+
 
 
 if __name__ == "__main__":

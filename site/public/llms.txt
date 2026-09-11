@@ -3,13 +3,13 @@
 > tsk is a terminal task board for you and your agents: one shared queue, a TUI for you, a CLI for them.
 
 Install with `curl -fsSL https://gettsk.sh/install.sh | sh` or `brew install smarzban/tap/tsk`.
-If Herdr is on PATH, the curl installer asks to run `tsk setup herdr` on a TTY; the install wrap-up points at the board (and the Herdr board shortcut after a successful setup, or `tsk setup herdr` when skipped). Homebrew prints the setup command as a caveat.
+If Herdr is on PATH, the curl installer asks to run `tsk setup herdr` on a TTY; when agent skill roots are detected it also asks once to install the tsk skill. The install wrap-up points at the board (and the Herdr board shortcut after a successful Herdr setup, or `tsk setup herdr` / `tsk setup` when those asks are skipped). Homebrew prints the Herdr setup command as a caveat.
 Details: https://gettsk.sh/docs/install.md
 The board checks GitHub releases at most daily and shows a dim `vX.Y.Z available` on the status row; set `TSK_NO_UPDATE_CHECK` to disable.
 
 ## For agents
 
-- `tsk guide` prints the workflow; `tsk setup <agent>` installs the skill
+- `tsk guide` prints the workflow; `tsk setup` detects agents and can install the skill; `tsk setup <agent>` targets one agent
 - Guide: https://gettsk.sh/docs/agents.md
 - CLI: https://gettsk.sh/docs/cli.md
 
