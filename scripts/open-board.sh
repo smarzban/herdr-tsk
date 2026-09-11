@@ -6,8 +6,9 @@ set -uo pipefail
 herdr_bin="${HERDR_BIN_PATH:-herdr}"
 workspace_id="${HERDR_WORKSPACE_ID:-}"
 target_pane="${HERDR_PANE_ID:-}"
-if [ -z "$workspace_id" ] || [ -z "$target_pane" ]; then
-  printf 'tsk: cannot open board without a Herdr workspace and pane\n' >&2
+origin_tab="${HERDR_TAB_ID:-}"
+if [ -z "$workspace_id" ] || [ -z "$target_pane" ] || [ -z "$origin_tab" ]; then
+  printf 'tsk: cannot open board without a Herdr workspace, tab and pane\n' >&2
   exit 1
 fi
 
@@ -44,5 +45,10 @@ fi
 
 # Split placement requires a target pane, not a workspace argument. Anchor it to
 # the invoking pane so a focus change cannot redirect creation to another workspace.
+# Plugin open does not navigate attached clients either. Return to the invoking
+# tab before creation, including when a stale board was found in another tab.
+if ! "$herdr_bin" tab focus "$origin_tab"; then
+  exit 1
+fi
 # New panes still receive the host's invocation context.
 exec "$herdr_bin" plugin pane open --plugin herdr-tsk --entrypoint board --placement split --target-pane "$target_pane" --focus

@@ -299,8 +299,9 @@ If `HERDR_ENV` is unset, say that live smoke was not run.
   directories, not symlinks; permission hardening refuses a symlink instead of chmodding its target.
 - Golden fixtures regenerate via `cargo test --test queue_board_render regenerate_golden_fixtures -- --ignored`; never hand-edit the `.txt` files.
 - `prefix+t` opens or focuses the board within the invoking Herdr workspace, across tabs.
-  `scripts/open-board.sh` scopes lookup with `HERDR_WORKSPACE_ID` and anchors creation to
-  `HERDR_PANE_ID` (Herdr rejects `--workspace` for split placement). It refuses missing context
+  `scripts/open-board.sh` scopes lookup with `HERDR_WORKSPACE_ID`, activates the invoking
+  `HERDR_TAB_ID` before creation, and anchors the split to `HERDR_PANE_ID` (Herdr rejects
+  `--workspace` for split placement). It refuses missing context
   or a failed pane listing, and never publishes shared reopen context on focus.
   Existing boards preserve their view and edits; other workspaces keep their boards.
   On reuse, `--find-board-tab` resolves the matching pane's tab; call `herdr tab focus` before

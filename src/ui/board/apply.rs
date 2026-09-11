@@ -2193,7 +2193,8 @@ fn open_task_page_on(domain: &DomainState, model: &mut BoardModel, id: Uuid) {
 }
 
 /// The row double-click window: a second click on the same row within it opens the page.
-const ROW_DOUBLE_CLICK_WINDOW: std::time::Duration = std::time::Duration::from_millis(400);
+pub(super) const ROW_DOUBLE_CLICK_WINDOW: std::time::Duration =
+    std::time::Duration::from_millis(400);
 
 /// Keep the quick-add line's visible destination truthful while `!p` tokens are typed.
 ///

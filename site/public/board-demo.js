@@ -2077,8 +2077,48 @@ import { parseCapture } from "./capture.js";
   }
 
   let lastClick = { id: null, at: 0 };
+  const cancelReflowClick = () => {
+    delete lastClick.reflow;
+  };
+  frame.addEventListener("keydown", cancelReflowClick, true);
+  root.addEventListener("wheel", cancelReflowClick, { passive: true });
+  root.addEventListener("pointermove", (e) => {
+    if (e.buttons) cancelReflowClick();
+  });
+  root.addEventListener("pointerdown", (e) => {
+    const previous = lastClick.reflow;
+    if (
+      e.button !== 0 ||
+      (previous && (e.clientX !== previous.x || e.clientY !== previous.y))
+    )
+      cancelReflowClick();
+  });
+  root.addEventListener("pointercancel", cancelReflowClick);
+  window.addEventListener("resize", cancelReflowClick);
+  window.addEventListener("scroll", cancelReflowClick, true);
 
   root.addEventListener("click", (e) => {
+    const previous = lastClick.reflow;
+    cancelReflowClick();
+    // Reflow must not turn the second click into a newly exposed task control.
+    if (
+      previous &&
+      e.detail > 0 &&
+      state.stage === "split" &&
+      state.selectedId === lastClick.id &&
+      Date.now() - lastClick.at < 350 &&
+      e.clientX === previous.x &&
+      e.clientY === previous.y &&
+      frame.clientWidth === previous.width &&
+      !state.editField &&
+      !steps.editor &&
+      !steps.dirty
+    ) {
+      lastClick = { id: null, at: 0 };
+      openFullPage();
+      render();
+      return;
+    }
     // A stage A click inside the task column slides to G first, then the control runs.
     const filterControl = e.target.closest("[data-filter]");
     if (filterControl) {
@@ -2181,6 +2221,15 @@ import { parseCapture } from "./capture.js";
       const id = row.getAttribute("data-task");
       if ((steps.dirty || steps.editor) && id !== state.selectedId) return;
       const now = Date.now();
+      const reflow =
+        e.detail > 0 &&
+        isWideSplit() &&
+        (state.stage === "board" || state.stage === "rail") &&
+        !state.editField &&
+        !steps.editor &&
+        !steps.dirty
+          ? { x: e.clientX, y: e.clientY, width: frame.clientWidth }
+          : null;
       if (lastClick.id === id && now - lastClick.at < 350) {
         state.selectedId = id;
         state.peekId = null;
@@ -2195,7 +2244,7 @@ import { parseCapture } from "./capture.js";
         state.selectedId = id;
         state.peekId = state.peekId === id ? null : id;
       }
-      lastClick = { id, at: now };
+      lastClick = { id, at: now, reflow };
       render();
       return;
     }

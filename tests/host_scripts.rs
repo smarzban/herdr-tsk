@@ -61,10 +61,12 @@ if [ "$1" = pane ] && [ "$2" = list ]; then
   fi
 elif [ "$1" = tab ] && [ "$2" = focus ]; then
   [ "${STUB_MODE:-}" != tab-focus-failure ] || exit 1
+  printf '%s' "$3" > "$STUB_ROOT/visible-tab"
 elif [ "$1" = plugin ] && [ "$2" = pane ] && [ "$3" = focus ]; then
   [ "${STUB_MODE:-}" != focus-failure ] || exit 1
 elif [ "$1" = plugin ] && [ "$2" = pane ] && [ "$3" = open ]; then
   touch "$STUB_ROOT/opened"
+  printf '%s' 'w0:t1' > "$STUB_ROOT/opened-tab"
   printf '%s' "${HERDR_PLUGIN_CONTEXT_JSON:-}" > "$STUB_ROOT/open-context.json"
 fi
 "#,
@@ -86,6 +88,16 @@ fi
         workspace: Option<&str>,
         pane: Option<&str>,
     ) -> std::process::Output {
+        self.run_with_tab(mode, workspace, pane, Some("w0:t1"))
+    }
+
+    fn run_with_tab(
+        &self,
+        mode: &str,
+        workspace: Option<&str>,
+        pane: Option<&str>,
+        tab: Option<&str>,
+    ) -> std::process::Output {
         let mut command = Command::new("bash");
         command
             .arg(open_board_path())
@@ -96,6 +108,7 @@ fi
             .env("STUB_ROOT", &self.root)
             .env("STUB_MODE", mode)
             .env_remove("HERDR_PANE_ID")
+            .env_remove("HERDR_TAB_ID")
             .env(
                 "HERDR_PLUGIN_CONTEXT_JSON",
                 r#"{"focused_pane_cwd":"/tmp"}"#,
@@ -106,6 +119,9 @@ fi
         }
         if let Some(pane) = pane {
             command.env("HERDR_PANE_ID", pane);
+        }
+        if let Some(tab) = tab {
+            command.env("HERDR_TAB_ID", tab);
         }
         command.output().expect("launcher")
     }
@@ -190,13 +206,18 @@ fn open_board_tab_focus_failure_does_not_focus_or_duplicate_the_board() {
 }
 
 #[test]
-fn open_board_stale_focus_falls_back_to_open_in_the_same_workspace() {
+fn open_board_stale_focus_falls_back_to_a_visible_board_in_the_invoking_tab() {
     let launcher = Launcher::new();
     let output = launcher.run("focus-failure", Some("w0"));
     assert!(output.status.success(), "{output:?}");
     let calls = launcher.calls();
+    assert_eq!(
+        read(&launcher.root.join("visible-tab")),
+        read(&launcher.root.join("opened-tab")),
+        "the replacement must be visible, not merely focused on the server"
+    );
     assert!(
-        calls.contains("plugin pane focus w0:p2\nplugin pane open "),
+        calls.contains("plugin pane focus w0:p2\ntab focus w0:t1\nplugin pane open "),
         "{calls}"
     );
     let open = calls
@@ -225,6 +246,17 @@ fn open_board_refuses_missing_pane_without_using_host_focus() {
         let output = launcher.run_with_pane("absent", Some("w0"), pane);
         assert!(!output.status.success(), "{output:?}");
         assert!(String::from_utf8_lossy(&output.stderr).contains("pane"));
+        assert!(launcher.calls().is_empty());
+    }
+}
+
+#[test]
+fn open_board_refuses_missing_invoking_tab_before_navigation() {
+    for tab in [None, Some("")] {
+        let launcher = Launcher::new();
+        let output = launcher.run_with_tab("focus-failure", Some("w0"), Some("w0:p1"), tab);
+        assert!(!output.status.success(), "{output:?}");
+        assert!(String::from_utf8_lossy(&output.stderr).contains("tab"));
         assert!(launcher.calls().is_empty());
     }
 }

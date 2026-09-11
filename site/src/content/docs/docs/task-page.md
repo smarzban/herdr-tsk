@@ -7,7 +7,7 @@ Read notes and steps, then edit the task when you need to change it.
 
 ## Open
 
-Double-click a task or select it and press `Enter`.
+Double-click a task or select it and press `Enter`. A double-click follows the task you first clicked, even when the first click resizes the columns.
 
 At 110 usable columns or wider, click a task or press `→` to open details beside the board, keeping board focus. Use `→` and `←` to move between [board and task views](/docs/board/#wide-stage-slider). Press `Enter` from the board for full screen; `Esc` returns.
 
