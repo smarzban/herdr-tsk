@@ -1,9 +1,3 @@
-//! Once-per-install delivery record for notice rows: `delivery.json` beside `update.json`.
-//!
-//! It lives outside `tsk.json` so a dismiss mark never bumps the store format and an
-//! older binary ignores it. Written with the same temp + rename + sync pattern as the
-//! update cache.
-
 use std::collections::BTreeSet;
 use std::fs;
 use std::io::{self, Write};

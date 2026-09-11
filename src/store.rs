@@ -2500,14 +2500,11 @@ mod tests {
         );
     }
 
-    /// Injected v3 -> v4 step for the migration seam tests. It sits at chain index 2,
-    /// after the two shipped steps a current document never reaches, so a seam load
-    /// stamped from v3 applies exactly this step.
-    fn identity_v3_to_v4(document: serde_json::Value) -> Result<serde_json::Value, StoreError> {
+    fn seam_noop_v3_to_v4(document: serde_json::Value) -> Result<serde_json::Value, StoreError> {
         Ok(document)
     }
 
-    const SEAM_CHAIN: &[MigrationStep] = &[migrate_v1_to_v2, migrate_v2_to_v3, identity_v3_to_v4];
+    const SEAM_CHAIN: &[MigrationStep] = &[migrate_v1_to_v2, migrate_v2_to_v3, seam_noop_v3_to_v4];
 
     #[test]
     fn migrate_with_walks_the_chain_from_the_given_version() {

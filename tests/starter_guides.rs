@@ -1,6 +1,3 @@
-//! Notice seeds on the open path: the full board seeds the guides once and records the
-//! bundled announcements as seen, quick capture never does, and a dismissed guide is
-//! recorded so no later open brings it back.
 #![cfg(unix)]
 #[path = "support/pty.rs"]
 mod pty;
@@ -133,6 +130,10 @@ fn quick_capture_open_seeds_nothing() {
     assert!(!env.dir.join(delivery::DELIVERY_FILE).exists());
 }
 
+fn drop_delivery_record(state_dir: &std::path::Path) {
+    fs::remove_file(state_dir.join(delivery::DELIVERY_FILE)).unwrap();
+}
+
 #[test]
 fn completing_a_guide_on_the_real_board_records_its_dismissal() {
     let root = pty::scratch_root("dismiss");
@@ -147,8 +148,7 @@ fn completing_a_guide_on_the_real_board_records_its_dismissal() {
     }
     let store = TaskStore::new(&state_dir);
     assert_eq!(delivery::load(&state_dir).guides, catalog_ids());
-    // Lose the seed's record so the only way it can come back is the dismiss hook.
-    fs::remove_file(state_dir.join(delivery::DELIVERY_FILE)).unwrap();
+    drop_delivery_record(&state_dir);
 
     session.send(b"\x04");
     session.send(b"\x11");

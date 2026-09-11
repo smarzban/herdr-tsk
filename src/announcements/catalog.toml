@@ -1,11 +1,5 @@
-# Release announcements, compiled into the binary (src/announcements.rs).
-#
-# One entry per release worth a desk notice. Append at the end with the next id;
-# ids increase and are never reused. An install records the highest id it has seen,
-# so an upgrade delivers every newer entry as one "What's new in tsk" row. A fresh
-# install records the highest bundled id and receives none of these.
-#
-# The changelog link belongs in `notes`, never in `title`.
+# Maintainer catalog for `src/announcements.rs`. Append with the next id; ids
+# increase and are never reused. Changelog URLs go in `notes`, never in `title`.
 
 [[announcement]]
 id = 1

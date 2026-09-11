@@ -1,24 +1,15 @@
-//! Starter guides: desk notice rows seeded once per install on a full board open.
-//!
-//! The catalog is a table. Adding a guide is one row; `delivery.json` remembers which
-//! rows a state dir has already received, so existing users get new rows and never old
-//! ones back.
-
 use std::collections::BTreeSet;
 
 use crate::delivery;
 use crate::domain::{HumanStatus, TaskScope};
 use crate::store::TaskStore;
 
-/// One catalog row. `catalog_id` is the stable key the delivery record remembers; the
-/// title names the capability the row teaches.
 #[derive(Debug, Clone, Copy)]
 pub struct Guide {
     pub catalog_id: &'static str,
     pub title: &'static str,
     pub notes: &'static str,
     pub status: HumanStatus,
-    /// Step text and whether it starts checked.
     pub steps: &'static [(&'static str, bool)],
 }
 
@@ -105,10 +96,6 @@ pub const CATALOG: [Guide; 5] = [
 
 /// Seed every guide this state dir has not delivered, then record the whole catalog as
 /// delivered. Returns how many notice rows were created.
-///
-/// Reruns converge: a guide already in the store as a notice (any status, deleted
-/// included) is never created twice, and a delivery record lost between the store write
-/// and its own write is rebuilt from the store on the next open.
 pub fn seed_on_open(store: &TaskStore) -> Result<usize, String> {
     let dir = store.path();
     let mut record = delivery::load(dir);
@@ -192,6 +179,20 @@ mod tests {
             .collect()
     }
 
+    fn replace_store_with_ordinary_task_only(store: &TaskStore) {
+        let mut forgetting = DomainState::new();
+        forgetting
+            .create(
+                "unrelated",
+                None,
+                TaskScope::Global,
+                ProvenanceOrigin::Manual,
+                None,
+            )
+            .expect("task");
+        store.save(&forgetting).expect("save");
+    }
+
     #[test]
     fn first_open_seeds_five_desk_notices_and_a_second_open_adds_none() {
         let store = temp_store("empty");
@@ -271,19 +272,7 @@ mod tests {
         store.save(&state).expect("save");
         delivery::record_dismissed_notices(store.path(), state.tasks()).expect("record");
 
-        // The store forgets the three rows entirely (as a trash purge would); the
-        // delivery record alone must keep them from coming back.
-        let mut forgetting = DomainState::new();
-        forgetting
-            .create(
-                "unrelated",
-                None,
-                TaskScope::Global,
-                ProvenanceOrigin::Manual,
-                None,
-            )
-            .expect("task");
-        store.save(&forgetting).expect("save");
+        replace_store_with_ordinary_task_only(&store);
         assert_eq!(seed_on_open(&store), Ok(0));
         assert!(notices(&store.load().expect("reload")).is_empty());
         let _ = fs::remove_dir_all(store.path());

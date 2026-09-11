@@ -1,4 +1,3 @@
-//! Real `tsk` binary on an isolated PTY. Never uses a live Herdr session.
 use std::ffi::OsStr;
 use std::fs::{self, File};
 use std::io::{Read, Write};

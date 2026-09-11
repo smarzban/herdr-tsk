@@ -1,11 +1,3 @@
-//! Release announcements: one desk notice per upgrade, combining every bundled entry the
-//! install has not seen.
-//!
-//! The catalog is `announcements/catalog.toml` beside this file, edited by the maintainer
-//! and compiled in. `delivery.json` keeps the highest id delivered; a fresh install takes
-//! the bundled maximum and receives nothing, so a "What's new" row only ever describes an
-//! upgrade.
-
 use toml_edit::{DocumentMut, Item, Table};
 
 use crate::delivery;
@@ -23,7 +15,6 @@ pub struct Announcement {
     pub notes: String,
 }
 
-/// The bundled catalog, ascending by id.
 pub fn catalog() -> Result<Vec<Announcement>, String> {
     parse_catalog(CATALOG_TOML)
 }
@@ -89,12 +80,6 @@ pub fn seed_on_open(store: &TaskStore) -> Result<usize, String> {
     seed(store, &catalog()?)
 }
 
-/// Deliver every entry newer than what this install has seen as one notice, then record
-/// the bundled maximum as delivered.
-///
-/// What the install has seen is the delivery watermark or, when a lost record leaves it
-/// behind, the highest `announce.<id>` notice already in the store. Nothing seen means a
-/// fresh install: the watermark jumps to the bundled maximum and no row is created.
 fn seed(store: &TaskStore, catalog: &[Announcement]) -> Result<usize, String> {
     let Some(bundled) = catalog.last().map(|entry| entry.id) else {
         return Ok(0);
@@ -105,14 +90,9 @@ fn seed(store: &TaskStore, catalog: &[Announcement]) -> Result<usize, String> {
         return Ok(0);
     }
     let created = store.locked_transition_if_changed(|state| {
-        let seen = state
-            .tasks()
-            .iter()
-            .filter_map(|task| task.notice.as_ref())
-            .filter_map(|notice| notice.catalog_id.strip_prefix(CATALOG_ID_PREFIX))
-            .filter_map(|id| id.parse::<u64>().ok())
-            .fold(record.announcement_watermark, u64::max);
-        if seen == 0 || seen >= bundled {
+        let seen = highest_seen_announce_id(state, record.announcement_watermark);
+        let fresh_install = seen == 0;
+        if fresh_install || seen >= bundled {
             return Ok((0, false));
         }
         let missed = catalog.iter().filter(|entry| entry.id > seen);
@@ -133,7 +113,16 @@ fn seed(store: &TaskStore, catalog: &[Announcement]) -> Result<usize, String> {
     Ok(created)
 }
 
-/// Newest entry first, each under its own heading.
+fn highest_seen_announce_id(state: &crate::domain::DomainState, watermark: u64) -> u64 {
+    state
+        .tasks()
+        .iter()
+        .filter_map(|task| task.notice.as_ref())
+        .filter_map(|notice| notice.catalog_id.strip_prefix(CATALOG_ID_PREFIX))
+        .filter_map(|id| id.parse::<u64>().ok())
+        .fold(watermark, u64::max)
+}
+
 fn combined_notes<'a>(missed: impl DoubleEndedIterator<Item = &'a Announcement>) -> String {
     missed
         .rev()
