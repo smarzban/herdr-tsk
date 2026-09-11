@@ -1,5 +1,3 @@
-//! Starter guides on the open path: the full board seeds them once, quick capture never
-//! does, and a dismissed guide is recorded so no later open brings it back.
 #![cfg(unix)]
 #[path = "support/pty.rs"]
 mod pty;
@@ -10,6 +8,7 @@ use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::time::Duration;
 
+use tsk_tui::announcements;
 use tsk_tui::app::{load_board_for_quick_capture, load_board_model};
 use tsk_tui::delivery;
 use tsk_tui::domain::{DomainState, HumanStatus, ProvenanceOrigin, Task, TaskScope};
@@ -82,10 +81,26 @@ fn full_board_open_seeds_the_guides_once_beside_existing_tasks() {
         )
         .expect("task");
     store.save(&seeded).expect("save");
+    let newest = announcements::catalog()
+        .expect("bundled catalog")
+        .last()
+        .expect("at least one entry")
+        .id;
 
     let _ = load_board_model().expect("first open");
     let state = store.load().expect("load");
-    assert_eq!(notices(&state).len(), 5);
+    assert_eq!(
+        notices(&state).len(),
+        6,
+        "five guides plus What's new for an existing desk"
+    );
+    assert_eq!(
+        notices(&state)
+            .iter()
+            .filter(|task| task.title == announcements::TITLE)
+            .count(),
+        1
+    );
     assert_eq!(
         state
             .tasks()
@@ -95,10 +110,31 @@ fn full_board_open_seeds_the_guides_once_beside_existing_tasks() {
             .collect::<Vec<_>>(),
         vec![("existing work", Some(1))]
     );
-    assert_eq!(delivery::load(&env.dir).guides, catalog_ids());
+    let record = delivery::load(&env.dir);
+    assert_eq!(record.guides, catalog_ids());
+    assert_eq!(record.announcement_watermark, newest);
 
     let _ = load_board_model().expect("second open");
-    assert_eq!(notices(&store.load().expect("reload")).len(), 5);
+    assert_eq!(notices(&store.load().expect("reload")).len(), 6);
+}
+
+#[test]
+fn a_fresh_full_board_open_records_the_bundled_announcements_without_seeding_them() {
+    let _lock = env_lock();
+    suppress_background_fetch();
+    let env = StateDirEnv::set("announcements");
+    let bundled = announcements::catalog().expect("bundled catalog");
+    let newest = bundled.last().expect("at least one entry").id;
+
+    let _ = load_board_model().expect("first open");
+    let state = TaskStore::new(&env.dir).load().expect("load");
+    assert_eq!(notices(&state).len(), 5, "guides only");
+    assert!(notices(&state)
+        .iter()
+        .all(|task| task.title != announcements::TITLE));
+    let record = delivery::load(&env.dir);
+    assert_eq!(record.announcement_watermark, newest);
+    assert_eq!(record.guides, catalog_ids());
 }
 
 #[test]
@@ -110,6 +146,10 @@ fn quick_capture_open_seeds_nothing() {
     assert!(notices(&state).is_empty());
     assert!(notices(&store.load().expect("load")).is_empty());
     assert!(!env.dir.join(delivery::DELIVERY_FILE).exists());
+}
+
+fn drop_delivery_record(state_dir: &std::path::Path) {
+    fs::remove_file(state_dir.join(delivery::DELIVERY_FILE)).unwrap();
 }
 
 #[test]
@@ -126,8 +166,7 @@ fn completing_a_guide_on_the_real_board_records_its_dismissal() {
     }
     let store = TaskStore::new(&state_dir);
     assert_eq!(delivery::load(&state_dir).guides, catalog_ids());
-    // Lose the seed's record so the only way it can come back is the dismiss hook.
-    fs::remove_file(state_dir.join(delivery::DELIVERY_FILE)).unwrap();
+    drop_delivery_record(&state_dir);
 
     session.send(b"\x04");
     session.send(b"\x11");

@@ -84,18 +84,11 @@ fn load_snapshot() -> InvocationSnapshot {
 }
 
 /// Load store + snapshot into domain and board view-model (no TTY).
-///
-/// The full board open is the one path that seeds the starter guides (see
-/// [`crate::guides::seed_on_open`]): the CLI, the install script, and the quick-capture
-/// popup never do.
 pub fn load_board() -> Result<(TaskStore, DomainState, BoardModel), Box<dyn Error>> {
     load_board_inner(true)
 }
 
 /// Load store + snapshot for the quick-capture popup (no TTY).
-///
-/// The launch card and the guide seed are board-open concerns; the popup opens straight
-/// onto the draft page, and its archived-project scope fallback happens when the draft opens.
 pub fn load_board_for_quick_capture() -> Result<(TaskStore, DomainState, BoardModel), Box<dyn Error>>
 {
     load_board_inner(false)
@@ -107,10 +100,7 @@ fn load_board_inner(
     let state_dir = default_state_dir();
     let store = TaskStore::new(state_dir.clone());
     if full_board_open {
-        // A board that could not seed its guides is still a usable board: the next open
-        // converges (`seed_on_open` dedupes by catalog id), and a message here would take
-        // the status slot from the update notice.
-        let _ = crate::guides::seed_on_open(&store);
+        seed_notices_without_blocking_open(&store);
     }
     let state = store.load()?;
     let snapshot = load_snapshot();
@@ -123,6 +113,16 @@ fn load_board_inner(
         env!("CARGO_PKG_VERSION"),
     ));
     Ok((store, state, model))
+}
+
+fn seed_notices_without_blocking_open(store: &TaskStore) {
+    let announcement_fresh = crate::announcements::is_fresh_install(store);
+    let _ = crate::guides::seed_on_open(store);
+    let _ = crate::announcements::seed_on_open(store, announcement_fresh);
+}
+
+fn record_notice_dismissals_without_blocking_persist(store: &TaskStore, domain: &DomainState) {
+    let _ = crate::delivery::record_dismissed_notices(store.path(), domain.tasks());
 }
 
 /// The one walkthrough read on the open path: no record means the card opens.
@@ -1649,9 +1649,7 @@ fn handle_board_intent(
         },
     );
     if outcome == IntentOutcome::Persisted {
-        // The store already holds the dismissed guide; the delivery mark keeps a later open
-        // from seeding it back. Best effort, like the seed: nothing here fails the board.
-        let _ = crate::delivery::record_dismissed_notices(store.path(), domain.tasks());
+        record_notice_dismissals_without_blocking_persist(store, domain);
     }
     match outcome {
         IntentOutcome::Quit => Ok(true),
