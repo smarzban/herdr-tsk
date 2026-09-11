@@ -11,7 +11,7 @@ use crate::cli::guide::SKILL_MD;
 const SKILL_FOLDER: &str = "tsk-cli";
 const SKILL_FILE: &str = "SKILL.md";
 
-pub const USAGE: &str = "usage: tsk setup [herdr | agents | claude | pi | cursor | grok | codex | --skill-dir <path>] [--yes] [--force] [--json]\n       tsk setup --detected-ids";
+pub const USAGE: &str = "usage: tsk setup [herdr | agents | claude | pi | cursor | grok | codex | opencode | --skill-dir <path>] [--yes] [--force] [--json]\n       tsk setup --detected-ids";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Target {
@@ -20,6 +20,7 @@ pub enum Target {
     Cursor,
     Grok,
     Codex,
+    OpenCode,
     SkillDir(PathBuf),
 }
 
@@ -31,6 +32,7 @@ impl Target {
             Self::Cursor => "cursor",
             Self::Grok => "grok",
             Self::Codex => "codex",
+            Self::OpenCode => "opencode",
             Self::SkillDir(_) => "skill-dir",
         }
     }
@@ -43,6 +45,9 @@ impl Target {
             Self::Cursor => Ok(home_dir()?.join(".cursor/skills")),
             Self::Grok => Ok(home_dir()?.join(".grok/skills")),
             Self::Codex => Ok(home_dir()?.join(".agents/skills")),
+            // OpenCode-native global skills root per https://opencode.ai/docs/skills/
+            // (project-local `.opencode/skills` is intentionally out of scope).
+            Self::OpenCode => Ok(home_dir()?.join(".config/opencode/skills")),
         }
     }
 
@@ -50,13 +55,14 @@ impl Target {
         Ok(self.skills_root()?.join(SKILL_FOLDER).join(SKILL_FILE))
     }
 
-    fn named_agents() -> [Target; 5] {
+    fn named_agents() -> [Target; 6] {
         [
             Target::Claude,
             Target::Pi,
             Target::Cursor,
             Target::Grok,
             Target::Codex,
+            Target::OpenCode,
         ]
     }
 }
@@ -191,6 +197,7 @@ pub fn parse(args: &[String]) -> Result<Command, Error> {
             "cursor" => push_agent(&mut agents, Target::Cursor)?,
             "grok" => push_agent(&mut agents, Target::Grok)?,
             "codex" => push_agent(&mut agents, Target::Codex)?,
+            "opencode" => push_agent(&mut agents, Target::OpenCode)?,
             "--yes" => yes = true,
             "--force" => force = true,
             "--json" => json = true,
@@ -549,6 +556,7 @@ pub fn list_text() -> String {
          cursor    {}\n\
          grok      {}\n\
          codex     {}\n\
+         opencode  {}\n\
          --skill-dir <path>  write <path>/tsk-cli/SKILL.md\n\
          --detected-ids      print detected agent ids (for installers)\n",
         display(".claude/skills"),
@@ -556,6 +564,7 @@ pub fn list_text() -> String {
         display(".cursor/skills"),
         display(".grok/skills"),
         display(".agents/skills"),
+        display(".config/opencode/skills"),
     )
 }
 
@@ -588,6 +597,7 @@ fn named_target(id: &str) -> Result<Target, Error> {
         "cursor" => Ok(Target::Cursor),
         "grok" => Ok(Target::Grok),
         "codex" => Ok(Target::Codex),
+        "opencode" => Ok(Target::OpenCode),
         _ => Err(usage()),
     }
 }
@@ -599,6 +609,7 @@ fn agent_present(home: &Path, target: &Target, skills_root: &Path) -> bool {
         Target::Cursor => home.join(".cursor"),
         Target::Grok => home.join(".grok"),
         Target::Codex => home.join(".codex"),
+        Target::OpenCode => home.join(".config/opencode"),
         Target::SkillDir(_) => return true,
     };
     real_dir(&marker)
@@ -607,6 +618,7 @@ fn agent_present(home: &Path, target: &Target, skills_root: &Path) -> bool {
             Target::Claude => cli_on_path("claude"),
             Target::Cursor => cli_on_path("cursor"),
             Target::Codex => cli_on_path("codex"),
+            Target::OpenCode => cli_on_path("opencode"),
             Target::Pi | Target::Grok | Target::SkillDir(_) => false,
         }
 }

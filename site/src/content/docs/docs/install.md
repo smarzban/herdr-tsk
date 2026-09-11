@@ -44,7 +44,7 @@ tsk setup
 tsk setup pi
 ```
 
-On a TTY, bare `tsk setup` detects installed agents and asks once to install or update the skill. Use `claude`, `cursor`, `grok`, or `codex` instead of `pi` for a single named target. Setup installs the CLI skill in that agent's user-level skills directory.
+On a TTY, bare `tsk setup` detects installed agents and asks once to install or update the skill. Use `claude`, `cursor`, `grok`, `codex`, or `opencode` instead of `pi` for a single named target. Setup installs the CLI skill in that agent's user-level skills directory.
 
 [Detection, version updates, and overwrite options](/docs/cli/#setup).
 

@@ -185,6 +185,7 @@ fn bare_setup_non_tty_lists_targets_and_writes_nothing() {
         "codex",
         "cursor",
         "grok",
+        "opencode",
         "--skill-dir",
     ] {
         assert!(
@@ -196,6 +197,11 @@ fn bare_setup_non_tty_lists_targets_and_writes_nothing() {
     assert!(
         output.stdout.contains(".grok/skills"),
         "bare setup should advertise the grok skills dir, got {:?}",
+        output.stdout
+    );
+    assert!(
+        output.stdout.contains(".config/opencode/skills"),
+        "bare setup should advertise the opencode skills dir, got {:?}",
         output.stdout
     );
     assert!(
@@ -295,6 +301,7 @@ fn named_agent_targets_write_under_home() {
         ("cursor", ".cursor/skills"),
         ("codex", ".agents/skills"),
         ("grok", ".grok/skills"),
+        ("opencode", ".config/opencode/skills"),
     ];
     for (name, suffix) in cases {
         let dest = home.join(suffix).join("tsk-cli/SKILL.md");
@@ -373,6 +380,7 @@ fn detected_ids_prints_space_separated_agents() {
     let home = root.join("home");
     fs::create_dir_all(home.join(".cursor")).expect("cursor");
     fs::create_dir_all(home.join(".claude")).expect("claude");
+    fs::create_dir_all(home.join(".config/opencode")).expect("opencode");
     let previous_home = std::env::var_os("HOME");
     let previous_path = std::env::var_os("PATH");
     std::env::set_var("HOME", &home);
@@ -391,7 +399,43 @@ fn detected_ids_prints_space_separated_agents() {
     let ids: Vec<&str> = output.stdout.split_whitespace().collect();
     assert!(ids.contains(&"cursor"), "{ids:?}");
     assert!(ids.contains(&"claude"), "{ids:?}");
+    assert!(ids.contains(&"opencode"), "{ids:?}");
     assert!(!ids.contains(&"grok"), "{ids:?}");
+    let _ = fs::remove_dir_all(root);
+}
+
+#[cfg(unix)]
+#[test]
+fn opencode_detects_via_path_binary() {
+    let _lock = env_lock();
+    let root = temp_dir("opencode-path");
+    let home = root.join("home");
+    let bin = root.join("bin");
+    fs::create_dir_all(&home).expect("home");
+    fs::create_dir_all(&bin).expect("bin");
+    fs::write(bin.join("opencode"), "#!/bin/sh\n").expect("stub");
+    use std::os::unix::fs::PermissionsExt;
+    let mut perms = fs::metadata(bin.join("opencode"))
+        .expect("meta")
+        .permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(bin.join("opencode"), perms).expect("chmod");
+    let previous_home = std::env::var_os("HOME");
+    let previous_path = std::env::var_os("PATH");
+    std::env::set_var("HOME", &home);
+    std::env::set_var("PATH", &bin);
+    let output = cli_non_tty(&["tsk", "setup", "--detected-ids"]);
+    match previous_home {
+        Some(value) => std::env::set_var("HOME", value),
+        None => std::env::remove_var("HOME"),
+    }
+    match previous_path {
+        Some(value) => std::env::set_var("PATH", value),
+        None => std::env::remove_var("PATH"),
+    }
+    assert_eq!(output.code, 0, "{output:?}");
+    let ids: Vec<&str> = output.stdout.split_whitespace().collect();
+    assert_eq!(ids, vec!["opencode"], "{ids:?}");
     let _ = fs::remove_dir_all(root);
 }
 

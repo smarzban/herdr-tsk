@@ -263,6 +263,7 @@ Requires Herdr 0.9+ on PATH. Registers the installed binary and adds **prefix+t*
 | `cursor` | `~/.cursor/skills/` |
 | `grok` | `~/.grok/skills/` |
 | `codex` | `~/.agents/skills/` |
+| `opencode` | `~/.config/opencode/skills/` |
 | `--skill-dir <path>` | The supplied directory |
 
 Setup writes `tsk-cli/SKILL.md` under the selected directory. Skill `version:` is independent of the crate version. A matching installed version exits 1 with `skill-exists`; a missing or different version updates without `--force`. `--force` always overwrites. `tsk setup agents --yes` installs or updates every detected agent without asking. Only global skill roots are offered (project-local roots are out of scope).
