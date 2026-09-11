@@ -7,6 +7,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 use std::collections::BTreeSet;
+use tsk_tui::context::InvocationSnapshot;
 use tsk_tui::domain::{
     DomainState, HumanStatus, ProvenanceOrigin, Task, TaskEvent, TaskEventKind, TaskScope,
 };
@@ -137,7 +138,7 @@ fn list_files_recursive(root: &Path) -> Vec<PathBuf> {
 }
 
 /// First open pins the first NEEDS YOU / IN MOTION / ON DECK row of the startup
-/// destination: the project board inside a repo, the desk anywhere else.
+/// destination: the invocation project board, or desk with no project context.
 #[test]
 fn from_domain_seeds_selection_on_first_needs_you_else_motion_else_deck_row() {
     // Case A: startup in a repo opens its project board and seeds by lane order.
@@ -252,8 +253,8 @@ fn from_domain_seeds_selection_on_first_needs_you_else_motion_else_deck_row() {
     assert_eq!(empty.selected_id(), None);
 }
 
-/// Directory-aware startup: a live repo opens its project board, an archived repo
-/// stays on the desk behind the launch card, no repo means the desk.
+/// Directory-aware startup: a live project opens its board, an archived project
+/// stays on the desk behind the launch card, absent project context means desk.
 #[test]
 fn from_domain_opens_the_invocation_project_unless_archived() {
     let mut domain = DomainState::new();
@@ -318,7 +319,7 @@ fn from_domain_opens_the_invocation_project_unless_archived() {
     assert_eq!(model.nav_tab(), tsk_tui::ui::queue::NavTab::Desk);
     assert!(!model.visible_ids().contains(&archived_id));
 
-    // No repo at all: desk.
+    // A non-Git invocation keeps its directory in project slot 2 but opens Desk.
     let mut domain = DomainState::new();
     let desk_id = domain
         .create(
@@ -329,8 +330,16 @@ fn from_domain_opens_the_invocation_project_unless_archived() {
             None,
         )
         .unwrap();
-    let model = BoardModel::from_domain(&domain, None);
+    let outside = PathBuf::from("/work/outside-git");
+    let snapshot = InvocationSnapshot {
+        default_scope: TaskScope::Global,
+        this_repo: Some(outside.clone()),
+        title_prefill: None,
+        provenance: ProvenanceOrigin::Manual,
+    };
+    let model = BoardModel::from_domain_for_snapshot(&domain, &snapshot);
     assert_eq!(model.nav_tab(), tsk_tui::ui::queue::NavTab::Desk);
+    assert_eq!(model.selected_project(), Some(outside.as_path()));
     assert_eq!(model.selected_id(), Some(desk_id));
 }
 

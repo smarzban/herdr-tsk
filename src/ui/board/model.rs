@@ -967,30 +967,45 @@ impl BoardModel {
         cancelled_quick_add
     }
 
-    /// Snapshot tasks from domain state (default agent kind; seed env at open).
-    ///
-    /// Directory-aware startup: launching inside a live repository opens that
-    /// project's board, empty or not (an empty board paints its own add hint).
-    /// Launching anywhere else opens the desk. An archived invocation repository is
-    /// handled by [`Self::offer_launch_card`] instead and stays on the desk.
+    /// Snapshot tasks from domain state and open a supplied project when it is live.
     pub fn from_domain(state: &DomainState, this_repo: Option<PathBuf>) -> Self {
+        Self::from_domain_with_start(state, this_repo, true)
+    }
+
+    /// Snapshot tasks using the invocation's project candidate and default scope.
+    ///
+    /// A Git invocation opens its project. Outside Git, Desk opens while the current
+    /// directory remains selected in project slot 2 and Desk remains quick-add's default.
+    pub fn from_domain_for_snapshot(state: &DomainState, snapshot: &InvocationSnapshot) -> Self {
+        let start_in_project = matches!(snapshot.default_scope, TaskScope::Project { .. });
+        let mut model =
+            Self::from_domain_with_start(state, snapshot.this_repo.clone(), start_in_project);
+        model.session_default_scope = Some(snapshot.default_scope.clone());
+        model
+    }
+
+    fn from_domain_with_start(
+        state: &DomainState,
+        this_repo: Option<PathBuf>,
+        start_in_project: bool,
+    ) -> Self {
         let mut model = Self::from_tasks(state.tasks().to_vec(), this_repo);
         model.archived_projects = state.archived_projects();
         if let Some(repo) = model.this_repo.clone() {
-            if !model.is_archived_project_path(&repo) {
+            if model.is_archived_project_path(&repo) {
+                model.selected_project = None;
+            } else if start_in_project {
                 let previous_visible = model.visible_ids();
                 model.board_location = BoardLocation::Project(repo);
                 model.reanchor_selection(None, &previous_visible);
                 model.seed_selection();
-            } else {
-                model.selected_project = None;
             }
         }
         model
     }
 
-    /// Raise the two-choice launch card when the invocation default resolves to an
-    /// archived project, at most once per session. Returns whether the card was raised.
+    /// Raise the two-choice launch card when the invocation project candidate is
+    /// archived, at most once per session. Returns whether the card was raised.
     pub fn offer_launch_card(
         &mut self,
         state: &DomainState,
@@ -999,14 +1014,14 @@ impl BoardModel {
         if self.launch_card_shown {
             return false;
         }
-        let TaskScope::Project { path } = &snapshot.default_scope else {
+        let Some(path) = snapshot.this_repo.as_deref() else {
             return false;
         };
-        if !state.is_project_archived(path) {
+        if !state.is_project_archived(&path.to_string_lossy()) {
             return false;
         }
         self.launch_card_shown = true;
-        self.launch_card = Some(PathBuf::from(path));
+        self.launch_card = Some(path.to_path_buf());
         self.popup = BoardPopup::LaunchCard;
         true
     }
@@ -1251,11 +1266,16 @@ impl BoardModel {
         self.last_project_row_click = None;
     }
 
-    /// Apply an explicit reopen context without changing task ownership. A dirty editor is
-    /// left untouched and the request remains pending for the caller to retry after save/cancel.
-    /// Archived aliases are checked before switching so path spelling cannot bypass read-only
-    /// project protections.
+    /// Apply a reopen that opens a supplied project, or Desk when none was supplied.
     pub fn apply_reopen_project(&mut self, project: Option<PathBuf>) -> bool {
+        let open_project = project.is_some();
+        self.apply_reopen_context(project, open_project)
+    }
+
+    /// Apply an explicit reopen context without changing task ownership. The project
+    /// candidate can fill slot 2 while `open_project` keeps the active destination on Desk.
+    /// A dirty editor is left untouched for the caller to retry after save/cancel.
+    pub fn apply_reopen_context(&mut self, project: Option<PathBuf>, open_project: bool) -> bool {
         if self.has_unsaved_work() {
             self.set_message("save or cancel edits before reopening tsk");
             return false;
@@ -1279,16 +1299,23 @@ impl BoardModel {
             self.set_message(format!("project {name} is archived"));
             return true;
         }
-        let same = matches!(&self.board_location, BoardLocation::Project(current) if paths_equivalent(&current.to_string_lossy(), &project_text));
+        let same = open_project
+            && matches!(&self.board_location, BoardLocation::Project(current) if paths_equivalent(&current.to_string_lossy(), &project_text));
         self.this_repo = Some(project.clone());
         self.selected_project = Some(project.clone());
-        self.session_default_scope = Some(TaskScope::Project {
-            path: project.to_string_lossy().into_owned(),
+        self.session_default_scope = Some(if open_project {
+            TaskScope::Project {
+                path: project.to_string_lossy().into_owned(),
+            }
+        } else {
+            TaskScope::Global
         });
         if same {
             self.thread_filter = ThreadFilter::All;
-        } else {
+        } else if open_project {
             self.switch_location(BoardLocation::Project(project));
+        } else {
+            self.switch_location(BoardLocation::Desk);
         }
         self.clear_message();
         true

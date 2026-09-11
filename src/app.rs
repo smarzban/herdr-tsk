@@ -104,7 +104,7 @@ fn load_board_inner(
     }
     let state = store.load()?;
     let snapshot = load_snapshot();
-    let mut model = BoardModel::from_domain(&state, snapshot.this_repo.clone());
+    let mut model = BoardModel::from_domain_for_snapshot(&state, &snapshot);
     if full_board_open {
         model.offer_launch_card(&state, &snapshot);
     }
@@ -869,7 +869,7 @@ pub fn apply_reopen_request(
         }
         return false;
     }
-    if !model.apply_reopen_project(request.project.clone()) {
+    if !model.apply_reopen_context(request.project.clone(), request.open_project) {
         return false;
     }
     watch.acknowledge();
@@ -1751,6 +1751,45 @@ mod save_recovery_tests {
             Some(std::path::Path::new("/repo/new"))
         );
         assert!(!dir.join("reopen.json").exists());
+
+        let outside = PathBuf::from("/work/outside-git");
+        let outside_snapshot = crate::context::InvocationSnapshot {
+            default_scope: crate::domain::TaskScope::Global,
+            this_repo: Some(outside.clone()),
+            title_prefill: None,
+            provenance: crate::domain::ProvenanceOrigin::Capture,
+        };
+        ReopenRequest::from_snapshot(&outside_snapshot)
+            .write(&dir)
+            .expect("outside-Git request");
+        assert!(apply_reopen_request(&mut model, &mut watch, &recovery));
+        assert_eq!(model.nav_tab(), crate::ui::queue::NavTab::Desk);
+        assert_eq!(model.selected_project(), Some(outside.as_path()));
+
+        let mut domain = DomainState::new();
+        crate::ui::board::apply_intent(
+            &mut domain,
+            &mut model,
+            crate::ui::input::BoardIntent::OpenCapture,
+            Some(&outside_snapshot),
+        )
+        .expect("open desk capture");
+        crate::ui::board::apply_intent(
+            &mut domain,
+            &mut model,
+            crate::ui::input::BoardIntent::QuickAddInsertText("desk task".into()),
+            None,
+        )
+        .expect("type desk task");
+        crate::ui::board::apply_intent(
+            &mut domain,
+            &mut model,
+            crate::ui::input::BoardIntent::QuickAddSave,
+            None,
+        )
+        .expect("save desk task");
+        assert_eq!(domain.tasks()[0].scope, crate::domain::TaskScope::Global);
+        model.sync_from_domain(&domain);
 
         let mut pending = SaveRecovery::new();
         pending.fail(DomainState::new(), DomainState::new(), "save failed");
@@ -3496,7 +3535,9 @@ mod tests {
     #[test]
     fn quick_add_project_token_matches_a_project_basename_case_insensitively() {
         let snapshot = InvocationSnapshot {
-            default_scope: TaskScope::Global,
+            default_scope: TaskScope::Project {
+                path: "/repos/tsk-board".into(),
+            },
             this_repo: Some(PathBuf::from("/repos/tsk-board")),
             title_prefill: None,
             provenance: ProvenanceOrigin::Capture,

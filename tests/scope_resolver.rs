@@ -53,6 +53,28 @@ fn board_quick_add_scope(
 }
 
 #[test]
+fn outside_git_directory_candidate_does_not_ambiguate_a_stored_project_basename() {
+    let mut domain = DomainState::new();
+    create_project(&mut domain, "/repos/api");
+    let snapshot = InvocationSnapshot {
+        default_scope: TaskScope::Global,
+        this_repo: Some(PathBuf::from("/scratch/api")),
+        title_prefill: None,
+        provenance: ProvenanceOrigin::Capture,
+    };
+
+    assert_eq!(
+        resolve_project_path("api", &domain, Some(&snapshot)),
+        "/repos/api"
+    );
+    assert_eq!(
+        resolve_project_path("/scratch/api", &domain, Some(&snapshot)),
+        "/scratch/api",
+        "the directory candidate remains addressable by its exact path"
+    );
+}
+
+#[test]
 fn shared_resolver_and_board_quick_add_agree_on_fixtures() {
     let mut domain = DomainState::new();
     create_project(&mut domain, "/repos/other");

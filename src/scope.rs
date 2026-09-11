@@ -162,11 +162,14 @@ pub fn resolve_project_path(
         candidates.insert(path.clone());
     }
     if let Some(snapshot) = snapshot {
+        // An outside-Git candidate fills board slot 2 but is not a basename alias. Adding
+        // it here could make an existing stored project ambiguous and persist the bare token.
+        // Its exact path remains addressable because slash-containing tokens stay verbatim.
         if let TaskScope::Project { path } = &snapshot.default_scope {
             candidates.insert(path.clone());
-        }
-        if let Some(this_repo) = snapshot.this_repo.as_deref() {
-            candidates.insert(this_repo.to_string_lossy().into_owned());
+            if let Some(this_repo) = snapshot.this_repo.as_deref() {
+                candidates.insert(this_repo.to_string_lossy().into_owned());
+            }
         }
     }
 

@@ -51,7 +51,7 @@ Board notice tasks paint as `N1`… (starter tasks and `What's new in tsk`). Tho
 
 ### Scope
 
-Without a scope flag, `add` and filtered `list` use the launch repository, or the current directory outside Git. Commands addressed to a task ignore that default.
+Without a scope flag, `add` and filtered `list` use the launch repository inside Git, or desk outside Git. Commands addressed to a task ignore that default. The outside-Git current directory remains available through `-p /full/path`.
 
 | Flag | Scope |
 | --- | --- |

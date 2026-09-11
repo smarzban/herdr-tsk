@@ -117,7 +117,7 @@ fn resolve_context_rejects_malformed_json_without_publishing_a_request() {
 }
 
 #[test]
-fn resolve_context_publishes_project_and_desk_requests_without_using_process_cwd() {
+fn resolve_context_publishes_repo_and_directory_projects_without_using_process_cwd() {
     let dir = state_dir();
     let repo = dir.join("repo");
     fs::create_dir_all(repo.join(".git")).expect("repo");
@@ -150,10 +150,12 @@ fn resolve_context_publishes_project_and_desk_requests_without_using_process_cwd
         repo.display().to_string()
     );
     let request = fs::read_to_string(dir.join("reopen.json")).expect("request");
-    assert!(request.contains(&repo.display().to_string()));
+    let request: serde_json::Value = serde_json::from_str(&request).unwrap();
+    assert_eq!(request["project"], repo.to_string_lossy().as_ref());
+    assert_eq!(request["open_project"], true);
 
-    // A host invocation outside any repository must publish an explicit Desk
-    // request, even though this test process itself runs from the repository.
+    // A host invocation outside Git selects that directory, even though this
+    // test process itself runs from a repository.
     let outside = dir.join("outside");
     fs::create_dir_all(&outside).expect("outside");
     // Keep the process cwd in-repo while the host JSON supplies the outside cwd.
@@ -163,7 +165,7 @@ fn resolve_context_publishes_project_and_desk_requests_without_using_process_cwd
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .spawn()
-        .expect("resolve desk context");
+        .expect("resolve directory context");
     child
         .stdin
         .take()
@@ -178,10 +180,64 @@ fn resolve_context_publishes_project_and_desk_requests_without_using_process_cwd
         .expect("context");
     let output = child.wait_with_output().expect("output");
     assert!(output.status.success());
-    assert!(String::from_utf8_lossy(&output.stdout).trim().is_empty());
-    let request = fs::read_to_string(dir.join("reopen.json")).expect("desk request");
-    assert!(request.contains(r#""project":null"#));
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        outside.to_string_lossy()
+    );
+    let request = fs::read_to_string(dir.join("reopen.json")).expect("directory request");
+    let request: serde_json::Value = serde_json::from_str(&request).unwrap();
+    assert_eq!(request["project"], outside.to_string_lossy().as_ref());
+    assert_eq!(request["open_project"], false);
     let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn resolve_context_escapes_control_characters_in_the_printed_project_candidate() {
+    use std::io::Write;
+
+    let dir = state_dir();
+    let candidate = dir.join("outside\n\u{1b}]52;clipboard\u{7}");
+    let binary = env!("CARGO_BIN_EXE_tsk");
+    let mut child = Command::new(binary)
+        .arg("--resolve-context")
+        .env("TSK_STATE_DIR", &dir)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("resolve unsafe directory context");
+    child
+        .stdin
+        .take()
+        .expect("stdin")
+        .write_all(
+            format!(
+                r#"{{"focused_pane_cwd":{}}}"#,
+                serde_json::to_string(&candidate).unwrap()
+            )
+            .as_bytes(),
+        )
+        .expect("context");
+
+    let output = child.wait_with_output().expect("output");
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("UTF-8 output");
+    assert!(!stdout.contains('\n') || stdout.ends_with('\n') && stdout.matches('\n').count() == 1);
+    assert!(!stdout.contains('\u{1b}'));
+    assert!(!stdout.contains('\u{7}'));
+    assert!(stdout.contains(r"\u{000a}"));
+    assert!(stdout.contains(r"\u{001b}"));
+    assert!(stdout.contains(r"\u{0007}"));
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn non_git_reopen_keeps_the_directory_in_slot_two_and_opens_desk() {
+    let mut model = BoardModel::from_domain(&DomainState::new(), None);
+    let outside = PathBuf::from("/work/outside-git");
+
+    assert!(model.apply_reopen_context(Some(outside.clone()), false));
+    assert_eq!(model.nav_tab(), tsk_tui::ui::queue::NavTab::Desk);
+    assert_eq!(model.selected_project(), Some(outside.as_path()));
 }
 
 #[cfg(unix)]

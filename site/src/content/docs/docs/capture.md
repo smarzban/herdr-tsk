@@ -33,8 +33,8 @@ Scroll to reach steps below long notes. Typing brings the notes cursor back into
 | Where you add | Default destination |
 | --- | --- |
 | Project board | That project |
-| Desk or Projects | The launch/reopen repository, or directory outside Git |
-| Herdr quick-capture popup | The focused pane's repository, or directory outside Git |
+| Desk or Projects | The launch/reopen repository inside Git; desk outside Git |
+| Herdr quick-capture popup | The focused pane's repository inside Git; desk outside Git |
 
 Use title tokens or the draft's scope control to change the destination. Archived projects cannot receive new tasks.
 

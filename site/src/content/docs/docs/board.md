@@ -13,9 +13,9 @@ Click to navigate, or use the keyboard. The footer shows actions for the current
 | **selected project** | `2` | Tasks in the selected project |
 | **projects** | `3` | Project overview |
 
-Launching inside a Git repository opens that project. Outside a repository, tsk uses the current directory as the project. Reopening from another directory updates the existing board's project context.
+Launching inside a Git repository opens that project. Outside Git, tsk opens **desk** and puts the current directory in the middle project tab. Reopening from another directory updates that project tab while keeping **desk** active outside Git.
 
-The middle tab remembers your selected project. If none is selected, `2` opens the project picker.
+The middle tab remembers your selected project. Press `2` to open it; if none is selected, `2` opens the project picker.
 
 ## Projects
 

@@ -13,6 +13,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
+use crate::context::InvocationSnapshot;
+use crate::domain::TaskScope;
 use crate::fsperm;
 use crate::store::{StoreSignature, TaskStore};
 
@@ -22,14 +24,15 @@ const ACK_LOCK_BUDGET: Duration = Duration::from_millis(250);
 const LOCK_FILE: &str = "reopen.json.lock";
 const MAX_REQUEST_BYTES: usize = 8 * 1024;
 const MAX_PROJECT_BYTES: usize = 4096;
-const FORMAT_VERSION: u32 = 1;
+const FORMAT_VERSION: u32 = 2;
 static REQUEST_SEQ: AtomicU64 = AtomicU64::new(0);
 
-/// A validated invocation context handoff. `project: None` means the invoking
-/// directory was outside a repository and the board should select Desk.
+/// A validated invocation context handoff. The project candidate and initial
+/// destination travel separately so a non-Git directory can fill slot 2 while Desk opens.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReopenRequest {
     pub project: Option<PathBuf>,
+    pub open_project: bool,
     id: String,
 }
 
@@ -38,12 +41,26 @@ struct WireRequest {
     version: u32,
     id: String,
     project: Option<String>,
+    open_project: bool,
 }
 
 impl ReopenRequest {
     /// Build a request with a process-unique id. Validation is repeated at write time,
     /// because callers may construct the value directly in tests or future adapters.
     pub fn new(project: Option<PathBuf>) -> Self {
+        let open_project = project.is_some();
+        Self::with_destination(project, open_project)
+    }
+
+    /// Build a request from the resolver's separate project candidate and default scope.
+    pub fn from_snapshot(snapshot: &InvocationSnapshot) -> Self {
+        Self::with_destination(
+            snapshot.this_repo.clone(),
+            matches!(snapshot.default_scope, TaskScope::Project { .. }),
+        )
+    }
+
+    fn with_destination(project: Option<PathBuf>, open_project: bool) -> Self {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|duration| duration.as_nanos().to_string())
@@ -51,6 +68,7 @@ impl ReopenRequest {
         let seq = REQUEST_SEQ.fetch_add(1, Ordering::Relaxed);
         Self {
             project,
+            open_project,
             id: format!("{}-{}-{}", std::process::id(), now, seq),
         }
     }
@@ -109,10 +127,17 @@ impl ReopenRequest {
                 "invalid reopen project path",
             ));
         }
+        if self.open_project && project.is_none() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "reopen project destination has no project",
+            ));
+        }
         Ok(WireRequest {
             version: FORMAT_VERSION,
             id: self.id.clone(),
             project,
+            open_project: self.open_project,
         })
     }
 
@@ -130,6 +155,7 @@ impl ReopenRequest {
         let project = wire.project.map(PathBuf::from);
         let request = Self {
             project,
+            open_project: wire.open_project,
             id: wire.id,
         };
         request.to_wire().map(|_| request)

@@ -844,6 +844,52 @@ fn flag_add_uses_the_invocation_default_scope() {
 }
 
 #[test]
+fn flag_add_outside_git_defaults_to_desk() {
+    let _env = env_lock();
+    let outside = temp_state_dir("invocation-outside");
+    let dir = temp_state_dir("outside-state");
+    let prior = std::env::var_os("HERDR_PLUGIN_CONTEXT_JSON");
+    let context = format!(
+        r#"{{"focused_pane_cwd":{}}}"#,
+        serde_json::to_string(&outside).unwrap()
+    );
+    // SAFETY: ENV_LOCK serializes this test's process-wide environment mutation.
+    unsafe { std::env::set_var("HERDR_PLUGIN_CONTEXT_JSON", context) };
+
+    let output = add(
+        &[
+            "tsk".into(),
+            "add".into(),
+            "--state-dir".into(),
+            state_dir_arg(&dir),
+            "-t".into(),
+            "outside scope".into(),
+        ],
+        true,
+    );
+
+    match prior {
+        Some(value) => {
+            // SAFETY: ENV_LOCK serializes this test's process-wide environment mutation.
+            unsafe { std::env::set_var("HERDR_PLUGIN_CONTEXT_JSON", value) };
+        }
+        None => {
+            // SAFETY: ENV_LOCK serializes this test's process-wide environment mutation.
+            unsafe { std::env::remove_var("HERDR_PLUGIN_CONTEXT_JSON") };
+        }
+    }
+
+    assert_eq!(output.code, 0);
+    assert_eq!(
+        task_store(&dir).load().expect("load outside state").tasks()[0].scope,
+        TaskScope::Global
+    );
+
+    let _ = std::fs::remove_dir_all(outside);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn flag_add_requires_a_title() {
     let _env = env_lock();
     let dir = temp_state_dir("missing-title");

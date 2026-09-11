@@ -15,7 +15,7 @@ pub mod text_select;
 pub mod tier;
 
 /// Render untrusted values without allowing C0/C1 terminal control sequences through.
-pub(crate) fn terminal_text(value: &str) -> String {
+pub fn terminal_text(value: &str) -> String {
     value
         .chars()
         .flat_map(|character| {
