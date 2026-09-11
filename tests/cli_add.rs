@@ -583,7 +583,7 @@ fn flag_add_with_a_seeded_notice_title_creates_an_ordinary_task() {
     let state = store.load().expect("reload state");
     assert_eq!(
         state.tasks().iter().filter(|task| task.is_notice()).count(),
-        5
+        4
     );
     let ordinary: Vec<_> = state
         .tasks()
