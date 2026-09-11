@@ -26,100 +26,247 @@ fn read(path: &Path) -> String {
     fs::read_to_string(path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
 }
 
-#[test]
-fn open_board_exercises_context_handoff_before_focus_and_new_pane_paths() {
-    static SEQ: AtomicU64 = AtomicU64::new(0);
-    let root = std::env::temp_dir().join(format!(
-        "tsk-host-launcher-{}-{}",
-        std::process::id(),
-        SEQ.fetch_add(1, Ordering::Relaxed)
-    ));
-    fs::create_dir_all(&root).expect("temp root");
-    let stub = root.join("herdr");
-    let log = root.join("calls.log");
-    fs::write(
-        &stub,
-        r#"#!/bin/sh
-printf '%s\n' "$*" >> "$STUB_LOG"
+struct Launcher {
+    root: PathBuf,
+}
+
+impl Launcher {
+    fn new() -> Self {
+        static SEQ: AtomicU64 = AtomicU64::new(0);
+        let root = std::env::temp_dir().join(format!(
+            "tsk-host-launcher-{}-{}",
+            std::process::id(),
+            SEQ.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(root.join("state")).expect("temp root");
+        let stub = root.join("herdr");
+        fs::write(
+            &stub,
+            r#"#!/bin/sh
+printf '%s\n' "$*" >> "$STUB_ROOT/calls.log"
 if [ "$1" = pane ] && [ "$2" = list ]; then
-  if [ "${STUB_MODE:-existing}" = existing ]; then
-    printf '%s' '{"result":{"panes":[{"pane_id":"w0:p1","label":"tsk"}]}}'
-  else
-    printf '%s' '{"result":{"panes":[]}}'
+  [ "${STUB_MODE:-}" != list-failure ] || exit 1
+  if [ "${STUB_MODE:-}" = missing-tab ]; then
+    printf '%s' '{"result":{"panes":[{"pane_id":"w0:p2","label":"tsk"}]}}'
+    exit 0
   fi
-fi
-if [ "$1" = plugin ] && [ "$2" = pane ] && [ "$3" = focus ] && [ ! -f "$STUB_STATE/reopen.json" ]; then
-  exit 1
+  if [ "$3" = --workspace ] && [ "$4" = w0 ]; then
+    if [ "${STUB_MODE:-}" = existing ] || [ "${STUB_MODE:-}" = focus-failure ] || [ "${STUB_MODE:-}" = tab-focus-failure ] || [ -f "$STUB_ROOT/opened" ]; then
+      printf '%s' '{"result":{"panes":[{"pane_id":"w0:p2","workspace_id":"w0","tab_id":"w0:t2","label":"tsk"}]}}'
+    else
+      printf '%s' '{"result":{"panes":[]}}'
+    fi
+  else
+    printf '%s' '{"result":{"panes":[{"pane_id":"w9:p1","workspace_id":"w9","tab_id":"w9:t1","label":"tsk"},{"pane_id":"w0:p2","workspace_id":"w0","tab_id":"w0:t2","label":"tsk"}]}}'
+  fi
+elif [ "$1" = tab ] && [ "$2" = focus ]; then
+  [ "${STUB_MODE:-}" != tab-focus-failure ] || exit 1
+  printf '%s' "$3" > "$STUB_ROOT/visible-tab"
+elif [ "$1" = plugin ] && [ "$2" = pane ] && [ "$3" = focus ]; then
+  [ "${STUB_MODE:-}" != focus-failure ] || exit 1
+elif [ "$1" = plugin ] && [ "$2" = pane ] && [ "$3" = open ]; then
+  touch "$STUB_ROOT/opened"
+  printf '%s' 'w0:t1' > "$STUB_ROOT/opened-tab"
+  printf '%s' "${HERDR_PLUGIN_CONTEXT_JSON:-}" > "$STUB_ROOT/open-context.json"
 fi
 "#,
-    )
-    .expect("stub");
-    let mut permissions = fs::metadata(&stub).expect("stub metadata").permissions();
-    permissions.set_mode(0o755);
-    fs::set_permissions(&stub, permissions).expect("stub executable");
-    let state = root.join("state");
-    fs::create_dir_all(&state).expect("state");
-    let run = |mode: &str| {
-        Command::new("bash")
+        )
+        .expect("stub");
+        let mut permissions = fs::metadata(&stub).expect("stub metadata").permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&stub, permissions).expect("stub executable");
+        Self { root }
+    }
+
+    fn run(&self, mode: &str, workspace: Option<&str>) -> std::process::Output {
+        self.run_with_pane(mode, workspace, Some("w0:p1"))
+    }
+
+    fn run_with_pane(
+        &self,
+        mode: &str,
+        workspace: Option<&str>,
+        pane: Option<&str>,
+    ) -> std::process::Output {
+        self.run_with_tab(mode, workspace, pane, Some("w0:t1"))
+    }
+
+    fn run_with_tab(
+        &self,
+        mode: &str,
+        workspace: Option<&str>,
+        pane: Option<&str>,
+        tab: Option<&str>,
+    ) -> std::process::Output {
+        let mut command = Command::new("bash");
+        command
             .arg(open_board_path())
-            .env("HERDR_BIN_PATH", &stub)
+            .env("HERDR_BIN_PATH", self.root.join("herdr"))
             .env("TSK_BIN", env!("CARGO_BIN_EXE_tsk"))
-            .env("TSK_STATE_DIR", &state)
-            .env("STUB_LOG", &log)
-            .env("STUB_STATE", &state)
+            .env("TSK_STATE_DIR", self.root.join("state"))
+            .env("TSK_CONFIG_DIR", self.root.join("state"))
+            .env("STUB_ROOT", &self.root)
             .env("STUB_MODE", mode)
+            .env_remove("HERDR_PANE_ID")
+            .env_remove("HERDR_TAB_ID")
             .env(
                 "HERDR_PLUGIN_CONTEXT_JSON",
                 r#"{"focused_pane_cwd":"/tmp"}"#,
             )
-            .output()
-            .expect("launcher")
-    };
-    let existing = run("existing");
-    assert!(
-        existing.status.success(),
-        "existing launcher: {:?}",
-        existing
-    );
-    let calls = read(&log);
-    assert!(calls.contains("pane list"));
-    assert!(calls.contains("plugin pane focus w0:p1"));
-    assert!(
-        !calls.lines().any(|line| line == "plugin pane open"),
-        "existing pane must not be reopened"
-    );
-    assert!(calls.find("pane list").unwrap() < calls.find("plugin pane focus").unwrap());
-    assert!(state.join("reopen.json").exists(), "context was published");
+            .env_remove("HERDR_WORKSPACE_ID");
+        if let Some(workspace) = workspace {
+            command.env("HERDR_WORKSPACE_ID", workspace);
+        }
+        if let Some(pane) = pane {
+            command.env("HERDR_PANE_ID", pane);
+        }
+        if let Some(tab) = tab {
+            command.env("HERDR_TAB_ID", tab);
+        }
+        command.output().expect("launcher")
+    }
 
-    let absent = run("absent");
-    assert!(absent.status.success(), "new-pane launcher: {:?}", absent);
-    let calls = read(&log);
-    assert!(calls.contains("plugin pane open"));
+    fn calls(&self) -> String {
+        fs::read_to_string(self.root.join("calls.log")).unwrap_or_default()
+    }
+}
 
-    let before = calls.lines().count();
-    let failed = Command::new("bash")
-        .arg(open_board_path())
-        .env("HERDR_BIN_PATH", &stub)
-        .env("TSK_BIN", env!("CARGO_BIN_EXE_tsk"))
-        .env("TSK_STATE_DIR", &state)
-        .env("STUB_LOG", &log)
-        .env("STUB_STATE", &state)
-        .env("STUB_MODE", "existing")
-        .env("HERDR_PLUGIN_CONTEXT_JSON", "not json")
-        .output()
-        .expect("failing launcher");
-    assert!(!failed.status.success());
-    let after = read(&log);
+impl Drop for Launcher {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.root);
+    }
+}
+
+#[test]
+fn open_board_focuses_current_workspace_board_even_in_another_tab() {
+    let launcher = Launcher::new();
+    let output = launcher.run("existing", Some("w0"));
+    assert!(output.status.success(), "{output:?}");
     assert_eq!(
-        after.lines().count(),
-        before + 1,
-        "failed handoff must not focus"
+        launcher.calls(),
+        "pane list --workspace w0\ntab focus w0:t2\nplugin pane focus w0:p2\n"
     );
-    assert!(!after
+    assert!(
+        !launcher.root.join("state/reopen.json").exists(),
+        "focusing must preserve the board view, not publish shared context"
+    );
+}
+
+#[test]
+fn open_board_opens_locally_when_only_other_workspaces_have_boards() {
+    let launcher = Launcher::new();
+    let output = launcher.run("absent", Some("w0"));
+    assert!(output.status.success(), "{output:?}");
+    let calls = launcher.calls();
+    assert!(calls.starts_with("pane list --workspace w0\n"), "{calls}");
+    assert!(calls.contains("plugin pane open "), "{calls}");
+    assert!(calls.contains("--workspace w0"), "{calls}");
+    assert!(calls.contains("--placement split"), "{calls}");
+    assert!(calls.contains("--focus"), "{calls}");
+    let open = calls
         .lines()
-        .skip(before)
-        .any(|line| line == "plugin pane focus w0:p1"));
-    let _ = fs::remove_dir_all(root);
+        .find(|line| line.starts_with("plugin pane open "))
+        .expect("open call");
+    assert!(open.contains("--target-pane w0:p1"), "{open}");
+    assert!(
+        !open.contains("--workspace"),
+        "split placement rejects workspace_id: {open}"
+    );
+    assert!(!calls.contains("plugin pane focus"), "{calls}");
+    assert_eq!(
+        read(&launcher.root.join("open-context.json")),
+        r#"{"focused_pane_cwd":"/tmp"}"#
+    );
+    // The next invocation finds the local pane, never creates a second one.
+    let output = launcher.run("absent", Some("w0"));
+    assert!(output.status.success(), "{output:?}");
+    let calls = launcher.calls();
+    assert_eq!(calls.matches("plugin pane open ").count(), 1, "{calls}");
+    assert!(calls.ends_with("plugin pane focus w0:p2\n"), "{calls}");
+}
+
+#[test]
+fn open_board_missing_tab_refuses_without_creating_a_duplicate() {
+    let launcher = Launcher::new();
+    let output = launcher.run("missing-tab", Some("w0"));
+    assert!(!output.status.success(), "{output:?}");
+    assert_eq!(launcher.calls(), "pane list --workspace w0\n");
+    assert!(String::from_utf8_lossy(&output.stderr).contains("board tab"));
+}
+
+#[test]
+fn open_board_tab_focus_failure_does_not_focus_or_duplicate_the_board() {
+    let launcher = Launcher::new();
+    let output = launcher.run("tab-focus-failure", Some("w0"));
+    assert!(!output.status.success(), "{output:?}");
+    assert_eq!(
+        launcher.calls(),
+        "pane list --workspace w0\ntab focus w0:t2\n"
+    );
+}
+
+#[test]
+fn open_board_stale_focus_falls_back_to_a_visible_board_in_the_invoking_tab() {
+    let launcher = Launcher::new();
+    let output = launcher.run("focus-failure", Some("w0"));
+    assert!(output.status.success(), "{output:?}");
+    let calls = launcher.calls();
+    assert_eq!(
+        read(&launcher.root.join("visible-tab")),
+        read(&launcher.root.join("opened-tab")),
+        "the replacement must be visible, not merely focused on the server"
+    );
+    assert!(
+        calls.contains("plugin pane focus w0:p2\ntab focus w0:t1\nplugin pane open "),
+        "{calls}"
+    );
+    let open = calls
+        .lines()
+        .find(|line| line.starts_with("plugin pane open "))
+        .expect("open call");
+    assert!(open.contains("--target-pane w0:p1"), "{open}");
+    assert!(!open.contains("--workspace"), "{open}");
+}
+
+#[test]
+fn open_board_refuses_missing_workspace_without_global_lookup() {
+    for workspace in [None, Some("")] {
+        let launcher = Launcher::new();
+        let output = launcher.run("existing", workspace);
+        assert!(!output.status.success(), "{output:?}");
+        assert!(String::from_utf8_lossy(&output.stderr).contains("workspace"));
+        assert!(launcher.calls().is_empty());
+    }
+}
+
+#[test]
+fn open_board_refuses_missing_pane_without_using_host_focus() {
+    for pane in [None, Some("")] {
+        let launcher = Launcher::new();
+        let output = launcher.run_with_pane("absent", Some("w0"), pane);
+        assert!(!output.status.success(), "{output:?}");
+        assert!(String::from_utf8_lossy(&output.stderr).contains("pane"));
+        assert!(launcher.calls().is_empty());
+    }
+}
+
+#[test]
+fn open_board_refuses_missing_invoking_tab_before_navigation() {
+    for tab in [None, Some("")] {
+        let launcher = Launcher::new();
+        let output = launcher.run_with_tab("focus-failure", Some("w0"), Some("w0:p1"), tab);
+        assert!(!output.status.success(), "{output:?}");
+        assert!(String::from_utf8_lossy(&output.stderr).contains("tab"));
+        assert!(launcher.calls().is_empty());
+    }
+}
+
+#[test]
+fn open_board_list_failure_does_not_create_a_duplicate() {
+    let launcher = Launcher::new();
+    let output = launcher.run("list-failure", Some("w0"));
+    assert!(!output.status.success(), "{output:?}");
+    assert_eq!(launcher.calls(), "pane list --workspace w0\n");
 }
 
 /// Non-comment, non-empty lines of a shell script (strip `# ...` full-line comments).

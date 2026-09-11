@@ -733,11 +733,11 @@ fn apply_board_intent(
             if !model.select_index(idx) {
                 return Ok(IntentOutcome::None);
             }
-            // A left-side click takes focus left: a rail click in G selects the row and lands
-            // the board in A. In 0 and A the click selects in place. A second click on the
-            // same row inside the double-click window opens the full task page.
+            // A row click opens or retargets the task beside the board, with board focus.
+            // A second click on the same row inside the double-click window opens the
+            // full task page.
             model.detail_open = None;
-            if model.wide_stage == WideStage::Rail {
+            if matches!(model.wide_stage, WideStage::FullBoard | WideStage::Rail) {
                 model.wide_stage = WideStage::Split;
             }
             if let Some(id) = model.selected_id() {
@@ -2193,7 +2193,8 @@ fn open_task_page_on(domain: &DomainState, model: &mut BoardModel, id: Uuid) {
 }
 
 /// The row double-click window: a second click on the same row within it opens the page.
-const ROW_DOUBLE_CLICK_WINDOW: std::time::Duration = std::time::Duration::from_millis(400);
+pub(super) const ROW_DOUBLE_CLICK_WINDOW: std::time::Duration =
+    std::time::Duration::from_millis(400);
 
 /// Keep the quick-add line's visible destination truthful while `!p` tokens are typed.
 ///

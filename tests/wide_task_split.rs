@@ -1366,7 +1366,7 @@ fn click_map(model: &BoardModel, hits: &QueueHitMap, x: u16, y: u16) -> Option<B
 }
 
 #[test]
-fn board_row_click_selects_without_changing_stage_or_peeking() {
+fn board_row_click_opens_or_retargets_split_without_peeking() {
     for stage in [WideStage::FullBoard, WideStage::Split] {
         let (mut domain, mut model) = fixture();
         to_stage(&mut domain, &mut model, stage);
@@ -1383,18 +1383,34 @@ fn board_row_click_selects_without_changing_stage_or_peeking() {
         assert!(matches!(intent, BoardIntent::FocusBoardAndSelectIndex(_)));
         go(&mut domain, &mut model, intent);
         assert_ne!(model.selected_id(), selected);
-        assert_eq!(model.wide_stage(), stage, "{stage:?}: stage unchanged");
+        assert_eq!(model.wide_stage(), WideStage::Split, "{stage:?}");
+        assert_eq!(model.focused_surface(), FocusedSurface::Board);
+        assert_eq!(model.input_mode(), BoardInputMode::Normal);
         assert_eq!(model.detail_open(), None, "no peek at wide widths");
         let (after, _) = render(&model, 130, 24);
         assert_ne!(rows, after);
-        if stage == WideStage::Split {
-            let header = column_text(&after, geometry.task_content(), 1);
-            assert!(
-                header.contains("T15 Renew domain"),
-                "pane retargets: {header}"
-            );
-        }
+        let split = resolve_responsive(130, 24, WideStage::Split);
+        let header = column_text(&after, split.task_content(), 1);
+        assert!(
+            header.contains("T15 Renew domain"),
+            "pane retargets: {header}"
+        );
     }
+}
+
+#[test]
+fn full_board_click_on_selected_task_opens_split() {
+    let (mut domain, mut model) = fixture();
+    let selected = model.selected_id().expect("selected task");
+    let geometry = resolve_responsive(130, 24, WideStage::FullBoard);
+    let (_, hits) = render(&model, 130, 24);
+    let row = row_hit(&hits, geometry.board, |id| id == selected);
+    let intent = click_map(&model, &hits, row.x, row.y).expect("row click");
+    go(&mut domain, &mut model, intent);
+    assert_eq!(model.wide_stage(), WideStage::Split);
+    assert_eq!(model.selected_id(), Some(selected));
+    assert_eq!(model.focused_surface(), FocusedSurface::Board);
+    assert_eq!(model.detail_open(), None);
 }
 
 #[test]
@@ -1509,13 +1525,19 @@ fn row_double_click_opens_the_full_page_and_records_the_origin() {
         let selected = model.selected_id();
         let row = row_hit(&hits, geometry.board, |id| Some(id) != selected);
         let intent = click_map(&model, &hits, row.x, row.y).expect("row click");
-        go(&mut domain, &mut model, intent.clone());
-        let after_first = if stage == WideStage::Rail {
-            WideStage::Split
-        } else {
-            stage
-        };
+        go(&mut domain, &mut model, intent);
+        let after_first = WideStage::Split;
         assert_eq!(model.wide_stage(), after_first, "{stage:?}: first click");
+        let (_, hits) = render(&model, 130, 24);
+        // Rail rows can reflow vertically when the board expands. Keep that existing
+        // case task-based; full-board and split double-clicks use the same coordinates.
+        let row = if stage == WideStage::Rail {
+            let split = resolve_responsive(130, 24, WideStage::Split);
+            row_hit(&hits, split.board, |id| Some(id) == model.selected_id())
+        } else {
+            row
+        };
+        let intent = click_map(&model, &hits, row.x, row.y).expect("second row click");
         go(&mut domain, &mut model, intent);
         assert_eq!(
             model.wide_stage(),

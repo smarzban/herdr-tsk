@@ -2034,6 +2034,13 @@ impl BoardModel {
         resolve_responsive(area.width, area.height, self.wide_stage)
     }
 
+    /// Only a successfully applied row click can authorize gesture continuation.
+    pub(crate) fn pending_row_double_click(&self, id: Uuid) -> bool {
+        self.last_row_click.is_some_and(|(at, last)| {
+            last == id && at.elapsed() <= super::apply::ROW_DOUBLE_CLICK_WINDOW
+        })
+    }
+
     /// Session-only wide-slider stage. The board always opens in `FullBoard`.
     pub fn wide_stage(&self) -> WideStage {
         self.wide_stage

@@ -393,6 +393,7 @@ fn run_board_loop(
         // felt reliable on the task page where Down is inert over notes.
         let mut drag_gesture = crate::ui::text_select::DragSelectGesture::new();
         let mut scrollbar_drag = false;
+        let mut reflow_click = ReflowRowClick::default();
         // Non-resize event that arrived during a resize debounce window; handled
         // after one settled-size paint so a key typed mid-drag is not dropped.
         let mut pending_event: Option<Event> = None;
@@ -453,6 +454,7 @@ fn run_board_loop(
                 }
                 event::read()?
             };
+            reflow_click.observe(&next);
             match next {
                 Event::Key(key) if key.kind == KeyEventKind::Press => {
                     // A key while the mouse button is held abandons the deferred click so
@@ -495,12 +497,14 @@ fn run_board_loop(
                     use crate::ui::text_select::{DragSelectOutcome, DragSelectPhase};
                     use crossterm::event::{MouseButton, MouseEventKind};
                     let area = terminal_area(terminal)?;
+                    let continuing_row = reflow_click.target(&model, area, mouse).is_some();
                     let task_focus_candidate =
                         wide_mouse_focus_intent(&model, &frame_hits, area, mouse);
                     let (quit, mode, scrollbar) = board_scrollbar_mouse_route(
                         area,
                         &mut model,
                         &frame_hits,
+                        &reflow_click,
                         mouse,
                         &mut scrollbar_drag,
                         |model, focus| {
@@ -520,6 +524,7 @@ fn run_board_loop(
                     match scrollbar {
                         ScrollbarMouse::Miss => {}
                         ScrollbarMouse::Intent(intent) => {
+                            reflow_click.clear();
                             drag_gesture.clear();
                             if handle_board_intent(
                                 &store,
@@ -534,6 +539,7 @@ fn run_board_loop(
                             continue;
                         }
                         ScrollbarMouse::Consumed => {
+                            reflow_click.clear();
                             drag_gesture.clear();
                             continue;
                         }
@@ -634,6 +640,7 @@ fn run_board_loop(
                                 map_responsive_board_mouse(&model, &frame_hits, area, mouse);
                             let focused = press_on_focused_surface(&model, area, pos);
                             if !focused
+                                && !continuing_row
                                 && !press_survives_off_focus(
                                     responsive_intent.as_ref(),
                                     mode,
@@ -664,6 +671,7 @@ fn run_board_loop(
                         area,
                         &mut model,
                         &frame_hits,
+                        &mut reflow_click,
                         click,
                         |model, focus| {
                             handle_board_intent(
@@ -1301,6 +1309,54 @@ fn press_survives_off_focus(
     slide_or_select || existing_mode_route || task_focus_candidate.is_some()
 }
 
+/// Keep a row gesture attached to its original cell and task across a column reflow.
+/// The reducer's existing clock authorizes continuation only after successful selection.
+#[derive(Default)]
+struct ReflowRowClick(Option<(Position, Rect, uuid::Uuid)>);
+
+impl ReflowRowClick {
+    fn clear(&mut self) {
+        self.0 = None;
+    }
+
+    fn observe(&mut self, event: &Event) {
+        use crossterm::event::{MouseButton, MouseEventKind};
+        match event {
+            Event::Mouse(mouse) if mouse.kind == MouseEventKind::Down(MouseButton::Left) => {
+                if self
+                    .0
+                    .is_some_and(|(pos, _, _)| pos != Position::new(mouse.column, mouse.row))
+                {
+                    self.clear();
+                }
+            }
+            Event::Mouse(mouse)
+                if matches!(
+                    mouse.kind,
+                    MouseEventKind::Up(MouseButton::Left) | MouseEventKind::Moved
+                ) => {}
+            _ => self.clear(), // keys, resize, wheel, drag, other buttons and focus changes
+        }
+    }
+
+    fn target(
+        &self,
+        model: &BoardModel,
+        area: Rect,
+        mouse: crossterm::event::MouseEvent,
+    ) -> Option<uuid::Uuid> {
+        use crossterm::event::{MouseButton, MouseEventKind};
+        let (pos, frame, id) = self.0?;
+        (mouse.kind == MouseEventKind::Down(MouseButton::Left)
+            && pos == Position::new(mouse.column, mouse.row)
+            && frame == area
+            && model.wide_stage() == crate::ui::tier::WideStage::Split
+            && model.input_mode() == BoardInputMode::Normal
+            && model.pending_row_double_click(id))
+        .then_some(id)
+    }
+}
+
 /// Run the release-time task focus handoff before mapping the same click.
 ///
 /// The dispatcher is the real save-recovery-aware event-loop boundary in production and a
@@ -1309,9 +1365,25 @@ fn board_mouse_click_intent_after_focus<E>(
     area: Rect,
     model: &mut BoardModel,
     painted_hits: &crate::ui::render::QueueHitMap,
+    reflow_click: &mut ReflowRowClick,
     click: crossterm::event::MouseEvent,
     mut dispatch_focus: impl FnMut(&mut BoardModel, BoardIntent) -> Result<bool, E>,
 ) -> Result<(bool, Option<BoardIntent>), E> {
+    // Consume the second release before preview controls or reflowed rows can see it.
+    if let Some(id) = reflow_click.target(model, area, click) {
+        reflow_click.clear();
+        let intent = (model.selected_id() == Some(id))
+            .then(|| {
+                model
+                    .visible_ids()
+                    .iter()
+                    .position(|&visible| visible == id)
+                    .map(BoardIntent::FocusBoardAndSelectIndex)
+            })
+            .flatten();
+        return Ok((false, intent));
+    }
+    reflow_click.clear();
     if let Some(focus) = wide_mouse_focus_intent(model, painted_hits, area, click) {
         if dispatch_focus(model, focus)? {
             return Ok((true, None));
@@ -1326,7 +1398,21 @@ fn board_mouse_click_intent_after_focus<E>(
             .and_then(|intent| resolve_board_command(model, intent));
         return Ok((false, intent));
     }
-    Ok((false, board_mouse_intent(area, model, click)))
+    let intent = board_mouse_intent(area, model, click);
+    if matches!(
+        model.wide_stage(),
+        crate::ui::tier::WideStage::FullBoard | crate::ui::tier::WideStage::Rail
+    ) && matches!(
+        model.input_mode(),
+        BoardInputMode::Normal | BoardInputMode::TaskPage
+    ) {
+        if let Some(BoardIntent::FocusBoardAndSelectIndex(index)) = intent.as_ref() {
+            if let Some(&id) = model.visible_ids().get(*index) {
+                reflow_click.0 = Some((Position::new(click.column, click.row), area, id));
+            }
+        }
+    }
+    Ok((false, intent))
 }
 
 /// Route a scrollbar event, focusing and repainting a task preview before page dispatch.
@@ -1338,12 +1424,16 @@ fn board_scrollbar_mouse_route<E>(
     area: Rect,
     model: &mut BoardModel,
     painted_hits: &crate::ui::render::QueueHitMap,
+    reflow_click: &ReflowRowClick,
     mouse: crossterm::event::MouseEvent,
     dragging: &mut bool,
     mut dispatch_focus: impl FnMut(&mut BoardModel, BoardIntent) -> Result<bool, E>,
 ) -> Result<(bool, BoardInputMode, ScrollbarMouse), E> {
     use crossterm::event::{MouseButton, MouseEventKind};
 
+    if reflow_click.target(model, area, mouse).is_some() {
+        return Ok((false, model.input_mode(), ScrollbarMouse::Miss));
+    }
     let task_scrollbar_press = matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
         && matches!(
             scrollbar_hit_at(painted_hits, Position::new(mouse.column, mouse.row)),
@@ -2464,6 +2554,225 @@ mod tests {
         );
     }
 
+    fn dispatch_reflow_test_click(
+        domain: &mut DomainState,
+        model: &mut BoardModel,
+        reflow_click: &mut ReflowRowClick,
+        area: Rect,
+        click: MouseEvent,
+    ) {
+        reflow_click.observe(&Event::Mouse(click));
+        let hits = board_hit_map(area, model);
+        let continuing = reflow_click.target(model, area, click).is_some();
+        let (_, mode, scrollbar) = board_scrollbar_mouse_route(
+            area,
+            model,
+            &hits,
+            reflow_click,
+            click,
+            &mut false,
+            |model, focus| {
+                apply_intent(domain, model, focus, None)?;
+                Ok::<bool, DomainError>(false)
+            },
+        )
+        .expect("production Down scrollbar route");
+        assert!(matches!(scrollbar, ScrollbarMouse::Miss));
+        assert!(
+            continuing
+                || press_on_focused_surface(model, area, Position::new(click.column, click.row))
+                || press_survives_off_focus(
+                    map_responsive_board_mouse(model, &hits, area, click).as_ref(),
+                    mode,
+                    wide_mouse_focus_intent(model, &hits, area, click).as_ref()
+                )
+        );
+        reflow_click.observe(&Event::Mouse(MouseEvent {
+            kind: MouseEventKind::Up(MouseButton::Left),
+            ..click
+        }));
+        let (quit, intent) = board_mouse_click_intent_after_focus(
+            area,
+            model,
+            &hits,
+            reflow_click,
+            click,
+            |model, focus| {
+                apply_intent(domain, model, focus, None)?;
+                Ok::<bool, DomainError>(false)
+            },
+        )
+        .expect("route click through production focus handoff");
+        assert!(!quit);
+        if let Some(intent) = intent {
+            apply_intent(domain, model, intent, None).expect("dispatch click");
+        }
+    }
+
+    #[test]
+    fn app_reflow_double_click_right_of_split_opens_original_task() {
+        for width in [110, 130] {
+            let (mut domain, mut model) =
+                board_fixture("original task", Some("notes ".repeat(500)));
+            let id = model.selected_id();
+            let mut reflow_click = ReflowRowClick::default();
+            let area = Rect::new(0, 0, width, 24);
+            let hits = board_hit_map(area, &model);
+            let row = hits
+                .regions
+                .iter()
+                .find(|hit| matches!(hit.target, crate::ui::render::QueueHitTarget::Task(_)))
+                .unwrap()
+                .area;
+            let click = left_click(width - 1, row.y);
+            let before = serde_json::to_value(&domain).unwrap();
+            dispatch_reflow_test_click(&mut domain, &mut model, &mut reflow_click, area, click);
+            assert_eq!(model.wide_stage(), crate::ui::tier::WideStage::Split);
+            dispatch_reflow_test_click(&mut domain, &mut model, &mut reflow_click, area, click);
+            assert_eq!(model.wide_stage(), crate::ui::tier::WideStage::FullTask);
+            assert_eq!(model.edit_target(), id);
+            assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+            assert_eq!(serde_json::to_value(&domain).unwrap(), before);
+        }
+    }
+
+    #[test]
+    fn app_reflow_double_click_keeps_task_below_wrapping_row() {
+        for width in [110, 130] {
+            let (mut domain, _) = board_fixture(&"a long preceding title ".repeat(4), None);
+            domain
+                .create(
+                    "another long task title ".repeat(4),
+                    None,
+                    TaskScope::Global,
+                    ProvenanceOrigin::Manual,
+                    None,
+                )
+                .unwrap();
+            let mut model = BoardModel::from_domain(&domain, None);
+            let id = model.visible_ids()[1];
+            let mut reflow_click = ReflowRowClick::default();
+            let area = Rect::new(0, 0, width, 24);
+            let hits = board_hit_map(area, &model);
+            let row = hits
+                .regions
+                .iter()
+                .find(|hit| {
+                    matches!(hit.target,
+                crate::ui::render::QueueHitTarget::Task(task) if task == id)
+                })
+                .unwrap()
+                .area;
+            let click = left_click(20, row.y);
+            dispatch_reflow_test_click(&mut domain, &mut model, &mut reflow_click, area, click);
+            let new_hits = board_hit_map(area, &model);
+            let moved = new_hits
+                .regions
+                .iter()
+                .find(|hit| {
+                    matches!(hit.target,
+                crate::ui::render::QueueHitTarget::Task(task) if task == id)
+                })
+                .unwrap()
+                .area;
+            assert!(moved.y > row.y, "fixture must cross the wrap boundary");
+            dispatch_reflow_test_click(&mut domain, &mut model, &mut reflow_click, area, click);
+            assert_eq!(model.wide_stage(), crate::ui::tier::WideStage::FullTask);
+            assert_eq!(model.edit_target(), Some(id));
+        }
+    }
+
+    #[test]
+    fn app_reflow_double_click_different_cell_keeps_live_task_controls() {
+        let (mut domain, mut model) = board_fixture("control routing", None);
+        let mut reflow = ReflowRowClick::default();
+        let area = Rect::new(0, 0, 130, 24);
+        let hits = board_hit_map(area, &model);
+        let row = hits
+            .regions
+            .iter()
+            .find(|hit| matches!(hit.target, crate::ui::render::QueueHitTarget::Task(_)))
+            .unwrap()
+            .area;
+        dispatch_reflow_test_click(
+            &mut domain,
+            &mut model,
+            &mut reflow,
+            area,
+            left_click(80, row.y),
+        );
+        let hits = board_hit_map(area, &model);
+        let control = hits
+            .regions
+            .iter()
+            .find(|hit| matches!(hit.target, crate::ui::render::QueueHitTarget::StepAdd))
+            .unwrap()
+            .area;
+        assert_ne!(control.as_position(), Position::new(80, row.y));
+        dispatch_reflow_test_click(
+            &mut domain,
+            &mut model,
+            &mut reflow,
+            area,
+            click_at(control),
+        );
+        assert_eq!(model.wide_stage(), crate::ui::tier::WideStage::Rail);
+        assert_eq!(model.input_mode(), BoardInputMode::EditStep);
+    }
+
+    #[test]
+    fn app_reflow_double_click_cancels_for_other_gestures() {
+        for event in [
+            Event::Key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE)),
+            Event::Resize(120, 24),
+            Event::Mouse(MouseEvent {
+                kind: MouseEventKind::Drag(MouseButton::Left),
+                ..left_click(21, 6)
+            }),
+            Event::Mouse(MouseEvent {
+                kind: MouseEventKind::ScrollDown,
+                ..left_click(20, 6)
+            }),
+            Event::Mouse(left_click(21, 6)),
+        ] {
+            let (mut domain, mut model) = board_fixture("cancel gesture", None);
+            let area = Rect::new(0, 0, 130, 24);
+            let row = board_hit_map(area, &model)
+                .regions
+                .into_iter()
+                .find(|hit| matches!(hit.target, crate::ui::render::QueueHitTarget::Task(_)))
+                .unwrap()
+                .area;
+            let click = left_click(20, row.y);
+            let mut reflow = ReflowRowClick::default();
+            dispatch_reflow_test_click(&mut domain, &mut model, &mut reflow, area, click);
+            assert!(reflow.target(&model, area, click).is_some());
+            assert!(reflow
+                .target(&model, Rect::new(0, 0, 129, 24), click)
+                .is_none());
+            reflow.observe(&event);
+            assert!(reflow.target(&model, area, click).is_none(), "{event:?}");
+        }
+    }
+
+    #[test]
+    fn app_reflow_double_click_does_not_arm_on_task_number_copy() {
+        let (mut domain, _) = board_fixture("copy number", None);
+        domain.assign_numbers_for_persistence();
+        let mut model = BoardModel::from_domain(&domain, None);
+        let area = Rect::new(0, 0, 130, 24);
+        let number = board_hit_map(area, &model)
+            .regions
+            .into_iter()
+            .find(|hit| matches!(hit.target, crate::ui::render::QueueHitTarget::TaskNumber(_)))
+            .unwrap()
+            .area;
+        let mut reflow = ReflowRowClick::default();
+        dispatch_reflow_test_click(&mut domain, &mut model, &mut reflow, area, click_at(number));
+        assert!(reflow.0.is_none());
+        assert_eq!(model.wide_stage(), crate::ui::tier::WideStage::FullBoard);
+    }
+
     #[test]
     fn app_mouse_click_moves_stage_a_to_g_before_dispatching_same_control() {
         let (mut domain, mut model) = board_fixture("mouse stage", None);
@@ -2482,13 +2791,19 @@ mod tests {
             })
             .expect("task-side add-step control in the preview");
         let click = click_at(control.area);
-        let (quit, intent) =
-            board_mouse_click_intent_after_focus(area, &mut model, &hits, click, |model, focus| {
+        let (quit, intent) = board_mouse_click_intent_after_focus(
+            area,
+            &mut model,
+            &hits,
+            &mut ReflowRowClick::default(),
+            click,
+            |model, focus| {
                 assert_eq!(focus, BoardIntent::StageRight);
                 apply_intent(&mut domain, model, focus, None)?;
                 Ok::<bool, DomainError>(false)
-            })
-            .expect("route click");
+            },
+        )
+        .expect("route click");
 
         assert!(!quit);
         assert_eq!(model.wide_stage(), crate::ui::tier::WideStage::Rail);
@@ -2619,6 +2934,7 @@ mod tests {
             wide,
             &mut model,
             &preview_hits,
+            &ReflowRowClick::default(),
             click_at(bottom.1),
             &mut dragging,
             |model, focus| {

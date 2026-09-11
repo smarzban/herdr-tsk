@@ -17,6 +17,7 @@ pub enum Surface {
     Setup,
     Guide,
     FindBoardPane,
+    FindBoardTab,
     ResolveContext,
     GlobalHelp,
     Usage,
@@ -24,7 +25,7 @@ pub enum Surface {
 
 /// Select a process surface from argv-style arguments, including argv0.
 ///
-/// Only `--find-board-pane` and `--help` are global flags, and only before the first
+/// Global help and internal launcher flags are recognized only before the first
 /// positional argument. A capture-mode environment value applies when there is no
 /// subcommand or global flag.
 pub fn route<S: AsRef<str>>(
@@ -40,6 +41,7 @@ pub fn route<S: AsRef<str>>(
         if arg.starts_with('-') {
             let surface = match arg {
                 "--find-board-pane" => Surface::FindBoardPane,
+                "--find-board-tab" => Surface::FindBoardTab,
                 "--resolve-context" => Surface::ResolveContext,
                 "--help" => Surface::GlobalHelp,
                 _ => return Surface::Usage,
@@ -113,6 +115,18 @@ mod tests {
     fn find_board_pane_with_extra_argument_is_usage() {
         assert_eq!(
             route(["tsk", "--find-board-pane", "extra"], None),
+            Surface::Usage
+        );
+    }
+
+    #[test]
+    fn find_board_tab_is_a_hidden_global_surface() {
+        assert_eq!(
+            route(["tsk", "--find-board-tab"], Some("capture")),
+            Surface::FindBoardTab
+        );
+        assert_eq!(
+            route(["tsk", "--find-board-tab", "extra"], None),
             Surface::Usage
         );
     }

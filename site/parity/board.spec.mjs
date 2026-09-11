@@ -150,6 +150,34 @@ test("110-column boundary and rail mouse return", async ({ page }, info) => {
   await expect(row(page, 13)).toHaveClass(/is-sel/);
 });
 
+for (const width of [110, 130]) {
+  test(`row double-click survives reflow at ${width} columns`, async ({
+    page,
+  }) => {
+    await open(page, width);
+    const result = await row(page, 13).evaluate((el) => {
+      const rect = el.getBoundingClientRect();
+      const x = Math.min(rect.right - 4, window.innerWidth - 8);
+      const y = rect.top + 4;
+      const click = () =>
+        document.elementFromPoint(x, y).dispatchEvent(
+          new MouseEvent("click", {
+            bubbles: true,
+            clientX: x,
+            clientY: y,
+            detail: 1,
+          }),
+        );
+      click();
+      const split = !!document.querySelector(".tsk-wide-split.is-split");
+      click();
+      return { split, full: !document.querySelector(".tsk-list") };
+    });
+    expect(result).toEqual({ split: true, full: true });
+    await expect(page.locator(".tsk-task-column")).toContainText("END");
+  });
+}
+
 test("landing column readout excludes board padding", async ({ page }) => {
   await open(page, 78);
   await page.evaluate(() => {

@@ -4,10 +4,12 @@
 
 Install with `curl -fsSL https://gettsk.sh/install.sh | sh` or `brew install smarzban/tap/tsk`.
 If Herdr is on PATH, the curl installer asks to run `tsk setup herdr` on a TTY; when agent skill roots are detected it also asks once to install the tsk skill. The install wrap-up points at the board (and the Herdr board shortcut after a successful Herdr setup, or `tsk setup herdr` / `tsk setup` when those asks are skipped). Homebrew prints the Herdr setup command as a caveat.
+Herdr's board shortcut opens or focuses one board per workspace across its tabs, preserving its view and edits. Other workspaces stay untouched; boards share the same task store.
 Details: https://gettsk.sh/docs/install.md
 Inside Git, the repo root is the default project. Outside Git, tsk opens and captures on the desk while keeping the current directory available as a project.
 The board checks GitHub releases at most daily and shows a dim `vX.Y.Z available` on the status row; set `TSK_NO_UPDATE_CHECK` to disable.
 `N` tasks on the desk are human-only notices: four starter tasks on a first open, one `What's new in tsk` task after an upgrade. `tsk list` never shows them.
+At 110 usable columns or wider, clicking a task opens or updates its details beside the board with board focus; double-click opens it full screen. Narrow panes use click-to-peek.
 
 ## For agents
 

@@ -118,7 +118,7 @@ pub enum BoardIntent {
     SelectPrev,
     /// Select visible list row by index (mouse row click).
     SelectIndex(usize),
-    /// Select a wide-split board row and return board focus without peek or double-click.
+    /// Select a wide board row and show its task beside the board; double-click opens full.
     FocusBoardAndSelectIndex(usize),
     /// Copy the presentation-only `T<number>` identifier for one persisted task.
     CopyTaskNumber(uuid::Uuid),
