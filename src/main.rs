@@ -8,7 +8,8 @@ use tsk_tui::cli::router::{route, Surface};
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().collect();
     match route(&args, std::env::var(tsk_tui::app::MODE_ENV).ok().as_deref()) {
-        Surface::FindBoardPane => find_board_pane_main(),
+        Surface::FindBoardPane => find_board_main(false),
+        Surface::FindBoardTab => find_board_main(true),
         Surface::ResolveContext => resolve_context_main(),
         Surface::GlobalHelp => {
             println!(
@@ -96,9 +97,14 @@ fn headless_main(args: Vec<String>) -> ExitCode {
     ExitCode::from(output.code)
 }
 
-/// Read herdr `pane list` JSON from stdin; print first Tasks pane_id or exit 1.
-fn find_board_pane_main() -> ExitCode {
-    match tsk_tui::find_board_pane_from_stdin() {
+/// Read herdr `pane list` JSON; print the first Tasks pane or its tab, or exit 1.
+fn find_board_main(tab: bool) -> ExitCode {
+    let result = if tab {
+        tsk_tui::board_pane::find_board_tab_from_stdin()
+    } else {
+        tsk_tui::find_board_pane_from_stdin()
+    };
+    match result {
         Ok(Some(id)) => {
             if writeln!(io::stdout(), "{id}").is_err() {
                 return ExitCode::from(1);
@@ -107,7 +113,12 @@ fn find_board_pane_main() -> ExitCode {
         }
         Ok(None) => ExitCode::from(1),
         Err(err) => {
-            eprintln!("tsk --find-board-pane: {err}");
+            let flag = if tab {
+                "--find-board-tab"
+            } else {
+                "--find-board-pane"
+            };
+            eprintln!("tsk {flag}: {err}");
             ExitCode::from(1)
         }
     }

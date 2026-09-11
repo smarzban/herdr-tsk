@@ -2186,7 +2186,8 @@ import { parseCapture } from "./capture.js";
         state.peekId = null;
         openFullPage();
       } else if (isWideSplit()) {
-        if (state.stage === "rail") state.stage = "split";
+        if (state.stage === "board" || state.stage === "rail")
+          state.stage = "split";
         state.selectedId = id;
         state.peekId = null;
         state.overlay = null;

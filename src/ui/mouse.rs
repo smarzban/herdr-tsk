@@ -458,9 +458,8 @@ pub fn map_responsive_board_mouse(
                 | BoardInputMode::EditScope
                 | BoardInputMode::FormScopeDropdown
         );
-    // A board-row click selects in place; a rail-row click selects and lands the board in A
-    // (the reducer moves the stage). The reducer retargets the pane or page and refuses while
-    // a dirty draft is bound elsewhere.
+    // A task-row click opens or retargets the task beside the board in A (the reducer
+    // moves the stage). The reducer refuses while a dirty draft is bound elsewhere.
     if responsive.board.contains(pos) && (view_mode || clean_or_dirty_task_editor) {
         if let Some(QueueHitTarget::Task(id)) = hit_at(hits, pos) {
             if clean_or_dirty_task_editor && model.edit_target() == Some(id) {

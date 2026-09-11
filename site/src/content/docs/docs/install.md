@@ -32,10 +32,10 @@ herdr server reload-config
 
 | Shortcut | Action |
 | --- | --- |
-| **prefix+t** | Open the board |
+| **prefix+t** | Open or focus the board in this workspace |
 | **prefix+a** | Quick capture |
 
-Use your configured Herdr prefix. [Herdr keyboard guide](https://herdr.dev/docs/keyboard/).
+Use your configured Herdr prefix. An existing board in this workspace is focused across tabs without resetting its view. If none exists here, a new board opens; other workspaces keep their boards. [Herdr keyboard guide](https://herdr.dev/docs/keyboard/).
 
 ## Agent skill
 

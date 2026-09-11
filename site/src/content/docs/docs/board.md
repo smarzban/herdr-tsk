@@ -13,7 +13,9 @@ Click to navigate, or use the keyboard. The footer shows actions for the current
 | **selected project** | `2` | Tasks in the selected project |
 | **projects** | `3` | Project overview |
 
-Launching inside a Git repository opens that project. Outside Git, tsk opens **desk** and puts the current directory in the middle project tab. Reopening from another directory updates that project tab while keeping **desk** active outside Git.
+Launching inside a Git repository opens that project. Outside Git, tsk opens **desk** and puts the current directory in the middle project tab.
+
+In Herdr, `prefix+t` opens or focuses a board in the current workspace. If one is already open in another tab there, Herdr switches to that tab and focuses its pane, preserving its view and edits. Otherwise, it opens a board beside your work. Boards in other workspaces stay untouched; all boards share the same tasks.
 
 The middle tab remembers your selected project. Press `2` to open it; if none is selected, `2` opens the project picker.
 
@@ -75,7 +77,7 @@ Your first board open seeds four desk tasks with `N` ids (not `T`). They teach t
 | Action | Result |
 | --- | --- |
 | Click a tab or selector | Change view or open its choices |
-| Click a task | Peek in narrow panes; select in wide panes |
+| Click a task | Peek in narrow panes; open or update details beside the board in wide panes |
 | Click the same task again in a narrow pane | Close its peek |
 | Double-click a task | Open it full screen |
 | Click its `T` or `N` number | Copy that id |
@@ -98,7 +100,7 @@ At **110 usable columns** or wider, use `→` and `←` to move through a four-s
 
 Press `Enter` from the board to open a task full screen. `Esc` returns to the view you left. From task focus, `Esc` returns focus to the board beside it.
 
-Click inside the task column to focus it. Click a rail row to bring back the split board. While editing, arrows move the text cursor instead.
+Click a task on the full-width board to open its details alongside it, keeping board focus. Click inside the task column to focus it. Click a rail row to bring back the split board. While editing, arrows move the text cursor instead.
 
 Narrowing the pane shows one surface; widening it restores the selected view. Each new session starts with the board alone.
 

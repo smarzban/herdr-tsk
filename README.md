@@ -10,14 +10,15 @@ your agent the task number when you're ready to work on it.
 
 ![The tsk board beside an agent working on the selected Redis-to-Postgres migration task](docs/images/board-in-herdr.png)
 
-In Herdr, **prefix+t** opens your board and **prefix+a** opens quick capture.
+In Herdr, **prefix+t** opens or focuses your workspace's board, even across tabs;
+other workspaces keep their own views of the same tasks. **prefix+a** opens quick capture.
 Click a task's `T` number to copy it, then paste it into your agent conversation.
 
 ### Room to think
 
 ![A wide tsk board with the selected task's notes and steps open alongside it](docs/images/wide-task-page.png)
 
-In a wide pane, `→` opens task details beside the board; `←` brings you back.
+In a wide pane, click a task or press `→` to open its details beside the board; `←` brings you back.
 Press `Enter` for a full-screen task and `Esc` to return. For a standalone board,
 run `tsk` in your terminal.
 

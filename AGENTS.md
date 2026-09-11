@@ -127,7 +127,7 @@ For scriptable board work, use `tsk add`, `tsk list`, `tsk status`, `tsk edit`, 
   the binary.
 - Below 110 columns, row click peeks, clicking the same row again closes peek, and
   a fast double-click opens the page. At wide widths there is no peek: a board or rail
-  row click selects it in place (a rail click lands the board in stage A), and a fast
+  row click selects it and opens or updates the task beside the board in stage A, and a fast
   double-click opens the full task page.
 - Task page is view-first. Only `ctrl+e`, `ctrl+n`, or bare Tab enter edit mode,
   the one exception being a quick-add draft expanded with `Tab`, which opens
@@ -298,7 +298,15 @@ If `HERDR_ENV` is unset, say that live smoke was not run.
   unsupported, `TSK_STATE_DIR` is the escape hatch. State/config directory roots must be real
   directories, not symlinks; permission hardening refuses a symlink instead of chmodding its target.
 - Golden fixtures regenerate via `cargo test --test queue_board_render regenerate_golden_fixtures -- --ignored`; never hand-edit the `.txt` files.
-- Pane label matching is exact against `board_pane::BOARD_PANE_LABEL`; the manifest pane title must equal it.
+- `prefix+t` opens or focuses the board within the invoking Herdr workspace, across tabs.
+  `scripts/open-board.sh` scopes lookup with `HERDR_WORKSPACE_ID` and anchors creation to
+  `HERDR_PANE_ID` (Herdr rejects `--workspace` for split placement). It refuses missing context
+  or a failed pane listing, and never publishes shared reopen context on focus.
+  Existing boards preserve their view and edits; other workspaces keep their boards.
+  On reuse, `--find-board-tab` resolves the matching pane's tab; call `herdr tab focus` before
+  `plugin pane focus`. Herdr 0.9.0's plugin focus route does not navigate attached clients.
+  API `focused: true` alone is not visible-navigation evidence: confirm the displayed tab.
+  Pane label matching is exact against `board_pane::BOARD_PANE_LABEL`; the manifest pane title must equal it.
 - UI chrome lives in `src/ui/` (`board/` model·apply·commands·chrome·draw,
   `capture`, `mouse`, `input`, `render`).
 - `map_edit` and `map_board_form_key` share `map_form_edit_key`. Save-recovery
