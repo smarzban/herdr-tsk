@@ -157,7 +157,7 @@ for (const width of [110, 130]) {
     await open(page, width);
     const result = await row(page, 13).evaluate((el) => {
       const rect = el.getBoundingClientRect();
-      const x = rect.right - 4;
+      const x = Math.min(rect.right - 4, window.innerWidth - 8);
       const y = rect.top + 4;
       const click = () =>
         document.elementFromPoint(x, y).dispatchEvent(
