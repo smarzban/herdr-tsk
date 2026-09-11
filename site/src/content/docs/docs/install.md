@@ -19,6 +19,8 @@ brew install smarzban/tap/tsk
 
 Reopen your terminal if prompted, or run the printed `export` command.
 
+If Herdr is already installed, the curl installer asks whether to run `tsk setup herdr` when a terminal is available. Noninteractive installs (no TTY or `CI`) skip the ask and print the command to run later. Homebrew stays noninteractive and prints the same setup command as a caveat.
+
 ## Add to Herdr
 
 [Install Herdr](https://herdr.dev/docs/install/) first. Installed-binary setup requires Herdr 0.9+.
@@ -105,6 +107,16 @@ If the install directory is missing from PATH, the installer adds it to:
 
 The installer does not source these files. Symlinked, non-regular, or unwritable files are skipped with manual instructions. Other shells require manual PATH setup. Successful edits remain if another file cannot be updated.
 
+### Herdr prompt
+
+When `herdr` is on PATH after the binary is installed, the installer may ask to run plugin setup:
+
+- Interactive terminal (stdin TTY, or `/dev/tty` under `curl | sh`): asks `[y/N]`. Yes runs the newly installed `tsk setup herdr`; no prints that command for later.
+- `CI` set, or no usable TTY: skips the ask and prints the same command so the install never hangs.
+- Herdr absent: no Herdr output.
+
+Setup failures do not undo the install. Homebrew does not run this prompt; use the formula caveat or run `tsk setup herdr` yourself.
+
 ## Herdr setup with an installed binary
 
 Setup registers bundled plugin files using the installed executable. No source checkout is needed.
@@ -115,7 +127,7 @@ Setup registers bundled plugin files using the installed executable. No source c
 - Rerunning setup updates the registration without duplicating bindings.
 - Use the stable command on PATH, not a versioned Homebrew Cellar path.
 
-Installation alone does not update an existing plugin registration. [Setup recovery and configuration](https://github.com/smarzban/herdr-tsk/blob/main/packaging/README.md#herdr-setup-and-upgrades).
+Installation alone does not update an existing plugin registration unless you answer yes to the curl installer's Herdr prompt. [Setup recovery and configuration](https://github.com/smarzban/herdr-tsk/blob/main/packaging/README.md#herdr-setup-and-upgrades).
 
 ## Manual archives
 

@@ -36,7 +36,10 @@ brew install smarzban/tap/tsk
 ```
 
 The installer sets up PATH for Bash and Zsh. If prompted, reopen your terminal
-or run the printed `export` command before continuing.
+or run the printed `export` command before continuing. When Herdr is already
+installed, an interactive curl install may also ask to run `tsk setup herdr`;
+noninteractive installs print that command instead. Homebrew prints it as a
+caveat.
 
 ### Add to Herdr
 

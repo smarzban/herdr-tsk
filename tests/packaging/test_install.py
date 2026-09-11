@@ -29,6 +29,9 @@ class InstallerTests(unittest.TestCase):
         self.env.pop("ZDOTDIR", None)
         self.env.pop("TSK_VERSION", None)
         self.env.pop("TSK_INSTALL_DIR", None)
+        # Packaging CI sets CI=true; clear it so Herdr-prompt branches stay deterministic.
+        self.env.pop("CI", None)
+        self.setup_log = self.root / "setup-herdr.log"
         self.command("uname", '#!/bin/sh\ncase "$1" in -s) echo "$MOCK_OS";; -m) echo "$MOCK_ARCH";; esac\n')
         self.command("curl", '''#!/usr/bin/env python3
 import json, os, pathlib, sys
@@ -51,10 +54,21 @@ else:
         path.write_text(source)
         path.chmod(0o755)
 
-    def archive(self, target="x86_64-unknown-linux-musl", bad_checksum=False, member="tsk"):
+    def archive(self, target="x86_64-unknown-linux-musl", bad_checksum=False, member="tsk", record_setup=False):
         archive = self.assets / f"tsk-v1.2.3-{target}.tar.gz"
         with tarfile.open(archive, "w:gz") as out:
-            data = b"#!/bin/sh\necho installed-fixture\n"
+            if record_setup:
+                data = b"""#!/bin/sh
+if [ "${1:-}" = setup ] && [ "${2:-}" = herdr ]; then
+    if [ -n "${TSK_SETUP_LOG:-}" ]; then
+        printf '%s\\n' "$*" >> "$TSK_SETUP_LOG"
+    fi
+    exit 0
+fi
+echo installed-fixture
+"""
+            else:
+                data = b"#!/bin/sh\necho installed-fixture\n"
             info = tarfile.TarInfo(member)
             info.size = len(data)
             info.mode = 0o755
@@ -63,7 +77,60 @@ else:
         (self.assets / "SHA256SUMS").write_text(f"{digest}  {archive.name}\n")
 
     def run_install(self, **env):
-        return subprocess.run(["sh", str(INSTALLER)], env=dict(self.env, **env), cwd=self.root, text=True, capture_output=True)
+        return subprocess.run(["sh", str(INSTALLER)], env=dict(self.env, **env), cwd=self.root, text=True, capture_output=True, stdin=subprocess.DEVNULL, start_new_session=True)
+
+    def run_install_with_answer(self, answer, **env):
+        """Drive the Herdr prompt over a PTY so stdin is a TTY."""
+        import errno
+        import pty
+        import select
+        import time
+
+        master, slave = pty.openpty()
+        environment = dict(self.env, **env)
+        process = None
+        transcript = b""
+        try:
+            process = subprocess.Popen(
+                ["sh", str(INSTALLER)],
+                stdin=slave,
+                stdout=slave,
+                stderr=slave,
+                env=environment,
+                cwd=self.root,
+                start_new_session=True,
+            )
+            os.close(slave)
+            slave = None
+            replied = False
+            deadline = time.monotonic() + 20
+            while time.monotonic() < deadline:
+                if not select.select([master], [], [], 0.1)[0]:
+                    if process.poll() is not None:
+                        break
+                    continue
+                try:
+                    chunk = os.read(master, 8192)
+                except OSError as error:
+                    if error.errno == errno.EIO:
+                        break
+                    raise
+                if not chunk:
+                    break
+                transcript += chunk
+                if b"[y/N]" in transcript and not replied:
+                    os.write(master, answer)
+                    replied = True
+            code = process.wait(timeout=5)
+            output = transcript.decode(errors="replace")
+            return subprocess.CompletedProcess(["sh", str(INSTALLER)], code, output, "")
+        finally:
+            if process is not None and process.poll() is None:
+                process.kill()
+                process.wait()
+            if slave is not None:
+                os.close(slave)
+            os.close(master)
 
     @unittest.skipUnless(os.environ.get("TSK_TEST_BINARY"), "set TSK_TEST_BINARY to smoke a built executable")
     def test_installed_real_binary_runs_isolated_cli(self):
@@ -202,7 +269,7 @@ else:
                 self.assertEqual(result.returncode, 0, result.stderr)
                 fresh = subprocess.run([shell, "-i", "-c", "tsk"], env=self.env, stdin=subprocess.DEVNULL, text=True, capture_output=True)
                 self.assertEqual(fresh.returncode, 0, fresh.stderr)
-                self.assertEqual(fresh.stdout.strip(), "installed-fixture")
+                self.assertTrue(fresh.stdout.rstrip().endswith("installed-fixture"), fresh.stdout)
 
     def test_path_separator_directories_are_refused_before_asset_download(self):
         self.archive()
@@ -353,6 +420,86 @@ else:
         result = self.run_install()
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse((self.root / "home/.local/bin/tsk").exists())
+
+    def test_herdr_absent_stays_silent_about_plugin_setup(self):
+        self.archive(record_setup=True)
+        result = self.run_install(TSK_SETUP_LOG=str(self.setup_log), PATH=f"{self.env['PATH']}")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        combined = result.stdout + result.stderr
+        self.assertNotIn("Herdr detected", combined)
+        self.assertNotIn("setup herdr", combined)
+        self.assertFalse(self.setup_log.exists())
+
+    def test_herdr_present_without_tty_skips_with_guidance(self):
+        self.archive(record_setup=True)
+        self.command("herdr", "#!/bin/sh\nexit 0\n")
+        result = self.run_install(TSK_SETUP_LOG=str(self.setup_log))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        combined = result.stdout + result.stderr
+        self.assertIn("Herdr detected", combined)
+        self.assertIn("Skipping plugin setup (no TTY)", combined)
+        installed = self.root / "home/.local/bin/tsk"
+        self.assertIn(f"{installed} setup herdr", combined)
+        self.assertFalse(self.setup_log.exists())
+
+    def test_herdr_present_in_ci_skips_without_asking(self):
+        self.archive(record_setup=True)
+        self.command("herdr", "#!/bin/sh\nexit 0\n")
+        result = self.run_install(TSK_SETUP_LOG=str(self.setup_log), CI="1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        combined = result.stdout + result.stderr
+        self.assertIn("Skipping plugin setup (CI)", combined)
+        self.assertIn("setup herdr", combined)
+        self.assertNotIn("[y/N]", combined)
+        self.assertFalse(self.setup_log.exists())
+
+    @unittest.skipUnless(os.name == "posix", "PTY prompt requires POSIX")
+    def test_herdr_prompt_yes_runs_installed_tsk_setup(self):
+        self.archive(record_setup=True)
+        self.command("herdr", "#!/bin/sh\nexit 0\n")
+        result = self.run_install_with_answer(b"y\n", TSK_SETUP_LOG=str(self.setup_log))
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("[y/N]", result.stdout)
+        self.assertIn("Running ", result.stdout)
+        installed = self.root / "home/.local/bin/tsk"
+        self.assertTrue(self.setup_log.exists(), result.stdout)
+        self.assertEqual(self.setup_log.read_text().strip(), "setup herdr")
+        self.assertTrue(installed.exists())
+
+    @unittest.skipUnless(os.name == "posix", "PTY prompt requires POSIX")
+    def test_herdr_prompt_no_skips_setup_with_guidance(self):
+        self.archive(record_setup=True)
+        self.command("herdr", "#!/bin/sh\nexit 0\n")
+        result = self.run_install_with_answer(b"n\n", TSK_SETUP_LOG=str(self.setup_log))
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("[y/N]", result.stdout)
+        self.assertIn("Skipped Herdr plugin setup", result.stdout)
+        installed = self.root / "home/.local/bin/tsk"
+        self.assertIn(f"{installed} setup herdr", result.stdout)
+        self.assertFalse(self.setup_log.exists())
+
+    @unittest.skipUnless(os.name == "posix", "PTY prompt requires POSIX")
+    def test_herdr_setup_failure_keeps_install_and_prints_guidance(self):
+        archive = self.assets / "tsk-v1.2.3-x86_64-unknown-linux-musl.tar.gz"
+        with tarfile.open(archive, "w:gz") as out:
+            data = b"""#!/bin/sh
+if [ "${1:-}" = setup ] && [ "${2:-}" = herdr ]; then
+    echo setup-failed >&2
+    exit 7
+fi
+echo installed-fixture
+"""
+            info = tarfile.TarInfo("tsk")
+            info.size = len(data)
+            info.mode = 0o755
+            out.addfile(info, io.BytesIO(data))
+        digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+        (self.assets / "SHA256SUMS").write_text(f"{digest}  {archive.name}\n")
+        self.command("herdr", "#!/bin/sh\nexit 0\n")
+        result = self.run_install_with_answer(b"y\n")
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("tsk setup herdr failed", result.stdout)
+        self.assertTrue((self.root / "home/.local/bin/tsk").exists())
 
 
 if __name__ == "__main__":

@@ -130,3 +130,49 @@ case ":${PATH:-}:" in
         fi
         ;;
 esac
+
+# Offer Herdr plugin registration when the host binary is already on PATH.
+# Curl|sh often has a non-TTY stdin; prefer /dev/tty so an interactive terminal can still answer.
+# CI and headless installs skip the ask so they never hang on a prompt.
+# Probe /dev/tty in a child shell: a failed `exec <>/dev/tty` in this shell would exit under set -e.
+maybe_setup_herdr() {
+    command -v herdr >/dev/null 2>&1 || return 0
+    tsk_bin=$install_dir/tsk
+    [ -x "$tsk_bin" ] || return 0
+    setup_cmd=$(printf '%s setup herdr' "$tsk_bin")
+    if [ -n "${CI:-}" ]; then
+        printf 'Herdr detected. Skipping plugin setup (CI). Run:\n  %s\n' "$setup_cmd"
+        return 0
+    fi
+    answer=
+    setup_stdin=
+    if [ -t 0 ]; then
+        printf 'Herdr detected. Set up the Herdr plugin now? [y/N] ' >&2
+        read -r answer || true
+    elif sh -c 'exec <>/dev/tty' 2>/dev/null; then
+        printf 'Herdr detected. Set up the Herdr plugin now? [y/N] ' >&2
+        read -r answer </dev/tty || true
+        setup_stdin=/dev/tty
+    else
+        printf 'Herdr detected. Skipping plugin setup (no TTY). Run:\n  %s\n' "$setup_cmd"
+        return 0
+    fi
+    case $answer in
+        y|Y|yes|YES)
+            printf 'Running %s...\n' "$setup_cmd"
+            setup_status=0
+            if [ -n "$setup_stdin" ]; then
+                "$tsk_bin" setup herdr <"$setup_stdin" || setup_status=$?
+            else
+                "$tsk_bin" setup herdr || setup_status=$?
+            fi
+            if [ "$setup_status" -ne 0 ]; then
+                printf 'tsk setup herdr failed; install succeeded. Run it manually:\n  %s\n' "$setup_cmd" >&2
+            fi
+            ;;
+        *)
+            printf 'Skipped Herdr plugin setup. Run later:\n  %s\n' "$setup_cmd"
+            ;;
+    esac
+}
+maybe_setup_herdr
