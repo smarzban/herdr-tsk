@@ -1247,7 +1247,7 @@ fn notice_row_leads_title_with_uppercase_n_identifier() {
     let mut tasks = fixture_tasks();
     tasks[0].notice = Some(Notice {
         catalog_id: "welcome".into(),
-        number: 3,
+        number: Some(3),
     });
     let view = fixture_view(&tasks, false);
     let model = fixture_model(&tasks, &view);
