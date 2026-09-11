@@ -114,6 +114,7 @@ impl InstallOutcome {
 pub struct BatchResult {
     pub applied: Vec<(String, InstallOutcome)>,
     pub skipped_current: Vec<String>,
+    pub blocked: Vec<String>,
     pub declined: bool,
     pub none_detected: bool,
 }
@@ -405,14 +406,17 @@ pub fn install_detected(force: bool) -> Result<BatchResult, Error> {
         return Ok(BatchResult {
             applied: Vec::new(),
             skipped_current: Vec::new(),
+            blocked: Vec::new(),
             declined: false,
             none_detected: true,
         });
     }
     let mut applied = Vec::new();
     let mut skipped_current = Vec::new();
+    let mut blocked = Vec::new();
     for status in detected {
         if status.state == SkillState::Blocked {
+            blocked.push(status.id);
             continue;
         }
         if !force && status.state == SkillState::Current {
@@ -429,6 +433,7 @@ pub fn install_detected(force: bool) -> Result<BatchResult, Error> {
     Ok(BatchResult {
         applied,
         skipped_current,
+        blocked,
         declined: false,
         none_detected: false,
     })
@@ -449,6 +454,7 @@ pub fn run_interactive_batch(
         return Ok(BatchResult {
             applied: Vec::new(),
             skipped_current: Vec::new(),
+            blocked: Vec::new(),
             declined: false,
             none_detected: true,
         });
@@ -458,6 +464,7 @@ pub fn run_interactive_batch(
     let _ = writeln!(writer, "Detected agents:");
     let mut needs_work = Vec::new();
     let mut current = Vec::new();
+    let mut blocked = Vec::new();
     for status in &detected {
         let detail = match status.state {
             SkillState::Missing => "not installed".to_string(),
@@ -477,7 +484,7 @@ pub fn run_interactive_batch(
         match status.state {
             SkillState::Missing | SkillState::Outdated => needs_work.push(status.id.clone()),
             SkillState::Current => current.push(status.id.clone()),
-            SkillState::Blocked => {}
+            SkillState::Blocked => blocked.push(status.id.clone()),
         }
     }
 
@@ -489,6 +496,7 @@ pub fn run_interactive_batch(
         return Ok(BatchResult {
             applied: Vec::new(),
             skipped_current: current,
+            blocked,
             declined: false,
             none_detected: false,
         });
@@ -502,6 +510,7 @@ pub fn run_interactive_batch(
         return Ok(BatchResult {
             applied: Vec::new(),
             skipped_current: current,
+            blocked,
             declined: true,
             none_detected: false,
         });
@@ -520,6 +529,7 @@ pub fn run_interactive_batch(
         return Ok(BatchResult {
             applied: Vec::new(),
             skipped_current: current,
+            blocked,
             declined: true,
             none_detected: false,
         });
@@ -535,6 +545,7 @@ pub fn run_interactive_batch(
     Ok(BatchResult {
         applied,
         skipped_current: current,
+        blocked,
         declined: false,
         none_detected: false,
     })

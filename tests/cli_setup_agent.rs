@@ -468,6 +468,67 @@ fn agents_yes_installs_without_asking() {
 }
 
 #[test]
+fn agents_yes_json_is_machine_readable() {
+    let _lock = env_lock();
+    let root = temp_dir("agents-yes-json");
+    let home = root.join("home");
+    fs::create_dir_all(home.join(".claude")).expect("claude");
+    let previous_home = std::env::var_os("HOME");
+    let previous_path = std::env::var_os("PATH");
+    std::env::set_var("HOME", &home);
+    std::env::set_var("PATH", root.join("empty-bin"));
+    fs::create_dir_all(root.join("empty-bin")).expect("empty bin");
+    let output = cli_non_tty(&["tsk", "setup", "agents", "--yes", "--json"]);
+    match previous_home {
+        Some(value) => std::env::set_var("HOME", value),
+        None => std::env::remove_var("HOME"),
+    }
+    match previous_path {
+        Some(value) => std::env::set_var("PATH", value),
+        None => std::env::remove_var("PATH"),
+    }
+    assert_eq!(output.code, 0, "{output:?}");
+    let payload: serde_json::Value =
+        serde_json::from_str(output.stdout.trim()).expect("batch json");
+    assert_eq!(payload["outcome"], "batch");
+    assert_eq!(payload["applied"][0]["id"], "claude");
+    let _ = fs::remove_dir_all(root);
+}
+
+#[cfg(unix)]
+#[test]
+fn agents_yes_reports_blocked_skill_roots() {
+    let _lock = env_lock();
+    let root = temp_dir("agents-blocked");
+    let home = root.join("home");
+    let outside = root.join("outside");
+    fs::create_dir_all(home.join(".claude")).expect("claude");
+    fs::create_dir_all(&outside).expect("outside");
+    std::os::unix::fs::symlink(&outside, home.join(".claude/skills")).expect("skill link");
+    let previous_home = std::env::var_os("HOME");
+    let previous_path = std::env::var_os("PATH");
+    std::env::set_var("HOME", &home);
+    std::env::set_var("PATH", root.join("empty-bin"));
+    fs::create_dir_all(root.join("empty-bin")).expect("empty bin");
+    let output = cli_non_tty(&["tsk", "setup", "agents", "--yes", "--json"]);
+    match previous_home {
+        Some(value) => std::env::set_var("HOME", value),
+        None => std::env::remove_var("HOME"),
+    }
+    match previous_path {
+        Some(value) => std::env::set_var("PATH", value),
+        None => std::env::remove_var("PATH"),
+    }
+    assert_eq!(output.code, 1, "{output:?}");
+    assert!(output.stderr.contains("blocked agent skill roots: claude"));
+    let payload: serde_json::Value =
+        serde_json::from_str(output.stdout.trim()).expect("batch json");
+    assert_eq!(payload["blocked"], serde_json::json!(["claude"]));
+    assert!(!outside.join("tsk-cli/SKILL.md").exists());
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn bare_setup_non_tty_with_detected_agents_prints_guidance_without_writing() {
     let _lock = env_lock();
     let root = temp_dir("bare-nontty");

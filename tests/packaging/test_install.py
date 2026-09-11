@@ -252,7 +252,7 @@ echo installed-fixture
     def test_piped_script_configures_default_zsh_and_new_shell_finds_tsk(self):
         self.archive()
         environment = dict(self.env, SHELL="/bin/zsh")
-        result = subprocess.run(["sh"], input=INSTALLER.read_text(), env=environment, cwd=self.root, text=True, capture_output=True)
+        result = subprocess.run(["sh"], input=INSTALLER.read_text(), env=environment, cwd=self.root, text=True, capture_output=True, start_new_session=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         home = Path(self.env["HOME"])
         self.assertTrue((home / ".zshrc").exists())
@@ -440,7 +440,7 @@ echo installed-fixture
 
     def test_herdr_absent_stays_silent_about_plugin_setup(self):
         self.archive(record_setup=True)
-        result = self.run_install(TSK_SETUP_LOG=str(self.setup_log), PATH=f"{self.env['PATH']}")
+        result = self.run_install(TSK_SETUP_LOG=str(self.setup_log), PATH=f"{self.bin}:/usr/bin:/bin")
         self.assertEqual(result.returncode, 0, result.stderr)
         combined = result.stdout + result.stderr
         self.assertNotIn("Herdr detected", combined)
@@ -449,6 +449,18 @@ echo installed-fixture
         self.assertIn("tsk install completed.", combined)
         self.assertIn("In a project directory run tsk to open the board.", combined)
         self.assertFalse(self.setup_log.exists())
+
+    def test_custom_install_directory_never_executes_the_published_binary(self):
+        self.archive(record_setup=True)
+        self.command("herdr", "#!/bin/sh\nexit 0\n")
+        result = self.run_install(
+            TSK_INSTALL_DIR=str(self.root / "shared-bin"),
+            TSK_SETUP_LOG=str(self.setup_log),
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((self.root / "shared-bin/tsk").exists())
+        self.assertFalse(self.setup_log.exists())
+        self.assertIn("Set up the Herdr plugin with tsk setup herdr.", result.stdout)
 
     def test_herdr_present_without_tty_skips_with_guidance(self):
         self.archive(record_setup=True)

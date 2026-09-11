@@ -278,11 +278,11 @@ fn run_setup<R: Read>(args: Vec<String>, stdin: &mut R, stdin_is_tty: bool) -> C
             Ok(ids) => presenter::setup_agent_detected_ids(ids),
             Err(error) => presenter::setup_error(&error.to_string(), 1),
         },
-        Ok(crate::setup_agent::Command::Interactive { json: _ }) => {
+        Ok(crate::setup_agent::Command::Interactive { json }) => {
             let mut reader = std::io::BufReader::new(stdin);
             let mut stderr = std::io::stderr();
             match crate::setup_agent::run_interactive_batch(&mut reader, &mut stderr, interactive) {
-                Ok(result) => presenter::setup_agent_batch(result, false),
+                Ok(result) => presenter::setup_agent_batch(result, json),
                 Err(crate::setup_agent::Error::Usage(reason)) => presenter::setup_error(&reason, 2),
                 Err(error) => presenter::setup_error(&error.to_string(), 1),
             }

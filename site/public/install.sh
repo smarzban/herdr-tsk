@@ -144,9 +144,16 @@ herdr_wrap=board
 # detected but the batch ask was declined, skipped (CI/no-TTY), or agents --yes failed.
 skills_wrap=
 tsk_bin=$install_dir/tsk
+# An overridden destination can be a shared directory. Do not execute a newly
+# published path there: the user can run `tsk setup` after choosing the directory.
+post_install_setup=1
+if [ -n "${TSK_INSTALL_DIR:-}" ]; then
+    post_install_setup=0
+fi
 
 maybe_setup_herdr() {
     command -v herdr >/dev/null 2>&1 || return 0
+    [ "$post_install_setup" = 1 ] || { herdr_wrap=board_setup; return 0; }
     [ -x "$tsk_bin" ] || return 0
     setup_cmd=$(printf '%s setup herdr' "$tsk_bin")
     if [ -n "${CI:-}" ]; then
@@ -189,6 +196,7 @@ maybe_setup_herdr() {
 }
 
 maybe_setup_agent_skills() {
+    [ "$post_install_setup" = 1 ] || return 0
     [ -x "$tsk_bin" ] || return 0
     detected_ids=
     detected_ids=$("$tsk_bin" setup --detected-ids 2>/dev/null) || detected_ids=

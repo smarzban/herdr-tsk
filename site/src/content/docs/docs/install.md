@@ -112,7 +112,7 @@ The installer does not source these files. Symlinked, non-regular, or unwritable
 
 When `herdr` is on PATH after the binary is installed, the installer may ask to run plugin setup:
 
-- Interactive terminal (stdin TTY, or `/dev/tty` under `curl | sh`): asks `[y/N]`. Yes runs the newly installed `tsk setup herdr`.
+- Interactive terminal (stdin TTY, or `/dev/tty` under `curl | sh`) using the default `~/.local/bin` destination: asks `[y/N]`. Yes runs the newly installed `tsk setup herdr`. An overridden `TSK_INSTALL_DIR` never executes the newly published binary; run `tsk setup` yourself after install.
 - `CI` set, or no usable TTY: skips the ask so the install never hangs.
 - Herdr absent: no Herdr prompt.
 

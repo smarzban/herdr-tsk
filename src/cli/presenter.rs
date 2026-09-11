@@ -886,13 +886,14 @@ pub fn setup_agent_batch(result: crate::setup_agent::BatchResult, json: bool) ->
                 "path": outcome.path().display().to_string(),
             })).collect::<Vec<_>>(),
             "skipped_current": result.skipped_current,
+            "blocked": result.blocked,
             "declined": result.declined,
             "none_detected": result.none_detected,
         });
         return CliOutput {
             stdout: format!("{payload}\n"),
-            stderr: String::new(),
-            code: 0,
+            stderr: batch_blocked_error(&result.blocked),
+            code: u8::from(!result.blocked.is_empty()),
         };
     }
     // Interactive path already wrote progress to stderr; keep stdout quiet unless scripted batch.
@@ -907,13 +908,27 @@ pub fn setup_agent_batch(result: crate::setup_agent::BatchResult, json: bool) ->
     for id in &result.skipped_current {
         stdout.push_str(&format!("{id}: current\n"));
     }
+    for id in &result.blocked {
+        stdout.push_str(&format!("{id}: blocked (symlink)\n"));
+    }
     if result.none_detected && stdout.is_empty() {
         stdout.push_str("No agent skill roots detected.\n");
     }
     CliOutput {
         stdout,
-        stderr: String::new(),
-        code: 0,
+        stderr: batch_blocked_error(&result.blocked),
+        code: u8::from(!result.blocked.is_empty()),
+    }
+}
+
+fn batch_blocked_error(blocked: &[String]) -> String {
+    if blocked.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "tsk setup: blocked agent skill roots: {}\n",
+            blocked.join(", ")
+        )
     }
 }
 
