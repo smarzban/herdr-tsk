@@ -151,8 +151,8 @@ The web demo uses bare verb keys on purpose (browsers reserve control chords); d
 
 Any edit to `skills/tsk-cli/SKILL.md` bumps its frontmatter `version:` (never backwards:
 shipped versions are on users' disks) and the two pins in `embedded_skill_declares_semver`
-(`src/setup_agent.rs`): the version string and the FNV-1a content hash, which the test's
-failure message tells you how to refresh. `tsk setup <agent>` compares the version against
+(`src/setup_agent.rs`): the version string and the FNV-1a content hash. On failure the
+assertion's `left` value is the new hash; paste it in. `tsk setup <agent>` compares the version against
 the installed copy and only rewrites on a difference, so an unbumped edit leaves every
 installed skill silently stale. The skill is also `tsk guide` and
 `/docs/agents/`, so it counts as user-visible.
