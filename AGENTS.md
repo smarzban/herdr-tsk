@@ -75,18 +75,22 @@ same PR, never leave them apart.
   to live-smoke or touch packaging; it is a third full compile that proves nothing the
   tests did not. CI runs the same chain plus the release build and is the gate that
   matters; the local bar saves a round-trip, so under time pressure push and let CI report.
-- Before starting the bar, `pgrep -lx 'cargo|rustc'` must print nothing. A second cargo
-  process holds the `target/` lock and cargo waits silently on it for every one of the
-  40+ test binaries, which is how a three-minute bar becomes twenty. If the list is not
-  empty, wait for it (do not kill a process you did not start). If a run passes five
-  minutes, assume contention, `pgrep` again, and say so rather than waiting it out.
-- The usual lock holder is an editor's rust-analyzer check-on-save sharing `target/`.
-  Set `rust-analyzer.cargo.targetDir` to `true` (its own subdirectory of `target/`, at the
-  cost of duplicated artifacts) so editor checks never contend with the bar.
+- macOS: if the bar runs far past five minutes with idle CPU, it is Gatekeeper scanning
+  each of the 40+ freshly linked test binaries on first launch (10 to 18 s each, zero CPU,
+  `GK performScan` in `log show --predicate 'process == "syspolicyd"'`). Diagnose with
+  `cp target/debug/deps/<any test binary> /tmp/x && time /tmp/x`: seconds means the scan is
+  on, milliseconds means it is off. The fix is the owner's, not the agent's: add the
+  terminal app under System Settings → Privacy & Security → Developer Tools, then relaunch
+  the terminal *and* any long-lived server under it (herdr) so new processes descend from
+  the exempted app. Ad-hoc `codesign` does not help. Report the symptom and stop; do not
+  keep polling a run you know is scan-bound.
+- Before starting the bar, `pgrep -lx 'cargo|rustc'` must print nothing: a second cargo
+  process holds the `target/` lock and every step waits on it. If the list is not empty,
+  wait (do not kill a process you did not start). An editor's rust-analyzer check-on-save
+  is the usual holder; `rust-analyzer.cargo.targetDir = true` gives it its own directory.
 - `cargo test <filter>` still compiles every test binary; the filter is applied at run time.
-  For a targeted run use `--lib` or `--test <name>`. A cold debug build after pulling `main`
-  takes about ten minutes: run it in the background with a log and poll, never inside a
-  tool timeout.
+  For a targeted run use `--lib` or `--test <name>`. Run anything that may exceed a couple
+  of minutes in the background with a log and poll, never inside a tool timeout.
 - Never delete anything under `target/` unasked. Cargo does not garbage-collect old
   artifacts, so the directory grows with every branch. If `du -sh target` is above 10 GB,
   say so and suggest the owner run `rm -rf target/debug/incremental` at session end when
