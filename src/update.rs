@@ -97,7 +97,7 @@ pub fn notice_for(latest: &str, current: &str) -> Option<String> {
     } else {
         format!("v{body}")
     };
-    Some(format!("{shown} available"))
+    Some(format!("{shown} available, run tsk update"))
 }
 
 pub fn read_cache(dir: &Path) -> Option<UpdateCache> {
@@ -222,11 +222,11 @@ mod tests {
         assert!(!is_newer("0.6.0", "nope"));
         assert_eq!(
             notice_for("v0.7.0", "0.6.0").as_deref(),
-            Some("v0.7.0 available")
+            Some("v0.7.0 available, run tsk update")
         );
         assert_eq!(
             notice_for("0.7.0", "0.6.0").as_deref(),
-            Some("v0.7.0 available")
+            Some("v0.7.0 available, run tsk update")
         );
         assert_eq!(notice_for("0.6.0", "0.6.0"), None);
     }

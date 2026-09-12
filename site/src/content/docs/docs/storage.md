@@ -50,7 +50,7 @@ The list includes both recently deleted tasks still in the main store and tasks 
 
 ## Update check
 
-On launch, tsk checks for a newer release if its cached check is older than 24 hours. A newer version appears on the board's idle status row.
+On launch, tsk checks for a newer release if its cached check is older than 24 hours. A newer version appears on the board's idle status row as `vX.Y.Z available, run tsk update`.
 
 | Setting or file | Purpose |
 | --- | --- |
