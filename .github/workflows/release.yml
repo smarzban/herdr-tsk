@@ -122,4 +122,4 @@ jobs:
       - name: Refuse a moved tag
         run: test "$(gh api "repos/$GITHUB_REPOSITORY/commits/refs%2Ftags%2F$TAG" --jq .sha)" = "$RELEASE_COMMIT"
       - name: Create draft only (refuses an existing release)
-        run: gh release create "$TAG" dist-release/* --verify-tag --draft --title "tsk $TAG" --notes-file packaging/RELEASE-NOTES.md
+        run: gh release create "$TAG" dist-release/* --verify-tag --draft --notes-file packaging/RELEASE-NOTES.md
