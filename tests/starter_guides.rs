@@ -105,25 +105,25 @@ fn full_board_open_seeds_the_guides_once_beside_existing_tasks() {
         )
         .expect("task");
     store.save(&seeded).expect("save");
-    let newest = announcements::catalog()
-        .expect("bundled catalog")
-        .last()
-        .expect("at least one entry")
-        .id;
+    // An existing desk gets the four starter tasks, plus one What's new row only when the
+    // bundled catalog has something to announce.
+    let bundled = announcements::catalog().expect("bundled catalog");
+    let newest = bundled.last().map(|entry| entry.id).unwrap_or(0);
+    let whats_new = usize::from(!bundled.is_empty());
 
     let _ = load_board_model().expect("first open");
     let state = store.load().expect("load");
     assert_eq!(
         notices(&state).len(),
-        5,
-        "four starter tasks plus What's new for an existing desk"
+        4 + whats_new,
+        "four starter tasks plus What's new for an existing desk when the catalog has entries"
     );
     assert_eq!(
         notices(&state)
             .iter()
             .filter(|task| task.title == announcements::TITLE)
             .count(),
-        1
+        whats_new
     );
     assert_eq!(
         state
@@ -139,7 +139,7 @@ fn full_board_open_seeds_the_guides_once_beside_existing_tasks() {
     assert_eq!(record.announcement_watermark, newest);
 
     let _ = load_board_model().expect("second open");
-    assert_eq!(notices(&store.load().expect("reload")).len(), 5);
+    assert_eq!(notices(&store.load().expect("reload")).len(), 4 + whats_new);
 }
 
 #[test]
@@ -148,7 +148,7 @@ fn a_fresh_full_board_open_records_the_bundled_announcements_without_seeding_the
     suppress_background_fetch();
     let env = StateDirEnv::set("announcements");
     let bundled = announcements::catalog().expect("bundled catalog");
-    let newest = bundled.last().expect("at least one entry").id;
+    let newest = bundled.last().map(|entry| entry.id).unwrap_or(0);
 
     let _ = load_board_model().expect("first open");
     let state = TaskStore::new(&env.dir).load().expect("load");
