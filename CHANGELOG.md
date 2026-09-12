@@ -9,7 +9,7 @@ the GitHub release notes verbatim.
 
 ## Unreleased
 
-## v0.8.0
+## v0.8.1
 
 ### Breaking
 
@@ -18,7 +18,7 @@ the GitHub release notes verbatim.
 ### Added
 
 - Starter tour on first board open: four desk tasks (`N1` to `N4`) that teach the tabs, sections, status keys, the task page, and the CLI, each cleared for good with `ctrl+d`, `ctrl+f`, or `ctrl+x`. Agents never see them: `tsk list` hides `N` rows.
-- What's new on your desk: after an upgrade, one `N` row summarises the release, with a link to the changelog. A fresh install gets none.
+- What's new on your desk: after an upgrade, one `N` row can summarise the release with a link to the changelog. This release carries none, so a 0.7.x upgrader sees only the tour.
 - `tsk update` upgrades installer-managed copies in place; Homebrew copies print `brew update && brew upgrade tsk`. The board nudges once a day when a newer release is out (`TSK_NO_UPDATE_CHECK` disables).
 - `tsk setup` detects the coding agents on your machine and offers to install the tsk skill for each; `tsk setup agents --yes` does it unattended. The curl installer asks the same question once when Herdr is on PATH.
 - Added support for OMP with `tsk setup omp`, thanks @bnivanov.

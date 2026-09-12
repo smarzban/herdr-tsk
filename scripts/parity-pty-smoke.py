@@ -41,7 +41,8 @@ for width in (40, 78, 109, 110):
         # Keep this task-only fixture stable as guide and announcement catalogs grow.
         guide_ids = re.findall(r'catalog_id: "([^"]+)"', (repo / 'src/guides.rs').read_text())
         announcements = tomllib.loads((repo / 'src/announcements/catalog.toml').read_text())
-        newest_announcement = max(entry['id'] for entry in announcements['announcement'])
+        # A comment-only catalog means nothing to announce; the watermark stays at 0.
+        newest_announcement = max((entry['id'] for entry in announcements.get('announcement', [])), default=0)
         (state / 'delivery.json').write_text(json.dumps({
             'guides': guide_ids,
             'announcement_watermark': newest_announcement,
@@ -82,6 +83,17 @@ for width in (40, 78, 109, 110):
             (output / f'pty-{width}-{name}.ansi').write_bytes(transcript)
             (output / f'pty-{width}-{name}.txt').write_text('\n'.join(screen.display))
 
+        def saved_task(number, ready):
+            # A settled screen does not mean the save has landed: the board repaints
+            # before it persists, and wide layouts repaint in several chunks. Poll.
+            deadline = time.monotonic() + 3
+            while True:
+                saved = json.loads((state / 'tsk.json').read_text())
+                task = next(t for t in saved['tasks'] if t['number'] == number)
+                if ready(task) or time.monotonic() >= deadline:
+                    return task
+                time.sleep(0.05)
+
         try:
             first = drain()
             deadline = time.monotonic() + 8
@@ -96,19 +108,16 @@ for width in (40, 78, 109, 110):
             key(b'\x1b[D', 'closed')
             key(b'\x1b[B', 'selected')
             key(b'\x13', 'started')
-            saved = json.loads((state / 'tsk.json').read_text())
-            assert next(t for t in saved['tasks'] if t['number'] == 13)['status'] == 'started'
+            assert saved_task(13, lambda t: t['status'] == 'started')['status'] == 'started'
             key(b'\r', 'page')
             assert 'plain note' in '\n'.join(screen.display)
             key(b'\t', 'step-selected')
             key(b'\r', 'step-toggled')
-            saved = json.loads((state / 'tsk.json').read_text())
-            task = next(t for t in saved['tasks'] if t['number'] == 13)
+            task = saved_task(13, lambda t: t['steps'][0]['done'])
             assert task['steps'][0]['done'] and task['status'] == 'started'
             key(b'\x01', 'step-add-editor')
             key(b'New step\r', 'step-added')
-            saved = json.loads((state / 'tsk.json').read_text())
-            assert len(next(t for t in saved['tasks'] if t['number'] == 13)['steps']) == 3
+            assert len(saved_task(13, lambda t: len(t['steps']) == 3)['steps']) == 3
             key(b'\x1b', 'step-add-canceled')
             key(b'\x1b', 'back')
             assert 'IN MOTION' in '\n'.join(screen.display)

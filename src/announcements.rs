@@ -23,6 +23,10 @@ pub fn catalog() -> Result<Vec<Announcement>, String> {
 /// Ids are positive and strictly increasing in file order, titles carry no link.
 pub fn parse_catalog(toml: &str) -> Result<Vec<Announcement>, String> {
     let document: DocumentMut = toml.parse().map_err(|error| format!("catalog: {error}"))?;
+    // A comment-only file is a valid empty catalog: a release with nothing to announce.
+    if document.is_empty() {
+        return Ok(Vec::new());
+    }
     if document.len() != 1 {
         return Err("catalog: only [[announcement]] tables are allowed".to_string());
     }
@@ -39,7 +43,9 @@ pub fn parse_catalog(toml: &str) -> Result<Vec<Announcement>, String> {
         entries.push(entry);
     }
     if entries.is_empty() {
-        return Err("catalog: no announcements".to_string());
+        return Err(
+            "catalog: an empty announcement array is a mistake, delete the key".to_string(),
+        );
     }
     Ok(entries)
 }
@@ -204,7 +210,6 @@ mod tests {
     #[test]
     fn the_bundled_catalog_parses_and_ends_with_a_changelog_link() {
         let entries = catalog().expect("bundled catalog");
-        assert_eq!(entries[0].id, 1);
         for entry in &entries {
             assert!(
                 entry
@@ -406,6 +411,10 @@ mod tests {
     fn a_bad_catalog_fails_to_parse() {
         let good = "[[announcement]]\nid = 1\ntitle = \"a\"\nnotes = \"b\"\n";
         assert_eq!(parse_catalog(good).map(|c| c.len()), Ok(1));
+        assert_eq!(
+            parse_catalog("# nothing to announce\n").map(|c| c.len()),
+            Ok(0)
+        );
         let bad = [
             ("not toml", "[[announcement]\n"),
             ("no entries", "announcement = []\n"),
