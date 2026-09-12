@@ -1,21 +1,76 @@
 ---
 name: tsk-cli
-description: Use when asked to add, list, edit, or change status of Tasks board items. Use `tsk add`, `tsk list`, `tsk status`, `tsk edit`, and `tsk steps`, never the TUI.
-version: 1.0.0
+description: Work the user's tsk task board from the command line. Use when asked to add, update, edit, start, block, finish, archive, or restore a task on the board (or "tsk", "the tsk board", "the desk"), to add or tick steps, or to answer "what's on the board", "what's next", "what's on deck", "what needs me". Always `tsk add|list|status|edit|steps|archive|trash`, never the TUI.
+version: 1.1.0
 ---
 
-# tsk CLI
+# tsk: the user's task board
 
-Use `tsk add` to create a task or JSON plan, `tsk list` to inspect the shared
-board store, `tsk status` to set human status, `tsk edit` to change title or
-notes, and `tsk steps` to add, toggle, rename, or remove steps. Human output
-escapes terminal controls in titles, step text, and project names; JSON does not.
+tsk is the user's task board. Tasks have a human status (`ready` · `started` · `blocked` ·
+`review` · `done`), live on the **desk** (no project) or in a **project** (a Git repo root, named
+by its basename), and may carry a **thread** label. The user sees the board in a TUI; you never
+open it. Every read and write goes through the CLI below, and the user's board updates live.
 
 ## If tsk is not installed
 
-Run `command -v tsk`. If it is missing, give the user
-https://gettsk.sh/docs/install.md and stop. Never run `install.sh`, `brew`, or
-`cargo build` unless they asked.
+Run `command -v tsk`. If it is missing, give the user https://gettsk.sh/docs/install.md and
+stop. Never run `install.sh`, `brew`, or `cargo build` unless they asked.
+
+## Quick reference
+
+| Ask | Command |
+| --- | --- |
+| Add a task here | `tsk add -t "Title"` (project of the cwd repo, else desk) |
+| Add to the desk / a project / a thread | `tsk add -t "Title" --desk` · `-p widget` · `--thread rel-2026` |
+| Add with notes | `tsk add -t "Title" -n "Notes"` |
+| Add many | `tsk add --file plan.json` or pipe JSON to `tsk add` |
+| What's on the board | `tsk list` (this project) · `tsk list --desk` · `tsk list --all` |
+| What's next / on deck | `tsk list`, READY group |
+| What needs the user | `tsk list`, BLOCKED and REVIEW groups |
+| What's in motion | `tsk list`, STARTED group |
+| One task and its steps | `tsk list T12` |
+| Start / block / hand back / finish | `tsk status T12 start` · `blocked` · `review` · `done` |
+| Change title or notes | `tsk edit T12 --title "…"` · `--notes "…"` |
+| Steps | `tsk steps T12 add "…"` · `toggle <id>` · `rename <id> "…"` · `remove <id>` |
+| Archive / unarchive | `tsk archive T12` · `tsk unarchive T12` · `tsk project archive widget` |
+| Done, archived, deleted | `tsk list --done` · `--archived` · `--deleted` |
+| Bring back a deleted task | `tsk trash restore T12` |
+| Machine output | add `--json` to `add` or `list` |
+
+`T12`, `t12`, `12`, and the UUID all address the same task. Prefer `T12`, it is what the user sees.
+
+## Rules
+
+1. **Human status is the user's.** When your work on a task is finished, set `review`. Set
+   `done` only when the user says the task is done or told you to close it. Never mark tasks
+   done from your own progress.
+2. **Check the scope before `-p name`.** A typo silently files the task under a new project.
+   Confirm with `tsk list --all --json` (the `project` field) when unsure; recover a stray task
+   the same way, then `tsk edit` cannot move it, so re-add in the right scope and archive the stray.
+3. **Thread names**: lowercase ASCII letters, digits, `-` and `.`, starting with a letter or
+   digit, at most 32 characters. `--thread` normalizes case; anything else is refused.
+4. **Never pass `--state-dir`** unless the user asked. It points at a different board.
+5. **Never blind-retry.** Read the exit code, then act (contract below). `add` is idempotent,
+   `steps toggle` and `steps remove` are not.
+6. **Ignore notice rows.** Rows the board paints as `N1`… are human-only (starter tasks and
+   release notes). `tsk list` never shows them and no command addresses them.
+7. Values that begin with `-` need the `=` form: `--title="-fix parser"`, `--project="-x"`,
+   `--notes="-5 degrees"`, `--state-dir=<dir>`, `--file=<path>`.
+
+## Exit contract (all commands)
+
+| Exit | Meaning | Do |
+| --- | --- | --- |
+| 0 | done, or already true (idempotent success) | nothing |
+| 1 | refusal of one or more items; valid siblings persisted | fix and retry only the refused subset |
+| 2 | usage or parse error, nothing persisted | correct the invocation, run again |
+| 3 | store I/O, commit indeterminate | `tsk list …` (also `--done`, `--archived` if it could be hidden), retry only what is missing |
+
+After exit 1 or exit 3, never whole-plan-retry: retry the refused or missing subset only.
+Refusals carry a stable code: `empty-title`,
+`invalid-title`, `invalid-thread`, `unknown-task`, `soft-deleted-task`, `project-archived`,
+`empty-step-text`, `invalid-step-text`, `unknown-step`, `ambiguous-step`. The human message
+is not a contract.
 
 ## Adding
 
@@ -28,167 +83,106 @@ tsk add --file plan.json
 cat plan.json | tsk add
 ```
 
-Use `--title=<value>`, `--notes=<value>`, `--project=<value>`,
-`--state-dir=<dir>`, or `--file=<path>` when a value begins with `-`.
-`--thread <name>` assigns the normalized thread name to a flag add. Item flags
-plus `--file` are usage (exit 2, nothing persists). Piped stdin with item flags
-is ignored and not read. Use `--json` with a flag add when another
-tool needs one result object. It contains `outcome` (`created` or `existing`),
-`id`, numeric `number`, trimmed `title`, and resolved `project` (or `null` for the desk).
+- Default scope is the Git repo root of the cwd; outside Git, the desk. `-p` takes a project
+  basename (case-insensitive) or a `/full/path`. `--desk` forces the desk.
+- Idempotent on trimmed title + resolved scope + normalized thread: a matching live task is a
+  success (`task already exists`, exit 0). Safe to retry.
+- `--json` (flag add) prints one object: `outcome` (`created` | `existing`), `id`, `number`,
+  `title`, `project` (`null` for desk).
+- Plan JSON: `[{"title": "…", "notes": "…", "project": "…", "thread": "…"}]`, `notes`,
+  `project`, `thread` optional (`thread` may be `null`). Result:
+  `{"created": [...], "existing": [...], "failed": [...]}`; `created` and `existing` rows
+  carry `i` (item index), `id`, `number`, `title`, failed rows carry `i`, `title`, `code`,
+  `error`. Scope comes from each item's `project`: item flags (including `--desk`) together
+  with `--file` are usage (exit 2). Piped stdin is ignored when item flags are present.
+- Adding into an archived project refuses with `project-archived` (exit 1). A flag add persists
+  nothing; in a plan add the other items still persist, retry only the refused ones.
 
-Plan JSON accepts a per-item `thread` string or `null`, for example
-`[{"title":"Release notes","thread":"release-2026"}]`. Invalid plan thread
-values are item refusals with code `invalid-thread`; valid sibling items still
-persist and the command exits 1.
-
-## Exit and retry contract
-
-- exit 0: every item was created or already existed.
-- exit 1: one or more plan items were refused, including `invalid-thread`.
-  Valid siblings still persist. Retry only the `failed` subset. `created` and
-  `existing` items both succeeded, so you must never whole-plan-retry an exit 1 run.
-- exit 2: usage or parse error, nothing persisted. Correct the invocation, then run it.
-- exit 3: store I/O, commit indeterminate. Run `tsk list --all --json` to
-  check open work across scopes. Also check `--done` and `--archived` if a matching
-  task could be hidden there; use direct lookup when its number is known. Retry
-  only missing work. Never whole-plan-retry an exit 3 run.
-
-Add is idempotent by trimmed title, resolved project scope, and normalized thread. A non-soft-deleted
-matching task is a success: plain flag add prints `task already exists`, and plan add
-reports it in `existing` with its `i`, `id`, and `title`.
-
-## Listing scope and filters
-
-`tsk list` defaults to ready, started, blocked, and review tasks in the
-Git repo root when inside a repository, otherwise on your desk. The current directory
-outside Git remains available through its full path with `-p`/`--project <scope>`. Use that option
-for the same basename-or-path resolution as add, `--desk` for desk tasks, or `--all`
-for every scope. `--thread <name>` normalizes then filters tasks after scope
-selection. An invalid thread name is a usage error (exit 2), not an empty result.
-JSON rows always include `thread`, with `null` for unthreaded tasks. Use
-`--project=<scope>` or `--state-dir=<dir>` when either value begins with `-`,
-`-p -maintenance` is usage. `--done` lists done tasks only; `--deleted` lists
-soft-deleted tasks only, regardless of stored status: live soft-deletes plus
-trash entries from `trash.jsonl` (kept 30 days), deduped by task with the live
-copy winning, newest deletion first. Scope selectors are mutually
-exclusive, as are `--done` and `--deleted`.
-
-A typo in a project name silently files the task under a new scope. Use
-`tsk list --all --json` to recover the resulting scope.
-
-Rows the board paints as `N1`… are human-only notices: starter tasks and the
-`What's new in tsk` release note. `tsk list` never shows them, no command addresses
-them, and agents ignore them.
-
-## Direct task lookup and steps
-
-A task number is the human handle: resolve `T12` with `tsk list T12`.
-`T12`, `t12`, bare digits, and UUIDs are valid task operands. Direct lookup ignores cwd,
-invocation default, and task scope: `tsk list T12` finds its one task even in
-another project, including done and live soft-deleted tasks still in `tsk.json`.
-A task that has left the live store for `trash.jsonl` is not found that way; use
-`tsk list --deleted` and `tsk trash restore T12`. JSON list rows include
-numeric `number` beside `id`. Do not combine a direct task operand with scope,
-thread, or status filters.
+## Listing
 
 ```sh
-tsk status T12 start
-tsk edit T12 --title "Draft outline" --notes "Scope note"
-tsk steps 12 add "Draft outline"
-tsk steps 12 toggle <step-short-id>
-tsk steps 12 rename <step-short-id> "Write the failing test"
-tsk steps 12 remove <step-short-id>
-tsk list 12
+tsk list                 # ready, started, blocked, review in this repo's project
+tsk list --desk          # same for the desk
+tsk list --all           # every scope, grouped by status then project
+tsk list --thread rel-1  # filter within the selected scope
+tsk list --done | --deleted | --archived
+tsk list T12             # one task, with its steps
+tsk list --json
 ```
 
-A step short id is the shortest unambiguous prefix of the step id. `tsk list 12`
-prints one line per step with its `[x]`/`[ ]` state and short id; with `--json`
-the row's `steps` array carries each step's `id`, `text`, `done`, and
-`short_id`. UUID remains valid in each command where a task number is shown.
-
-`toggle` flips the step state: a retry after an unseen success flips it back.
-`rename` is idempotent on the trimmed text. `remove` is not: a retry after an
-unseen success is `unknown-step`. Never blind-retry a `steps` invocation, run
-`tsk list 12` first and retry only a real refusal. `steps` exits 0 when the
-step was created, toggled, renamed, or removed, 1 for a refusal (stable tokens
-`empty-step-text`, `invalid-step-text`, `unknown-task`, `soft-deleted-task`,
-`unknown-step`, `ambiguous-step`), 2 for a usage error, and 3 for store I/O —
-verify with `list` before retrying an exit 3, same as add.
+- Human output groups by status: `STARTED`, `READY`, `BLOCKED`, `REVIEW`; a row is
+  ` - <number> <title> #<thread>`. Map board language onto it: *on deck* = READY, *in motion* =
+  STARTED, *needs you* = BLOCKED + REVIEW.
+- `--json` is a flat array of `id`, `number`, `title`, `status`, `project` (`null` for desk),
+  `thread` (`null` if none), in display order. `tsk list T12 --json` adds `steps`:
+  `id`, `text`, `done`, `short_id`.
+- Scope selectors (`-p`, `--desk`, `--all`) are mutually exclusive, so are `--done` and
+  `--deleted`. An invalid `--thread` is exit 2, not an empty result.
+- `tsk list T12` ignores cwd and scope and finds the task anywhere, including done and live
+  soft-deleted tasks. A task already moved to trash needs `--deleted`. Do not combine a task
+  operand with scope, thread, or status filters.
+- `--deleted` shows live soft-deletes plus `trash.jsonl` entries (kept 30 days), newest first.
+- Human output escapes terminal controls in titles, steps, and project names; JSON does not.
 
 ## Status and edit
 
-Agents set human status and rewrite title or notes by task address. Direct
-lookup ignores cwd, same as `tsk list T12`.
-
 ```sh
-tsk status T12 start
+tsk status T12 start      # ready → started (start = started)
 tsk status T12 blocked
-tsk status T12 review
-tsk status T12 done
+tsk status T12 review     # your work is done, the user decides
+tsk status T12 done       # only when the user said so
 tsk edit T12 --title "New title"
 tsk edit T12 --notes "Replacement notes"
-tsk edit T12 --title="-fix parser" --notes="-5 degrees"
 ```
 
-`status` accepts `ready`, `started` (or `start`), `blocked`, `review`, or `done`.
-Output always uses the stored name (`started`, not `start`). Repeating the same
-status is idempotent.
+- `status` accepts `ready`, `started` (or `start`), `blocked`, `review`, `done`; output uses the
+  stored name. Repeating a status is idempotent.
+- `edit` needs `--title` and/or `--notes`; it never changes scope or thread. Notes that trim
+  to nothing clear the notes. Newlines and tabs are kept. Repeating stored values is
+  idempotent. Notes render a small markdown subset on the board (`**bold**`, `*em*`,
+  `` `code` ``, `#` headings, `-` lists, fenced code).
+- Refusals: `unknown-task`, `soft-deleted-task`, and for edit `empty-title`, `invalid-title`.
 
-`edit` needs at least one of `--title` or `--notes`. Scope and thread stay as
-they are. Notes that trim to nothing are cleared. Newlines and tabs in notes are
-kept, same as add. Repeating the stored values
-is idempotent. Values that start with `-` need `--title=<value>` or
-`--notes=<value>`.
+## Steps
 
-Both exit 0 on success, 1 for a refusal (`unknown-task`, `soft-deleted-task`,
-and for edit also `empty-title`, `invalid-title`), 2 for usage,
-and 3 for store I/O. Verify with `tsk list T12` before retrying an exit 3.
+```sh
+tsk steps T12 add "Write the failing test"
+tsk steps T12 toggle a3
+tsk steps T12 rename a3 "Write the failing test first"
+tsk steps T12 remove a3
+tsk list T12              # shows [x]/[ ] and each step's short id
+```
 
-## Archived tasks and projects
+- A step short id is the shortest unambiguous prefix of the step id, printed by `tsk list T12`.
+- `toggle` flips: a retry after an unseen success flips it back. `rename` is idempotent on
+  trimmed text. `remove` is not: a retry after an unseen success is `unknown-step`. Run
+  `tsk list T12` before retrying any `steps` command.
 
-An archived task keeps its human status and leaves every working view. Archive
-by task address and bring it back the same way:
+## Archive
 
 ```sh
 tsk archive T12
 tsk unarchive T12
-```
-
-Both are idempotent and exit 0 on repeat with the same line
-(`archived T12 <title>` / `unarchived T12 <title>`). An unknown task refuses
-with `T12 is not on the board` and a soft-deleted task with `T12 is deleted`
-(exit 1).
-
-Whole projects archive too, by `!p` name rules (basename case-insensitive or a
-`/path` verbatim):
-
-```sh
 tsk project archive widget
 tsk project unarchive widget
 ```
 
-Unarchiving returns every task in the status it had; a task's own archived flag
-is independent. A name matching no project that has tasks exits 1 with
-`no project named <name> has tasks`.
-
-`tsk list --archived` lists archived tasks and tasks of archived projects, one
-row per id, marked `archived` or `project archived`; default list views exclude
-both. `tsk add` into an archived project exits 1 with code `project-archived`
-and the hint names `--desk`, `-p <other project>`, and
-`tsk project unarchive <name>` — nothing persists.
+- An archived task keeps its status and leaves every working view; `tsk list --archived` shows
+  archived tasks and tasks of archived projects (`archived` / `project archived`).
+- Both task verbs are idempotent (exit 0 on repeat). Unknown task: `T12 is not on the board`;
+  deleted task: `T12 is deleted` (exit 1).
+- Project names follow `-p` rules. A name with no tasks exits 1
+  (`no project named <name> has tasks`). Unarchiving a project restores each task's own
+  status; a task's own archived flag is independent.
 
 ## Trash
 
-A soft-deleted task leaves the board store once it is no longer undoable, or
-after 7 days, and lives in `trash.jsonl` for 30 days. `tsk list --deleted`
-shows trash entries beside live soft-deletes, keeping their `T<n>` number.
-
 ```sh
+tsk list --deleted
 tsk trash restore T12
 ```
 
-`restore` puts the task back on the board: not soft-deleted, with a `restored`
-history event, a new revision, and its old number. A missing line, or a task
-that is already live, refuses with `T12 is not in trash` (exit 1). Usage
-errors exit 2; store I/O exits 3 — verify with `tsk list --deleted` before
-retrying an exit 3, same as add.
+Deleted tasks leave the live store once undo can no longer reach them (or after 7 days) and
+stay in `trash.jsonl` for 30 days, keeping their number. `restore` puts the task back with
+its old number. A task not in trash, or already live, refuses with `T12 is not in trash`
+(exit 1).

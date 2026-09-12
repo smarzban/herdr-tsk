@@ -28,12 +28,34 @@ def version(tag):
     return tag[1:]
 
 
-def check_version(tag, manifest=ROOT / "Cargo.toml"):
+def read_versions(root):
+    """Every place the release version is written. All must agree with the tag."""
+    root = Path(root)
+    with (root / "Cargo.toml").open("rb") as source:
+        crate = tomllib.load(source)["package"]["version"]
+    with (root / "Cargo.lock").open("rb") as source:
+        locked = [p["version"] for p in tomllib.load(source).get("package", []) if p.get("name") == "tsk-tui"]
+    if len(locked) != 1:
+        raise ValueError("Cargo.lock must contain exactly one tsk-tui package entry")
+    with (root / "herdr-plugin.toml").open("rb") as source:
+        plugin = tomllib.load(source)["version"]
+    site = re.search(r"^export const VERSION = '([^']+)';$", (root / "site" / "src" / "version.mjs").read_text(), re.M)
+    if site is None:
+        raise ValueError("site/src/version.mjs has no export const VERSION = '...' line")
+    return {
+        "Cargo.toml": crate,
+        "Cargo.lock": locked[0],
+        "herdr-plugin.toml": plugin,
+        "site/src/version.mjs": site.group(1),
+    }
+
+
+def check_version(tag, root=ROOT):
     wanted = version(tag)
-    with Path(manifest).open("rb") as source:
-        actual = tomllib.load(source)["package"]["version"]
-    if actual != wanted:
-        raise ValueError(f"tag {tag} does not match crate version {actual}")
+    mismatched = {path: found for path, found in read_versions(root).items() if found != wanted}
+    if mismatched:
+        detail = ", ".join(f"{path} has {found}" for path, found in mismatched.items())
+        raise ValueError(f"tag {tag} does not match: {detail}")
 
 
 def package(tag, target, binary, out):

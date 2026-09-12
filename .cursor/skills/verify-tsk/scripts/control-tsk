@@ -1,0 +1,605 @@
+#!/usr/bin/env python3
+"""Drive an isolated tsk instance for verification. Never touches ~/.tsk."""
+
+from __future__ import annotations
+
+import argparse
+import fcntl
+import json
+import os
+import pathlib
+import pty
+import re
+import select
+import shutil
+import signal
+import struct
+import subprocess
+import sys
+import tempfile
+import termios
+import time
+import uuid
+
+SKILL_ROOT = pathlib.Path(__file__).resolve().parents[1]
+REPO_ROOT = SKILL_ROOT.parents[2]
+RUN_FILE = SKILL_ROOT / ".run"
+EVIDENCE_ROOT = SKILL_ROOT / "evidence"
+VENV_SITE = (
+    SKILL_ROOT
+    / ".venv"
+    / "lib"
+    / f"python{sys.version_info.major}.{sys.version_info.minor}"
+    / "site-packages"
+)
+DEFAULT_BINARY = REPO_ROOT / "target" / "release" / "tsk"
+CSI_RE = re.compile(rb"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))")
+
+if VENV_SITE.is_dir():
+    sys.path.insert(0, str(VENV_SITE))
+
+try:
+    import pyte
+except ImportError:  # pragma: no cover - optional until skill venv is created
+    pyte = None  # type: ignore[assignment]
+
+
+def die(message: str, code: int = 1) -> None:
+    print(message, file=sys.stderr)
+    raise SystemExit(code)
+
+
+def decode_screen(raw: bytes, width: int, height: int) -> str:
+    """Decode a PTY transcript to a plain text frame.
+
+    Cursor-addressed paints leave titles as adjacent cells. Stripping CSI alone
+    joins words (`Verifyboardstart`). Prefer pyte when the skill venv is present.
+    """
+    if pyte is not None:
+        screen = pyte.Screen(width, height)
+        stream = pyte.ByteStream(screen)
+        stream.feed(raw)
+        return "\n".join(line.rstrip() for line in screen.display)
+    return strip_ansi(raw)
+
+
+def load_run() -> dict:
+    if not RUN_FILE.is_file():
+        die("no active run · control-tsk init first")
+    try:
+        return json.loads(RUN_FILE.read_text())
+    except json.JSONDecodeError as error:
+        die(f"corrupt .run: {error}")
+
+
+def save_run(data: dict) -> None:
+    RUN_FILE.write_text(json.dumps(data, indent=2) + "\n")
+
+
+def binary_path(run: dict | None = None) -> pathlib.Path:
+    override = os.environ.get("TSK_BIN")
+    if override:
+        return pathlib.Path(override)
+    if run and run.get("binary"):
+        return pathlib.Path(run["binary"])
+    return DEFAULT_BINARY
+
+
+def strip_ansi(data: bytes) -> str:
+    cleaned = CSI_RE.sub(b"", data)
+    cleaned = cleaned.replace(b"\r", b"")
+    return cleaned.decode("utf-8", errors="replace")
+
+
+def ensure_dirs(path: pathlib.Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+
+
+def write_walkthrough_dismissed(config_dir: pathlib.Path) -> None:
+    ensure_dirs(config_dir)
+    (config_dir / "walkthrough.json").write_text('{"dismissed":true}\n')
+
+
+def cmd_init(args: argparse.Namespace) -> int:
+    run_id = args.run_id or time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:8]
+    scratch = pathlib.Path(tempfile.mkdtemp(prefix=f"tsk-verify-{run_id}-"))
+    state_dir = scratch / "state"
+    config_dir = scratch / "config"
+    cwd = scratch / "cwd"
+    evidence_dir = EVIDENCE_ROOT / run_id
+    for path in (state_dir, config_dir, cwd, evidence_dir):
+        ensure_dirs(path)
+    write_walkthrough_dismissed(config_dir)
+    binary = binary_path()
+    if not binary.is_file():
+        die(f"missing binary {binary} · cargo build --release from repo root")
+    data = {
+        "run_id": run_id,
+        "scratch": str(scratch),
+        "state_dir": str(state_dir),
+        "config_dir": str(config_dir),
+        "cwd": str(cwd),
+        "evidence_dir": str(evidence_dir),
+        "binary": str(binary.resolve()),
+        "board_pid": None,
+        "board_master_fd": None,
+        "board_width": 80,
+        "board_height": 24,
+        "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+    save_run(data)
+    print(json.dumps(data, indent=2))
+    return 0
+
+
+def cmd_doctor(_: argparse.Namespace) -> int:
+    run = load_run()
+    binary = binary_path(run)
+    problems: list[str] = []
+    if not binary.is_file():
+        problems.append(f"binary missing: {binary}")
+    for key in ("state_dir", "config_dir", "cwd", "evidence_dir"):
+        path = pathlib.Path(run[key])
+        if not path.is_dir():
+            problems.append(f"{key} missing: {path}")
+        if path.is_symlink():
+            problems.append(f"{key} is a symlink (tsk refuses): {path}")
+    home_tsk = pathlib.Path.home() / ".tsk"
+    if pathlib.Path(run["state_dir"]).resolve() == home_tsk.resolve():
+        problems.append("state_dir resolves to ~/.tsk · refuse")
+    if not (pathlib.Path(run["config_dir"]) / "walkthrough.json").is_file():
+        problems.append("walkthrough.json missing under config_dir")
+    pid = run.get("board_pid")
+    if pid:
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            problems.append(f"board_pid {pid} is not running")
+            run["board_pid"] = None
+            save_run(run)
+    report = {
+        "ok": not problems,
+        "run_id": run["run_id"],
+        "binary": str(binary),
+        "state_dir": run["state_dir"],
+        "config_dir": run["config_dir"],
+        "cwd": run["cwd"],
+        "evidence_dir": run["evidence_dir"],
+        "board_pid": run.get("board_pid"),
+        "problems": problems,
+    }
+    print(json.dumps(report, indent=2))
+    return 0 if not problems else 2
+
+
+def cli_env(run: dict) -> dict[str, str]:
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("HERDR_", "TSK_"))}
+    env.update(
+        {
+            "TSK_STATE_DIR": run["state_dir"],
+            "TSK_CONFIG_DIR": run["config_dir"],
+            "TSK_NO_UPDATE_CHECK": "1",
+            "TERM": "xterm-256color",
+            "HOME": run["scratch"],
+        }
+    )
+    return env
+
+
+def inject_state_dir(argv: list[str], state_dir: str) -> list[str]:
+    if any(arg == "--state-dir" or arg.startswith("--state-dir=") for arg in argv):
+        return argv
+    if not argv:
+        return argv
+    head, *rest = argv
+    if head in {
+        "add",
+        "list",
+        "status",
+        "edit",
+        "steps",
+        "trash",
+        "archive",
+        "unarchive",
+        "project",
+    }:
+        return [head, f"--state-dir={state_dir}", *rest]
+    return argv
+
+
+def cmd_cli(args: argparse.Namespace) -> int:
+    run = load_run()
+    binary = binary_path(run)
+    argv = inject_state_dir(list(args.argv), run["state_dir"])
+    completed = subprocess.run(
+        [str(binary), *argv],
+        cwd=run["cwd"],
+        env=cli_env(run),
+        text=True,
+        capture_output=True,
+    )
+    sys.stdout.write(completed.stdout)
+    sys.stderr.write(completed.stderr)
+    artifact = {
+        "command": [str(binary), *argv],
+        "cwd": run["cwd"],
+        "exit_code": completed.returncode,
+        "stdout": completed.stdout,
+        "stderr": completed.stderr,
+    }
+    stamp = f"{time.strftime('%H%M%S')}-{time.time_ns() % 1_000_000:06d}"
+    path = pathlib.Path(run["evidence_dir"]) / f"cli-{stamp}.json"
+    path.write_text(json.dumps(artifact, indent=2) + "\n")
+    print(f"evidence: {path}", file=sys.stderr)
+    return completed.returncode
+
+
+def board_socket_path(run: dict) -> pathlib.Path:
+    return pathlib.Path(run["scratch"]) / "board.sock"
+
+
+def cmd_board_start(args: argparse.Namespace) -> int:
+    run = load_run()
+    if run.get("board_pid"):
+        die(f"board already running as pid {run['board_pid']}")
+    binary = binary_path(run)
+    width = args.width
+    height = args.height
+    master, slave = pty.openpty()
+    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", height, width, 0, 0))
+    child = subprocess.Popen(
+        [str(binary)],
+        stdin=slave,
+        stdout=slave,
+        stderr=slave,
+        cwd=run["cwd"],
+        env=cli_env(run),
+        start_new_session=True,
+        preexec_fn=lambda: fcntl.ioctl(0, termios.TIOCSCTTY, 0),
+    )
+    os.close(slave)
+    run["board_pid"] = child.pid
+    run["board_width"] = width
+    run["board_height"] = height
+    run["board_master_fd"] = None
+    pid_file = pathlib.Path(run["scratch"]) / "board.pid"
+    master_file = pathlib.Path(run["scratch"]) / "board.master"
+    pid_file.write_text(str(child.pid))
+    # Keep the master fd open in this process only for the start call's wait;
+    # subsequent commands reopen via /dev/fd is impossible across processes.
+    # Persist master path by dup'ing into a stable file descriptor file is not portable.
+    # Instead write the master fd number into the run file and keep a long-lived daemon.
+    # Simpler: spawn a tiny board-proxy that owns the PTY for the run lifetime.
+    proxy = pathlib.Path(run["scratch"]) / "board-proxy.py"
+    proxy.write_text(
+        """#!/usr/bin/env python3
+import fcntl, json, os, pathlib, select, struct, sys, termios, time
+run_path = pathlib.Path(sys.argv[1])
+master = int(sys.argv[2])
+meta = pathlib.Path(sys.argv[3])
+ctl = pathlib.Path(sys.argv[4])
+out = pathlib.Path(sys.argv[5])
+ctl.mkdir(parents=True, exist_ok=True)
+out.mkdir(parents=True, exist_ok=True)
+buf = bytearray()
+seq = 0
+meta.write_text(json.dumps({"master": master, "pid": os.getpid()}) + "\\n")
+while True:
+    cmds = sorted(ctl.glob("cmd-*.json"))
+    for cmd_path in cmds:
+        try:
+            cmd = json.loads(cmd_path.read_text())
+        except Exception:
+            cmd_path.unlink(missing_ok=True)
+            continue
+        kind = cmd.get("kind")
+        if kind == "write":
+            os.write(master, bytes(cmd["data"]))
+        elif kind == "resize":
+            fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", cmd["height"], cmd["width"], 0, 0))
+        elif kind == "quit":
+            cmd_path.unlink(missing_ok=True)
+            os.close(master)
+            raise SystemExit(0)
+        cmd_path.unlink(missing_ok=True)
+        (out / f"ack-{cmd_path.name}").write_text("ok\\n")
+    ready, _, _ = select.select([master], [], [], 0.05)
+    if ready:
+        try:
+            chunk = os.read(master, 65536)
+        except OSError:
+            break
+        if not chunk:
+            break
+        buf.extend(chunk)
+        seq += 1
+        (out / "screen.raw").write_bytes(bytes(buf))
+        (out / "screen.seq").write_text(str(seq))
+"""
+    )
+    # Hand master to proxy child; close in parent after spawn.
+    proxy_log = pathlib.Path(run["scratch"]) / "board-proxy.log"
+    ctl_dir = pathlib.Path(run["scratch"]) / "board-ctl"
+    out_dir = pathlib.Path(run["scratch"]) / "board-out"
+    meta_path = pathlib.Path(run["scratch"]) / "board-proxy.json"
+    ensure_dirs(ctl_dir)
+    ensure_dirs(out_dir)
+    proxy_proc = subprocess.Popen(
+        [sys.executable, str(proxy), str(RUN_FILE), str(master), str(meta_path), str(ctl_dir), str(out_dir)],
+        pass_fds=(master,),
+        stdout=proxy_log.open("w"),
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+    )
+    os.close(master)
+    run["board_proxy_pid"] = proxy_proc.pid
+    run["board_ctl"] = str(ctl_dir)
+    run["board_out"] = str(out_dir)
+    save_run(run)
+    # Wait until the first paint mentions desk chrome or empty-state copy.
+    deadline = time.monotonic() + 8
+    raw_path = out_dir / "screen.raw"
+    while time.monotonic() < deadline:
+        if raw_path.is_file():
+            text = decode_screen(raw_path.read_bytes(), width, height)
+            if "desk" in text or "NEEDS YOU" in text or "no open tasks" in text or "ON DECK" in text:
+                break
+        time.sleep(0.05)
+    else:
+        die("board did not paint within 8s · check board-proxy.log under scratch")
+    print(
+        json.dumps(
+            {
+                "board_pid": child.pid,
+                "board_proxy_pid": proxy_proc.pid,
+                "width": width,
+                "height": height,
+            },
+            indent=2,
+        )
+    )
+    return 0
+
+
+def board_send(run: dict, payload: dict, timeout: float = 2.0, *, required: bool = True) -> bool:
+    ctl = pathlib.Path(run["board_ctl"])
+    out = pathlib.Path(run["board_out"])
+    name = f"cmd-{time.time_ns()}.json"
+    path = ctl / name
+    path.write_text(json.dumps(payload))
+    ack = out / f"ack-{name}"
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if ack.is_file():
+            ack.unlink(missing_ok=True)
+            return True
+        time.sleep(0.01)
+    if required:
+        die(f"board proxy did not ack {name}")
+    path.unlink(missing_ok=True)
+    return False
+
+
+def named_key(name: str) -> bytes:
+    table = {
+        "enter": b"\r",
+        "esc": b"\x1b",
+        "tab": b"\t",
+        "up": b"\x1b[A",
+        "down": b"\x1b[B",
+        "right": b"\x1b[C",
+        "left": b"\x1b[D",
+        "ctrl-s": b"\x13",
+        "ctrl-d": b"\x04",
+        "ctrl-o": b"\x0f",
+        "ctrl-b": b"\x02",
+        "ctrl-r": b"\x12",
+        "ctrl-e": b"\x05",
+        "ctrl-n": b"\x0e",
+        "ctrl-x": b"\x18",
+        "ctrl-u": b"\x15",
+        "ctrl-f": b"\x06",
+        "ctrl-q": b"\x11",
+        "ctrl-c": b"\x03",
+        "shift-enter": b"\x1b[13;2u",  # may not land; prefer literal \r with shift via text APIs
+    }
+    if name in table:
+        return table[name]
+    if name.startswith("text:"):
+        return name[len("text:") :].encode()
+    if len(name) == 1:
+        return name.encode()
+    die(
+        f"unknown key {name!r} · use named keys or text:<string> "
+        "(quote the token when the string has spaces: 'text:Verify quick add')"
+    )
+
+
+def cmd_board_keys(args: argparse.Namespace) -> int:
+    run = load_run()
+    if not run.get("board_pid"):
+        die("board not running · control-tsk board start")
+    for token in args.keys:
+        board_send(run, {"kind": "write", "data": list(named_key(token))})
+        time.sleep(0.05)
+    return 0
+
+
+def cmd_board_dump(args: argparse.Namespace) -> int:
+    run = load_run()
+    raw_path = pathlib.Path(run["board_out"]) / "screen.raw"
+    if not raw_path.is_file():
+        die("no screen capture yet")
+    raw = raw_path.read_bytes()
+    text = decode_screen(raw, int(run.get("board_width", 80)), int(run.get("board_height", 24)))
+    dest = pathlib.Path(args.path) if args.path else pathlib.Path(run["evidence_dir"]) / "board-screen.txt"
+    ensure_dirs(dest.parent)
+    dest.write_text(text + "\n")
+    ansi_dest = dest.with_suffix(".ansi")
+    ansi_dest.write_bytes(raw)
+    print(text)
+    print(f"evidence: {dest}", file=sys.stderr)
+    print(f"evidence: {ansi_dest}", file=sys.stderr)
+    return 0
+
+
+def cmd_board_wait(args: argparse.Namespace) -> int:
+    run = load_run()
+    raw_path = pathlib.Path(run["board_out"]) / "screen.raw"
+    deadline = time.monotonic() + args.timeout
+    needle = args.substring
+    width = int(run.get("board_width", 80))
+    height = int(run.get("board_height", 24))
+    while time.monotonic() < deadline:
+        if raw_path.is_file() and needle in decode_screen(raw_path.read_bytes(), width, height):
+            print(json.dumps({"found": needle, "ok": True}))
+            return 0
+        time.sleep(0.05)
+    die(f"timed out waiting for {needle!r}")
+
+
+def cmd_board_quit(_: argparse.Namespace) -> int:
+    run = load_run()
+    if not run.get("board_pid") and not run.get("board_proxy_pid"):
+        print(json.dumps({"ok": True, "note": "board not running"}))
+        return 0
+    board_send(run, {"kind": "write", "data": list(named_key("ctrl-q"))}, timeout=1.0, required=False)
+    time.sleep(0.2)
+    for key in ("board_pid", "board_proxy_pid"):
+        pid = run.get(key)
+        if not pid:
+            continue
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError:
+            pass
+    deadline = time.monotonic() + 3
+    while time.monotonic() < deadline:
+        alive = False
+        for key in ("board_pid", "board_proxy_pid"):
+            pid = run.get(key)
+            if not pid:
+                continue
+            try:
+                os.kill(pid, 0)
+                alive = True
+            except OSError:
+                run[key] = None
+        if not alive:
+            break
+        time.sleep(0.05)
+    for key in ("board_pid", "board_proxy_pid"):
+        pid = run.get(key)
+        if not pid:
+            continue
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except OSError:
+            pass
+        run[key] = None
+    board_send(run, {"kind": "quit"}, timeout=0.5, required=False)
+    save_run(run)
+    print(json.dumps({"ok": True}))
+    return 0
+
+
+def cmd_store_show(_: argparse.Namespace) -> int:
+    run = load_run()
+    path = pathlib.Path(run["state_dir"]) / "tsk.json"
+    if not path.is_file():
+        print(json.dumps({"exists": False, "path": str(path)}))
+        return 0
+    print(path.read_text())
+    return 0
+
+
+def cmd_cleanup(args: argparse.Namespace) -> int:
+    if RUN_FILE.is_file():
+        run = load_run()
+        if run.get("board_pid") or run.get("board_proxy_pid"):
+            cmd_board_quit(argparse.Namespace())
+            run = load_run()
+        scratch = pathlib.Path(run["scratch"])
+        evidence = pathlib.Path(run["evidence_dir"])
+        if scratch.is_dir() and not args.keep_scratch:
+            shutil.rmtree(scratch, ignore_errors=True)
+        RUN_FILE.unlink(missing_ok=True)
+        print(
+            json.dumps(
+                {
+                    "ok": True,
+                    "removed_scratch": str(scratch),
+                    "evidence_kept": str(evidence),
+                    "evidence_exists": evidence.is_dir(),
+                },
+                indent=2,
+            )
+        )
+    else:
+        print(json.dumps({"ok": True, "note": "no active run"}))
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="control-tsk", description=__doc__)
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    init_p = sub.add_parser("init", help="allocate an isolated run")
+    init_p.add_argument("--run-id")
+    init_p.set_defaults(func=cmd_init)
+
+    doctor_p = sub.add_parser("doctor", help="read-only health check")
+    doctor_p.set_defaults(func=cmd_doctor)
+
+    cli_p = sub.add_parser("cli", help="run tsk CLI against the run store")
+    cli_p.add_argument("argv", nargs=argparse.REMAINDER)
+    cli_p.set_defaults(func=cmd_cli)
+
+    board = sub.add_parser("board", help="drive the TUI board in a PTY")
+    board_sub = board.add_subparsers(dest="board_command", required=True)
+
+    start_p = board_sub.add_parser("start")
+    start_p.add_argument("--width", type=int, default=80)
+    start_p.add_argument("--height", type=int, default=24)
+    start_p.set_defaults(func=cmd_board_start)
+
+    keys_p = board_sub.add_parser("keys")
+    keys_p.add_argument("keys", nargs="+")
+    keys_p.set_defaults(func=cmd_board_keys)
+
+    dump_p = board_sub.add_parser("dump")
+    dump_p.add_argument("--path")
+    dump_p.set_defaults(func=cmd_board_dump)
+
+    wait_p = board_sub.add_parser("wait")
+    wait_p.add_argument("substring")
+    wait_p.add_argument("--timeout", type=float, default=5.0)
+    wait_p.set_defaults(func=cmd_board_wait)
+
+    quit_p = board_sub.add_parser("quit")
+    quit_p.set_defaults(func=cmd_board_quit)
+
+    store_p = sub.add_parser("store", help="print tsk.json for the run")
+    store_p.set_defaults(func=cmd_store_show)
+
+    cleanup_p = sub.add_parser("cleanup", help="stop board and remove scratch; keep evidence")
+    cleanup_p.add_argument("--keep-scratch", action="store_true")
+    cleanup_p.set_defaults(func=cmd_cleanup)
+
+    return parser
+
+
+def main() -> int:
+    parser = build_parser()
+    args = parser.parse_args()
+    if args.command == "cli":
+        # argparse.REMAINDER keeps a leading "--" when callers pass `cli -- …`
+        if args.argv and args.argv[0] == "--":
+            args.argv = args.argv[1:]
+        if not args.argv:
+            die("usage: control-tsk cli -- <tsk args…>")
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

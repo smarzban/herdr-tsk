@@ -9,7 +9,7 @@ Requirements:
 - Rust 1.96.0, pinned by `rust-toolchain.toml`
 - Linux or macOS
 - Node.js 22 when changing `site/`
-- herdr 0.7.5 or newer for host-integration smoke tests
+- herdr 0.7.5 or newer to link the checkout as a plugin; 0.9.0 or newer to smoke `tsk setup herdr`
 
 ```bash
 git clone https://github.com/smarzban/herdr-tsk.git

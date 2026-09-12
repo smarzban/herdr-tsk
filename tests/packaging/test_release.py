@@ -149,12 +149,41 @@ class ReleaseTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             release.package("v1.2.3", release.TARGETS[1], self.binary, self.out)
 
-    def test_version_must_match_manifest(self):
-        manifest = self.root / "Cargo.toml"
-        manifest.write_text('[package]\nversion = "1.2.3"\n')
-        release.check_version("v1.2.3", manifest)
+    def write_versions(self, cargo="1.2.3", lock="1.2.3", plugin="1.2.3", site="1.2.3"):
+        (self.root / "Cargo.toml").write_text(f'[package]\nname = "tsk-tui"\nversion = "{cargo}"\n')
+        (self.root / "Cargo.lock").write_text(
+            f'[[package]]\nname = "serde"\nversion = "9.9.9"\n\n[[package]]\nname = "tsk-tui"\nversion = "{lock}"\n'
+        )
+        (self.root / "herdr-plugin.toml").write_text(f'id = "herdr-tsk"\nversion = "{plugin}"\n')
+        (self.root / "site" / "src").mkdir(parents=True, exist_ok=True)
+        (self.root / "site" / "src" / "version.mjs").write_text(f"export const VERSION = '{site}';\n")
+
+    def test_version_must_match_every_version_site(self):
+        self.write_versions()
+        release.check_version("v1.2.3", self.root)
         with self.assertRaises(ValueError):
-            release.check_version("v1.2.4", manifest)
+            release.check_version("v1.2.4", self.root)
+        sites = {
+            "cargo": "Cargo.toml",
+            "lock": "Cargo.lock",
+            "plugin": "herdr-plugin.toml",
+            "site": "site/src/version.mjs",
+        }
+        for field, label in sites.items():
+            with self.subTest(field=field):
+                self.write_versions(**{field: "1.2.4"})
+                with self.assertRaises(ValueError) as caught:
+                    release.check_version("v1.2.3", self.root)
+                self.assertEqual(str(caught.exception), f"tag v1.2.3 does not match: {label} has 1.2.4")
+
+    def test_version_check_names_missing_lock_entry(self):
+        self.write_versions()
+        (self.root / "Cargo.lock").write_text('[[package]]\nname = "serde"\nversion = "9.9.9"\n')
+        with self.assertRaisesRegex(ValueError, "Cargo.lock"):
+            release.check_version("v1.2.3", self.root)
+
+    def test_repo_version_sites_agree(self):
+        release.check_version("v" + release.read_versions(release.ROOT)["Cargo.toml"], release.ROOT)
 
 
 if __name__ == "__main__":

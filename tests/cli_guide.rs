@@ -22,5 +22,8 @@ fn guide_prints_skill_minus_frontmatter_and_exits_0() {
         !output.stdout.starts_with("---"),
         "frontmatter must be stripped"
     );
-    assert!(output.stdout.starts_with("# tsk CLI"));
+    assert!(
+        output.stdout.starts_with("# "),
+        "body must open with the H1"
+    );
 }

@@ -945,11 +945,23 @@ mod tests {
         }
     }
 
+    /// `install` only rewrites an installed skill when the frontmatter version differs, so
+    /// an edit that leaves the version alone never reaches users. This pins version and
+    /// content together: change one, change the other.
     #[test]
     fn embedded_skill_declares_semver() {
         let version = embedded_skill_version();
-        assert_eq!(version, "1.0.0");
-        assert_eq!(frontmatter_version(SKILL_MD).as_deref(), Some("1.0.0"));
+        assert_eq!(version, "1.1.0");
+        assert_eq!(frontmatter_version(SKILL_MD).as_deref(), Some("1.1.0"));
+        let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+        for byte in SKILL_MD.bytes() {
+            hash ^= u64::from(byte);
+            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        assert_eq!(
+            hash, 0xa28d_c32a_e7a1_51fa,
+            "skills/tsk-cli/SKILL.md changed: bump `version:` in its frontmatter and update both pins here"
+        );
     }
 
     #[test]
