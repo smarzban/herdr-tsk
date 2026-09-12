@@ -4,6 +4,10 @@ One `## vX.Y.Z` section per release, newest first, with `## Unreleased
 
 ## v0.8.0
 
+### Breaking
+
+- Task store format 3, migrated automatically on first open. Rolling back to 0.7.x afterwards refuses the file; restore the `tsk.json.v2` backup written beside it if you need to.
+
 ### Added
 
 - Starter tour on first board open: four desk tasks (`N1` to `N4`) that teach the tabs, sections, status keys, the task page, and the CLI, each cleared for good with `ctrl+d`, `ctrl+f`, or `ctrl+x`. Agents never see them: `tsk list` hides `N` rows.
@@ -16,7 +20,6 @@ One `## vX.Y.Z` section per release, newest first, with `## Unreleased
 ### Changed
 
 - The agent skill (`tsk guide`, `tsk setup <agent>`) is rewritten around a quick-reference table and rules of engagement: agents hand work back with `review` and leave `done` to you. Skill version 1.1.0; rerun `tsk setup` to update installed copies.
-- Task store format 3. Older binaries refuse the new file; the first save writes `tsk.json.v2` beside it.
 
 ### Fixed
 
