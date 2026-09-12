@@ -163,11 +163,18 @@ class ReleaseTests(unittest.TestCase):
         release.check_version("v1.2.3", self.root)
         with self.assertRaises(ValueError):
             release.check_version("v1.2.4", self.root)
-        for field in ["cargo", "lock", "plugin", "site"]:
+        sites = {
+            "cargo": "Cargo.toml",
+            "lock": "Cargo.lock",
+            "plugin": "herdr-plugin.toml",
+            "site": "site/src/version.mjs",
+        }
+        for field, label in sites.items():
             with self.subTest(field=field):
                 self.write_versions(**{field: "1.2.4"})
-                with self.assertRaisesRegex(ValueError, "1.2.4"):
+                with self.assertRaises(ValueError) as caught:
                     release.check_version("v1.2.3", self.root)
+                self.assertEqual(str(caught.exception), f"tag v1.2.3 does not match: {label} has 1.2.4")
 
     def test_version_check_names_missing_lock_entry(self):
         self.write_versions()

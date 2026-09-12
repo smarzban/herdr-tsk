@@ -14,6 +14,10 @@ the GitHub release notes verbatim.
 - `tsk update` upgrades installer-managed copies; Homebrew copies print `brew update && brew upgrade tsk`.
 - `tsk setup omp` installs the agent skill for the active OMP profile and participates in detected-agent setup.
 
+### Changed
+
+- The agent skill (`tsk guide`, `tsk setup <agent>`) is rewritten around a quick-reference table and rules of engagement: agents hand work back with `review` and leave `done` to you. Skill version 1.1.0; rerun `tsk setup` to update installed copies.
+
 ## v0.7.0
 
 ### Added

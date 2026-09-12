@@ -1,7 +1,7 @@
 ---
 name: tsk-cli
 description: Work the user's tsk task board from the command line. Use when asked to add, update, edit, start, block, finish, archive, or restore a task on the board (or "tsk", "the tsk board", "the desk"), to add or tick steps, or to answer "what's on the board", "what's next", "what's on deck", "what needs me". Always `tsk add|list|status|edit|steps|archive|trash`, never the TUI.
-version: 0.1.0
+version: 1.1.0
 ---
 
 # tsk: the user's task board
@@ -95,7 +95,8 @@ cat plan.json | tsk add
   carry `i` (item index), `id`, `number`, `title`, failed rows carry `i`, `title`, `code`,
   `error`. Scope comes from each item's `project`: item flags (including `--desk`) together
   with `--file` are usage (exit 2). Piped stdin is ignored when item flags are present.
-- Adding into an archived project refuses with `project-archived` (exit 1), nothing persists.
+- Adding into an archived project refuses with `project-archived` (exit 1). A flag add persists
+  nothing; in a plan add the other items still persist, retry only the refused ones.
 
 ## Listing
 

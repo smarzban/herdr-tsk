@@ -149,10 +149,12 @@ Before calling a docs pass done, diff the guide against `src/`: keymaps in
 The web demo uses bare verb keys on purpose (browsers reserve control chords); do not
 "fix" that to match the TUI.
 
-Any edit to `skills/tsk-cli/SKILL.md` bumps its frontmatter `version:` and the pinned value
-in `embedded_skill_declares_semver` (`src/setup_agent.rs`). `tsk setup <agent>` compares that
-version against the installed copy and only rewrites on a difference, so an unbumped edit
-leaves every installed skill silently stale. The skill is also `tsk guide` and
+Any edit to `skills/tsk-cli/SKILL.md` bumps its frontmatter `version:` (never backwards:
+shipped versions are on users' disks) and the two pins in `embedded_skill_declares_semver`
+(`src/setup_agent.rs`): the version string and the FNV-1a content hash, which the test's
+failure message tells you how to refresh. `tsk setup <agent>` compares the version against
+the installed copy and only rewrites on a difference, so an unbumped edit leaves every
+installed skill silently stale. The skill is also `tsk guide` and
 `/docs/agents/`, so it counts as user-visible.
 
 ## Invariants

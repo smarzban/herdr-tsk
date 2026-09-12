@@ -87,7 +87,7 @@ pub const CATALOG: [Guide; 4] = [
                 `tsk list` shows the tasks of the project you are standing in, or your desk outside a repository. Add `--all` for every project or `--json` for output another program can read.\n\
                 \n\
                 **Let an agent work the board**\n\
-                Run `tsk setup` once: it finds the coding agents on your machine (Claude, Pi, Cursor, Codex, and others) and installs the tsk skill for each. `tsk setup claude` targets one. Then ask the agent in plain words. \"Add a task for each failing test.\" \"Mark T7 as review.\" `tsk guide` prints the same instructions if you want to read them yourself.",
+                Run `tsk setup` once: it finds the coding agents on your machine (Claude, Pi, Cursor, Codex, and others) and offers to install the tsk skill for each. `tsk setup claude` targets one. Then ask the agent in plain words. \"Add a task for each failing test.\" \"Mark T7 as review.\" `tsk guide` prints the same instructions if you want to read them yourself.",
         status: HumanStatus::Ready,
         steps: &[
             ("Run tsk add -t \"Try the CLI\" in another terminal", false),
