@@ -4,6 +4,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 const INSTALLER_URL: &str = "https://gettsk.sh/install.sh";
+const CURL_PATH: &str = "/usr/bin/curl";
+const SH_PATH: &str = "/bin/sh";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UpdateOutcome {
@@ -16,29 +18,34 @@ pub enum UpdateOutcome {
 pub fn run() -> Result<UpdateOutcome, String> {
     let executable = std::env::current_exe()
         .map_err(|error| format!("could not locate the running tsk executable: {error}"))?;
-    if is_homebrew_install(&executable, homebrew_formula_prefix().as_deref()) {
+    run_for(&executable, Path::new(CURL_PATH), Path::new(SH_PATH))
+}
+
+fn run_for(executable: &Path, curl: &Path, shell: &Path) -> Result<UpdateOutcome, String> {
+    let executable = normalized(executable);
+    if is_homebrew_install(&executable) {
         return Ok(UpdateOutcome::Homebrew);
     }
-
-    run_installer()?;
+    let install_dir = executable
+        .parent()
+        .ok_or_else(|| "the running tsk executable has no installation directory".to_string())?;
+    run_installer(install_dir, curl, shell)?;
     Ok(UpdateOutcome::Installed)
 }
 
-fn homebrew_formula_prefix() -> Option<PathBuf> {
-    let output = Command::new("brew")
-        .args(["--prefix", "tsk"])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let prefix = String::from_utf8(output.stdout).ok()?;
-    let prefix = PathBuf::from(prefix.trim());
-    (!prefix.as_os_str().is_empty()).then_some(prefix)
+fn is_homebrew_install(executable: &Path) -> bool {
+    let executable = normalized(executable);
+    executable.ancestors().any(|path| {
+        path.file_name().is_some_and(|name| name == "tsk")
+            && path
+                .parent()
+                .and_then(Path::file_name)
+                .is_some_and(|name| name == "Cellar")
+    })
 }
 
-fn run_installer() -> Result<(), String> {
-    let mut download = Command::new("curl")
+fn run_installer(install_dir: &Path, curl: &Path, shell: &Path) -> Result<(), String> {
+    let mut download = Command::new(curl)
         .args([
             "--proto",
             "=https",
@@ -55,7 +62,11 @@ fn run_installer() -> Result<(), String> {
         .stdout
         .take()
         .expect("curl stdout is piped before it starts");
-    let mut installer = match Command::new("sh").stdin(Stdio::from(stdout)).spawn() {
+    let mut installer = match Command::new(shell)
+        .env("TSK_INSTALL_DIR", install_dir)
+        .stdin(Stdio::from(stdout))
+        .spawn()
+    {
         Ok(installer) => installer,
         Err(error) => {
             let _ = download.kill();
@@ -89,37 +100,90 @@ fn exit_label(code: Option<i32>) -> String {
     code.map_or_else(|| "signal".to_string(), |code| code.to_string())
 }
 
-fn is_homebrew_install(executable: &Path, formula_prefix: Option<&Path>) -> bool {
-    let Some(prefix) = formula_prefix else {
-        return false;
-    };
-    normalized(executable).starts_with(normalized(prefix))
-}
-
 fn normalized(path: &Path) -> PathBuf {
     path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
 }
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicU64, Ordering};
 
-    use super::is_homebrew_install;
+    use super::{is_homebrew_install, run_for, UpdateOutcome};
+
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+
+    fn temp_dir(label: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "tsk-update-{label}-{}-{}",
+            std::process::id(),
+            SEQ.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&dir).expect("create temporary directory");
+        dir
+    }
+
+    fn command(dir: &Path, name: &str, source: &str) -> PathBuf {
+        let path = dir.join(name);
+        fs::write(&path, source).expect("write test command");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o755))
+                .expect("make test command executable");
+        }
+        path
+    }
 
     #[test]
-    fn homebrew_install_is_identified_from_its_formula_prefix() {
-        let prefix = Path::new("/opt/homebrew/Cellar/tsk/0.7.0");
-        assert!(is_homebrew_install(
-            Path::new("/opt/homebrew/Cellar/tsk/0.7.0/bin/tsk"),
-            Some(prefix)
-        ));
-        assert!(!is_homebrew_install(
-            Path::new("/Users/alex/.local/bin/tsk"),
-            Some(prefix)
-        ));
-        assert!(!is_homebrew_install(
-            Path::new("/Users/alex/.local/bin/tsk"),
-            None
-        ));
+    fn homebrew_install_is_identified_without_brew_on_path() {
+        assert!(is_homebrew_install(Path::new(
+            "/opt/homebrew/Cellar/tsk/0.7.0/bin/tsk"
+        )));
+        assert!(is_homebrew_install(Path::new(
+            "/home/linuxbrew/.linuxbrew/Cellar/tsk/0.7.0/bin/tsk"
+        )));
+        assert!(!is_homebrew_install(Path::new(
+            "/Users/alex/.local/bin/tsk"
+        )));
+    }
+
+    #[test]
+    fn installer_uses_explicit_tools_and_preserves_the_running_install_directory() {
+        let dir = temp_dir("installer");
+        let log = dir.join("installer-input");
+        let installed_to = dir.join("installer-destination");
+        let curl = command(&dir, "curl", "#!/bin/sh\nprintf installer-payload\n");
+        let shell = command(
+            &dir,
+            "sh",
+            &format!(
+                "#!/bin/sh\ncat > '{}'\nprintf '%s' \"$TSK_INSTALL_DIR\" > '{}'\n",
+                log.display(),
+                installed_to.display()
+            ),
+        );
+        let executable = dir.join("custom/bin/tsk");
+        fs::create_dir_all(executable.parent().expect("executable parent"))
+            .expect("create custom install directory");
+
+        assert_eq!(
+            run_for(&executable, &curl, &shell),
+            Ok(UpdateOutcome::Installed)
+        );
+        assert_eq!(
+            fs::read_to_string(&log).expect("installer received download"),
+            "installer-payload"
+        );
+        assert_eq!(
+            fs::read_to_string(&installed_to).expect("installer destination"),
+            executable
+                .parent()
+                .expect("executable parent")
+                .display()
+                .to_string()
+        );
+        let _ = fs::remove_dir_all(dir);
     }
 }

@@ -61,14 +61,17 @@ fn twenty_four_hour_freshness_and_future_timestamp_are_eligible() {
     assert_eq!(
         fresh,
         CheckPlan {
-            notice: Some("v9.0.0 available".into()),
+            notice: Some("v9.0.0 available, run tsk update".into()),
             should_fetch: false,
         }
     );
     seed_cache(&dir, now - STALE_AFTER_SECS, "v9.0.0");
     let stale = plan(&dir, "0.6.0", now);
     assert!(stale.should_fetch);
-    assert_eq!(stale.notice.as_deref(), Some("v9.0.0 available"));
+    assert_eq!(
+        stale.notice.as_deref(),
+        Some("v9.0.0 available, run tsk update")
+    );
     seed_cache(&dir, now + 3_600, "v9.0.0");
     let future = plan(&dir, "0.6.0", now);
     assert!(!future.should_fetch, "future last_check stays eligible");
@@ -110,7 +113,10 @@ fn starting_a_check_stamps_last_check_and_keeps_the_cached_tag() {
     );
     let planned = plan(&dir, "0.6.0", 99);
     assert!(!planned.should_fetch);
-    assert_eq!(planned.notice.as_deref(), Some("v9.0.0 available"));
+    assert_eq!(
+        planned.notice.as_deref(),
+        Some("v9.0.0 available, run tsk update")
+    );
     let _ = fs::remove_dir_all(dir);
 }
 
@@ -251,7 +257,10 @@ fn load_board_uses_seeded_update_json_in_state_dir() {
         Some(value) => std::env::set_var("TSK_STATE_DIR", value),
         None => std::env::remove_var("TSK_STATE_DIR"),
     }
-    assert_eq!(model.update_notice(), Some("v9.9.9 available"));
+    assert_eq!(
+        model.update_notice(),
+        Some("v9.9.9 available, run tsk update")
+    );
     let _ = fs::remove_dir_all(dir);
 }
 

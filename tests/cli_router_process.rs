@@ -93,40 +93,28 @@ fn update_help_explains_installer_and_homebrew_behavior_without_updating() {
 }
 
 #[test]
-fn update_directs_homebrew_installations_to_brew_without_downloading() {
+fn update_directs_a_homebrew_binary_to_brew_without_a_path_lookup() {
     let dir = temp_state_dir("update-homebrew");
-    let brew = dir.join("brew");
-    std::fs::write(
-        &brew,
-        "#!/bin/sh\nprintf '%s\\n' \"$TSK_TEST_BREW_PREFIX\"\n",
-    )
-    .expect("write fake brew");
+    let executable = dir.join("Cellar/tsk/0.7.0/bin/tsk");
+    std::fs::create_dir_all(executable.parent().expect("Homebrew binary parent"))
+        .expect("create Homebrew test directory");
+    std::fs::copy(binary(), &executable).expect("copy tsk into Homebrew Cellar");
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&brew, std::fs::Permissions::from_mode(0o755))
-            .expect("make fake brew executable");
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755))
+            .expect("make copied binary executable");
     }
-    let executable = PathBuf::from(binary())
-        .canonicalize()
-        .expect("canonical tsk binary");
-    let prefix = executable.parent().expect("tsk binary parent");
-    let path = format!(
-        "{}:{}",
-        dir.display(),
-        std::env::var("PATH").expect("PATH is set")
-    );
     let output = wait_with_output_before_deadline(
         Command::new(&executable)
             .arg("update")
-            .env("PATH", path)
-            .env("TSK_TEST_BREW_PREFIX", prefix)
+            .env_clear()
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .expect("spawn homebrew update"),
-        "homebrew update guidance",
+            .expect("spawn Homebrew update"),
+        "Homebrew update guidance",
     );
 
     assert_eq!(output.status.code(), Some(0));
@@ -134,51 +122,6 @@ fn update_directs_homebrew_installations_to_brew_without_downloading() {
     assert_eq!(
         String::from_utf8(output.stdout).expect("UTF-8 guidance"),
         "tsk was installed with Homebrew. Run:\n  brew update && brew upgrade tsk\n"
-    );
-    let _ = std::fs::remove_dir_all(dir);
-}
-
-#[test]
-fn update_runs_the_installer_for_a_non_homebrew_copy() {
-    let dir = temp_state_dir("update-installer");
-    let log = dir.join("installer-input");
-    for (name, source) in [
-        ("brew", "#!/bin/sh\nexit 1\n"),
-        ("curl", "#!/bin/sh\nprintf installer-payload\n"),
-        ("sh", "#!/bin/sh\ncat > \"$TSK_TEST_INSTALLER_LOG\"\n"),
-    ] {
-        let path = dir.join(name);
-        std::fs::write(&path, source).expect("write fake command");
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
-                .expect("make fake command executable");
-        }
-    }
-    let path = format!(
-        "{}:{}",
-        dir.display(),
-        std::env::var("PATH").expect("PATH is set")
-    );
-    let output = wait_with_output_before_deadline(
-        Command::new(binary())
-            .arg("update")
-            .env("PATH", path)
-            .env("TSK_TEST_INSTALLER_LOG", &log)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .expect("spawn installer update"),
-        "installer update",
-    );
-
-    assert_eq!(output.status.code(), Some(0));
-    assert!(output.stderr.is_empty());
-    assert_eq!(
-        std::fs::read_to_string(&log).expect("installer ran"),
-        "installer-payload"
     );
     let _ = std::fs::remove_dir_all(dir);
 }
