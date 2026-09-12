@@ -30,6 +30,8 @@ root = pathlib.Path(os.environ["SETUP_FIXTURE"])
 args = sys.argv[1:]
 with (root / "calls").open("a") as log: log.write(json.dumps(args) + "\\n")
 registry = root / "registry"
+if args == ["--version"]:
+    print("herdr 0.9.0")
 if args[:2] == ["plugin", "link"]:
     registry.write_text(json.dumps({"result":{"plugins":[{"plugin_id":"herdr-tsk","plugin_root":args[2]}]}}))
 if args[:2] == ["plugin", "list"]:
