@@ -41,7 +41,8 @@ for width in (40, 78, 109, 110):
         # Keep this task-only fixture stable as guide and announcement catalogs grow.
         guide_ids = re.findall(r'catalog_id: "([^"]+)"', (repo / 'src/guides.rs').read_text())
         announcements = tomllib.loads((repo / 'src/announcements/catalog.toml').read_text())
-        newest_announcement = max(entry['id'] for entry in announcements['announcement'])
+        # A comment-only catalog means nothing to announce; the watermark stays at 0.
+        newest_announcement = max((entry['id'] for entry in announcements.get('announcement', [])), default=0)
         (state / 'delivery.json').write_text(json.dumps({
             'guides': guide_ids,
             'announcement_watermark': newest_announcement,
