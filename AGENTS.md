@@ -71,26 +71,18 @@ same PR, never leave them apart.
 - Test: `cargo test` (plain, parallel; 1000+ tests, well under a minute warm).
 - Green bar, run once at the end as a single chain, not after every edit:
   `cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test`
-  Warm it takes two to three minutes. Add `cargo build --release` only when you are about
-  to live-smoke or touch packaging; it is a third full compile that proves nothing the
-  tests did not. CI runs the same chain plus the release build and is the gate that
-  matters; the local bar saves a round-trip, so under time pressure push and let CI report.
-- macOS: if the bar runs far past five minutes with idle CPU, it is Gatekeeper scanning
-  each of the 40+ freshly linked test binaries on first launch (10 to 18 s each, zero CPU,
-  `GK performScan` in `log show --predicate 'process == "syspolicyd"'`). Diagnose with
-  `cp target/debug/deps/<any test binary> /tmp/x && time /tmp/x`: seconds means the scan is
-  on, milliseconds means it is off. The fix is the owner's, not the agent's: add the
-  terminal app under System Settings → Privacy & Security → Developer Tools, then relaunch
-  the terminal *and* any long-lived server under it (herdr) so new processes descend from
-  the exempted app. Ad-hoc `codesign` does not help. Report the symptom and stop; do not
-  keep polling a run you know is scan-bound.
-- Before starting the bar, `pgrep -lx 'cargo|rustc'` must print nothing: a second cargo
-  process holds the `target/` lock and every step waits on it. If the list is not empty,
-  wait (do not kill a process you did not start). An editor's rust-analyzer check-on-save
-  is the usual holder; `rust-analyzer.cargo.targetDir = true` gives it its own directory.
-- `cargo test <filter>` still compiles every test binary; the filter is applied at run time.
-  For a targeted run use `--lib` or `--test <name>`. Run anything that may exceed a couple
-  of minutes in the background with a log and poll, never inside a tool timeout.
+  (under a minute warm, about three after a lib change). CI runs the same chain plus the
+  release build and is the gate that matters. Add `cargo build --release` only before a
+  live smoke or packaging work.
+- Before starting it, `pgrep -lx 'cargo|rustc'` must print nothing; a second cargo holds the
+  `target/` lock. Wait, do not kill a process you did not start.
+- For a targeted run use `--lib` or `--test <name>`; `cargo test <filter>` still compiles
+  every test binary.
+- macOS: if the bar takes tens of minutes with idle CPU, Gatekeeper is scanning each freshly
+  linked test binary on first launch (`cp target/debug/deps/<any test binary> /tmp/x && time
+  /tmp/x` shows seconds instead of milliseconds). Fix is the owner's: add the terminal app
+  under System Settings → Privacy & Security → Developer Tools and relaunch it and any
+  server under it (herdr). Report and stop, do not keep polling.
 - Never delete anything under `target/` unasked. Cargo does not garbage-collect old
   artifacts, so the directory grows with every branch. If `du -sh target` is above 10 GB,
   say so and suggest the owner run `rm -rf target/debug/incremental` at session end when
