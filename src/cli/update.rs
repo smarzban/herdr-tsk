@@ -5,6 +5,7 @@ use std::process::{Command, Stdio};
 
 const INSTALLER_URL: &str = "https://gettsk.sh/install.sh";
 const CURL_PATH: &str = "/usr/bin/curl";
+const CURL_ENV: &str = "TSK_UPDATE_CURL";
 const SH_PATH: &str = "/bin/sh";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -18,7 +19,16 @@ pub enum UpdateOutcome {
 pub fn run() -> Result<UpdateOutcome, String> {
     let executable = std::env::current_exe()
         .map_err(|error| format!("could not locate the running tsk executable: {error}"))?;
-    run_for(&executable, Path::new(CURL_PATH), Path::new(SH_PATH))
+    let curl = configured_curl_path(std::env::var_os(CURL_ENV).map(PathBuf::from))?;
+    run_for(&executable, &curl, Path::new(SH_PATH))
+}
+
+fn configured_curl_path(configured: Option<PathBuf>) -> Result<PathBuf, String> {
+    match configured {
+        Some(path) if path.is_absolute() => Ok(path),
+        Some(_) => Err(format!("{CURL_ENV} must be an absolute path")),
+        None => Ok(PathBuf::from(CURL_PATH)),
+    }
 }
 
 fn run_for(executable: &Path, curl: &Path, shell: &Path) -> Result<UpdateOutcome, String> {
@@ -110,7 +120,7 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
 
-    use super::{is_homebrew_install, run_for, UpdateOutcome};
+    use super::{configured_curl_path, is_homebrew_install, run_for, UpdateOutcome};
 
     static SEQ: AtomicU64 = AtomicU64::new(0);
 
@@ -147,6 +157,18 @@ mod tests {
         assert!(!is_homebrew_install(Path::new(
             "/Users/alex/.local/bin/tsk"
         )));
+    }
+
+    #[test]
+    fn nonstandard_curl_path_must_be_explicit_and_absolute() {
+        assert_eq!(
+            configured_curl_path(Some(PathBuf::from("/opt/tools/curl"))),
+            Ok(PathBuf::from("/opt/tools/curl"))
+        );
+        assert_eq!(
+            configured_curl_path(Some(PathBuf::from("curl"))),
+            Err("TSK_UPDATE_CURL must be an absolute path".into())
+        );
     }
 
     #[test]
