@@ -519,6 +519,8 @@ pub struct QueueFrameModel<'a> {
     /// Current board lens painted on the idle status row (for example `desk` or
     /// `tsk · #release`). The projects index keeps its selected path instead.
     pub context: String,
+    /// Whether `context` is a release-update notice rather than a board lens.
+    pub has_update_notice: bool,
     /// Optional status-line notice; replaces the default counts when set.
     pub status_message: Option<&'a str>,
     /// Column offset of the delete-notice `ctrl+u undo` control inside `status_message`, when
@@ -1304,15 +1306,7 @@ fn paint_footer(
                 _ => {}
             }
         } else {
-            let idle = if model.projects_index && !model.context.trim_end().ends_with(" available")
-            {
-                // The index's status row names the selected project's full path; rows
-                // carry only the basename. An update notice already in `context` keeps
-                // this idle slot, same as desk and project boards.
-                index_selected_path(model)
-            } else {
-                model.context.clone()
-            };
+            let idle = idle_context(model);
             let (line, undo_hit) = paint_status_line(
                 model.status_message,
                 model.status_undo_offset,
@@ -4280,6 +4274,16 @@ fn paint_bottom_input_message(
     );
 }
 
+fn idle_context(model: &QueueFrameModel<'_>) -> String {
+    if model.projects_index && !model.has_update_notice {
+        // The index's status row names the selected project's full path; rows carry
+        // only the basename. A release notice owns the idle slot on every surface.
+        index_selected_path(model)
+    } else {
+        model.context.clone()
+    }
+}
+
 /// The projects index's idle status: the selected row's stored path, so same-named
 /// projects stay distinguishable without crowding the rows.
 fn index_selected_path(model: &QueueFrameModel<'_>) -> String {
@@ -4745,6 +4749,7 @@ mod tests {
             projects_query: "",
             summary: None,
             context: " projects".to_string(),
+            has_update_notice: false,
             status_message: None,
             status_undo_offset: None,
             verb_items: &[],
@@ -4800,6 +4805,7 @@ mod tests {
             projects_query: "",
             summary: None,
             context: " desk".to_string(),
+            has_update_notice: false,
             status_message: None,
             status_undo_offset: None,
             verb_items: &[],
@@ -4918,6 +4924,7 @@ mod tests {
             projects_query: "",
             summary: None,
             context: " projects".to_string(),
+            has_update_notice: false,
             status_message: None,
             status_undo_offset: None,
             verb_items: &[],
@@ -4931,11 +4938,20 @@ mod tests {
             rows_dim: false,
         };
         // The status row paints the selected path, escaped.
-        let idle = index_selected_path(&model);
+        let idle = idle_context(&model);
         let (line, _) = paint_status_line(None, None, &idle, 200, None);
         let text = plain(&line);
         assert!(text.contains("\\u{001b}]52;clipboard\\u{0007}"), "{text}");
         assert!(!text.contains('\u{1b}'));
+
+        let mut update_model = model.clone();
+        update_model.context = "v0.8.0 available, run tsk update".into();
+        update_model.has_update_notice = true;
+        assert_eq!(
+            idle_context(&update_model),
+            "v0.8.0 available, run tsk update"
+        );
+
         // Rows never paint the path, and the basename stays clean at every width.
         for width in [40, 60, 79, 100, 120, 200] {
             let text = plain(&paint_project_row(&model, 0, false, width));

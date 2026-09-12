@@ -62,9 +62,11 @@ For standalone use, run `tsk` directly in your terminal.
 
 ## Upgrade
 
+Run `tsk update` to upgrade an installer-managed copy. It immediately downloads and runs the same checksum-verifying installer used for the first install. A Homebrew copy stays under Homebrew's control: `tsk update` prints `brew update && brew upgrade tsk` instead.
+
 | Installed with | Upgrade |
 | --- | --- |
-| Installer | Run the installer again |
+| Installer | `tsk update` |
 | Homebrew | `brew update && brew upgrade tsk` |
 | Source | Pull changes and rebuild |
 

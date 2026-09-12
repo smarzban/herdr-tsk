@@ -16,6 +16,7 @@ pub mod router;
 pub mod status;
 pub mod steps;
 pub mod trash;
+pub mod update;
 
 /// Captured process output, used by the binary and headless integration tests.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -338,6 +338,7 @@ fn fixture_model_on_tab<'a>(
         projects_query: "",
         summary: None,
         context: " desk".to_string(),
+        has_update_notice: false,
         status_message: None,
         status_undo_offset: None,
         verb_items: fixture_verbs(),

@@ -19,6 +19,25 @@ on:
       - "Cargo.toml"
       - "Cargo.lock"
       - ".github/workflows/parity.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "tests/fixtures/demo-parity/**"
+      - "tests/demo_parity.rs"
+      - "site/public/**"
+      - "site/parity/**"
+      - "site/astro.config.mjs"
+      - "site/src/components/**"
+      - "scripts/parity-pty-smoke.py"
+      - "scripts/parity-requirements.txt"
+      - "site/src/pages/index.astro"
+      - "site/src/styles/landing.css"
+      - "site/package*.json"
+      - "site/playwright.config.mjs"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/parity.yml"
 permissions:
   contents: read
 concurrency:

@@ -6,6 +6,7 @@ import json
 import os
 import pathlib
 import pty
+import re
 import select
 import struct
 import subprocess
@@ -13,6 +14,7 @@ import sys
 import tempfile
 import termios
 import time
+import tomllib
 
 import pyte
 
@@ -36,6 +38,14 @@ for width in (40, 78, 109, 110):
             if isinstance(task['scope'], dict):
                 task['scope']['project']['path'] = str(project)
         (state / 'tsk.json').write_text(json.dumps(document))
+        # Keep this task-only fixture stable as guide and announcement catalogs grow.
+        guide_ids = re.findall(r'catalog_id: "([^"]+)"', (repo / 'src/guides.rs').read_text())
+        announcements = tomllib.loads((repo / 'src/announcements/catalog.toml').read_text())
+        newest_announcement = max(entry['id'] for entry in announcements['announcement'])
+        (state / 'delivery.json').write_text(json.dumps({
+            'guides': guide_ids,
+            'announcement_watermark': newest_announcement,
+        }))
         master, slave = pty.openpty()
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', 24, width, 0, 0))
         env = {k: v for k, v in os.environ.items() if not k.startswith(('HERDR_', 'TSK_'))}

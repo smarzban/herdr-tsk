@@ -62,12 +62,68 @@ fn top_level_help_names_subcommands_and_their_help() {
     assert!(stdout.contains("list"));
     assert!(stdout.contains("status"));
     assert!(stdout.contains("edit"));
+    assert!(stdout.contains("update"));
     assert!(stdout.contains("archive") && stdout.contains("unarchive"));
     assert!(stdout.contains("tsk add --help"));
     assert!(stdout.contains("tsk list --help"));
     assert!(stdout.contains("tsk status --help"));
     assert!(stdout.contains("tsk edit --help"));
     assert!(stdout.contains("tsk archive --help"));
+}
+
+#[test]
+fn update_help_explains_installer_and_homebrew_behavior_without_updating() {
+    let output = wait_with_output_before_deadline(
+        Command::new(binary())
+            .args(["update", "--help"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn update help"),
+        "update help",
+    );
+
+    assert_eq!(output.status.code(), Some(0));
+    assert!(output.stderr.is_empty());
+    let stdout = String::from_utf8(output.stdout).expect("UTF-8 help");
+    assert!(stdout.contains("usage: tsk update"));
+    assert!(stdout.contains("Homebrew"));
+    assert!(stdout.contains("installer"));
+}
+
+#[test]
+fn update_directs_a_homebrew_binary_to_brew_without_a_path_lookup() {
+    let dir = temp_state_dir("update-homebrew");
+    let executable = dir.join("Cellar/tsk/0.7.0/bin/tsk");
+    std::fs::create_dir_all(executable.parent().expect("Homebrew binary parent"))
+        .expect("create Homebrew test directory");
+    std::fs::copy(binary(), &executable).expect("copy tsk into Homebrew Cellar");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755))
+            .expect("make copied binary executable");
+    }
+    let output = wait_with_output_before_deadline(
+        Command::new(&executable)
+            .arg("update")
+            .env_clear()
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn Homebrew update"),
+        "Homebrew update guidance",
+    );
+
+    assert_eq!(output.status.code(), Some(0));
+    assert!(output.stderr.is_empty());
+    assert_eq!(
+        String::from_utf8(output.stdout).expect("UTF-8 guidance"),
+        "tsk was installed with Homebrew. Run:\n  brew update && brew upgrade tsk\n"
+    );
+    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]

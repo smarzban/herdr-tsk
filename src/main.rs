@@ -13,11 +13,12 @@ fn main() -> ExitCode {
         Surface::ResolveContext => resolve_context_main(),
         Surface::GlobalHelp => {
             println!(
-                "usage: tsk [capture] | add | steps | list | status | edit | trash | archive | unarchive | project | setup | guide | --find-board-pane | --help\n\nCommands:\n  guide          print the agent workflow skill\n  setup          register herdr, or install the agent skill\n  add    create one task or apply a JSON plan\n  steps  add, toggle, rename, or remove one step on a task\n  list   inspect tasks\n  status set a task's human status\n  edit   update a task's title or notes\n  trash  restore a trashed task\n  archive    keep a task off the working views\n  unarchive  put an archived task back\n  project    archive or unarchive a project\n\nRun `tsk add --help`, `tsk steps --help`, `tsk list --help`, `tsk status --help`, `tsk edit --help`, `tsk trash --help`, `tsk archive --help`, `tsk unarchive --help`, or `tsk project --help` for command details.\n\nAgents: run `tsk guide`, or read https://gettsk.sh/docs/agents.md"
+                "usage: tsk [capture] | add | steps | list | status | edit | trash | archive | unarchive | project | setup | update | guide | --find-board-pane | --help\n\nCommands:\n  guide          print the agent workflow skill\n  setup          register herdr, or install the agent skill\n  update         install the latest published release\n  add    create one task or apply a JSON plan\n  steps  add, toggle, rename, or remove one step on a task\n  list   inspect tasks\n  status set a task's human status\n  edit   update a task's title or notes\n  trash  restore a trashed task\n  archive    keep a task off the working views\n  unarchive  put an archived task back\n  project    archive or unarchive a project\n\nRun `tsk add --help`, `tsk steps --help`, `tsk list --help`, `tsk status --help`, `tsk edit --help`, `tsk trash --help`, `tsk archive --help`, `tsk unarchive --help`, `tsk project --help`, or `tsk update --help` for command details.\n\nAgents: run `tsk guide`, or read https://gettsk.sh/docs/agents.md"
             );
             ExitCode::SUCCESS
         }
         Surface::Usage => usage_exit(),
+        Surface::Update => update_main(&args),
         Surface::Add
         | Surface::Steps
         | Surface::List
@@ -41,7 +42,7 @@ fn main() -> ExitCode {
 
 fn usage_exit() -> ExitCode {
     eprintln!(
-        "usage: tsk [capture] | add | steps | list | status | edit | trash | archive | unarchive | project | setup | guide | --find-board-pane | --help"
+        "usage: tsk [capture] | add | steps | list | status | edit | trash | archive | unarchive | project | setup | update | guide | --find-board-pane | --help"
     );
     ExitCode::from(2)
 }
@@ -82,6 +83,31 @@ fn resolve_context_main() -> ExitCode {
         );
     }
     ExitCode::SUCCESS
+}
+
+fn update_main(args: &[String]) -> ExitCode {
+    if args.len() == 3 && args[2] == "--help" {
+        println!(
+            "usage: tsk update\n\nInstalls the latest published release for installer-managed tsk. Homebrew installations stay managed by Homebrew and print `brew update && brew upgrade tsk` instead."
+        );
+        return ExitCode::SUCCESS;
+    }
+    if args.len() != 2 {
+        eprintln!("usage: tsk update");
+        return ExitCode::from(2);
+    }
+
+    match tsk_tui::cli::update::run() {
+        Ok(tsk_tui::cli::update::UpdateOutcome::Homebrew) => {
+            println!("tsk was installed with Homebrew. Run:\n  brew update && brew upgrade tsk");
+            ExitCode::SUCCESS
+        }
+        Ok(tsk_tui::cli::update::UpdateOutcome::Installed) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("tsk update: {error}");
+            ExitCode::from(1)
+        }
+    }
 }
 
 fn headless_main(args: Vec<String>) -> ExitCode {

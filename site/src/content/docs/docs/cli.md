@@ -38,10 +38,11 @@ Use `--json` on `add` or `list` for machine-readable output. Read the [exit cont
 | `tsk project archive` / `tsk project unarchive` | Hide or restore a project |
 | `tsk trash restore` | Restore a task from trash |
 | `tsk setup` | Configure Herdr or install an agent skill |
+| `tsk update` | Upgrade an installer-managed copy, or print Homebrew guidance |
 | `tsk guide` | Print the agent workflow |
 | `tsk --help` | Show help |
 
-Data commands accept `--state-dir <dir>`. Setup and guide do not use that flag.
+Data commands accept `--state-dir <dir>`. Setup, update, and guide do not use that flag.
 
 ### Task addresses
 
@@ -234,6 +235,14 @@ tsk trash restore T12
 Restore returns a task from trash with its original number. A task absent from trash, or already live, refuses with `T12 is not in trash`.
 
 Recent deletions may still be in the main store; use board undo until they move to trash. [Retention and storage](/docs/storage/#deleted-tasks).
+
+## update
+
+```sh
+tsk update
+```
+
+For an installer-managed copy, immediately downloads and runs the official installer to install the latest published release. For a Homebrew copy, it prints `brew update && brew upgrade tsk`; Homebrew remains responsible for its own upgrades. Reopen a running board after an upgrade.
 
 ## setup
 
