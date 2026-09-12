@@ -948,15 +948,29 @@ fn setup_agent_json(
     }
 }
 pub fn setup_error(reason: &str, code: u8) -> CliOutput {
-    // Reasons can carry user text (a `--skill-dir` path, for one), so every control
-    // character is escaped, newlines included. The fixed usage text is the one reason that
-    // legitimately spans two lines; Herdr's own output is folded per line where it is
-    // captured (`setup::herdr`), before it becomes a reason.
+    // Agent-skill reasons can carry user text (a `--skill-dir` path, for one), so every
+    // control character is escaped, newlines included. The fixed usage text is the one
+    // reason that legitimately spans two lines.
     let rendered = if reason == crate::setup_agent::USAGE {
         reason.to_string()
     } else {
         terminal_text(reason)
     };
+    CliOutput {
+        stdout: String::new(),
+        stderr: format!("tsk setup: {rendered}\n"),
+        code,
+    }
+}
+/// `tsk setup herdr` failures. Those reasons are built from fixed text, paths tsk chose,
+/// and Herdr's own output, which `setup::herdr` already escapes per line so its
+/// diagnostics keep their line breaks; nothing in them is typed by the user.
+pub fn setup_herdr_error(reason: &str, code: u8) -> CliOutput {
+    let rendered = reason
+        .split('\n')
+        .map(terminal_text)
+        .collect::<Vec<_>>()
+        .join("\n");
     CliOutput {
         stdout: String::new(),
         stderr: format!("tsk setup: {rendered}\n"),
@@ -1002,6 +1016,18 @@ mod tests {
             format!("tsk setup: {}\n", crate::setup_agent::USAGE)
         );
         assert!(!output.stderr.contains("\\u{000a}"));
+    }
+
+    #[test]
+    fn herdr_setup_errors_keep_herdr_line_breaks_and_escape_the_rest() {
+        let output = setup_herdr_error(
+            "herdr config check failed: bad\u{1b}]0;evil\n  herdr config reset-keys  ...",
+            1,
+        );
+        assert_eq!(
+            output.stderr,
+            "tsk setup: herdr config check failed: bad\\u{001b}]0;evil\n  herdr config reset-keys  ...\n"
+        );
     }
 
     #[test]

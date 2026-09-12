@@ -318,9 +318,12 @@ fn require_min_herdr(version_output: &str) -> io::Result<()> {
         .skip_while(|word| *word != "herdr")
         .nth(1)
         .ok_or_else(unreadable)?;
-    let (core, prerelease) = match raw.split_once('-') {
+    // Semver: `X.Y.Z[-prerelease][+build]`. Build metadata never affects precedence and may
+    // itself contain hyphens, so drop it before looking for a prerelease marker.
+    let without_build = raw.split('+').next().unwrap_or(raw);
+    let (core, prerelease) = match without_build.split_once('-') {
         Some((core, _)) => (core, true),
-        None => (raw.split('+').next().unwrap_or(raw), false),
+        None => (without_build, false),
     };
     let mut parts = core.split('.').map(str::parse::<u64>);
     let found = match (parts.next(), parts.next(), parts.next(), parts.next()) {
@@ -346,8 +349,8 @@ fn herdr(args: &[&str], config: &Path) -> io::Result<String> {
         .map_err(|e| error(format!("could not run herdr: {e}")))?;
     if !output.status.success() {
         // Herdr's stdout and stderr are multi-line by nature (usage dumps, diagnostics).
-        // Keep their line breaks and escape everything else here, so the presenter can
-        // treat the finished reason as trusted text that only needs printing.
+        // Escape control characters per line here so the text is safe to print; the
+        // presenter for `tsk setup herdr` keeps the line breaks.
         let quoted = format!(
             "{}{}",
             String::from_utf8_lossy(&output.stdout),

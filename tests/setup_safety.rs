@@ -117,6 +117,10 @@ fn herdr_stderr_in_a_setup_failure_keeps_its_line_breaks() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(!stderr.contains("\\u{000a}"), "{stderr}");
     assert!(
+        stderr.contains("invalid config\n  second diagnostic line"),
+        "Herdr's second line is a real line: {stderr}"
+    );
+    assert!(
         stderr.contains("\\u{001b}"),
         "escape sequences stay escaped: {stderr}"
     );

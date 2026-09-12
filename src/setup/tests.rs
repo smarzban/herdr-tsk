@@ -352,6 +352,8 @@ fn old_herdr_is_refused_before_any_write_with_an_actionable_message() {
     assert!(require_min_herdr("herdr 1.2.0-beta.1").is_ok());
     assert!(require_min_herdr("herdr 0.10.0").is_ok());
     assert!(require_min_herdr("herdr 0.9.0+build.7").is_ok());
+    assert!(require_min_herdr("herdr 0.9.0+build-7").is_ok());
+    assert!(require_min_herdr("herdr 1.0.0+20130313144700-sha").is_ok());
     let err = require_min_herdr("herdr 0.6.8\n").unwrap_err().to_string();
     assert_eq!(
         err,
