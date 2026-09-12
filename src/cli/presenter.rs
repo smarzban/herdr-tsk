@@ -14,13 +14,7 @@ use crate::domain::HumanStatus;
 use crate::ui::terminal_text;
 
 fn human_reason(reason: &str) -> String {
-    // Escape per line so real newlines stay line breaks while control characters
-    // inside a line (paths, pasted reasons) are still neutralised.
-    reason
-        .split('\n')
-        .map(terminal_text)
-        .collect::<Vec<_>>()
-        .join("\n")
+    terminal_text(reason)
 }
 
 pub fn add_help() -> CliOutput {
@@ -956,7 +950,13 @@ fn setup_agent_json(
 pub fn setup_error(reason: &str, code: u8) -> CliOutput {
     CliOutput {
         stdout: String::new(),
-        stderr: format!("tsk setup: {}\n", human_reason(reason)),
+        // The fixed usage text is the one reason that legitimately spans two lines; every
+        // other reason may carry user input and keeps full control-character escaping.
+        stderr: if reason == crate::setup_agent::USAGE {
+            format!("tsk setup: {reason}\n")
+        } else {
+            format!("tsk setup: {}\n", human_reason(reason))
+        },
         code,
     }
 }
@@ -992,17 +992,22 @@ mod tests {
     use std::path::PathBuf;
 
     #[test]
-    fn usage_reason_keeps_real_newlines_as_line_breaks() {
-        let rendered = human_reason("usage: tsk setup [...]\n       tsk setup --detected-ids");
+    fn setup_usage_error_keeps_its_two_lines() {
+        let output = setup_error(crate::setup_agent::USAGE, 2);
         assert_eq!(
-            rendered,
-            "usage: tsk setup [...]\n       tsk setup --detected-ids"
+            output.stderr,
+            format!("tsk setup: {}\n", crate::setup_agent::USAGE)
         );
+        assert!(!output.stderr.contains("\\u{000a}"));
     }
 
     #[test]
-    fn usage_reason_still_escapes_control_characters_within_a_line() {
-        assert_eq!(human_reason("bad\u{1b}]0;evil"), "bad\\u{001b}]0;evil");
+    fn other_setup_errors_still_escape_every_control_character() {
+        let output = setup_error("bad\u{1b}]0;evil\nsecond", 1);
+        assert_eq!(
+            output.stderr,
+            "tsk setup: bad\\u{001b}]0;evil\\u{000a}second\n"
+        );
     }
 
     #[test]
