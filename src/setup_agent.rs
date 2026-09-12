@@ -948,8 +948,8 @@ mod tests {
     #[test]
     fn embedded_skill_declares_semver() {
         let version = embedded_skill_version();
-        assert_eq!(version, "1.0.0");
-        assert_eq!(frontmatter_version(SKILL_MD).as_deref(), Some("1.0.0"));
+        assert_eq!(version, "0.1.0");
+        assert_eq!(frontmatter_version(SKILL_MD).as_deref(), Some("0.1.0"));
     }
 
     #[test]

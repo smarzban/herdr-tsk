@@ -1,6 +1,15 @@
 # Changelog
 
+One `## vX.Y.Z` section per release, newest first, with `## Unreleased` on top. Inside a
+section the subsections are, in this order and only when non-empty: `### Breaking`,
+`### Added`, `### Changed`, `### Fixed`. Every user-visible change lands here in the PR
+that makes it, written for a user, not a contributor: omit demo alignment, CI wiring,
+review history, and other maintainer-only work. On release the version's section becomes
+the GitHub release notes verbatim.
+
 ## Unreleased
+
+### Added
 
 - `tsk update` upgrades installer-managed copies; Homebrew copies print `brew update && brew upgrade tsk`.
 - `tsk setup omp` installs the agent skill for the active OMP profile and participates in detected-agent setup.

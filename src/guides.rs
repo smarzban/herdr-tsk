@@ -33,9 +33,7 @@ pub const CATALOG: [Guide; 4] = [
                 **Moving around**\n\
                 - `j` and `k` or the arrows move the selection. `Enter` opens a task, `Esc` comes back.\n\
                 - Status keys use Ctrl, so a stray letter never changes anything. `ctrl+s` starts, `ctrl+b` blocks, `ctrl+r` marks review or takes it back to ready, `ctrl+d` finishes, `ctrl+o` reopens.\n\
-                - `ctrl+u` undoes the last change.\n\
-                \n\
-                Try it now. Press `ctrl+r` on this task and watch it move from NEEDS YOU to ON DECK.",
+                - `ctrl+u` undoes the last change.",
         status: HumanStatus::Review,
         steps: &[
             ("Open this task with Enter", true),
@@ -80,7 +78,7 @@ pub const CATALOG: [Guide; 4] = [
                 tsk add -t \"Try the CLI\"\n\
                 tsk list\n\
                 tsk status T1 start\n\
-                tsk steps 1 add \"First step\"\n\
+                tsk steps T1 add \"First step\"\n\
                 tsk edit T1 --notes \"Written from the CLI\"\n\
                 ```\n\
                 \n\
@@ -89,14 +87,12 @@ pub const CATALOG: [Guide; 4] = [
                 `tsk list` shows the tasks of the project you are standing in, or your desk outside a repository. Add `--all` for every project or `--json` for output another program can read.\n\
                 \n\
                 **Let an agent work the board**\n\
-                Run `tsk setup claude` once (or `pi`, `cursor`, `codex`) and that agent learns the CLI. Then ask it in plain words. \"Add a task for each failing test.\" \"Mark T7 as review.\" `tsk guide` prints the same instructions if you want to read them yourself.\n\
-                \n\
-                These starter tasks are yours alone. `tsk list` never shows them, so an agent never sees them.",
+                Run `tsk setup` once: it finds the coding agents on your machine (Claude, Pi, Cursor, Codex, and others) and installs the tsk skill for each. `tsk setup claude` targets one. Then ask the agent in plain words. \"Add a task for each failing test.\" \"Mark T7 as review.\" `tsk guide` prints the same instructions if you want to read them yourself.",
         status: HumanStatus::Ready,
         steps: &[
             ("Run tsk add -t \"Try the CLI\" in another terminal", false),
             ("Watch it appear in ON DECK", false),
-            ("Run tsk status on it with start", false),
+            ("Run tsk status T<n> start on it", false),
         ],
     },
     Guide {
@@ -111,7 +107,7 @@ pub const CATALOG: [Guide; 4] = [
                 - `ctrl+x` twice deletes it. `ctrl+u` brings it back if you change your mind.\n\
                 \n\
                 **When you forget a key**\n\
-                Press `?`. Every key of every screen is on one card.\n\
+                Press `?`. Every key of every screen is on one card. The full guide is at https://gettsk.sh/docs\n\
                 \n\
                 **Say hello**\n\
                 - Something broke, or something is missing? Tell us at https://github.com/smarzban/herdr-tsk/issues\n\
