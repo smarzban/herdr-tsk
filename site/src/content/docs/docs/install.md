@@ -19,7 +19,7 @@ brew install smarzban/tap/tsk
 
 Reopen your terminal if prompted, or run the printed `export` command.
 
-If Herdr is already installed, the curl installer asks whether to run `tsk setup herdr` when a terminal is available. When global agent skill roots are detected, it also asks once whether to install or update the tsk skill for those agents. After install it prints a short wrap-up: board-only when Herdr is absent; board plus `prefix+t` when you accept Herdr setup; board plus `tsk setup herdr` when you decline Herdr, or when CI / no TTY skips that ask; plus `tsk setup` when agent skill setup was declined or skipped. Homebrew stays noninteractive and prints the Herdr setup command as a caveat.
+If Herdr is already installed, the curl installer asks whether to run `tsk setup herdr` when a terminal is available. When global agent skill roots are detected, it also asks once whether to install or update the tsk skill for those agents. The installer closes with one `Done.` line — `Done. Run tsk in a project directory to open the board`, plus `, or press prefix+t in Herdr` after an accepted Herdr setup — and one row per step that did not run: `Herdr plugin:  tsk setup herdr` when Herdr setup was declined, skipped under CI or no TTY, or failed, and `Agent skills:  tsk setup` when the skill ask was declined or skipped. With `TSK_INSTALL_DIR` set, the installer skips both asks and prints `Custom install directory: setup was not run. When you are ready:` with the full binary path in both rows. Homebrew stays noninteractive and prints the Herdr setup command as a caveat.
 
 ## Add to Herdr
 
@@ -93,7 +93,7 @@ The installer verifies the release's SHA-256 checksum and installs to `~/.local/
 
 | Setting | Purpose |
 | --- | --- |
-| `TSK_INSTALL_DIR` | Choose an absolute installation directory; no colons or newlines |
+| `TSK_INSTALL_DIR` | Choose an absolute installation directory (no colons or newlines); the post-install setup asks are skipped |
 | `TSK_VERSION=vX.Y.Z` | Install a specific stable release |
 | `--help` | Show help without downloading |
 
@@ -114,15 +114,16 @@ The installer does not source these files. Symlinked, non-regular, or unwritable
 
 When `herdr` is on PATH after the binary is installed, the installer may ask to run plugin setup:
 
-- Interactive terminal (stdin TTY, or `/dev/tty` under `curl | sh`) using the default `~/.local/bin` destination: asks `[y/N]`. Yes runs the newly installed `tsk setup herdr`. An overridden `TSK_INSTALL_DIR` never executes the newly published binary; run `tsk setup` yourself after install.
+- Interactive terminal (stdin TTY, or `/dev/tty` under `curl | sh`) using the default `~/.local/bin` destination: asks `[y/N]`. Yes runs the newly installed `tsk setup herdr`. An overridden `TSK_INSTALL_DIR` never executes the newly published binary; the closing block prints the `tsk setup herdr` and `tsk setup` commands with the full binary path instead.
 - `CI` set, or no usable TTY: skips the ask so the install never hangs.
 - Herdr absent: no Herdr prompt.
 
-The install always ends with a short wrap-up:
+The install always ends with one closing block:
 
-- Setup accepted: open the board with `tsk`, or press `prefix+t` in Herdr.
-- Declined, CI/no-TTY skip, or setup failure: open the board with `tsk`, and run `tsk setup herdr` when ready.
-- Herdr absent: open the board with `tsk` only (no setup nudge).
+- Setup accepted: `Done. Run tsk in a project directory to open the board, or press prefix+t in Herdr.`
+- Declined, CI/no-TTY skip, or setup failure: `Done. Run tsk in a project directory to open the board.` followed by a `    Herdr plugin:  tsk setup herdr` row.
+- Agents detected but the skill batch declined or skipped: a `    Agent skills:  tsk setup` row.
+- Herdr absent: the `Done.` line only (no Herdr row).
 
 Setup failures do not undo the install. Homebrew does not run this prompt; use the formula caveat or run `tsk setup herdr` yourself.
 
@@ -130,9 +131,9 @@ Setup failures do not undo the install. Homebrew does not run this prompt; use t
 
 Setup registers bundled plugin files using the installed executable. No source checkout is needed.
 
-- Shortcut conflicts ask for confirmation. Declining keeps the existing binding.
+- Shortcut conflicts ask for confirmation. Declining keeps the existing binding, and the output says so.
 - A noninteractive conflict stops before writing.
-- Config changes create a backup.
+- Config changes create a backup beside the config, `config.toml.tsk-backup-<YYYYMMDD-HHMMSS>` in UTC; a second setup within the same second appends `-1`, `-2`, ....
 - Rerunning setup updates the registration without duplicating bindings.
 - Use the stable command on PATH, not a versioned Homebrew Cellar path.
 

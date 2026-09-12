@@ -444,23 +444,48 @@ echo installed-fixture
         self.assertEqual(result.returncode, 0, result.stderr)
         combined = result.stdout + result.stderr
         self.assertNotIn("Herdr detected", combined)
-        self.assertNotIn("Set up the Herdr plugin with", combined)
+        self.assertNotIn("Herdr plugin:", combined)
+        self.assertNotIn("Agent skills:", combined)
         self.assertNotIn("prefix+t", combined)
-        self.assertIn("tsk install completed.", combined)
-        self.assertIn("In a project directory run tsk to open the board.", combined)
+        self.assertIn("Done. Run tsk in a project directory to open the board.", combined)
         self.assertFalse(self.setup_log.exists())
 
     def test_custom_install_directory_never_executes_the_published_binary(self):
         self.archive(record_setup=True)
         self.command("herdr", "#!/bin/sh\nexit 0\n")
+        dest = self.root / "shared-bin"
         result = self.run_install(
-            TSK_INSTALL_DIR=str(self.root / "shared-bin"),
+            TSK_INSTALL_DIR=str(dest),
+            TSK_SETUP_LOG=str(self.setup_log),
+            TSK_DETECT_AGENTS="cursor",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((dest / "tsk").exists())
+        self.assertFalse(self.setup_log.exists())
+        # T41: the closing block says why setup did not run and uses the full binary path.
+        self.assertIn("Done. Run tsk in a project directory to open the board.", result.stdout)
+        self.assertIn("Custom install directory: setup was not run. When you are ready:", result.stdout)
+        self.assertIn(f"    Herdr plugin:  {dest}/tsk setup herdr", result.stdout)
+        self.assertIn(f"    Agent skills:  {dest}/tsk setup", result.stdout)
+        self.assertNotIn("[y/N]", result.stdout + result.stderr)
+
+    def test_update_invocation_explains_the_in_place_upgrade(self):
+        # `tsk update` runs the installer with TSK_INSTALL_DIR and TSK_UPDATE set: the
+        # binary was replaced in place, so the block asks to refresh setup, not to run it.
+        self.archive(record_setup=True)
+        self.command("herdr", "#!/bin/sh\nexit 0\n")
+        dest = self.root / "managed-bin"
+        result = self.run_install(
+            TSK_INSTALL_DIR=str(dest),
+            TSK_UPDATE="1",
             TSK_SETUP_LOG=str(self.setup_log),
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertTrue((self.root / "shared-bin/tsk").exists())
         self.assertFalse(self.setup_log.exists())
-        self.assertIn("Set up the Herdr plugin with tsk setup herdr.", result.stdout)
+        self.assertIn("Updated in place. Refresh what you use:", result.stdout)
+        self.assertIn("    Herdr plugin:  tsk setup herdr", result.stdout)
+        self.assertIn("    Agent skills:  tsk setup", result.stdout)
+        self.assertNotIn("Custom install directory", result.stdout)
 
     def test_herdr_present_without_tty_skips_with_guidance(self):
         self.archive(record_setup=True)
@@ -469,10 +494,10 @@ echo installed-fixture
         self.assertEqual(result.returncode, 0, result.stderr)
         combined = result.stdout + result.stderr
         self.assertNotIn("[y/N]", combined)
-        self.assertIn("tsk install completed.", combined)
-        self.assertIn("In a project directory run tsk to open the board.", combined)
-        self.assertIn("Set up the Herdr plugin with tsk setup herdr.", combined)
+        self.assertIn("Done. Run tsk in a project directory to open the board.", combined)
+        self.assertIn("    Herdr plugin:  tsk setup herdr", combined)
         self.assertNotIn("prefix+t", combined)
+        self.assertNotIn("    Agent skills:", combined)
         self.assertFalse(self.setup_log.exists())
 
     def test_herdr_present_in_ci_skips_without_asking(self):
@@ -482,8 +507,8 @@ echo installed-fixture
         self.assertEqual(result.returncode, 0, result.stderr)
         combined = result.stdout + result.stderr
         self.assertNotIn("[y/N]", combined)
-        self.assertIn("tsk install completed.", combined)
-        self.assertIn("Set up the Herdr plugin with tsk setup herdr.", combined)
+        self.assertIn("Done. Run tsk in a project directory to open the board.", combined)
+        self.assertIn("    Herdr plugin:  tsk setup herdr", combined)
         self.assertNotIn("prefix+t", combined)
         self.assertFalse(self.setup_log.exists())
 
@@ -494,17 +519,16 @@ echo installed-fixture
         result = self.run_install_with_answer(b"y\n", TSK_SETUP_LOG=str(self.setup_log))
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("[y/N]", result.stdout)
-        self.assertIn("Running ", result.stdout)
+        self.assertIn("Running tsk setup herdr...", result.stdout)
         installed = self.root / "home/.local/bin/tsk"
         self.assertTrue(self.setup_log.exists(), result.stdout)
         self.assertEqual(self.setup_log.read_text().strip(), "setup herdr")
         self.assertTrue(installed.exists())
-        self.assertIn("tsk install completed.", result.stdout)
         self.assertIn(
-            "In a project directory run tsk to open the board, or press prefix+t to start tsk.",
+            "Done. Run tsk in a project directory to open the board, or press prefix+t in Herdr.",
             result.stdout,
         )
-        self.assertNotIn("Set up the Herdr plugin with tsk setup herdr.", result.stdout)
+        self.assertNotIn("    Herdr plugin:", result.stdout)
 
     @unittest.skipUnless(os.name == "posix", "PTY prompt requires POSIX")
     def test_herdr_prompt_no_skips_setup_with_guidance(self):
@@ -513,9 +537,8 @@ echo installed-fixture
         result = self.run_install_with_answer(b"n\n", TSK_SETUP_LOG=str(self.setup_log))
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("[y/N]", result.stdout)
-        self.assertIn("tsk install completed.", result.stdout)
-        self.assertIn("In a project directory run tsk to open the board.", result.stdout)
-        self.assertIn("Set up the Herdr plugin with tsk setup herdr.", result.stdout)
+        self.assertIn("Done. Run tsk in a project directory to open the board.", result.stdout)
+        self.assertIn("    Herdr plugin:  tsk setup herdr", result.stdout)
         self.assertNotIn("prefix+t", result.stdout)
         self.assertFalse(self.setup_log.exists())
 
@@ -541,8 +564,8 @@ echo installed-fixture
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("tsk setup herdr failed", result.stdout)
         self.assertTrue((self.root / "home/.local/bin/tsk").exists())
-        self.assertIn("tsk install completed.", result.stdout)
-        self.assertIn("Set up the Herdr plugin with tsk setup herdr.", result.stdout)
+        self.assertIn("Done. Run tsk in a project directory to open the board.", result.stdout)
+        self.assertIn("    Herdr plugin:  tsk setup herdr", result.stdout)
         self.assertNotIn("prefix+t", result.stdout)
 
     def test_agent_skills_absent_stays_silent(self):
@@ -550,8 +573,8 @@ echo installed-fixture
         result = self.run_install(TSK_SETUP_LOG=str(self.setup_log))
         self.assertEqual(result.returncode, 0, result.stderr)
         combined = result.stdout + result.stderr
-        self.assertNotIn("Set up agent skills with tsk setup.", combined)
-        self.assertNotIn("Install or update the tsk skill for", combined)
+        self.assertNotIn("    Agent skills:", combined)
+        self.assertNotIn("Agents detected:", combined)
 
     def test_agent_skills_detected_without_tty_nudge(self):
         self.archive(record_setup=True)
@@ -562,7 +585,7 @@ echo installed-fixture
         self.assertEqual(result.returncode, 0, result.stderr)
         combined = result.stdout + result.stderr
         self.assertNotIn("[y/N]", combined)
-        self.assertIn("Set up agent skills with tsk setup.", combined)
+        self.assertIn("    Agent skills:  tsk setup", combined)
         self.assertFalse(self.setup_log.exists())
 
     def test_agent_skills_detected_in_ci_nudge(self):
@@ -574,8 +597,8 @@ echo installed-fixture
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         combined = result.stdout + result.stderr
-        self.assertNotIn("Install or update the tsk skill for", combined)
-        self.assertIn("Set up agent skills with tsk setup.", combined)
+        self.assertNotIn("Agents detected:", combined)
+        self.assertIn("    Agent skills:  tsk setup", combined)
 
     @unittest.skipUnless(os.name == "posix", "PTY prompt requires POSIX")
     def test_agent_skills_prompt_yes_runs_agents_yes(self):
@@ -586,9 +609,9 @@ echo installed-fixture
             TSK_DETECT_AGENTS="cursor",
         )
         self.assertEqual(result.returncode, 0, result.stdout)
-        self.assertIn("Install or update the tsk skill for cursor", result.stdout)
+        self.assertIn("Agents detected: cursor. Install the tsk skill for them?", result.stdout)
         self.assertIn("setup agents --yes", self.setup_log.read_text())
-        self.assertNotIn("Set up agent skills with tsk setup.", result.stdout)
+        self.assertNotIn("    Agent skills:  tsk setup", result.stdout)
 
     @unittest.skipUnless(os.name == "posix", "PTY prompt requires POSIX")
     def test_agent_skills_prompt_no_nudge(self):
@@ -599,7 +622,7 @@ echo installed-fixture
             TSK_DETECT_AGENTS="cursor claude",
         )
         self.assertEqual(result.returncode, 0, result.stdout)
-        self.assertIn("Set up agent skills with tsk setup.", result.stdout)
+        self.assertIn("    Agent skills:  tsk setup", result.stdout)
         self.assertFalse(self.setup_log.exists())
 
     @unittest.skipUnless(os.name == "posix", "PTY prompt requires POSIX")
@@ -615,9 +638,15 @@ echo installed-fixture
         log = self.setup_log.read_text()
         self.assertIn("setup herdr", log)
         self.assertIn("setup agents --yes", log)
-        self.assertIn("prefix+t", result.stdout)
-        self.assertNotIn("Set up the Herdr plugin with tsk setup herdr.", result.stdout)
-        self.assertNotIn("Set up agent skills with tsk setup.", result.stdout)
+        self.assertIn("Running tsk setup herdr...", result.stdout)
+        self.assertIn("Running tsk setup agents...", result.stdout)
+        self.assertIn("Agents detected: cursor. Install the tsk skill for them?", result.stdout)
+        self.assertIn(
+            "Done. Run tsk in a project directory to open the board, or press prefix+t in Herdr.",
+            result.stdout,
+        )
+        self.assertNotIn("    Herdr plugin:", result.stdout)
+        self.assertNotIn("    Agent skills:", result.stdout)
 
 
 

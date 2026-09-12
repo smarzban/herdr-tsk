@@ -199,6 +199,47 @@ fn asset_root_name(assets: &[(&str, String)]) -> String {
     format!("{hash:016x}")
 }
 
+/// `YYYYMMDD-HHMMSS` from Unix time, UTC. Civil-from-days (Howard Hinnant); no date crate.
+fn utc_timestamp(now: std::time::SystemTime) -> String {
+    let secs = now
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+    let days = secs.div_euclid(86_400);
+    let (hour, minute, second) = (
+        secs.rem_euclid(86_400) / 3_600,
+        secs.rem_euclid(3_600) / 60,
+        secs.rem_euclid(60),
+    );
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    format!("{year:04}{month:02}{day:02}-{hour:02}{minute:02}{second:02}")
+}
+
+/// Final backup name: `config.toml.tsk-backup-YYYYMMDD-HHMMSS` in UTC. Two setups within
+/// one second get `-1`, `-2`, ... appended rather than overwriting. The staging copy keeps
+/// its UUID name; only this durable name needs to read as a timestamp.
+fn backup_file_name(
+    now: std::time::SystemTime,
+    taken: &mut impl FnMut(&str) -> io::Result<bool>,
+) -> io::Result<String> {
+    let base = format!("config.toml.tsk-backup-{}", utc_timestamp(now));
+    let mut candidate = base.clone();
+    let mut collisions = 0_u32;
+    while taken(&candidate)? {
+        collisions += 1;
+        candidate = format!("{base}-{collisions}");
+    }
+    Ok(candidate)
+}
+
 fn managed_assets(binary: &Path, version: &str) -> io::Result<Vec<(&'static str, String)>> {
     let path = binary
         .to_str()
@@ -304,6 +345,7 @@ pub struct SetupResult {
     pub binary: PathBuf,
     pub root: PathBuf,
     pub backup: Option<PathBuf>,
+    pub declined_conflicts: bool,
 }
 
 pub fn run(
@@ -388,10 +430,15 @@ fn run_at(
     } else {
         read_config(config)?
     };
+    let declined_conflicts = std::cell::Cell::new(false);
     let edited = edit_bindings(
         before.as_deref().unwrap_or(""),
         interactive,
-        |key, detail| confirm(reader, writer, key, detail),
+        |key, detail| {
+            let replaced = confirm(reader, writer, key, detail)?;
+            declined_conflicts.set(declined_conflicts.get() || !replaced);
+            Ok(replaced)
+        },
     )?;
     let binary = installed_binary()?;
     let assets = managed_assets(&binary, version)?;
@@ -456,11 +503,15 @@ fn run_at(
     } else {
         None
     };
-    let backup = staged_backup.as_ref().map(|_| {
-        parent
-            .path
-            .join(format!("config.toml.tsk-backup-{}", uuid::Uuid::new_v4()))
-    });
+    let backup = match staged_backup.as_ref() {
+        Some(_) => {
+            let name = backup_file_name(std::time::SystemTime::now(), &mut |candidate| {
+                parent.exists(Path::new(candidate))
+            })?;
+            Some(parent.path.join(name))
+        }
+        None => None,
+    };
     unchanged()?;
     base.validate()?;
     root.validate()?;
@@ -528,6 +579,7 @@ fn run_at(
         binary,
         root: root.path.clone(),
         backup,
+        declined_conflicts: declined_conflicts.get(),
     })
 }
 

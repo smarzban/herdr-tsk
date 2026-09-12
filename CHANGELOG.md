@@ -9,6 +9,14 @@ the GitHub release notes verbatim.
 
 ## Unreleased
 
+### Changed
+
+- Installer and setup output reads in phases: setup results print as indented label rows (config backup, plugin root, shortcuts, per-agent skill paths) under a `Running tsk setup herdr...` or `Running tsk setup agents...` heading, and the installer closes with a single `Done.` block that names anything skipped. Herdr config backups are timestamped (`config.toml.tsk-backup-<YYYYMMDD-HHMMSS>` in UTC, with `-1`, `-2`, ... on a same-second rerun) instead of a random UUID.
+
+### Fixed
+
+- `tsk setup` usage errors print the second usage line on its own line instead of a literal `\u{000a}`.
+
 ## v0.8.0
 
 ### Breaking

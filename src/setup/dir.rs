@@ -136,6 +136,30 @@ impl Dir {
         // Keep the inode, including after unlock. Removing it lets a second opener lock a new inode.
         Ok(file)
     }
+    /// Whether a child name exists (a final symlink counts: rename would clobber its link,
+    /// not its target). Pure stat, never creates.
+    pub fn exists(&self, child: &Path) -> io::Result<bool> {
+        let n = name(child)?;
+        let mut stat: libc::stat = unsafe { std::mem::zeroed() };
+        // SAFETY: valid descriptor, NUL-terminated single component, writable out struct.
+        if unsafe {
+            libc::fstatat(
+                self.file.as_raw_fd(),
+                n.as_ptr(),
+                &mut stat,
+                libc::AT_SYMLINK_NOFOLLOW,
+            )
+        } == 0
+        {
+            return Ok(true);
+        }
+        let e = io::Error::last_os_error();
+        if e.kind() == io::ErrorKind::NotFound {
+            Ok(false)
+        } else {
+            Err(e)
+        }
+    }
     pub fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
         let from = name(from)?;
         let to = name(to)?;
