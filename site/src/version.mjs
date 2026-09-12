@@ -1,2 +1,2 @@
 // Crate and plugin version, shown in the landing and docs headers.
-export const VERSION = '0.7.0';
+export const VERSION = '0.8.0';

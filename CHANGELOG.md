@@ -9,14 +9,29 @@ the GitHub release notes verbatim.
 
 ## Unreleased
 
+## v0.8.0
+
+### Breaking
+
+- Task store format 3, migrated automatically on first open. Rolling back to 0.7.x afterwards refuses the file; restore the `tsk.json.v2` backup written beside it if you need to.
+
 ### Added
 
-- `tsk update` upgrades installer-managed copies; Homebrew copies print `brew update && brew upgrade tsk`.
-- `tsk setup omp` installs the agent skill for the active OMP profile and participates in detected-agent setup.
+- Starter tour on first board open: four desk tasks (`N1` to `N4`) that teach the tabs, sections, status keys, the task page, and the CLI, each cleared for good with `ctrl+d`, `ctrl+f`, or `ctrl+x`. Agents never see them: `tsk list` hides `N` rows.
+- What's new on your desk: after an upgrade, one `N` row summarises the release, with a link to the changelog. A fresh install gets none.
+- `tsk update` upgrades installer-managed copies in place; Homebrew copies print `brew update && brew upgrade tsk`. The board nudges once a day when a newer release is out (`TSK_NO_UPDATE_CHECK` disables).
+- `tsk setup` detects the coding agents on your machine and offers to install the tsk skill for each; `tsk setup agents --yes` does it unattended. The curl installer asks the same question once when Herdr is on PATH.
+- Added support for OMP with `tsk setup omp`, thanks @bnivanov.
+- Outside Git, the current directory is available as a project: `2` opens its board, quick-add files there once it is open. The desk stays the default for capture and the CLI.
 
 ### Changed
 
 - The agent skill (`tsk guide`, `tsk setup <agent>`) is rewritten around a quick-reference table and rules of engagement: agents hand work back with `review` and leave `done` to you. Skill version 1.1.0; rerun `tsk setup` to update installed copies.
+
+### Fixed
+
+- On a wide board, clicking a task opens its details beside the board and keeps board focus; a double-click during column reflow opens the task you clicked, not a newly exposed control.
+- `prefix+t` opens or focuses one board per Herdr workspace, across tabs, and returns to the tab you pressed it from.
 
 ## v0.7.0
 
