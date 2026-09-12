@@ -896,7 +896,7 @@ pub fn setup_agent_batch(result: crate::setup_agent::BatchResult, json: bool) ->
             code: u8::from(!result.blocked.is_empty()),
         };
     }
-    // Interactive path already wrote progress to stderr; keep stdout quiet unless scripted batch.
+    // One summary row per agent on stdout, for the interactive and scripted paths alike.
     let mut stdout = String::new();
     for (id, outcome) in &result.applied {
         stdout.push_str(&format!("    {id:<8} {}\n", outcome.path().display()));
