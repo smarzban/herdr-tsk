@@ -63,7 +63,7 @@ crates.io publishing is separate task T29. `publish = false` remains in Cargo.to
 
 ## Herdr setup and upgrades
 
-`tsk setup herdr` requires Herdr 0.9+ on PATH. It uses `HERDR_CONFIG_PATH`, otherwise
+`tsk setup herdr` requires Herdr 0.9+ on PATH, checked from `herdr --version` before any write; an older host is refused with an update message. It uses `HERDR_CONFIG_PATH`, otherwise
 `$XDG_CONFIG_HOME/herdr/config.toml`, otherwise `~/.config/herdr/config.toml`.
 Empty config-path environment values are treated as unset. Config-file and final-directory symlinks are refused. An open directory descriptor anchors all setup writes,
 backups, renames and cleanup; a replaced parent cannot redirect them. A kernel lock

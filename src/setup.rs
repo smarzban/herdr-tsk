@@ -298,6 +298,38 @@ fn read_config(path: &Path) -> io::Result<Option<String>> {
         Err(e) => Err(e),
     }
 }
+/// The lowest Herdr this plugin registers against: `config check` and link-by-id arrived in 0.9.
+pub const MIN_HERDR_VERSION: (u64, u64, u64) = (0, 9, 0);
+
+/// `herdr --version` prints `herdr X.Y.Z[-suffix]`; older hosts lack `herdr config check`
+/// and fail with a raw usage dump, so refuse them with a message that names the fix.
+fn require_min_herdr(version_output: &str) -> io::Result<()> {
+    let found = version_output
+        .split_whitespace()
+        .find_map(|word| {
+            let core = word.split(['-', '+']).next()?;
+            let mut parts = core.split('.').map(str::parse::<u64>);
+            match (parts.next(), parts.next(), parts.next(), parts.next()) {
+                (Some(Ok(a)), Some(Ok(b)), Some(Ok(c)), None) => Some((a, b, c)),
+                _ => None,
+            }
+        })
+        .ok_or_else(|| {
+            error(format!(
+                "could not read the Herdr version from `herdr --version` ({})",
+                version_output.trim()
+            ))
+        })?;
+    if found < MIN_HERDR_VERSION {
+        let (a, b, c) = MIN_HERDR_VERSION;
+        return Err(error(format!(
+            "herdr {}.{}.{} found; tsk needs {a}.{b}.{c} or newer. Update Herdr, then run tsk setup herdr again",
+            found.0, found.1, found.2
+        )));
+    }
+    Ok(())
+}
+
 fn herdr(args: &[&str], config: &Path) -> io::Result<String> {
     let output = Command::new("herdr")
         .args(args)
@@ -442,7 +474,7 @@ fn run_at(
     )?;
     let binary = installed_binary()?;
     let assets = managed_assets(&binary, version)?;
-    host(&["--version"], config)?;
+    require_min_herdr(&host(&["--version"], config)?)?;
     let parent = match existing {
         Some(dir) => dir,
         None => Dir::open(parent_path, true)?,

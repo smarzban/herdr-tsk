@@ -948,15 +948,16 @@ fn setup_agent_json(
     }
 }
 pub fn setup_error(reason: &str, code: u8) -> CliOutput {
+    // Setup reasons are fixed text or stderr from the herdr binary we invoked, never task
+    // content, so real line breaks stay while every other control character is escaped.
+    let lines = reason
+        .split('\n')
+        .map(terminal_text)
+        .collect::<Vec<_>>()
+        .join("\n");
     CliOutput {
         stdout: String::new(),
-        // The fixed usage text is the one reason that legitimately spans two lines; every
-        // other reason may carry user input and keeps full control-character escaping.
-        stderr: if reason == crate::setup_agent::USAGE {
-            format!("tsk setup: {reason}\n")
-        } else {
-            format!("tsk setup: {}\n", human_reason(reason))
-        },
+        stderr: format!("tsk setup: {lines}\n"),
         code,
     }
 }
@@ -1002,11 +1003,11 @@ mod tests {
     }
 
     #[test]
-    fn other_setup_errors_still_escape_every_control_character() {
-        let output = setup_error("bad\u{1b}]0;evil\nsecond", 1);
+    fn herdr_stderr_in_setup_errors_keeps_lines_and_escapes_the_rest() {
+        let output = setup_error("herdr config check failed: bad\u{1b}]0;evil\n  second", 1);
         assert_eq!(
             output.stderr,
-            "tsk setup: bad\\u{001b}]0;evil\\u{000a}second\n"
+            "tsk setup: herdr config check failed: bad\\u{001b}]0;evil\n  second\n"
         );
     }
 

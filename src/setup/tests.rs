@@ -63,6 +63,9 @@ fn upgrade_replaces_one_registration_and_removes_only_the_intact_old_root() {
     let config = temp.0.join("config.toml");
     let registry = RefCell::new(BTreeMap::<String, PathBuf>::new());
     let mut host = |args: &[&str], _: &Path| -> io::Result<String> {
+        if args == ["--version"] {
+            return Ok("herdr 0.9.0\n".into());
+        }
         if args.starts_with(&["plugin", "link"]) {
             registry
                 .borrow_mut()
@@ -117,6 +120,9 @@ fn unsuccessful_upgrade_keeps_previous_registration_and_assets() {
     let old = RefCell::new(None::<PathBuf>);
     let fail = std::cell::Cell::new(false);
     let mut host = |args: &[&str], _: &Path| -> io::Result<String> {
+        if args == ["--version"] {
+            return Ok("herdr 0.9.0\n".into());
+        }
         if args.starts_with(&["plugin", "link"]) {
             if fail.get() {
                 return Err(error("link failed"));
@@ -199,6 +205,9 @@ fn cleanup_preserves_modified_or_incomplete_managed_roots() {
         let config = temp.0.join("config.toml");
         let registry = RefCell::new(None::<PathBuf>);
         let mut host = |args: &[&str], _: &Path| -> io::Result<String> {
+            if args == ["--version"] {
+                return Ok("herdr 0.9.0\n".into());
+            }
             if args.starts_with(&["plugin", "link"]) {
                 *registry.borrow_mut() = Some(args[2].into());
             }
@@ -268,6 +277,9 @@ fn setup_replaces_source_checkout_and_missing_registrations_without_deleting_sou
         }
         let registered = RefCell::new(checkout.clone());
         let mut host = |args: &[&str], _: &Path| -> io::Result<String> {
+            if args == ["--version"] {
+                return Ok("herdr 0.9.0\n".into());
+            }
             if args.starts_with(&["plugin", "link"]) {
                 *registered.borrow_mut() = args[2].into();
             }
@@ -332,4 +344,18 @@ fn generated_backup_name_matches_the_documented_pattern() {
     assert!(parts[0].len() == 8 && digits(parts[0]), "{stamp}");
     assert!(parts[1].len() == 6 && digits(parts[1]), "{stamp}");
     assert!(parts.get(2).is_none_or(|extra| digits(extra)), "{stamp}");
+}
+
+#[test]
+fn old_herdr_is_refused_before_any_write_with_an_actionable_message() {
+    assert!(require_min_herdr("herdr 0.9.0\n").is_ok());
+    assert!(require_min_herdr("herdr 1.2.0-beta.1").is_ok());
+    let err = require_min_herdr("herdr 0.6.8\n").unwrap_err().to_string();
+    assert_eq!(
+        err,
+        "herdr 0.6.8 found; tsk needs 0.9.0 or newer. Update Herdr, then run tsk setup herdr again"
+    );
+    assert!(require_min_herdr("herdr 0.10.0").is_ok());
+    let unreadable = require_min_herdr("something else").unwrap_err().to_string();
+    assert!(unreadable.starts_with("could not read the Herdr version"));
 }

@@ -29,6 +29,8 @@ impl Host {
         fs::write(bin.join("herdr"), r#"#!/bin/sh
 printf '%s\n' "$*" >> "$FIXTURE/calls"
 case "$1 $2" in
+  '--version ')
+    printf 'herdr %s\n' "${HERDR_VERSION:-0.9.0}";;
   'config check')
     printf '%s' "$HERDR_CONFIG_PATH" > "$FIXTURE/checked"
     case "$SCENARIO" in

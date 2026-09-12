@@ -9,6 +9,11 @@ the GitHub release notes verbatim.
 
 ## Unreleased
 
+### Fixed
+
+- `tsk setup herdr` on a Herdr older than 0.9 says so (`herdr 0.6.8 found; tsk needs 0.9.0 or newer`) and stops before touching the config, instead of failing on `herdr config check` with a usage dump.
+- Setup errors that quote Herdr's output keep their line breaks instead of printing a literal `\u{000a}`.
+
 ## v0.8.1
 
 ### Breaking
