@@ -268,7 +268,7 @@ Rehearsal traps, learned the hard way:
   path and setup, and says which of these it did not run.
 
 **Official release.** Replace the draft's skeleton and checklist with the version's
-`CHANGELOG.md` section verbatim (keep the Installation section), then promote the tested
+`CHANGELOG.md` section verbatim (keep the one-line Install section), then promote the tested
 assets, no rebuild: `gh release edit vX.Y.Z --prerelease=false --latest`. Confirm
 `https://github.com/smarzban/herdr-tsk/releases/latest` redirects to the new tag. Then,
 and only then, copy the generated `tsk.rb` to `Formula/tsk.rb` in `smarzban/homebrew-tap`
