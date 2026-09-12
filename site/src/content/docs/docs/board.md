@@ -54,6 +54,8 @@ Assign threads when [capturing](/docs/capture/#title-tokens) or [editing a task]
 
 On your desk, **ON DECK** contains only desk tasks. On a project board, it contains that project's ready tasks. Use the thread filter to narrow them.
 
+Sections hold their order while you work: NEEDS YOU, IN MOTION, DONE, and the drawer's ARCHIVED group keep the most recent status change on top, while ON DECK lists its backlog oldest first (`N` rows lead it until you clear them). Editing a task or ticking a step never moves it; setting a status moves it to the top of its new section.
+
 Select a task, then click a footer action or use:
 
 | Key | Action |

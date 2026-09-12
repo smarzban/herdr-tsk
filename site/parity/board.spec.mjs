@@ -155,12 +155,28 @@ for (const width of [110, 130]) {
     page,
   }) => {
     await open(page, width);
-    const result = await row(page, 13).evaluate((el) => {
+    // The reflow guard in board-demo.js fires only when the second click lands on the
+    // same client coordinates as the first, after the split has moved the row from under
+    // them. So both clicks must reuse one (x, y). The flake was upstream of that: a row
+    // handle read before layout had an empty rect and the click went to (-4, 4). Wait for
+    // a laid-out rect, then click twice at the same point.
+    const result = await page.evaluate(async (taskId) => {
+      const settle = () => new Promise((r) => requestAnimationFrame(() => r()));
+      let el = null;
+      for (let attempt = 0; attempt < 10 && !el; attempt += 1) {
+        const candidate = document.querySelector(`[data-task="${taskId}"]`);
+        if (candidate && candidate.getBoundingClientRect().width > 0)
+          el = candidate;
+        else await settle();
+      }
+      if (!el) throw new Error(`row ${taskId} never laid out`);
       const rect = el.getBoundingClientRect();
       const x = Math.min(rect.right - 4, window.innerWidth - 8);
       const y = rect.top + 4;
-      const click = () =>
-        document.elementFromPoint(x, y).dispatchEvent(
+      const click = () => {
+        const hit = document.elementFromPoint(x, y);
+        if (!hit) throw new Error(`nothing at (${x}, ${y})`);
+        hit.dispatchEvent(
           new MouseEvent("click", {
             bubbles: true,
             clientX: x,
@@ -168,11 +184,12 @@ for (const width of [110, 130]) {
             detail: 1,
           }),
         );
+      };
       click();
       const split = !!document.querySelector(".tsk-wide-split.is-split");
       click();
       return { split, full: !document.querySelector(".tsk-list") };
-    });
+    }, id(13));
     expect(result).toEqual({ split: true, full: true });
     await expect(page.locator(".tsk-task-column")).toContainText("END");
   });

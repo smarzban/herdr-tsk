@@ -890,8 +890,8 @@ fn every_section_header_has_symmetric_spacing_and_scrolls_with_its_selected_task
         ("IN MOTION", Uuid::from_u128(1), "Smoke-test worktree"),
         (
             "ON DECK",
-            Uuid::from_u128(10),
-            "Prototype the queue-style board UI",
+            Uuid::from_u128(11),
+            "Cut rust-toolchain pin into CI docs",
         ),
     ];
 
@@ -1451,8 +1451,11 @@ fn numbered_board_at_40x10_paints_in_bounds_wraps_titles_and_keeps_tasks_reachab
     let ids = model.visible_ids();
     let mut domain = DomainState::new();
 
-    for (index, id) in ids.iter().copied().enumerate() {
-        if index > 0 {
+    for (position, id) in ids.iter().copied().enumerate() {
+        // The deck's order is the board's own rule (oldest created first), so derive
+        // each row's expectations from the visited task, not from loop position.
+        let index = (id.as_u128() - 500) as u64;
+        if position > 0 {
             apply_intent(&mut domain, &mut model, BoardIntent::SelectNext, None)
                 .expect("select next numbered task");
         }

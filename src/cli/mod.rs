@@ -300,7 +300,7 @@ fn run_setup<R: Read>(args: Vec<String>, stdin: &mut R, stdin_is_tty: bool) -> C
             let mut stderr = std::io::stderr();
             match crate::setup::run(&mut reader, &mut stderr, interactive) {
                 Ok(result) => presenter::setup(result),
-                Err(error) => presenter::setup_error(&error.to_string(), 1),
+                Err(error) => presenter::setup_herdr_error(&error.to_string(), 1),
             }
         }
         Ok(crate::setup_agent::Command::Skill {

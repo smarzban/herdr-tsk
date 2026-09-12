@@ -95,6 +95,37 @@ fn rejected_native_config_leaves_config_untouched_and_never_links() {
     assert!(!std::path::Path::new(&checked).exists());
 }
 #[test]
+fn old_herdr_is_refused_before_config_check_with_a_readable_message() {
+    let h = host();
+    fs::write(&h.config, "# original\n").unwrap();
+    let output = h.command().env("HERDR_VERSION", "0.6.8").output().unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        stderr.trim(),
+        "tsk setup: herdr 0.6.8 found; tsk needs 0.9.0 or newer. Update Herdr, then run tsk setup herdr again"
+    );
+    assert_eq!(fs::read_to_string(&h.config).unwrap(), "# original\n");
+    assert!(!h.calls().contains("config check"));
+    assert!(!h.calls().contains("plugin link"));
+    assert!(!h.root.join("checked").exists());
+}
+#[test]
+fn herdr_stderr_in_a_setup_failure_keeps_its_line_breaks() {
+    let h = host();
+    let output = h.run("invalid");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!stderr.contains("\\u{000a}"), "{stderr}");
+    assert!(
+        stderr.contains("invalid config\n  second diagnostic line"),
+        "Herdr's second line is a real line: {stderr}"
+    );
+    assert!(
+        stderr.contains("\\u{001b}"),
+        "escape sequences stay escaped: {stderr}"
+    );
+}
+#[test]
 fn noninteractive_conflict_has_zero_host_calls() {
     let h = host();
     fs::write(&h.config, "[keys]\nnew_tab='prefix+t'\n").unwrap();

@@ -2564,7 +2564,7 @@ fn row_click_selects_without_jumping_the_viewport() {
     let _ = page_rows(&model);
     let before = page_rows(&model);
     assert!(
-        before.iter().any(|row| row.contains("task 39")),
+        before.iter().any(|row| row.contains("task 0")),
         "top of the deck should be on screen:\n{}",
         before.join("\n")
     );
@@ -2576,7 +2576,7 @@ fn row_click_selects_without_jumping_the_viewport() {
     assert_eq!(model.detail_open(), Some(ids[mid]));
     let after = page_rows(&model);
     assert!(
-        after.iter().any(|row| row.contains("task 39")),
+        after.iter().any(|row| row.contains("task 0")),
         "clicking a visible row must not park the peek at the bottom:\n{}",
         after.join("\n")
     );
@@ -2811,12 +2811,12 @@ fn downward_autoscroll_copy_excludes_titles_above_the_press_row() {
     let rows = page_rows(&model);
     let start_y = rows
         .iter()
-        .position(|row| row.contains("task 30"))
-        .expect("task 30 visible") as u16;
+        .position(|row| row.contains("task 9"))
+        .expect("task 9 visible") as u16;
     let origin = text_select::copyable_line_at(&rows, &hits.copyable, start_y)
         .expect("press row is copyable");
     assert!(
-        origin.contains("task 30"),
+        origin.contains("task 9"),
         "origin must be the pressed title, got {origin:?}"
     );
 
@@ -2869,11 +2869,11 @@ fn downward_autoscroll_copy_excludes_titles_above_the_press_row() {
     )
     .expect("copy");
     assert!(
-        !text.contains("task 39"),
+        !text.contains("task 0"),
         "copy must not include titles above the press row:\n{text}"
     );
     assert!(
-        text.contains("task 30"),
+        text.contains("task 9"),
         "copy must include the press row:\n{text}"
     );
 }

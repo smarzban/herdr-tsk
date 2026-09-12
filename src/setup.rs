@@ -298,6 +298,49 @@ fn read_config(path: &Path) -> io::Result<Option<String>> {
         Err(e) => Err(e),
     }
 }
+/// The lowest Herdr this plugin registers against: `config check` and link-by-id arrived in 0.9.
+pub const MIN_HERDR_VERSION: (u64, u64, u64) = (0, 9, 0);
+
+/// `herdr --version` prints `herdr X.Y.Z` (Clap's default). Read the version that follows
+/// the word `herdr`, never a stray semver elsewhere in the output, and treat a pre-release
+/// of the minimum (`0.9.0-beta`) as below it: older hosts lack `herdr config check` and
+/// fail with a raw usage dump, so refuse them with a message that names the fix.
+fn require_min_herdr(version_output: &str) -> io::Result<()> {
+    let unreadable = || {
+        error(format!(
+            "could not read the Herdr version from `herdr --version` ({})",
+            version_output.trim()
+        ))
+    };
+    let mut words = version_output.split_whitespace();
+    let raw = words
+        .by_ref()
+        .skip_while(|word| *word != "herdr")
+        .nth(1)
+        .ok_or_else(unreadable)?;
+    // Semver: `X.Y.Z[-prerelease][+build]`. Build metadata never affects precedence and may
+    // itself contain hyphens, so drop it before looking for a prerelease marker.
+    let without_build = raw.split('+').next().unwrap_or(raw);
+    let (core, prerelease) = match without_build.split_once('-') {
+        Some((core, _)) => (core, true),
+        None => (without_build, false),
+    };
+    let mut parts = core.split('.').map(str::parse::<u64>);
+    let found = match (parts.next(), parts.next(), parts.next(), parts.next()) {
+        (Some(Ok(a)), Some(Ok(b)), Some(Ok(c)), None) => (a, b, c),
+        _ => return Err(unreadable()),
+    };
+    // A pre-release sorts below its release, so 0.9.0-beta is not yet 0.9.0.
+    let too_old = found < MIN_HERDR_VERSION || (prerelease && found == MIN_HERDR_VERSION);
+    if too_old {
+        let (a, b, c) = MIN_HERDR_VERSION;
+        return Err(error(format!(
+            "herdr {raw} found; tsk needs {a}.{b}.{c} or newer. Update Herdr, then run tsk setup herdr again"
+        )));
+    }
+    Ok(())
+}
+
 fn herdr(args: &[&str], config: &Path) -> io::Result<String> {
     let output = Command::new("herdr")
         .args(args)
@@ -305,12 +348,20 @@ fn herdr(args: &[&str], config: &Path) -> io::Result<String> {
         .output()
         .map_err(|e| error(format!("could not run herdr: {e}")))?;
     if !output.status.success() {
-        return Err(error(format!(
-            "herdr {} failed: {}{}",
-            args.join(" "),
+        // Herdr's stdout and stderr are multi-line by nature (usage dumps, diagnostics).
+        // Escape control characters per line here so the text is safe to print; the
+        // presenter for `tsk setup herdr` keeps the line breaks.
+        let quoted = format!(
+            "{}{}",
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
-        )));
+        );
+        let quoted = quoted
+            .lines()
+            .map(crate::ui::terminal_text)
+            .collect::<Vec<_>>()
+            .join("\n");
+        return Err(error(format!("herdr {} failed: {quoted}", args.join(" "))));
     }
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
@@ -442,7 +493,7 @@ fn run_at(
     )?;
     let binary = installed_binary()?;
     let assets = managed_assets(&binary, version)?;
-    host(&["--version"], config)?;
+    require_min_herdr(&host(&["--version"], config)?)?;
     let parent = match existing {
         Some(dir) => dir,
         None => Dir::open(parent_path, true)?,

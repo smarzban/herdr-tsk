@@ -23,7 +23,7 @@ If Herdr is already installed, the curl installer asks whether to run `tsk setup
 
 ## Add to Herdr
 
-[Install Herdr](https://herdr.dev/docs/install/) first. Installed-binary setup requires Herdr 0.9+.
+[Install Herdr](https://herdr.dev/docs/install/) first. Setup requires Herdr 0.9 or newer: an older `herdr` on PATH is refused with `herdr X.Y.Z found; tsk needs 0.9.0 or newer` before anything is written, so update Herdr and run `tsk setup herdr` again.
 
 ```sh
 tsk setup herdr

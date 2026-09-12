@@ -14,7 +14,7 @@ use ratatui::Terminal;
 use tsk_tui::app::{
     board_frame, board_poll_duration, load_board_model, take_pending_after_paint, FramePoll,
 };
-use tsk_tui::domain::{DomainState, ProvenanceOrigin, TaskScope};
+use tsk_tui::domain::{DomainState, HumanStatus, ProvenanceOrigin, TaskScope};
 use tsk_tui::ui::scheduler::{next_wait, DEFAULT_BASE_TICK};
 use tsk_tui::ui::{apply_intent, draw_board, BoardIntent, BoardModel, IntentOutcome};
 use tsk_tui::update::suppress_background_fetch;
@@ -383,9 +383,12 @@ fn idle_merge_hides_a_task_archived_by_another_process_without_moving_selection(
             None,
         )
         .expect("create Y");
+    // Y is the only started task, so IN MOTION (above ON DECK) carries the seeded
+    // selection regardless of the deck's FIFO order.
+    seed.set_status(y, HumanStatus::Started).expect("start Y");
     store.save(&seed).expect("seed two tasks");
 
-    // Process A: newest task (Y) sorts first, so the seeded selection rests on it.
+    // Process A: the seeded selection rests on started Y.
     let mut domain = store.load().expect("load A");
     let mut model = BoardModel::from_domain(&domain, None);
     assert_eq!(model.selected_id(), Some(y), "selection starts on Y");

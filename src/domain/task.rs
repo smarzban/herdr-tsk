@@ -178,6 +178,22 @@ impl Task {
         self.last_event_at(TaskEventKind::SoftDeleted)
     }
 
+    /// The `at` of the task's most recent status change (`StatusSet`, `Completed`
+    /// or `Reopened`), or `created_at` when no such event exists.
+    pub(crate) fn status_changed_at(&self) -> SystemTime {
+        self.history
+            .iter()
+            .rev()
+            .find(|event| {
+                matches!(
+                    event.kind,
+                    TaskEventKind::StatusSet | TaskEventKind::Completed | TaskEventKind::Reopened
+                )
+            })
+            .map(|event| event.at)
+            .unwrap_or(self.created_at)
+    }
+
     /// The `at` of the last history event of `kind`, if any.
     pub(crate) fn last_event_at(&self, kind: TaskEventKind) -> Option<SystemTime> {
         self.history
@@ -1049,6 +1065,50 @@ mod tests {
         assert_eq!(
             state.get(id).expect("task exists").provenance,
             ProvenanceOrigin::Selection
+        );
+    }
+
+    #[test]
+    fn status_changed_at_tracks_status_events_not_edits() {
+        let mut state = DomainState::new();
+        let id = create_sample(&mut state);
+
+        // Only a `Created` event exists: fall back to created_at.
+        let created = state.get(id).expect("task").created_at;
+        assert_eq!(
+            state.get(id).expect("task").status_changed_at(),
+            created,
+            "no status event yet: status_changed_at falls back to created_at"
+        );
+
+        state
+            .set_status(id, HumanStatus::Started)
+            .expect("set_status");
+        let after_status = state.get(id).expect("task").status_changed_at();
+        assert!(after_status >= created, "a status change is recorded");
+
+        state
+            .edit(id, "Edited title", None, TaskScope::Global, None)
+            .expect("edit");
+        assert_eq!(
+            state.get(id).expect("task").status_changed_at(),
+            after_status,
+            "an edit must not move the status-change time"
+        );
+
+        state.complete(id).expect("complete");
+        let after_complete = state.get(id).expect("task").status_changed_at();
+        assert!(
+            after_complete >= after_status,
+            "completing is also a status change"
+        );
+
+        // A step tick is a mutation but not a status change.
+        state.add_step(id, "a step").expect("add_step");
+        assert_eq!(
+            state.get(id).expect("task").status_changed_at(),
+            after_complete,
+            "a step change must not move the status-change time"
         );
     }
 

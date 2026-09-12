@@ -1,6 +1,5 @@
 //! Queue Section Query: pure derivation of the board sections from a task snapshot.
 
-use std::cmp::Reverse;
 use std::collections::BTreeSet;
 use std::path::Path;
 
@@ -115,8 +114,8 @@ pub struct ProjectRow {
     pub in_motion: usize,
     /// Ready count.
     pub ready: usize,
-    /// Distinct thread names on this project's open tasks, ordered by most recently
-    /// updated task first. Painted as the wide-width THREADS column.
+    /// Distinct thread names on this project's open tasks, ordered by the most
+    /// recently status-changed task first. Painted as the wide-width THREADS column.
     pub threads: Vec<String>,
     /// True when this is the invocation directory's project.
     pub current: bool,
@@ -279,14 +278,14 @@ fn query_desk(
         .copied()
         .filter(|t| is_needs_you_status(t.status))
         .collect();
-    sort_by_updated_desc(&mut need);
+    sort_by_status_change_desc(&mut need);
 
     let mut motion: Vec<&Task> = live
         .iter()
         .copied()
         .filter(|t| t.status == HumanStatus::Started)
         .collect();
-    sort_by_updated_desc(&mut motion);
+    sort_by_status_change_desc(&mut motion);
 
     // ON DECK · desk is the personal backlog: desk-scope ready tasks only. Project
     // backlogs live on their project boards, never here.
@@ -295,7 +294,7 @@ fn query_desk(
         .copied()
         .filter(|t| t.status == HumanStatus::Ready && matches!(t.scope, TaskScope::Global))
         .collect();
-    sort_by_updated_desc(&mut deck);
+    sort_by_created_asc(&mut deck);
 
     let mut sections = Vec::new();
     push_needs_you(&mut sections, &need);
@@ -368,8 +367,8 @@ fn query_projects_index(
                 };
                 let mut owned_tasks: Vec<&Task> =
                     live.iter().copied().filter(|task| owned(task)).collect();
-                sort_by_updated_desc(&mut owned_tasks);
-                // Insertion order is recency; the set only guards uniqueness.
+                sort_by_status_change_desc(&mut owned_tasks);
+                // Insertion order is status-change recency; the set only guards uniqueness.
                 let mut seen: BTreeSet<&str> = BTreeSet::new();
                 let threads: Vec<String> = owned_tasks
                     .iter()
@@ -470,19 +469,19 @@ fn query_thread_view(
         .copied()
         .filter(|t| is_needs_you_status(t.status))
         .collect();
-    sort_by_updated_desc(&mut need);
+    sort_by_status_change_desc(&mut need);
     let mut motion: Vec<&Task> = live
         .iter()
         .copied()
         .filter(|t| t.status == HumanStatus::Started)
         .collect();
-    sort_by_updated_desc(&mut motion);
+    sort_by_status_change_desc(&mut motion);
     let mut deck: Vec<&Task> = live
         .iter()
         .copied()
         .filter(|t| t.status == HumanStatus::Ready)
         .collect();
-    sort_by_updated_desc(&mut deck);
+    sort_by_created_asc(&mut deck);
 
     let mut sections = Vec::new();
     push_needs_you(&mut sections, &need);
@@ -523,15 +522,18 @@ fn query_project_focus(
         .copied()
         .filter(|t| t.status == HumanStatus::Started && admits(t))
         .collect();
-    sort_by_updated_desc(&mut motion);
+    sort_by_status_change_desc(&mut motion);
 
+    // `open` carries both NEEDS YOU and ON DECK rows: FIFO order for the backlog,
+    // then NEEDS YOU re-sorted to status-change recency after the split.
     let mut open: Vec<&Task> = live
         .iter()
         .copied()
         .filter(|t| !matches!(t.status, HumanStatus::Started | HumanStatus::Done) && admits(t))
         .collect();
-    sort_by_updated_desc(&mut open);
-    let (need, ready) = split_needs_you(&open);
+    sort_by_created_asc(&mut open);
+    let (mut need, ready) = split_needs_you(&open);
+    sort_by_status_change_desc(&mut need);
 
     let label = live
         .iter()
@@ -596,7 +598,7 @@ fn append_done(sections: &mut Vec<QueueSection>, live: &[&Task], drawer_open: bo
         .copied()
         .filter(|t| t.status == HumanStatus::Done)
         .collect();
-    sort_by_updated_desc(&mut done);
+    sort_by_status_change_desc(&mut done);
     if !done.is_empty() {
         sections.push(section_from(SectionKind::Done, None, &done));
     }
@@ -604,7 +606,7 @@ fn append_done(sections: &mut Vec<QueueSection>, live: &[&Task], drawer_open: bo
 
 /// The done drawer's archived group: individually archived tasks the drawer's scope
 /// would otherwise show (not soft-deleted, not owned by an archived project), newest
-/// first. Paints only while the drawer is open, and only when non-empty.
+/// status change first. Paints only while the drawer is open, and only when non-empty.
 fn append_archived(sections: &mut Vec<QueueSection>, in_scope: &[&Task], drawer_open: bool) {
     if !drawer_open {
         return;
@@ -614,7 +616,7 @@ fn append_archived(sections: &mut Vec<QueueSection>, in_scope: &[&Task], drawer_
         .copied()
         .filter(|task| task.archived && !task.soft_deleted)
         .collect();
-    sort_by_updated_desc(&mut archived);
+    sort_by_status_change_desc(&mut archived);
     if !archived.is_empty() {
         sections.push(section_from(SectionKind::Archived, None, &archived));
     }
@@ -695,8 +697,31 @@ fn task_matches_scope(task: &Task, path: &Path, identities: &PathIdentityCache) 
     }
 }
 
-fn sort_by_updated_desc(tasks: &mut [&Task]) {
-    tasks.sort_by_key(|t| Reverse(t.updated_at));
+/// Section ordering rule. NEEDS YOU, IN MOTION, DONE and ARCHIVED put the most
+/// recent status change first (`status_changed_at`: the last `StatusSet`,
+/// `Completed` or `Reopened` event, falling back to `created_at`); ON DECK is a
+/// FIFO backlog, oldest `created_at` first. Plain edits, step changes, archive
+/// and restore never reorder a section. Ties break by `created_at` then `id` so
+/// the order is total and stable across reloads.
+fn sort_by_status_change_desc(tasks: &mut [&Task]) {
+    tasks.sort_by(|a, b| {
+        b.status_changed_at()
+            .cmp(&a.status_changed_at())
+            .then_with(|| a.created_at.cmp(&b.created_at))
+            .then_with(|| a.id.cmp(&b.id))
+    });
+}
+
+/// Backlogs are FIFO: oldest capture first, ties by id. Notice rows (the starter tour,
+/// release notes) lead regardless: they are seeded once and would otherwise sink under an
+/// existing user's backlog, unseen.
+fn sort_by_created_asc(tasks: &mut [&Task]) {
+    tasks.sort_by(|a, b| {
+        b.is_notice()
+            .cmp(&a.is_notice())
+            .then_with(|| a.created_at.cmp(&b.created_at))
+            .then_with(|| a.id.cmp(&b.id))
+    });
 }
 
 fn section_from(kind: SectionKind, project_label: Option<String>, tasks: &[&Task]) -> QueueSection {
@@ -775,6 +800,30 @@ mod tests {
         }
     }
 
+    /// Appends a status-change event at `at_secs`, the only history kind that may
+    /// reorder a section.
+    fn with_status_event(task: Task, kind: TaskEventKind, at_secs: u64) -> Task {
+        let mut task = task;
+        task.history.push(TaskEvent {
+            kind,
+            at: SystemTime::UNIX_EPOCH + Duration::from_secs(at_secs),
+        });
+        task
+    }
+
+    /// Simulates `record_mutation` for a non-status mutation (edit, step tick):
+    /// `updated_at` moves and a non-status event lands, but the task's
+    /// status-change time does not.
+    fn mutated(task: Task, kind: TaskEventKind, at_secs: u64) -> Task {
+        let mut task = task;
+        task.updated_at = SystemTime::UNIX_EPOCH + Duration::from_secs(at_secs);
+        task.history.push(TaskEvent {
+            kind,
+            at: task.updated_at,
+        });
+        task
+    }
+
     fn ids(section: &QueueSection) -> Vec<Uuid> {
         section.task_ids.clone()
     }
@@ -807,7 +856,7 @@ mod tests {
             task.archived = true;
         }
 
-        // Desk drawer: every scope's archived tasks, newest first. A task whose
+        // Desk drawer: every scope's archived tasks, newest status change first. A task whose
         // project is archived stays hidden (task 3).
         let home = query_board(
             &tasks,
@@ -825,7 +874,7 @@ mod tests {
         assert_eq!(
             ids(group),
             vec![Uuid::from_u128(2), Uuid::from_u128(1)],
-            "newest first, archived project's task excluded"
+            "newest status change first, archived project's task excluded"
         );
         assert_eq!(group.count, 2);
 
@@ -959,13 +1008,27 @@ mod tests {
     }
 
     #[test]
-    fn desk_in_motion_is_global_started_sorted_by_updated_desc() {
+    fn desk_in_motion_is_global_started_sorted_by_status_change_desc() {
+        // created_at order (90, 50, 10) is the reverse of status-change order
+        // (60, 80, 100): the newest status change leads, not the newest edit.
         let tasks = vec![
-            task(1, HumanStatus::Started, TaskScope::Global, false, 10),
-            task(2, HumanStatus::Started, project("/repos/a"), false, 30),
+            with_status_event(
+                task(1, HumanStatus::Started, TaskScope::Global, false, 90),
+                TaskEventKind::StatusSet,
+                60,
+            ),
+            with_status_event(
+                task(2, HumanStatus::Started, project("/repos/a"), false, 10),
+                TaskEventKind::StatusSet,
+                100,
+            ),
             task(3, HumanStatus::Started, TaskScope::Global, true, 40),
             task(4, HumanStatus::Ready, TaskScope::Global, false, 50),
-            task(5, HumanStatus::Started, project("/repos/b"), false, 20),
+            with_status_event(
+                task(5, HumanStatus::Started, project("/repos/b"), false, 50),
+                TaskEventKind::StatusSet,
+                80,
+            ),
         ];
 
         let view = query_lens(&tasks, None, BoardLens::Desk, false);
@@ -978,7 +1041,8 @@ mod tests {
         assert_eq!(motion.len(), 1);
         assert_eq!(
             ids(motion[0]),
-            vec![Uuid::from_u128(2), Uuid::from_u128(5), Uuid::from_u128(1),]
+            vec![Uuid::from_u128(2), Uuid::from_u128(5), Uuid::from_u128(1),],
+            "newest status change first across every live scope"
         );
 
         let desk: Vec<_> = view
@@ -989,6 +1053,134 @@ mod tests {
         assert_eq!(desk.len(), 1);
         assert_eq!(ids(desk[0]), vec![Uuid::from_u128(4)]);
         assert!(!section_ids(&view, SectionKind::OnDeck).contains(&Uuid::from_u128(2)));
+    }
+
+    #[test]
+    fn ticking_a_step_on_the_older_started_task_does_not_reorder_in_motion() {
+        let older = with_status_event(
+            task(1, HumanStatus::Started, TaskScope::Global, false, 10),
+            TaskEventKind::StatusSet,
+            20,
+        );
+        let newer = with_status_event(
+            task(2, HumanStatus::Started, TaskScope::Global, false, 30),
+            TaskEventKind::StatusSet,
+            50,
+        );
+        // The step tick lands long after both status changes and bumps updated_at
+        // past the newer task's; the section order must not move.
+        let tasks = vec![mutated(older, TaskEventKind::StepChecked, 200), newer];
+
+        let view = query_lens(&tasks, None, BoardLens::Desk, false);
+
+        assert_eq!(
+            section_ids(&view, SectionKind::InMotion),
+            vec![Uuid::from_u128(2), Uuid::from_u128(1)],
+            "a step tick never reorders IN MOTION"
+        );
+    }
+
+    #[test]
+    fn setting_status_moves_a_task_to_the_top_of_its_new_section() {
+        let tasks = vec![
+            with_status_event(
+                task(1, HumanStatus::Started, TaskScope::Global, false, 10),
+                TaskEventKind::StatusSet,
+                20,
+            ),
+            with_status_event(
+                task(2, HumanStatus::Started, TaskScope::Global, false, 30),
+                TaskEventKind::StatusSet,
+                40,
+            ),
+            // Task 3 is the oldest created but was just started at 100.
+            with_status_event(
+                task(3, HumanStatus::Started, TaskScope::Global, false, 5),
+                TaskEventKind::StatusSet,
+                100,
+            ),
+        ];
+
+        let view = query_lens(&tasks, None, BoardLens::Desk, false);
+
+        assert_eq!(
+            section_ids(&view, SectionKind::InMotion),
+            vec![Uuid::from_u128(3), Uuid::from_u128(2), Uuid::from_u128(1)],
+            "the freshly started task leads IN MOTION"
+        );
+    }
+
+    #[test]
+    fn on_deck_is_oldest_first_and_an_edit_does_not_move_a_row() {
+        let tasks = vec![
+            task(1, HumanStatus::Ready, TaskScope::Global, false, 10),
+            // Task 2 is edited at 90, past both neighbours: it stays in FIFO place.
+            mutated(
+                task(2, HumanStatus::Ready, TaskScope::Global, false, 20),
+                TaskEventKind::Edited,
+                90,
+            ),
+            task(3, HumanStatus::Ready, TaskScope::Global, false, 30),
+        ];
+
+        let view = query_lens(&tasks, None, BoardLens::Desk, false);
+
+        assert_eq!(
+            section_ids(&view, SectionKind::OnDeck),
+            vec![Uuid::from_u128(1), Uuid::from_u128(2), Uuid::from_u128(3)],
+            "ON DECK is the backlog: oldest created first, edits never reorder"
+        );
+    }
+
+    #[test]
+    fn notices_lead_on_deck_ahead_of_an_older_backlog() {
+        // A starter guide seeded today (created 90) on a desk with tasks from 10 and 20:
+        // FIFO alone would bury it, so notices lead and the backlog keeps its own order.
+        let mut guide = task(3, HumanStatus::Ready, TaskScope::Global, false, 90);
+        guide.notice = Some(crate::domain::Notice {
+            catalog_id: "guide.welcome".into(),
+            number: None,
+        });
+        let tasks = vec![
+            task(1, HumanStatus::Ready, TaskScope::Global, false, 10),
+            task(2, HumanStatus::Ready, TaskScope::Global, false, 20),
+            guide,
+        ];
+
+        let view = query_lens(&tasks, None, BoardLens::Desk, false);
+
+        assert_eq!(
+            section_ids(&view, SectionKind::OnDeck),
+            vec![Uuid::from_u128(3), Uuid::from_u128(1), Uuid::from_u128(2)],
+        );
+    }
+
+    #[test]
+    fn a_task_without_a_status_event_sorts_by_created_among_status_changed_ones() {
+        // Task 1: status set at 50. Task 2: no status event, updated_at bumped to
+        // 99 by an edit, so only its created_at (20) may order it. Task 3: no
+        // status event, created at 30.
+        let tasks = vec![
+            with_status_event(
+                task(1, HumanStatus::Blocked, TaskScope::Global, false, 10),
+                TaskEventKind::StatusSet,
+                50,
+            ),
+            mutated(
+                task(2, HumanStatus::Blocked, TaskScope::Global, false, 20),
+                TaskEventKind::Edited,
+                99,
+            ),
+            task(3, HumanStatus::Blocked, TaskScope::Global, false, 30),
+        ];
+
+        let view = query_lens(&tasks, None, BoardLens::Desk, false);
+
+        assert_eq!(
+            section_ids(&view, SectionKind::NeedsYou),
+            vec![Uuid::from_u128(1), Uuid::from_u128(3), Uuid::from_u128(2)],
+            "no status event falls back to created_at, never updated_at"
+        );
     }
 
     #[test]
@@ -1020,7 +1212,7 @@ mod tests {
                 Uuid::from_u128(2),
                 Uuid::from_u128(1),
             ],
-            "blocked/review from every live project plus desk, newest first"
+            "blocked/review from every live project plus desk, newest status change first"
         );
         assert_eq!(
             section_ids(&view, SectionKind::OnDeck),
@@ -1410,7 +1602,7 @@ mod tests {
     }
 
     #[test]
-    fn done_drawer_lists_non_deleted_done_updated_desc() {
+    fn done_drawer_lists_non_deleted_done_by_status_change_desc() {
         let tasks = vec![
             task(1, HumanStatus::Done, TaskScope::Global, false, 10),
             task(2, HumanStatus::Done, project("/repos/a"), false, 30),

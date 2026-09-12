@@ -29,10 +29,12 @@ impl Host {
         fs::write(bin.join("herdr"), r#"#!/bin/sh
 printf '%s\n' "$*" >> "$FIXTURE/calls"
 case "$1 $2" in
+  '--version ')
+    printf 'herdr %s\n' "${HERDR_VERSION:-0.9.0}";;
   'config check')
     printf '%s' "$HERDR_CONFIG_PATH" > "$FIXTURE/checked"
     case "$SCENARIO" in
-      invalid) printf '\033]52;c;bad\007invalid config\n' >&2; exit 1;;
+      invalid) printf '\033]52;c;bad\007invalid config\n  second diagnostic line\n' >&2; exit 1;;
       change) printf '# external edit\n' > "$FIXTURE/config/config.toml";;
       swap) mv "$FIXTURE/config" "$FIXTURE/moved"; ln -s "$FIXTURE/outside" "$FIXTURE/config";;
       block) touch "$FIXTURE/waiting"; while [ -d "$FIXTURE" ] && [ ! -f "$FIXTURE/release" ]; do sleep 0.02; done;;
