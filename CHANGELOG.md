@@ -9,12 +9,7 @@ the GitHub release notes verbatim.
 
 ## Unreleased
 
-### Fixed
-
-- `tsk setup herdr` on a Herdr older than 0.9 says so (`herdr 0.6.8 found; tsk needs 0.9.0 or newer`) and stops before touching the config, instead of failing on `herdr config check` with a usage dump.
-- Setup errors that quote Herdr's output keep their line breaks instead of printing a literal `\u{000a}`.
-
-## v0.8.1
+## v0.8.2
 
 ### Breaking
 
@@ -32,11 +27,14 @@ the GitHub release notes verbatim.
 ### Changed
 
 - The agent skill (`tsk guide`, `tsk setup <agent>`) is rewritten around a quick-reference table and rules of engagement: agents hand work back with `review` and leave `done` to you. Skill version 1.1.0; rerun `tsk setup` to update installed copies.
+- Sections hold their order while you work: NEEDS YOU, IN MOTION, DONE and the drawer's ARCHIVED group keep the most recent status change on top, and ON DECK lists its backlog oldest first. Editing a task or ticking a step no longer jumps it to the top.
 
 ### Fixed
 
 - On a wide board, clicking a task opens its details beside the board and keeps board focus; a double-click during column reflow opens the task you clicked, not a newly exposed control.
 - `prefix+t` opens or focuses one board per Herdr workspace, across tabs, and returns to the tab you pressed it from.
+- `tsk setup herdr` on a Herdr older than 0.9 says so (`herdr 0.6.8 found; tsk needs 0.9.0 or newer`) and stops before touching the config, instead of failing on `herdr config check` with a usage dump.
+- Setup errors that quote Herdr's output keep their line breaks instead of printing a literal `\u{000a}`.
 
 ## v0.7.0
 

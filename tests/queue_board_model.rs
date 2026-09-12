@@ -533,7 +533,7 @@ fn project_deck_lists_tasks_flat_with_thread_filter_across_statuses() {
 }
 
 #[test]
-fn project_deck_orders_ready_tasks_by_updated_desc_across_threads() {
+fn project_deck_orders_ready_tasks_oldest_first_across_threads() {
     let tasks = vec![
         threaded_task(
             1,
@@ -565,8 +565,8 @@ fn project_deck_orders_ready_tasks_by_updated_desc_across_threads() {
     let deck = on_deck(&view);
     assert_eq!(
         deck.task_ids,
-        vec![Uuid::from_u128(2), Uuid::from_u128(3), Uuid::from_u128(1)],
-        "one flat recency order; no thread blocks, no loose lane"
+        vec![Uuid::from_u128(1), Uuid::from_u128(3), Uuid::from_u128(2)],
+        "one flat oldest-first backlog order; no thread blocks, no loose lane"
     );
 }
 
@@ -650,7 +650,8 @@ fn same_thread_name_joins_only_in_the_global_view_not_the_local_filter() {
     );
     assert_eq!(
         section_ids(&view, SectionKind::OnDeck),
-        vec![Uuid::from_u128(2), Uuid::from_u128(1)]
+        vec![Uuid::from_u128(1), Uuid::from_u128(2)],
+        "both scopes join under one thread name, oldest created first"
     );
 }
 
@@ -786,7 +787,7 @@ fn projects_index_rows_carry_open_work_counts() {
 }
 
 #[test]
-fn selection_stays_on_task_id_across_deck_reorder() {
+fn selection_stays_on_task_id_across_motion_reorder() {
     let mut domain = DomainState::new();
     let alpha = domain
         .create(
@@ -806,10 +807,16 @@ fn selection_stays_on_task_id_across_deck_reorder() {
             Some("beta".into()),
         )
         .unwrap();
+    // Beta was started last, so it leads IN MOTION (newest status change first).
+    domain.set_status(alpha, HumanStatus::Started).unwrap();
+    domain.set_status(beta, HumanStatus::Started).unwrap();
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
 
     let before = model.queue_view();
-    assert_eq!(on_deck(&before).task_ids, vec![beta, alpha]);
+    assert_eq!(
+        section_ids(&before, SectionKind::InMotion),
+        vec![beta, alpha]
+    );
 
     let beta_index = model
         .visible_ids()
@@ -824,24 +831,26 @@ fn selection_stays_on_task_id_across_deck_reorder() {
     )
     .unwrap();
 
-    domain
-        .edit(
-            alpha,
-            "alpha changed",
-            None,
-            project(THIS_REPO),
-            Some("alpha".into()),
-        )
-        .unwrap();
+    // A fresh status change on alpha moves it above beta; selection stays pinned
+    // to beta's id, not to beta's row position.
+    domain.set_status(alpha, HumanStatus::Blocked).unwrap();
+    domain.set_status(alpha, HumanStatus::Started).unwrap();
     model.sync_from_domain(&domain);
 
     let after = model.queue_view();
-    assert_eq!(on_deck(&after).task_ids, vec![alpha, beta]);
+    assert_eq!(
+        section_ids(&after, SectionKind::InMotion),
+        vec![alpha, beta],
+        "the newest status change leads IN MOTION"
+    );
     assert_eq!(model.selected_id(), Some(beta));
-    assert_eq!(model.visible_ids(), on_deck(&after).task_ids);
+    assert_eq!(
+        model.visible_ids(),
+        section_ids(&after, SectionKind::InMotion)
+    );
     assert_eq!(model.selected_index(), Some(1));
     assert_eq!(
-        on_deck(&after).task_ids[model.selected_index().unwrap()],
+        section_ids(&after, SectionKind::InMotion)[model.selected_index().unwrap()],
         beta
     );
 }

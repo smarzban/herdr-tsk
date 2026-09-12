@@ -250,10 +250,22 @@ gh release download vX.Y.Z -p tsk.rb -D /tmp/tsk-rc && HOMEBREW_DEVELOPER=1 brew
 ```
 
 The site serves `install.sh` from `main`; if the installer changed in this release fetch
-`releases/download/vX.Y.Z/install.sh` instead. Smoke every supported architecture you
-can reach, and `tsk setup herdr` under isolated roots. A failed rehearsal burns the tag:
-fix forward with the next patch version and leave (or, with approval, delete) the bad
-pre-release.
+`releases/download/vX.Y.Z/install.sh` instead. Smoke `tsk setup herdr` under isolated
+roots. A failed rehearsal burns the tag: fix forward with the next patch version and leave
+(or, with approval, delete) the bad pre-release.
+
+Rehearsal traps, learned the hard way:
+
+- Never run `tsk update` on a pre-release copy before promotion. It follows
+  `releases/latest`, which is still the previous stable, so it downgrades the binary,
+  and the downgraded binary then refuses the store the pre-release migrated.
+- `brew install --formula tsk.rb` on a machine with the tap's `tsk` installed replaces the
+  daily copy (same formula name) and removes the old keg. Use a throwaway machine or
+  `brew unlink` first and expect to `brew reinstall smarzban/tap/tsk` afterwards.
+- The installer one-liner, Linux and Intel smoke are owner steps. An agent sandbox cannot
+  execute a downloaded script, and the checked-in rehearsal can only run the macOS ARM
+  archive binary directly; the agent verifies checksums, the archive binary, the upgrade
+  path and setup, and says which of these it did not run.
 
 **Official release.** Replace the draft's skeleton and checklist with the version's
 `CHANGELOG.md` section verbatim (keep the Installation section), then promote the tested

@@ -104,7 +104,7 @@ fn installed_symlink_is_shared_with_plugin_and_rerun_does_not_duplicate_assets()
     let installed = bin.join("tsk");
     symlink(env!("CARGO_BIN_EXE_tsk"), &installed).unwrap();
     let host = bin.join("herdr");
-    fs::write(&host, "#!/bin/sh\nif [ \"$1 $2\" = 'plugin list' ]; then if [ -f \"$SETUP_LINK\" ]; then printf '{\"result\":{\"plugins\":[{\"plugin_id\":\"herdr-tsk\",\"plugin_root\":\"%s\"}]}}' \"$(cat \"$SETUP_LINK\")\"; else printf '{\"result\":{\"plugins\":[]}}'; fi; exit 0; fi\nif [ \"$1 $2\" = 'plugin link' ]; then printf '%s' \"$3\" > \"$SETUP_LINK\"; fi\nexit 0\n").unwrap();
+    fs::write(&host, "#!/bin/sh\nif [ \"$1\" = --version ]; then echo 'herdr 0.9.0'; exit 0; fi\nif [ \"$1 $2\" = 'plugin list' ]; then if [ -f \"$SETUP_LINK\" ]; then printf '{\"result\":{\"plugins\":[{\"plugin_id\":\"herdr-tsk\",\"plugin_root\":\"%s\"}]}}' \"$(cat \"$SETUP_LINK\")\"; else printf '{\"result\":{\"plugins\":[]}}'; fi; exit 0; fi\nif [ \"$1 $2\" = 'plugin link' ]; then printf '%s' \"$3\" > \"$SETUP_LINK\"; fi\nexit 0\n").unwrap();
     fs::set_permissions(&host, fs::Permissions::from_mode(0o755)).unwrap();
     let config = root.join("herdr/config.toml");
     let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap());
@@ -163,7 +163,7 @@ fn failed_host_registration_keeps_original_config_and_releases_lock() {
     let host = root.join("herdr");
     fs::write(
         &host,
-        "#!/bin/sh\nif [ \"$1 $2\" = 'plugin list' ]; then printf '{\"result\":{\"plugins\":[]}}'; exit 0; fi\nif [ \"$1 $2\" = 'plugin link' ]; then echo refused >&2; exit 1; fi\nexit 0\n",
+        "#!/bin/sh\nif [ \"$1\" = --version ]; then echo 'herdr 0.9.0'; exit 0; fi\nif [ \"$1 $2\" = 'plugin list' ]; then printf '{\"result\":{\"plugins\":[]}}'; exit 0; fi\nif [ \"$1 $2\" = 'plugin link' ]; then echo refused >&2; exit 1; fi\nexit 0\n",
     )
     .unwrap();
     fs::set_permissions(&host, fs::Permissions::from_mode(0o755)).unwrap();

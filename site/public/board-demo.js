@@ -411,7 +411,11 @@ import { parseCapture } from "./capture.js";
   };
 
   const projectName = (task) => task.project || "desk";
+  // updatedAt moves only on a status change here, so this is "newest status change first";
+  // ready backlogs are FIFO, oldest capture at the top, matching the TUI.
   const byUpdated = (a, b) => b.updatedAt - a.updatedAt;
+  const byCreated = (a, b) =>
+    a.createdAt - b.createdAt || String(a.id).localeCompare(String(b.id));
   const taskById = (id) => state.tasks.find((t) => t.id === id);
 
   function pickerOptions() {
@@ -579,7 +583,7 @@ import { parseCapture } from "./capture.js";
           .sort(byUpdated),
         ready: open
           .filter((t) => inP(t) && t.status === "ready")
-          .sort(byUpdated),
+          .sort(byCreated),
         done: done.filter(inP),
       };
     }
@@ -591,7 +595,7 @@ import { parseCapture } from "./capture.js";
           .sort(byUpdated),
         desk: open
           .filter((t) => !t.project && t.status === "ready")
-          .sort(byUpdated),
+          .sort(byCreated),
         done,
       };
     }
@@ -704,7 +708,7 @@ import { parseCapture } from "./capture.js";
         const blocked = group
           .filter((t) => t.status === "blocked")
           .sort(byUpdated);
-        const ready = group.filter((t) => t.status === "ready").sort(byUpdated);
+        const ready = group.filter((t) => t.status === "ready").sort(byCreated);
         rows.push({
           kind: "project",
           label: name,

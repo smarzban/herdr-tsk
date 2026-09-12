@@ -155,12 +155,27 @@ for (const width of [110, 130]) {
     page,
   }) => {
     await open(page, width);
-    const result = await row(page, 13).evaluate((el) => {
-      const rect = el.getBoundingClientRect();
-      const x = Math.min(rect.right - 4, window.innerWidth - 8);
-      const y = rect.top + 4;
-      const click = () =>
-        document.elementFromPoint(x, y).dispatchEvent(
+    // The demo re-renders the list, so a locator handle can go stale between calls and
+    // report an empty rect (the old failure: a click at (-4, 4)). Resolve the row by task
+    // id inside the page for each click, and let layout settle if the rect is empty.
+    const result = await page.evaluate(async (taskId) => {
+      const settle = () => new Promise((r) => requestAnimationFrame(() => r()));
+      const locate = async () => {
+        for (let attempt = 0; attempt < 10; attempt += 1) {
+          const el = document.querySelector(`[data-task="${taskId}"]`);
+          if (el && el.getBoundingClientRect().width > 0) return el;
+          await settle();
+        }
+        throw new Error(`row ${taskId} never laid out`);
+      };
+      const click = async () => {
+        const target = await locate();
+        const rect = target.getBoundingClientRect();
+        const x = Math.min(rect.right - 4, window.innerWidth - 8);
+        const y = rect.top + 4;
+        const hit = document.elementFromPoint(x, y);
+        if (!hit) throw new Error(`nothing at (${x}, ${y}) for ${taskId}`);
+        hit.dispatchEvent(
           new MouseEvent("click", {
             bubbles: true,
             clientX: x,
@@ -168,11 +183,12 @@ for (const width of [110, 130]) {
             detail: 1,
           }),
         );
-      click();
+      };
+      await click();
       const split = !!document.querySelector(".tsk-wide-split.is-split");
-      click();
+      await click();
       return { split, full: !document.querySelector(".tsk-list") };
-    });
+    }, id(13));
     expect(result).toEqual({ split: true, full: true });
     await expect(page.locator(".tsk-task-column")).toContainText("END");
   });
