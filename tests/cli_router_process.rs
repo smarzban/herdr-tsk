@@ -133,7 +133,7 @@ fn update_directs_homebrew_installations_to_brew_without_downloading() {
     assert!(output.stderr.is_empty());
     assert_eq!(
         String::from_utf8(output.stdout).expect("UTF-8 guidance"),
-        "tsk was installed with Homebrew. Run:\n  brew upgrade tsk\n"
+        "tsk was installed with Homebrew. Run:\n  brew update && brew upgrade tsk\n"
     );
     let _ = std::fs::remove_dir_all(dir);
 }

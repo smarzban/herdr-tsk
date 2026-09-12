@@ -7,7 +7,7 @@ If Herdr is on PATH, the curl installer asks to run `tsk setup herdr` on a TTY; 
 Herdr's board shortcut opens or focuses one board per workspace across its tabs, preserving its view and edits. Other workspaces stay untouched; boards share the same task store.
 Details: https://gettsk.sh/docs/install.md
 Inside Git, the repo root is the default project. Outside Git, tsk opens and captures on the desk while keeping the current directory available as a project.
-The board checks GitHub releases at most daily and shows a dim `vX.Y.Z available` on the status row; set `TSK_NO_UPDATE_CHECK` to disable. Run `tsk update` to immediately run the official installer for an installer-managed copy; Homebrew copies print `brew upgrade tsk` instead.
+The board checks GitHub releases at most daily and shows a dim `vX.Y.Z available` on the status row; set `TSK_NO_UPDATE_CHECK` to disable. Run `tsk update` to immediately run the official installer for an installer-managed copy; Homebrew copies print `brew update && brew upgrade tsk` instead.
 `N` tasks on the desk are human-only notices: four starter tasks on a first open, one `What's new in tsk` task after an upgrade. `tsk list` never shows them.
 At 110 usable columns or wider, clicking a task opens or updates its details beside the board with board focus; double-click opens it full screen. Narrow panes use click-to-peek.
 

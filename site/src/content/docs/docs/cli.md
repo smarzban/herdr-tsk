@@ -242,7 +242,7 @@ Recent deletions may still be in the main store; use board undo until they move 
 tsk update
 ```
 
-For an installer-managed copy, immediately downloads and runs the official installer to install the latest published release. For a Homebrew copy, it prints `brew upgrade tsk`; Homebrew remains responsible for its own upgrades. Reopen a running board after an upgrade.
+For an installer-managed copy, immediately downloads and runs the official installer to install the latest published release. For a Homebrew copy, it prints `brew update && brew upgrade tsk`; Homebrew remains responsible for its own upgrades. Reopen a running board after an upgrade.
 
 ## setup
 

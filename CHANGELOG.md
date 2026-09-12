@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- `tsk update` upgrades installer-managed copies; Homebrew copies print `brew upgrade tsk`.
+- `tsk update` upgrades installer-managed copies; Homebrew copies print `brew update && brew upgrade tsk`.
 - `tsk setup omp` installs the agent skill for the active OMP profile and participates in detected-agent setup.
 
 ## v0.7.0

@@ -88,7 +88,7 @@ fn resolve_context_main() -> ExitCode {
 fn update_main(args: &[String]) -> ExitCode {
     if args.len() == 3 && args[2] == "--help" {
         println!(
-            "usage: tsk update\n\nInstalls the latest published release for installer-managed tsk. Homebrew installations stay managed by Homebrew and print `brew upgrade tsk` instead."
+            "usage: tsk update\n\nInstalls the latest published release for installer-managed tsk. Homebrew installations stay managed by Homebrew and print `brew update && brew upgrade tsk` instead."
         );
         return ExitCode::SUCCESS;
     }
@@ -99,7 +99,7 @@ fn update_main(args: &[String]) -> ExitCode {
 
     match tsk_tui::cli::update::run() {
         Ok(tsk_tui::cli::update::UpdateOutcome::Homebrew) => {
-            println!("tsk was installed with Homebrew. Run:\n  brew upgrade tsk");
+            println!("tsk was installed with Homebrew. Run:\n  brew update && brew upgrade tsk");
             ExitCode::SUCCESS
         }
         Ok(tsk_tui::cli::update::UpdateOutcome::Installed) => ExitCode::SUCCESS,

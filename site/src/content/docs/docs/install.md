@@ -62,12 +62,12 @@ For standalone use, run `tsk` directly in your terminal.
 
 ## Upgrade
 
-Run `tsk update` to upgrade an installer-managed copy. It immediately downloads and runs the same checksum-verifying installer used for the first install. A Homebrew copy stays under Homebrew's control: `tsk update` prints `brew upgrade tsk` instead.
+Run `tsk update` to upgrade an installer-managed copy. It immediately downloads and runs the same checksum-verifying installer used for the first install. A Homebrew copy stays under Homebrew's control: `tsk update` prints `brew update && brew upgrade tsk` instead.
 
 | Installed with | Upgrade |
 | --- | --- |
 | Installer | `tsk update` |
-| Homebrew | `brew upgrade tsk` |
+| Homebrew | `brew update && brew upgrade tsk` |
 | Source | Pull changes and rebuild |
 
 Close and reopen running boards to use the new binary. After upgrading an installed Herdr plugin, rerun `tsk setup herdr`, then reload Herdr's config.
