@@ -155,26 +155,27 @@ for (const width of [110, 130]) {
     page,
   }) => {
     await open(page, width);
-    // The demo re-renders the list, so a locator handle can go stale between calls and
-    // report an empty rect (the old failure: a click at (-4, 4)). Resolve the row by task
-    // id inside the page for each click, and let layout settle if the rect is empty.
+    // The reflow guard in board-demo.js fires only when the second click lands on the
+    // same client coordinates as the first, after the split has moved the row from under
+    // them. So both clicks must reuse one (x, y). The flake was upstream of that: a row
+    // handle read before layout had an empty rect and the click went to (-4, 4). Wait for
+    // a laid-out rect, then click twice at the same point.
     const result = await page.evaluate(async (taskId) => {
       const settle = () => new Promise((r) => requestAnimationFrame(() => r()));
-      const locate = async () => {
-        for (let attempt = 0; attempt < 10; attempt += 1) {
-          const el = document.querySelector(`[data-task="${taskId}"]`);
-          if (el && el.getBoundingClientRect().width > 0) return el;
-          await settle();
-        }
-        throw new Error(`row ${taskId} never laid out`);
-      };
-      const click = async () => {
-        const target = await locate();
-        const rect = target.getBoundingClientRect();
-        const x = Math.min(rect.right - 4, window.innerWidth - 8);
-        const y = rect.top + 4;
+      let el = null;
+      for (let attempt = 0; attempt < 10 && !el; attempt += 1) {
+        const candidate = document.querySelector(`[data-task="${taskId}"]`);
+        if (candidate && candidate.getBoundingClientRect().width > 0)
+          el = candidate;
+        else await settle();
+      }
+      if (!el) throw new Error(`row ${taskId} never laid out`);
+      const rect = el.getBoundingClientRect();
+      const x = Math.min(rect.right - 4, window.innerWidth - 8);
+      const y = rect.top + 4;
+      const click = () => {
         const hit = document.elementFromPoint(x, y);
-        if (!hit) throw new Error(`nothing at (${x}, ${y}) for ${taskId}`);
+        if (!hit) throw new Error(`nothing at (${x}, ${y})`);
         hit.dispatchEvent(
           new MouseEvent("click", {
             bubbles: true,
@@ -184,9 +185,9 @@ for (const width of [110, 130]) {
           }),
         );
       };
-      await click();
+      click();
       const split = !!document.querySelector(".tsk-wide-split.is-split");
-      await click();
+      click();
       return { split, full: !document.querySelector(".tsk-list") };
     }, id(13));
     expect(result).toEqual({ split: true, full: true });

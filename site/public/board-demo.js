@@ -411,9 +411,14 @@ import { parseCapture } from "./capture.js";
   };
 
   const projectName = (task) => task.project || "desk";
-  // updatedAt moves only on a status change here, so this is "newest status change first";
-  // ready backlogs are FIFO, oldest capture at the top, matching the TUI.
-  const byUpdated = (a, b) => b.updatedAt - a.updatedAt;
+  // Same rule as the TUI: status sections show the newest status change first (statusAt
+  // moves only in setStatus, never on an edit or a step), ready backlogs are FIFO by
+  // capture time. Ties break by createdAt then id so the order is stable.
+  const statusAt = (t) => t.statusAt ?? t.createdAt;
+  const byStatusChange = (a, b) =>
+    statusAt(b) - statusAt(a) ||
+    a.createdAt - b.createdAt ||
+    String(a.id).localeCompare(String(b.id));
   const byCreated = (a, b) =>
     a.createdAt - b.createdAt || String(a.id).localeCompare(String(b.id));
   const taskById = (id) => state.tasks.find((t) => t.id === id);
@@ -477,7 +482,7 @@ import { parseCapture } from "./capture.js";
   function archivedInScope() {
     const archived = state.tasks
       .filter((t) => t.archived && matchesThread(t))
-      .sort(byUpdated);
+      .sort(byStatusChange);
     if (state.focusProject || isProjectsThreadView()) {
       const inP = (t) =>
         !state.focusProject ||
@@ -564,7 +569,7 @@ import { parseCapture } from "./capture.js";
     );
     const done = state.tasks
       .filter((t) => t.status === "done" && !t.archived && matchesThread(t))
-      .sort(byUpdated);
+      .sort(byStatusChange);
     if (state.focusProject || isProjectsThreadView()) {
       const inP = (t) =>
         !state.focusProject ||
@@ -574,13 +579,13 @@ import { parseCapture } from "./capture.js";
       return {
         started: open
           .filter((t) => inP(t) && t.status === "started")
-          .sort(byUpdated),
+          .sort(byStatusChange),
         review: open
           .filter((t) => inP(t) && t.status === "review")
-          .sort(byUpdated),
+          .sort(byStatusChange),
         blocked: open
           .filter((t) => inP(t) && t.status === "blocked")
-          .sort(byUpdated),
+          .sort(byStatusChange),
         ready: open
           .filter((t) => inP(t) && t.status === "ready")
           .sort(byCreated),
@@ -589,10 +594,12 @@ import { parseCapture } from "./capture.js";
     }
     if (state.tab === "desk") {
       return {
-        started: open.filter((t) => t.status === "started").sort(byUpdated),
+        started: open
+          .filter((t) => t.status === "started")
+          .sort(byStatusChange),
         need: open
           .filter((t) => t.status === "blocked" || t.status === "review")
-          .sort(byUpdated),
+          .sort(byStatusChange),
         desk: open
           .filter((t) => !t.project && t.status === "ready")
           .sort(byCreated),
@@ -653,7 +660,7 @@ import { parseCapture } from "./capture.js";
 
     if (state.focusProject || isProjectsThreadView()) {
       const v = visibleTasks();
-      const need = [...v.review, ...v.blocked].sort(byUpdated);
+      const need = [...v.review, ...v.blocked].sort(byStatusChange);
       if (need.length) {
         pushHeader("section", "NEEDS YOU", need.length);
         need.forEach((t) => pushTask(t));
@@ -701,13 +708,13 @@ import { parseCapture } from "./capture.js";
         );
         const started = group
           .filter((t) => t.status === "started")
-          .sort(byUpdated);
+          .sort(byStatusChange);
         const review = group
           .filter((t) => t.status === "review")
-          .sort(byUpdated);
+          .sort(byStatusChange);
         const blocked = group
           .filter((t) => t.status === "blocked")
-          .sort(byUpdated);
+          .sort(byStatusChange);
         const ready = group.filter((t) => t.status === "ready").sort(byCreated);
         rows.push({
           kind: "project",
@@ -724,7 +731,7 @@ import { parseCapture } from "./capture.js";
       if (state.drawer) {
         const done = state.tasks
           .filter((t) => t.status === "done" && !t.archived && matchesThread(t))
-          .sort(byUpdated);
+          .sort(byStatusChange);
         pushHeader("section", "DONE", done.length);
         done.forEach((t) => pushTask(t));
         const archived = archivedInScope();
@@ -755,7 +762,7 @@ import { parseCapture } from "./capture.js";
     if (state.drawer) {
       const done = state.tasks
         .filter((t) => t.status === "done" && !t.archived && matchesThread(t))
-        .sort(byUpdated);
+        .sort(byStatusChange);
       pushHeader("section", "DONE", done.length);
       done.forEach((t) => pushTask(t));
       const archived = archivedInScope();
@@ -925,6 +932,7 @@ import { parseCapture } from "./capture.js";
     if (!task) return;
     task.status = status;
     task.updatedAt = clock();
+    task.statusAt = task.updatedAt;
     if (status !== "done") state.drawer = state.drawer;
     state.flashId = task.id;
     setTimeout(() => {

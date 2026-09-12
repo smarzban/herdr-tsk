@@ -301,30 +301,38 @@ fn read_config(path: &Path) -> io::Result<Option<String>> {
 /// The lowest Herdr this plugin registers against: `config check` and link-by-id arrived in 0.9.
 pub const MIN_HERDR_VERSION: (u64, u64, u64) = (0, 9, 0);
 
-/// `herdr --version` prints `herdr X.Y.Z[-suffix]`; older hosts lack `herdr config check`
-/// and fail with a raw usage dump, so refuse them with a message that names the fix.
+/// `herdr --version` prints `herdr X.Y.Z` (Clap's default). Read the version that follows
+/// the word `herdr`, never a stray semver elsewhere in the output, and treat a pre-release
+/// of the minimum (`0.9.0-beta`) as below it: older hosts lack `herdr config check` and
+/// fail with a raw usage dump, so refuse them with a message that names the fix.
 fn require_min_herdr(version_output: &str) -> io::Result<()> {
-    let found = version_output
-        .split_whitespace()
-        .find_map(|word| {
-            let core = word.split(['-', '+']).next()?;
-            let mut parts = core.split('.').map(str::parse::<u64>);
-            match (parts.next(), parts.next(), parts.next(), parts.next()) {
-                (Some(Ok(a)), Some(Ok(b)), Some(Ok(c)), None) => Some((a, b, c)),
-                _ => None,
-            }
-        })
-        .ok_or_else(|| {
-            error(format!(
-                "could not read the Herdr version from `herdr --version` ({})",
-                version_output.trim()
-            ))
-        })?;
-    if found < MIN_HERDR_VERSION {
+    let unreadable = || {
+        error(format!(
+            "could not read the Herdr version from `herdr --version` ({})",
+            version_output.trim()
+        ))
+    };
+    let mut words = version_output.split_whitespace();
+    let raw = words
+        .by_ref()
+        .skip_while(|word| *word != "herdr")
+        .nth(1)
+        .ok_or_else(unreadable)?;
+    let (core, prerelease) = match raw.split_once('-') {
+        Some((core, _)) => (core, true),
+        None => (raw.split('+').next().unwrap_or(raw), false),
+    };
+    let mut parts = core.split('.').map(str::parse::<u64>);
+    let found = match (parts.next(), parts.next(), parts.next(), parts.next()) {
+        (Some(Ok(a)), Some(Ok(b)), Some(Ok(c)), None) => (a, b, c),
+        _ => return Err(unreadable()),
+    };
+    // A pre-release sorts below its release, so 0.9.0-beta is not yet 0.9.0.
+    let too_old = found < MIN_HERDR_VERSION || (prerelease && found == MIN_HERDR_VERSION);
+    if too_old {
         let (a, b, c) = MIN_HERDR_VERSION;
         return Err(error(format!(
-            "herdr {}.{}.{} found; tsk needs {a}.{b}.{c} or newer. Update Herdr, then run tsk setup herdr again",
-            found.0, found.1, found.2
+            "herdr {raw} found; tsk needs {a}.{b}.{c} or newer. Update Herdr, then run tsk setup herdr again"
         )));
     }
     Ok(())
@@ -337,12 +345,20 @@ fn herdr(args: &[&str], config: &Path) -> io::Result<String> {
         .output()
         .map_err(|e| error(format!("could not run herdr: {e}")))?;
     if !output.status.success() {
-        return Err(error(format!(
-            "herdr {} failed: {}{}",
-            args.join(" "),
+        // Herdr's stdout and stderr are multi-line by nature (usage dumps, diagnostics).
+        // Keep their line breaks and escape everything else here, so the presenter can
+        // treat the finished reason as trusted text that only needs printing.
+        let quoted = format!(
+            "{}{}",
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
-        )));
+        );
+        let quoted = quoted
+            .lines()
+            .map(crate::ui::terminal_text)
+            .collect::<Vec<_>>()
+            .join("\n");
+        return Err(error(format!("herdr {} failed: {quoted}", args.join(" "))));
     }
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }

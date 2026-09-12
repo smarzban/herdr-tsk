@@ -712,10 +712,14 @@ fn sort_by_status_change_desc(tasks: &mut [&Task]) {
     });
 }
 
+/// Backlogs are FIFO: oldest capture first, ties by id. Notice rows (the starter tour,
+/// release notes) lead regardless: they are seeded once and would otherwise sink under an
+/// existing user's backlog, unseen.
 fn sort_by_created_asc(tasks: &mut [&Task]) {
     tasks.sort_by(|a, b| {
-        a.created_at
-            .cmp(&b.created_at)
+        b.is_notice()
+            .cmp(&a.is_notice())
+            .then_with(|| a.created_at.cmp(&b.created_at))
             .then_with(|| a.id.cmp(&b.id))
     });
 }
@@ -1125,6 +1129,29 @@ mod tests {
             section_ids(&view, SectionKind::OnDeck),
             vec![Uuid::from_u128(1), Uuid::from_u128(2), Uuid::from_u128(3)],
             "ON DECK is the backlog: oldest created first, edits never reorder"
+        );
+    }
+
+    #[test]
+    fn notices_lead_on_deck_ahead_of_an_older_backlog() {
+        // A starter guide seeded today (created 90) on a desk with tasks from 10 and 20:
+        // FIFO alone would bury it, so notices lead and the backlog keeps its own order.
+        let mut guide = task(3, HumanStatus::Ready, TaskScope::Global, false, 90);
+        guide.notice = Some(crate::domain::Notice {
+            catalog_id: "guide.welcome".into(),
+            number: None,
+        });
+        let tasks = vec![
+            task(1, HumanStatus::Ready, TaskScope::Global, false, 10),
+            task(2, HumanStatus::Ready, TaskScope::Global, false, 20),
+            guide,
+        ];
+
+        let view = query_lens(&tasks, None, BoardLens::Desk, false);
+
+        assert_eq!(
+            section_ids(&view, SectionKind::OnDeck),
+            vec![Uuid::from_u128(3), Uuid::from_u128(1), Uuid::from_u128(2)],
         );
     }
 

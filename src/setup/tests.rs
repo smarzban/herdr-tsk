@@ -350,12 +350,35 @@ fn generated_backup_name_matches_the_documented_pattern() {
 fn old_herdr_is_refused_before_any_write_with_an_actionable_message() {
     assert!(require_min_herdr("herdr 0.9.0\n").is_ok());
     assert!(require_min_herdr("herdr 1.2.0-beta.1").is_ok());
+    assert!(require_min_herdr("herdr 0.10.0").is_ok());
+    assert!(require_min_herdr("herdr 0.9.0+build.7").is_ok());
     let err = require_min_herdr("herdr 0.6.8\n").unwrap_err().to_string();
     assert_eq!(
         err,
         "herdr 0.6.8 found; tsk needs 0.9.0 or newer. Update Herdr, then run tsk setup herdr again"
     );
-    assert!(require_min_herdr("herdr 0.10.0").is_ok());
-    let unreadable = require_min_herdr("something else").unwrap_err().to_string();
-    assert!(unreadable.starts_with("could not read the Herdr version"));
+    // A pre-release of the minimum is not the minimum.
+    assert!(require_min_herdr("herdr 0.9.0-beta.2")
+        .unwrap_err()
+        .to_string()
+        .starts_with("herdr 0.9.0-beta.2 found"));
+    // Only the version after the word `herdr` counts, never a stray semver in a banner.
+    assert!(require_min_herdr("warning: helper 1.2.3\nherdr 0.6.8")
+        .unwrap_err()
+        .to_string()
+        .starts_with("herdr 0.6.8 found"));
+    for garbage in [
+        "something 1.2.3",
+        "herdr",
+        "herdr abc",
+        "herdr 1.2",
+        "herdr 1.2.3.4",
+        "",
+    ] {
+        let unreadable = require_min_herdr(garbage).unwrap_err().to_string();
+        assert!(
+            unreadable.starts_with("could not read the Herdr version"),
+            "{garbage:?}: {unreadable}"
+        );
+    }
 }
