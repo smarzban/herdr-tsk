@@ -553,7 +553,6 @@ pub fn run_interactive_batch(
     for id in &needs_work {
         let target = named_target(id)?;
         let outcome = install(&target, false)?;
-        let _ = writeln!(writer, "  {} {}", outcome.kind(), outcome.path().display());
         applied.push((id.clone(), outcome));
     }
     Ok(BatchResult {

@@ -129,6 +129,54 @@ fn replacement_backs_up_original_and_renames_new_document() {
     assert!(updated.contains("herdr-tsk.quick-capture"));
 }
 #[test]
+fn backup_name_is_a_timestamp_not_a_uuid() {
+    let h = host();
+    fs::write(&h.config, "# original\n").unwrap();
+    let output = ok(h.run(""));
+    let backups: Vec<String> = fs::read_dir(h.config.parent().unwrap())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|n| n.starts_with("config.toml.tsk-backup-"))
+        .collect();
+    assert_eq!(backups.len(), 1, "{output}");
+    let stamp = backups[0]
+        .strip_prefix("config.toml.tsk-backup-")
+        .unwrap()
+        .to_owned();
+    let parts: Vec<&str> = stamp.split('-').collect();
+    assert!(parts.len() == 2 || parts.len() == 3, "{stamp}");
+    let digits = |part: &str| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit());
+    assert!(parts[0].len() == 8 && digits(parts[0]), "{stamp}");
+    assert!(parts[1].len() == 6 && digits(parts[1]), "{stamp}");
+    assert!(parts.get(2).is_none_or(|extra| digits(extra)), "{stamp}");
+    assert!(output.contains(
+        h.config
+            .parent()
+            .unwrap()
+            .join(&backups[0])
+            .to_str()
+            .unwrap()
+    ));
+}
+
+#[test]
+fn two_setups_keep_distinct_backups_instead_of_overwriting() {
+    let h = host();
+    fs::write(&h.config, "# first\n").unwrap();
+    ok(h.run(""));
+    fs::write(&h.config, "# second\n").unwrap();
+    ok(h.run(""));
+    let mut backups: Vec<String> = fs::read_dir(h.config.parent().unwrap())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|n| n.starts_with("config.toml.tsk-backup-"))
+        .collect();
+    backups.sort();
+    assert_eq!(backups.len(), 2, "{backups:?}");
+    assert_ne!(backups[0], backups[1]);
+}
+
+#[test]
 fn argv0_mismatch_is_refused_without_registration() {
     let h = host();
     let mut command = h.command();

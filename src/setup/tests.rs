@@ -292,3 +292,44 @@ fn setup_replaces_source_checkout_and_missing_registrations_without_deleting_sou
         assert!(config.exists());
     }
 }
+
+#[test]
+fn backup_name_is_utc_timestamp_and_suffixes_collisions() {
+    let known = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_789_223_422);
+    assert_eq!(utc_timestamp(known), "20260912-143022");
+    let leap_day_end =
+        std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(951_868_799);
+    assert_eq!(utc_timestamp(leap_day_end), "20000229-235959");
+    let year_end =
+        std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_735_603_200);
+    assert_eq!(utc_timestamp(year_end), "20241231-000000");
+    assert_eq!(
+        utc_timestamp(std::time::SystemTime::UNIX_EPOCH),
+        "19700101-000000"
+    );
+    let name = backup_file_name(known, &mut |_| Ok(false)).unwrap();
+    assert_eq!(name, "config.toml.tsk-backup-20260912-143022");
+    let mut taken = std::collections::BTreeSet::from([name.clone()]);
+    let collided = backup_file_name(known, &mut |candidate: &str| {
+        Ok(!taken.insert(candidate.to_owned()))
+    })
+    .unwrap();
+    assert_eq!(collided, "config.toml.tsk-backup-20260912-143022-1");
+    let twice =
+        backup_file_name(known, &mut |candidate: &str| Ok(taken.contains(candidate))).unwrap();
+    assert_eq!(twice, "config.toml.tsk-backup-20260912-143022-2");
+}
+
+#[test]
+fn generated_backup_name_matches_the_documented_pattern() {
+    let name = backup_file_name(std::time::SystemTime::now(), &mut |_| Ok(false)).unwrap();
+    let stamp = name
+        .strip_prefix("config.toml.tsk-backup-")
+        .expect("prefix");
+    let parts: Vec<&str> = stamp.split('-').collect();
+    assert!(parts.len() == 2 || parts.len() == 3, "{stamp}");
+    let digits = |part: &str| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit());
+    assert!(parts[0].len() == 8 && digits(parts[0]), "{stamp}");
+    assert!(parts[1].len() == 6 && digits(parts[1]), "{stamp}");
+    assert!(parts.get(2).is_none_or(|extra| digits(extra)), "{stamp}");
+}

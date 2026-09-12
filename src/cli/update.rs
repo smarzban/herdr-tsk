@@ -74,6 +74,7 @@ fn run_installer(install_dir: &Path, curl: &Path, shell: &Path) -> Result<(), St
         .expect("curl stdout is piped before it starts");
     let mut installer = match Command::new(shell)
         .env("TSK_INSTALL_DIR", install_dir)
+        .env("TSK_UPDATE", "1")
         .stdin(Stdio::from(stdout))
         .spawn()
     {

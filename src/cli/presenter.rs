@@ -896,20 +896,16 @@ pub fn setup_agent_batch(result: crate::setup_agent::BatchResult, json: bool) ->
             code: u8::from(!result.blocked.is_empty()),
         };
     }
-    // Interactive path already wrote progress to stderr; keep stdout quiet unless scripted batch.
+    // One summary row per agent on stdout, for the interactive and scripted paths alike.
     let mut stdout = String::new();
     for (id, outcome) in &result.applied {
-        stdout.push_str(&format!(
-            "{id}: {} {}\n",
-            outcome.kind(),
-            outcome.path().display()
-        ));
+        stdout.push_str(&format!("    {id:<8} {}\n", outcome.path().display()));
     }
     for id in &result.skipped_current {
-        stdout.push_str(&format!("{id}: current\n"));
+        stdout.push_str(&format!("    {id:<8} current\n"));
     }
     for id in &result.blocked {
-        stdout.push_str(&format!("{id}: blocked (symlink)\n"));
+        stdout.push_str(&format!("    {id:<8} blocked (symlink)\n"));
     }
     if result.none_detected && stdout.is_empty() {
         stdout.push_str("No agent skill roots detected.\n");
@@ -954,7 +950,13 @@ fn setup_agent_json(
 pub fn setup_error(reason: &str, code: u8) -> CliOutput {
     CliOutput {
         stdout: String::new(),
-        stderr: format!("tsk setup: {}\n", human_reason(reason)),
+        // The fixed usage text is the one reason that legitimately spans two lines; every
+        // other reason may carry user input and keeps full control-character escaping.
+        stderr: if reason == crate::setup_agent::USAGE {
+            format!("tsk setup: {reason}\n")
+        } else {
+            format!("tsk setup: {}\n", human_reason(reason))
+        },
         code,
     }
 }
@@ -962,19 +964,103 @@ pub fn setup(result: crate::setup::SetupResult) -> CliOutput {
     let mut stdout = String::new();
     if let Some(backup) = result.backup {
         stdout.push_str(&format!(
-            "Herdr config backup: {}\n",
+            "    Config backup:\n        {}\n",
             terminal_text(&backup.display().to_string())
         ));
     }
     stdout.push_str(&format!(
-        "Herdr plugin registered, using {}\nPlugin root: {}\n",
-        terminal_text(&result.binary.display().to_string()),
+        "    Plugin root:\n        {}\n",
         terminal_text(&result.root.display().to_string())
     ));
-    stdout.push_str("Configured available shortcuts: prefix+t board, prefix+a quick capture. Declined conflicts were left unchanged.\nReload Herdr configuration (herdr server reload-config), or restart Herdr, to apply shortcuts.\n");
+    stdout.push_str("    Shortcuts:      prefix+t board, prefix+a quick capture\n");
+    if result.declined_conflicts {
+        stdout.push_str("Declined conflicts were left unchanged.\n");
+    }
+    stdout.push_str(
+        "\nReload Herdr (herdr server reload-config) or restart it to apply the shortcuts.\n",
+    );
     CliOutput {
         stdout,
         stderr: String::new(),
         code: 0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn setup_usage_error_keeps_its_two_lines() {
+        let output = setup_error(crate::setup_agent::USAGE, 2);
+        assert_eq!(
+            output.stderr,
+            format!("tsk setup: {}\n", crate::setup_agent::USAGE)
+        );
+        assert!(!output.stderr.contains("\\u{000a}"));
+    }
+
+    #[test]
+    fn other_setup_errors_still_escape_every_control_character() {
+        let output = setup_error("bad\u{1b}]0;evil\nsecond", 1);
+        assert_eq!(
+            output.stderr,
+            "tsk setup: bad\\u{001b}]0;evil\\u{000a}second\n"
+        );
+    }
+
+    #[test]
+    fn setup_prints_indented_label_rows_and_one_reload_line() {
+        let output = setup(crate::setup::SetupResult {
+            binary: PathBuf::from("/home/box/.local/bin/tsk"),
+            root: PathBuf::from("/home/box/.config/herdr/tsk-plugins/c578550bfb36dea8"),
+            backup: Some(PathBuf::from(
+                "/home/box/.config/herdr/config.toml.tsk-backup-20260912-143022",
+            )),
+            declined_conflicts: false,
+        });
+        assert_eq!(
+            output.stdout,
+            "    Config backup:\n        /home/box/.config/herdr/config.toml.tsk-backup-20260912-143022\n    Plugin root:\n        /home/box/.config/herdr/tsk-plugins/c578550bfb36dea8\n    Shortcuts:      prefix+t board, prefix+a quick capture\n\nReload Herdr (herdr server reload-config) or restart it to apply the shortcuts.\n"
+        );
+        assert_eq!(output.code, 0);
+    }
+
+    #[test]
+    fn setup_omits_absent_backup_and_names_declined_conflicts_on_their_own_line() {
+        let output = setup(crate::setup::SetupResult {
+            binary: PathBuf::from("/home/box/.local/bin/tsk"),
+            root: PathBuf::from("/home/box/.config/herdr/tsk-plugins/c578550bfb36dea8"),
+            backup: None,
+            declined_conflicts: true,
+        });
+        assert!(!output.stdout.contains("Config backup:"));
+        assert!(output
+            .stdout
+            .contains(
+                "    Shortcuts:      prefix+t board, prefix+a quick capture\nDeclined conflicts were left unchanged.\n"
+            ));
+    }
+
+    #[test]
+    fn setup_agent_batch_prints_padded_rows_for_each_outcome() {
+        let result = crate::setup_agent::BatchResult {
+            applied: vec![(
+                "pi".into(),
+                crate::setup_agent::InstallOutcome::Written(PathBuf::from(
+                    "/home/box/.pi/agent/skills/tsk-cli/SKILL.md",
+                )),
+            )],
+            skipped_current: vec!["cursor".into()],
+            blocked: vec!["grok".into()],
+            declined: false,
+            none_detected: false,
+        };
+        let output = setup_agent_batch(result, false);
+        assert_eq!(
+            output.stdout,
+            "    pi       /home/box/.pi/agent/skills/tsk-cli/SKILL.md\n    cursor   current\n    grok     blocked (symlink)\n"
+        );
     }
 }
