@@ -22,6 +22,12 @@ In a wide pane, click a task or press `→` to open its details beside the board
 Press `Enter` for a full-screen task and `Esc` to return. For a standalone board,
 run `tsk` in your terminal.
 
+### Coming soon
+
+**From task to implementation.** The next phase brings agent execution into the
+board: assign a task to an agent, start implementation from tsk, and run the work
+in Herdr worktrees.
+
 ## Quickstart
 
 ### Install
