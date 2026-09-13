@@ -2387,6 +2387,14 @@ import { parseCapture } from "./capture.js";
       render();
       return true;
     }
+    if (bare && e.key === "ArrowLeft") {
+      e.preventDefault();
+      // Like the native parked task form, leaving the page keeps an unfinished preview
+      // draft available when the right seat is focused again.
+      preview.page = false;
+      render();
+      return true;
+    }
     if (e.key === "Escape") {
       e.preventDefault();
       leavePreviewTaskPage();
@@ -3320,16 +3328,6 @@ import { parseCapture } from "./capture.js";
         if (
           projectsOverview() &&
           projectsPreviewActive() &&
-          previewHasUnsavedWork() &&
-          preview.project === project
-        ) {
-          preview.message = "save or cancel edits before switching tasks";
-          render();
-          return;
-        }
-        if (
-          projectsOverview() &&
-          projectsPreviewActive() &&
           preview.project !== project &&
           !bindProjectPreviewFor(project)
         ) {
@@ -3340,7 +3338,6 @@ import { parseCapture } from "./capture.js";
         if (projectsOverview() && isWideSplit()) {
           if (state.stage === "board") openProjectPreview();
           else if (state.stage === "rail") {
-            leavePreviewTaskPage();
             bindProjectPreview();
             state.stage = "split";
           } else bindProjectPreview();

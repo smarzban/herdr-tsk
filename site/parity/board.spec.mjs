@@ -230,12 +230,32 @@ test("projects overview opens a live project preview and keeps its task seat", a
     "data-status",
     "blocked",
   );
+  await page.keyboard.press("ArrowLeft");
+  await expect(page.locator(".tsk-project-preview.is-live")).toBeVisible();
   await page.locator("[data-project-row]").first().click();
   await expect(page.locator(".tsk-wide-split.is-split")).toBeVisible();
   await page.keyboard.press("ArrowRight");
   await expect(page.locator(".tsk-project-preview.is-live")).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.locator(".tsk-wide-split.is-split")).toBeVisible();
+});
+
+test("projects preview keeps an unsaved page draft when the index retakes focus", async ({
+  page,
+}) => {
+  await open(page, 110);
+  await page.keyboard.press("3");
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("e");
+  await page.locator("#tsk-preview-edit").fill("Unsaved preview title");
+  await page.locator("[data-project-row]").first().click();
+  await expect(page.locator(".tsk-wide-split.is-split")).toBeVisible();
+  await page.keyboard.press("ArrowRight");
+  await expect(page.locator("#tsk-preview-edit")).toHaveValue(
+    "Unsaved preview title",
+  );
 });
 
 test("projects preview quick-add shows the title while editing notes", async ({
