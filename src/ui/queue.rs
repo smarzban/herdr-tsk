@@ -539,14 +539,15 @@ fn query_project_focus(
         .collect();
     sort_by_status_change_desc(&mut motion);
 
-    // `open` carries both NEEDS YOU and ON DECK rows: FIFO order for the backlog,
-    // then NEEDS YOU re-sorted to status-change recency after the split.
-    let open: Vec<&Task> = live
+    // `pending` carries both NEEDS YOU and ON DECK rows, unsorted: NEEDS YOU is
+    // re-sorted to status-change recency after the split and `push_deck` orders
+    // its own ready and inbox halves.
+    let pending: Vec<&Task> = live
         .iter()
         .copied()
         .filter(|t| !matches!(t.status, HumanStatus::Started | HumanStatus::Done) && admits(t))
         .collect();
-    let (mut need, ready) = split_needs_you(&open);
+    let (mut need, ready) = split_needs_you(&pending);
     sort_by_status_change_desc(&mut need);
 
     let label = live
