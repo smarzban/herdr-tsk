@@ -1874,6 +1874,66 @@ fn footer_verbs_dispatch_for_the_focused_surface_in_every_stage() {
 }
 
 #[test]
+fn projects_split_wheel_starts_from_the_painted_index_scroll() {
+    let mut domain = DomainState::new();
+    for index in 0..24 {
+        domain
+            .create(
+                format!("project task {index}"),
+                None,
+                TaskScope::Project {
+                    path: format!("/repos/project-{index:02}"),
+                },
+                ProvenanceOrigin::Manual,
+                None,
+            )
+            .expect("project task");
+    }
+    let mut model = BoardModel::from_domain(&domain, None);
+    go(
+        &mut domain,
+        &mut model,
+        BoardIntent::SelectNavTab(tsk_tui::ui::queue::NavTab::Projects),
+    );
+    go(&mut domain, &mut model, BoardIntent::StageRight);
+    assert_eq!(model.wide_stage(), WideStage::Split);
+
+    for _ in 0..23 {
+        go(&mut domain, &mut model, BoardIntent::SelectNext);
+    }
+    assert_eq!(model.project_rows().len(), 24);
+    assert_eq!(model.projects_cursor(), 23);
+    let (_, _) = render(&model, WIDE_SPLIT_MIN_WIDTH, 30);
+    let painted_scroll = model.list_scroll();
+    assert!(
+        painted_scroll > 0,
+        "selected project must follow the viewport"
+    );
+
+    let wheel = MouseEvent {
+        kind: MouseEventKind::ScrollDown,
+        column: 2,
+        row: 6,
+        modifiers: KeyModifiers::NONE,
+    };
+    assert_eq!(
+        map_responsive_board_mouse(
+            &model,
+            &QueueHitMap::default(),
+            Rect {
+                x: 0,
+                y: 0,
+                width: WIDE_SPLIT_MIN_WIDTH,
+                height: 30,
+            },
+            wheel
+        ),
+        Some(BoardIntent::ListScrollTo(painted_scroll + 1)),
+        "wheel reads the renderer's painted index scroll"
+    );
+}
+
+#[test]
 fn wheel_scrolls_only_the_focused_column() {
     let (mut domain, mut model) = fixture();
     to_stage(&mut domain, &mut model, WideStage::Rail);

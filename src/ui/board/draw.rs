@@ -1690,7 +1690,13 @@ fn draw_projects_wide_board(
         let mut board_hits = if stage == tier::WideStage::Rail {
             render::draw_rail_frame(frame, &outer_frame, &board_geo, column_rect(board_area))
         } else {
-            render::draw_queue_frame(frame, &outer_frame, &board_geo, column_rect(board_area)).0
+            let (board_hits, painted_list_scroll) =
+                render::draw_queue_frame(frame, &outer_frame, &board_geo, column_rect(board_area));
+            if let Some((scroll, max_scroll)) = painted_list_scroll {
+                model.list_scroll.set(scroll);
+                model.list_max_scroll.set(max_scroll);
+            }
+            board_hits
         };
         hits.regions.append(&mut board_hits.regions);
         hits.copyable.append(&mut board_hits.copyable);
