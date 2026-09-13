@@ -312,6 +312,49 @@ import { parseCapture } from "./capture.js";
         ],
         archived: true,
       }),
+      task({
+        title: "Plan the support handoff",
+        status: "ready",
+        thread: "triage",
+        notes: "Pick the owner, escalation path, and first response expectations before the pilot opens.",
+      }),
+      task({
+        title: "Clean up stale local branches",
+        status: "ready",
+        notes: "Keep only the branches needed for the release train and document anything retained.",
+      }),
+      task({
+        title: "Sort feedback from the pilot",
+        status: "open",
+        thread: "triage",
+        notes: "Group feedback by workflow before deciding which issues to pick next.",
+      }),
+      task({
+        title: "Record the retry runbook",
+        status: "open",
+        notes: "Capture the safe retry steps while the incident details are still fresh.",
+      }),
+      task({
+        title: "Add audit events for admin changes",
+        status: "ready",
+        project: "launchpad",
+        thread: "ops",
+        notes: "Record actor, target, and result for each privileged change.",
+      }),
+      task({
+        title: "Trace worker queue saturation",
+        status: "open",
+        project: "launchpad",
+        thread: "ops",
+        notes: "Measure queue depth and worker lag before choosing a scaling threshold.",
+      }),
+      task({
+        title: "Document regional failover checks",
+        status: "open",
+        project: "launchpad",
+        thread: "ops",
+        notes: "Write the operator checks that confirm a region can take traffic safely.",
+      }),
     ];
   };
 
