@@ -516,6 +516,15 @@ fn run_at(
     host(&["config", "check"], &parent.path.join(&staged.name))?;
     unchanged()?;
     let old = registered_root(config, host)?;
+    // A registration whose root is gone (a rehearsal that relinked the live Herdr to a temp
+    // dir, a deleted config tree) would otherwise be replaced silently.
+    if let Some(gone) = old.as_deref().filter(|path| !path.exists()) {
+        writeln!(
+            writer,
+            "previous registration at {} is gone, re-registering",
+            gone.display()
+        )?;
+    }
     unchanged()?;
     let base = parent.child(Path::new("tsk-plugins"), true)?;
     let root = base.child(Path::new(&asset_root_name(&assets)), true)?;

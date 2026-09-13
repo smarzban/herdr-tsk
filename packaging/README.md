@@ -95,8 +95,11 @@ changes. If an accepted builtin override has no remaining bindings, it is remove
 restoring Herdr's default. Candidate config is checked by Herdr before registration;
 existing config bytes are staged in a temporary backup before linking. The config is replaced atomically afterward, then the backup is promoted to its final timestamped name, `config.toml.tsk-backup-<YYYYMMDD-HHMMSS>` in UTC (`-1`, `-2`, ... when that second already has a backup). A failed link removes the temporary backup; a config replacement or backup-promotion failure names any retained recovery copy.
 Registration failure leaves config intact; post-registration failures identify the
-partial state. Success prints the plugin root and any backup path. Reload config
-with `herdr server reload-config` or restart Herdr to apply shortcuts.
+partial state. Success prints any backup path and the shortcuts; the content-addressed
+plugin root appears only in error messages. When the previously registered root no longer
+exists on disk (a rehearsal that relinked the live Herdr to a temp dir), setup says so on
+stderr before re-registering. Reload config with `herdr server reload-config` or restart
+Herdr to apply shortcuts.
 
 To remove integration, close its board/popups, run `herdr plugin unlink herdr-tsk`,
 remove its two command bindings, and reload config. Restore a setup backup only if

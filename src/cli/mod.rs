@@ -337,8 +337,8 @@ fn run_setup<R: Read>(args: Vec<String>, stdin: &mut R, stdin_is_tty: bool) -> C
                 Err(error) => presenter::setup_error(&error.to_string(), 1),
             }
         }
-        Ok(crate::setup_agent::Command::AgentsYes { json }) => {
-            match crate::setup_agent::install_detected(false) {
+        Ok(crate::setup_agent::Command::AgentsYes { json, force }) => {
+            match crate::setup_agent::install_detected(force) {
                 Ok(result) => presenter::setup_agent_batch(result, json),
                 Err(crate::setup_agent::Error::Usage(reason)) => presenter::setup_error(&reason, 2),
                 Err(error) => presenter::setup_error(&error.to_string(), 1),

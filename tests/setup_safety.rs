@@ -39,11 +39,66 @@ fn setup_uses_cli_harness() {
     assert!(output.stdout.contains("Exit:"));
 }
 #[test]
-fn bare_path_install_materializes_capture_and_version_and_reports_root() {
+fn a_gone_registration_is_reported_on_stderr_even_when_the_relink_fails() {
+    let gone_notice = |h: &Host| {
+        let gone = h.root.join("leaked-rehearsal-root");
+        fs::write(
+            h.root.join("registry"),
+            format!(
+                "{{\"result\":{{\"plugins\":[{{\"plugin_id\":\"herdr-tsk\",\"plugin_root\":\"{}\"}}]}}}}",
+                gone.display()
+            ),
+        )
+        .unwrap();
+        format!(
+            "previous registration at {} is gone, re-registering\n",
+            gone.display()
+        )
+    };
+
+    let h = host();
+    let expected = gone_notice(&h);
+    let output = h.run("");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8(output.stderr).unwrap(), expected);
+    assert!(!String::from_utf8(output.stdout).unwrap().contains("gone"));
+    assert!(h.linked().exists());
+
+    // The notice is written before `plugin link`, so a refused relink still shows it.
+    let h = host();
+    let expected = gone_notice(&h);
+    let output = h.run("link-fail");
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.starts_with(&expected), "{stderr}");
+    assert!(stderr.contains("refused"), "{stderr}");
+
+    // A live registration says nothing.
+    let h = host();
+    let first = ok(h.run(""));
+    assert!(!first.contains("gone"));
+    let output = h.run("");
+    assert!(output.status.success());
+    assert!(
+        output.stderr.is_empty(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+#[test]
+fn bare_path_install_materializes_capture_and_version_without_printing_the_root() {
     let h = host();
     let output = ok(h.run(""));
     let root = h.linked();
-    assert!(output.contains(root.to_str().unwrap()));
+    assert!(
+        !output.contains(root.to_str().unwrap()),
+        "the content-addressed root is not user-facing on success: {output}"
+    );
+    assert!(output.contains("Shortcuts:      prefix+t board, prefix+a quick capture"));
     assert_eq!(
         fs::read(root.join("scripts/open-capture.sh")).unwrap(),
         include_bytes!("../scripts/open-capture.sh")

@@ -135,6 +135,7 @@ pub enum Command {
     },
     AgentsYes {
         json: bool,
+        force: bool,
     },
     Herdr,
     Skill {
@@ -251,11 +252,15 @@ pub fn parse(args: &[String]) -> Result<Command, Error> {
         return Ok(Command::Herdr);
     }
     if agents_cmd {
-        if named > 0 || force {
+        if named > 0 {
             return Err(usage());
         }
         if yes {
-            return Ok(Command::AgentsYes { json });
+            return Ok(Command::AgentsYes { json, force });
+        }
+        // `--force` is an unattended intent: it only pairs with `--yes`.
+        if force {
+            return Err(usage());
         }
         return Ok(Command::Interactive { json });
     }

@@ -23,6 +23,7 @@ the GitHub release notes verbatim.
 
 ### Changed
 
+- The starter tour mentions the wide projects preview and `tsk help`; the upgrade notice for this release covers the inbox, the projects preview, and the CLI reference.
 - The agent skill (`tsk guide`, `tsk setup <agent>`) is slimmed to rules of engagement, board language, the exit contract, and workflows; flag tables and JSON shapes now live in `tsk help <command>` and the CLI guide. It gains a `Refine a task` section: a shaping pass that reads the task and its neighbours, grounds in code, proposes, and only then writes the rewrite back with `tsk edit` or `tsk add`. Skill version 1.2.0; rerun `tsk setup` to update installed copies.
 - Task-verb refusals print as `code: message` on stderr for every command: `archive` and `unarchive` gain the stable `unknown-task` and `soft-deleted-task` codes, and `status`, `edit`, and `steps` gain a human message after theirs.
 - Command help now uses one 80-column reference skeleton with usage, options, examples, refusals, and exits; detailed retry and output rules remain in the CLI guide.
@@ -32,6 +33,8 @@ the GitHub release notes verbatim.
 
 ### Fixed
 
+- `tsk setup agents --yes --force` rewrites every detected agent skill even when the installed version already matches; before, `--force` only worked with a single named agent.
+- `tsk setup herdr` no longer prints the content-addressed plugin root on success (it stays in error messages), and says `previous registration at <path> is gone, re-registering` when the root Herdr had registered no longer exists.
 - Expanded quick-add in a project preview now keeps its draft title in the right-column header and renders the active notes line with the editor's focus style.
 
 ## v0.8.2

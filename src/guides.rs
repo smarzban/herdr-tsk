@@ -22,7 +22,7 @@ pub const CATALOG: [Guide; 4] = [
                 **Three tabs, always**\n\
                 - `1` is your desk. It shows anything that needs you or is in motion, from every project, plus the ready and open tasks that belong to no project.\n\
                 - `2` is one project. Press `p` to pick it.\n\
-                - `3` lists every project. `Enter` on a row opens that project's board.\n\
+                - `3` lists every project. `Enter` on a row opens that project's board. On a terminal 110 columns or wider, moving the cursor previews the project beside the list and `→` makes that preview live.\n\
                 \n\
                 **Three sections, decided by status**\n\
                 - **NEEDS YOU** holds `blocked` and `review` tasks. Something is waiting on you. This task is in review, so it sits here until you act on it.\n\
@@ -86,6 +86,8 @@ pub const CATALOG: [Guide; 4] = [
                 Every task gets a `T` number, and that number is how each command finds it. Use the number `tsk list` prints for your new task in place of `T1`.\n\
                 \n\
                 `tsk list` shows the tasks of the project you are standing in, or your desk outside a repository. Add `--all` for every project, `--open` for the inbox, `--ready` for picked tasks, or `--json` for output another program can read.\n\
+                \n\
+                `tsk --help` lists every command and status. `tsk help list` explains one command: its flags, examples, and exit codes.\n\
                 \n\
                 **Let an agent work the board**\n\
                 Run `tsk setup` once: it finds the coding agents on your machine (Claude, Pi, Cursor, Codex, and others) and offers to install the tsk skill for each. `tsk setup claude` targets one. Then ask the agent in plain words. \"Add a task for each failing test.\" \"Mark T7 as review.\" `tsk guide` prints the same instructions if you want to read them yourself.",
