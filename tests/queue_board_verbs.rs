@@ -67,6 +67,90 @@ fn board_with_task(title: &str, status: HumanStatus) -> (DomainState, BoardModel
     (domain, model, id)
 }
 
+fn select_done_task(domain: &mut DomainState, model: &mut BoardModel, id: uuid::Uuid) {
+    apply_intent(domain, model, BoardIntent::ToggleDoneDrawer, None).expect("drawer");
+    let index = model
+        .visible_ids()
+        .iter()
+        .position(|&row| row == id)
+        .expect("done task visible");
+    apply_intent(domain, model, BoardIntent::SelectIndex(index), None).expect("select done");
+}
+
+#[test]
+fn ctrl_n_sets_ready_and_ctrl_o_sets_open_from_every_status_without_ready_open_events() {
+    assert_eq!(
+        map_key(BoardInputMode::Normal, ctrl(KeyCode::Char('n'))),
+        Some(BoardIntent::SetStatus(HumanStatus::Ready))
+    );
+    assert_eq!(
+        map_key(BoardInputMode::Normal, ctrl(KeyCode::Char('o'))),
+        Some(BoardIntent::Reopen)
+    );
+    assert_eq!(
+        map_key(BoardInputMode::TaskPage, ctrl(KeyCode::Char('n'))),
+        Some(BoardIntent::SetStatus(HumanStatus::Ready))
+    );
+
+    for from in [
+        HumanStatus::Open,
+        HumanStatus::Ready,
+        HumanStatus::Started,
+        HumanStatus::Blocked,
+        HumanStatus::Review,
+        HumanStatus::Done,
+    ] {
+        let (mut domain, mut model, id) = board_with_task("ready target", from);
+        if from == HumanStatus::Done {
+            select_done_task(&mut domain, &mut model, id);
+        }
+        let before = domain.get(id).expect("task").clone();
+        let outcome = apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::SetStatus(HumanStatus::Ready),
+            None,
+        )
+        .expect("set ready");
+        let task = domain.get(id).expect("task");
+        assert_eq!(task.status, HumanStatus::Ready, "{from:?} → ready");
+        if from == HumanStatus::Ready {
+            assert_eq!(outcome, IntentOutcome::None, "ready is a no-op");
+            assert_eq!(task.revision, before.revision, "ready has no event");
+            assert_eq!(
+                task.history.len(),
+                before.history.len(),
+                "ready has no history"
+            );
+        } else {
+            assert_eq!(outcome, IntentOutcome::Persist, "{from:?} → ready persists");
+            assert_ne!(task.revision, before.revision, "{from:?} gets one event");
+        }
+
+        let (mut domain, mut model, id) = board_with_task("open target", from);
+        if from == HumanStatus::Done {
+            select_done_task(&mut domain, &mut model, id);
+        }
+        let before = domain.get(id).expect("task").clone();
+        let outcome =
+            apply_intent(&mut domain, &mut model, BoardIntent::Reopen, None).expect("set open");
+        let task = domain.get(id).expect("task");
+        assert_eq!(task.status, HumanStatus::Open, "{from:?} → open");
+        if from == HumanStatus::Open {
+            assert_eq!(outcome, IntentOutcome::None, "open is a no-op");
+            assert_eq!(task.revision, before.revision, "open has no event");
+            assert_eq!(
+                task.history.len(),
+                before.history.len(),
+                "open has no history"
+            );
+        } else {
+            assert_eq!(outcome, IntentOutcome::Persist, "{from:?} → open persists");
+            assert_ne!(task.revision, before.revision, "{from:?} gets one event");
+        }
+    }
+}
+
 #[test]
 fn space_on_todo_sets_doing_via_domain() {
     let (mut domain, mut model, id) = board_with_task("start me", HumanStatus::Ready);
@@ -463,6 +547,7 @@ fn palette_lists_exactly_m1_commands_for_selection_filters_by_subsequence_and_di
     let labels: Vec<&str> = model.visible_commands().iter().map(|c| c.label).collect();
     let expected = [
         "set status: ready",
+        "set status: open",
         "set status: started",
         "set status: blocked",
         "set status: review",
@@ -480,11 +565,9 @@ fn palette_lists_exactly_m1_commands_for_selection_filters_by_subsequence_and_di
         "palette catalog with a selection must match exactly (no toggle-groups entry: \
          the destinations have no collapsible task groups)"
     );
-    // / the `o` key: reopen is only valid for a done selection, so a ready selection's
-    // catalog must not offer it at all (not merely filtered out above by the exact-match).
     assert!(
-        !labels.contains(&"reopen"),
-        "a ready selection must not offer reopen"
+        labels.contains(&"set status: open"),
+        "a ready selection offers the absolute inbox status"
     );
 
     // Subsequence (not substring): "started" matches only that status label.
@@ -514,8 +597,7 @@ fn palette_lists_exactly_m1_commands_for_selection_filters_by_subsequence_and_di
     apply_intent(&mut domain, &mut model, resolved, None).expect("apply");
     assert_eq!(domain.get(id).expect("task").status, HumanStatus::Started);
 
-    // a doing selection still has nothing to reopen (SetStatus closed the palette
-    // above; reopen it to read the catalog for the new status).
+    // The absolute status commands remain available from every working status.
     apply_intent(
         &mut domain,
         &mut model,
@@ -524,11 +606,14 @@ fn palette_lists_exactly_m1_commands_for_selection_filters_by_subsequence_and_di
     )
     .expect("palette while doing");
     assert!(
-        !model.visible_commands().iter().any(|c| c.label == "reopen"),
-        "a doing selection must not offer reopen"
+        model
+            .visible_commands()
+            .iter()
+            .any(|c| c.label == "set status: open"),
+        "a doing selection offers the absolute inbox status"
     );
 
-    // Key-equivalent: `o` reopen vs palette "reopen".
+    // Key-equivalent: `o` sets open, and the palette has the same absolute route.
     domain.set_status(id, HumanStatus::Done).expect("done");
     model.sync_from_domain(&domain);
     apply_intent(&mut domain, &mut model, BoardIntent::ToggleDoneDrawer, None).expect("drawer");
@@ -548,12 +633,15 @@ fn palette_lists_exactly_m1_commands_for_selection_filters_by_subsequence_and_di
         None,
     )
     .expect("palette again");
-    // the done selection's catalog offers reopen before any query narrows it.
+    // the done selection's catalog offers the absolute inbox command.
     assert!(
-        model.visible_commands().iter().any(|c| c.label == "reopen"),
-        "a done selection must offer reopen"
+        model
+            .visible_commands()
+            .iter()
+            .any(|c| c.label == "set status: open"),
+        "a done selection must offer set status: open"
     );
-    for ch in "reopen".chars() {
+    for ch in "set status: open".chars() {
         apply_intent(
             &mut domain,
             &mut model,
@@ -563,9 +651,9 @@ fn palette_lists_exactly_m1_commands_for_selection_filters_by_subsequence_and_di
         .expect("type reopen");
     }
     let via_palette =
-        resolve_board_command(&mut model, BoardIntent::ConfirmCommand).expect("reopen cmd");
-    assert_eq!(via_palette, BoardIntent::Reopen);
-    apply_intent(&mut domain, &mut model, via_palette, None).expect("reopen");
+        resolve_board_command(&mut model, BoardIntent::ConfirmCommand).expect("open cmd");
+    assert_eq!(via_palette, BoardIntent::SetStatus(HumanStatus::Open));
+    apply_intent(&mut domain, &mut model, via_palette, None).expect("open");
     assert_eq!(domain.get(id).expect("task").status, HumanStatus::Open);
 
     // Direct key route lands on the same intent.
@@ -1881,6 +1969,14 @@ fn ctrl_s_replaces_ctrl_space_as_the_primary_verb() {
         None,
         "the legacy NUL encoding of Ctrl+Space must also be retired"
     );
+
+    for from in [HumanStatus::Open, HumanStatus::Ready] {
+        let (mut domain, mut model, id) = board_with_task("startable", from);
+        let outcome =
+            apply_intent(&mut domain, &mut model, BoardIntent::PrimaryVerb, None).expect("start");
+        assert_eq!(outcome, IntentOutcome::Persist);
+        assert_eq!(domain.get(id).expect("task").status, HumanStatus::Started);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2310,7 +2406,7 @@ fn ctrl_r_toggles_review_and_ready_and_refuses_on_done() {
 
     // Review lives in NEEDS YOU, so the row stays selected and the bar keeps done/block.
     let verbs: Vec<&str> = board_verb_items(&model).iter().map(|v| v.key).collect();
-    assert_eq!(verbs, vec!["enter", "d", "b", "+", "?"]);
+    assert_eq!(verbs, vec!["enter", "d", "b", "o", "+", "?"]);
 
     apply_intent(&mut domain, &mut model, review.clone(), None).expect("back to ready");
     assert_eq!(domain.get(id).expect("task").status, HumanStatus::Ready);
@@ -3787,8 +3883,8 @@ fn help_card_lists_ctrl_f_and_the_verb_bar_keeps_archive_out_of_its_seats() {
     );
     assert_eq!(
         verbs.iter().map(|entry| entry.key).collect::<Vec<_>>(),
-        vec!["enter", "s", "d", "b", "+", "?"],
-        "ready row bar: open · start · done · block · add · help"
+        vec!["enter", "s", "o", "d", "+", "?"],
+        "ready row bar: open · start · inbox · done · add · help"
     );
 
     // The expanded archived group: header shows its toggle, a row shows `f unarchive`.

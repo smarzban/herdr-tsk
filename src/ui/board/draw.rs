@@ -180,54 +180,71 @@ pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
     if let Some(task) = selected_task {
         entries.push(OPEN);
         entries.extend(status_verbs(task.status));
+        // Add is useful from the backlog and inbox, but the status-heavy in-motion and
+        // done legends use that seat for their truthful lifecycle actions.
+        if !matches!(task.status, HumanStatus::Started | HumanStatus::Done) {
+            entries.push(ADD);
+        }
     }
-    entries.push(ADD);
     entries.push(HELP);
     entries
 }
 
-/// The status verbs a task's current status makes meaningful, in the order every bar
-/// paints them: start / reopen, done, block / unblock.
+/// The status verbs a task's current status makes meaningful. `n` picks a task for ON DECK,
+/// while `o` sends it to the inbox.
 fn status_verbs(status: HumanStatus) -> Vec<VerbEntry<'static>> {
+    const START: VerbEntry<'static> = VerbEntry {
+        key: "s",
+        label: "start",
+    };
+    const NEXT: VerbEntry<'static> = VerbEntry {
+        key: "n",
+        label: "next",
+    };
+    const INBOX: VerbEntry<'static> = VerbEntry {
+        key: "o",
+        label: "inbox",
+    };
+    const DONE: VerbEntry<'static> = VerbEntry {
+        key: "d",
+        label: "done",
+    };
     match status {
-        HumanStatus::Open | HumanStatus::Ready => vec![
-            VerbEntry {
-                key: "s",
-                label: "start",
-            },
-            VerbEntry {
-                key: "d",
-                label: "done",
-            },
-            VerbEntry {
-                key: "b",
-                label: "block",
-            },
-        ],
-        HumanStatus::Started | HumanStatus::Review => vec![
-            VerbEntry {
-                key: "d",
-                label: "done",
-            },
+        HumanStatus::Open => vec![START, NEXT, DONE],
+        HumanStatus::Ready => vec![START, INBOX, DONE],
+        HumanStatus::Started => vec![
+            DONE,
+            NEXT,
+            INBOX,
             VerbEntry {
                 key: "b",
                 label: "block",
             },
         ],
         HumanStatus::Blocked => vec![
-            VerbEntry {
-                key: "d",
-                label: "done",
-            },
+            DONE,
             VerbEntry {
                 key: "b",
                 label: "unblock",
             },
+            INBOX,
         ],
-        HumanStatus::Done => vec![VerbEntry {
-            key: "o",
-            label: "reopen",
-        }],
+        HumanStatus::Review => vec![
+            DONE,
+            VerbEntry {
+                key: "b",
+                label: "block",
+            },
+            INBOX,
+        ],
+        HumanStatus::Done => vec![
+            NEXT,
+            INBOX,
+            VerbEntry {
+                key: "u",
+                label: "undo",
+            },
+        ],
     }
 }
 

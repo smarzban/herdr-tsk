@@ -3857,7 +3857,9 @@ fn build_list_rows(
             continue;
         }
         if section.kind == SectionKind::Inbox {
-            out.push(ListRow::Blank);
+            if !matches!(out.last(), Some(&ListRow::Blank)) {
+                out.push(ListRow::Blank);
+            }
             out.push(ListRow::InboxHeader {
                 line: paint_group_header(
                     "inbox",

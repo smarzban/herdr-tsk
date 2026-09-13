@@ -1869,6 +1869,10 @@ fn apply_board_intent(
                 model.set_message(NO_SELECTION);
                 return Ok(IntentOutcome::None);
             };
+            if domain.get(id).is_some_and(|task| task.status == status) {
+                model.close_popup();
+                return Ok(IntentOutcome::None);
+            }
             domain.set_status(id, status)?;
             model.close_popup();
         }
@@ -1887,6 +1891,12 @@ fn apply_board_intent(
                 model.set_message(NO_SELECTION);
                 return Ok(IntentOutcome::None);
             };
+            if domain
+                .get(id)
+                .is_some_and(|task| task.status == HumanStatus::Open)
+            {
+                return Ok(IntentOutcome::None);
+            }
             domain.reopen(id)?;
         }
         BoardIntent::SoftDelete => {

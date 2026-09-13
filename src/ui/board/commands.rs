@@ -71,6 +71,10 @@ impl BoardModel {
                     BoardIntent::SetStatus(HumanStatus::Ready),
                 ),
                 command(
+                    "set status: open",
+                    BoardIntent::SetStatus(HumanStatus::Open),
+                ),
+                command(
                     "set status: started",
                     BoardIntent::SetStatus(HumanStatus::Started),
                 ),
@@ -86,20 +90,12 @@ impl BoardModel {
                 command("change scope", BoardIntent::BeginEditScope),
             ]);
         }
-        // Always-available board commands, then selection-gated delete/reopen when present.
+        // Always-available board commands, then selection-gated delete when present.
+        // The status commands above are absolute, so `set status: open` replaces the old
+        // done-only `reopen` entry and stays useful from every status.
         commands.push(command("new task", BoardIntent::OpenCapture));
-        if let Some(id) = self.selected_id() {
+        if self.selected_id().is_some() {
             commands.push(command("delete", BoardIntent::SoftDelete));
-            // / the `o` key both gate reopen on Done (see `board_verb_items`); a
-            // todo/doing selection has nothing to reopen, so the entry must agree with
-            // what `o` would actually do rather than being offered unconditionally.
-            let is_done = self
-                .tasks
-                .iter()
-                .any(|task| task.id == id && task.status == HumanStatus::Done);
-            if is_done {
-                commands.push(command("reopen", BoardIntent::Reopen));
-            }
         }
         commands.extend_from_slice(&[
             command("undo", BoardIntent::Undo),

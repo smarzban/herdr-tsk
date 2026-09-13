@@ -258,19 +258,22 @@ fn palette_commands() -> Vec<PaletteCommandRow<'static>> {
         labels,
         vec![
             "set status: ready",
+            "set status: open",
             "set status: started",
             "set status: blocked",
             "set status: review",
         ],
-        "the \"stat\" query against the real M1 catalog must narrow to exactly the four \
+        "the \"stat\" query against the real M1 catalog must narrow to exactly the five \
          status commands (no dispatch, no other tail entry) -- if the product catalog \
          changed, this fixture must follow it, not be hand-patched"
     );
-    apply_intent(&mut domain, &mut model, BoardIntent::CommandNext, None).expect("command next");
-    apply_intent(&mut domain, &mut model, BoardIntent::CommandNext, None).expect("command next");
+    for _ in 0..3 {
+        apply_intent(&mut domain, &mut model, BoardIntent::CommandNext, None)
+            .expect("command next");
+    }
     assert_eq!(
         model.command_selected(),
-        Some(2),
+        Some(3),
         "fixture must highlight \"set status: blocked\""
     );
     let selected = model.command_selected();
@@ -583,7 +586,14 @@ fn assert_exact_header_spacing(
     let marker = format!("{header} ─");
     let header_row = rows
         .iter()
-        .position(|line| list_body(line).contains(&marker))
+        .position(|line| {
+            let body = list_body(line);
+            if header == "inbox" {
+                body.contains("inbox ·")
+            } else {
+                body.contains(&marker)
+            }
+        })
         .unwrap_or_else(|| panic!("{dimensions}: missing {header:?}:\n{:#?}", rows));
     let viewport_top = geo.viewport_top as usize;
     let viewport_bottom = viewport_top + geo.viewport_height as usize;
@@ -592,6 +602,17 @@ fn assert_exact_header_spacing(
         "{dimensions}: {header:?} and its surrounding rows must be visible after selection scrolling:\n{:#?}",
         rows
     );
+    // At the compact floor the sticky ON DECK header can occupy the row immediately
+    // above inbox, so only the inbox-to-task spacing remains paintable.
+    if header == "inbox" && !list_body(&rows[header_row - 1]).is_empty() {
+        assert!(
+            list_body(&rows[header_row + 1]).is_empty()
+                && list_body(&rows[header_row + 2]).contains(first_content),
+            "{dimensions}: inbox must keep one blank row before its task:\n{:#?}",
+            rows
+        );
+        return;
+    }
     assert!(
         list_body(&rows[header_row - 1]).is_empty() && list_body(&rows[header_row + 1]).is_empty(),
         "{dimensions}: {header:?} needs one blank row immediately above and below:\n{:#?}",
@@ -711,8 +732,12 @@ fn standard_78x24_fixture_has_selector_list_rule_status_verb_and_no_other_chrome
     // task, and `PrimaryVerb` is a silent no-op there, so a correct legend omits the entry
     // rather than advertise a no-op. `enter`/`?` are always present regardless of selection.
     assert!(
-        verbs.contains("enter") && verbs.contains('?') && verbs.contains("+ add"),
-        "standard verb bar must retain open, help, and add: {verbs:?}"
+        verbs.contains("enter")
+            && verbs.contains('?')
+            && verbs.contains("ctrl+n next")
+            && verbs.contains("ctrl+o inbox")
+            && !verbs.contains("+ add"),
+        "in-motion bar keeps its status actions and help without a misleading add seat: {verbs:?}"
     );
 
     // Chrome is exactly selector + rule + status + verb. Viewport rows are list content only
@@ -2961,6 +2986,7 @@ fn palette_golden_scene_commands_are_bound_to_the_real_m1_catalog_and_exclude_di
         labels,
         vec![
             "set status: ready",
+            "set status: open",
             "set status: started",
             "set status: blocked",
             "set status: review",
