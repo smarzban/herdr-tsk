@@ -13,6 +13,8 @@ use crate::cli::trash::{TrashCliError, TrashRestoreResult};
 use crate::domain::HumanStatus;
 use crate::ui::terminal_text;
 
+const MIN_LIST_TERMINAL_WIDTH: usize = 50;
+
 fn human_reason(reason: &str) -> String {
     terminal_text(reason)
 }
@@ -23,22 +25,22 @@ pub fn add_help() -> CliOutput {
     )
 }
 
-pub fn list_help() -> CliOutput {
-    CliOutput {
-        stdout: concat!(
+pub fn list_help(terminal_width: Option<usize>) -> CliOutput {
+    let stdout = concat!(
             "usage: tsk list [<task>] [-p <project> | --desk | --all] [--thread <name>] [--done | --deleted | --archived] [--json] [--state-dir <dir>]\n\n",
             "Lists ready, started, blocked, and review tasks in the invocation project (nearest Git repo root) by default inside Git, or your desk outside Git. The current directory outside Git remains available through --project=/full/path.\n",
             "With a task number (bare digits) or UUID from add --json or list --json, lists that one task alone with its notes, steps, and thread as separate blocks, with a blank line between blocks that exist. The thread follows the steps instead of the title; each human step shows only its [x]/[ ] state and text. Direct JSON keeps step short ids for scripting. Direct lookup ignores cwd and searches the live store, including done and live soft-deleted tasks. Tasks that have moved to trash.jsonl need tsk list --deleted. A task operand cannot be combined with scope, thread, or status filters.\n",
             "--project uses the same basename-or-path scope resolution as add; --desk selects your desk, tasks not tied to a project; --all selects every scope. --thread normalizes a thread name and filters within the selected scope; an invalid name is a usage error (exit 2). For dash-leading project and state-directory values, use --project=<scope> and --state-dir=<dir>.\n",
             "--archived lists archived tasks only: individually archived tasks plus tasks of archived projects, each row marked `archived` or `project archived`. --done lists done tasks only. --deleted lists soft-deleted tasks only, regardless of status: live soft-deletes plus trash entries from trash.jsonl (kept 30 days), deduped by task with the live copy winning, newest deletion first.\n",
             "To recover a typo scope, use tsk list --all --json.\n",
-            "--json emits a flat array of id, number, title, status, project, and thread (or null) in displayed group order. Direct task JSON adds notes and steps, including null notes and an empty steps array, ordered as id, number, project, status, title, notes, steps, thread. All non-JSON list content wraps to the attached terminal width with hanging indentation; redirected output keeps stored logical lines. Human --all groups rows by status, then project scope, using a unique concise trailing path or desk.\n\n",
+            "--json emits a flat array of id, number, title, status, project, and thread (or null) in displayed group order. Direct task JSON adds notes and steps, including null notes and an empty steps array, ordered as id, number, project, status, title, notes, steps, thread. All non-JSON list content wraps to the attached terminal width with hanging indentation, using a 50-column minimum; redirected output keeps stored logical lines. Human --all groups rows by status, then project scope, using a unique concise trailing path or desk.\n\n",
             "Exit contract:\n",
             "  exit 0: tasks were listed\n",
             "  exit 2: usage or parse error, nothing persisted\n",
             "  exit 3: store I/O failure, no tasks listed\n"
-        )
-        .into(),
+        );
+    CliOutput {
+        stdout: wrap_list_document(stdout, terminal_width),
         stderr: String::new(),
         code: 0,
     }
@@ -172,7 +174,9 @@ fn list_json(result: &ListResult) -> String {
 }
 
 fn list_human(result: &ListResult, terminal_width: Option<usize>) -> String {
-    let output_width = terminal_width.unwrap_or(usize::MAX);
+    let output_width = terminal_width
+        .map(|width| width.max(MIN_LIST_TERMINAL_WIDTH))
+        .unwrap_or(usize::MAX);
     let groups: &[(Option<HumanStatus>, &str)] = match result.view {
         ListView::Open => &[
             (Some(HumanStatus::Started), "STARTED"),
@@ -339,6 +343,30 @@ fn append_step_lines(output: &mut String, steps: &[StepLine], indent: &str, outp
             output_width,
         );
     }
+}
+
+/// Wrap list help and errors while preserving each logical line's leading
+/// indentation. Redirected output is returned byte-for-byte.
+fn wrap_list_document(text: &str, terminal_width: Option<usize>) -> String {
+    let Some(output_width) = terminal_width else {
+        return text.to_owned();
+    };
+    let output_width = output_width.max(MIN_LIST_TERMINAL_WIDTH);
+    let lines = crate::ui::split_line_breaks(text).collect::<Vec<_>>();
+    let has_trailing_break = text.ends_with('\n') || text.ends_with('\r');
+    let mut output = String::new();
+    for (index, line) in lines.iter().enumerate() {
+        if has_trailing_break && index + 1 == lines.len() && line.is_empty() {
+            continue;
+        }
+        let indent_len = line.bytes().take_while(|byte| *byte == b' ').count();
+        let (prefix, content) = line.split_at(indent_len);
+        append_wrapped(&mut output, prefix, prefix, content, output_width);
+    }
+    if !has_trailing_break {
+        output.pop();
+    }
+    output
 }
 
 /// Append text within one terminal width. Prefixes are ASCII CLI chrome, so
@@ -848,26 +876,30 @@ pub fn archive_rejected(error: ArchiveCliError, verb: &str) -> CliOutput {
     }
 }
 
-pub fn list_usage(reason: &str) -> CliOutput {
+pub fn list_usage(reason: &str, terminal_width: Option<usize>) -> CliOutput {
+    let stderr = format!(
+        "tsk list: {}\nusage: tsk list [<task>] [-p <project> | --desk | --all] [--thread <name>] [--done | --deleted | --archived] [--json] [--state-dir <dir>]\n",
+        human_reason(reason)
+    );
     CliOutput {
         stdout: String::new(),
-        stderr: format!(
-            "tsk list: {}\nusage: tsk list [<task>] [-p <project> | --desk | --all] [--thread <name>] [--done | --deleted | --archived] [--json] [--state-dir <dir>]\n",
-            human_reason(reason)
-        ),
+        stderr: wrap_list_document(&stderr, terminal_width),
         code: 2,
     }
 }
 
-pub fn list_rejected(error: ListError) -> CliOutput {
+pub fn list_rejected(error: ListError, terminal_width: Option<usize>) -> CliOutput {
     match error {
         ListError::Store(detail) => CliOutput {
             stdout: String::new(),
-            stderr: format!("tsk list: {detail}\n"),
+            stderr: wrap_list_document(
+                &format!("tsk list: {}\n", human_reason(&detail)),
+                terminal_width,
+            ),
             code: 3,
         },
         // A well-formed address that addresses no task: the invocation is wrong, not the store.
-        ListError::UnknownTask => list_usage("unknown task"),
+        ListError::UnknownTask => list_usage("unknown task", terminal_width),
     }
 }
 

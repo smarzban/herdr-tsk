@@ -1,9 +1,14 @@
+#[cfg(unix)]
+#[allow(dead_code)]
+#[path = "support/pty.rs"]
+mod pty;
+
 use std::ffi::OsString;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard, OnceLock};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use tsk_tui::cli::{run_with, run_with_terminal_width};
 use tsk_tui::domain::{DomainState, HumanStatus, ProvenanceOrigin, TaskScope};
@@ -855,18 +860,19 @@ fn human_list_escapes_terminal_control_titles_without_changing_json() {
 fn direct_human_list_wraps_notes_with_a_hanging_indent() {
     let dir = temp_state_dir("wrapped-notes");
     let mut state = DomainState::new();
+    let title = "wrap target with a title long enough to wrap at fifty columns";
+    let notes = "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda";
+    let step = "implement the surprisingly long step and verify every continuation remains aligned";
     let task = state
         .create(
-            "wrap target",
-            Some("alpha beta gamma delta epsilon".into()),
+            title,
+            Some(notes.into()),
             TaskScope::Global,
             ProvenanceOrigin::Manual,
             Some("release-2026-long-thread".into()),
         )
         .expect("create wrapping notes task");
-    state
-        .add_step(task, "implement the surprisingly long step")
-        .expect("seed wrapping step");
+    state.add_step(task, step).expect("seed wrapping step");
     TaskStore::new(&dir).save(&state).expect("seed store");
 
     let output = list_at_width(
@@ -877,19 +883,54 @@ fn direct_human_list_wraps_notes_with_a_hanging_indent() {
             "--state-dir".into(),
             state_dir_arg(&dir),
         ],
-        24,
+        50,
     );
 
     assert_eq!(output.code, 0);
     assert_eq!(
         output.stdout,
-        "READY\n - 1 wrap target\n   alpha beta gamma \n   delta epsilon\n\n   [ ] implement the \n       surprisingly \n       long step\n\n   #release-2026-long-th\n   read\n"
+        "READY\n - 1 wrap target with a title long enough to wrap \n     at fifty columns\n   alpha beta gamma delta epsilon zeta eta theta \n   iota kappa lambda\n\n   [ ] implement the surprisingly long step and \n       verify every continuation remains aligned\n\n   #release-2026-long-thread\n"
     );
     assert!(
-        output.stdout.lines().all(|line| line.len() <= 24),
+        output.stdout.lines().all(|line| line.len() <= 50),
         "every explicit row fits the reported terminal width: {}",
         output.stdout
     );
+
+    let redirected = list(&[
+        "tsk".into(),
+        "list".into(),
+        task.to_string(),
+        "--state-dir".into(),
+        state_dir_arg(&dir),
+    ]);
+    for logical_line in [
+        format!(" - 1 {title}"),
+        format!("   {notes}"),
+        format!("   [ ] {step}"),
+    ] {
+        assert!(
+            redirected.stdout.lines().any(|line| line == logical_line),
+            "redirected output split {logical_line:?}: {}",
+            redirected.stdout
+        );
+    }
+
+    let json = list_at_width(
+        &[
+            "tsk".into(),
+            "list".into(),
+            task.to_string(),
+            "--json".into(),
+            "--state-dir".into(),
+            state_dir_arg(&dir),
+        ],
+        50,
+    );
+    assert_eq!(json.stdout.lines().count(), 1, "JSON must not wrap");
+    let rows: Vec<serde_json::Value> = serde_json::from_str(&json.stdout).expect("valid JSON");
+    assert_eq!(rows[0]["notes"], notes);
+    assert_eq!(rows[0]["steps"][0]["text"], step);
 
     let _ = std::fs::remove_dir_all(dir);
 }
@@ -900,9 +941,9 @@ fn scoped_human_list_wraps_task_rows_and_scope_labels() {
     let mut state = DomainState::new();
     create_task_with_thread(
         &mut state,
-        "a very long task title that wraps",
+        "a very long task title that wraps across the supported terminal floor",
         TaskScope::Project {
-            path: "/projects/a-very-long-project-name".into(),
+            path: "/projects/a-very-long-project-name-that-needs-wrapping-at-fifty-columns".into(),
         },
         HumanStatus::Ready,
         Some("release-2026-long"),
@@ -917,21 +958,158 @@ fn scoped_human_list_wraps_task_rows_and_scope_labels() {
             "--state-dir".into(),
             state_dir_arg(&dir),
         ],
-        24,
+        50,
     );
 
     assert_eq!(output.code, 0);
-    assert_eq!(
-        output.stdout,
-        "READY\n  a-very-long-project-na\n  me\n    - 1 a very long \n        task title that \n        wraps \n        #release-2026-lo\n        ng\n"
-    );
     assert!(
-        output.stdout.lines().all(|line| line.len() <= 24),
+        output.stdout.lines().all(|line| line.len() <= 50),
         "every list row fits the reported terminal width: {}",
         output.stdout
     );
 
+    assert!(
+        output
+            .stdout
+            .lines()
+            .any(|line| line.starts_with("  ") && line.contains("fifty")),
+        "scope label did not wrap with its hanging indent: {}",
+        output.stdout
+    );
+    assert!(
+        output
+            .stdout
+            .lines()
+            .any(|line| line.starts_with("        ") && line.contains("terminal")),
+        "scoped task row did not wrap with its hanging indent: {}",
+        output.stdout
+    );
+
     let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn unscoped_human_list_wraps_threaded_task_rows() {
+    let dir = temp_state_dir("wrapped-unscoped-row");
+    let mut state = DomainState::new();
+    create_task_with_thread(
+        &mut state,
+        "a default list task title that must wrap across the supported fifty column floor",
+        TaskScope::Global,
+        HumanStatus::Ready,
+        Some("release-2026-long"),
+    );
+    TaskStore::new(&dir).save(&state).expect("seed store");
+
+    let output = list_at_width(
+        &[
+            "tsk".into(),
+            "list".into(),
+            "--desk".into(),
+            "--state-dir".into(),
+            state_dir_arg(&dir),
+        ],
+        50,
+    );
+
+    assert_eq!(output.code, 0);
+    assert!(output.stdout.lines().all(|line| line.len() <= 50));
+    assert!(
+        output
+            .stdout
+            .lines()
+            .any(|line| line.starts_with("     ") && line.contains("supported")),
+        "unscoped task row did not wrap with its hanging indent: {}",
+        output.stdout
+    );
+    assert!(output.stdout.contains("#release-2026-long"));
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn list_help_and_usage_errors_wrap_with_a_fifty_column_floor() {
+    let help = list_at_width(&["tsk".into(), "list".into(), "--help".into()], 12);
+    assert_eq!(help.code, 0);
+    let help_width = help
+        .stdout
+        .lines()
+        .map(|line| line.chars().count())
+        .max()
+        .unwrap();
+    assert!(help_width <= 50, "help exceeded floor: {}", help.stdout);
+    assert!(
+        help_width > 12,
+        "widths below 50 must use the supported floor"
+    );
+
+    let usage = list_at_width(&["tsk".into(), "list".into(), "--bogus".into()], 50);
+    assert_eq!(usage.code, 2);
+    assert!(usage.stdout.is_empty());
+    assert!(
+        usage.stderr.lines().all(|line| line.chars().count() <= 50),
+        "usage exceeded terminal width: {}",
+        usage.stderr
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn binary_uses_stdout_terminal_width_and_leaves_redirects_unwrapped() {
+    let root = pty::scratch_root("list-terminal-width");
+    let title =
+        "a terminal width handoff title deliberately longer than fifty columns at the boundary";
+    let mut state = DomainState::new();
+    let task = create_task_with_thread(
+        &mut state,
+        title,
+        TaskScope::Global,
+        HumanStatus::Ready,
+        None,
+    );
+    TaskStore::new(root.join("state"))
+        .save(&state)
+        .expect("seed PTY store");
+    let number = TaskStore::new(root.join("state"))
+        .load()
+        .expect("reload PTY store")
+        .get(task)
+        .unwrap()
+        .number
+        .unwrap()
+        .to_string();
+    let args = ["list", number.as_str()];
+
+    let redirected = pty::run_with_tty_stdin_and_piped_output(
+        &root,
+        &std::env::current_dir().unwrap(),
+        &args,
+        24,
+        50,
+    );
+    assert!(redirected.status.success());
+    let redirected = String::from_utf8(redirected.stdout).unwrap();
+    assert!(
+        redirected
+            .lines()
+            .any(|line| line == format!(" - 1 {title}")),
+        "piped stdout must stay unwrapped even when stdin is a terminal: {redirected}"
+    );
+
+    let mut terminal =
+        pty::Session::spawn(root, &std::env::current_dir().unwrap(), &args, &[], 24, 50);
+    let rendered = terminal.output_until("boundary").replace("\r\n", "\n");
+    assert!(terminal.wait_exit(Duration::from_secs(2)).success());
+    assert!(
+        rendered.lines().all(|line| line.chars().count() <= 50),
+        "terminal output exceeded its width: {rendered}"
+    );
+    assert!(
+        rendered
+            .lines()
+            .any(|line| line.starts_with("     ") && line.contains("fifty")),
+        "binary did not hand the terminal width to list rendering: {rendered}"
+    );
 }
 
 #[test]
@@ -1725,41 +1903,68 @@ fn list_displayed_or_bare_number_finds_the_task_from_another_cwd() {
 fn list_bare_digits_finds_done_and_deleted_tasks() {
     let dir = temp_state_dir("number-done-deleted");
     let mut state = DomainState::new();
-    let done = create_task_with_thread(
-        &mut state,
-        "done target",
-        TaskScope::Global,
-        HumanStatus::Done,
-        None,
-    );
-    let deleted = create_task_with_thread(
-        &mut state,
-        "deleted target",
-        TaskScope::Global,
-        HumanStatus::Ready,
-        None,
-    );
+    let done = state
+        .create(
+            "done target",
+            Some("done notes".into()),
+            TaskScope::Global,
+            ProvenanceOrigin::Manual,
+            Some("done-thread".into()),
+        )
+        .expect("create done task");
+    state
+        .set_status(done, HumanStatus::Done)
+        .expect("finish task");
+    state.add_step(done, "done step").expect("add done step");
+    let deleted = state
+        .create(
+            "deleted target",
+            Some("deleted notes".into()),
+            TaskScope::Global,
+            ProvenanceOrigin::Manual,
+            Some("deleted-thread".into()),
+        )
+        .expect("create deleted task");
+    state
+        .add_step(deleted, "deleted step")
+        .expect("add deleted step");
     state.soft_delete(deleted).expect("soft delete task");
     TaskStore::new(&dir).save(&state).expect("seed store");
 
     let persisted = TaskStore::new(&dir).load().expect("load store");
-    for task in [done, deleted] {
+    for (task, label) in [(done, "done"), (deleted, "deleted")] {
         let number = persisted
             .get(task)
             .expect("task")
             .number
             .expect("task number");
-        let output = list(&[
+        let args = [
             "tsk".into(),
             "list".into(),
             number.to_string(),
-            "--json".into(),
             "--state-dir".into(),
             state_dir_arg(&dir),
-        ]);
+        ];
+        let human = list(&args);
+        assert_eq!(human.code, 0, "{}", human.stderr);
+        let notes_at = human.stdout.find(&format!("   {label} notes")).unwrap();
+        let step_at = human.stdout.find(&format!("   [ ] {label} step")).unwrap();
+        let thread_at = human.stdout.find(&format!("   #{label}-thread")).unwrap();
+        assert!(
+            notes_at < step_at && step_at < thread_at,
+            "{}",
+            human.stdout
+        );
+
+        let mut json_args = args.to_vec();
+        json_args.insert(3, "--json".into());
+        let output = list(&json_args);
         assert_eq!(output.code, 0, "{}", output.stderr);
         let rows: Vec<serde_json::Value> = serde_json::from_str(&output.stdout).expect("JSON rows");
         assert_eq!(rows[0]["id"], task.to_string());
+        assert_eq!(rows[0]["notes"], format!("{label} notes"));
+        assert_eq!(rows[0]["steps"][0]["text"], format!("{label} step"));
+        assert_eq!(rows[0]["thread"], format!("{label}-thread"));
     }
     let _ = std::fs::remove_dir_all(dir);
 }

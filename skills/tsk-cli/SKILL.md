@@ -31,7 +31,7 @@ stop. Never run `install.sh`, `brew`, or `cargo build` unless they asked.
 | One complete task | `tsk list T12` |
 | Start / block / hand back / finish | `tsk status T12 start` · `blocked` · `review` · `done` |
 | Change title or notes | `tsk edit T12 --title "…"` · `--notes "…"` |
-| Steps | Read ids with `tsk list T12 --json`; then `tsk steps T12 add|toggle|rename|remove` |
+| Steps | Read ids with `tsk list T12 --json`; then `add` · `toggle` · `rename` · `remove` |
 | Archive / unarchive | `tsk archive T12` · `tsk unarchive T12` · `tsk project archive widget` |
 | Done, archived, deleted | `tsk list --done` · `--archived` · `--deleted` |
 | Bring back a deleted task | `tsk trash restore T12` |
@@ -113,8 +113,9 @@ tsk list --json
 - Human output groups by status: `STARTED`, `READY`, `BLOCKED`, `REVIEW`; a filtered row is
   ` - <number> <title> #<thread>`. Map board language onto it: *on deck* = READY, *in motion* =
   STARTED, *needs you* = BLOCKED + REVIEW. All human list content wraps to the attached terminal
-  width with hanging indentation. Direct task output uses separate notes, steps, and `#thread`
-  blocks in that order, with a blank line between blocks that exist; steps show state and text
+  width with hanging indentation and a 50-column minimum. Direct task output uses separate notes,
+  steps, and `#thread` blocks in that order, with a blank line between blocks that exist; steps
+  show state and text
   without ids.
 - `--json` is a flat array of `id`, `number`, `title`, `status`, `project` (`null` for desk),
   `thread` (`null` if none), in display order. `tsk list T12 --json` returns the complete task in

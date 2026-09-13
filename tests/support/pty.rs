@@ -4,7 +4,7 @@ use std::io::{Read, Write};
 use std::os::fd::{AsRawFd, FromRawFd};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, ExitStatus, Stdio};
+use std::process::{Child, Command, ExitStatus, Output, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
@@ -19,6 +19,55 @@ pub fn scratch_root(label: &str) -> PathBuf {
     ));
     fs::create_dir_all(&root).unwrap();
     root
+}
+
+/// Run `tsk` with a terminal stdin but captured stdout. This distinguishes the
+/// production stdout terminal check from an accidental stdin check.
+#[allow(dead_code)]
+pub fn run_with_tty_stdin_and_piped_output(
+    root: &Path,
+    cwd: &Path,
+    args: &[&str],
+    rows: u16,
+    cols: u16,
+) -> Output {
+    let mut master = -1;
+    let mut slave = -1;
+    let mut size = libc::winsize {
+        ws_row: rows,
+        ws_col: cols,
+        ws_xpixel: 0,
+        ws_ypixel: 0,
+    };
+    // SAFETY: openpty initializes valid descriptors; size is live for the call.
+    assert_eq!(
+        unsafe {
+            libc::openpty(
+                &mut master,
+                &mut slave,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                &raw mut size,
+            )
+        },
+        0
+    );
+    // SAFETY: each descriptor has one owned File after a successful openpty.
+    let _master = unsafe { File::from_raw_fd(master) };
+    let input = unsafe { File::from_raw_fd(slave) };
+    Command::new(env!("CARGO_BIN_EXE_tsk"))
+        .args(args)
+        .current_dir(cwd)
+        .env("TSK_STATE_DIR", root.join("state"))
+        .env("TSK_CONFIG_DIR", root.join("config"))
+        .env("TSK_NO_UPDATE_CHECK", "1")
+        .env_remove("TSK_MODE")
+        .env("TERM", "xterm-256color")
+        .stdin(Stdio::from(input))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .unwrap()
 }
 
 pub struct Session {

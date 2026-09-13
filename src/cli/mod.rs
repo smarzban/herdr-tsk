@@ -183,15 +183,15 @@ fn run_project(args: Vec<String>) -> CliOutput {
 fn run_list(args: Vec<String>, terminal_width: Option<usize>) -> CliOutput {
     let input = match list::parse(&args) {
         Ok(input) => input,
-        Err(reason) => return presenter::list_usage(&reason),
+        Err(reason) => return presenter::list_usage(&reason, terminal_width),
     };
     if input.help {
-        return presenter::list_help();
+        return presenter::list_help(terminal_width);
     }
     let json = input.json;
     match list::run(input) {
         Ok(result) => presenter::list(result, json, terminal_width),
-        Err(error) => presenter::list_rejected(error),
+        Err(error) => presenter::list_rejected(error, terminal_width),
     }
 }
 

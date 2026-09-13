@@ -958,7 +958,7 @@ mod tests {
             hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
         }
         assert_eq!(
-            hash, 0x7eb4_2530_4be1_af2d,
+            hash, 0xd6a0_7072_abcb_cace,
             "skills/tsk-cli/SKILL.md changed: bump `version:` in its frontmatter and update both pins here"
         );
     }

@@ -149,7 +149,7 @@ Scope flags are mutually exclusive. So are `--done`, `--deleted`, and `--archive
 
 A direct task address searches the main store, including done, archived, and recently deleted tasks. It cannot be combined with scope, thread, or status filters. A missing task exits 2. Tasks already moved to trash require `--deleted`.
 
-Human output groups by status; filtered rows include the task number and thread, and `--all` adds scope labels. Every non-JSON list element wraps to the attached terminal width with hanging indentation, including task rows, scope labels, notes, steps, archived marks, and threads. Redirected output keeps stored logical lines.
+Human output groups by status; filtered rows include the task number and thread, and `--all` adds scope labels. Every non-JSON list element, including help and errors, wraps to the attached terminal width with hanging indentation. Task rows, scope labels, notes, steps, archived marks, and threads use the same 50-column minimum. Redirected output keeps stored logical lines.
 
 Single-task output removes the thread from the title row and presents notes, steps, then `#thread` as separate blocks. A blank line separates adjacent blocks that exist. Human step rows show state and text without machine-oriented short IDs.
 
