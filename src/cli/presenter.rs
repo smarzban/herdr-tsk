@@ -13,8 +13,6 @@ use crate::cli::trash::{TrashCliError, TrashRestoreResult};
 use crate::domain::HumanStatus;
 use crate::ui::terminal_text;
 
-const MIN_LIST_TERMINAL_WIDTH: usize = 50;
-
 fn human_reason(reason: &str) -> String {
     terminal_text(reason)
 }
@@ -33,7 +31,7 @@ pub fn list_help(terminal_width: Option<usize>) -> CliOutput {
             "--project uses the same basename-or-path scope resolution as add; --desk selects your desk, tasks not tied to a project; --all selects every scope. --thread normalizes a thread name and filters within the selected scope; an invalid name is a usage error (exit 2). For dash-leading project and state-directory values, use --project=<scope> and --state-dir=<dir>.\n",
             "--archived lists archived tasks only: individually archived tasks plus tasks of archived projects, each row marked `archived` or `project archived`. --done lists done tasks only. --deleted lists soft-deleted tasks only, regardless of status: live soft-deletes plus trash entries from trash.jsonl (kept 30 days), deduped by task with the live copy winning, newest deletion first.\n",
             "To recover a typo scope, use tsk list --all --json.\n",
-            "--json emits a flat array of id, number, title, status, project, and thread (or null) in displayed group order. Direct task JSON adds notes and steps, including null notes and an empty steps array, ordered as id, number, project, status, title, notes, steps, thread. All non-JSON list content wraps to the attached terminal width with hanging indentation, using a 50-column minimum; redirected output keeps stored logical lines. Human --all groups rows by status, then project scope, using a unique concise trailing path or desk.\n\n",
+            "--json emits a flat array of id, number, title, status, project, and thread (or null) in displayed group order. Direct task JSON adds notes and steps, including null notes and an empty steps array, ordered as id, number, project, status, title, notes, steps, thread. All non-JSON list content wraps to the attached terminal width with hanging indentation and is supported from 50 columns; redirected output keeps stored logical lines. Human --all groups rows by status, then project scope, using a unique concise trailing path or desk.\n\n",
             "Exit contract:\n",
             "  exit 0: tasks were listed\n",
             "  exit 2: usage or parse error, nothing persisted\n",
@@ -174,9 +172,7 @@ fn list_json(result: &ListResult) -> String {
 }
 
 fn list_human(result: &ListResult, terminal_width: Option<usize>) -> String {
-    let output_width = terminal_width
-        .map(|width| width.max(MIN_LIST_TERMINAL_WIDTH))
-        .unwrap_or(usize::MAX);
+    let output_width = terminal_width.unwrap_or(usize::MAX);
     let groups: &[(Option<HumanStatus>, &str)] = match result.view {
         ListView::Open => &[
             (Some(HumanStatus::Started), "STARTED"),
@@ -351,7 +347,6 @@ fn wrap_list_document(text: &str, terminal_width: Option<usize>) -> String {
     let Some(output_width) = terminal_width else {
         return text.to_owned();
     };
-    let output_width = output_width.max(MIN_LIST_TERMINAL_WIDTH);
     let lines = crate::ui::split_line_breaks(text).collect::<Vec<_>>();
     let has_trailing_break = text.ends_with('\n') || text.ends_with('\r');
     let mut output = String::new();

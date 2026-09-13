@@ -113,7 +113,7 @@ tsk list --json
 - Human output groups by status: `STARTED`, `READY`, `BLOCKED`, `REVIEW`; a filtered row is
   ` - <number> <title> #<thread>`. Map board language onto it: *on deck* = READY, *in motion* =
   STARTED, *needs you* = BLOCKED + REVIEW. All human list content wraps to the attached terminal
-  width with hanging indentation and a 50-column minimum. Direct task output uses separate notes,
+  width with hanging indentation, supported from 50 columns. Direct task output uses separate notes,
   steps, and `#thread` blocks in that order, with a blank line between blocks that exist; steps
   show state and text
   without ids.

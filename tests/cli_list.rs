@@ -1028,8 +1028,8 @@ fn unscoped_human_list_wraps_threaded_task_rows() {
 }
 
 #[test]
-fn list_help_and_usage_errors_wrap_with_a_fifty_column_floor() {
-    let help = list_at_width(&["tsk".into(), "list".into(), "--help".into()], 12);
+fn list_help_and_usage_errors_wrap_at_the_supported_width() {
+    let help = list_at_width(&["tsk".into(), "list".into(), "--help".into()], 50);
     assert_eq!(help.code, 0);
     let help_width = help
         .stdout
@@ -1037,10 +1037,10 @@ fn list_help_and_usage_errors_wrap_with_a_fifty_column_floor() {
         .map(|line| line.chars().count())
         .max()
         .unwrap();
-    assert!(help_width <= 50, "help exceeded floor: {}", help.stdout);
     assert!(
-        help_width > 12,
-        "widths below 50 must use the supported floor"
+        help_width <= 50,
+        "help exceeded terminal width: {}",
+        help.stdout
     );
 
     let usage = list_at_width(&["tsk".into(), "list".into(), "--bogus".into()], 50);
