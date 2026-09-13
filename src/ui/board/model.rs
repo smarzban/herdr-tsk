@@ -1428,9 +1428,10 @@ impl BoardModel {
             return;
         }
         self.thread_filter = ThreadFilter::All;
-        let entering_projects = matches!(target, BoardLocation::Projects)
-            && !matches!(self.board_location, BoardLocation::Projects);
-        if entering_projects || !matches!(target, BoardLocation::Projects) {
+        let preview_transition = self.right_seat.is_some()
+            || matches!(self.board_location, BoardLocation::Projects)
+            || matches!(target, BoardLocation::Projects);
+        if preview_transition {
             self.right_seat = None;
             self.wide_stage = WideStage::FullBoard;
             self.stage_origin = None;

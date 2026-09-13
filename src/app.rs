@@ -2891,6 +2891,60 @@ mod tests {
     }
 
     #[test]
+    fn switching_to_a_project_keeps_the_existing_task_slider_stage() {
+        let mut domain = DomainState::new();
+        domain
+            .create(
+                "project task",
+                None,
+                TaskScope::Global,
+                ProvenanceOrigin::Manual,
+                None,
+            )
+            .expect("project task");
+        let mut model = BoardModel::from_tasks(
+            domain.tasks().to_vec(),
+            Some(PathBuf::from("/repos/project")),
+        );
+        apply_intent(&mut domain, &mut model, BoardIntent::StageRight, None)
+            .expect("open task pane");
+        assert_eq!(model.wide_stage(), crate::ui::tier::WideStage::Split);
+        assert_eq!(model.nav_tab(), NavTab::Desk);
+        assert!(model.right_seat().is_none());
+
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::SelectNavTab(NavTab::ProjectBoard),
+            None,
+        )
+        .expect("switch to project tab");
+        assert_eq!(
+            model.wide_stage(),
+            crate::ui::tier::WideStage::Split,
+            "switching tabs must not collapse the task slider"
+        );
+    }
+
+    #[test]
+    fn leaving_projects_clears_its_preview_stage_and_seat() {
+        let (mut domain, mut model) = projects_overview_fixture();
+        stage_right(&mut domain, &mut model, 2);
+        assert_eq!(model.wide_stage(), crate::ui::tier::WideStage::Rail);
+        assert!(model.right_seat().is_some());
+
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::SelectNavTab(NavTab::Desk),
+            None,
+        )
+        .expect("leave projects");
+        assert_eq!(model.wide_stage(), crate::ui::tier::WideStage::FullBoard);
+        assert!(model.right_seat().is_none());
+    }
+
+    #[test]
     fn nested_project_routes_keep_escape_and_global_navigation_on_the_outer_board() {
         let (_domain, model, _) = projects_preview_fixture();
         assert!(model.project_right_seat_focused());
