@@ -211,12 +211,21 @@ fn inside(area: Rect, hit: Rect) -> bool {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn selecting_a_project_row_opens_its_split_preview() {
+fn selecting_a_project_row_stays_in_the_index_until_stage_right() {
     let (mut domain, mut model) = projects_fixture();
     assert_eq!(model.wide_stage(), WideStage::FullBoard);
     assert!(model.right_seat().is_none());
 
     go(&mut domain, &mut model, BoardIntent::SelectNext);
+
+    assert_eq!(model.wide_stage(), WideStage::FullBoard);
+    assert!(model.right_seat().is_none());
+    assert_eq!(
+        model.selected_project_row().map(|row| row.path),
+        Some(PROJECT_B.to_string())
+    );
+
+    go(&mut domain, &mut model, BoardIntent::StageRight);
 
     assert_eq!(model.wide_stage(), WideStage::Split);
     assert_eq!(
@@ -229,7 +238,7 @@ fn selecting_a_project_row_opens_its_split_preview() {
 }
 
 #[test]
-fn clicking_a_project_row_opens_its_split_preview() {
+fn clicking_a_project_row_stays_in_the_index_until_stage_right() {
     let area = Rect::new(0, 0, 110, 30);
     let (mut domain, mut model) = projects_fixture();
     let (_, hits) = render(&model, area.width, area.height);
@@ -243,6 +252,10 @@ fn clicking_a_project_row_opens_its_split_preview() {
         .expect("project row click maps");
 
     go(&mut domain, &mut model, intent);
+
+    assert_eq!(model.wide_stage(), WideStage::FullBoard);
+    assert!(model.right_seat().is_none());
+    go(&mut domain, &mut model, BoardIntent::StageRight);
 
     assert_eq!(model.wide_stage(), WideStage::Split);
     assert_eq!(
@@ -959,6 +972,11 @@ fn wide_hits_stay_inside_their_column_or_the_footer() {
             let geometry = resolve_responsive(width, height, stage);
             let (_, hits) = render(&model, width, height);
             let footer = Rect::new(0, height - 3, width, 3);
+            assert_eq!(
+                hits.footer,
+                Some(footer),
+                "{stage:?} {width}x{height}: painted footer"
+            );
             let board = Rect::new(0, 0, geometry.board.width, height - 3);
             let task = Rect::new(
                 geometry.task_content().x,

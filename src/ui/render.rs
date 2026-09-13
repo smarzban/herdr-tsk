@@ -716,6 +716,9 @@ pub struct QueueHitMap {
     /// Furthest help-card scroll the painted frame could show, when the card was up.
     /// The reducer clamps with it so the offset never runs past the last page.
     pub help_max_scroll: Option<usize>,
+    /// Footer rectangle recorded by the painter, including any rows reserved for a bottom
+    /// input. Mouse routing uses this instead of reconstructing a footer height.
+    pub footer: Option<Rect>,
 }
 
 impl QueueHitMap {
@@ -743,6 +746,10 @@ impl QueueHitMap {
         }
         self.copyable
             .retain(|copyable| copyable.width > 0 && copyable.height > 0);
+        if let Some(footer) = self.footer {
+            let footer = local_rect(area, footer);
+            self.footer = (footer.width > 0 && footer.height > 0).then_some(footer);
+        }
     }
 }
 
@@ -1335,6 +1342,19 @@ fn paint_footer(
     shared: bool,
 ) {
     let width = geo.row_width;
+    let footer_top = [geo.rule_row, geo.status_row, geo.verb_row]
+        .into_iter()
+        .flatten()
+        .min()
+        .unwrap_or(geo.height);
+    if footer_top < geo.height {
+        hits.footer = Some(Rect::new(
+            0,
+            footer_top,
+            width,
+            geo.height.saturating_sub(footer_top),
+        ));
+    }
     if let Some(row) = geo.rule_row {
         put_line(frame, surface, row, width, paint_rule_row(width));
     }

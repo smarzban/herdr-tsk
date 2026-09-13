@@ -477,50 +477,29 @@ fn run_board_loop(
                     }) else {
                         continue;
                     };
-                    let intent = if intent == BoardIntent::CollapseDetail
-                        && model.project_right_board_leave_requested()
-                    {
-                        BoardIntent::StageLeft
-                    } else {
-                        intent
-                    };
-                    let Some(intent) = board_intent_for_area(area, intent) else {
+                    let Some(intent) = board_intent_for_presentation(area, &model, intent) else {
                         continue;
                     };
-                    // A command-surface confirmation dispatches its existing intent route.
-                    let return_to_index = intent == BoardIntent::CloseLayer
-                        && model.project_right_board_leave_requested();
-                    let leave_from_arrow = intent == BoardIntent::StageLeft
-                        && model.project_right_board_leave_requested();
-                    let global_navigation = model.project_right_seat_focused()
-                        && matches!(
-                            intent,
-                            BoardIntent::SelectNavTab(_) | BoardIntent::OpenProjectSelector
-                        );
-                    let Some(intent) = resolve_board_command(
-                        if leave_from_arrow || global_navigation {
-                            &mut model
-                        } else {
-                            model.input_target_mut()
-                        },
+                    let RoutedBoardIntent {
                         intent,
-                    ) else {
+                        target,
+                        return_to_index,
+                    } = route_board_intent(&model, intent);
+                    let Some(intent) =
+                        resolve_board_command(board_intent_target_mut(&mut model, target), intent)
+                    else {
                         continue;
                     };
+                    let intent_for_preview = intent.clone();
                     let quit = handle_board_intent(
                         &store,
                         &mut domain,
-                        if return_to_index {
-                            model.input_target_mut()
-                        } else if leave_from_arrow || global_navigation {
-                            &mut model
-                        } else {
-                            model.input_target_mut()
-                        },
+                        board_intent_target_mut(&mut model, target),
                         intent,
                         &mut save_recovery,
                         quick_capture,
                     )?;
+                    auto_open_projects_preview(area, &mut model, &intent_for_preview);
                     sync_focused_project_preview(&mut model, &domain, &save_recovery);
                     if quit {
                         break;
@@ -576,14 +555,22 @@ fn run_board_loop(
                         ScrollbarMouse::Intent(intent) => {
                             reflow_click.clear();
                             drag_gesture.clear();
+                            let intent_for_preview = intent.clone();
                             let quit = handle_board_intent(
                                 &store,
                                 &mut domain,
-                                mouse_intent_target_mut(&mut model, area, mouse, &intent),
+                                mouse_intent_target_mut(
+                                    &mut model,
+                                    area,
+                                    mouse,
+                                    &frame_hits,
+                                    &intent,
+                                ),
                                 intent,
                                 &mut save_recovery,
                                 quick_capture,
                             )?;
+                            auto_open_projects_preview(area, &mut model, &intent_for_preview);
                             sync_focused_project_preview(&mut model, &domain, &save_recovery);
                             if quit {
                                 break;
@@ -690,7 +677,7 @@ fn run_board_loop(
                             let pos = Position::new(mouse.column, mouse.row);
                             let responsive_intent =
                                 map_responsive_board_mouse(&model, &frame_hits, area, mouse);
-                            let focused = press_on_focused_surface(&model, area, pos);
+                            let focused = press_on_focused_surface(&model, &frame_hits, area, pos);
                             if !focused
                                 && !continuing_row
                                 && !press_survives_off_focus(
@@ -742,14 +729,16 @@ fn run_board_loop(
                     let Some(intent) = intent else {
                         continue;
                     };
+                    let intent_for_preview = intent.clone();
                     let quit = handle_board_intent(
                         &store,
                         &mut domain,
-                        mouse_intent_target_mut(&mut model, area, click, &intent),
+                        mouse_intent_target_mut(&mut model, area, click, &frame_hits, &intent),
                         intent,
                         &mut save_recovery,
                         quick_capture,
                     )?;
+                    auto_open_projects_preview(area, &mut model, &intent_for_preview);
                     sync_focused_project_preview(&mut model, &domain, &save_recovery);
                     if quit {
                         break;
@@ -1330,6 +1319,97 @@ fn board_intent_for_area(_area: Rect, intent: BoardIntent) -> Option<BoardIntent
     Some(intent)
 }
 
+/// Apply the one presentation-dependent input gate before an intent reaches the reducer.
+/// Projects preview opening is the only route whose meaning changes with width: a narrow
+/// projects index remains a FullBoard with no right seat, while a wide frame may enter Split.
+fn board_intent_for_presentation(
+    area: Rect,
+    model: &BoardModel,
+    intent: BoardIntent,
+) -> Option<BoardIntent> {
+    let intent = board_intent_for_area(area, intent)?;
+    if model.projects_overview()
+        && model.wide_stage() == crate::ui::tier::WideStage::FullBoard
+        && model.responsive_geometry(area).presentation
+            != crate::ui::tier::ResponsivePresentation::WideSplit
+        && intent == BoardIntent::StageRight
+    {
+        return None;
+    }
+    Some(intent)
+}
+
+/// Open a projects preview only after the input boundary has seen the responsive presentation.
+/// Selection and row-click reducers stay width-agnostic, so direct model updates cannot create
+/// a right seat on a narrow frame.
+fn auto_open_projects_preview(area: Rect, model: &mut BoardModel, intent: &BoardIntent) {
+    if !matches!(
+        intent,
+        BoardIntent::SelectNext
+            | BoardIntent::SelectPrev
+            | BoardIntent::SelectProjectRow(_)
+            | BoardIntent::StageRight
+    ) {
+        return;
+    }
+    if model.projects_overview()
+        && model.wide_stage() == crate::ui::tier::WideStage::FullBoard
+        && model.responsive_geometry(area).presentation
+            == crate::ui::tier::ResponsivePresentation::WideSplit
+    {
+        let _ = model.open_project_preview();
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BoardIntentTarget {
+    Outer,
+    Focused,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RoutedBoardIntent {
+    intent: BoardIntent,
+    target: BoardIntentTarget,
+    return_to_index: bool,
+}
+
+/// Resolve the nested projects-preview escape and ownership rules once for every keyboard route.
+/// The reducer still receives an ordinary board intent, but this helper keeps the outer/index
+/// target and the second Escape transition together and directly testable.
+fn route_board_intent(model: &BoardModel, intent: BoardIntent) -> RoutedBoardIntent {
+    let leave_requested = model.project_right_board_leave_requested();
+    let intent = if intent == BoardIntent::CollapseDetail && leave_requested {
+        BoardIntent::StageLeft
+    } else {
+        intent
+    };
+    let return_to_index = intent == BoardIntent::CloseLayer && leave_requested;
+    let leave_from_arrow = intent == BoardIntent::StageLeft && leave_requested;
+    let global_navigation = model.project_right_seat_focused()
+        && matches!(
+            intent,
+            BoardIntent::SelectNavTab(_) | BoardIntent::OpenProjectSelector
+        );
+    let target = if leave_from_arrow || global_navigation {
+        BoardIntentTarget::Outer
+    } else {
+        BoardIntentTarget::Focused
+    };
+    RoutedBoardIntent {
+        intent,
+        target,
+        return_to_index,
+    }
+}
+
+fn board_intent_target_mut(model: &mut BoardModel, target: BoardIntentTarget) -> &mut BoardModel {
+    match target {
+        BoardIntentTarget::Outer => model,
+        BoardIntentTarget::Focused => model.input_target_mut(),
+    }
+}
+
 /// Route a bracketed paste to the board intent the painted surface accepts.
 ///
 /// A paste arrives as `Event::Paste`, so it cannot go through `map_key`; it still passes the
@@ -1461,9 +1541,12 @@ fn board_mouse_click_intent_after_focus<E>(
         resolve_board_surface(area, model);
         model.cancel_project_header_double_click();
         let intent = map_responsive_board_mouse(model, painted_hits, area, click)
-            .and_then(|intent| board_intent_for_area(area, intent))
+            .and_then(|intent| board_intent_for_presentation(area, model, intent))
             .and_then(|intent| {
-                resolve_board_command(mouse_intent_target_mut(model, area, click, &intent), intent)
+                resolve_board_command(
+                    mouse_intent_target_mut(model, area, click, painted_hits, &intent),
+                    intent,
+                )
             });
         return Ok((false, intent));
     }
@@ -1542,6 +1625,7 @@ fn mouse_intent_target_mut<'a>(
     model: &'a mut BoardModel,
     area: Rect,
     mouse: crossterm::event::MouseEvent,
+    painted_hits: &crate::ui::render::QueueHitMap,
     intent: &BoardIntent,
 ) -> &'a mut BoardModel {
     let pos = Position::new(mouse.column, mouse.row);
@@ -1553,7 +1637,9 @@ fn mouse_intent_target_mut<'a>(
             BoardIntent::StageLeft | BoardIntent::StageRight | BoardIntent::SelectProjectRow(_)
         );
     let right_footer = model.project_right_seat_focused()
-        && pos.y >= area.height.saturating_sub(4)
+        && painted_hits
+            .footer
+            .is_some_and(|footer| footer.contains(pos))
         && !matches!(intent, BoardIntent::ListScrollTo(_));
     if right_surface || right_footer {
         model.input_target_mut()
@@ -1608,8 +1694,11 @@ fn board_mouse_intent(
         model.cancel_project_header_double_click();
     }
     let intent = intent?;
-    let intent = board_intent_for_area(area, intent)?;
-    resolve_board_command(mouse_intent_target_mut(model, area, mouse, &intent), intent)
+    let intent = board_intent_for_presentation(area, model, intent)?;
+    resolve_board_command(
+        mouse_intent_target_mut(model, area, mouse, &hits, &intent),
+        intent,
+    )
 }
 
 /// Apply one board intent and present any refusal instead of discarding it.
@@ -2617,6 +2706,82 @@ mod tests {
         board_keyboard_intent_for_area(right, area, mode, key).expect("preview key intent")
     }
 
+    fn projects_overview_fixture() -> (DomainState, BoardModel) {
+        let mut domain = DomainState::new();
+        domain
+            .create(
+                "alpha task",
+                None,
+                TaskScope::Project {
+                    path: "/repos/alpha".into(),
+                },
+                ProvenanceOrigin::Manual,
+                None,
+            )
+            .expect("create alpha task");
+        domain
+            .create(
+                "beta task",
+                None,
+                TaskScope::Project {
+                    path: "/repos/beta".into(),
+                },
+                ProvenanceOrigin::Manual,
+                None,
+            )
+            .expect("create beta task");
+        let mut model = BoardModel::from_domain(&domain, None);
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::SelectNavTab(NavTab::Projects),
+            None,
+        )
+        .expect("open projects overview");
+        (domain, model)
+    }
+
+    #[test]
+    fn projects_preview_opening_is_gated_at_the_app_boundary() {
+        let (mut domain, mut model) = projects_overview_fixture();
+        let narrow = Rect::new(0, 0, 109, 24);
+        let wide = Rect::new(0, 0, 110, 24);
+
+        assert_eq!(
+            board_intent_for_presentation(narrow, &model, BoardIntent::StageRight),
+            None,
+            "a narrow projects index has no preview stage"
+        );
+        apply_intent(&mut domain, &mut model, BoardIntent::SelectNext, None)
+            .expect("move the narrow index cursor");
+        auto_open_projects_preview(narrow, &mut model, &BoardIntent::SelectNext);
+        assert_eq!(model.wide_stage(), crate::ui::tier::WideStage::FullBoard);
+        assert!(model.right_seat().is_none());
+
+        auto_open_projects_preview(wide, &mut model, &BoardIntent::SelectNext);
+        assert_eq!(model.wide_stage(), crate::ui::tier::WideStage::Split);
+        assert!(model.right_seat().is_some());
+    }
+
+    #[test]
+    fn nested_project_routes_keep_escape_and_global_navigation_on_the_outer_board() {
+        let (_domain, model, _) = projects_preview_fixture();
+        assert!(model.project_right_seat_focused());
+
+        let collapse = route_board_intent(&model, BoardIntent::CollapseDetail);
+        assert_eq!(collapse.intent, BoardIntent::StageLeft);
+        assert_eq!(collapse.target, BoardIntentTarget::Outer);
+        assert!(!collapse.return_to_index);
+
+        let close = route_board_intent(&model, BoardIntent::CloseLayer);
+        assert_eq!(close.intent, BoardIntent::CloseLayer);
+        assert_eq!(close.target, BoardIntentTarget::Focused);
+        assert!(close.return_to_index);
+
+        let navigation = route_board_intent(&model, BoardIntent::SelectNavTab(NavTab::Desk));
+        assert_eq!(navigation.target, BoardIntentTarget::Outer);
+    }
+
     #[test]
     fn projects_preview_keyboard_uses_right_seat_for_task_actions() {
         let (mut domain, mut model, id) = projects_preview_fixture();
@@ -3027,7 +3192,12 @@ mod tests {
         assert!(matches!(scrollbar, ScrollbarMouse::Miss));
         assert!(
             continuing
-                || press_on_focused_surface(model, area, Position::new(click.column, click.row))
+                || press_on_focused_surface(
+                    model,
+                    &hits,
+                    area,
+                    Position::new(click.column, click.row),
+                )
                 || press_survives_off_focus(
                     map_responsive_board_mouse(model, &hits, area, click).as_ref(),
                     mode,
@@ -3296,7 +3466,7 @@ mod tests {
                 map_responsive_board_mouse(&model, &hits, area, left_click(verb.x, verb.y));
             assert!(intent.is_some(), "{stage:?}: footer verb maps an intent");
             assert!(
-                press_on_focused_surface(&model, area, pos),
+                press_on_focused_surface(&model, &hits, area, pos),
                 "{stage:?}: the Down gate keeps a shared-footer press"
             );
         }

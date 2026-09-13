@@ -1409,6 +1409,7 @@ fn apply_board_intent(
                     model.projects_selected = previous;
                     return Ok(IntentOutcome::None);
                 }
+                model.clear_project_preview_ephemeral_state();
                 model.wide_stage = WideStage::Split;
                 model.last_project_row_click = None;
                 model.clear_message();
@@ -1416,7 +1417,6 @@ fn apply_board_intent(
             }
             let previous = model.projects_selected;
             let preview_active = model.projects_preview_active();
-            let full_board = model.projects_overview() && model.wide_stage == WideStage::FullBoard;
             if preview_active
                 && model
                     .right_seat()
@@ -1429,12 +1429,7 @@ fn apply_board_intent(
                 return Ok(IntentOutcome::None);
             }
             model.projects_selected = index;
-            if full_board {
-                if !model.open_project_preview() {
-                    model.projects_selected = previous;
-                    return Ok(IntentOutcome::None);
-                }
-            } else if preview_active && !model.bind_project_preview() {
+            if preview_active && !model.bind_project_preview() {
                 model.projects_selected = previous;
                 return Ok(IntentOutcome::None);
             }
@@ -2363,7 +2358,10 @@ fn stage_left(model: &mut BoardModel) {
                     model.drop_project_preview();
                 }
             }
-            WideStage::Rail => model.wide_stage = WideStage::Split,
+            WideStage::Rail => {
+                model.clear_project_preview_ephemeral_state();
+                model.wide_stage = WideStage::Split;
+            }
             WideStage::FullTask => {
                 model.stage_origin = None;
                 model.wide_stage = WideStage::FullBoard;

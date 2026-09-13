@@ -1092,12 +1092,30 @@ impl BoardModel {
     /// Replace task snapshot from domain (after mutation) and reanchor selection by id.
     pub fn sync_from_domain(&mut self, state: &DomainState) {
         // Capture the prior visible order before the snapshot is replaced, so reanchoring
-        // can still see where the selection used to live.
+        // can still see where the selection used to live. Project rows are derived from task
+        // order, so the cursor needs a path anchor as well: an arriving project above it must
+        // not silently change which preview seat the user is looking at.
         let previous = self.selection_id;
         let previous_visible = self.visible_ids();
+        let previous_project_path = self
+            .projects_overview()
+            .then(|| self.selected_project_row().map(|row| row.path))
+            .flatten();
         let previous_id_set: HashSet<Uuid> = self.tasks.iter().map(|task| task.id).collect();
         self.tasks = state.tasks().to_vec();
         self.archived_projects = state.archived_projects();
+        if let Some(previous_path) = previous_project_path.as_deref() {
+            let projects = self.queue_view().projects;
+            if let Some(index) = projects
+                .iter()
+                .position(|row| paths_equivalent(&row.path, previous_path))
+            {
+                self.projects_selected = index;
+            } else {
+                self.projects_selected =
+                    self.projects_selected.min(projects.len().saturating_sub(1));
+            }
+        }
         if let Some(right) = self.right_seat.as_mut() {
             right.sync_from_domain(state);
         }
@@ -1175,7 +1193,29 @@ impl BoardModel {
             self.reanchor_selection(previous, &previous_visible);
         }
         if self.projects_preview_active() {
-            self.bind_project_preview();
+            // Rebinding clones the complete task snapshot and resets the transient seat. Keep
+            // the same-path seat untouched, both to preserve its session and to avoid turning a
+            // background task sync into a dirty-project switch refusal.
+            let selected_path = self.selected_project_row().map(|row| row.path);
+            let seat_path = self
+                .right_seat
+                .as_ref()
+                .and_then(|right| right.active_project())
+                .map(Path::to_path_buf);
+            let path_changed = previous_project_path
+                .as_deref()
+                .zip(selected_path.as_deref())
+                .is_some_and(|(previous, current)| !paths_equivalent(previous, current));
+            let seat_needs_binding = match (selected_path.as_deref(), seat_path.as_deref()) {
+                (Some(selected), Some(seat)) => {
+                    !paths_equivalent(selected, &seat.to_string_lossy())
+                }
+                (None, None) => false,
+                _ => true,
+            };
+            if path_changed || seat_needs_binding {
+                self.bind_project_preview();
+            }
         }
     }
 
@@ -1297,6 +1337,9 @@ impl BoardModel {
             self.set_message(DIRTY_TASK_SWITCH_REFUSAL);
             return false;
         }
+        // A rebind intentionally clones the current task snapshot, which is O(tasks). The
+        // same-path fast return above is load-bearing: cursor movement and background syncs
+        // should keep the existing seat instead of paying that cost or dropping its session.
         let mut right = BoardModel::from_tasks(self.tasks.clone(), self.this_repo.clone());
         right.archived_projects = self.archived_projects.clone();
         right.board_location = BoardLocation::Project(path.clone());
@@ -1310,7 +1353,7 @@ impl BoardModel {
     }
 
     /// Open the first project preview when a project row is selected from the full index.
-    pub(super) fn open_project_preview(&mut self) -> bool {
+    pub(crate) fn open_project_preview(&mut self) -> bool {
         if !self.projects_overview() || self.wide_stage != WideStage::FullBoard {
             return false;
         }
@@ -1319,6 +1362,26 @@ impl BoardModel {
         }
         self.wide_stage = WideStage::Split;
         true
+    }
+
+    /// Clear right-seat chrome that belongs to a focused Rail visit, while retaining the
+    /// same-project board session (selection, scroll, drawer, peek, and page form).
+    pub(crate) fn clear_project_preview_ephemeral_state(&mut self) {
+        let Some(right) = self.right_seat.as_deref_mut() else {
+            return;
+        };
+        right.message = None;
+        right.message_expires_at = None;
+        right.message_restore = None;
+        right.delete_notice = None;
+        right.suspended_delete_notice = None;
+        right.pending_delete = None;
+        right.mouse_press = None;
+        right.mouse_press_scroll = None;
+        right.text_selection = None;
+        right.last_row_click = None;
+        right.last_project_header_click = None;
+        right.last_project_row_click = None;
     }
 
     /// Drop the projects overview's transient right-column session.
@@ -1912,12 +1975,10 @@ impl BoardModel {
         } else {
             self.projects_selected.checked_sub(1).unwrap_or(len - 1)
         };
-        if self.wide_stage == WideStage::FullBoard {
-            if !self.open_project_preview() {
-                self.projects_selected = previous;
-                return false;
-            }
-        } else if self.projects_preview_active() && !self.bind_project_preview() {
+        // Preview opening is presentation-dependent and belongs to the app input boundary,
+        // where the responsive width is known. A model cursor move must stay harmless on a
+        // narrow frame; an already-open wide preview still rebinds its seat here.
+        if self.projects_preview_active() && !self.bind_project_preview() {
             self.projects_selected = previous;
             return false;
         }
@@ -3718,6 +3779,37 @@ mod tests {
             model.selected_id(),
             Some(t4),
             "selection must reanchor to the old-order neighbor, not the first new row"
+        );
+    }
+
+    #[test]
+    fn projects_sync_reanchors_preview_by_path_when_a_project_is_inserted_before_it() {
+        let mut domain = DomainState::new();
+        create(&mut domain, "alpha task", project(REPO_A));
+        create(&mut domain, "beta task", project(REPO_B));
+
+        let mut model = BoardModel::from_domain(&domain, None);
+        model.board_location = BoardLocation::Projects;
+        model.projects_selected = 1;
+        model.wide_stage = WideStage::Split;
+        assert_eq!(
+            model.selected_project_row().map(|row| row.path),
+            Some(REPO_B.into())
+        );
+        assert!(model.bind_project_preview());
+
+        // An external writer adds a project that sorts before the selected project. The preview
+        // must stay on /repos/b, not follow the old numeric cursor at index 1.
+        create(&mut domain, "before both", project("/repos/0"));
+        model.sync_from_domain(&domain);
+
+        assert_eq!(
+            model.selected_project_row().map(|row| row.path),
+            Some(REPO_B.into())
+        );
+        assert_eq!(
+            model.right_seat().and_then(BoardModel::active_project),
+            Some(Path::new(REPO_B))
         );
     }
 

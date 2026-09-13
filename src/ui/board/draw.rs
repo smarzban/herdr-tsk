@@ -1472,6 +1472,7 @@ fn draw_wide_board(
     );
     hits.regions.append(&mut footer_hits.regions);
     hits.copyable.append(&mut footer_hits.copyable);
+    hits.footer = footer_hits.footer;
     paint_board_form_toast(frame, model, &footer_geo, area);
     hits
 }
@@ -1759,5 +1760,6 @@ fn draw_projects_wide_board(
     );
     hits.regions.append(&mut footer_hits.regions);
     hits.copyable.append(&mut footer_hits.copyable);
+    hits.footer = footer_hits.footer;
     hits
 }
