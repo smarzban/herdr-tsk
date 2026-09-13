@@ -17,7 +17,7 @@ the GitHub release notes verbatim.
 
 - Added the `open` status for captured and untriaged tasks, an expandable inbox group under ON DECK, and explicit `ctrl+n` (ready) and `ctrl+o` (open) board verbs.
 - Added `tsk status T<n> open`, plus `tsk list --open` and `tsk list --ready` filters.
-- The Projects Overview now previews the cursored project beside the index at wide widths, with a live narrow project board at the Rail stage and no full-screen task stage. The right board keeps its own selection and editing state.
+- The Projects Overview now previews the cursored project beside the index at wide widths, with a live narrow project board at the Rail stage and no full-screen task stage. The right board names the selected project in its top row and keeps its own selection and editing state.
 - Direct `tsk list T<n>` output now includes the task's notes, steps, and thread in both human-readable and JSON forms, so agents can read the complete task with one command. Human detail separates notes, steps, and the trailing thread into blocks; step short IDs remain JSON-only. All human `tsk list` content wraps to the terminal width with hanging indentation, supported from 50 columns.
 
 ### Changed

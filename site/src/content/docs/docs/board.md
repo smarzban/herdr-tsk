@@ -38,7 +38,7 @@ At **110 usable columns** or wider, Overview can preview the cursored project be
 | Split | Index and a dim project preview; the index keeps focus |
 | Rail | Narrow index and a live project board; the right column owns input |
 
-Press `→` twice to reach Rail, `←` to walk back. The project tab never opens a full-screen task stage. `Enter` on an index row still opens that project in tab 2, and choosing a thread with `v` drops back to the full-width index. The right column has its own selection, drawer, filters, task page, quick-add, and status actions; `Esc` from its board returns focus to the index.
+The right preview names the selected project in its top row, in the space used by navigation tabs on the index. Press `→` twice to reach Rail, `←` to walk back. The project tab never opens a full-screen task stage. `Enter` on an index row still opens that project in tab 2, and choosing a thread with `v` drops back to the full-width index. The right column has its own selection, drawer, filters, task page, quick-add, and status actions; `Esc` from its board returns focus to the index.
 
 ## Threads
 
