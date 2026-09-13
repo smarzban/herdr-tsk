@@ -39,11 +39,15 @@ fn setup_uses_cli_harness() {
     assert!(output.stdout.contains("Exit:"));
 }
 #[test]
-fn bare_path_install_materializes_capture_and_version_and_reports_root() {
+fn bare_path_install_materializes_capture_and_version_without_printing_the_root() {
     let h = host();
     let output = ok(h.run(""));
     let root = h.linked();
-    assert!(output.contains(root.to_str().unwrap()));
+    assert!(
+        !output.contains(root.to_str().unwrap()),
+        "the content-addressed root is not user-facing on success: {output}"
+    );
+    assert!(output.contains("Shortcuts:      prefix+t board, prefix+a quick capture"));
     assert_eq!(
         fs::read(root.join("scripts/open-capture.sh")).unwrap(),
         include_bytes!("../scripts/open-capture.sh")

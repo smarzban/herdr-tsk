@@ -114,6 +114,54 @@ fn upgrade_replaces_one_registration_and_removes_only_the_intact_old_root() {
     assert_eq!(again.root, b.root);
 }
 #[test]
+fn a_registration_whose_root_is_gone_is_reported_before_relinking() {
+    let temp = Temp::new();
+    let config = temp.0.join("config.toml");
+    let gone = temp.0.join("leaked-rehearsal-root");
+    let registered = RefCell::new(Some(gone.clone()));
+    let mut host = |args: &[&str], _: &Path| -> io::Result<String> {
+        if args == ["--version"] {
+            return Ok("herdr 0.9.0\n".into());
+        }
+        if args.starts_with(&["plugin", "link"]) {
+            *registered.borrow_mut() = Some(args[2].into());
+        }
+        Ok(serde_json::json!({"result":{"plugins":registered.borrow().iter().map(|p|serde_json::json!({"plugin_id":"herdr-tsk","plugin_root":p})).collect::<Vec<_>>()}}).to_string())
+    };
+    let mut notices = Vec::new();
+    let result = run_at(
+        &config,
+        "0.5.0",
+        &mut io::Cursor::new(""),
+        &mut notices,
+        false,
+        &mut host,
+    )
+    .unwrap();
+    let notices = String::from_utf8(notices).unwrap();
+    assert_eq!(
+        notices,
+        format!(
+            "previous registration at {} is gone, re-registering\n",
+            gone.display()
+        )
+    );
+    assert_eq!(*registered.borrow(), Some(result.root.clone()));
+
+    // A live registration says nothing.
+    let mut quiet = Vec::new();
+    run_at(
+        &config,
+        "0.5.0",
+        &mut io::Cursor::new(""),
+        &mut quiet,
+        false,
+        &mut host,
+    )
+    .unwrap();
+    assert!(quiet.is_empty(), "{:?}", String::from_utf8_lossy(&quiet));
+}
+#[test]
 fn unsuccessful_upgrade_keeps_previous_registration_and_assets() {
     let temp = Temp::new();
     let config = temp.0.join("config.toml");
