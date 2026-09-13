@@ -468,6 +468,68 @@ fn sync_from_domain_reanchors_by_id() {
     assert!(!model.visible_ids().contains(&id_todo));
 }
 
+/// Completing the last ready row must not reanchor onto the inbox heading that follows it.
+#[test]
+fn ready_task_leaving_view_reanchors_to_neighbor_not_inbox_header() {
+    let mut domain = DomainState::new();
+    let first_ready = domain
+        .create(
+            "first ready",
+            None,
+            project(THIS_REPO),
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .unwrap();
+    domain.set_status(first_ready, HumanStatus::Ready).unwrap();
+    let last_ready = domain
+        .create(
+            "last ready",
+            None,
+            project(THIS_REPO),
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .unwrap();
+    domain.set_status(last_ready, HumanStatus::Ready).unwrap();
+    let open = domain
+        .create(
+            "inbox neighbor",
+            None,
+            project(THIS_REPO),
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .unwrap();
+
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
+    let visible = model.visible_ids();
+    let last_ready_index = visible
+        .iter()
+        .position(|&id| id == last_ready)
+        .expect("last ready row");
+    let inbox_index = visible
+        .iter()
+        .position(|&id| id == INBOX_HEADER_ROW_ID)
+        .expect("inbox heading");
+    assert_eq!(last_ready_index + 1, inbox_index);
+    assert!(visible.contains(&open));
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::SelectIndex(last_ready_index),
+        None,
+    )
+    .unwrap();
+
+    apply_intent(&mut domain, &mut model, BoardIntent::Complete, None).unwrap();
+
+    assert_eq!(model.selected_id(), Some(first_ready));
+    assert_ne!(model.selected_id(), None);
+    assert_ne!(model.selected_id(), Some(open));
+    assert!(!model.visible_ids().contains(&last_ready));
+}
+
 #[test]
 fn project_deck_lists_tasks_flat_with_thread_filter_across_statuses() {
     let tasks = vec![

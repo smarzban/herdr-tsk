@@ -34,6 +34,36 @@ pub const BOARD_TITLE: &str = "Tasks";
 
 const DIRTY_TASK_SWITCH_REFUSAL: &str = "save or cancel edits before switching tasks";
 
+fn is_header_row(id: Uuid) -> bool {
+    matches!(
+        id,
+        queue::ARCHIVED_HEADER_ROW_ID | queue::INBOX_HEADER_ROW_ID
+    )
+}
+
+fn nearest_surviving_task(
+    previous: Uuid,
+    previous_visible: &[Uuid],
+    new_visible: &[Uuid],
+) -> Option<Uuid> {
+    let index = previous_visible.iter().position(|&id| id == previous)?;
+    (1..=index.max(previous_visible.len().saturating_sub(index + 1))).find_map(|distance| {
+        let before = index
+            .checked_sub(distance)
+            .and_then(|i| previous_visible.get(i))
+            .copied()
+            .filter(|id| !is_header_row(*id))
+            .filter(|id| new_visible.contains(id));
+        before.or_else(|| {
+            previous_visible
+                .get(index + distance)
+                .copied()
+                .filter(|id| !is_header_row(*id))
+                .filter(|id| new_visible.contains(id))
+        })
+    })
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SelectionRetarget {
     Explicit,
@@ -2949,66 +2979,11 @@ impl BoardModel {
         // real task survives, keep the selection on that task instead of landing on
         // the inbox/archived heading merely because it was nearest by row index.
         let requested = if let (Some(previous), Some(candidate)) = (previous, requested) {
-            let prior_was_task = !matches!(
-                previous,
-                queue::ARCHIVED_HEADER_ROW_ID | queue::INBOX_HEADER_ROW_ID
-            );
-            let candidate_is_header = matches!(
-                candidate,
-                queue::ARCHIVED_HEADER_ROW_ID | queue::INBOX_HEADER_ROW_ID
-            );
-            if prior_was_task
-                && candidate_is_header
-                && !new_visible.iter().all(|id| {
-                    matches!(
-                        *id,
-                        queue::ARCHIVED_HEADER_ROW_ID | queue::INBOX_HEADER_ROW_ID
-                    )
-                })
+            if !is_header_row(previous)
+                && is_header_row(candidate)
+                && new_visible.iter().any(|id| !is_header_row(*id))
             {
-                let nearest_task = previous_visible
-                    .iter()
-                    .position(|&id| id == previous)
-                    .and_then(|index| {
-                        (1..=index.max(previous_visible.len().saturating_sub(index + 1))).find_map(
-                            |distance| {
-                                let before = index
-                                    .checked_sub(distance)
-                                    .and_then(|i| previous_visible.get(i))
-                                    .copied()
-                                    .filter(|id| {
-                                        !matches!(
-                                            *id,
-                                            queue::ARCHIVED_HEADER_ROW_ID
-                                                | queue::INBOX_HEADER_ROW_ID
-                                        )
-                                    })
-                                    .filter(|id| new_visible.contains(id));
-                                before.or_else(|| {
-                                    previous_visible
-                                        .get(index + distance)
-                                        .copied()
-                                        .filter(|id| {
-                                            !matches!(
-                                                *id,
-                                                queue::ARCHIVED_HEADER_ROW_ID
-                                                    | queue::INBOX_HEADER_ROW_ID
-                                            )
-                                        })
-                                        .filter(|id| new_visible.contains(id))
-                                })
-                            },
-                        )
-                    })
-                    .or_else(|| {
-                        new_visible.iter().copied().find(|id| {
-                            !matches!(
-                                *id,
-                                queue::ARCHIVED_HEADER_ROW_ID | queue::INBOX_HEADER_ROW_ID
-                            )
-                        })
-                    });
-                nearest_task.or(Some(candidate))
+                nearest_surviving_task(previous, previous_visible, &new_visible).or(Some(candidate))
             } else {
                 Some(candidate)
             }
