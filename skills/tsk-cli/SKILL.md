@@ -1,7 +1,7 @@
 ---
 name: tsk-cli
 description: Work the user's tsk task board from the command line. Use when asked to add, update, edit, start, block, finish, archive, or restore a task on the board (or "tsk", "the tsk board", "the desk"), to add or tick steps, or to answer "what's on the board", "what's next", "what's on deck", "what needs me". Always `tsk add|list|status|edit|steps|archive|trash`, never the TUI.
-version: 1.3.0
+version: 1.2.0
 ---
 
 # tsk: the user's task board
