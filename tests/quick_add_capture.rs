@@ -705,7 +705,7 @@ fn expanded_page_stashes_notes_and_scope_across_esc_and_saves_like_quick_add() {
         "Tab in the page advances the form rather than re-expanding quick add"
     );
     apply(&mut domain, &mut model, BoardIntent::FormFocusNext, None);
-    assert_eq!(model.input_mode(), BoardInputMode::Normal);
+    assert_eq!(model.input_mode(), BoardInputMode::CapturePage);
     assert!(
         render_text(&model, 80, 24).contains("▸ + step"),
         "Tab from Notes selects the trailing step target"

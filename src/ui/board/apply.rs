@@ -631,13 +631,7 @@ fn apply_board_intent(
             } else if matches!(
                 model.input_mode,
                 BoardInputMode::SelectThread | BoardInputMode::EditThread
-            ) && model.form.as_ref().is_some_and(|form| form.is_task())
-            {
-                select_add_step(model);
-            } else if matches!(
-                model.input_mode,
-                BoardInputMode::SelectThread | BoardInputMode::EditThread
-            ) && model.capture_draft_open()
+            ) && model.form.is_some()
             {
                 select_add_step(model);
             } else if model.input_mode == BoardInputMode::EditScope
