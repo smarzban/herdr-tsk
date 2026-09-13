@@ -848,7 +848,7 @@ pub fn edit_help() -> CliOutput {
                 ("--state-dir <dir>", "use another board store"),
                 (
                     "--flag=<value>",
-                    "use --title=<value>, --notes=<value>, or --state-dir=<dir> for dash-leading values", 
+                    "use --title=<value>, --notes=<value>, or --state-dir=<dir> for dash-leading values",
                 ),
             ],
         )],
