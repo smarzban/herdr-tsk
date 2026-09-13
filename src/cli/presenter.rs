@@ -165,7 +165,13 @@ pub fn add_help() -> CliOutput {
             group("Values", &[("-t, --title <title>", "required task title"), ("-n, --notes <notes>", "optional notes"), ("--thread <name>", "optional normalized thread"), ("--file <path|->", "read a JSON plan from a file or stdin"), ("--flag=<value>", "use equals syntax for dash-leading title, notes, project, state-dir, or file values")]),
         ],
         examples: vec!["tsk add -t \"Draft release notes\"".into(), "tsk add -t \"Buy milk\" --desk".into(), "tsk add -t \"Fix widget\" --project widget --thread release-2026".into(), "tsk add --file plan.json".into(), "cat plan.json | tsk add".into()],
-        refusals: vec!["empty-title, invalid-title, invalid-thread, invalid-item, project-archived".into()],
+        refusals: vec![
+            "empty-title".into(),
+            "invalid-title".into(),
+            "invalid-thread (JSON plan)".into(),
+            "invalid-item (JSON plan)".into(),
+            "project-archived".into(),
+        ],
         exit: exit_line("every item was created or already existed", Some("one or more items refused, retry failed only"), true),
     })
 }
@@ -662,12 +668,42 @@ fn path_segments(path: &str) -> Vec<String> {
 
 pub fn steps_help() -> CliOutput {
     help(HelpDoc {
-        usage: vec!["tsk steps <task> add <text> [--state-dir <dir>]".into(), "tsk steps <task> toggle <step-short-id> [--state-dir <dir>]".into(), "tsk steps <task> rename <step-short-id> <text> [--state-dir <dir>]".into(), "tsk steps <task> remove <step-short-id> [--state-dir <dir>]".into()],
+        usage: vec![
+            "tsk steps <task> add <text> [--state-dir <dir>]".into(),
+            "tsk steps <task> toggle <step-short-id> [--state-dir <dir>]".into(),
+            "tsk steps <task> rename <step-short-id> <text> [--state-dir <dir>]".into(),
+            "tsk steps <task> remove <step-short-id> [--state-dir <dir>]".into(),
+        ],
         purpose: "Add, toggle, rename, or remove one step on a task.".into(),
-        groups: vec![group("Values", &[("<task>", "a task number or UUID"), ("<step-short-id>", "an unambiguous prefix from tsk list <task> --json"), ("--state-dir <dir>", "use another board store")])],
-        examples: vec!["tsk steps T12 add \"Write the failing test\"".into(), "tsk steps T12 toggle a3".into(), "tsk steps T12 rename a3 \"Write the failing test first\"".into()],
-        refusals: vec!["empty-step-text, invalid-step-text, unknown-task, soft-deleted-task, unknown-step, ambiguous-step".into()],
-        exit: exit_line("step created, toggled, renamed, or removed", Some("step refusal, verify with list before retrying"), true),
+        groups: vec![group(
+            "Values",
+            &[
+                ("<task>", "a task number or UUID"),
+                (
+                    "<step-short-id>",
+                    "an unambiguous prefix from tsk list <task> --json",
+                ),
+                ("--state-dir <dir>", "use another board store"),
+            ],
+        )],
+        examples: vec![
+            "tsk steps T12 add \"Write the failing test\"".into(),
+            "tsk steps T12 toggle a3".into(),
+            "tsk steps T12 rename a3 \"Write the failing test first\"".into(),
+        ],
+        refusals: vec![
+            "empty-step-text".into(),
+            "invalid-step-text".into(),
+            "unknown-task".into(),
+            "soft-deleted-task".into(),
+            "unknown-step".into(),
+            "ambiguous-step".into(),
+        ],
+        exit: exit_line(
+            "step created, toggled, renamed, or removed",
+            Some("step refusal, verify with list before retrying"),
+            true,
+        ),
     })
 }
 
@@ -752,7 +788,7 @@ pub fn status_help() -> CliOutput {
             "tsk status T12 ready".into(),
             "tsk status T12 review".into(),
         ],
-        refusals: vec!["unknown-task, soft-deleted-task".into()],
+        refusals: vec!["unknown-task".into(), "soft-deleted-task".into()],
         exit: exit_line(
             "status set, or it already had the value",
             Some("status refusal, verify with list before retrying"),
@@ -820,7 +856,12 @@ pub fn edit_help() -> CliOutput {
             "tsk edit T12 --title \"Fix timeout on slow connections\"".into(),
             "tsk edit T12 --notes \"Reproduced with a delayed response\"".into(),
         ],
-        refusals: vec!["unknown-task, soft-deleted-task, empty-title, invalid-title".into()],
+        refusals: vec![
+            "unknown-task".into(),
+            "soft-deleted-task".into(),
+            "empty-title".into(),
+            "invalid-title".into(),
+        ],
         exit: exit_line(
             "fields written, or already had the values",
             Some("edit refusal, verify with list before retrying"),
@@ -879,7 +920,10 @@ pub fn trash_help() -> CliOutput {
             "tsk list --deleted --all".into(),
             "tsk trash restore T12".into(),
         ],
-        refusals: vec!["no matching trash line, or the task is already live".into()],
+        refusals: vec![
+            "no matching trash line".into(),
+            "task is already live".into(),
+        ],
         exit: exit_line(
             "task restored",
             Some("no matching trash line, or task already live"),
@@ -940,7 +984,7 @@ pub fn archive_help(verb: &str) -> CliOutput {
             ],
         )],
         examples: vec![format!("tsk {verb} T12"), format!("tsk {antiverb} T12")],
-        refusals: vec!["unknown-task, soft-deleted-task".into()],
+        refusals: vec!["unknown-task".into(), "soft-deleted-task".into()],
         exit: exit_line(
             "archived flag set, or already had the value",
             Some("unknown or deleted task"),
@@ -1104,7 +1148,7 @@ pub fn setup_help() -> CliOutput {
         purpose: "Register Herdr, or install the bundled agent workflow skill.".into(),
         groups: vec![group("Output", &[("--json", "print machine-readable agent detection or install output"), ("--detected-ids", "print space-separated detected agent ids")]), group("Values", &[("herdr", "register plugin assets and keyboard shortcuts"), ("agents --yes", "install or update every detected agent skill"), ("<agent>, --skill-dir <path>", "install one named agent skill"), ("--force", "overwrite a matching skill version")])],
         examples: vec!["tsk setup herdr".into(), "tsk setup agents --yes".into(), "tsk setup pi".into()],
-        refusals: vec!["skill-exists, setup failure, or a blocked skill root".into()],
+        refusals: vec!["skill-exists".into(), "setup failure".into(), "blocked skill root".into()],
         exit: exit_line("setup completed or help listed", Some("setup refusal or failure"), false),
     })
 }
