@@ -2823,6 +2823,35 @@ struct GoldenScene {
 fn golden_scenes() -> Vec<GoldenScene> {
     let tasks = fixture_tasks();
 
+    // Keep the projects-preview scenes on the real board painter: the nested right seat and its
+    // shared footer are not representable by a standalone QueueFrameModel.
+    let mut projects_domain = DomainState::new();
+    let mut projects_model =
+        BoardModel::from_tasks(tasks.clone(), Some(PathBuf::from("/repos/tsk")));
+    apply_intent(
+        &mut projects_domain,
+        &mut projects_model,
+        BoardIntent::SelectNavTab(NavTab::Projects),
+        None,
+    )
+    .expect("open projects overview for goldens");
+    apply_intent(
+        &mut projects_domain,
+        &mut projects_model,
+        BoardIntent::StageRight,
+        None,
+    )
+    .expect("enter projects split for golden");
+    let projects_split_rows = board_rows(&projects_model, 110, 30);
+    apply_intent(
+        &mut projects_domain,
+        &mut projects_model,
+        BoardIntent::StageRight,
+        None,
+    )
+    .expect("enter projects rail for golden");
+    let projects_rail_rows = board_rows(&projects_model, 110, 30);
+
     let board_view = fixture_view(&tasks, false);
     let board_model = fixture_model(&tasks, &board_view);
     let (board_rows, _) = paint(80, 24, &board_model);
@@ -2954,6 +2983,16 @@ fn golden_scenes() -> Vec<GoldenScene> {
             name: "done_drawer_archived",
             rows: archived_rows,
             width: 80,
+        },
+        GoldenScene {
+            name: "projects_preview_split_110x30",
+            rows: projects_split_rows,
+            width: 110,
+        },
+        GoldenScene {
+            name: "projects_preview_rail_110x30",
+            rows: projects_rail_rows,
+            width: 110,
         },
     ]
 }
@@ -3403,9 +3442,10 @@ fn all_golden_frames_pass_no_color_sgr_scan() {
         scanned += 1;
     }
     assert_eq!(
-        scanned, 8,
-        "expected the eight board surface goldens (board, board_default_split_78, accordion, \
-         palette, help, done_drawer, inbox, done_drawer_archived) in {dir:?}"
+        scanned, 10,
+        "expected the ten board surface goldens (board, board_default_split_78, accordion, \
+         palette, help, done_drawer, inbox, done_drawer_archived, projects_preview_split_110x30, \
+         projects_preview_rail_110x30) in {dir:?}"
     );
 }
 
@@ -5262,6 +5302,9 @@ fn projects_index_paints_aligned_counts_search_hint_and_selected_path() {
 
     // Moving the cursor moves the path.
     apply_intent(&mut domain, &mut model, BoardIntent::SelectNext, None).expect("move down");
+    // Selecting a project opens its wide preview; close it so the remaining assertions keep
+    // exercising the full-width index renderer.
+    apply_intent(&mut domain, &mut model, BoardIntent::StageLeft, None).expect("close preview");
     let rows = board_rows(&model, 162, 43);
     let text = rows.join("\n");
     assert!(

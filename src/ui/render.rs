@@ -716,6 +716,9 @@ pub struct QueueHitMap {
     /// Furthest help-card scroll the painted frame could show, when the card was up.
     /// The reducer clamps with it so the offset never runs past the last page.
     pub help_max_scroll: Option<usize>,
+    /// Footer rectangle recorded by the painter, including any rows reserved for a bottom
+    /// input. Mouse routing uses this instead of reconstructing a footer height.
+    pub footer: Option<Rect>,
 }
 
 impl QueueHitMap {
@@ -743,6 +746,10 @@ impl QueueHitMap {
         }
         self.copyable
             .retain(|copyable| copyable.width > 0 && copyable.height > 0);
+        if let Some(footer) = self.footer {
+            let footer = local_rect(area, footer);
+            self.footer = (footer.width > 0 && footer.height > 0).then_some(footer);
+        }
     }
 }
 
@@ -796,7 +803,64 @@ pub fn draw_queue_frame(
     geo: &TierGeometry,
     surface: Rect,
 ) -> (QueueHitMap, Option<(usize, usize)>) {
-    draw_queue_frame_impl(frame, model, geo, surface, false)
+    draw_queue_frame_impl(frame, model, geo, surface, false, true, true, None)
+}
+
+/// Paint a queue column without its navigation strip or footer. Wide project previews use this
+/// to keep the right seat's board chrome inside the shared frame owned by the outer board.
+pub fn draw_queue_frame_without_selector(
+    frame: &mut Frame<'_>,
+    model: &QueueFrameModel<'_>,
+    geo: &TierGeometry,
+    surface: Rect,
+) -> (QueueHitMap, Option<(usize, usize)>) {
+    draw_queue_frame_impl(frame, model, geo, surface, false, false, false, None)
+}
+
+/// Paint a project preview column with its project name in the selector slot.
+///
+/// The preview has no navigation tabs of its own, but the reserved top row still names the
+/// project whose board is visible. `bold` is used for the live Rail seat and omitted for the
+/// dim Split preview.
+pub fn draw_project_preview_frame(
+    frame: &mut Frame<'_>,
+    model: &QueueFrameModel<'_>,
+    geo: &TierGeometry,
+    surface: Rect,
+    project_name: &str,
+    bold: bool,
+) -> (QueueHitMap, Option<(usize, usize)>) {
+    draw_queue_frame_impl(
+        frame,
+        model,
+        geo,
+        surface,
+        false,
+        false,
+        false,
+        Some((project_name, bold)),
+    )
+}
+
+fn paint_project_preview_header(
+    frame: &mut Frame<'_>,
+    geo: &TierGeometry,
+    surface: Rect,
+    project_name: &str,
+    bold: bool,
+) {
+    let Some(row) = geo.selector_row else {
+        return;
+    };
+    let text = format!(" {project_name}");
+    let style = if bold { style_bold() } else { style_dim() };
+    put_line(
+        frame,
+        surface,
+        row,
+        geo.row_width,
+        paint_bounded_line(&text, geo.row_width, style),
+    );
 }
 
 /// Paint the stage G rail: the board list at rail width, no meta column, no done drawer,
@@ -809,7 +873,7 @@ pub fn draw_rail_frame(
     geo: &TierGeometry,
     surface: Rect,
 ) -> QueueHitMap {
-    let (hits, _) = draw_queue_frame_impl(frame, model, geo, surface, true);
+    let (hits, _) = draw_queue_frame_impl(frame, model, geo, surface, true, true, true, None);
     let surface = clipped_area(surface, frame.area());
     let buffer = frame.buffer_mut();
     for y in surface.top()..surface.bottom() {
@@ -1083,17 +1147,24 @@ pub struct StatusHint<'a> {
     pub keys: &'a str,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_queue_frame_impl(
     frame: &mut Frame<'_>,
     model: &QueueFrameModel<'_>,
     geo: &TierGeometry,
     surface: Rect,
     rail: bool,
+    selector: bool,
+    footer: bool,
+    project_header: Option<(&str, bool)>,
 ) -> (QueueHitMap, Option<(usize, usize)>) {
     let surface = clipped_area(surface, frame.area());
     let input_slot_geo = bottom_input_slot_geometry(*geo, &model.overlay);
     let mut selector_geo = input_slot_geo;
-    if selector_chip_wraps(model, selector_geo.row_width) && selector_geo.viewport_height > 0 {
+    if selector
+        && selector_chip_wraps(model, selector_geo.row_width)
+        && selector_geo.viewport_height > 0
+    {
         // A wrapped control gets one blank row between it and the tabs.
         selector_geo.viewport_top = selector_geo.viewport_top.saturating_add(2);
         selector_geo.viewport_height = selector_geo.viewport_height.saturating_sub(2);
@@ -1114,22 +1185,24 @@ fn draw_queue_frame_impl(
     // The task page owns the whole surface above the bottom chrome: the selector row stays
     // hidden while it is open (list navigation does not apply to a single-task surface).
     let page_active = matches!(model.overlay, QueueOverlay::TaskPage { .. });
-    if let Some(row) = geo.selector_row {
-        if !page_active {
-            let (line, regions) = paint_selector_row(model, geo);
-            put_line(frame, surface, row, width, line);
-            for (target, x, w) in regions {
-                hits.push(target, Rect::new(x, row, w, 1));
-            }
-            if selector_chip_wraps(model, width) {
-                let chip_row = row.saturating_add(2);
-                if chip_row < geo.rule_row.unwrap_or(geo.height) {
-                    let (chip, x, chip_width) = paint_selector_chip(model, width);
-                    put_line(frame, surface, chip_row, width, chip);
-                    hits.push(
-                        QueueHitTarget::NavChip,
-                        Rect::new(x, chip_row, chip_width, 1),
-                    );
+    if selector {
+        if let Some(row) = geo.selector_row {
+            if !page_active {
+                let (line, regions) = paint_selector_row(model, geo);
+                put_line(frame, surface, row, width, line);
+                for (target, x, w) in regions {
+                    hits.push(target, Rect::new(x, row, w, 1));
+                }
+                if selector_chip_wraps(model, width) {
+                    let chip_row = row.saturating_add(2);
+                    if chip_row < geo.rule_row.unwrap_or(geo.height) {
+                        let (chip, x, chip_width) = paint_selector_chip(model, width);
+                        put_line(frame, surface, chip_row, width, chip);
+                        hits.push(
+                            QueueHitTarget::NavChip,
+                            Rect::new(x, chip_row, chip_width, 1),
+                        );
+                    }
                 }
             }
         }
@@ -1243,7 +1316,13 @@ fn draw_queue_frame_impl(
         painted_list_scroll = Some((scroll, max_scroll));
     }
 
-    paint_footer(frame, model, geo, surface, &mut hits, None, false);
+    if footer {
+        paint_footer(frame, model, geo, surface, &mut hits, None, false);
+    }
+
+    if let Some((project_name, bold)) = project_header {
+        paint_project_preview_header(frame, geo, surface, project_name, bold);
+    }
 
     paint_overlay(frame, &model.overlay, geo, surface, &mut hits);
     hits.translate_and_clip(surface);
@@ -1263,6 +1342,19 @@ fn paint_footer(
     shared: bool,
 ) {
     let width = geo.row_width;
+    let footer_top = [geo.rule_row, geo.status_row, geo.verb_row]
+        .into_iter()
+        .flatten()
+        .min()
+        .unwrap_or(geo.height);
+    if footer_top < geo.height {
+        hits.footer = Some(Rect::new(
+            0,
+            footer_top,
+            width,
+            geo.height.saturating_sub(footer_top),
+        ));
+    }
     if let Some(row) = geo.rule_row {
         put_line(frame, surface, row, width, paint_rule_row(width));
     }

@@ -343,6 +343,7 @@ import { parseCapture } from "./capture.js";
     editDraft: "",
     undo: null,
     refuse: "",
+    quickOwner: "outer",
     nextId: 20,
     nextNumber: 22,
     // Wide stage slider: board · split · rail · page. Focus is the stage.
@@ -351,12 +352,52 @@ import { parseCapture } from "./capture.js";
   };
 
   const steps = new TaskSteps();
+  const previewSteps = new TaskSteps();
+  const preview = {
+    project: null,
+    selectedId: null,
+    threadFilter: null,
+    peekId: null,
+    drawer: false,
+    archivedOpen: false,
+    page: false,
+    editField: null,
+    editDraft: "",
+    undo: null,
+    lastClick: 0,
+    message: "",
+  };
 
+  function projectsOverview() {
+    return (
+      state.tab === "projects" &&
+      state.projectView === null &&
+      !state.focusProject
+    );
+  }
+  function projectsPreviewActive() {
+    return (
+      projectsOverview() &&
+      isWideSplit() &&
+      ["split", "rail"].includes(state.stage)
+    );
+  }
+  function projectsPreviewFocused() {
+    return projectsPreviewActive() && state.stage === "rail";
+  }
+  function projectsPreviewPage() {
+    return projectsPreviewFocused() && preview.page;
+  }
   const TASK_STAGES = ["rail", "page"];
   function taskFocus() {
-    return TASK_STAGES.includes(state.stage);
+    return !projectsOverview() && TASK_STAGES.includes(state.stage);
   }
   function stageRight() {
+    if (projectsOverview()) {
+      if (state.stage === "board") openProjectPreview();
+      else if (state.stage === "split") state.stage = "rail";
+      return;
+    }
     if (!state.selectedId) return;
     if (state.stage === "board") state.stage = "split";
     else if (state.stage === "split") state.stage = "rail";
@@ -366,6 +407,11 @@ import { parseCapture } from "./capture.js";
     }
   }
   function stageLeft() {
+    if (projectsOverview()) {
+      if (state.stage === "rail") state.stage = "split";
+      else if (state.stage === "split") state.stage = "board";
+      return;
+    }
     if (state.stage === "split") state.stage = "board";
     else if (state.stage === "rail") state.stage = "split";
     else if (state.stage === "page") {
@@ -460,6 +506,176 @@ import { parseCapture } from "./capture.js";
     return taskById(state.selectedId) || null;
   }
 
+  function previewTask() {
+    return taskById(preview.selectedId) || null;
+  }
+
+  function previewProjectTasks() {
+    if (!preview.project) return [];
+    return state.tasks.filter(
+      (task) => task.project === preview.project && !task.archived,
+    );
+  }
+
+  function previewMatchesThread(task) {
+    return (
+      preview.threadFilter === null ||
+      (task.thread || "") === preview.threadFilter
+    );
+  }
+
+  function previewVisibleTasks() {
+    const scoped = previewProjectTasks().filter(previewMatchesThread);
+    return {
+      started: scoped
+        .filter((task) => task.status === "started")
+        .sort(byStatusChange),
+      review: scoped
+        .filter((task) => task.status === "review")
+        .sort(byStatusChange),
+      blocked: scoped
+        .filter((task) => task.status === "blocked")
+        .sort(byStatusChange),
+      ready: scoped.filter((task) => task.status === "ready").sort(byCreated),
+      done: scoped
+        .filter((task) => task.status === "done")
+        .sort(byStatusChange),
+    };
+  }
+
+  function previewRows() {
+    const rows = [];
+    const v = previewVisibleTasks();
+    const pushHeader = (label, count) =>
+      rows.push({ kind: "section", label, count, selectable: false });
+    const pushTask = (task, dim = false) =>
+      rows.push({ kind: "task", task, selectable: true, id: task.id, dim });
+    const need = [...v.review, ...v.blocked].sort(byStatusChange);
+    if (need.length) {
+      pushHeader("NEEDS YOU", need.length);
+      need.forEach((task) => pushTask(task));
+    }
+    if (v.started.length) {
+      pushHeader("IN MOTION", v.started.length);
+      v.started.forEach((task) => pushTask(task));
+    }
+    pushHeader("ON DECK", v.ready.length);
+    v.ready.forEach((task) => pushTask(task));
+    if (preview.drawer) {
+      pushHeader("DONE", v.done.length);
+      v.done.forEach((task) => pushTask(task));
+      const archived = state.tasks
+        .filter(
+          (task) =>
+            task.project === preview.project &&
+            task.archived &&
+            previewMatchesThread(task),
+        )
+        .sort(byStatusChange);
+      if (archived.length) {
+        rows.push({
+          kind: "archived",
+          label: "archived",
+          count: archived.length,
+          selectable: true,
+          id: "nav:preview-archived",
+        });
+        if (preview.archivedOpen)
+          archived.forEach((task) => pushTask(task, true));
+      }
+    }
+    return rows;
+  }
+
+  function previewFilterOptions() {
+    const tasks = state.tasks.filter(
+      (task) =>
+        task.project === preview.project &&
+        !task.archived &&
+        task.status !== "done",
+    );
+    const names = [
+      ...new Set(tasks.map((task) => task.thread).filter(Boolean)),
+    ].sort(
+      (a, b) =>
+        tasks.filter((task) => task.thread === b).length -
+          tasks.filter((task) => task.thread === a).length ||
+        a.localeCompare(b),
+    );
+    return [
+      { value: null, label: `All tasks  ${tasks.length}` },
+      ...names.map((name) => ({
+        value: name,
+        label: `#${name}  ${tasks.filter((task) => task.thread === name).length}`,
+      })),
+      {
+        value: "",
+        label: `Without a thread  ${tasks.filter((task) => !task.thread).length}`,
+      },
+    ];
+  }
+
+  function previewFilterLabel() {
+    return preview.threadFilter === null
+      ? "all"
+      : preview.threadFilter === ""
+        ? "without a thread"
+        : `#${preview.threadFilter}`;
+  }
+
+  function openPreviewFilter() {
+    if (!projectsPreviewFocused() || previewHasUnsavedWork()) return;
+    state.overlay = "preview-filter";
+    state.filterI = Math.max(
+      0,
+      previewFilterOptions().findIndex(
+        (option) => option.value === preview.threadFilter,
+      ),
+    );
+  }
+
+  function choosePreviewFilter(index) {
+    const option = previewFilterOptions()[index];
+    if (!option) return;
+    preview.threadFilter = option.value;
+    preview.peekId = null;
+    ensurePreviewSelection();
+    state.overlay = null;
+  }
+
+  function renderPreviewFilter() {
+    return `<div class="tsk-box" role="dialog" aria-label="project thread filter"><div class="tsk-box-top"><span class="tsk-box-title">project thread</span><button type="button" class="tsk-box-close" data-close="1">[x]</button></div><div class="tsk-box-body">${previewFilterOptions()
+      .map(
+        (option, index) =>
+          `<div class="tsk-pal-row" data-preview-filter-option="${index}"><span class="${index === state.filterI ? "sel-text" : ""}">${index === state.filterI ? "▸" : " "} ${esc(option.label)}</span></div>`,
+      )
+      .join(
+        "",
+      )}</div><div class="tsk-box-foot">↑↓ move · enter choose · esc close</div></div>`;
+  }
+
+  function previewSelectableIds(rows = previewRows()) {
+    return rows.filter((row) => row.selectable).map((row) => row.id);
+  }
+
+  function ensurePreviewSelection(rows = previewRows()) {
+    const ids = previewSelectableIds(rows);
+    if (!ids.length) {
+      preview.selectedId = null;
+      return;
+    }
+    if (!ids.includes(preview.selectedId)) preview.selectedId = ids[0];
+  }
+
+  function previewHasUnsavedWork() {
+    return Boolean(
+      preview.editField ||
+      previewSteps.dirty ||
+      previewSteps.editor ||
+      (state.overlay === "quick" && state.quickOwner === "preview"),
+    );
+  }
+
   let renderColumns = null;
   function terminalColumns() {
     if (renderColumns !== null) return renderColumns;
@@ -478,6 +694,7 @@ import { parseCapture } from "./capture.js";
   }
 
   function fallbackProject() {
+    if (state.quickOwner === "preview") return preview.project;
     if (state.focusProject) return state.focusProject;
     return null;
   }
@@ -530,7 +747,7 @@ import { parseCapture } from "./capture.js";
     ];
   }
   function openFilter() {
-    if (steps.dirty || steps.editor) return;
+    if (steps.dirty || steps.editor || previewHasUnsavedWork()) return;
     state.overlay = "filter";
     const value = state.focusProject ? state.threadFilter : state.projectView;
     state.filterI = Math.max(
@@ -546,6 +763,7 @@ import { parseCapture } from "./capture.js";
     state.overlay = null;
     state.peekId = null;
     state.stage = "board";
+    if (state.tab === "projects") dropProjectPreview();
   }
   function renderFilter() {
     const title = state.focusProject ? "thread filter" : "projects View";
@@ -991,19 +1209,21 @@ import { parseCapture } from "./capture.js";
   }
 
   function goTab(tab) {
-    if (steps.dirty || steps.editor) return;
+    if (steps.dirty || steps.editor || previewHasUnsavedWork()) return;
     state.threadFilter = null;
     state.tab = tab;
     state.focusProject = tab === "project" ? state.selectedProject : null;
     state.projectQuery = "";
     state.peekId = null;
     state.overlay = null;
+    state.quickOwner = "outer";
     state.stage = "board";
     state.stageOrigin = null;
+    dropProjectPreview();
   }
 
   function openProject(name) {
-    if (steps.dirty || steps.editor) return;
+    if (steps.dirty || steps.editor || previewHasUnsavedWork()) return;
     if (!name || name === "desk") {
       goTab("desk");
       return;
@@ -1015,8 +1235,10 @@ import { parseCapture } from "./capture.js";
     state.projectQuery = "";
     state.peekId = null;
     state.overlay = null;
+    state.quickOwner = "outer";
     state.stage = "board";
     state.stageOrigin = null;
+    dropProjectPreview();
   }
 
   function selectedRow() {
@@ -1025,6 +1247,89 @@ import { parseCapture } from "./capture.js";
         (row) => row.selectable && row.id === state.selectedId,
       ) || null
     );
+  }
+
+  function dropProjectPreview() {
+    preview.project = null;
+    preview.selectedId = null;
+    preview.threadFilter = null;
+    preview.peekId = null;
+    preview.drawer = false;
+    preview.archivedOpen = false;
+    preview.page = false;
+    preview.editField = null;
+    preview.editDraft = "";
+    preview.undo = null;
+    preview.lastClick = 0;
+    preview.message = "";
+    previewSteps.reset();
+  }
+
+  function bindProjectPreview() {
+    if (!projectsOverview()) return false;
+    const row = selectedRow();
+    const project = row?.kind === "project" ? row.project : null;
+    if (!project) {
+      dropProjectPreview();
+      return false;
+    }
+    if (preview.project === project) {
+      ensurePreviewSelection();
+      return true;
+    }
+    if (previewHasUnsavedWork()) {
+      preview.message = "save or cancel edits before switching tasks";
+      return false;
+    }
+    dropProjectPreview();
+    preview.project = project;
+    ensurePreviewSelection();
+    return true;
+  }
+
+  function openProjectPreview() {
+    if (!projectsOverview() || !isWideSplit() || state.stage !== "board")
+      return false;
+    if (!bindProjectPreview()) return false;
+    state.stage = "split";
+    return true;
+  }
+
+  function moveProjectCursor(delta) {
+    const ids = selectableIds(buildRows());
+    if (!ids.length) return;
+    let i = ids.indexOf(state.selectedId);
+    if (i < 0) i = 0;
+    const next = ids[(i + delta + ids.length) % ids.length];
+    const row = buildRows().find((item) => item.id === next);
+    if (row?.kind !== "project") return;
+    if (
+      projectsPreviewActive() &&
+      preview.project !== row.project &&
+      !bindProjectPreviewFor(row.project)
+    )
+      return;
+    state.selectedId = next;
+    if (isWideSplit()) {
+      if (state.stage === "board") openProjectPreview();
+      else if (projectsPreviewActive()) bindProjectPreview();
+    }
+  }
+
+  function bindProjectPreviewFor(project) {
+    if (preview.project === project) return true;
+    if (previewHasUnsavedWork()) {
+      preview.message = "save or cancel edits before switching tasks";
+      return false;
+    }
+    const row = buildRows().find(
+      (item) => item.kind === "project" && item.project === project,
+    );
+    if (!row) return false;
+    dropProjectPreview();
+    preview.project = project;
+    ensurePreviewSelection();
+    return true;
   }
 
   function toggleAllGroups() {
@@ -1063,19 +1368,23 @@ import { parseCapture } from "./capture.js";
     state.overlay = null;
     state.draft = "";
     state.refuse = "";
+    state.quickOwner = "outer";
     state.copyNotice = "";
     state.undo = null;
     state.stage = "board";
     state.stageOrigin = null;
+    dropProjectPreview();
   }
 
-  function openQuickAdd() {
+  function openQuickAdd(owner = "outer") {
     state.overlay = "quick";
+    state.quickOwner = owner;
     state.draft = "";
     state.refuse = "";
   }
 
   function saveDraft(stay) {
+    const owner = state.quickOwner === "preview" ? "preview" : "outer";
     const parsed = parseCapture(state.draft, fallbackProject());
     if (!parsed.title) {
       state.refuse = "title needed";
@@ -1095,11 +1404,20 @@ import { parseCapture } from "./capture.js";
       updatedAt: now,
     };
     state.tasks.unshift(task);
-    state.selectedId = id;
+    if (owner === "preview") {
+      preview.selectedId = id;
+      preview.peekId = null;
+      preview.message = "";
+    } else {
+      state.selectedId = id;
+    }
     state.flashId = id;
     state.refuse = "";
     state.draft = "";
-    if (!stay) state.overlay = null;
+    if (!stay) {
+      state.overlay = null;
+      state.quickOwner = "outer";
+    }
     setTimeout(() => {
       if (state.flashId === id) {
         state.flashId = null;
@@ -1143,6 +1461,109 @@ import { parseCapture } from "./capture.js";
     const task = selectedTask();
     if (!task) return;
     if (task.status === "open" || task.status === "ready") setStatus("started");
+  }
+
+  function previewSetStatus(status) {
+    const task = previewTask();
+    if (!task) return;
+    task.status = status;
+    task.updatedAt = clock();
+    task.statusAt = task.updatedAt;
+    preview.message = "";
+    state.flashId = task.id;
+    setTimeout(() => {
+      if (state.flashId === task.id) {
+        state.flashId = null;
+        render();
+      }
+    }, 420);
+  }
+
+  function previewToggleBlock() {
+    const task = previewTask();
+    if (!task || task.status === "done") return;
+    previewSetStatus(task.status === "blocked" ? "ready" : "blocked");
+  }
+
+  function previewToggleReview() {
+    const task = previewTask();
+    if (!task || task.status === "done") return;
+    previewSetStatus(task.status === "review" ? "ready" : "review");
+  }
+
+  function previewPrimaryVerb() {
+    const task = previewTask();
+    if (!task) return;
+    if (task.status === "ready") previewSetStatus("started");
+    else if (task.status === "done") previewSetStatus("ready");
+  }
+
+  function previewFileSelected() {
+    const task = previewTask();
+    if (!task) return;
+    task.archived = !task.archived;
+    preview.peekId = null;
+  }
+
+  function previewDeleteSelected() {
+    const task = previewTask();
+    if (!task) return;
+    preview.undo = { task: { ...task }, index: state.tasks.indexOf(task) };
+    state.tasks = state.tasks.filter((item) => item.id !== task.id);
+    preview.peekId = null;
+  }
+
+  function previewUndoDelete() {
+    if (!preview.undo) return;
+    const { task, index } = preview.undo;
+    state.tasks.splice(Math.min(index, state.tasks.length), 0, task);
+    preview.selectedId = task.id;
+    preview.undo = null;
+  }
+
+  function movePreview(delta) {
+    if (previewHasUnsavedWork()) return;
+    const ids = previewSelectableIds();
+    if (!ids.length) return;
+    let i = ids.indexOf(preview.selectedId);
+    if (i < 0) i = 0;
+    preview.selectedId = ids[(i + delta + ids.length) % ids.length];
+    preview.peekId = null;
+  }
+
+  function openPreviewTaskPage(editField = null) {
+    const task = previewTask();
+    if (!task) return;
+    preview.page = true;
+    preview.editField = editField;
+    preview.editDraft =
+      editField === "title"
+        ? task.title
+        : editField === "notes"
+          ? task.notes || ""
+          : "";
+    previewSteps.bind(task);
+  }
+
+  function leavePreviewTaskPage() {
+    previewSteps.reset();
+    preview.page = false;
+    preview.editField = null;
+    preview.editDraft = "";
+  }
+
+  function commitPreviewEdit() {
+    const task = previewTask();
+    if (!task || !preview.editField) return;
+    if (preview.editField === "title") {
+      const title = preview.editDraft.trim();
+      if (title) task.title = title;
+    } else {
+      task.notes = preview.editDraft;
+    }
+    task.updatedAt = clock();
+    preview.editField = null;
+    preview.editDraft = "";
   }
 
   function renderHelp() {
@@ -1259,6 +1680,38 @@ import { parseCapture } from "./capture.js";
     if (id === "file") fileSelected();
   }
 
+  function runPreviewPageVerb(id) {
+    const task = previewTask();
+    if (!task) return;
+    if (
+      id === "edit" &&
+      previewSteps.selected &&
+      previewSteps.selected !== "add"
+    ) {
+      previewSteps.begin(task, previewSteps.selected);
+      return;
+    }
+    if (id === "edit") openPreviewTaskPage("title");
+    if (id === "done") previewSetStatus("done");
+    if (id === "block") previewToggleBlock();
+  }
+
+  function runPreviewVerb(id) {
+    if (id === "open") openPreviewTaskPage();
+    if (id === "capture") openQuickAdd("preview");
+    if (id === "start") previewPrimaryVerb();
+    if (id === "done") previewSetStatus("done");
+    if (id === "block") previewToggleBlock();
+    if (id === "reopen" && previewTask()?.status === "done")
+      previewSetStatus("ready");
+    if (id === "file") previewFileSelected();
+    if (id === "delete") previewDeleteSelected();
+    if (id === "help") {
+      state.overlay = "help";
+      state.helpQ = "";
+    }
+  }
+
   // The wide task column: a header rule on the selector row (dim in split, bold when the task
   // owns focus) and the page body under it. Narrow: the same page fills the frame.
   function taskColumnWidth() {
@@ -1270,30 +1723,42 @@ import { parseCapture } from "./capture.js";
         : cols;
   }
 
-  function renderPage(embedded = false) {
-    const task = selectedTask();
-    const focused = taskFocus();
+  function renderTaskPage(task, { preview: previewMode, embedded }) {
+    const pageSteps = previewMode ? previewSteps : steps;
+    const editing = previewMode ? preview.editField : state.editField;
+    const editDraft = previewMode ? preview.editDraft : state.editDraft;
+    const focused = previewMode || taskFocus();
+    const narrow = !previewMode && !isWideSplit();
+    const editId = previewMode ? "tsk-preview-edit" : "tsk-edit";
+    const stepEditId = previewMode ? "tsk-preview-step-edit" : "tsk-step-edit";
+    const stepAttribute = previewMode ? "data-preview-step" : "data-step";
+    const addAttribute = previewMode
+      ? "data-preview-step-add"
+      : "data-step-add";
+    const project = previewMode
+      ? preview.project || "project"
+      : task
+        ? projectName(task)
+        : "desk";
     if (!task) {
       if (embedded) {
-        return `<div class="tsk-task-column tsk-surface" aria-label="task column"><div class="tsk-task-header dim"><span class="sec">no task</span></div><div class="tsk-task-rule" aria-hidden="true"></div><div class="tsk-task-surface"><div class="dim">  select a task to preview it here</div></div></div>`;
+        return `<div class="tsk-task-column tsk-surface" aria-label="${previewMode ? "project " : ""}task column"><div class="tsk-task-header dim"><span class="sec">no task</span></div><div class="tsk-task-rule" aria-hidden="true"></div><div class="tsk-task-surface"><div class="dim">  select a task to preview it here</div></div></div>`;
       }
       return `<div class="tsk-overlay"><div class="dim">no task</div><div class="dim">  select a task to preview it here</div></div>`;
     }
-    steps.bind(task);
-    const editing = state.editField;
-    const narrow = !isWideSplit();
-    const stateSlot = steps.editor
+    pageSteps.bind(task);
+    const stateSlot = pageSteps.editor
       ? "editing step"
-      : steps.dirty
+      : pageSteps.dirty
         ? "unsaved"
         : editing
           ? `editing ${editing}`
           : narrow
             ? task.status
-            : `${task.status} · ${projectName(task)}`;
+            : `${task.status} · ${project}`;
     const headTitle =
       editing === "title"
-        ? `<input class="tsk-field" id="tsk-edit" value="${esc(state.editDraft)}" />`
+        ? `<input class="tsk-field" id="${editId}" value="${esc(editDraft)}" />`
         : esc(task.title);
     const glyph = GLYPH[task.status] || "○";
     let header = `<div class="tsk-task-header ${focused ? "is-bold" : "dim"}"><span class="glyph">${glyph}</span> <span class="tsk-task-id" data-copy-task="${esc(task.id)}" title="copy T${task.number}">T${task.number}</span> <span class="sec">${headTitle}</span><span class="tsk-state-slot">${esc(stateSlot)}</span></div><div class="tsk-task-rule" aria-hidden="true"></div>`;
@@ -1308,20 +1773,20 @@ import { parseCapture } from "./capture.js";
     }
     const notes =
       editing === "notes"
-        ? `<textarea class="tsk-field tsk-notes" id="tsk-edit">${esc(state.editDraft)}</textarea>`
+        ? `<textarea class="tsk-field tsk-notes" id="${editId}">${esc(editDraft)}</textarea>`
         : `<div class="tsk-page-notes">${wrapText(
             task.notes || "no notes yet",
             taskColumnWidth() - 6,
           )
             .map((line) => `<span>${esc(line) || " "}</span>`)
             .join("")}</div>`;
-    const stepRows = steps.rows(task);
-    const inlineEditor = `<textarea id="tsk-step-edit" class="tsk-field" aria-label="Step text" rows="${wrapText(steps.editor?.text ?? "", taskColumnWidth() - 8).length}">${esc(steps.editor?.text ?? "")}</textarea><span class="tsk-step-refusal">${esc(steps.refusal)}</span>`;
+    const stepRows = pageSteps.rows(task);
+    const inlineEditor = `<textarea id="${stepEditId}" class="tsk-field" aria-label="Step text" rows="${wrapText(pageSteps.editor?.text ?? "", taskColumnWidth() - 8).length}">${esc(pageSteps.editor?.text ?? "")}</textarea><span class="tsk-step-refusal">${esc(pageSteps.refusal)}</span>`;
     const stepList = `<div class="tsk-steps"><div class="tsk-steps-heading dim">steps ${stepRows.filter((step) => step.done).length}/${stepRows.length}</div>${stepRows
       .map(
         (step) =>
-          `<div class="tsk-step" data-step="${esc(step.id)}" role="option" aria-selected="${steps.selected === step.id}"><span class="tsk-step-glyph">${steps.selected === step.id ? "▸ " : "  "}${steps.marked === step.id ? "✗" : step.done ? "✓" : "▪"} </span>${
-            steps.editor?.id === step.id
+          `<div class="tsk-step" ${stepAttribute}="${esc(step.id)}" role="option" aria-selected="${pageSteps.selected === step.id}"><span class="tsk-step-glyph">${pageSteps.selected === step.id ? "▸ " : "  "}${pageSteps.marked === step.id ? "✗" : step.done ? "✓" : "▪"} </span>${
+            pageSteps.editor?.id === step.id
               ? inlineEditor
               : `<span class="tsk-step-text">${wrapText(
                   step.text,
@@ -1335,13 +1800,109 @@ import { parseCapture } from "./capture.js";
       )
       .join(
         "",
-      )}${steps.editor && !steps.editor.id ? `<div class="tsk-step-new">${inlineEditor}</div>` : `<button type="button" class="tsk-step-add dim" data-step-add="1">   + step</button>`}</div>`;
-    const meta = `<div class="tsk-page-meta dim">${narrow ? `${esc(projectName(task))} · ` : ""}${task.thread ? `#${esc(task.thread)} · ` : ""}created ${esc(age(task.createdAt))} ago · updated ${esc(age(task.updatedAt))} ago</div>`;
-    return `<div class="tsk-task-column tsk-surface ${narrow ? "is-narrow" : ""}" aria-label="T${task.number} task column" data-status="${esc(task.status)}" data-edit-state="${steps.editor ? "editing" : steps.dirty ? "unsaved" : "view"}">${header}<div class="tsk-task-surface tsk-page">${notes}${stepList}</div>${meta}</div>`;
+      )}${pageSteps.editor && !pageSteps.editor.id ? `<div class="tsk-step-new">${inlineEditor}</div>` : `<button type="button" class="tsk-step-add dim" ${addAttribute}="1">   + step</button>`}</div>`;
+    const meta = previewMode
+      ? `<div class="tsk-page-meta dim">${esc(project)}${task.thread ? ` · #${esc(task.thread)}` : ""} · created ${esc(age(task.createdAt))} ago · updated ${esc(age(task.updatedAt))} ago</div>`
+      : `<div class="tsk-page-meta dim">${narrow ? `${esc(project)} · ` : ""}${task.thread ? `#${esc(task.thread)} · ` : ""}created ${esc(age(task.createdAt))} ago · updated ${esc(age(task.updatedAt))} ago</div>`;
+    return `<div class="tsk-task-column tsk-surface ${narrow ? "is-narrow" : ""}" aria-label="T${task.number}${previewMode ? " project" : ""} task column" data-status="${esc(task.status)}" data-edit-state="${pageSteps.editor ? "editing" : pageSteps.dirty ? "unsaved" : "view"}">${header}<div class="tsk-task-surface tsk-page">${notes}${stepList}</div>${meta}</div>`;
+  }
+
+  function renderPage(embedded = false) {
+    return renderTaskPage(selectedTask(), { preview: false, embedded });
+  }
+
+  function previewPageVerbBar() {
+    if (previewSteps.editor || previewSteps.dirty || preview.editField)
+      return "shift+enter save · esc cancel";
+    return (
+      PAGE_VERBS.map(
+        (verb) =>
+          `<button type="button" class="tsk-verb" data-preview-page-verb="${verb.id}">${verb.label}</button>`,
+      ).join("<span> · </span>") + "<span> · </span><span>esc close</span>"
+    );
+  }
+
+  function previewBoardWidth() {
+    const columns = terminalColumns();
+    return Math.max(
+      8,
+      (state.stage === "split"
+        ? columns - Math.floor(columns * 0.4) - 3
+        : columns - 34) - 4,
+    );
+  }
+
+  function renderPreviewPage() {
+    return renderTaskPage(previewTask(), { preview: true, embedded: true });
+  }
+
+  function renderPreviewBoard(rail) {
+    ensurePreviewSelection();
+    const width = previewBoardWidth();
+    const body = previewRows()
+      .map((row) => {
+        if (row.kind === "section")
+          return `<div class="tsk-sec"><span class="sec">${esc(row.label)}</span><span class="rule" aria-hidden="true"></span><span class="count">${row.count}</span></div>`;
+        if (row.kind === "archived") {
+          const mark = preview.archivedOpen ? "▾" : "▸";
+          const selected = row.id === preview.selectedId;
+          return `<button type="button" class="tsk-group" data-preview-archived="1"><span class="dim">${mark}</span> <span class="sec">${selected ? "<strong>archived</strong>" : "archived"}</span><span class="rule" aria-hidden="true"></span><span class="count dim">${row.count}</span></button>`;
+        }
+        const task = row.task;
+        const selected = task.id === preview.selectedId;
+        const flash = task.id === state.flashId;
+        const glyph = GLYPH[task.status] || "○";
+        const titleLines = wrapText(
+          task.title,
+          Math.max(8, width - 2 - 4 - `T${task.number} `.length),
+        );
+        const title = titleLines
+          .map((line) => `<span class="tsk-title-line">${esc(line)}</span>`)
+          .join("");
+        const noteLines = wrapText(
+          (task.notes || "").trim() || "no notes yet",
+          Math.max(8, width - 7),
+        );
+        const peek =
+          rail && preview.peekId === task.id
+            ? [
+                ...noteLines
+                  .slice(0, 5)
+                  .map(
+                    (line) =>
+                      `<div class="tsk-peek dim">    │ ${esc(line)}</div>`,
+                  ),
+                ...(noteLines.length > 5
+                  ? [
+                      `<div class="tsk-peek dim">    │ … ${noteLines.length - 5} more lines</div>`,
+                    ]
+                  : []),
+                ...(task.thread
+                  ? [
+                      `<div class="tsk-attribution dim">    └─ #${esc(task.thread)}</div>`,
+                    ]
+                  : [`<div class="tsk-peek dim">    └</div>`]),
+              ].join("")
+            : "";
+        return `<button type="button" class="tsk-row ${row.dim ? "dim" : ""} ${selected ? "is-sel" : ""} ${flash ? "is-flash" : ""}" data-preview-task="${esc(task.id)}"><span class="tsk-row-main"><span class="tsk-row-prefix">${selected ? "▸ " : "  "}<span class="tsk-row-glyph">${glyph}</span> <span class="tsk-task-id" data-copy-task="${esc(task.id)}" title="copy T${task.number}">T${task.number}</span> </span><span class="tsk-row-title">${title}</span></span></button>${peek}`;
+      })
+      .join("");
+    const project = esc(preview.project || "project");
+    const filter = `<button type="button" class="tsk-view-control dim" data-preview-filter="1">${esc(previewFilterLabel())} ▾</button>`;
+    return `<div class="tsk-project-preview tsk-surface ${rail ? "is-live" : "is-preview"}" aria-label="${project} project preview"><div class="tsk-project-preview-header ${rail ? "is-bold" : "dim"}"><span class="sec">${project}</span>${rail ? filter : ""}</div><div class="tsk-task-rule" aria-hidden="true"></div><div class="tsk-list">${body || `<div class="dim">  nothing here</div>`}</div></div>`;
   }
 
   function stageHint() {
     if (!isWideSplit()) return "";
+    if (projectsOverview()) {
+      if (state.stage === "board") return "→ project pane";
+      if (state.stage === "split")
+        return "index ▸ project    → project · ← close";
+      if (projectsPreviewPage()) return "project task page    ← close";
+      return previewHasUnsavedWork()
+        ? "index ◂ project"
+        : "index ◂ project    ← index";
+    }
     if (state.editField) return "shift+enter save · esc cancel";
     if (state.stage === "board") return "→ task pane";
     if (state.stage === "split")
@@ -1394,8 +1955,14 @@ import { parseCapture } from "./capture.js";
       state.tab === "projects" &&
       state.projectView === null &&
       !state.focusProject;
-    const showThreads = terminalColumns() >= 100;
-    const available = terminalColumns() - 34;
+    const boardColumns =
+      index && isWideSplit() && state.stage === "split"
+        ? Math.floor(terminalColumns() * 0.4)
+        : index && rail
+          ? 32
+          : terminalColumns();
+    const showThreads = index && boardColumns >= 100;
+    const available = boardColumns - (showThreads ? 34 : 0);
     const nameWidth = Math.max(24, Math.floor(available * 0.4));
     const threadWidth = Math.max(0, available - nameWidth - 2);
     const count = (n) => n || "·";
@@ -1407,6 +1974,9 @@ import { parseCapture } from "./capture.js";
         }
         if (row.kind === "project") {
           const selected = row.id === state.selectedId;
+          if (rail) {
+            return `<button type="button" class="tsk-row tsk-rail-project-row ${selected ? "is-sel" : ""}" data-project-row="${esc(row.project)}" data-nav-id="${esc(row.id)}"><span class="tsk-row-main"><span class="tsk-rail-project-name">${selected ? "▸" : " "} ${esc(row.label)}</span><span class="dim tsk-rail-project-counts">${count(row.needs)} ${count(row.motion)} ${count(row.ready)}</span></span></button>`;
+          }
           const threads = [
             ...new Set(
               state.tasks
@@ -1526,8 +2096,10 @@ import { parseCapture } from "./capture.js";
   // One footer for the frame: a rule, the status row (active lens · stage crumb), and the verb
   // bar for whichever side owns focus. Wide stages paint it under both columns, as the app does.
   function renderFooter() {
-    const context =
-      state.tab === "projects" && state.projectView === null
+    const previewOwnsFooter = projectsPreviewFocused() || projectsPreviewPage();
+    const context = previewOwnsFooter
+      ? preview.message || preview.project || "project"
+      : state.tab === "projects" && state.projectView === null
         ? selectedRow()?.project
           ? projectPath(selectedRow().project)
           : "projects"
@@ -1536,15 +2108,23 @@ import { parseCapture } from "./capture.js";
           : state.focusProject
             ? `${state.focusProject}${state.threadFilter ? ` · #${state.threadFilter}` : ""}`
             : state.tab;
-    const task = selectedTask();
-    const verbs = taskFocus()
-      ? pageVerbBar()
-      : verbItems(task)
-          .map(
-            (v) =>
-              `<button type="button" class="tsk-verb" data-verb="${esc(v.id)}">${esc(v.label)}</button>`,
-          )
-          .join("<span> · </span>");
+    const task = previewOwnsFooter ? previewTask() : selectedTask();
+    const previewVerbs = task
+      ? verbItems(task)
+      : [
+          { id: "capture", label: "+ add" },
+          { id: "help", label: "? help" },
+        ];
+    const verbs = projectsPreviewPage()
+      ? previewPageVerbBar()
+      : taskFocus()
+        ? pageVerbBar()
+        : (previewOwnsFooter ? previewVerbs : verbItems(task))
+            .map(
+              (v) =>
+                `<button type="button" class="tsk-verb" data-${previewOwnsFooter ? "preview-" : ""}verb="${esc(v.id)}">${esc(v.label)}</button>`,
+            )
+            .join("<span> · </span>");
     const footer =
       state.overlay === "quick"
         ? `<div class="tsk-input-row"><span class="tsk-prompt">+</span><input class="tsk-field" id="tsk-add" value="${esc(state.draft)}" placeholder="title  ·  !p project  ·  !t thread" autocomplete="off" /><span class="cursor">█</span></div>
@@ -1552,7 +2132,7 @@ import { parseCapture } from "./capture.js";
         : state.overlay === "search"
           ? `<div class="tsk-input-row"><span class="tsk-prompt">/</span><input class="tsk-field" id="tsk-project-search" value="${esc(state.projectQuery)}" placeholder="search projects" autocomplete="off" /><span class="cursor">█</span></div>
              <div class="foot dim">enter open · esc close</div>`
-          : `<div class="tsk-status-row"><button type="button" class="tsk-done-count foot" data-drawer="1">${esc(context)}</button><span class="foot dim tsk-stage-hint">${esc(stageHint())}</span></div>
+          : `<div class="tsk-status-row"><button type="button" class="tsk-done-count foot" data-${previewOwnsFooter ? "preview-" : ""}drawer="1">${esc(context)}</button><span class="foot dim tsk-stage-hint">${esc(stageHint())}</span></div>
            <div class="foot dim tsk-verbs">${verbs}</div>
            ${state.copyNotice ? `<div class="foot dim">${esc(state.copyNotice)}</div>` : ""}`;
     return `
@@ -1569,7 +2149,19 @@ import { parseCapture } from "./capture.js";
       ensureSelection(rows);
       const wide = isWideSplit();
       let html;
-      if (wide && state.stage === "split") {
+      if (wide && projectsOverview() && state.stage === "split") {
+        html = `<div class="tsk-wide-split is-split" style="grid-template-columns:${Math.floor(terminalColumns() * 0.4)}ch 2ch minmax(0,1fr)">
+           <div class="tsk-board-surface tsk-surface">${renderBoard(rows, false, true)}</div>
+           <div class="tsk-rule-column dim" aria-hidden="true"></div>
+           ${renderPreviewBoard(false)}
+         </div>${renderFooter()}`;
+      } else if (wide && projectsOverview() && state.stage === "rail") {
+        html = `<div class="tsk-wide-split is-rail">
+           <div class="tsk-board-surface tsk-rail tsk-surface dim">${renderBoard(rows, true, true)}</div>
+           <div class="tsk-rule-column dim" aria-hidden="true"></div>
+           ${preview.page ? renderPreviewPage() : renderPreviewBoard(true)}
+         </div>${renderFooter()}`;
+      } else if (wide && state.stage === "split") {
         html = `<div class="tsk-wide-split is-split" style="grid-template-columns:${Math.floor(terminalColumns() * 0.4)}ch 2ch minmax(0,1fr)">
            <div class="tsk-board-surface tsk-surface">${renderBoard(rows, false, true)}</div>
            <div class="tsk-rule-column dim" aria-hidden="true"></div>
@@ -1592,6 +2184,7 @@ import { parseCapture } from "./capture.js";
       if (state.overlay === "palette") html += renderPalette();
       if (state.overlay === "picker") html += renderPicker();
       if (state.overlay === "filter") html += renderFilter();
+      if (state.overlay === "preview-filter") html += renderPreviewFilter();
       const oldScroll = root.querySelector(".tsk-task-surface")?.scrollTop ?? 0;
       const activeSearch = document.activeElement?.id === "tsk-project-search";
       const keepKeys =
@@ -1601,25 +2194,23 @@ import { parseCapture } from "./capture.js";
       const content = root.querySelector(".tsk-task-surface");
       if (content) content.scrollTop = oldScroll;
       const stepInput = root.querySelector("#tsk-step-edit");
-      if (stepInput) {
-        stepInput.addEventListener("input", () => {
-          steps.editor.text = stepInput.value;
-          steps.refusal = "";
+      const previewStepInput = root.querySelector("#tsk-preview-step-edit");
+      if (stepInput || previewStepInput) {
+        const input = stepInput || previewStepInput;
+        const stepState = stepInput ? steps : previewSteps;
+        input.addEventListener("input", () => {
+          stepState.editor.text = input.value;
+          stepState.refusal = "";
           root.querySelector(".tsk-step-refusal").textContent = "";
-          stepInput.rows = wrapText(
-            stepInput.value,
-            taskColumnWidth() - 8,
-          ).length;
+          input.rows = wrapText(input.value, taskColumnWidth() - 8).length;
         });
-        stepInput.focus({ preventScroll: true });
-        stepInput.setSelectionRange(
-          stepInput.value.length,
-          stepInput.value.length,
-        );
-        stepInput.scrollIntoView({ block: "nearest" });
+        input.focus({ preventScroll: true });
+        input.setSelectionRange(input.value.length, input.value.length);
+        input.scrollIntoView({ block: "nearest" });
       }
       const add = document.getElementById("tsk-add");
       const edit = document.getElementById("tsk-edit");
+      const previewEdit = document.getElementById("tsk-preview-edit");
       const search = document.getElementById("tsk-project-search");
       if (search) {
         search.addEventListener("input", () => {
@@ -1627,7 +2218,7 @@ import { parseCapture } from "./capture.js";
           render();
         });
       }
-      if (!stepInput) {
+      if (!stepInput && !previewStepInput) {
         if (add) {
           add.focus();
           add.selectionStart = add.value.length;
@@ -1639,6 +2230,11 @@ import { parseCapture } from "./capture.js";
           edit.focus();
           edit.addEventListener("input", () => {
             state.editDraft = edit.value;
+          });
+        } else if (previewEdit) {
+          previewEdit.focus();
+          previewEdit.addEventListener("input", () => {
+            preview.editDraft = previewEdit.value;
           });
         } else if (search && activeSearch) {
           search.focus();
@@ -1659,6 +2255,10 @@ import { parseCapture } from "./capture.js";
   }
 
   function move(delta) {
+    if (projectsOverview()) {
+      moveProjectCursor(delta);
+      return;
+    }
     if (steps.dirty || steps.editor) return;
     const ids = selectableIds(buildRows());
     if (!ids.length) return;
@@ -1691,6 +2291,287 @@ import { parseCapture } from "./capture.js";
     state.editDraft = "";
   }
 
+  function handlePreviewPageKey(e) {
+    if (!projectsPreviewPage()) return false;
+    const task = previewTask();
+    const bare = !e.ctrlKey && !e.metaKey && !e.altKey;
+    if (preview.editField) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        preview.editField = null;
+        preview.editDraft = "";
+        render();
+      } else if (e.key === "Enter" && preview.editField === "title" && bare) {
+        e.preventDefault();
+        commitPreviewEdit();
+        render();
+      } else if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+        e.preventDefault();
+        commitPreviewEdit();
+        render();
+      }
+      return true;
+    }
+    if (!task) return true;
+    if (previewSteps.editor) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        previewSteps.cancel();
+        render();
+      } else if (e.key === "Enter" && bare) {
+        e.preventDefault();
+        const persists = !previewSteps.editor.id || e.shiftKey;
+        if (previewSteps.save(task, e.shiftKey) && persists)
+          task.updatedAt = clock();
+        render();
+      }
+      return true;
+    }
+    if (previewSteps.dirty && e.key === "Escape") {
+      e.preventDefault();
+      previewSteps.cancel();
+      render();
+      return true;
+    }
+    if (previewSteps.dirty && e.key === "Enter" && e.shiftKey && bare) {
+      e.preventDefault();
+      previewSteps.save(task, true);
+      task.updatedAt = clock();
+      render();
+      return true;
+    }
+    if (bare && ["Tab", "ArrowDown", "ArrowUp", "j", "k"].includes(e.key)) {
+      e.preventDefault();
+      previewSteps.move(
+        task,
+        e.shiftKey || ["ArrowUp", "k"].includes(e.key) ? -1 : 1,
+      );
+      render();
+      root
+        .querySelector(`[data-preview-step="${previewSteps.selected}"]`)
+        ?.scrollIntoView({ block: "nearest" });
+      return true;
+    }
+    if (bare && e.key === "Enter" && previewSteps.selected) {
+      e.preventDefault();
+      if (previewSteps.selected === "add") previewSteps.begin(task);
+      else {
+        previewSteps.toggle(task);
+        task.updatedAt = clock();
+      }
+      render();
+      return true;
+    }
+    if (bare && e.key === "a") {
+      e.preventDefault();
+      previewSteps.begin(task);
+      render();
+      return true;
+    }
+    if (bare && e.key === "e") {
+      e.preventDefault();
+      if (previewSteps.selected && previewSteps.selected !== "add")
+        previewSteps.begin(task, previewSteps.selected);
+      else openPreviewTaskPage("title");
+      render();
+      return true;
+    }
+    if (
+      bare &&
+      e.key === "x" &&
+      previewSteps.selected &&
+      previewSteps.selected !== "add"
+    ) {
+      e.preventDefault();
+      if (previewSteps.remove(task)) task.updatedAt = clock();
+      render();
+      return true;
+    }
+    if (bare && e.key === "ArrowLeft") {
+      e.preventDefault();
+      // Like the native parked task form, leaving the page keeps an unfinished preview
+      // draft available when the right seat is focused again.
+      preview.page = false;
+      render();
+      return true;
+    }
+    if (e.key === "Escape") {
+      e.preventDefault();
+      leavePreviewTaskPage();
+      render();
+      return true;
+    }
+    if (bare && e.key === "d") {
+      e.preventDefault();
+      previewSetStatus("done");
+      render();
+      return true;
+    }
+    if (bare && e.key === "b") {
+      e.preventDefault();
+      previewToggleBlock();
+      render();
+      return true;
+    }
+    if (bare && e.key === "r") {
+      e.preventDefault();
+      previewToggleReview();
+      render();
+      return true;
+    }
+    if (bare && e.key === "n") {
+      e.preventDefault();
+      openPreviewTaskPage("notes");
+      render();
+      return true;
+    }
+    if (bare && e.key === "?") {
+      e.preventDefault();
+      state.overlay = "help";
+      state.helpQ = "";
+      render();
+      return true;
+    }
+    return true;
+  }
+
+  function handlePreviewBoardKey(e) {
+    if (!projectsPreviewFocused() || preview.page || state.overlay)
+      return false;
+    const bare = !e.ctrlKey && !e.metaKey && !e.altKey;
+    if (e.key === "Escape") {
+      e.preventDefault();
+      if (preview.peekId) preview.peekId = null;
+      else state.stage = "split";
+      render();
+      return true;
+    }
+    if (bare && (e.key === "j" || e.key === "ArrowDown")) {
+      e.preventDefault();
+      movePreview(1);
+      render();
+      return true;
+    }
+    if (bare && (e.key === "k" || e.key === "ArrowUp")) {
+      e.preventDefault();
+      movePreview(-1);
+      render();
+      return true;
+    }
+    if (bare && e.key === "ArrowRight") {
+      e.preventDefault();
+      preview.peekId = preview.selectedId;
+      render();
+      return true;
+    }
+    if (bare && e.key === "ArrowLeft") {
+      e.preventDefault();
+      if (preview.peekId) preview.peekId = null;
+      else state.stage = "split";
+      render();
+      return true;
+    }
+    if (bare && e.key === "Enter") {
+      e.preventDefault();
+      if (previewTask()) openPreviewTaskPage();
+      render();
+      return true;
+    }
+    if (bare && e.key === "+") {
+      e.preventDefault();
+      openQuickAdd("preview");
+      render();
+      return true;
+    }
+    if (bare && e.key === "s") {
+      e.preventDefault();
+      previewPrimaryVerb();
+      render();
+      return true;
+    }
+    if (bare && e.key === "d") {
+      e.preventDefault();
+      previewSetStatus("done");
+      render();
+      return true;
+    }
+    if (bare && e.key === "b") {
+      e.preventDefault();
+      previewToggleBlock();
+      render();
+      return true;
+    }
+    if (bare && e.key === "r") {
+      e.preventDefault();
+      previewToggleReview();
+      render();
+      return true;
+    }
+    if (bare && e.key === "o") {
+      e.preventDefault();
+      if (previewTask()?.status === "done") previewSetStatus("ready");
+      render();
+      return true;
+    }
+    if (bare && e.key === "f") {
+      e.preventDefault();
+      previewFileSelected();
+      render();
+      return true;
+    }
+    if (bare && e.key === "x") {
+      e.preventDefault();
+      previewDeleteSelected();
+      render();
+      return true;
+    }
+    if (bare && e.key === "u") {
+      e.preventDefault();
+      previewUndoDelete();
+      render();
+      return true;
+    }
+    if (bare && e.key === "z") {
+      e.preventDefault();
+      preview.drawer = !preview.drawer;
+      ensurePreviewSelection();
+      render();
+      return true;
+    }
+    if (bare && e.key === "g") {
+      e.preventDefault();
+      preview.archivedOpen = !preview.archivedOpen;
+      render();
+      return true;
+    }
+    if (bare && e.key === "e") {
+      e.preventDefault();
+      if (previewTask()) openPreviewTaskPage("title");
+      render();
+      return true;
+    }
+    if (bare && e.key === "n") {
+      e.preventDefault();
+      if (previewTask()) openPreviewTaskPage("notes");
+      render();
+      return true;
+    }
+    if (bare && e.key === "t") {
+      e.preventDefault();
+      openPreviewFilter();
+      render();
+      return true;
+    }
+    if (bare && e.key === "?") {
+      e.preventDefault();
+      state.overlay = "help";
+      state.helpQ = "";
+      render();
+      return true;
+    }
+    return false;
+  }
+
   function onKey(e) {
     // Never swallow keys pressed on the landing chrome inside the pane
     // (pane bar, layout toggle, divider): those keep their own keyboard
@@ -1721,9 +2602,11 @@ import { parseCapture } from "./capture.js";
     const wide = isWideSplit();
     const taskPageActive = taskFocus();
     if (state.overlay === "quick") {
+      const owner = state.quickOwner;
       if (e.key === "Escape") {
         e.preventDefault();
         state.overlay = null;
+        state.quickOwner = "outer";
         state.refuse = "";
         frame.focus();
         render();
@@ -1739,14 +2622,19 @@ import { parseCapture } from "./capture.js";
       if (e.key === "Tab") {
         e.preventDefault();
         if (saveDraft(false)) {
-          openFullPage();
-          state.editField = "notes";
-          state.editDraft = "";
+          if (owner === "preview") openPreviewTaskPage("notes");
+          else {
+            openFullPage();
+            state.editField = "notes";
+            state.editDraft = "";
+          }
         }
         render();
       }
       return;
     }
+
+    if (handlePreviewPageKey(e) || handlePreviewBoardKey(e)) return;
 
     if (taskPageActive && !state.overlay && !state.editField) {
       const task = selectedTask();
@@ -1949,6 +2837,20 @@ import { parseCapture } from "./capture.js";
       return;
     }
 
+    if (state.overlay === "preview-filter") {
+      e.preventDefault();
+      if (e.key === "Escape") state.overlay = null;
+      else if (e.key === "Enter") choosePreviewFilter(state.filterI);
+      else if (["ArrowDown", "j"].includes(e.key))
+        state.filterI = Math.min(
+          previewFilterOptions().length - 1,
+          state.filterI + 1,
+        );
+      else if (["ArrowUp", "k"].includes(e.key))
+        state.filterI = Math.max(0, state.filterI - 1);
+      render();
+      return;
+    }
     if (state.overlay === "filter") {
       e.preventDefault();
       if (e.key === "Escape") state.overlay = null;
@@ -2204,7 +3106,14 @@ import { parseCapture } from "./capture.js";
   const cancelReflowClick = () => {
     delete lastClick.reflow;
   };
-  frame.addEventListener("keydown", cancelReflowClick, true);
+  frame.addEventListener(
+    "keydown",
+    () => {
+      cancelReflowClick();
+      lastClick = { id: null, at: 0 };
+    },
+    true,
+  );
   root.addEventListener("wheel", cancelReflowClick, { passive: true });
   root.addEventListener("pointermove", (e) => {
     if (e.buttons) cancelReflowClick();
@@ -2244,6 +3153,23 @@ import { parseCapture } from "./capture.js";
       return;
     }
     // A stage A click inside the task column slides to G first, then the control runs.
+    const previewFilterControl = e.target.closest("[data-preview-filter]");
+    if (previewFilterControl && projectsPreviewActive()) {
+      if (state.stage === "split") stageRight();
+      openPreviewFilter();
+      render();
+      return;
+    }
+    const previewFilterOption = e.target.closest(
+      "[data-preview-filter-option]",
+    );
+    if (previewFilterOption && state.overlay === "preview-filter") {
+      choosePreviewFilter(
+        Number(previewFilterOption.dataset.previewFilterOption),
+      );
+      render();
+      return;
+    }
     const filterControl = e.target.closest("[data-filter]");
     if (filterControl) {
       openFilter();
@@ -2253,6 +3179,31 @@ import { parseCapture } from "./capture.js";
     const filterOption = e.target.closest("[data-filter-option]");
     if (filterOption) {
       chooseFilter(Number(filterOption.dataset.filterOption));
+      render();
+      return;
+    }
+    const previewStepTarget = e.target.closest(
+      "[data-preview-step], [data-preview-step-add]",
+    );
+    if (
+      projectsPreviewPage() &&
+      previewStepTarget &&
+      e.target.id !== "tsk-preview-step-edit"
+    ) {
+      const task = previewTask();
+      if (
+        previewSteps.editor &&
+        !previewSteps.editor.text.trim() &&
+        !previewSteps.editor.id
+      )
+        previewSteps.cancel();
+      else if (previewSteps.editor && !previewSteps.save(task, false)) {
+        render();
+        return;
+      }
+      if (previewStepTarget.hasAttribute("data-preview-step-add"))
+        previewSteps.begin(task);
+      else previewSteps.selected = previewStepTarget.dataset.previewStep;
       render();
       return;
     }
@@ -2274,11 +3225,50 @@ import { parseCapture } from "./capture.js";
       render();
       return;
     }
-    const taskColumn = e.target.closest(".tsk-task-column");
-    if (taskColumn && isWideSplit() && state.stage === "split") stageRight();
+    const previewArchivedHeader = e.target.closest("[data-preview-archived]");
+    if (previewArchivedHeader && projectsPreviewActive()) {
+      preview.archivedOpen = !preview.archivedOpen;
+      ensurePreviewSelection();
+      render();
+      return;
+    }
+    const previewTaskRow = e.target.closest("[data-preview-task]");
+    if (previewTaskRow && projectsPreviewActive()) {
+      const copyTarget = e.target.closest("[data-copy-task]");
+      if (copyTarget) {
+        const task = state.tasks.find(
+          (item) => item.id === copyTarget.getAttribute("data-copy-task"),
+        );
+        if (task) copyTaskIdentifier(task);
+        render();
+        return;
+      }
+      const id = previewTaskRow.getAttribute("data-preview-task");
+      if (previewHasUnsavedWork() && id !== preview.selectedId) return;
+      const now = Date.now();
+      if (state.stage === "split") stageRight();
+      if (preview.selectedId === id && now - (preview.lastClick || 0) < 350) {
+        openPreviewTaskPage();
+      } else {
+        preview.selectedId = id;
+        preview.peekId = null;
+      }
+      preview.lastClick = now;
+      render();
+      return;
+    }
+    const taskColumn = e.target.closest(
+      ".tsk-task-column, .tsk-project-preview",
+    );
+    if (taskColumn && isWideSplit() && state.stage === "split") {
+      stageRight();
+      render();
+      return;
+    }
     const close = e.target.closest("[data-close]");
     if (close) {
       state.overlay = null;
+      state.quickOwner = "outer";
       state.paletteQ = "";
       state.helpQ = "";
       frame.focus();
@@ -2324,11 +3314,35 @@ import { parseCapture } from "./capture.js";
     }
     const projectRow = e.target.closest("[data-project-row]");
     if (projectRow) {
-      const id = projectRow.dataset.navId,
-        now = Date.now();
-      if (lastClick.id === id && now - lastClick.at < 350)
-        openProject(projectRow.dataset.projectRow);
-      else state.selectedId = id;
+      const id = projectRow.dataset.navId;
+      const project = projectRow.dataset.projectRow;
+      const now = Date.now();
+      if (lastClick.id === id && now - lastClick.at < 350) {
+        if (projectsOverview() && projectsPreviewActive() && previewHasUnsavedWork()) {
+          preview.message = "save or cancel edits before switching tasks";
+          render();
+          return;
+        }
+        openProject(project);
+      } else {
+        if (
+          projectsOverview() &&
+          projectsPreviewActive() &&
+          preview.project !== project &&
+          !bindProjectPreviewFor(project)
+        ) {
+          render();
+          return;
+        }
+        state.selectedId = id;
+        if (projectsOverview() && isWideSplit()) {
+          if (state.stage === "board") openProjectPreview();
+          else if (state.stage === "rail") {
+            bindProjectPreview();
+            state.stage = "split";
+          } else bindProjectPreview();
+        }
+      }
       lastClick = { id, at: now };
       render();
       return;
@@ -2379,6 +3393,27 @@ import { parseCapture } from "./capture.js";
       render();
       return;
     }
+    const previewDrawer = e.target.closest("[data-preview-drawer]");
+    if (previewDrawer) {
+      preview.drawer = !preview.drawer;
+      ensurePreviewSelection();
+      render();
+      return;
+    }
+    const previewPageVerb = e.target.closest("[data-preview-page-verb]");
+    if (previewPageVerb) {
+      runPreviewPageVerb(
+        previewPageVerb.getAttribute("data-preview-page-verb"),
+      );
+      render();
+      return;
+    }
+    const previewVerb = e.target.closest("[data-preview-verb]");
+    if (previewVerb) {
+      runPreviewVerb(previewVerb.getAttribute("data-preview-verb"));
+      render();
+      return;
+    }
     const drawer = e.target.closest("[data-drawer]");
     if (drawer) {
       state.drawer = !state.drawer;
@@ -2422,6 +3457,21 @@ import { parseCapture } from "./capture.js";
   frame.addEventListener("tsk:set-stage", (e) => {
     const stage = e.detail;
     if (!["board", "split", "rail", "page"].includes(stage)) return;
+    if (projectsOverview()) {
+      if (stage === "page" || (stage === "board" && previewHasUnsavedWork()))
+        return;
+      if (stage === "board") dropProjectPreview();
+      else {
+        if (!bindProjectPreview()) return;
+        leavePreviewTaskPage();
+      }
+      state.stage = stage;
+      state.stageOrigin = null;
+      state.peekId = null;
+      if (state.overlay !== "quick") state.overlay = null;
+      render();
+      return;
+    }
     if (stage !== "board" && !state.selectedId) return;
     state.stage = stage;
     state.stageOrigin = null;

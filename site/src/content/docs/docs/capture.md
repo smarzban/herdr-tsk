@@ -20,7 +20,7 @@ Clicking a task while the quick-add line is open discards the draft and selects 
 
 ## Details
 
-Press `Tab` from quick-add to add notes, steps, a scope, or a thread. The draft uses the full pane and opens in Notes.
+Press `Tab` from quick-add to add notes, steps, a scope, or a thread. The draft uses the full pane and opens in Notes. In a project preview, its title stays in the right-column header while Notes is active.
 
 - `Shift+Enter` saves.
 - `Esc` returns to the quick-add line.
