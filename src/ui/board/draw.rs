@@ -1633,6 +1633,8 @@ fn draw_projects_wide_board(
         follow_list: model.follow_list.get(),
         archived_collapsed: model.archived_collapsed,
         archived_header_selected: false,
+        inbox_collapsed: model.inbox_collapsed,
+        inbox_header_selected: false,
         rows_dim: false,
     };
 
@@ -1667,6 +1669,8 @@ fn draw_projects_wide_board(
             follow_list: right.follow_list.get(),
             archived_collapsed: right.archived_collapsed,
             archived_header_selected: right.archived_header_selected(),
+            inbox_collapsed: right.inbox_collapsed,
+            inbox_header_selected: right.inbox_header_selected(),
             rows_dim: stage == tier::WideStage::Split || right.focus_is_archived(),
         })
     });

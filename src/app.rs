@@ -2700,6 +2700,39 @@ mod tests {
         (domain, model, id)
     }
 
+    fn projects_preview_open_tasks_fixture() -> (DomainState, BoardModel) {
+        let mut domain = DomainState::new();
+        for title in ["first open task", "second open task"] {
+            domain
+                .create(
+                    title,
+                    None,
+                    TaskScope::Project {
+                        path: "/repos/preview".into(),
+                    },
+                    ProvenanceOrigin::Manual,
+                    None,
+                )
+                .expect("create open preview task");
+        }
+        let mut model = BoardModel::from_domain(&domain, None);
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::SelectNavTab(NavTab::Projects),
+            None,
+        )
+        .expect("open projects overview");
+        stage_right(&mut domain, &mut model, 2);
+        (domain, model)
+    }
+
+    fn selected_row(model: &BoardModel) -> Option<uuid::Uuid> {
+        model
+            .selected_index()
+            .and_then(|index| model.visible_ids().get(index).copied())
+    }
+
     fn preview_key_intent(model: &mut BoardModel, area: Rect, key: KeyEvent) -> BoardIntent {
         let mode = resolve_board_surface(area, model);
         let right = model.right_seat().expect("projects rail has a right seat");
@@ -2802,6 +2835,69 @@ mod tests {
             model.selected_id().is_none(),
             "the index has no task selection"
         );
+    }
+
+    #[test]
+    fn projects_preview_right_seat_selection_stays_on_visible_task_after_sync() {
+        let (mut domain, mut model) = projects_preview_open_tasks_fixture();
+        let area = Rect::new(0, 0, 110, 30);
+        let header = crate::ui::queue::INBOX_HEADER_ROW_ID;
+        let visible = model
+            .right_seat()
+            .expect("projects rail has a right seat")
+            .visible_ids();
+        let first_task = visible
+            .iter()
+            .copied()
+            .find(|id| *id != header)
+            .expect("open task is visible");
+        let second_task = visible
+            .iter()
+            .copied()
+            .find(|id| *id != header && *id != first_task)
+            .expect("second open task is visible");
+
+        // Make the task immediately below the inbox heading the selected row. Completing it
+        // must reanchor to the surviving task, not to the heading that sits between them.
+        while selected_row(model.right_seat().expect("projects rail has a right seat"))
+            != Some(first_task)
+        {
+            apply_intent(
+                &mut domain,
+                model.input_target_mut(),
+                BoardIntent::SelectNext,
+                None,
+            )
+            .expect("advance right-seat selection");
+        }
+        assert_eq!(selected_row(model.right_seat().unwrap()), Some(first_task));
+
+        let intent = preview_key_intent(
+            &mut model,
+            area,
+            KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL),
+        );
+        let routed = route_board_intent(&model, intent);
+        assert_eq!(routed.target, BoardIntentTarget::Focused);
+        assert_eq!(routed.intent, BoardIntent::Complete);
+        apply_intent(
+            &mut domain,
+            board_intent_target_mut(&mut model, routed.target),
+            routed.intent,
+            None,
+        )
+        .expect("complete right-seat task");
+
+        let recovery = SaveRecovery::<DomainState>::new();
+        sync_focused_project_preview(&mut model, &domain, &recovery);
+
+        let right = model.right_seat().expect("projects rail has a right seat");
+        assert_eq!(right.selected_id(), Some(second_task));
+        assert!(
+            right.visible_ids().contains(&second_task),
+            "right-seat selection must remain on a painted row"
+        );
+        assert_ne!(selected_row(right), Some(header));
     }
 
     #[test]
