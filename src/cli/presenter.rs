@@ -23,22 +23,22 @@ pub fn add_help() -> CliOutput {
     )
 }
 
-pub fn list_help() -> CliOutput {
-    CliOutput {
-        stdout: concat!(
+pub fn list_help(terminal_width: Option<usize>) -> CliOutput {
+    let stdout = concat!(
             "usage: tsk list [<task>] [-p <project> | --desk | --all] [--thread <name>] [--done | --deleted | --archived] [--json] [--state-dir <dir>]\n\n",
             "Lists ready, started, blocked, and review tasks in the invocation project (nearest Git repo root) by default inside Git, or your desk outside Git. The current directory outside Git remains available through --project=/full/path.\n",
-            "With a task number (bare digits) or UUID from add --json or list --json, lists that one task alone and prints its steps: one line per step with its [x]/[ ] state and step short id. Direct lookup ignores cwd and searches the live store, including done and live soft-deleted tasks. Tasks that have moved to trash.jsonl need tsk list --deleted. A task operand cannot be combined with scope, thread, or status filters.\n",
+            "With a task number (bare digits) or UUID from add --json or list --json, lists that one task alone with its notes, steps, and thread as separate blocks, with a blank line between blocks that exist. The thread follows the steps instead of the title; each human step shows only its [x]/[ ] state and text. Direct JSON keeps step short ids for scripting. Direct lookup ignores cwd and searches the live store, including done and live soft-deleted tasks. Tasks that have moved to trash.jsonl need tsk list --deleted. A task operand cannot be combined with scope, thread, or status filters.\n",
             "--project uses the same basename-or-path scope resolution as add; --desk selects your desk, tasks not tied to a project; --all selects every scope. --thread normalizes a thread name and filters within the selected scope; an invalid name is a usage error (exit 2). For dash-leading project and state-directory values, use --project=<scope> and --state-dir=<dir>.\n",
             "--archived lists archived tasks only: individually archived tasks plus tasks of archived projects, each row marked `archived` or `project archived`. --done lists done tasks only. --deleted lists soft-deleted tasks only, regardless of status: live soft-deletes plus trash entries from trash.jsonl (kept 30 days), deduped by task with the live copy winning, newest deletion first.\n",
             "To recover a typo scope, use tsk list --all --json.\n",
-            "--json emits a flat array of id, number, title, status, project, and thread (or null) in displayed group order. Human --all groups rows by status, then project scope, using a unique concise trailing path or desk.\n\n",
+            "--json emits a flat array of id, number, title, status, project, and thread (or null) in displayed group order. Direct task JSON adds notes and steps, including null notes and an empty steps array, ordered as id, number, project, status, title, notes, steps, thread. All non-JSON list content wraps to the attached terminal width with hanging indentation and is supported from 50 columns; redirected output keeps stored logical lines. Human --all groups rows by status, then project scope, using a unique concise trailing path or desk.\n\n",
             "Exit contract:\n",
             "  exit 0: tasks were listed\n",
             "  exit 2: usage or parse error, nothing persisted\n",
             "  exit 3: store I/O failure, no tasks listed\n"
-        )
-        .into(),
+        );
+    CliOutput {
+        stdout: wrap_list_document(stdout, terminal_width),
         stderr: String::new(),
         code: 0,
     }
@@ -119,11 +119,11 @@ pub fn usage(reason: &str) -> CliOutput {
     }
 }
 
-pub fn list(result: ListResult, json: bool) -> CliOutput {
+pub fn list(result: ListResult, json: bool, terminal_width: Option<usize>) -> CliOutput {
     let stdout = if json {
         list_json(&result)
     } else {
-        list_human(&result)
+        list_human(&result, terminal_width)
     };
     CliOutput {
         stdout,
@@ -132,28 +132,47 @@ pub fn list(result: ListResult, json: bool) -> CliOutput {
     }
 }
 
-/// The flat row array. A single-task listing with steps attaches them to its
-/// one row (`steps`: id, done, short_id, text); every other listing keeps
-/// the standard task row shape.
+/// Filtered listings keep the compact row schema. A directly addressed task
+/// carries its complete readable content in a stable field order.
 fn list_json(result: &ListResult) -> String {
-    let mut value = serde_json::to_value(&result.rows).expect("list rows are serializable");
-    if !result.steps.is_empty() {
-        value
-            .as_array_mut()
-            .expect("rows serialize to an array")
-            .get_mut(0)
-            .expect("a steps collection implies the single task row")
-            .as_object_mut()
-            .expect("row serializes to an object")
-            .insert(
-                "steps".into(),
-                serde_json::to_value(&result.steps).expect("steps are serializable"),
-            );
+    if let Some(direct) = result.direct.as_ref() {
+        let row = result
+            .rows
+            .first()
+            .expect("direct task details imply one task row");
+        #[derive(serde::Serialize)]
+        struct DirectRow<'a> {
+            id: uuid::Uuid,
+            number: u64,
+            project: &'a Option<String>,
+            status: HumanStatus,
+            title: &'a str,
+            notes: &'a Option<String>,
+            steps: &'a [StepLine],
+            thread: &'a Option<String>,
+        }
+        let direct_row = DirectRow {
+            id: row.id,
+            number: row.number,
+            project: &row.project,
+            status: row.status,
+            title: &row.title,
+            notes: &direct.notes,
+            steps: &direct.steps,
+            thread: &row.thread,
+        };
+        return format!(
+            "{}\n",
+            serde_json::to_string(&[direct_row]).expect("direct list row is serializable")
+        );
     }
+
+    let value = serde_json::to_value(&result.rows).expect("list rows are serializable");
     format!("{value}\n")
 }
 
-fn list_human(result: &ListResult) -> String {
+fn list_human(result: &ListResult, terminal_width: Option<usize>) -> String {
+    let output_width = terminal_width.unwrap_or(usize::MAX);
     let groups: &[(Option<HumanStatus>, &str)] = match result.view {
         ListView::Open => &[
             (Some(HumanStatus::Started), "STARTED"),
@@ -179,15 +198,31 @@ fn list_human(result: &ListResult) -> String {
         if !output.is_empty() {
             output.push('\n');
         }
-        output.push_str(heading);
-        output.push('\n');
+        append_wrapped(&mut output, "", "", heading, output_width);
         if result.include_scope {
-            append_scope_groups(&mut output, rows, labels.as_ref().expect("scope labels"));
+            append_scope_groups(
+                &mut output,
+                rows,
+                labels.as_ref().expect("scope labels"),
+                output_width,
+            );
         } else {
-            append_rows(&mut output, &rows, " ");
-            if !result.steps.is_empty() {
-                // Single-task listing: the step lines belong under the one row above.
-                append_step_lines(&mut output, &result.steps, " ");
+            append_rows(
+                &mut output,
+                &rows,
+                " ",
+                output_width,
+                result.direct.is_none(),
+            );
+            if let Some(direct) = result.direct.as_ref() {
+                append_direct_details(
+                    &mut output,
+                    direct.notes.as_deref(),
+                    &direct.steps,
+                    rows[0].thread.as_deref(),
+                    " ",
+                    output_width,
+                );
             }
         }
     }
@@ -198,6 +233,7 @@ fn append_scope_groups(
     output: &mut String,
     rows: Vec<&ListRow>,
     labels: &BTreeMap<Option<String>, String>,
+    output_width: usize,
 ) {
     let mut scopes = Vec::<(Option<&str>, Vec<&ListRow>)>::new();
     for row in rows {
@@ -211,46 +247,143 @@ fn append_scope_groups(
         }
     }
     for (scope, rows) in scopes {
-        output.push_str("  ");
-        output.push_str(&terminal_text(
+        let label = terminal_text(
             labels
                 .get(&scope.map(str::to_owned))
                 .expect("label for displayed scope"),
-        ));
-        output.push('\n');
-        append_rows(output, &rows, "    ");
+        );
+        append_wrapped(output, "  ", "  ", &label, output_width);
+        append_rows(output, &rows, "    ", output_width, true);
     }
 }
 
-fn append_rows(output: &mut String, rows: &[&ListRow], indent: &str) {
+fn append_rows(
+    output: &mut String,
+    rows: &[&ListRow],
+    indent: &str,
+    output_width: usize,
+    include_thread: bool,
+) {
     for row in rows {
-        output.push_str(indent);
-        output.push_str("- ");
-        output.push_str(&row.number.to_string());
-        output.push(' ');
-        output.push_str(&terminal_text(&row.title));
-        if let Some(thread) = row.thread.as_deref() {
-            output.push_str(" #");
-            output.push_str(&terminal_text(thread));
+        let mut content = terminal_text(&row.title);
+        if include_thread {
+            if let Some(thread) = row.thread.as_deref() {
+                content.push_str(" #");
+                content.push_str(&terminal_text(thread));
+            }
         }
         if let Some(mark) = row.archived {
-            output.push_str(" · ");
-            output.push_str(mark);
+            content.push_str(" · ");
+            content.push_str(mark);
         }
-        output.push('\n');
+        let first_prefix = format!("{indent}- {} ", row.number);
+        let continuation_prefix = " ".repeat(first_prefix.len());
+        append_wrapped(
+            output,
+            &first_prefix,
+            &continuation_prefix,
+            &content,
+            output_width,
+        );
     }
 }
 
-/// One line per step: state glyph, short id, text, one level under the row.
-fn append_step_lines(output: &mut String, steps: &[StepLine], indent: &str) {
+/// Direct detail is an ordered set of present blocks. Blank rows separate only
+/// adjacent blocks that exist: notes, steps, then thread.
+fn append_direct_details(
+    output: &mut String,
+    notes: Option<&str>,
+    steps: &[StepLine],
+    thread: Option<&str>,
+    indent: &str,
+    output_width: usize,
+) {
+    let mut has_prior = false;
+    let detail_prefix = format!("{indent}  ");
+    if let Some(notes) = notes {
+        append_wrapped(output, &detail_prefix, &detail_prefix, notes, output_width);
+        has_prior = true;
+    }
+    if !steps.is_empty() {
+        if has_prior {
+            output.push('\n');
+        }
+        append_step_lines(output, steps, indent, output_width);
+        has_prior = true;
+    }
+    if let Some(thread) = thread {
+        if has_prior {
+            output.push('\n');
+        }
+        let thread = terminal_text(&format!("#{thread}"));
+        append_wrapped(
+            output,
+            &detail_prefix,
+            &detail_prefix,
+            &thread,
+            output_width,
+        );
+    }
+}
+
+/// One line per step: state and text, with continuation rows aligned under text.
+fn append_step_lines(output: &mut String, steps: &[StepLine], indent: &str, output_width: usize) {
     for step in steps {
-        output.push_str(indent);
-        output.push_str("  [");
-        output.push(if step.done { 'x' } else { ' ' });
-        output.push_str("] ");
-        output.push_str(&step.short_id);
-        output.push(' ');
-        output.push_str(&terminal_text(&step.text));
+        let first_prefix = format!("{indent}  [{}] ", if step.done { 'x' } else { ' ' });
+        let continuation_prefix = " ".repeat(first_prefix.len());
+        append_wrapped(
+            output,
+            &first_prefix,
+            &continuation_prefix,
+            &terminal_text(&step.text),
+            output_width,
+        );
+    }
+}
+
+/// Wrap list help and errors while preserving each logical line's leading
+/// indentation. Redirected output is returned byte-for-byte.
+fn wrap_list_document(text: &str, terminal_width: Option<usize>) -> String {
+    let Some(output_width) = terminal_width else {
+        return text.to_owned();
+    };
+    let lines = crate::ui::split_line_breaks(text).collect::<Vec<_>>();
+    let has_trailing_break = text.ends_with('\n') || text.ends_with('\r');
+    let mut output = String::new();
+    for (index, line) in lines.iter().enumerate() {
+        if has_trailing_break && index + 1 == lines.len() && line.is_empty() {
+            continue;
+        }
+        let indent_len = line.bytes().take_while(|byte| *byte == b' ').count();
+        let (prefix, content) = line.split_at(indent_len);
+        append_wrapped(&mut output, prefix, prefix, content, output_width);
+    }
+    if !has_trailing_break {
+        output.pop();
+    }
+    output
+}
+
+/// Append text within one terminal width. Prefixes are ASCII CLI chrome, so
+/// their byte lengths are also their display widths.
+fn append_wrapped(
+    output: &mut String,
+    first_prefix: &str,
+    continuation_prefix: &str,
+    text: &str,
+    output_width: usize,
+) {
+    let content_width = output_width.saturating_sub(first_prefix.len()).max(1);
+    for (index, row) in crate::ui::edit::wrap_text(text, content_width)
+        .into_iter()
+        .enumerate()
+    {
+        output.push_str(if index == 0 {
+            first_prefix
+        } else {
+            continuation_prefix
+        });
+        output.push_str(&row.text);
         output.push('\n');
     }
 }
@@ -402,9 +535,9 @@ pub fn steps_help() -> CliOutput {
             "       tsk steps <task> rename <step-short-id> <text> [--state-dir <dir>]\n",
             "       tsk steps <task> remove <step-short-id> [--state-dir <dir>]\n\n",
             "steps adds, toggles, renames, or removes one step on a task. The task is a bare task number or UUID from tsk list --json; direct lookup ignores cwd.\n",
-            "A step short id is the shortest unambiguous prefix of the step id, as printed by tsk list <task>.\n",
-            "toggle flips the step state: a blind retry after an unseen success flips it back, so verify with tsk list <task> before retrying.\n",
-            "rename is idempotent on the trimmed text. remove is not: a retry after an unseen success is unknown-step, so verify with list before retrying.\n\n",
+            "A step short id is the shortest unambiguous prefix of the step id, as printed by tsk list <task> --json.\n",
+            "toggle flips the step state: a blind retry after an unseen success flips it back, so verify with tsk list <task> --json before retrying.\n",
+            "rename is idempotent on the trimmed text. remove is not: a retry after an unseen success is unknown-step, so verify with tsk list <task> --json before retrying.\n\n",
             "Refusal tokens (exit 1): empty-step-text, invalid-step-text, unknown-task, soft-deleted-task, unknown-step, ambiguous-step.\n\n",
             "Exit contract:\n",
             "  exit 0: step created, toggled, renamed, or removed\n",
@@ -738,26 +871,30 @@ pub fn archive_rejected(error: ArchiveCliError, verb: &str) -> CliOutput {
     }
 }
 
-pub fn list_usage(reason: &str) -> CliOutput {
+pub fn list_usage(reason: &str, terminal_width: Option<usize>) -> CliOutput {
+    let stderr = format!(
+        "tsk list: {}\nusage: tsk list [<task>] [-p <project> | --desk | --all] [--thread <name>] [--done | --deleted | --archived] [--json] [--state-dir <dir>]\n",
+        human_reason(reason)
+    );
     CliOutput {
         stdout: String::new(),
-        stderr: format!(
-            "tsk list: {}\nusage: tsk list [<task>] [-p <project> | --desk | --all] [--thread <name>] [--done | --deleted | --archived] [--json] [--state-dir <dir>]\n",
-            human_reason(reason)
-        ),
+        stderr: wrap_list_document(&stderr, terminal_width),
         code: 2,
     }
 }
 
-pub fn list_rejected(error: ListError) -> CliOutput {
+pub fn list_rejected(error: ListError, terminal_width: Option<usize>) -> CliOutput {
     match error {
         ListError::Store(detail) => CliOutput {
             stdout: String::new(),
-            stderr: format!("tsk list: {detail}\n"),
+            stderr: wrap_list_document(
+                &format!("tsk list: {}\n", human_reason(&detail)),
+                terminal_width,
+            ),
             code: 3,
         },
         // A well-formed address that addresses no task: the invocation is wrong, not the store.
-        ListError::UnknownTask => list_usage("unknown task"),
+        ListError::UnknownTask => list_usage("unknown task", terminal_width),
     }
 }
 

@@ -950,17 +950,37 @@ mod tests {
     #[test]
     fn embedded_skill_declares_semver() {
         let version = embedded_skill_version();
-        assert_eq!(version, "1.1.0");
-        assert_eq!(frontmatter_version(SKILL_MD).as_deref(), Some("1.1.0"));
+        assert_eq!(version, "1.2.0");
+        assert_eq!(frontmatter_version(SKILL_MD).as_deref(), Some("1.2.0"));
         let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
         for byte in SKILL_MD.bytes() {
             hash ^= u64::from(byte);
             hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
         }
         assert_eq!(
-            hash, 0xa28d_c32a_e7a1_51fa,
+            hash, 0x3b4b_9a95_b29c_cd35,
             "skills/tsk-cli/SKILL.md changed: bump `version:` in its frontmatter and update both pins here"
         );
+    }
+
+    #[test]
+    fn embedded_skill_uses_json_for_agent_list_reads() {
+        assert!(SKILL_MD.contains("**Read JSON, not presentation.**"));
+        assert!(SKILL_MD.contains("Always add `--json` to `tsk list`."));
+        let exit_zero = SKILL_MD
+            .lines()
+            .find(|line| line.starts_with("| 0 |"))
+            .expect("exit-zero contract row");
+        assert!(exit_zero.contains("verify") && exit_zero.contains("--json"));
+        for line in SKILL_MD
+            .lines()
+            .filter(|line| line.starts_with("tsk list "))
+        {
+            assert!(
+                line.contains("--json"),
+                "agent-facing list example must use JSON: {line}"
+            );
+        }
     }
 
     #[test]

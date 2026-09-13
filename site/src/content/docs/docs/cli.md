@@ -149,9 +149,11 @@ Scope flags are mutually exclusive. So are `--done`, `--deleted`, and `--archive
 
 A direct task address searches the main store, including done, archived, and recently deleted tasks. It cannot be combined with scope, thread, or status filters. A missing task exits 2. Tasks already moved to trash require `--deleted`.
 
-Human output groups by status and includes the task number and thread. `--all` adds scope labels. Single-task output includes steps and their short IDs.
+Human output groups by status; filtered rows include the task number and thread, and `--all` adds scope labels. Every non-JSON list element, including help and errors, wraps to the attached terminal width with hanging indentation. Task rows, scope labels, notes, steps, archived marks, and threads use the same wrapping behavior, supported from 50 columns. Redirected output keeps stored logical lines.
 
-JSON returns an array with `id`, `number`, `title`, `status`, `project`, and `thread`. Direct lookup also includes `steps`. Archived listings include an `archived` mark: `archived` or `project archived`.
+Single-task output removes the thread from the title row and presents notes, steps, then `#thread` as separate blocks. A blank line separates adjacent blocks that exist. Human step rows show state and text without machine-oriented short IDs.
+
+JSON returns an array with `id`, `number`, `title`, `status`, `project`, and `thread`. Direct lookup returns the complete task, including `notes` (`null` when absent) and `steps` (an empty array when absent). Its fields are ordered `id`, `number`, `project`, `status`, `title`, `notes`, `steps`, `thread`; each JSON step retains its `short_id` for step commands. Archived listings include an `archived` mark: `archived` or `project archived`.
 
 ## status
 
@@ -188,7 +190,7 @@ tsk steps <task> rename <step-short-id> <text> [--state-dir <dir>]
 tsk steps <task> remove <step-short-id> [--state-dir <dir>]
 ```
 
-Read short IDs with `tsk list T12`. Full step UUIDs also work.
+Read short IDs with `tsk list T12 --json`. Full step UUIDs also work.
 
 | Action | Output prefix | Safe to repeat unchanged? |
 | --- | --- | --- |
@@ -197,7 +199,7 @@ Read short IDs with `tsk list T12`. Full step UUIDs also work.
 | Rename | `renamed <short-id> <text>` | Yes |
 | Remove | `removed <short-id> <text>` | No; refuses after removal |
 
-Read back before retrying an uncertain result. [Using steps on the board](/docs/steps/).
+Read back with `tsk list T12 --json` before retrying an uncertain result. [Using steps on the board](/docs/steps/).
 
 ## archive and unarchive
 
