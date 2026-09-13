@@ -169,7 +169,7 @@ Scope flags are mutually exclusive. So are `--open`, `--ready`, `--done`, `--del
 
 A direct task address searches the main store, including done, archived, and recently deleted tasks. It cannot be combined with scope, thread, or status filters. A missing task exits 2. Tasks already moved to trash require `--deleted`.
 
-Human output groups by status in `STARTED`, `READY`, `OPEN`, `BLOCKED`, `REVIEW` order; filtered rows include the task number and thread, and `--all` adds scope labels. List output and errors wrap to the attached terminal width with hanging indentation. Task rows, scope labels, notes, steps, archived marks, and threads use the same wrapping behavior, supported from 50 columns. Redirected output keeps stored logical lines. Command help is reference text and instead always wraps at 80 columns.
+Human output groups by status in `STARTED`, `READY`, `OPEN`, `BLOCKED`, `REVIEW` order; filtered rows include the task number and thread, and `--all` adds scope labels using a unique concise trailing path or desk. List output and errors wrap to the attached terminal width with hanging indentation. Task rows, scope labels, notes, steps, archived marks, and threads use the same wrapping behavior, supported from 50 columns. Redirected output keeps stored logical lines. Command help is reference text and instead always wraps at 80 columns.
 
 Single-task output removes the thread from the title row and presents notes, steps, then `#thread` as separate blocks. A blank line separates adjacent blocks that exist. Human step rows show state and text without machine-oriented short IDs.
 
@@ -230,7 +230,7 @@ tsk archive T12
 tsk unarchive T12
 ```
 
-Keep the task's status and number. Repeating either command is safe.
+Keep the task's status and number. Archiving removes it from working views, and it remains available through `tsk list --archived` until `tsk unarchive` returns it. Repeating either command is safe.
 
 Output: `archived T12 <title>` or `unarchived T12 <title>`.
 
@@ -243,7 +243,7 @@ tsk project archive atlas
 tsk project unarchive atlas
 ```
 
-Accepts a project basename or path. Repeating an action is safe. An unknown project refuses with `no project named <name> has tasks`.
+Accepts a project basename or path. Archiving removes the whole project from working views, while unarchiving returns its tasks in their existing statuses. Repeating an action is safe. An unknown project refuses with `no project named <name> has tasks`.
 
 Restoring a project preserves task statuses and leaves individually archived tasks archived.
 
@@ -256,7 +256,7 @@ tsk list --deleted --all
 tsk trash restore T12
 ```
 
-Restore returns a task from trash with its original number. A task absent from trash, or already live, refuses with `T12 is not in trash`.
+Restore returns a task from trash with its original number, no soft-delete flag, a restored event, and a new revision. A task absent from trash, or already live, refuses with `T12 is not in trash`.
 
 Recent deletions may still be in the main store; use board undo until they move to trash. [Retention and storage](/docs/storage/#deleted-tasks).
 
