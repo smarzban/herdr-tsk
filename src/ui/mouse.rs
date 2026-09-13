@@ -870,6 +870,7 @@ pub fn map_board_mouse(
             Some(QueueHitTarget::ProjectRow(index)) => Some(BoardIntent::SelectProjectRow(index)),
             Some(QueueHitTarget::Drawer) => Some(BoardIntent::ToggleDoneDrawer),
             Some(QueueHitTarget::ArchivedHeader) => Some(BoardIntent::ToggleArchivedGroup),
+            Some(QueueHitTarget::InboxHeader) => Some(BoardIntent::ToggleInboxGroup),
             Some(QueueHitTarget::TaskNumber(id)) => Some(BoardIntent::CopyTaskNumber(id)),
             Some(QueueHitTarget::Task(id)) => model
                 .visible_ids()

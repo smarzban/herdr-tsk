@@ -120,12 +120,26 @@ pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
         ];
     }
 
-    // The archived header holds the selection: its own verbs only.
+    // Header rows hold the selection: their own verbs only.
     if model.archived_header_selected() {
         return vec![
             VerbEntry {
                 key: "enter",
                 label: if model.archived_collapsed {
+                    "expand"
+                } else {
+                    "collapse"
+                },
+            },
+            ADD,
+            HELP,
+        ];
+    }
+    if model.inbox_header_selected() {
+        return vec![
+            VerbEntry {
+                key: "enter",
+                label: if model.inbox_collapsed {
                     "expand"
                 } else {
                     "collapse"
@@ -1171,6 +1185,8 @@ fn draw_board_hits(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap
         follow_list: model.follow_list.get(),
         archived_collapsed: model.archived_collapsed,
         archived_header_selected: model.archived_header_selected(),
+        inbox_collapsed: model.inbox_collapsed,
+        inbox_header_selected: model.inbox_header_selected(),
         rows_dim: model.focus_is_archived(),
     };
     let (hits, painted_list_scroll) = render::draw_queue_frame(frame, &frame_model, &geo, area);
@@ -1343,6 +1359,8 @@ fn draw_wide_board(
         follow_list: model.follow_list.get(),
         archived_collapsed: model.archived_collapsed,
         archived_header_selected: model.archived_header_selected(),
+        inbox_collapsed: model.inbox_collapsed,
+        inbox_header_selected: model.inbox_header_selected(),
         rows_dim: model.focus_is_archived(),
     };
     let task_frame = QueueFrameModel {

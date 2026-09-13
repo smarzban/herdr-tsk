@@ -548,6 +548,10 @@ pub struct QueueFrameModel<'a> {
     pub archived_collapsed: bool,
     /// The archived header row holds the selection.
     pub archived_header_selected: bool,
+    /// The inbox group starts expanded (session-only).
+    pub inbox_collapsed: bool,
+    /// The inbox header row holds the selection.
+    pub inbox_header_selected: bool,
     /// Every task row paints dim: the read-only archived focus (AC-41).
     pub rows_dim: bool,
 }
@@ -623,6 +627,8 @@ pub enum QueueHitTarget {
     Drawer,
     /// The done drawer's archived group header: selects the row and toggles the group.
     ArchivedHeader,
+    /// The ON DECK inbox group header: selects the row and toggles the group.
+    InboxHeader,
     /// One painted row of the open palette, indexed exactly as
     /// `BoardModel::visible_commands()` orders them, so a click resolves straight to that
     /// command's own intent ( residual: mapped through the model's command list, never
@@ -3457,6 +3463,10 @@ enum ListRow {
     ArchivedHeader {
         line: Line<'static>,
     },
+    /// The ON DECK inbox group header (sticky, selectable, hits map to the toggle).
+    InboxHeader {
+        line: Line<'static>,
+    },
     /// One selectable projects index row (navigation, never a task). The selected
     /// marker is baked into the line.
     ProjectRow {
@@ -3555,6 +3565,15 @@ fn paint_list_row(
             if base_list_interactive {
                 hits.push(
                     QueueHitTarget::ArchivedHeader,
+                    Rect::new(0, y, content_width, 1),
+                );
+            }
+        }
+        ListRow::InboxHeader { line } => {
+            put_line(frame, surface, y, content_width, line.clone());
+            if base_list_interactive {
+                hits.push(
+                    QueueHitTarget::InboxHeader,
                     Rect::new(0, y, content_width, 1),
                 );
             }
@@ -3804,11 +3823,12 @@ fn build_list_rows(
         if rail && matches!(section.kind, SectionKind::Done | SectionKind::Archived) {
             continue;
         }
-        // The archived group paints its own selectable header, dim rows under it.
+        // Inbox and archived paint their own selectable headers, dim rows under them.
         if section.kind == SectionKind::Archived {
             out.push(ListRow::Blank);
             out.push(ListRow::ArchivedHeader {
-                line: paint_archived_header(
+                line: paint_group_header(
+                    "archived",
                     section.count,
                     geo.row_width,
                     model.archived_header_selected,
@@ -3831,6 +3851,38 @@ fn build_list_rows(
                     &mut anchor_last_idx,
                     false,
                     false,
+                    true,
+                );
+            }
+            continue;
+        }
+        if section.kind == SectionKind::Inbox {
+            out.push(ListRow::Blank);
+            out.push(ListRow::InboxHeader {
+                line: paint_group_header(
+                    "inbox",
+                    section.count,
+                    geo.row_width,
+                    model.inbox_header_selected,
+                    model.inbox_collapsed,
+                ),
+            });
+            if model.inbox_header_selected {
+                selected_idx = Some(out.len() - 1);
+            }
+            out.push(ListRow::Blank);
+            if model.inbox_collapsed {
+                continue;
+            }
+            let thread_label = model.thread_labels;
+            for id in section.task_ids.iter().copied() {
+                push_task(
+                    id,
+                    &mut out,
+                    &mut selected_idx,
+                    &mut anchor_last_idx,
+                    false,
+                    thread_label,
                     true,
                 );
             }
@@ -4177,9 +4229,10 @@ fn paint_rail_row_lines(
 /// Paint one scoped ON DECK thread block label. Headers are presentation-only: their
 /// associated ids stay in the task-only queue stream, so neither keyboard selection nor
 /// mouse hit testing can land on this row.
-/// The archived group's header: `{chevron} archived · {n}` with no rule. Selected,
+/// A collapsible group header: `{chevron} {word} · {n}` with no rule. Selected,
 /// the word is bold and the rest dim; unselected, everything is dim. Never reverse.
-fn paint_archived_header(
+fn paint_group_header(
+    word: &'static str,
     count: usize,
     width: u16,
     selected: bool,
@@ -4191,7 +4244,7 @@ fn paint_archived_header(
     bound_line(
         Line::from(vec![
             Span::styled(format!(" {chevron} "), rest_style),
-            Span::styled("archived".to_string(), word_style),
+            Span::styled(word.to_string(), word_style),
             Span::styled(format!(" \u{b7} {count}"), rest_style),
         ]),
         width as usize,
@@ -4231,6 +4284,7 @@ fn section_title(section: &QueueSection, surface: BoardSurface) -> String {
         SectionKind::InMotion => "IN MOTION".to_string(),
         SectionKind::Done => "DONE".to_string(),
         SectionKind::Archived => "archived".to_string(),
+        SectionKind::Inbox => "inbox".to_string(),
         SectionKind::OnDeck if surface == BoardSurface::Desk && section.project_label.is_none() => {
             "ON DECK \u{b7} desk".to_string()
         }
@@ -4857,6 +4911,8 @@ mod tests {
             follow_list: false,
             archived_collapsed: true,
             archived_header_selected: false,
+            inbox_collapsed: false,
+            inbox_header_selected: false,
             rows_dim: false,
         };
         let (line, hits) = paint_selector_row(&model, &tier::resolve(40, 24));
@@ -4913,6 +4969,8 @@ mod tests {
             follow_list: false,
             archived_collapsed: true,
             archived_header_selected: false,
+            inbox_collapsed: false,
+            inbox_header_selected: false,
             rows_dim: false,
         }
     }
@@ -5032,6 +5090,8 @@ mod tests {
             follow_list: false,
             archived_collapsed: true,
             archived_header_selected: false,
+            inbox_collapsed: false,
+            inbox_header_selected: false,
             rows_dim: false,
         };
         // The status row paints the selected path, escaped.

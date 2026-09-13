@@ -349,6 +349,8 @@ fn fixture_model_on_tab<'a>(
         follow_list: true,
         archived_collapsed: true,
         archived_header_selected: false,
+        inbox_collapsed: false,
+        inbox_header_selected: false,
         rows_dim: false,
     }
 }
@@ -3343,7 +3345,7 @@ fn board_list_wraps_a_long_title_onto_a_continuation_row() {
     let rows = board_rows(&model, 80, 24);
     // The head row keeps the classic shape (gutter + glyph + title head).
     assert!(
-        rows.iter().any(|row| row.contains("○ alpha")),
+        rows.iter().any(|row| row.contains("◌ alpha")),
         "head row must keep the glyph + title shape:\n{}",
         rows.join("\n")
     );
@@ -3360,7 +3362,7 @@ fn board_list_wraps_a_long_title_onto_a_continuation_row() {
     // own tier budget is a different surface).
     let head = rows
         .iter()
-        .find(|row| row.contains("○ alpha"))
+        .find(|row| row.contains("◌ alpha"))
         .expect("head row");
     assert!(
         !head.contains('…') && !continuation.contains('…'),
@@ -3491,7 +3493,8 @@ fn notes_edit_arrows_move_across_logical_and_wrapped_rows() {
 #[test]
 fn task_page_caps_a_wrapped_header_inside_the_page_body() {
     let mut domain = DomainState::new();
-    let title = "word ".repeat(120);
+    // A whitespace-free title fills each wrap row, so the capped tail needs an ellipsis.
+    let title = "word".repeat(120);
     domain
         .create(
             &title,
@@ -3523,7 +3526,7 @@ fn task_page_caps_a_wrapped_header_inside_the_page_body() {
     );
     // The header itself is bounded and honest about what it hides.
     assert!(
-        (1..7).any(|y| rows[y].contains("wor…")),
+        (1..7).any(|y| rows[y].contains('…')),
         "a capped header names the rows it cannot show:\n{}",
         rows.join("\n")
     );
@@ -3574,7 +3577,8 @@ fn step_cursor_moves_do_not_rescroll_the_page_when_steps_fit() {
 #[test]
 fn edit_title_caret_parks_at_the_capped_headers_end() {
     let mut domain = DomainState::new();
-    let title = "word ".repeat(120);
+    // A whitespace-free title fills each wrap row, so the capped tail needs an ellipsis.
+    let title = "word".repeat(120);
     domain
         .create(
             &title,
@@ -3600,7 +3604,7 @@ fn edit_title_caret_parks_at_the_capped_headers_end() {
     // that row's past-end column, immediately after the "…".
     let last_header = (1..7)
         .rev()
-        .find(|&y| rows[y].contains("wor…"))
+        .find(|&y| rows[y].starts_with("    ") && rows[y].contains('…'))
         .expect("capped header row");
     let cursor = terminal.backend().cursor_position();
     assert_eq!(
@@ -4036,7 +4040,7 @@ fn expanded_archived_rows_are_dim_keep_glyph_and_identifier_and_are_selectable_a
         row_text.contains("T2"),
         "identifier prefix paints: {row_text}"
     );
-    assert!(row_text.contains('○'), "status glyph is kept: {row_text}");
+    assert!(row_text.contains('◌'), "status glyph is kept: {row_text}");
     for x in 0..80 {
         let symbol = buffer[(x, row_y)].symbol();
         if symbol == " " {
@@ -4072,7 +4076,7 @@ fn expanded_archived_rows_are_dim_keep_glyph_and_identifier_and_are_selectable_a
 #[test]
 fn task_page_header_slot_reads_archived_for_an_archived_task() {
     let mut domain = DomainState::new();
-    domain
+    let live_id = domain
         .create(
             "live row task",
             None,
@@ -4138,11 +4142,22 @@ fn task_page_header_slot_reads_archived_for_an_archived_task() {
 
     // An unarchived task still shows its status word.
     let mut model = BoardModel::from_domain(&domain, None);
-    apply_intent(&mut domain, &mut model, BoardIntent::SelectIndex(0), None).expect("select live");
+    let live_index = model
+        .visible_ids()
+        .iter()
+        .position(|&visible| visible == live_id)
+        .expect("live task visible");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::SelectIndex(live_index),
+        None,
+    )
+    .expect("select live");
     apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
     let rows = board_rows(&model, 80, 24);
     assert!(
-        rows.iter().any(|row| row.contains("ready")),
+        rows.iter().any(|row| row.contains("open")),
         "unarchived task keeps its status word:\n{}",
         rows.join("\n")
     );
@@ -5072,7 +5087,7 @@ fn real_thread_picker_paints_query_and_options() {
 fn projects_index_paints_aligned_counts_search_hint_and_selected_path() {
     let mut domain = DomainState::new();
     for path in ["/one/alpha", "/two/alpha"] {
-        domain
+        let id = domain
             .create(
                 "project task",
                 None,
@@ -5081,6 +5096,7 @@ fn projects_index_paints_aligned_counts_search_hint_and_selected_path() {
                 None,
             )
             .expect("task");
+        domain.set_status(id, HumanStatus::Ready).expect("ready");
     }
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from("/one/alpha")));
     apply_intent(

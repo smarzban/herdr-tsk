@@ -1178,7 +1178,8 @@ pub fn apply_board_intent_with_save_recovery(
             | BoardIntent::PageWheelScrollUp
             | BoardIntent::PageWheelScrollDown
             | BoardIntent::ToggleDoneDrawer
-            | BoardIntent::ToggleArchivedGroup => return apply_intent(domain, model, intent, None),
+            | BoardIntent::ToggleArchivedGroup
+            | BoardIntent::ToggleInboxGroup => return apply_intent(domain, model, intent, None),
             _ => {
                 model.begin_save_recovery(recovery.error().unwrap_or("save failed"));
                 return Ok(IntentOutcome::None);
@@ -2656,7 +2657,8 @@ mod tests {
                 )
                 .unwrap();
             let mut model = BoardModel::from_domain(&domain, None);
-            let id = model.visible_ids()[1];
+            // The expanded inbox heading is a selectable chrome row before the two tasks.
+            let id = model.visible_ids()[2];
             let mut reflow_click = ReflowRowClick::default();
             let area = Rect::new(0, 0, width, 24);
             let hits = board_hit_map(area, &model);

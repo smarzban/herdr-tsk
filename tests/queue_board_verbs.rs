@@ -60,7 +60,7 @@ fn board_with_task(title: &str, status: HumanStatus) -> (DomainState, BoardModel
             None,
         )
         .expect("create");
-    if status != HumanStatus::Ready {
+    if status != HumanStatus::Open {
         domain.set_status(id, status).expect("status");
     }
     let model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
@@ -109,7 +109,7 @@ fn space_on_done_reopens() {
     let outcome =
         apply_intent(&mut domain, &mut model, BoardIntent::PrimaryVerb, None).expect("primary");
     assert_eq!(outcome, IntentOutcome::Persist);
-    assert_eq!(domain.get(id).expect("task").status, HumanStatus::Ready);
+    assert_eq!(domain.get(id).expect("task").status, HumanStatus::Open);
 }
 
 #[test]
@@ -147,7 +147,7 @@ fn d_completes_non_done_and_o_reopens_done() {
     }
     let outcome = apply_intent(&mut domain, &mut model, BoardIntent::Reopen, None).expect("reopen");
     assert_eq!(outcome, IntentOutcome::Persist);
-    assert_eq!(domain.get(id).expect("task").status, HumanStatus::Ready);
+    assert_eq!(domain.get(id).expect("task").status, HumanStatus::Open);
 
     assert!(board_intent_may_persist(&BoardIntent::Complete));
     assert!(board_intent_may_persist(&BoardIntent::Reopen));
@@ -566,7 +566,7 @@ fn palette_lists_exactly_m1_commands_for_selection_filters_by_subsequence_and_di
         resolve_board_command(&mut model, BoardIntent::ConfirmCommand).expect("reopen cmd");
     assert_eq!(via_palette, BoardIntent::Reopen);
     apply_intent(&mut domain, &mut model, via_palette, None).expect("reopen");
-    assert_eq!(domain.get(id).expect("task").status, HumanStatus::Ready);
+    assert_eq!(domain.get(id).expect("task").status, HumanStatus::Open);
 
     // Direct key route lands on the same intent.
     assert_eq!(
@@ -1158,7 +1158,12 @@ fn project_scope_chip_and_dropdown_filter_all_visible_sections_matching_ac5() {
     assert_eq!(other_view.counts.done, 1);
     assert_eq!(
         model.visible_ids(),
-        vec![motion_other, deck_other, done_other],
+        vec![
+            motion_other,
+            tsk_tui::ui::queue::INBOX_HEADER_ROW_ID,
+            deck_other,
+            done_other,
+        ],
         "a project scope leaves no task from another scope visible"
     );
     assert!(!model.visible_ids().contains(&done_app));
@@ -1538,7 +1543,7 @@ fn page_verbs_act_on_the_page_task_and_the_page_stays_open() {
     // `o` reopens it, still from the page.
     let reopen = map_key(BoardInputMode::TaskPage, ctrl(KeyCode::Char('o'))).expect("o");
     apply_intent(&mut domain, &mut model, reopen, None).expect("reopen");
-    assert_eq!(domain.get(id).expect("task").status, HumanStatus::Ready);
+    assert_eq!(domain.get(id).expect("task").status, HumanStatus::Open);
     assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
 
     // `b` blocks, `b` again unblocks.
@@ -2253,7 +2258,7 @@ fn ctrl_d_with_a_step_selected_completes_the_task_and_enter_toggles_the_step() {
     );
     assert_eq!(
         task.status,
-        HumanStatus::Ready,
+        HumanStatus::Open,
         "toggling a step never changes human status"
     );
     assert_ne!(
@@ -3631,7 +3636,18 @@ fn ctrl_f_archives_the_selected_task_keeping_status_and_pushing_no_undo() {
     );
 
     // Select the remaining row and undo: nothing about A may change (AC-7).
-    apply_intent(&mut domain, &mut model, BoardIntent::SelectIndex(0), None).expect("select b");
+    let b_index = model
+        .visible_ids()
+        .iter()
+        .position(|&visible| visible == b)
+        .expect("remaining row visible");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::SelectIndex(b_index),
+        None,
+    )
+    .expect("select b");
     assert_eq!(model.selected_id(), Some(b));
     apply_intent(&mut domain, &mut model, BoardIntent::Undo, None).expect("undo");
     let task_a = domain.get(a).expect("task a");
@@ -3642,7 +3658,7 @@ fn ctrl_f_archives_the_selected_task_keeping_status_and_pushing_no_undo() {
     assert_eq!(task_a.status, HumanStatus::Review);
     assert_eq!(
         domain.get(b).expect("task b").status,
-        HumanStatus::Ready,
+        HumanStatus::Open,
         "the empty-stack undo is a no-op"
     );
 }
@@ -3734,7 +3750,7 @@ fn ctrl_u_on_an_archived_selection_unarchives_without_popping_the_undo_stack() {
     apply_intent(&mut domain, &mut model, BoardIntent::Undo, None).expect("undo k");
     assert_eq!(
         domain.get(k).expect("k").status,
-        HumanStatus::Ready,
+        HumanStatus::Open,
         "the seeded undo entry survived the unarchive (stack length unchanged)"
     );
 }

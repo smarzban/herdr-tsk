@@ -112,7 +112,7 @@ fn board_with_task(title: &str, status: HumanStatus) -> (DomainState, BoardModel
             None,
         )
         .expect("create task");
-    if status != HumanStatus::Ready {
+    if status != HumanStatus::Open {
         domain.set_status(id, status).expect("set status");
     }
     let model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
@@ -795,8 +795,9 @@ fn click_and_wheel_match_keyboard_effects_for_each_control() {
     // Each board created its own tasks (different uuids), so compare the *shape* of what
     // is now visible -- one ON DECK task, the one scoped to the chosen project -- rather
     // than exact ids.
-    assert_eq!(model_key.visible_ids().len(), 1);
-    assert_eq!(model_mouse.visible_ids().len(), 1);
+    // The selected project contains one open task plus its inbox heading.
+    assert_eq!(model_key.visible_ids().len(), 2);
+    assert_eq!(model_mouse.visible_ids().len(), 2);
 }
 
 /// non-regression: the standalone quick-capture popup's mouse paths are untouched by
@@ -1022,7 +1023,7 @@ fn click_a_task_row_selects_its_index_on_a_scrolled_list() {
     assert!(
         hits.regions
             .iter()
-            .all(|hit| !matches!(hit.target, QueueHitTarget::Task(id) if id == visible[0])),
+            .all(|hit| !matches!(hit.target, QueueHitTarget::Task(id) if id == visible[1])),
         "the deck must actually be long enough to scroll task 0 out of the viewport: {hits:?} \
          (geo={geo:?})"
     );
@@ -1053,7 +1054,8 @@ fn stepping_selection_past_the_fold_with_select_next_keeps_the_selected_row_pain
     let visible = model.visible_ids();
     let last = visible.len() - 1;
 
-    for step in 0..last {
+    // The inbox heading is visible[0], and the model initially selects task 0 at visible[1].
+    for step in 0..last.saturating_sub(1) {
         apply_intent(&mut domain, &mut model, BoardIntent::SelectNext, None).expect("select next");
         let selected = model
             .selected_id()
@@ -2544,8 +2546,8 @@ fn the_modal_cards_copyable_rects_exclude_its_own_border_and_footer() {
 #[test]
 fn list_scrollbar_click_jumps_viewport_without_changing_selection() {
     let (mut domain, mut model) = deck_of(40);
-    let first = model.visible_ids()[0];
-    assert_eq!(model.selected_id(), Some(first));
+    let first = model.selected_id().expect("the first task is selected");
+    assert_eq!(model.visible_ids()[1], first);
     assert_eq!(model.detail_open(), None);
 
     let hits = board_hit_map(STANDARD, &model);
@@ -2608,8 +2610,8 @@ fn row_click_selects_without_jumping_the_viewport() {
 fn list_scrollbar_still_moves_the_viewport_while_peek_is_open() {
     let (mut domain, mut model) = deck_of(40);
     let _ = page_rows(&model);
-    apply_intent(&mut domain, &mut model, BoardIntent::SelectIndex(0), None)
-        .expect("peek first row");
+    apply_intent(&mut domain, &mut model, BoardIntent::SelectIndex(1), None)
+        .expect("peek first task row");
     assert!(model.detail_open().is_some());
     let before = page_rows(&model);
     let hits = board_hit_map(STANDARD, &model);

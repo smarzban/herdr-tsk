@@ -46,6 +46,8 @@ pub enum SectionKind {
     NeedsYou,
     InMotion,
     OnDeck,
+    /// Open tasks under ON DECK (header + dim rows, collapsible).
+    Inbox,
     Done,
     /// The done drawer's archived group (header + dim rows, collapsible).
     Archived,
@@ -54,6 +56,10 @@ pub enum SectionKind {
 /// Row id the archived group's header occupies in `visible_task_ids`.
 /// Chrome, not a task: `BoardModel::selected_id()` hides it from verbs.
 pub const ARCHIVED_HEADER_ROW_ID: Uuid = Uuid::from_u128(0xFFFF_FFFF_FFFF_FFFF_0000_0000_0000_0001);
+
+/// Row id the inbox group's header occupies in `visible_task_ids`.
+/// Chrome, not a task: `BoardModel::selected_id()` hides it from verbs.
+pub const INBOX_HEADER_ROW_ID: Uuid = Uuid::from_u128(0xFFFF_FFFF_FFFF_FFFF_0000_0000_0000_0002);
 
 /// Session thread filter for the project board. It narrows every status section,
 /// done drawer included; `All` is the unfiltered board.
@@ -238,20 +244,31 @@ fn task_owned_by_archived_project(
     }
 }
 
-/// Task ids visible for selection, honoring the done drawer's archived group collapse.
-pub fn visible_task_ids(view: &QueueView, archived_collapsed: bool) -> Vec<Uuid> {
+/// Task ids visible for selection, honoring inbox and archived group collapse.
+pub fn visible_task_ids(
+    view: &QueueView,
+    archived_collapsed: bool,
+    inbox_collapsed: bool,
+) -> Vec<Uuid> {
     let mut out = Vec::new();
     for section in &view.sections {
-        if section.kind == SectionKind::Archived {
-            // The archived header is always selectable so Enter can toggle it;
-            // its rows paint only when the group is expanded.
-            out.push(ARCHIVED_HEADER_ROW_ID);
-            if !archived_collapsed {
-                out.extend(section.task_ids.iter().copied());
+        match section.kind {
+            SectionKind::Archived => {
+                // The archived header is always selectable so Enter can toggle it;
+                // its rows paint only when the group is expanded.
+                out.push(ARCHIVED_HEADER_ROW_ID);
+                if !archived_collapsed {
+                    out.extend(section.task_ids.iter().copied());
+                }
             }
-            continue;
+            SectionKind::Inbox => {
+                out.push(INBOX_HEADER_ROW_ID);
+                if !inbox_collapsed {
+                    out.extend(section.task_ids.iter().copied());
+                }
+            }
+            _ => out.extend(section.task_ids.iter().copied()),
         }
-        out.extend(section.task_ids.iter().copied());
     }
     out
 }
@@ -566,10 +583,12 @@ fn query_project_focus(
 
     // An empty board (or a filter that hides everything) keeps one hinted section, so
     // the project board always answers with an add affordance instead of a bare pane.
-    if !sections
-        .iter()
-        .any(|section| section.kind != SectionKind::Done && section.kind != SectionKind::Archived)
-    {
+    if !sections.iter().any(|section| {
+        !matches!(
+            section.kind,
+            SectionKind::Done | SectionKind::Archived | SectionKind::Inbox
+        )
+    }) {
         sections.push(QueueSection {
             kind: SectionKind::OnDeck,
             project_label: Some(label),
@@ -670,24 +689,39 @@ fn push_needs_you(sections: &mut Vec<QueueSection>, need: &[&Task]) {
 }
 
 /// Keep an empty desk/ON DECK header only when NEEDS YOU is also empty.
+/// Ready rows sit on ON DECK; open rows follow under a collapsible inbox heading.
 fn push_deck(
     sections: &mut Vec<QueueSection>,
     project_label: Option<String>,
-    ready: &[&Task],
+    deck: &[&Task],
     need: &[&Task],
 ) {
-    if ready.is_empty() && !need.is_empty() {
+    let mut ready: Vec<&Task> = deck
+        .iter()
+        .copied()
+        .filter(|task| task.status == HumanStatus::Ready)
+        .collect();
+    let mut inbox: Vec<&Task> = deck
+        .iter()
+        .copied()
+        .filter(|task| task.status == HumanStatus::Open)
+        .collect();
+    sort_ready_by_pick_asc(&mut ready);
+    sort_by_created_asc(&mut inbox);
+    if ready.is_empty() && inbox.is_empty() && !need.is_empty() {
         return;
     }
-    let task_ids: Vec<Uuid> = ready.iter().map(|t| t.id).collect();
-    let count = task_ids.len();
+    let count = ready.len() + inbox.len();
     sections.push(QueueSection {
         kind: SectionKind::OnDeck,
         project_label,
-        task_ids,
+        task_ids: ready.iter().map(|task| task.id).collect(),
         count,
         empty_hint: count == 0,
     });
+    if !inbox.is_empty() {
+        sections.push(section_from(SectionKind::Inbox, None, &inbox));
+    }
 }
 
 /// Whether a task belongs to the project at `path`, tolerating the same directory
@@ -703,10 +737,11 @@ fn task_matches_scope(task: &Task, path: &Path, identities: &PathIdentityCache) 
 
 /// Section ordering rule. NEEDS YOU, IN MOTION, DONE and ARCHIVED put the most
 /// recent status change first (`status_changed_at`: the last `StatusSet`,
-/// `Completed` or `Reopened` event, falling back to `created_at`); ON DECK is a
-/// FIFO backlog, oldest `created_at` first. Plain edits, step changes, archive
-/// and restore never reorder a section. Ties break by `created_at` then `id` so
-/// the order is total and stable across reloads.
+/// `Completed` or `Reopened` event, falling back to `created_at`). Ready rows on
+/// ON DECK are oldest pick first (`status_changed_at` ascending). Inbox (`open`)
+/// stays FIFO by `created_at`. Plain edits, step changes, archive and restore
+/// never reorder a section. Ties break by `created_at` then `id` so the order is
+/// total and stable across reloads.
 fn sort_by_status_change_desc(tasks: &mut [&Task]) {
     tasks.sort_by(|a, b| {
         b.status_changed_at()
@@ -723,6 +758,17 @@ fn sort_by_created_asc(tasks: &mut [&Task]) {
     tasks.sort_by(|a, b| {
         b.is_notice()
             .cmp(&a.is_notice())
+            .then_with(|| a.created_at.cmp(&b.created_at))
+            .then_with(|| a.id.cmp(&b.id))
+    });
+}
+
+/// Ready picks: oldest `status_changed_at` first. Notices still lead.
+fn sort_ready_by_pick_asc(tasks: &mut [&Task]) {
+    tasks.sort_by(|a, b| {
+        b.is_notice()
+            .cmp(&a.is_notice())
+            .then_with(|| a.status_changed_at().cmp(&b.status_changed_at()))
             .then_with(|| a.created_at.cmp(&b.created_at))
             .then_with(|| a.id.cmp(&b.id))
     });
@@ -1676,7 +1722,7 @@ mod tests {
         );
 
         // No archived tasks: the drawer paints DONE rows only.
-        let visible = visible_task_ids(&view, false);
+        let visible = visible_task_ids(&view, false, false);
         assert_eq!(
             visible,
             vec![Uuid::from_u128(1), Uuid::from_u128(2)],
@@ -1698,11 +1744,11 @@ mod tests {
             true,
             &ThreadFilter::All,
         );
-        let expanded = visible_task_ids(&view, false);
+        let expanded = visible_task_ids(&view, false, false);
         assert!(
             expanded.contains(&ARCHIVED_HEADER_ROW_ID) && expanded.contains(&Uuid::from_u128(3))
         );
-        let collapsed = visible_task_ids(&view, true);
+        let collapsed = visible_task_ids(&view, true, false);
         assert_eq!(
             collapsed,
             vec![
@@ -1712,5 +1758,113 @@ mod tests {
             ],
             "the collapsed archived group paints only its header"
         );
+    }
+
+    #[test]
+    fn on_deck_puts_ready_picks_above_inbox_open_rows() {
+        let tasks = vec![
+            with_status_event(
+                task(1, HumanStatus::Ready, TaskScope::Global, false, 10),
+                TaskEventKind::StatusSet,
+                80,
+            ),
+            with_status_event(
+                task(2, HumanStatus::Ready, TaskScope::Global, false, 20),
+                TaskEventKind::StatusSet,
+                40,
+            ),
+            task(3, HumanStatus::Open, TaskScope::Global, false, 30),
+            task(4, HumanStatus::Open, TaskScope::Global, false, 5),
+        ];
+        let view = query_lens(&tasks, None, BoardLens::Desk, false);
+        assert_eq!(
+            section_ids(&view, SectionKind::OnDeck),
+            vec![Uuid::from_u128(2), Uuid::from_u128(1)],
+            "ready rows are oldest pick first"
+        );
+        assert_eq!(
+            section_ids(&view, SectionKind::Inbox),
+            vec![Uuid::from_u128(4), Uuid::from_u128(3)],
+            "inbox is oldest created first"
+        );
+        let deck = view
+            .sections
+            .iter()
+            .find(|section| section.kind == SectionKind::OnDeck)
+            .expect("on deck");
+        assert_eq!(deck.count, 4, "ON DECK totals ready plus open");
+    }
+
+    #[test]
+    fn inbox_heading_is_absent_without_open_and_present_without_ready() {
+        let ready_only = vec![task(1, HumanStatus::Ready, TaskScope::Global, false, 10)];
+        let ready_view = query_lens(&ready_only, None, BoardLens::Desk, false);
+        assert!(
+            ready_view
+                .sections
+                .iter()
+                .all(|section| section.kind != SectionKind::Inbox),
+            "no open tasks means no inbox heading"
+        );
+
+        let open_only = vec![task(2, HumanStatus::Open, TaskScope::Global, false, 10)];
+        let open_view = query_lens(&open_only, None, BoardLens::Desk, false);
+        let deck = open_view
+            .sections
+            .iter()
+            .find(|section| section.kind == SectionKind::OnDeck)
+            .expect("on deck still paints");
+        assert!(deck.task_ids.is_empty());
+        assert_eq!(deck.count, 1);
+        assert!(!deck.empty_hint);
+        assert_eq!(
+            section_ids(&open_view, SectionKind::Inbox),
+            vec![Uuid::from_u128(2)]
+        );
+    }
+
+    #[test]
+    fn folded_inbox_hides_open_rows() {
+        let tasks = vec![
+            task(1, HumanStatus::Ready, TaskScope::Global, false, 10),
+            task(2, HumanStatus::Open, TaskScope::Global, false, 20),
+        ];
+        let view = query_lens(&tasks, None, BoardLens::Desk, false);
+        let expanded = visible_task_ids(&view, false, false);
+        assert_eq!(
+            expanded,
+            vec![Uuid::from_u128(1), INBOX_HEADER_ROW_ID, Uuid::from_u128(2)]
+        );
+        let collapsed = visible_task_ids(&view, false, true);
+        assert_eq!(
+            collapsed,
+            vec![Uuid::from_u128(1), INBOX_HEADER_ROW_ID],
+            "a folded inbox paints only its heading"
+        );
+        assert!(
+            !collapsed.contains(&Uuid::from_u128(2)),
+            "selection cannot rest on a folded inbox row"
+        );
+    }
+
+    #[test]
+    fn desk_on_deck_excludes_project_ready_and_open() {
+        let tasks = vec![
+            task(1, HumanStatus::Ready, TaskScope::Global, false, 10),
+            task(2, HumanStatus::Open, TaskScope::Global, false, 20),
+            task(3, HumanStatus::Ready, project("/repos/a"), false, 30),
+            task(4, HumanStatus::Open, project("/repos/a"), false, 40),
+        ];
+        let view = query_lens(&tasks, None, BoardLens::Desk, false);
+        assert_eq!(
+            section_ids(&view, SectionKind::OnDeck),
+            vec![Uuid::from_u128(1)]
+        );
+        assert_eq!(
+            section_ids(&view, SectionKind::Inbox),
+            vec![Uuid::from_u128(2)]
+        );
+        assert!(!all_listed_ids(&view).contains(&Uuid::from_u128(3)));
+        assert!(!all_listed_ids(&view).contains(&Uuid::from_u128(4)));
     }
 }

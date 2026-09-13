@@ -675,6 +675,8 @@ pub struct BoardModel {
     pub(super) drawer_open: bool,
     /// The done drawer's archived group starts collapsed on every launch. Session-only.
     pub(super) archived_collapsed: bool,
+    /// The ON DECK inbox group starts expanded. Session-only.
+    pub(super) inbox_collapsed: bool,
     /// The archived project the launch card names, while the card is up.
     pub(super) launch_card: Option<PathBuf>,
     /// The launch card is shown at most once per session, whichever choice was made.
@@ -802,6 +804,7 @@ impl BoardModel {
             list_picker: None,
             drawer_open: false,
             archived_collapsed: true,
+            inbox_collapsed: false,
             launch_card: None,
             launch_card_shown: false,
             session_default_scope: None,
@@ -1937,9 +1940,8 @@ impl BoardModel {
         self.list_picker = None;
     }
 
-    /// Collapse (or reopen) the done drawer's archived group with Ctrl+G. The index
-    /// and the project board have no collapsible task groups of their own; the drawer's
-    /// archived group is the one group the chord still answers (AC-38).
+    /// Fold the group `g` addresses: archived while the drawer is open and that
+    /// group is painted, otherwise inbox when it is painted.
     pub(super) fn toggle_all_groups(&mut self) -> bool {
         let view = self.queue_view();
         let archived_joins = self.drawer_open
@@ -1949,10 +1951,17 @@ impl BoardModel {
                 .any(|section| section.kind == SectionKind::Archived);
         if archived_joins {
             self.archived_collapsed = !self.archived_collapsed;
-            true
-        } else {
-            false
+            return true;
         }
+        if view
+            .sections
+            .iter()
+            .any(|section| section.kind == SectionKind::Inbox)
+        {
+            self.inbox_collapsed = !self.inbox_collapsed;
+            return true;
+        }
+        false
     }
 
     /// Whether the done drawer is open (session-only).
@@ -1963,6 +1972,24 @@ impl BoardModel {
     /// Toggle the archived group's collapse. Session-only; never persisted.
     pub(super) fn toggle_archived_collapsed(&mut self) {
         self.archived_collapsed = !self.archived_collapsed;
+    }
+
+    /// Toggle the inbox group's collapse. Session-only; never persisted.
+    pub(super) fn toggle_inbox_collapsed(&mut self) {
+        self.inbox_collapsed = !self.inbox_collapsed;
+    }
+
+    /// Whether the inbox group's header row holds the selection.
+    pub fn inbox_header_selected(&self) -> bool {
+        self.selection_id == Some(queue::INBOX_HEADER_ROW_ID)
+    }
+
+    /// Pin the selection onto the inbox header row (chrome, not a task).
+    pub(super) fn select_inbox_header(&mut self) -> bool {
+        self.retarget_selection(
+            Some(queue::INBOX_HEADER_ROW_ID),
+            SelectionRetarget::Explicit,
+        )
     }
 
     /// Whether the archived group's header row holds the selection.
@@ -1990,7 +2017,11 @@ impl BoardModel {
 
     /// Visible task ids from the queue section query (flat section order).
     pub fn visible_ids(&self) -> Vec<Uuid> {
-        visible_task_ids(&self.queue_view(), self.archived_collapsed)
+        visible_task_ids(
+            &self.queue_view(),
+            self.archived_collapsed,
+            self.inbox_collapsed,
+        )
     }
 
     /// Visible tasks in queue section order.
@@ -2007,10 +2038,13 @@ impl BoardModel {
         self.visible_ids().iter().position(|&row| row == id)
     }
 
-    /// Selected task id, if any. The archived header row is chrome, not a task:
-    /// with it selected every task verb refuses with `select a task first`.
+    /// Selected task id, if any. Header rows are chrome, not a task: with one
+    /// selected every task verb refuses with `select a task first`.
     pub fn selected_id(&self) -> Option<Uuid> {
-        if self.selection_id == Some(queue::ARCHIVED_HEADER_ROW_ID) {
+        if matches!(
+            self.selection_id,
+            Some(queue::ARCHIVED_HEADER_ROW_ID) | Some(queue::INBOX_HEADER_ROW_ID)
+        ) {
             None
         } else {
             self.selection_id
@@ -2830,6 +2864,7 @@ impl BoardModel {
             SectionKind::NeedsYou,
             SectionKind::InMotion,
             SectionKind::OnDeck,
+            SectionKind::Inbox,
         ] {
             if let Some(id) = view
                 .sections
@@ -2843,7 +2878,19 @@ impl BoardModel {
                 return;
             }
         }
-        self.retarget_selection(None, SelectionRetarget::Reanchor);
+        if view
+            .sections
+            .iter()
+            .any(|section| section.kind == SectionKind::Inbox)
+            && self.inbox_collapsed
+        {
+            self.retarget_selection(
+                Some(queue::INBOX_HEADER_ROW_ID),
+                SelectionRetarget::Reanchor,
+            );
+        } else {
+            self.retarget_selection(None, SelectionRetarget::Reanchor);
+        }
         self.follow_list.set(true);
     }
 
@@ -2898,6 +2945,76 @@ impl BoardModel {
             self.close_detail();
         }
         let requested = selection::reanchor(previous, previous_visible, &new_visible);
+        // Group headers are selectable chrome, but when a task leaves the view and a
+        // real task survives, keep the selection on that task instead of landing on
+        // the inbox/archived heading merely because it was nearest by row index.
+        let requested = if let (Some(previous), Some(candidate)) = (previous, requested) {
+            let prior_was_task = !matches!(
+                previous,
+                queue::ARCHIVED_HEADER_ROW_ID | queue::INBOX_HEADER_ROW_ID
+            );
+            let candidate_is_header = matches!(
+                candidate,
+                queue::ARCHIVED_HEADER_ROW_ID | queue::INBOX_HEADER_ROW_ID
+            );
+            if prior_was_task
+                && candidate_is_header
+                && !new_visible.iter().all(|id| {
+                    matches!(
+                        *id,
+                        queue::ARCHIVED_HEADER_ROW_ID | queue::INBOX_HEADER_ROW_ID
+                    )
+                })
+            {
+                let nearest_task = previous_visible
+                    .iter()
+                    .position(|&id| id == previous)
+                    .and_then(|index| {
+                        (1..=index.max(previous_visible.len().saturating_sub(index + 1))).find_map(
+                            |distance| {
+                                let before = index
+                                    .checked_sub(distance)
+                                    .and_then(|i| previous_visible.get(i))
+                                    .copied()
+                                    .filter(|id| {
+                                        !matches!(
+                                            *id,
+                                            queue::ARCHIVED_HEADER_ROW_ID
+                                                | queue::INBOX_HEADER_ROW_ID
+                                        )
+                                    })
+                                    .filter(|id| new_visible.contains(id));
+                                before.or_else(|| {
+                                    previous_visible
+                                        .get(index + distance)
+                                        .copied()
+                                        .filter(|id| {
+                                            !matches!(
+                                                *id,
+                                                queue::ARCHIVED_HEADER_ROW_ID
+                                                    | queue::INBOX_HEADER_ROW_ID
+                                            )
+                                        })
+                                        .filter(|id| new_visible.contains(id))
+                                })
+                            },
+                        )
+                    })
+                    .or_else(|| {
+                        new_visible.iter().copied().find(|id| {
+                            !matches!(
+                                *id,
+                                queue::ARCHIVED_HEADER_ROW_ID | queue::INBOX_HEADER_ROW_ID
+                            )
+                        })
+                    });
+                nearest_task.or(Some(candidate))
+            } else {
+                Some(candidate)
+            }
+        } else {
+            requested
+        };
         if !self.retarget_selection(requested, SelectionRetarget::Reanchor) {
             return;
         }
@@ -3093,31 +3210,33 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_g_folds_only_the_done_drawers_archived_group() {
+    fn ctrl_g_addresses_inbox_unless_the_open_drawer_has_archived_rows() {
         let mut domain = DomainState::new();
-        create(&mut domain, "task-a", project(REPO_A));
+        let task_a = create(&mut domain, "task-a", project(REPO_A));
         create(&mut domain, "task-b", project(REPO_B));
 
         let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(REPO_A)));
-        // Drawer closed: no group answers the chord (the destinations have no
-        // collapsible task groups anymore).
-        assert!(!model.toggle_all_groups());
+        // New tasks are open, so with the drawer closed g folds the inbox.
+        assert!(model.toggle_all_groups());
+        assert!(model.inbox_collapsed);
+        assert!(model.toggle_all_groups());
+        assert!(!model.inbox_collapsed);
 
-        // Drawer open with an archived group: the chord folds it.
+        // An open drawer without archived rows still addresses the inbox.
         model.drawer_open = true;
-        // No archived tasks here, so the archived section never paints.
-        assert!(!model.toggle_all_groups());
+        assert!(model.toggle_all_groups());
+        assert!(model.inbox_collapsed);
+        model.inbox_collapsed = false;
 
-        domain
-            .archive_task(model.selected_id().expect("a selected task"))
-            .expect("archive");
+        domain.archive_task(task_a).expect("archive");
         model.sync_from_domain(&domain);
         model.drawer_open = true;
-        // The archived group starts collapsed; the chord's first press expands it.
+        // The archived group starts collapsed; the open drawer gives it priority.
         assert!(model.toggle_all_groups());
         assert!(!model.archived_collapsed);
         assert!(model.toggle_all_groups());
         assert!(model.archived_collapsed);
+        assert!(!model.inbox_collapsed, "archived takes priority over inbox");
     }
 
     #[test]
@@ -3293,7 +3412,7 @@ mod tests {
         let visible = model.visible_ids();
         assert_eq!(
             visible,
-            vec![a],
+            vec![queue::INBOX_HEADER_ROW_ID, a],
             "the filter narrows the board across statuses"
         );
 
@@ -3302,7 +3421,7 @@ mod tests {
         model.move_list_picker(false);
         let applied = model.confirm_list_picker();
         assert_eq!(applied, Some(ListPickerValue::ThreadAll));
-        assert_eq!(model.visible_ids().len(), 2);
+        assert_eq!(model.visible_ids().len(), 3);
     }
 
     #[test]

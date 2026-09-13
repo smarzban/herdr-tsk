@@ -14,7 +14,7 @@ use crate::ui::capture::{CaptureField, TITLE_REQUIRED_MESSAGE};
 use crate::ui::edit::{flatten_line_breaks, EditBuffer};
 use crate::ui::input::BoardIntent;
 use crate::ui::mouse::BoardPopup;
-use crate::ui::queue::{NavTab, ARCHIVED_HEADER_ROW_ID};
+use crate::ui::queue::{NavTab, ARCHIVED_HEADER_ROW_ID, INBOX_HEADER_ROW_ID};
 use crate::ui::tier::{FocusedSurface, WideStage};
 
 use super::commands::{resolve_board_command, CommandSurface};
@@ -1439,12 +1439,18 @@ fn apply_board_intent(
                 }
                 return Ok(IntentOutcome::None);
             }
-            // Enter on the archived header toggles the group instead of opening a page:
+            // Enter on a group header toggles that group instead of opening a page:
             // the header is chrome, never a task.
             if model.archived_header_selected() {
                 let previous_visible = model.visible_ids();
                 model.toggle_archived_collapsed();
                 model.reanchor_selection(Some(ARCHIVED_HEADER_ROW_ID), &previous_visible);
+                return Ok(IntentOutcome::None);
+            }
+            if model.inbox_header_selected() {
+                let previous_visible = model.visible_ids();
+                model.toggle_inbox_collapsed();
+                model.reanchor_selection(Some(INBOX_HEADER_ROW_ID), &previous_visible);
                 return Ok(IntentOutcome::None);
             }
             // Enter never opens inline step editing. A selected step remains selected in either
@@ -1690,6 +1696,13 @@ fn apply_board_intent(
             model.toggle_archived_collapsed();
             model.select_archived_header();
             model.reanchor_selection(Some(ARCHIVED_HEADER_ROW_ID), &previous_visible);
+            return Ok(IntentOutcome::None);
+        }
+        BoardIntent::ToggleInboxGroup => {
+            let previous_visible = model.visible_ids();
+            model.toggle_inbox_collapsed();
+            model.select_inbox_header();
+            model.reanchor_selection(Some(INBOX_HEADER_ROW_ID), &previous_visible);
             return Ok(IntentOutcome::None);
         }
         BoardIntent::OpenHelp => {

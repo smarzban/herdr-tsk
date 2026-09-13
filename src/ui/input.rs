@@ -333,6 +333,8 @@ pub enum BoardIntent {
     /// Expand/collapse the done drawer's archived group (Enter or click on its header,
     /// which the intent also selects). Session-only. Reducer lands in.
     ToggleArchivedGroup,
+    /// Expand/collapse the ON DECK inbox group (Enter or click on its header).
+    ToggleInboxGroup,
     /// `?` — open the help card. Surface wiring lands in.
     OpenHelp,
     /// `Esc` — layered close. Full layer order lands in.
@@ -512,12 +514,12 @@ const NORMAL_KEYMAP: &[NormalKeyEntry] = &[
         help_label: "done drawer",
         verb: false,
     },
-    // Bare `g` folds the drawer's archived group; inert while the drawer is closed.
+    // Bare `g` folds inbox, or archived while the drawer is open.
     NormalKeyEntry {
         code: KeyCode::Char('g'),
         intent: BoardIntent::ToggleAllGroups,
         help_chord: "g",
-        help_label: "archived group",
+        help_label: "inbox / archived",
         verb: false,
     },
     // The project slot is mouse-clickable; `p` gives the keyboard the same route.
@@ -1662,6 +1664,7 @@ pub fn intent_primary_action(intent: &BoardIntent) -> Option<PrimaryBoardAction>
         | BoardIntent::ListScrollTo(_)
         | BoardIntent::ToggleDoneDrawer
         | BoardIntent::ToggleArchivedGroup
+        | BoardIntent::ToggleInboxGroup
         | BoardIntent::ProjectPickerSwitchTab
         | BoardIntent::SelectPickerTab(_)
         | BoardIntent::LaunchUnarchive
