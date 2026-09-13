@@ -311,6 +311,8 @@ test("task pages and expanded quick-add share the title-entry-only tab ring", as
   await expect(page.locator(".tsk-page-meta")).toContainText(
     /#auth · launchpad · created/,
   );
+  const selectedThread = page.locator('[data-page-field="thread"]');
+  await expect(selectedThread).not.toHaveClass(/dim/);
   const footerColors = await page
     .locator(".tsk-page-meta")
     .evaluate((meta) => [

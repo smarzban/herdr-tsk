@@ -3178,8 +3178,11 @@ fn paint_task_page(
             let selected_width = selected_width.min(width.saturating_sub(selected_x));
             let buffer = frame.buffer_mut();
             for x in selected_x..selected_x.saturating_add(selected_width) {
-                buffer[(surface.x.saturating_add(x), surface.y.saturating_add(y))]
-                    .set_style(style_reverse());
+                buffer[(surface.x.saturating_add(x), surface.y.saturating_add(y))].set_style(
+                    Style::default()
+                        .add_modifier(Modifier::REVERSED)
+                        .remove_modifier(Modifier::DIM),
+                );
             }
         }
         if footer_input_open {

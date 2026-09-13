@@ -730,12 +730,18 @@ fn scope_and_thread_are_selected_controls_with_enter_activation() {
             let _ = draw_board(frame, &model);
         })
         .expect("draw selected Scope");
+    let scope_style = terminal.backend().buffer()[(scope_hit.area.x, scope_hit.area.y)].style();
     assert!(
-        terminal.backend().buffer()[(scope_hit.area.x, scope_hit.area.y)]
+        scope_style.add_modifier.contains(Modifier::REVERSED)
+            && !scope_style.add_modifier.contains(Modifier::DIM),
+        "selected Scope must reverse without retaining dim"
+    );
+    assert!(
+        terminal.backend().buffer()[(scope_hit.area.right() + 3, scope_hit.area.y)]
             .style()
             .add_modifier
-            .contains(Modifier::REVERSED),
-        "selected Scope must be visually distinct"
+            .contains(Modifier::DIM),
+        "the unselected created footer text stays dim"
     );
 
     let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
@@ -776,12 +782,19 @@ fn scope_and_thread_are_selected_controls_with_enter_activation() {
             let _ = draw_board(frame, &model);
         })
         .expect("draw selected Thread");
+    let thread_style =
+        terminal.backend().buffer()[(thread_hit.area.x + 3, thread_hit.area.y)].style();
     assert!(
-        terminal.backend().buffer()[(thread_hit.area.x + 3, thread_hit.area.y)]
+        thread_style.add_modifier.contains(Modifier::REVERSED)
+            && !thread_style.add_modifier.contains(Modifier::DIM),
+        "selected Thread must reverse without retaining dim"
+    );
+    assert!(
+        terminal.backend().buffer()[(scope_hit.area.right() + 3, scope_hit.area.y)]
             .style()
             .add_modifier
-            .contains(Modifier::REVERSED),
-        "selected Thread must be visually distinct"
+            .contains(Modifier::DIM),
+        "the unselected created footer text stays dim"
     );
     assert_eq!(
         map_key(BoardInputMode::SelectThread, enter),
