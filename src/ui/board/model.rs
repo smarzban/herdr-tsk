@@ -806,6 +806,9 @@ pub struct BoardModel {
     pub(super) right_seat: Option<Box<BoardModel>>,
     /// Marks a nested board so its own FullBoard stage still behaves as a narrow live surface.
     pub(super) preview_seat: bool,
+    /// Whether the last app-boundary presentation was wide enough to paint a split frame.
+    /// A parked preview keeps its session while input returns to the painted index.
+    pub(super) frame_wide: Cell<bool>,
 }
 
 /// How an unresolved failed save ended.
@@ -871,6 +874,7 @@ impl BoardModel {
             command_selected: 0,
             right_seat: None,
             preview_seat: false,
+            frame_wide: Cell::new(true),
             mouse_press: None,
             mouse_press_scroll: None,
             list_scroll: Cell::new(0),
@@ -1282,12 +1286,25 @@ impl BoardModel {
 
     /// Whether the projects overview owns a transient preview seat.
     pub(crate) fn projects_preview_active(&self) -> bool {
-        self.projects_overview() && matches!(self.wide_stage, WideStage::Split | WideStage::Rail)
+        self.frame_wide()
+            && self.projects_overview()
+            && matches!(self.wide_stage, WideStage::Split | WideStage::Rail)
+    }
+
+    /// Record whether the app's current frame paints a wide split presentation.
+    /// The stage and right-seat session remain parked when this is false.
+    pub(crate) fn set_frame_wide(&self, wide: bool) {
+        self.frame_wide.set(wide);
+    }
+
+    pub(crate) fn frame_wide(&self) -> bool {
+        self.frame_wide.get()
     }
 
     /// Whether the right project board is the active input seat.
     pub fn project_right_seat_focused(&self) -> bool {
-        self.projects_preview_active()
+        self.frame_wide()
+            && self.projects_overview()
             && matches!(self.wide_stage, WideStage::Rail)
             && self.right_seat.is_some()
     }

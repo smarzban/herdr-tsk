@@ -404,6 +404,8 @@ fn run_board_loop(
             // previous iteration is written before this frame is painted and before the wait
             // can time out into the `continue` below.
             let next = if let Some(event) = take_pending_after_paint(&mut pending_event, || {
+                let area = terminal_area(terminal)?;
+                sync_frame_presentation(area, &model);
                 terminal.draw(|frame| {
                     let hits = draw_board(frame, &model);
                     frame_rows = frame_text_rows(frame.buffer_mut());
@@ -418,6 +420,8 @@ fn run_board_loop(
                     &mut model,
                     || walkthrough.record_dismissed(),
                     |model: &BoardModel| {
+                        let area = terminal_area(terminal)?;
+                        sync_frame_presentation(area, model);
                         terminal
                             .draw(|frame| {
                                 let hits = draw_board(frame, model);
@@ -455,6 +459,11 @@ fn run_board_loop(
                 event::read()?
             };
             reflow_click.observe(&next);
+            let event_area = match &next {
+                Event::Resize(width, height) => Rect::new(0, 0, *width, *height),
+                _ => terminal_area(terminal)?,
+            };
+            sync_frame_presentation(event_area, &model);
             match next {
                 Event::Key(key) if key.kind == KeyEventKind::Press => {
                     // A key while the mouse button is held abandons the deferred click so
@@ -1027,6 +1036,12 @@ pub fn revalidate_board_from_store(
 fn terminal_area(terminal: &DefaultTerminal) -> io::Result<Rect> {
     let size = terminal.size()?;
     Ok(Rect::new(0, 0, size.width, size.height))
+}
+
+fn sync_frame_presentation(area: Rect, model: &BoardModel) {
+    let wide = model.responsive_geometry(area).presentation
+        == crate::ui::tier::ResponsivePresentation::WideSplit;
+    model.set_frame_wide(wide);
 }
 
 /// One board intent plus the persistence baseline it must recover to on a failed save.
@@ -2794,6 +2809,85 @@ mod tests {
         auto_open_projects_preview(wide, &mut model, &BoardIntent::SelectNext);
         assert_eq!(model.wide_stage(), crate::ui::tier::WideStage::Split);
         assert!(model.right_seat().is_some());
+    }
+
+    #[test]
+    fn projects_preview_rail_parks_on_narrow_resize_and_restores_the_seat() {
+        let (mut domain, mut model) = projects_overview_fixture();
+        stage_right(&mut domain, &mut model, 2);
+        let narrow = Rect::new(0, 0, 109, 30);
+        let wide = Rect::new(0, 0, 110, 30);
+        let project = model
+            .right_seat()
+            .and_then(BoardModel::active_project)
+            .map(Path::to_path_buf)
+            .expect("rail project");
+        let selected = model
+            .right_seat()
+            .and_then(BoardModel::selected_id)
+            .expect("rail task selection");
+        assert!(model.project_right_seat_focused());
+
+        sync_frame_presentation(narrow, &model);
+        assert!(!model.project_right_seat_focused());
+        let mode = resolve_board_surface(narrow, &mut model);
+        let next = board_keyboard_intent_for_area(
+            &model,
+            narrow,
+            mode,
+            KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE),
+        )
+        .expect("narrow index key");
+        assert_eq!(next, BoardIntent::SelectNext);
+        apply_intent(&mut domain, &mut model, next, None).expect("move the parked index");
+        assert_eq!(
+            model.projects_cursor(),
+            1,
+            "narrow keys move the painted index"
+        );
+        assert_eq!(
+            model
+                .right_seat()
+                .and_then(BoardModel::active_project)
+                .map(Path::to_path_buf),
+            Some(project.clone()),
+            "narrow index movement keeps the parked seat session"
+        );
+        assert_eq!(
+            model.right_seat().and_then(BoardModel::selected_id),
+            Some(selected)
+        );
+
+        let before = domain.tasks().to_vec();
+        let mode = resolve_board_surface(narrow, &mut model);
+        let complete = board_keyboard_intent_for_area(
+            &model,
+            narrow,
+            mode,
+            KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL),
+        )
+        .expect("narrow verb key");
+        apply_intent(&mut domain, &mut model, complete, None).expect("narrow verb");
+        assert_eq!(
+            domain.tasks(),
+            before,
+            "hidden preview receives no mutation"
+        );
+
+        sync_frame_presentation(wide, &model);
+        assert!(model.project_right_seat_focused());
+        assert_eq!(
+            model.right_seat().and_then(BoardModel::selected_id),
+            Some(selected)
+        );
+        assert_eq!(
+            model
+                .right_seat()
+                .and_then(BoardModel::active_project)
+                .map(Path::to_path_buf),
+            Some(project),
+            "widening restores the same rail session"
+        );
     }
 
     #[test]
