@@ -499,32 +499,31 @@ fn run_board_loop(
                     else {
                         continue;
                     };
-                    let intent_for_preview = intent.clone();
-                    let quit = handle_board_intent(
+                    if dispatch_board_intent(
                         &store,
                         &mut domain,
-                        board_intent_target_mut(&mut model, target),
+                        &mut model,
+                        area,
+                        target,
                         intent,
                         &mut save_recovery,
                         quick_capture,
-                    )?;
-                    auto_open_projects_preview(area, &mut model, &intent_for_preview);
-                    sync_focused_project_preview(&mut model, &domain, &save_recovery);
-                    if quit {
+                    )? {
                         break;
                     }
-                    if return_to_index {
-                        if handle_board_intent(
+                    if return_to_index
+                        && dispatch_board_intent(
                             &store,
                             &mut domain,
                             &mut model,
+                            area,
+                            BoardIntentTarget::Outer,
                             BoardIntent::StageLeft,
                             &mut save_recovery,
                             quick_capture,
-                        )? {
-                            break;
-                        }
-                        sync_focused_project_preview(&mut model, &domain, &save_recovery);
+                        )?
+                    {
+                        break;
                     }
                 }
                 Event::Mouse(mouse) => {
@@ -564,24 +563,18 @@ fn run_board_loop(
                         ScrollbarMouse::Intent(intent) => {
                             reflow_click.clear();
                             drag_gesture.clear();
-                            let intent_for_preview = intent.clone();
-                            let quit = handle_board_intent(
+                            let target =
+                                mouse_intent_target(&model, area, mouse, &frame_hits, &intent);
+                            if dispatch_board_intent(
                                 &store,
                                 &mut domain,
-                                mouse_intent_target_mut(
-                                    &mut model,
-                                    area,
-                                    mouse,
-                                    &frame_hits,
-                                    &intent,
-                                ),
+                                &mut model,
+                                area,
+                                target,
                                 intent,
                                 &mut save_recovery,
                                 quick_capture,
-                            )?;
-                            auto_open_projects_preview(area, &mut model, &intent_for_preview);
-                            sync_focused_project_preview(&mut model, &domain, &save_recovery);
-                            if quit {
+                            )? {
                                 break;
                             }
                             continue;
@@ -738,18 +731,17 @@ fn run_board_loop(
                     let Some(intent) = intent else {
                         continue;
                     };
-                    let intent_for_preview = intent.clone();
-                    let quit = handle_board_intent(
+                    let target = mouse_intent_target(&model, area, click, &frame_hits, &intent);
+                    if dispatch_board_intent(
                         &store,
                         &mut domain,
-                        mouse_intent_target_mut(&mut model, area, click, &frame_hits, &intent),
+                        &mut model,
+                        area,
+                        target,
                         intent,
                         &mut save_recovery,
                         quick_capture,
-                    )?;
-                    auto_open_projects_preview(area, &mut model, &intent_for_preview);
-                    sync_focused_project_preview(&mut model, &domain, &save_recovery);
-                    if quit {
+                    )? {
                         break;
                     }
                 }
@@ -758,16 +750,21 @@ fn run_board_loop(
                     let Some(intent) = board_paste_intent(area, &mut model, &text) else {
                         continue;
                     };
-                    let quit = handle_board_intent(
+                    let target = if model.project_right_seat_focused() {
+                        BoardIntentTarget::Focused
+                    } else {
+                        BoardIntentTarget::Outer
+                    };
+                    if dispatch_board_intent(
                         &store,
                         &mut domain,
-                        model.input_target_mut(),
+                        &mut model,
+                        area,
+                        target,
                         intent,
                         &mut save_recovery,
                         quick_capture,
-                    )?;
-                    sync_focused_project_preview(&mut model, &domain, &save_recovery);
-                    if quit {
+                    )? {
                         break;
                     }
                 }
@@ -1028,7 +1025,7 @@ pub fn revalidate_board_from_store(
         return false;
     };
     domain.merge_tasks_from_disk(&disk);
-    if !model.sync_from_domain(domain) {
+    if !model.sync_from_external_domain(domain) {
         // A dirty project preview keeps its old snapshot until the user resolves the draft. Do
         // not acknowledge the file signature: the next idle tick must retry the deferred merge.
         return false;
@@ -1640,13 +1637,13 @@ fn board_scrollbar_mouse_route<E>(
 /// [`draw_board`] uses, so the click and the screen the user is looking at can never
 /// disagree about where a control is. The area gate and command resolution afterward are
 /// the same ones the key and paste routes already pass through.
-fn mouse_intent_target_mut<'a>(
-    model: &'a mut BoardModel,
+fn mouse_intent_target(
+    model: &BoardModel,
     area: Rect,
     mouse: crossterm::event::MouseEvent,
     painted_hits: &crate::ui::render::QueueHitMap,
     intent: &BoardIntent,
-) -> &'a mut BoardModel {
+) -> BoardIntentTarget {
     let pos = Position::new(mouse.column, mouse.row);
     let responsive = model.responsive_geometry(area);
     let right_surface = model.project_right_seat_focused()
@@ -1661,10 +1658,21 @@ fn mouse_intent_target_mut<'a>(
             .is_some_and(|footer| footer.contains(pos))
         && !matches!(intent, BoardIntent::ListScrollTo(_));
     if right_surface || right_footer {
-        model.input_target_mut()
+        BoardIntentTarget::Focused
     } else {
-        model
+        BoardIntentTarget::Outer
     }
+}
+
+fn mouse_intent_target_mut<'a>(
+    model: &'a mut BoardModel,
+    area: Rect,
+    mouse: crossterm::event::MouseEvent,
+    painted_hits: &crate::ui::render::QueueHitMap,
+    intent: &BoardIntent,
+) -> &'a mut BoardModel {
+    let target = mouse_intent_target(model, area, mouse, painted_hits, intent);
+    board_intent_target_mut(model, target)
 }
 
 fn board_mouse_intent(
@@ -1875,6 +1883,33 @@ fn sync_focused_project_preview(
     if model.project_right_seat_focused() && !recovery.is_pending() {
         model.sync_from_domain(domain);
     }
+}
+
+/// Dispatch one mapped event-loop intent, then run the shared preview opening and synchronization
+/// handoff before the next paint. Keeping this boundary in one function makes post-action sync
+/// part of the dispatch path rather than a test-only follow-up.
+fn dispatch_board_intent(
+    store: &TaskStore,
+    domain: &mut DomainState,
+    model: &mut BoardModel,
+    area: Rect,
+    target: BoardIntentTarget,
+    intent: BoardIntent,
+    save_recovery: &mut SaveRecovery<DomainState>,
+    quick_capture: bool,
+) -> io::Result<bool> {
+    let intent_for_preview = intent.clone();
+    let quit = handle_board_intent(
+        store,
+        domain,
+        board_intent_target_mut(model, target),
+        intent,
+        save_recovery,
+        quick_capture,
+    )?;
+    auto_open_projects_preview(area, model, &intent_for_preview);
+    sync_focused_project_preview(model, domain, save_recovery);
+    Ok(quit)
 }
 
 /// Apply a board intent. Returns `true` when the board loop should quit.
@@ -3233,17 +3268,27 @@ mod tests {
         );
 
         let mut recovery = SaveRecovery::new();
-        let quit = handle_board_intent(
+        let task_target = mouse_intent_target(&model, area, task_click, &hits, &task_intent);
+        assert_eq!(task_target, BoardIntentTarget::Focused);
+        let nested_selection_before = model.right_seat().and_then(BoardModel::selected_id);
+        assert_eq!(
+            mouse_intent_target_mut(&mut model, area, task_click, &hits, &task_intent)
+                .selected_id(),
+            nested_selection_before,
+            "the Rail mouse target must be the nested board"
+        );
+        let quit = dispatch_board_intent(
             &temp.store,
             &mut domain,
-            mouse_intent_target_mut(&mut model, area, task_click, &hits, &task_intent),
+            &mut model,
+            area,
+            task_target,
             task_intent,
             &mut recovery,
             false,
         )
         .expect("dispatch right-seat task click");
         assert!(!quit);
-        sync_focused_project_preview(&mut model, &domain, &recovery);
         assert_eq!(
             model.selected_id(),
             None,
@@ -3279,17 +3324,20 @@ mod tests {
         let verb_intent = map_responsive_board_mouse(&model, &hits, area, verb_click)
             .expect("right-seat footer click");
         assert_eq!(verb_intent, BoardIntent::Complete);
-        let quit = handle_board_intent(
+        let verb_target = mouse_intent_target(&model, area, verb_click, &hits, &verb_intent);
+        assert_eq!(verb_target, BoardIntentTarget::Focused);
+        let quit = dispatch_board_intent(
             &temp.store,
             &mut domain,
-            mouse_intent_target_mut(&mut model, area, verb_click, &hits, &verb_intent),
+            &mut model,
+            area,
+            verb_target,
             verb_intent,
             &mut recovery,
             false,
         )
         .expect("dispatch right-seat footer action");
         assert!(!quit);
-        sync_focused_project_preview(&mut model, &domain, &recovery);
 
         assert_eq!(
             domain.get(second_task).map(|task| task.status),

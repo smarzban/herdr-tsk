@@ -1123,16 +1123,8 @@ impl BoardModel {
     /// pin only when the current destination already renders the saved task, and no
     /// path switches the board to another project merely to reveal a row.
     ///
-    /// A dirty preview whose project disappeared from an incoming snapshot defers the whole
-    /// replacement. Returning `false` lets the idle store watcher retry after the draft is saved
-    /// or cancelled instead of leaving a dirty seat attached to a different project row.
-    ///
     /// Replace task snapshot from domain (after mutation) and reanchor selection by id.
-    pub fn sync_from_domain(&mut self, state: &DomainState) -> bool {
-        if self.should_defer_project_preview_sync(state) {
-            self.set_message(DIRTY_TASK_SWITCH_REFUSAL);
-            return false;
-        }
+    pub fn sync_from_domain(&mut self, state: &DomainState) {
         // Capture the prior visible order before the snapshot is replaced, so reanchoring
         // can still see where the selection used to live. Project rows are derived from task
         // order, so the cursor needs a path anchor as well: an arriving project above it must
@@ -1259,6 +1251,17 @@ impl BoardModel {
                 self.bind_project_preview();
             }
         }
+    }
+
+    /// Merge an externally loaded snapshot without replacing a dirty preview with a different
+    /// project. Returning `false` leaves the caller's snapshot and file signature unacknowledged,
+    /// so a later idle tick can retry after the user saves or cancels the draft.
+    pub fn sync_from_external_domain(&mut self, state: &DomainState) -> bool {
+        if self.should_defer_project_preview_sync(state) {
+            self.set_message(DIRTY_TASK_SWITCH_REFUSAL);
+            return false;
+        }
+        self.sync_from_domain(state);
         true
     }
 
@@ -3909,7 +3912,7 @@ mod tests {
         let mut incoming = domain.clone();
         incoming.soft_delete(alpha).expect("remove alpha");
         assert!(
-            !model.sync_from_domain(&incoming),
+            !model.sync_from_external_domain(&incoming),
             "a dirty preview must defer a snapshot that removes its project"
         );
         assert!(model.tasks.iter().any(|task| task.id == alpha));
@@ -3926,7 +3929,7 @@ mod tests {
         let right = model.right_seat.as_deref_mut().expect("preview seat");
         right.form = None;
         right.input_mode = BoardInputMode::Normal;
-        assert!(model.sync_from_domain(&incoming));
+        assert!(model.sync_from_external_domain(&incoming));
         assert_eq!(
             model.selected_project_row().map(|row| row.path),
             Some(REPO_B.into())
