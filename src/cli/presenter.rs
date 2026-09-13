@@ -40,7 +40,7 @@ impl HelpDoc {
             append_usage_wrapped(&mut output, prefix, "       ", usage, WIDTH);
         }
         output.push('\n');
-        append_wrapped(&mut output, "", "", &self.purpose, WIDTH);
+        append_help_wrapped(&mut output, "", "", &self.purpose, WIDTH);
         output.push('\n');
 
         for group in self.groups.iter().filter(|group| !group.options.is_empty()) {
@@ -55,7 +55,7 @@ impl HelpDoc {
             for (flag, text) in &group.options {
                 let prefix = format!("  {flag:width$}  ");
                 let continuation = " ".repeat(prefix.len());
-                append_wrapped(&mut output, &prefix, &continuation, text, WIDTH);
+                append_help_wrapped(&mut output, &prefix, &continuation, text, WIDTH);
             }
             output.push('\n');
         }
@@ -63,18 +63,18 @@ impl HelpDoc {
         if !self.examples.is_empty() {
             output.push_str("Examples:\n");
             for example in &self.examples {
-                append_wrapped(&mut output, "  ", "  ", example, WIDTH);
+                append_help_wrapped(&mut output, "  ", "  ", example, WIDTH);
             }
         }
         if !self.refusals.is_empty() {
             output.push_str("\nRefusals (exit 1):\n");
             for refusal in &self.refusals {
-                append_wrapped(&mut output, "  ", "  ", refusal, WIDTH);
+                append_help_wrapped(&mut output, "  ", "  ", refusal, WIDTH);
             }
         }
         if !self.exit.is_empty() {
             output.push_str("\nExit:\n");
-            append_wrapped(&mut output, "  ", "  ", &self.exit, WIDTH);
+            append_help_wrapped(&mut output, "  ", "  ", &self.exit, WIDTH);
         }
         output
     }
@@ -585,6 +585,27 @@ fn usage_tokens(usage: &str) -> Vec<String> {
     grouped
 }
 
+fn append_help_wrapped(
+    output: &mut String,
+    first_prefix: &str,
+    continuation_prefix: &str,
+    text: &str,
+    output_width: usize,
+) {
+    let mut wrapped = String::new();
+    append_wrapped(
+        &mut wrapped,
+        first_prefix,
+        continuation_prefix,
+        text,
+        output_width,
+    );
+    for line in wrapped.lines() {
+        output.push_str(line.trim_end());
+        output.push('\n');
+    }
+}
+
 /// Append text within one terminal width. Prefixes are ASCII CLI chrome, so
 /// their byte lengths are also their display widths.
 fn append_wrapped(
@@ -604,7 +625,7 @@ fn append_wrapped(
         } else {
             continuation_prefix
         });
-        output.push_str(row.text.trim_end());
+        output.push_str(&row.text);
         output.push('\n');
     }
 }
