@@ -1089,6 +1089,14 @@ fn board_keyboard_intent(
             | BoardInputMode::EditScope
             | BoardInputMode::FormScopeDropdown
     );
+    // Expanded capture presents a selected step target as Normal so it retains the quick-add
+    // surface's chrome, but Tab still belongs to the form ring rather than the normal keymap.
+    if mode == BoardInputMode::Normal
+        && model.capture_draft_open()
+        && matches!(key.code, KeyCode::Tab | KeyCode::BackTab)
+    {
+        return map_key(BoardInputMode::TaskPage, key);
+    }
     // A selected task-page add target has no field mapper, but its enclosing edit session
     // still owns the one Shift+Enter task-save chord.
     if mode == BoardInputMode::TaskPage
@@ -5742,6 +5750,33 @@ mod tests {
             ),
             Some(BoardIntent::EditInsert('e'))
         );
+    }
+
+    #[test]
+    fn expanded_quick_add_tabs_past_the_selected_step_target() {
+        let mut domain = DomainState::new();
+        let mut model = BoardModel::from_domain(&domain, None);
+        apply_intent(&mut domain, &mut model, BoardIntent::OpenCapture, None)
+            .expect("open quick add");
+        apply_intent(&mut domain, &mut model, BoardIntent::ExpandQuickAdd, None)
+            .expect("expand quick add");
+        apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
+            .expect("Tab from Notes selects + step");
+        assert_eq!(model.input_mode(), BoardInputMode::Normal);
+
+        let intent = board_keyboard_intent(
+            &model,
+            model.input_mode(),
+            KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE),
+        );
+        assert_eq!(
+            intent,
+            Some(BoardIntent::FormFocusNext),
+            "Tab on expanded capture's + step must reach Thread"
+        );
+        apply_intent(&mut domain, &mut model, intent.expect("Tab intent"), None)
+            .expect("advance past + step");
+        assert_eq!(model.input_mode(), BoardInputMode::EditThread);
     }
 
     /// A form can remain allocated while a popup or view owns the resolved input mode. The
