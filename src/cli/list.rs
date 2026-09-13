@@ -364,7 +364,11 @@ fn row_for(task: &crate::domain::Task) -> ListRow {
 fn is_open(status: HumanStatus) -> bool {
     matches!(
         status,
-        HumanStatus::Ready | HumanStatus::Started | HumanStatus::Blocked | HumanStatus::Review
+        HumanStatus::Open
+            | HumanStatus::Ready
+            | HumanStatus::Started
+            | HumanStatus::Blocked
+            | HumanStatus::Review
     )
 }
 
@@ -372,8 +376,9 @@ fn status_group_rank(status: HumanStatus) -> u8 {
     match status {
         HumanStatus::Started => 0,
         HumanStatus::Ready => 1,
-        HumanStatus::Blocked => 2,
-        HumanStatus::Review => 3,
-        HumanStatus::Done => 4,
+        HumanStatus::Open => 2,
+        HumanStatus::Blocked => 3,
+        HumanStatus::Review => 4,
+        HumanStatus::Done => 5,
     }
 }

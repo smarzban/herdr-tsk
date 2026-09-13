@@ -176,7 +176,7 @@ pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
 /// paints them: start / reopen, done, block / unblock.
 fn status_verbs(status: HumanStatus) -> Vec<VerbEntry<'static>> {
     match status {
-        HumanStatus::Ready => vec![
+        HumanStatus::Open | HumanStatus::Ready => vec![
             VerbEntry {
                 key: "s",
                 label: "start",
@@ -393,6 +393,7 @@ fn build_task_page_overlay<'a>(
     let status_word = match bound_task {
         Some(task) if task.archived => "archived",
         _ => match status {
+            HumanStatus::Open => "open",
             HumanStatus::Ready => "ready",
             HumanStatus::Started => "started",
             HumanStatus::Blocked => "blocked",
@@ -1068,6 +1069,7 @@ fn task_header_state(model: &BoardModel, form: &BoardForm, task: &crate::domain:
         "archived"
     } else {
         match task.status {
+            HumanStatus::Open => "open",
             HumanStatus::Ready => "ready",
             HumanStatus::Started => "started",
             HumanStatus::Blocked => "blocked",

@@ -177,6 +177,7 @@ fn list_human(result: &ListResult, terminal_width: Option<usize>) -> String {
         ListView::Open => &[
             (Some(HumanStatus::Started), "STARTED"),
             (Some(HumanStatus::Ready), "READY"),
+            (Some(HumanStatus::Open), "OPEN"),
             (Some(HumanStatus::Blocked), "BLOCKED"),
             (Some(HumanStatus::Review), "REVIEW"),
         ],
@@ -604,6 +605,7 @@ pub fn steps_rejected(error: StepsError) -> CliOutput {
 
 fn status_name(status: HumanStatus) -> &'static str {
     match status {
+        HumanStatus::Open => "open",
         HumanStatus::Ready => "ready",
         HumanStatus::Started => "started",
         HumanStatus::Blocked => "blocked",

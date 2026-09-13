@@ -1356,7 +1356,7 @@ fn apply_board_intent(
                 return Ok(IntentOutcome::None);
             };
             match task.status {
-                HumanStatus::Ready => {
+                HumanStatus::Open | HumanStatus::Ready => {
                     domain.set_status(id, HumanStatus::Started)?;
                 }
                 HumanStatus::Done => {
@@ -1381,7 +1381,10 @@ fn apply_board_intent(
                 HumanStatus::Blocked => {
                     domain.set_status(id, HumanStatus::Ready)?;
                 }
-                HumanStatus::Ready | HumanStatus::Started | HumanStatus::Review => {
+                HumanStatus::Open
+                | HumanStatus::Ready
+                | HumanStatus::Started
+                | HumanStatus::Review => {
                     domain.set_status(id, HumanStatus::Blocked)?;
                 }
                 HumanStatus::Done => {
@@ -1404,7 +1407,10 @@ fn apply_board_intent(
                 HumanStatus::Review => {
                     domain.set_status(id, HumanStatus::Ready)?;
                 }
-                HumanStatus::Ready | HumanStatus::Started | HumanStatus::Blocked => {
+                HumanStatus::Open
+                | HumanStatus::Ready
+                | HumanStatus::Started
+                | HumanStatus::Blocked => {
                     domain.set_status(id, HumanStatus::Review)?;
                 }
                 HumanStatus::Done => {

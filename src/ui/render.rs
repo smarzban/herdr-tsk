@@ -771,6 +771,7 @@ fn local_rect(area: Rect, local: Rect) -> Rect {
 /// Status glyph for a human status (the: static; no agent spin).
 pub fn status_glyph(status: HumanStatus) -> &'static str {
     match status {
+        HumanStatus::Open => "◌",
         HumanStatus::Ready => "○",
         HumanStatus::Started => "●",
         HumanStatus::Blocked => "■",

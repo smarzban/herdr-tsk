@@ -3246,7 +3246,7 @@ mod tests {
             "resolving the click must tear the surface down the same way Enter's \
              ConfirmCommand does"
         );
-        assert_eq!(domain.get(id).expect("task").status, HumanStatus::Ready);
+        assert_eq!(domain.get(id).expect("task").status, HumanStatus::Open);
     }
 
     #[test]
@@ -4723,7 +4723,7 @@ mod tests {
         assert!(domain.get(id).expect("task").steps[0].done, "alpha toggled");
         assert_eq!(
             domain.get(id).expect("task").status,
-            HumanStatus::Ready,
+            HumanStatus::Open,
             "task status untouched"
         );
 

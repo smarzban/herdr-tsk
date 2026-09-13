@@ -1616,7 +1616,7 @@ mod tests {
         let task = domain.get(id).expect("task");
         assert_eq!(task.title, "Ship form");
         assert_eq!(task.notes.as_deref(), Some("optional notes"));
-        assert_eq!(task.status, HumanStatus::Ready);
+        assert_eq!(task.status, HumanStatus::Open);
         assert_eq!(
             task.scope,
             TaskScope::Project {

@@ -287,12 +287,12 @@ fn query_desk(
         .collect();
     sort_by_status_change_desc(&mut motion);
 
-    // ON DECK · desk is the personal backlog: desk-scope ready tasks only. Project
-    // backlogs live on their project boards, never here.
+    // ON DECK · desk is the personal backlog: desk-scope ready and open tasks only.
+    // Project backlogs live on their project boards, never here.
     let mut deck: Vec<&Task> = live
         .iter()
         .copied()
-        .filter(|t| t.status == HumanStatus::Ready && matches!(t.scope, TaskScope::Global))
+        .filter(|t| is_on_deck_status(t.status) && matches!(t.scope, TaskScope::Global))
         .collect();
     sort_by_created_asc(&mut deck);
 
@@ -479,7 +479,7 @@ fn query_thread_view(
     let mut deck: Vec<&Task> = live
         .iter()
         .copied()
-        .filter(|t| t.status == HumanStatus::Ready)
+        .filter(|t| is_on_deck_status(t.status))
         .collect();
     sort_by_created_asc(&mut deck);
 
@@ -644,6 +644,10 @@ fn status_counts(live: &[&Task]) -> StatusCounts {
 
 fn is_needs_you_status(status: HumanStatus) -> bool {
     matches!(status, HumanStatus::Blocked | HumanStatus::Review)
+}
+
+fn is_on_deck_status(status: HumanStatus) -> bool {
+    matches!(status, HumanStatus::Ready | HumanStatus::Open)
 }
 
 fn split_needs_you<'a>(tasks: &[&'a Task]) -> (Vec<&'a Task>, Vec<&'a Task>) {

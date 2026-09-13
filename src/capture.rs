@@ -139,7 +139,7 @@ mod tests {
             }
         );
         assert_eq!(task.title, "Ship capture");
-        assert_eq!(task.status, HumanStatus::Ready);
+        assert_eq!(task.status, HumanStatus::Open);
         assert_eq!(task.provenance, ProvenanceOrigin::Capture);
         assert_eq!(state.tasks().len(), 1);
     }
