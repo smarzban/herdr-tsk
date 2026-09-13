@@ -421,7 +421,7 @@ fn steps_unknown_number_is_unknown_task() {
 }
 
 #[test]
-fn steps_help_documents_toggle_flip_and_verify_guidance() {
+fn steps_help_uses_the_shared_reference() {
     let output = steps(&["tsk".into(), "steps".into(), "--help".into()]);
     assert_eq!(output.code, 0, "{}", output.stderr);
     assert!(output.stderr.is_empty());
@@ -430,16 +430,14 @@ fn steps_help_documents_toggle_flip_and_verify_guidance() {
         "toggle",
         "rename",
         "remove",
-        "flips",
-        "verify",
-        "list",
-        "idempotent",
-        "exit 0",
-        "exit 1",
-        "exit 2",
-        "exit 3",
-        "nothing persisted",
-        "indeterminate",
+        "Values",
+        "Examples:",
+        "Refusals (exit 1):",
+        "Exit:",
+        "0 step created",
+        "1 step refusal",
+        "2 usage, nothing persisted",
+        "3 store I/O",
     ] {
         assert!(
             output.stdout.contains(term),
