@@ -366,13 +366,17 @@ fn build_task_page_overlay<'a>(
     // Translate at the boundary, so a staged removal cannot make the selector jump to a
     // different stored step just because its former array slot disappeared.
     let visible_step_index = |source_index: usize| {
-        bound_task.and_then(|task| {
+        if let Some(task) = bound_task {
             task.steps
                 .iter()
                 .enumerate()
                 .filter(|(_, step)| !form.steps.removals.contains(&step.id))
                 .position(|(index, _)| index == source_index)
-        })
+        } else {
+            // Capture steps are locally staged, so their cursor is already an index into the
+            // rendered pending-add rows rather than a source index in a bound task.
+            (source_index < stored_step_count).then_some(source_index)
+        }
     };
     // Cursor state uses source indices, so keep the recorded row counts source-aligned too.
     // Staged removals occupy zero rows; the active add row is not addressable by this cursor.

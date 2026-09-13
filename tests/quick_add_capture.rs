@@ -1355,6 +1355,60 @@ fn expanded_quick_add_sets_thread_and_steps() {
     assert_eq!(task.steps[0].text, "first step");
 }
 
+#[test]
+fn expanded_quick_add_tabs_through_staged_steps_and_the_add_target() {
+    let mut domain = DomainState::new();
+    let mut model = BoardModel::from_domain(&domain, None);
+    let snap = snapshot();
+    open(&mut domain, &mut model, &snap);
+    type_title(&mut domain, &mut model, "capture ring");
+    apply(&mut domain, &mut model, BoardIntent::ExpandQuickAdd, None);
+
+    apply(&mut domain, &mut model, BoardIntent::FormFocusNext, None);
+    apply(&mut domain, &mut model, BoardIntent::BeginAddStep, None);
+    for character in "first staged step".chars() {
+        apply(
+            &mut domain,
+            &mut model,
+            BoardIntent::EditInsert(character),
+            None,
+        );
+    }
+    apply(&mut domain, &mut model, BoardIntent::ConfirmEdit, None);
+    assert_eq!(
+        model.input_mode(),
+        BoardInputMode::EditStep,
+        "Enter opens the next step"
+    );
+    apply(&mut domain, &mut model, BoardIntent::CancelEdit, None);
+    assert_eq!(model.input_mode(), BoardInputMode::EditNotes);
+
+    apply(&mut domain, &mut model, BoardIntent::FormFocusNext, None);
+    assert!(
+        render_text(&model, 80, 24).contains("▸ ▪ first staged step"),
+        "Tab from Notes selects the first staged step"
+    );
+    apply(&mut domain, &mut model, BoardIntent::FormFocusNext, None);
+    assert!(
+        render_text(&model, 80, 24).contains("▸ + step"),
+        "Tab reaches the trailing add target after staged steps"
+    );
+    apply(&mut domain, &mut model, BoardIntent::FormFocusNext, None);
+    assert_eq!(model.input_mode(), BoardInputMode::EditThread);
+    apply(&mut domain, &mut model, BoardIntent::FormFocusPrev, None);
+    assert!(
+        render_text(&model, 80, 24).contains("▸ + step"),
+        "Shift+Tab from Thread returns to the add target"
+    );
+    apply(&mut domain, &mut model, BoardIntent::FormFocusPrev, None);
+    assert!(
+        render_text(&model, 80, 24).contains("▸ ▪ first staged step"),
+        "Shift+Tab from the add target returns to the last staged step"
+    );
+    apply(&mut domain, &mut model, BoardIntent::FormFocusPrev, None);
+    assert_eq!(model.input_mode(), BoardInputMode::EditNotes);
+}
+
 /// A wrapped draft owns the reserved row above the input, so its refusal moves down to the
 /// verb row instead of vanishing, and a click on that notice is inert (it must not read as
 /// an outside click that discards the draft).

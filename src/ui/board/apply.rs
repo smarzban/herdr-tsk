@@ -543,7 +543,7 @@ fn apply_board_intent(
                         .is_some_and(|form| form.steps.add_selected)
                     {
                         model.focus_form_field(CaptureField::Thread);
-                    } else {
+                    } else if !move_capture_step_with_tab(model, true) {
                         select_add_step(model);
                     }
                 } else if model.task_editing() {
@@ -564,7 +564,7 @@ fn apply_board_intent(
             {
                 select_step_from_tab(model, true);
             } else if model.input_mode == BoardInputMode::EditNotes && model.capture_draft_open() {
-                select_add_step(model);
+                select_first_capture_step_or_add(model);
             } else if model.input_mode == BoardInputMode::EditScope
                 && model.form.as_ref().is_some_and(|form| form.is_task())
             {
@@ -592,7 +592,17 @@ fn apply_board_intent(
                 return Ok(IntentOutcome::None);
             } else if model.input_mode == BoardInputMode::TaskPage {
                 if model.capture_draft_open() {
-                    model.focus_form_field(CaptureField::Notes);
+                    if model
+                        .form
+                        .as_ref()
+                        .is_some_and(|form| form.steps.add_selected)
+                    {
+                        if !select_last_capture_step(model) {
+                            model.focus_form_field(CaptureField::Notes);
+                        }
+                    } else if !move_capture_step_with_tab(model, false) {
+                        model.focus_form_field(CaptureField::Notes);
+                    }
                 } else if model.task_editing() {
                     if model
                         .form
@@ -2905,6 +2915,67 @@ fn select_add_step(model: &mut BoardModel) {
         form.steps.add_selected = true;
         model.input_mode = BoardInputMode::TaskPage;
     }
+}
+
+/// Expanded capture stages new steps locally, so its ring selects those rows without trying to
+/// resolve task-backed step identities that do not exist until the capture is saved.
+fn select_first_capture_step_or_add(model: &mut BoardModel) {
+    let count = model
+        .form
+        .as_ref()
+        .filter(|form| !form.is_task())
+        .map(|form| form.steps.pending_adds.len())
+        .unwrap_or(0);
+    if count == 0 {
+        select_add_step(model);
+    } else if let Some(form) = model.form.as_mut() {
+        form.steps.cursor = Some(0);
+        form.steps.add_selected = false;
+        model.input_mode = BoardInputMode::TaskPage;
+    }
+}
+
+fn select_last_capture_step(model: &mut BoardModel) -> bool {
+    let count = model
+        .form
+        .as_ref()
+        .filter(|form| !form.is_task())
+        .map(|form| form.steps.pending_adds.len())
+        .unwrap_or(0);
+    let Some(index) = count.checked_sub(1) else {
+        return false;
+    };
+    if let Some(form) = model.form.as_mut() {
+        form.steps.cursor = Some(index);
+        form.steps.add_selected = false;
+        model.input_mode = BoardInputMode::TaskPage;
+    }
+    true
+}
+
+/// Move among locally staged capture steps without wrapping. The caller handles the field at
+/// either end of the group, matching task-page step traversal.
+fn move_capture_step_with_tab(model: &mut BoardModel, forward: bool) -> bool {
+    let state = model.form.as_ref().and_then(|form| {
+        (!form.is_task()).then_some((form.steps.cursor, form.steps.pending_adds.len()))
+    });
+    let Some((Some(index), count)) = state else {
+        return false;
+    };
+    if forward && index + 1 == count {
+        select_add_step(model);
+        return true;
+    }
+    if !forward && index == 0 {
+        return false;
+    }
+    let next = if forward { index + 1 } else { index - 1 };
+    if let Some(form) = model.form.as_mut() {
+        form.steps.cursor = Some(next);
+        form.steps.add_selected = false;
+        model.input_mode = BoardInputMode::TaskPage;
+    }
+    true
 }
 
 fn select_last_step_for_edit(model: &mut BoardModel) {
