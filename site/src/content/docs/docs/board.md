@@ -30,6 +30,16 @@ Press `p` to choose a project, or open **projects** for an overview.
 
 Counts show work needing attention, in progress, and ready. The project index's ready count excludes open tasks; project boards show both under ON DECK. A dim `·` means zero. `here` marks the launch project. At 100 columns or wider, the overview also lists threads.
 
+At **110 usable columns** or wider, Overview can preview the cursored project beside the index:
+
+| Stage | What you see |
+| --- | --- |
+| Full board | Full-width projects index |
+| Split | Index and a dim project preview; the index keeps focus |
+| Rail | Narrow index and a live project board; the right column owns input |
+
+Press `→` twice to reach Rail, `←` to walk back. The project tab never opens a full-screen task stage. `Enter` on an index row still opens that project in tab 2, and choosing a thread with `v` drops back to the full-width index. The right column has its own selection, drawer, filters, task page, quick-add, and status actions; `Esc` from its board returns focus to the index.
+
 ## Threads
 
 A thread groups related tasks within a project, such as `release` or `login-fix`.
@@ -102,9 +112,9 @@ At **110 usable columns** or wider, use `→` and `←` to move through a four-s
 | Task | Task details beside a narrow board rail |
 | Full screen | Task details only |
 
-Press `Enter` from the board to open a task full screen. `Esc` returns to the view you left. From task focus, `Esc` returns focus to the board beside it.
+Press `Enter` from the board to open a task full screen. `Esc` returns to the view you left. From task focus, `Esc` returns focus to the board beside it. On Projects Overview, the slider stops at Rail: it shows a live project board beside the index and never opens a full-screen task; `Enter` in that right column opens the task page inside the column.
 
-Click a task on the full-width board to open its details alongside it, keeping board focus. Click inside the task column to focus it. Click a rail row to bring back the split board. While editing, arrows move the text cursor instead.
+Click a task on the full-width board to open its details alongside it, keeping board focus. Click inside the task column to focus it. Click a rail row to bring back the split board. While editing, arrows move the text cursor instead. On the projects tab, click the right preview to focus its live board, or click an index row from Rail to rebind it and return to Split.
 
 Narrowing the pane shows one surface; widening it restores the selected view. Each new session starts with the board alone.
 

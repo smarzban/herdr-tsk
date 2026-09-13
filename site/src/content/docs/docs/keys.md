@@ -123,4 +123,14 @@ At 110 usable columns or wider, arrows move through these views when you are not
 
 `Enter` from the board opens full screen and remembers the previous view. `Tab` navigates task fields or steps; it does not switch wide views.
 
+On **Projects Overview** at 110+ columns, the project slider is shorter:
+
+| Stage | `→` | `←` | `Esc` |
+| --- | --- | --- | --- |
+| Full board | Split preview | No change | No change |
+| Split, index focused | Rail | Full board | No change |
+| Rail, right board focused | Narrow board keys | Return to index | Return to index |
+
+The right seat keeps its own project-board selection and state. Its `→` / `←` are peek controls, and `Enter` opens a task page inside the column. `ctrl+d`, `d`, `g`, `+`, and the other board actions apply to the right seat while it is focused.
+
 [Board views and mouse behavior](/docs/board/#wide-stage-slider).
