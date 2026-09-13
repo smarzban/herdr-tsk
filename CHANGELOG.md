@@ -15,6 +15,7 @@ the GitHub release notes verbatim.
 
 ### Added
 
+- Added `tsk help <command>` as an alias for each command's `--help`, and `tsk --version` / `tsk -V` for the installed version.
 - Added the `open` status for captured and untriaged tasks, an expandable inbox group under ON DECK, and explicit `ctrl+n` (ready) and `ctrl+o` (open) board verbs.
 - Added `tsk status T<n> open`, plus `tsk list --open` and `tsk list --ready` filters.
 - The Projects Overview now previews the cursored project beside the index at wide widths, opening the Split preview when you click or move the index selection. It has a live narrow project board at the Rail stage and no full-screen task stage. The right board names the selected project in its top row and keeps its own selection and editing state.
@@ -22,6 +23,7 @@ the GitHub release notes verbatim.
 
 ### Changed
 
+- Command help now uses one 80-column reference skeleton with usage, options, examples, refusals, and exits; detailed retry and output rules remain in the CLI guide.
 - `ctrl+s` now starts both open and ready tasks. The bundled agent skill is version 1.2.0 and documents the inbox and status filters.
 - Help is now a searchable shortcut reference with a focused search field, dim divider, and one binding per row grouped by function; long descriptions wrap beneath their description column. It stays within half the terminal height except below 15 rows, where it may grow to six rows to keep a result visible. Press `?` from any non-text surface; typing filters by key or action, and `Esc` clears the search before closing.
 - The bundled agent skill now uses JSON as the default contract for every `tsk list` read. Human listings are reserved for output shown to the user or interactive troubleshooting.

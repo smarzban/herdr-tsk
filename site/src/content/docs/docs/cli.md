@@ -40,9 +40,24 @@ Use `--json` on `add` or `list` for machine-readable output. Read the [exit cont
 | `tsk setup` | Configure Herdr or install an agent skill |
 | `tsk update` | Upgrade an installer-managed copy, or print Homebrew guidance |
 | `tsk guide` | Print the agent workflow |
-| `tsk --help` | Show help |
+| `tsk help [<command>]` | Show the CLI reference or one command's reference |
+| `tsk --help` | Show the CLI reference |
+| `tsk --version` / `tsk -V` | Print the installed version |
+
+`tsk --help` is the syntax reference. `tsk help` prints the same reference, and `tsk help <command>` is identical to `tsk <command> --help`. Help always wraps at 80 columns, including redirected output. Internal Herdr launcher flags are intentionally absent.
 
 Data commands accept `--state-dir <dir>`. Setup, update, and guide do not use that flag.
+
+### Statuses
+
+| Status | Meaning |
+| --- | --- |
+| `open` | Captured, not yet picked (inbox) |
+| `ready` | Picked, up next (on deck) |
+| `started` | In motion |
+| `blocked` | Waiting on something |
+| `review` | Done by the agent, waiting on you |
+| `done` | Closed |
 
 ### Task addresses
 
@@ -244,6 +259,17 @@ tsk trash restore T12
 Restore returns a task from trash with its original number. A task absent from trash, or already live, refuses with `T12 is not in trash`.
 
 Recent deletions may still be in the main store; use board undo until they move to trash. [Retention and storage](/docs/storage/#deleted-tasks).
+
+## help and version
+
+```sh
+tsk --help
+tsk help list
+tsk list --help
+tsk --version
+```
+
+Use top-level help to find a command, then use either one-command form for its flags, examples, refusals, and exit contract. `--version` and `-V` print `tsk <version>`. They are global flags, so place them before a command.
 
 ## update
 
