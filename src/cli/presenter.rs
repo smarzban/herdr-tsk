@@ -1276,7 +1276,7 @@ pub fn setup_help() -> CliOutput {
     help(HelpDoc {
         usage: vec!["tsk setup [herdr | agents | claude | pi | omp | cursor | grok | codex | opencode | --skill-dir <path>] [--yes] [--force] [--json]".into(), "tsk setup --detected-ids".into()],
         purpose: "Register Herdr, or install the bundled agent workflow skill.".into(),
-        groups: vec![group("Output", &[("--json", "print machine-readable agent detection or install output"), ("--detected-ids", "print space-separated detected agent ids")]), group("Values", &[("herdr", "register plugin assets and keyboard shortcuts"), ("agents --yes", "install or update every detected agent skill"), ("<agent>, --skill-dir <path>", "install one named agent skill"), ("--force", "overwrite a matching skill version")])],
+        groups: vec![group("Output", &[("--json", "print machine-readable agent detection or install output"), ("--detected-ids", "print space-separated detected agent ids")]), group("Values", &[("herdr", "register plugin assets and keyboard shortcuts"), ("agents --yes", "install or update every detected agent skill; add --force to rewrite matching versions"), ("<agent>, --skill-dir <path>", "install one named agent skill"), ("--force", "overwrite a matching skill version")])],
         examples: vec!["tsk setup herdr".into(), "tsk setup agents --yes".into(), "tsk setup pi".into()],
         refusals: vec!["skill-exists".into(), "setup failure".into(), "blocked skill root".into()],
         exit: exit_line("setup completed or help listed", Some("setup refusal or failure"), false),
@@ -1495,10 +1495,8 @@ pub fn setup(result: crate::setup::SetupResult) -> CliOutput {
             terminal_text(&backup.display().to_string())
         ));
     }
-    stdout.push_str(&format!(
-        "    Plugin root:\n        {}\n",
-        terminal_text(&result.root.display().to_string())
-    ));
+    // The content-addressed plugin root is not something users act on; it stays in
+    // error messages, where `plugin unlink` or a manual look needs it.
     stdout.push_str("    Shortcuts:      prefix+t board, prefix+a quick capture\n");
     if result.declined_conflicts {
         stdout.push_str("Declined conflicts were left unchanged.\n");
@@ -1622,7 +1620,7 @@ mod tests {
         });
         assert_eq!(
             output.stdout,
-            "    Config backup:\n        /home/box/.config/herdr/config.toml.tsk-backup-20260912-143022\n    Plugin root:\n        /home/box/.config/herdr/tsk-plugins/c578550bfb36dea8\n    Shortcuts:      prefix+t board, prefix+a quick capture\n\nReload Herdr (herdr server reload-config) or restart it to apply the shortcuts.\n"
+            "    Config backup:\n        /home/box/.config/herdr/config.toml.tsk-backup-20260912-143022\n    Shortcuts:      prefix+t board, prefix+a quick capture\n\nReload Herdr (herdr server reload-config) or restart it to apply the shortcuts.\n"
         );
         assert_eq!(output.code, 0);
     }

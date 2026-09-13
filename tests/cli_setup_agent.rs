@@ -911,6 +911,60 @@ fn agents_yes_installs_without_asking() {
 }
 
 #[test]
+fn agents_yes_force_rewrites_a_current_skill() {
+    let _lock = env_lock();
+    let _omp_env = OmpEnvGuard::cleared();
+    let root = temp_dir("agents-yes-force");
+    let home = root.join("home");
+    let skill = home.join(".claude/skills/tsk-cli/SKILL.md");
+    fs::create_dir_all(skill.parent().expect("skill dir")).expect("claude skills");
+    // Same frontmatter version as the embedded skill, different body: the version check
+    // alone would call this current and skip it.
+    let stale = skill_source().replacen("# tsk", "# stale body", 1);
+    assert_ne!(stale, skill_source());
+    fs::write(&skill, &stale).expect("seed stale skill");
+    let previous_home = std::env::var_os("HOME");
+    let previous_path = std::env::var_os("PATH");
+    std::env::set_var("HOME", &home);
+    std::env::set_var("PATH", root.join("empty-bin"));
+    fs::create_dir_all(root.join("empty-bin")).expect("empty bin");
+    let skipped = cli_non_tty(&["tsk", "setup", "agents", "--yes", "--json"]);
+    let forced = cli_non_tty(&["tsk", "setup", "agents", "--yes", "--force", "--json"]);
+    let interactive_force = cli_non_tty(&["tsk", "setup", "agents", "--force"]);
+    match previous_home {
+        Some(value) => std::env::set_var("HOME", value),
+        None => std::env::remove_var("HOME"),
+    }
+    match previous_path {
+        Some(value) => std::env::set_var("PATH", value),
+        None => std::env::remove_var("PATH"),
+    }
+    assert_eq!(skipped.code, 0, "{skipped:?}");
+    assert!(
+        skipped.stdout.contains("\"skipped_current\":[\"claude\"]"),
+        "a matching version is skipped without --force: {}",
+        skipped.stdout
+    );
+    assert_eq!(forced.code, 0, "{forced:?}");
+    assert!(
+        forced
+            .stdout
+            .contains("\"id\":\"claude\",\"kind\":\"updated\""),
+        "--force rewrites the matching version: {}",
+        forced.stdout
+    );
+    assert_eq!(
+        fs::read_to_string(&skill).expect("rewritten"),
+        skill_source()
+    );
+    assert_eq!(
+        interactive_force.code, 2,
+        "agents --force without --yes is a usage error: {interactive_force:?}"
+    );
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn agents_yes_json_is_machine_readable() {
     let _lock = env_lock();
     let _omp_env = OmpEnvGuard::cleared();

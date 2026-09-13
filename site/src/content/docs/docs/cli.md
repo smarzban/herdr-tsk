@@ -311,7 +311,7 @@ Requires Herdr 0.9+ on PATH. Registers the installed binary and adds **prefix+t*
 | `opencode` | `~/.config/opencode/skills/` |
 | `--skill-dir <path>` | The supplied directory |
 
-Setup writes `tsk-cli/SKILL.md` under the selected directory. OMP follows `OMP_PROFILE`, using legacy `PI_PROFILE` only when `OMP_PROFILE` is unset; an empty, whitespace, or `default` value explicitly selects the default profile. It also follows `PI_CONFIG_DIR` and the default profile's `PI_CODING_AGENT_DIR`; invalid profile names are refused. Skill `version:` is independent of the crate version. A matching installed version exits 1 with `skill-exists`; a missing or different version updates without `--force`. `--force` always overwrites. `tsk setup agents --yes` installs or updates every detected agent without asking. Only global skill roots are offered (project-local roots are out of scope).
+Setup writes `tsk-cli/SKILL.md` under the selected directory. OMP follows `OMP_PROFILE`, using legacy `PI_PROFILE` only when `OMP_PROFILE` is unset; an empty, whitespace, or `default` value explicitly selects the default profile. It also follows `PI_CONFIG_DIR` and the default profile's `PI_CODING_AGENT_DIR`; invalid profile names are refused. Skill `version:` is independent of the crate version. A matching installed version exits 1 with `skill-exists`; a missing or different version updates without `--force`. `--force` always overwrites. `tsk setup agents --yes` installs or updates every detected agent without asking; `tsk setup agents --yes --force` also rewrites copies whose version already matches. `--force` without `--yes` is a usage error for `agents`. Only global skill roots are offered (project-local roots are out of scope).
 
 | Option | Action |
 | --- | --- |
