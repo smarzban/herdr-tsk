@@ -7,6 +7,13 @@ fn help(args: &[&str]) -> tsk_tui::cli::CliOutput {
     run_with(args, Cursor::new(Vec::<u8>::new()), true)
 }
 
+fn executable(args: &[&str]) -> std::process::Output {
+    Command::new(env!("CARGO_BIN_EXE_tsk"))
+        .args(args)
+        .output()
+        .expect("run tsk")
+}
+
 fn assert_sections_in_order(output: &str, headings: &[&str]) {
     let mut previous = 0;
     for heading in headings {
@@ -165,27 +172,33 @@ verb_help_test!(
 
 #[test]
 fn help_without_an_operand_is_top_level_help() {
-    let output = help(&["tsk", "help"]);
-    assert_eq!(output.code, 0);
-    assert!(output.stderr.is_empty());
-    assert_eq!(output.stdout, tsk_tui::cli::presenter::top_level_help());
+    let via_help = executable(&["help"]);
+    let global = executable(&["--help"]);
+    assert_eq!(via_help.status.code(), Some(0));
+    assert!(via_help.stderr.is_empty());
+    assert_eq!(via_help.stdout, global.stdout);
+    assert_eq!(
+        String::from_utf8(via_help.stdout).expect("UTF-8 help"),
+        tsk_tui::cli::presenter::top_level_help()
+    );
 }
 
 #[test]
 fn help_operand_matches_verb_help_byte_for_byte() {
-    let via_help = help(&["tsk", "help", "add"]);
-    let direct = help(&["tsk", "add", "--help"]);
-    assert_eq!(via_help.code, 0);
-    assert_eq!(via_help, direct);
+    let via_help = executable(&["help", "add"]);
+    let direct = executable(&["add", "--help"]);
+    assert_eq!(via_help.status.code(), Some(0));
+    assert!(via_help.stderr.is_empty());
+    assert_eq!(via_help.stdout, direct.stdout);
 }
 
 #[test]
 fn unknown_help_operand_is_a_usage_error() {
-    let output = help(&["tsk", "help", "nope"]);
-    assert_eq!(output.code, 2);
+    let output = executable(&["help", "nope"]);
+    assert_eq!(output.status.code(), Some(2));
     assert!(output.stdout.is_empty());
     assert_eq!(
-        output.stderr,
+        String::from_utf8(output.stderr).expect("UTF-8 usage error"),
         "tsk help: unknown command nope\nusage: tsk help [<command>]\n"
     );
 }
