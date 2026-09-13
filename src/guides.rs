@@ -59,7 +59,7 @@ pub const CATALOG: [Guide; 4] = [
                 - On a terminal 110 columns or wider there is no peek. `→` slides the task page open beside the board, `→` again gives it more room, and `←` slides it back.\n\
                 \n\
                 **Change one**\n\
-                - On the page, `ctrl+e` edits the title and `ctrl+n` edits the notes. `shift+enter` saves.\n\
+                - On the page, `ctrl+e` edits the title, then Tab moves to notes. The palette can also open notes editing. `shift+enter` saves.\n\
                 - `Enter` on a step checks it. The `+ step` row at the bottom adds one.\n\
                 - Steps never finish a task. Check every step below and this task stays `started` until you press `ctrl+d`. You decide when work is done.",
         status: HumanStatus::Started,
