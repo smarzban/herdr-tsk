@@ -45,7 +45,7 @@ impl HelpDoc {
 
         for group in self.groups.iter().filter(|group| !group.options.is_empty()) {
             output.push_str(&group.heading);
-            output.push_str("\n");
+            output.push('\n');
             let width = group
                 .options
                 .iter()
