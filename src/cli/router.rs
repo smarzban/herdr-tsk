@@ -21,6 +21,8 @@ pub enum Surface {
     FindBoardTab,
     ResolveContext,
     GlobalHelp,
+    Help,
+    Version,
     Usage,
 }
 
@@ -45,6 +47,7 @@ pub fn route<S: AsRef<str>>(
                 "--find-board-tab" => Surface::FindBoardTab,
                 "--resolve-context" => Surface::ResolveContext,
                 "--help" => Surface::GlobalHelp,
+                "--version" | "-V" => Surface::Version,
                 _ => return Surface::Usage,
             };
             if global.replace(surface).is_some() {
@@ -70,6 +73,7 @@ pub fn route<S: AsRef<str>>(
             "setup" => Surface::Setup,
             "update" => Surface::Update,
             "guide" => Surface::Guide,
+            "help" => Surface::Help,
             _ => Surface::Usage,
         };
     }
@@ -200,5 +204,13 @@ mod tests {
     #[test]
     fn update_selects_update_surface() {
         assert_eq!(route(["tsk", "update"], None), Surface::Update);
+    }
+
+    #[test]
+    fn help_and_version_are_global_surfaces() {
+        assert_eq!(route(["tsk", "help", "add"], None), Surface::Help);
+        assert_eq!(route(["tsk", "--version"], None), Surface::Version);
+        assert_eq!(route(["tsk", "-V"], None), Surface::Version);
+        assert_eq!(route(["tsk", "add", "--version"], None), Surface::Add);
     }
 }

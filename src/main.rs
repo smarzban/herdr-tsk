@@ -12,9 +12,11 @@ fn main() -> ExitCode {
         Surface::FindBoardTab => find_board_main(true),
         Surface::ResolveContext => resolve_context_main(),
         Surface::GlobalHelp => {
-            println!(
-                "usage: tsk [capture] | add | steps | list | status | edit | trash | archive | unarchive | project | setup | update | guide | --find-board-pane | --help\n\nCommands:\n  guide          print the agent workflow skill\n  setup          register herdr, or install the agent skill\n  update         install the latest published release\n  add    create one task or apply a JSON plan\n  steps  add, toggle, rename, or remove one step on a task\n  list   inspect tasks\n  status set a task's human status\n  edit   update a task's title or notes\n  trash  restore a trashed task\n  archive    keep a task off the working views\n  unarchive  put an archived task back\n  project    archive or unarchive a project\n\nRun `tsk add --help`, `tsk steps --help`, `tsk list --help`, `tsk status --help`, `tsk edit --help`, `tsk trash --help`, `tsk archive --help`, `tsk unarchive --help`, `tsk project --help`, or `tsk update --help` for command details.\n\nAgents: run `tsk guide`, or read https://gettsk.sh/docs/agents.md"
-            );
+            print!("{}", tsk_tui::cli::presenter::top_level_help());
+            ExitCode::SUCCESS
+        }
+        Surface::Version => {
+            println!("tsk {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
         }
         Surface::Usage => usage_exit(),
@@ -29,7 +31,8 @@ fn main() -> ExitCode {
         | Surface::Unarchive
         | Surface::Project
         | Surface::Setup
-        | Surface::Guide => headless_main(args),
+        | Surface::Guide
+        | Surface::Help => headless_main(args),
         Surface::Board | Surface::Capture => match tsk_tui::run(args) {
             Ok(()) => ExitCode::SUCCESS,
             Err(err) => {
@@ -41,9 +44,7 @@ fn main() -> ExitCode {
 }
 
 fn usage_exit() -> ExitCode {
-    eprintln!(
-        "usage: tsk [capture] | add | steps | list | status | edit | trash | archive | unarchive | project | setup | update | guide | --find-board-pane | --help"
-    );
+    eprintln!("usage: tsk [capture] | <command> [args] | help [<command>] | --help | --version");
     ExitCode::from(2)
 }
 
@@ -87,9 +88,8 @@ fn resolve_context_main() -> ExitCode {
 
 fn update_main(args: &[String]) -> ExitCode {
     if args.len() == 3 && args[2] == "--help" {
-        println!(
-            "usage: tsk update\n\nInstalls the latest published release for installer-managed tsk. Homebrew installations stay managed by Homebrew and print `brew update && brew upgrade tsk` instead."
-        );
+        let output = tsk_tui::cli::presenter::update_help();
+        print!("{}", output.stdout);
         return ExitCode::SUCCESS;
     }
     if args.len() != 2 {

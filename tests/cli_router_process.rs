@@ -64,11 +64,10 @@ fn top_level_help_names_subcommands_and_their_help() {
     assert!(stdout.contains("edit"));
     assert!(stdout.contains("update"));
     assert!(stdout.contains("archive") && stdout.contains("unarchive"));
-    assert!(stdout.contains("tsk add --help"));
-    assert!(stdout.contains("tsk list --help"));
-    assert!(stdout.contains("tsk status --help"));
-    assert!(stdout.contains("tsk edit --help"));
-    assert!(stdout.contains("tsk archive --help"));
+    assert!(stdout.contains("help [<command>]"));
+    assert!(stdout.contains("--version"));
+    assert!(stdout.contains("tsk help <command>"));
+    assert!(stdout.contains("tsk <command> --help"));
 }
 
 #[test]
