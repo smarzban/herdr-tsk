@@ -1309,6 +1309,18 @@ impl BoardModel {
         true
     }
 
+    /// Open the first project preview when a project row is selected from the full index.
+    pub(super) fn open_project_preview(&mut self) -> bool {
+        if !self.projects_overview() || self.wide_stage != WideStage::FullBoard {
+            return false;
+        }
+        if !self.bind_project_preview() {
+            return false;
+        }
+        self.wide_stage = WideStage::Split;
+        true
+    }
+
     /// Drop the projects overview's transient right-column session.
     pub(crate) fn drop_project_preview(&mut self) {
         self.right_seat = None;
@@ -1900,7 +1912,12 @@ impl BoardModel {
         } else {
             self.projects_selected.checked_sub(1).unwrap_or(len - 1)
         };
-        if self.projects_preview_active() && !self.bind_project_preview() {
+        if self.wide_stage == WideStage::FullBoard {
+            if !self.open_project_preview() {
+                self.projects_selected = previous;
+                return false;
+            }
+        } else if self.projects_preview_active() && !self.bind_project_preview() {
             self.projects_selected = previous;
             return false;
         }

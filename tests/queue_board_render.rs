@@ -5302,6 +5302,9 @@ fn projects_index_paints_aligned_counts_search_hint_and_selected_path() {
 
     // Moving the cursor moves the path.
     apply_intent(&mut domain, &mut model, BoardIntent::SelectNext, None).expect("move down");
+    // Selecting a project opens its wide preview; close it so the remaining assertions keep
+    // exercising the full-width index renderer.
+    apply_intent(&mut domain, &mut model, BoardIntent::StageLeft, None).expect("close preview");
     let rows = board_rows(&model, 162, 43);
     let text = rows.join("\n");
     assert!(

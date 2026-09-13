@@ -1416,6 +1416,7 @@ fn apply_board_intent(
             }
             let previous = model.projects_selected;
             let preview_active = model.projects_preview_active();
+            let full_board = model.projects_overview() && model.wide_stage == WideStage::FullBoard;
             if preview_active
                 && model
                     .right_seat()
@@ -1428,7 +1429,12 @@ fn apply_board_intent(
                 return Ok(IntentOutcome::None);
             }
             model.projects_selected = index;
-            if preview_active && !model.bind_project_preview() {
+            if full_board {
+                if !model.open_project_preview() {
+                    model.projects_selected = previous;
+                    return Ok(IntentOutcome::None);
+                }
+            } else if preview_active && !model.bind_project_preview() {
                 model.projects_selected = previous;
                 return Ok(IntentOutcome::None);
             }

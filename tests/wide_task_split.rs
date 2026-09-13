@@ -211,6 +211,50 @@ fn inside(area: Rect, hit: Rect) -> bool {
 // ---------------------------------------------------------------------------
 
 #[test]
+fn selecting_a_project_row_opens_its_split_preview() {
+    let (mut domain, mut model) = projects_fixture();
+    assert_eq!(model.wide_stage(), WideStage::FullBoard);
+    assert!(model.right_seat().is_none());
+
+    go(&mut domain, &mut model, BoardIntent::SelectNext);
+
+    assert_eq!(model.wide_stage(), WideStage::Split);
+    assert_eq!(
+        model
+            .right_seat()
+            .and_then(BoardModel::active_project)
+            .map(|path| path.to_string_lossy().into_owned()),
+        Some(PROJECT_B.to_string())
+    );
+}
+
+#[test]
+fn clicking_a_project_row_opens_its_split_preview() {
+    let area = Rect::new(0, 0, 110, 30);
+    let (mut domain, mut model) = projects_fixture();
+    let (_, hits) = render(&model, area.width, area.height);
+    let row = hits
+        .regions
+        .iter()
+        .find(|hit| matches!(hit.target, QueueHitTarget::ProjectRow(1)))
+        .expect("second project row hit")
+        .area;
+    let intent = map_responsive_board_mouse(&model, &hits, area, left_click(row.x, row.y))
+        .expect("project row click maps");
+
+    go(&mut domain, &mut model, intent);
+
+    assert_eq!(model.wide_stage(), WideStage::Split);
+    assert_eq!(
+        model
+            .right_seat()
+            .and_then(BoardModel::active_project)
+            .map(|path| path.to_string_lossy().into_owned()),
+        Some(PROJECT_B.to_string())
+    );
+}
+
+#[test]
 fn projects_preview_stages_bind_a_nested_project_board_and_keep_the_index_cursor() {
     let (mut domain, mut model) = projects_fixture();
     assert_eq!(model.wide_stage(), WideStage::FullBoard);
