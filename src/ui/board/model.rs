@@ -1089,12 +1089,50 @@ impl BoardModel {
         }
     }
 
+    fn should_defer_project_preview_sync(&self, state: &DomainState) -> bool {
+        if !self.projects_overview()
+            || !matches!(self.wide_stage, WideStage::Split | WideStage::Rail)
+        {
+            return false;
+        }
+        let Some(right) = self.right_seat.as_deref() else {
+            return false;
+        };
+        let Some(path) = right.active_project() else {
+            return false;
+        };
+        if !right.has_unsaved_work() {
+            return false;
+        }
+        let archived_projects = state.archived_projects();
+        let incoming = queue::query_board(
+            state.tasks(),
+            &archived_projects,
+            self.this_repo.as_deref(),
+            BoardLens::Projects,
+            false,
+            &ThreadFilter::All,
+        );
+        !incoming
+            .projects
+            .iter()
+            .any(|row| paths_equivalent(&row.path, &path.to_string_lossy()))
+    }
+
     /// Navigation is never yanked by saves or background merges: a save reanchors the
     /// pin only when the current destination already renders the saved task, and no
     /// path switches the board to another project merely to reveal a row.
     ///
+    /// A dirty preview whose project disappeared from an incoming snapshot defers the whole
+    /// replacement. Returning `false` lets the idle store watcher retry after the draft is saved
+    /// or cancelled instead of leaving a dirty seat attached to a different project row.
+    ///
     /// Replace task snapshot from domain (after mutation) and reanchor selection by id.
-    pub fn sync_from_domain(&mut self, state: &DomainState) {
+    pub fn sync_from_domain(&mut self, state: &DomainState) -> bool {
+        if self.should_defer_project_preview_sync(state) {
+            self.set_message(DIRTY_TASK_SWITCH_REFUSAL);
+            return false;
+        }
         // Capture the prior visible order before the snapshot is replaced, so reanchoring
         // can still see where the selection used to live. Project rows are derived from task
         // order, so the cursor needs a path anchor as well: an arriving project above it must
@@ -1221,6 +1259,7 @@ impl BoardModel {
                 self.bind_project_preview();
             }
         }
+        true
     }
 
     /// Presenter / pane title string.
@@ -3829,6 +3868,120 @@ mod tests {
             model.right_seat().and_then(BoardModel::active_project),
             Some(Path::new(REPO_B))
         );
+    }
+
+    #[test]
+    fn dirty_project_preview_sync_is_atomic_when_project_disappears() {
+        let mut domain = DomainState::new();
+        let alpha = create(&mut domain, "alpha task", project(REPO_A));
+        create(&mut domain, "beta task", project(REPO_B));
+
+        let mut model = BoardModel::from_domain(&domain, None);
+        model.board_location = BoardLocation::Projects;
+        model.wide_stage = WideStage::Split;
+        assert_eq!(
+            model.selected_project_row().map(|row| row.path),
+            Some(REPO_A.into())
+        );
+        assert!(model.bind_project_preview());
+        model.wide_stage = WideStage::Rail;
+
+        let right = model.right_seat.as_deref_mut().expect("preview seat");
+        let task = right
+            .tasks
+            .iter()
+            .find(|task| task.id == alpha)
+            .expect("preview task")
+            .clone();
+        let mut form = BoardForm::task(
+            &task,
+            right.this_repo.as_deref(),
+            &right.tasks,
+            CaptureField::Title,
+            &right.archived_projects,
+        );
+        form.editing = true;
+        form.title.insert_char('!');
+        right.form = Some(form);
+        right.input_mode = BoardInputMode::EditTitle;
+        assert!(model.has_unsaved_work());
+
+        let mut incoming = domain.clone();
+        incoming.soft_delete(alpha).expect("remove alpha");
+        assert!(
+            !model.sync_from_domain(&incoming),
+            "a dirty preview must defer a snapshot that removes its project"
+        );
+        assert!(model.tasks.iter().any(|task| task.id == alpha));
+        assert_eq!(
+            model.selected_project_row().map(|row| row.path),
+            Some(REPO_A.into())
+        );
+        assert_eq!(
+            model.right_seat().and_then(BoardModel::active_project),
+            Some(Path::new(REPO_A))
+        );
+        assert!(model.right_seat().is_some_and(BoardModel::has_unsaved_work));
+
+        let right = model.right_seat.as_deref_mut().expect("preview seat");
+        right.form = None;
+        right.input_mode = BoardInputMode::Normal;
+        assert!(model.sync_from_domain(&incoming));
+        assert_eq!(
+            model.selected_project_row().map(|row| row.path),
+            Some(REPO_B.into())
+        );
+        assert_eq!(
+            model.right_seat().and_then(BoardModel::active_project),
+            Some(Path::new(REPO_B))
+        );
+    }
+
+    #[test]
+    fn leaving_project_preview_clears_ephemeral_chrome_but_retains_the_session() {
+        let mut domain = DomainState::new();
+        let id = create(&mut domain, "preview task", project(REPO_A));
+        create(&mut domain, "other project", project(REPO_B));
+
+        let mut model = BoardModel::from_domain(&domain, None);
+        model.board_location = BoardLocation::Projects;
+        model.wide_stage = WideStage::Split;
+        assert!(model.bind_project_preview());
+        model.wide_stage = WideStage::Rail;
+        let project = model
+            .right_seat()
+            .and_then(BoardModel::active_project)
+            .map(Path::to_path_buf);
+        let selected = model.right_seat().and_then(BoardModel::selected_id);
+        {
+            let right = model.right_seat.as_deref_mut().expect("preview seat");
+            right.list_scroll.set(3);
+            right.pending_delete = Some(id);
+            right.delete_notice = Some("stale delete notice".into());
+            right.set_message("stale preview message");
+        }
+        assert!(model.right_seat().is_some_and(|right| {
+            right.pending_delete.is_some()
+                && right.delete_notice().is_some()
+                && right.message().is_some()
+        }));
+
+        crate::ui::board::apply_intent(
+            &mut domain,
+            &mut model,
+            crate::ui::input::BoardIntent::StageLeft,
+            None,
+        )
+        .expect("leave preview rail");
+
+        assert_eq!(model.wide_stage(), WideStage::Split);
+        let right = model.right_seat().expect("retained preview seat");
+        assert_eq!(right.active_project(), project.as_deref());
+        assert_eq!(right.selected_id(), selected);
+        assert_eq!(right.list_scroll(), 3);
+        assert!(right.pending_delete.is_none());
+        assert!(right.delete_notice().is_none());
+        assert!(right.message().is_none());
     }
 
     #[test]

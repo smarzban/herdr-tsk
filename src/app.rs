@@ -1028,7 +1028,11 @@ pub fn revalidate_board_from_store(
         return false;
     };
     domain.merge_tasks_from_disk(&disk);
-    model.sync_from_domain(domain);
+    if !model.sync_from_domain(domain) {
+        // A dirty project preview keeps its old snapshot until the user resolves the draft. Do
+        // not acknowledge the file signature: the next idle tick must retry the deferred merge.
+        return false;
+    }
     watch.record(signature);
     true
 }
@@ -2414,6 +2418,113 @@ mod idle_store_revalidation_tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    #[test]
+    fn idle_tick_defers_a_dirty_project_preview_until_the_draft_is_resolved() {
+        let dir = temp_store_dir("dirty-project-preview");
+        let store = TaskStore::new(&dir);
+        let mut domain = DomainState::new();
+        let alpha = domain
+            .create(
+                "Alpha preview task",
+                None,
+                TaskScope::Project {
+                    path: "/repos/alpha".into(),
+                },
+                ProvenanceOrigin::Manual,
+                None,
+            )
+            .unwrap();
+        domain
+            .create(
+                "Beta preview task",
+                None,
+                TaskScope::Project {
+                    path: "/repos/beta".into(),
+                },
+                ProvenanceOrigin::Manual,
+                None,
+            )
+            .unwrap();
+        store.save(&domain).unwrap();
+
+        let mut model = BoardModel::from_domain(&domain, None);
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::SelectNavTab(crate::ui::queue::NavTab::Projects),
+            None,
+        )
+        .expect("open projects overview");
+        apply_intent(&mut domain, &mut model, BoardIntent::StageRight, None)
+            .expect("open project split");
+        apply_intent(&mut domain, &mut model, BoardIntent::StageRight, None)
+            .expect("focus project rail");
+        apply_intent(
+            &mut domain,
+            model.input_target_mut(),
+            BoardIntent::OpenCapture,
+            None,
+        )
+        .expect("open preview draft");
+        apply_intent(
+            &mut domain,
+            model.input_target_mut(),
+            BoardIntent::QuickAddInsertText("retain this draft".into()),
+            None,
+        )
+        .expect("type preview draft");
+        let mut watch = StoreWatch::seeded(&store);
+        let recovery = SaveRecovery::<DomainState>::new();
+
+        let writer_store = TaskStore::new(&dir);
+        let mut writer_domain = writer_store.load().unwrap();
+        writer_domain.soft_delete(alpha).unwrap();
+        writer_store.save(&writer_domain).unwrap();
+
+        let merged =
+            revalidate_board_from_store(&store, &mut domain, &mut model, &mut watch, &recovery);
+        assert!(!merged, "the dirty preview must defer the changed snapshot");
+        assert!(
+            watch.poll(&store).is_some(),
+            "deferred signatures must be retried"
+        );
+        assert_eq!(
+            model.selected_project_row().map(|row| row.path),
+            Some("/repos/alpha".into())
+        );
+        assert_eq!(
+            model.right_seat().map(BoardModel::quick_add_title_value),
+            Some("retain this draft")
+        );
+        assert!(model.right_seat().is_some_and(|right| {
+            right.visible_ids().contains(&alpha)
+                && right
+                    .active_project()
+                    .is_some_and(|path| path == std::path::Path::new("/repos/alpha"))
+        }));
+
+        apply_intent(
+            &mut domain,
+            model.input_target_mut(),
+            BoardIntent::CancelQuickAdd,
+            None,
+        )
+        .expect("cancel deferred preview draft");
+        assert!(model
+            .right_seat()
+            .is_some_and(|right| !right.has_unsaved_work()));
+        assert!(
+            revalidate_board_from_store(&store, &mut domain, &mut model, &mut watch, &recovery,),
+            "the next idle tick must apply the deferred snapshot"
+        );
+        assert_eq!(
+            model.selected_project_row().map(|row| row.path),
+            Some("/repos/beta".into())
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     /// M-3(i) /: an open **title** edit must not be redirected by the idle merge this
     /// call site drives -- the doc above claims it (`sync_from_domain` reanchors selection by
     /// id and never touches the edit binding), and `tests/edit_target_binding.rs` already
@@ -2812,6 +2923,35 @@ mod tests {
     }
 
     #[test]
+    fn projects_preview_clicking_a_project_row_at_wide_width_opens_the_preview() {
+        let (mut domain, mut model) = projects_overview_fixture();
+        let area = Rect::new(0, 0, 110, 30);
+        sync_frame_presentation(area, &model);
+        let hits = board_hit_map(area, &model);
+        let row = hits
+            .regions
+            .iter()
+            .find(|hit| matches!(hit.target, crate::ui::render::QueueHitTarget::ProjectRow(1)))
+            .expect("second project row hit")
+            .area;
+        let intent = map_responsive_board_mouse(&model, &hits, area, left_click(row.x, row.y))
+            .expect("project row click");
+        assert_eq!(intent, BoardIntent::SelectProjectRow(1));
+
+        apply_intent(&mut domain, &mut model, intent, None).expect("select project row");
+        auto_open_projects_preview(area, &mut model, &BoardIntent::SelectProjectRow(1));
+
+        assert_eq!(model.wide_stage(), crate::ui::tier::WideStage::Split);
+        assert_eq!(
+            model
+                .right_seat()
+                .and_then(BoardModel::active_project)
+                .map(Path::to_path_buf),
+            Some(PathBuf::from("/repos/beta"))
+        );
+    }
+
+    #[test]
     fn projects_preview_rail_parks_on_narrow_resize_and_restores_the_seat() {
         let (mut domain, mut model) = projects_overview_fixture();
         stage_right(&mut domain, &mut model, 2);
@@ -3049,6 +3189,132 @@ mod tests {
     }
 
     #[test]
+    fn projects_preview_rail_mouse_dispatch_targets_right_seat_and_syncs_after_action() {
+        let area = Rect::new(0, 0, 110, 30);
+        let temp = TempStore::new("projects-preview-mouse");
+        let (mut domain, mut model) = projects_preview_open_tasks_fixture();
+        for id in domain
+            .tasks()
+            .iter()
+            .map(|task| task.id)
+            .collect::<Vec<_>>()
+        {
+            domain
+                .set_status(id, HumanStatus::Ready)
+                .expect("ready preview task");
+        }
+        model.sync_from_domain(&domain);
+        temp.store.save(&domain).expect("persist preview tasks");
+        sync_frame_presentation(area, &model);
+        assert!(model.project_right_seat_focused());
+
+        let right_visible = model
+            .right_seat()
+            .expect("projects rail has a right seat")
+            .visible_ids();
+        let task_ids: Vec<_> = right_visible
+            .into_iter()
+            .filter(|id| *id != crate::ui::queue::INBOX_HEADER_ROW_ID)
+            .collect();
+        let second_task = *task_ids.get(1).expect("second preview task");
+        let hits = board_hit_map(area, &model);
+        let task_hit = hits
+            .regions
+            .iter()
+            .find(|hit| hit.target == crate::ui::render::QueueHitTarget::Task(second_task))
+            .expect("right-seat task hit")
+            .area;
+        let task_click = left_click(task_hit.x, task_hit.y);
+        let task_intent = map_responsive_board_mouse(&model, &hits, area, task_click)
+            .expect("right-seat task click");
+        assert!(
+            matches!(task_intent, BoardIntent::SelectIndex(_)),
+            "right-seat task click mapped to {task_intent:?}"
+        );
+
+        let mut recovery = SaveRecovery::new();
+        let quit = handle_board_intent(
+            &temp.store,
+            &mut domain,
+            mouse_intent_target_mut(&mut model, area, task_click, &hits, &task_intent),
+            task_intent,
+            &mut recovery,
+            false,
+        )
+        .expect("dispatch right-seat task click");
+        assert!(!quit);
+        sync_focused_project_preview(&mut model, &domain, &recovery);
+        assert_eq!(
+            model.selected_id(),
+            None,
+            "the projects index stays unselected"
+        );
+        assert_eq!(
+            model.right_seat().and_then(BoardModel::selected_id),
+            Some(second_task),
+            "the task click must select the nested board's task"
+        );
+
+        let hits = board_hit_map(area, &model);
+        let verb_hit = hits
+            .regions
+            .iter()
+            .find(|hit| {
+                matches!(hit.target, crate::ui::render::QueueHitTarget::Verb(_))
+                    && map_responsive_board_mouse(
+                        &model,
+                        &hits,
+                        area,
+                        left_click(hit.area.x, hit.area.y),
+                    ) == Some(BoardIntent::Complete)
+            })
+            .expect("right-seat complete verb hit")
+            .area;
+        assert!(
+            hits.footer
+                .is_some_and(|footer| footer.contains(verb_hit.as_position())),
+            "the complete verb must be painted in the shared footer"
+        );
+        let verb_click = left_click(verb_hit.x, verb_hit.y);
+        let verb_intent = map_responsive_board_mouse(&model, &hits, area, verb_click)
+            .expect("right-seat footer click");
+        assert_eq!(verb_intent, BoardIntent::Complete);
+        let quit = handle_board_intent(
+            &temp.store,
+            &mut domain,
+            mouse_intent_target_mut(&mut model, area, verb_click, &hits, &verb_intent),
+            verb_intent,
+            &mut recovery,
+            false,
+        )
+        .expect("dispatch right-seat footer action");
+        assert!(!quit);
+        sync_focused_project_preview(&mut model, &domain, &recovery);
+
+        assert_eq!(
+            domain.get(second_task).map(|task| task.status),
+            Some(HumanStatus::Done)
+        );
+        let outer_view = model.queue_view();
+        let outer_row = outer_view
+            .projects
+            .iter()
+            .find(|row| row.path == "/repos/preview")
+            .expect("outer project row after completion");
+        assert_eq!(
+            outer_row.ready, 1,
+            "post-dispatch sync must refresh the outer project's count"
+        );
+        let right = model.right_seat().expect("right seat after completion");
+        assert!(
+            right
+                .selected_id()
+                .is_some_and(|id| right.visible_ids().contains(&id)),
+            "post-dispatch sync must leave the nested selection on a visible task"
+        );
+    }
+
+    #[test]
     fn projects_preview_nested_arrows_keep_the_narrow_peek_keymap() {
         let (mut domain, mut model, _) = projects_preview_fixture();
         let area = Rect::new(0, 0, 110, 30);
@@ -3116,14 +3382,21 @@ mod tests {
             area,
             KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
         );
-        let outer_intent = if outer_close == BoardIntent::CloseLayer
-            && model.project_right_board_leave_requested()
-        {
-            BoardIntent::StageLeft
-        } else {
-            outer_close
-        };
-        apply_intent(&mut domain, &mut model, outer_intent, None).expect("return to index");
+        let routed = route_board_intent(&model, outer_close);
+        assert_eq!(routed.intent, BoardIntent::CloseLayer);
+        assert_eq!(routed.target, BoardIntentTarget::Focused);
+        assert!(routed.return_to_index);
+        apply_intent(
+            &mut domain,
+            board_intent_target_mut(&mut model, routed.target),
+            routed.intent,
+            None,
+        )
+        .expect("close the nested preview board");
+        if routed.return_to_index {
+            apply_intent(&mut domain, &mut model, BoardIntent::StageLeft, None)
+                .expect("return to index");
+        }
         assert_eq!(model.wide_stage(), crate::ui::tier::WideStage::Split);
         assert!(!model.project_right_seat_focused());
     }
@@ -3330,6 +3603,121 @@ mod tests {
         )
         .expect("cancel preview save");
         assert!(!recovery.is_pending());
+    }
+
+    #[test]
+    fn projects_preview_dirty_draft_refuses_every_project_switch_route() {
+        let (mut domain, mut model) = projects_overview_fixture();
+        stage_right(&mut domain, &mut model, 2);
+        apply_intent(
+            &mut domain,
+            model.input_target_mut(),
+            BoardIntent::OpenCapture,
+            None,
+        )
+        .expect("open preview quick add");
+        apply_intent(
+            &mut domain,
+            model.input_target_mut(),
+            BoardIntent::QuickAddInsertText("keep this draft".into()),
+            None,
+        )
+        .expect("type preview draft");
+        let draft = model
+            .right_seat()
+            .map(BoardModel::quick_add_title_value)
+            .expect("preview draft");
+        assert_eq!(draft, "keep this draft");
+        assert!(model.has_unsaved_work());
+
+        // Rail row changes are refused before the nested session can be rebound.
+        let rail_project = model
+            .right_seat()
+            .and_then(BoardModel::active_project)
+            .map(Path::to_path_buf);
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::SelectProjectRow(1),
+            None,
+        )
+        .expect("refuse rail project switch");
+        assert_eq!(model.wide_stage(), crate::ui::tier::WideStage::Rail);
+        assert_eq!(
+            model.right_seat().and_then(BoardModel::active_project),
+            rail_project.as_deref()
+        );
+        assert_eq!(
+            model.right_seat().map(BoardModel::quick_add_title_value),
+            Some("keep this draft")
+        );
+        assert_eq!(
+            model.message(),
+            Some("save or cancel edits before switching tasks")
+        );
+
+        // Returning to Split keeps the dirty seat parked, so every index-level route below is
+        // tested against the same retained draft rather than a clean replacement.
+        apply_intent(&mut domain, &mut model, BoardIntent::StageLeft, None)
+            .expect("park dirty preview");
+        assert_eq!(model.wide_stage(), crate::ui::tier::WideStage::Split);
+        assert!(model.has_unsaved_work());
+
+        let assert_refused =
+            |domain: &mut DomainState, model: &mut BoardModel, intent: BoardIntent| {
+                apply_intent(domain, model, intent.clone(), None).expect("dirty route refusal");
+                assert_eq!(
+                    model.message(),
+                    Some("save or cancel edits before switching tasks"),
+                    "{intent:?} must explain why the dirty preview stayed put"
+                );
+                assert_eq!(
+                    model.right_seat().map(BoardModel::quick_add_title_value),
+                    Some("keep this draft")
+                );
+                assert!(model.has_unsaved_work());
+            };
+
+        assert_refused(&mut domain, &mut model, BoardIntent::SelectProjectRow(1));
+        assert_refused(&mut domain, &mut model, BoardIntent::OpenTaskPage);
+        assert_refused(&mut domain, &mut model, BoardIntent::OpenProjectSelector);
+        assert_refused(
+            &mut domain,
+            &mut model,
+            BoardIntent::SelectNavTab(NavTab::Desk),
+        );
+        assert_refused(
+            &mut domain,
+            &mut model,
+            BoardIntent::ProjectsQueryInsert('b'),
+        );
+        assert_refused(
+            &mut domain,
+            &mut model,
+            BoardIntent::ProjectsQueryInsertText("beta".into()),
+        );
+        assert_refused(&mut domain, &mut model, BoardIntent::ProjectsQueryBackspace);
+        assert_refused(&mut domain, &mut model, BoardIntent::StageLeft);
+
+        // A same-row second click is also a project-board jump once the double-click window is
+        // satisfied, and must not bypass the dirty-seat guard.
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::SelectProjectRow(0),
+            None,
+        )
+        .expect("first same-row click");
+        assert_refused(&mut domain, &mut model, BoardIntent::SelectProjectRow(0));
+
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::OpenProjectsViewPicker,
+            None,
+        )
+        .expect("open projects view picker");
+        assert_refused(&mut domain, &mut model, BoardIntent::ConfirmListPicker);
     }
 
     #[test]

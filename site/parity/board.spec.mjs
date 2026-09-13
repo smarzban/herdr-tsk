@@ -224,7 +224,15 @@ test("projects overview opens a live project preview and keeps its task seat", a
   await expect(
     page.locator('[role="dialog"][aria-label="project thread filter"]'),
   ).toBeVisible();
-  await page.keyboard.press("Escape");
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Enter");
+  await expect(page.locator('[role="dialog"][aria-label="project thread filter"]')).toHaveCount(0);
+  await expect(page.locator("[data-preview-task]")).toHaveCount(2);
+  await expect(
+    page.locator("[data-preview-task]").filter({
+      hasText: "Check the unlabeled project task",
+    }),
+  ).toHaveCount(0);
   await page.keyboard.press("Enter");
   await expect(page.locator(".tsk-task-column")).toHaveAttribute(
     "data-status",
