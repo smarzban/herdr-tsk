@@ -8,4 +8,4 @@
 [[announcement]]
 id = 2
 title = "An inbox, a projects preview, and tsk help"
-notes = "New captures start in an open inbox below ON DECK. Pick work with ctrl+n, send it back with ctrl+o, and use tsk list --open or --ready to filter from the CLI.\n\nOn a wide terminal the projects tab previews the cursored project beside the list; press → to work in it.\n\ntsk --help is the CLI reference: tsk help <command> explains one command, tsk --version prints the version.\n\nChangelog: https://github.com/smarzban/herdr-tsk/blob/main/CHANGELOG.md"
+notes = "New captures start in an open inbox below ON DECK. Pick work with ctrl+n, send it back with ctrl+o, and use tsk list --open or --ready to filter from the CLI.\n\nOn a wide terminal the projects tab previews the cursored project beside the list; press → to work in it. The projects index counts ON DECK and DONE.\n\ntsk --help is the CLI reference: tsk help <command> explains one command, tsk --version prints the version.\n\nChangelog: https://github.com/smarzban/herdr-tsk/blob/main/CHANGELOG.md"
