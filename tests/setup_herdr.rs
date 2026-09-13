@@ -86,7 +86,10 @@ fn setup_help_is_headless_and_bad_arguments_are_usage_errors() {
         .output()
         .unwrap();
     assert!(output.status.success());
-    assert!(String::from_utf8_lossy(&output.stdout).contains("prefix+t"));
+    let help = String::from_utf8_lossy(&output.stdout);
+    assert!(help.contains("Values"));
+    assert!(help.contains("herdr"));
+    assert!(help.contains("Exit:"));
     let output = Command::new(env!("CARGO_BIN_EXE_tsk"))
         .args(["setup", "herdr", "--force"])
         .output()
