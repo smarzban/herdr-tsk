@@ -29,7 +29,7 @@ Clicking Title, Notes, Scope, or Thread does not start an edit from view mode. S
 
 In view mode, `Tab` selects steps and **+ step**. It does not cycle task fields. Status shortcuts remain available on the task page; use `ctrl+e`, then `Tab` to reach Notes.
 
-During task editing, the forward order is Title → Notes → steps → **+ step** → Thread → Scope → Notes. Title is the entry point only; `Shift+Tab` from Notes reaches it. A field click moves the cursor and retains staged changes.
+During task editing, the forward order is Title → Notes → steps → **+ step** → Thread → Scope → Title. `Shift+Tab` reverses the ring. A field click moves the cursor and retains staged changes.
 
 ## Scope and thread
 

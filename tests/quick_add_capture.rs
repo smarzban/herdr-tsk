@@ -705,6 +705,12 @@ fn expanded_page_stashes_notes_and_scope_across_esc_and_saves_like_quick_add() {
         "Tab in the page advances the form rather than re-expanding quick add"
     );
     apply(&mut domain, &mut model, BoardIntent::FormFocusNext, None);
+    assert_eq!(model.input_mode(), BoardInputMode::Normal);
+    assert!(
+        render_text(&model, 80, 24).contains("▸ + step"),
+        "Tab from Notes selects the trailing step target"
+    );
+    apply(&mut domain, &mut model, BoardIntent::FormFocusNext, None);
     assert_eq!(model.input_mode(), BoardInputMode::EditThread);
     assert_eq!(
         model.form_focus(),
@@ -713,6 +719,10 @@ fn expanded_page_stashes_notes_and_scope_across_esc_and_saves_like_quick_add() {
     apply(&mut domain, &mut model, BoardIntent::FormFocusNext, None);
     assert_eq!(model.input_mode(), BoardInputMode::EditScope);
     assert_eq!(model.form_scope(), Some(&TaskScope::Global));
+    apply(&mut domain, &mut model, BoardIntent::FormFocusNext, None);
+    assert_eq!(model.input_mode(), BoardInputMode::EditTitle);
+    apply(&mut domain, &mut model, BoardIntent::FormFocusNext, None);
+    assert_eq!(model.input_mode(), BoardInputMode::EditNotes);
 
     apply(&mut domain, &mut model, BoardIntent::CancelEdit, None);
     assert_eq!(model.input_mode(), BoardInputMode::QuickAdd);
@@ -1307,6 +1317,11 @@ fn expanded_quick_add_sets_thread_and_steps() {
     assert!(
         page.contains("+ step"),
         "expanded capture paints + step:\n{page}"
+    );
+    apply(&mut domain, &mut model, BoardIntent::FormFocusNext, None);
+    assert!(
+        render_text(&model, 80, 24).contains("▸ + step"),
+        "Tab from Notes selects the trailing step target"
     );
     apply(&mut domain, &mut model, BoardIntent::FormFocusNext, None);
     assert_eq!(model.input_mode(), BoardInputMode::EditThread);

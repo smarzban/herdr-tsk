@@ -2246,7 +2246,10 @@ fn task_edit_tab_cycles_every_step_between_notes_and_thread_then_scope() {
         .expect("Tab reaches Scope");
     assert_eq!(model.input_mode(), BoardInputMode::EditScope);
     apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
-        .expect("Tab returns to Notes without revisiting Title");
+        .expect("Tab wraps Scope to Title");
+    assert_eq!(model.input_mode(), BoardInputMode::EditTitle);
+    apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
+        .expect("Tab advances Title to Notes");
     assert_eq!(model.input_mode(), BoardInputMode::EditNotes);
     apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
         .expect("Tab returns to the first selected step after Notes");
@@ -3009,9 +3012,9 @@ fn first_step_up_deactivates_before_inactive_up_scrolls_then_down_reactivates() 
 
     apply_intent(&mut domain, &mut model, BoardIntent::BeginEditScope, None)
         .expect("enter Scope on the task edit traversal");
-    for _ in 0..2 {
+    for _ in 0..3 {
         apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
-            .expect("Tab completes Scope → Notes → first step");
+            .expect("Tab completes Scope → Title → Notes → first step");
     }
     let reactivated = rendered_board(&model, 80, 24);
     assert!(

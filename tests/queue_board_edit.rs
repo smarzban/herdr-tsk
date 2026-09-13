@@ -459,8 +459,8 @@ fn task_form_unifies_palette_field_routes_scope_dropdown_and_atomic_save() {
     assert_eq!(model.form_scope(), Some(&TaskScope::Global));
 
     apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
-        .expect("Scope wraps to Notes");
-    assert_eq!(model.input_mode(), BoardInputMode::EditNotes);
+        .expect("Scope wraps to Title");
+    assert_eq!(model.input_mode(), BoardInputMode::EditTitle);
     let outcome = apply_intent(&mut domain, &mut model, BoardIntent::ConfirmEdit, None)
         .expect("one atomic form save");
     assert_eq!(outcome, IntentOutcome::Persist);
@@ -644,7 +644,7 @@ fn page_view_shows_thread_beside_scope() {
 }
 
 #[test]
-fn task_page_form_tab_cycle_keeps_title_entry_only_and_reverses_to_it() {
+fn task_page_form_tab_cycle_wraps_through_title() {
     let mut domain = DomainState::new();
     domain
         .create(
@@ -664,6 +664,7 @@ fn task_page_form_tab_cycle_keeps_title_entry_only_and_reverses_to_it() {
         CaptureField::Notes,
         CaptureField::Thread,
         CaptureField::Scope,
+        CaptureField::Title,
         CaptureField::Notes,
     ] {
         let tab = map_board_form_key(

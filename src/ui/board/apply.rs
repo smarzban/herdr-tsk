@@ -536,7 +536,17 @@ fn apply_board_intent(
                     }
                 }
             } else if model.input_mode == BoardInputMode::TaskPage {
-                if model.task_editing() {
+                if model.capture_draft_open() {
+                    if model
+                        .form
+                        .as_ref()
+                        .is_some_and(|form| form.steps.add_selected)
+                    {
+                        model.focus_form_field(CaptureField::Thread);
+                    } else {
+                        select_add_step(model);
+                    }
+                } else if model.task_editing() {
                     if model
                         .form
                         .as_ref()
@@ -553,10 +563,12 @@ fn apply_board_intent(
                 && model.form.as_ref().is_some_and(|form| form.is_task())
             {
                 select_step_from_tab(model, true);
+            } else if model.input_mode == BoardInputMode::EditNotes && model.capture_draft_open() {
+                select_add_step(model);
             } else if model.input_mode == BoardInputMode::EditScope
                 && model.form.as_ref().is_some_and(|form| form.is_task())
             {
-                model.focus_form_field(CaptureField::Notes);
+                model.focus_form_field(CaptureField::Title);
             } else if matches!(
                 model.input_mode,
                 BoardInputMode::SelectThread | BoardInputMode::EditThread
@@ -579,7 +591,9 @@ fn apply_board_intent(
                 }
                 return Ok(IntentOutcome::None);
             } else if model.input_mode == BoardInputMode::TaskPage {
-                if model.task_editing() {
+                if model.capture_draft_open() {
+                    model.focus_form_field(CaptureField::Notes);
+                } else if model.task_editing() {
                     if model
                         .form
                         .as_ref()
@@ -604,6 +618,12 @@ fn apply_board_intent(
             ) && model.form.as_ref().is_some_and(|form| form.is_task())
             {
                 select_step_from_tab(model, false);
+            } else if matches!(
+                model.input_mode,
+                BoardInputMode::SelectThread | BoardInputMode::EditThread
+            ) && model.capture_draft_open()
+            {
+                select_add_step(model);
             } else if model.input_mode == BoardInputMode::EditScope
                 && model.form.as_ref().is_some_and(|form| form.is_task())
             {
@@ -2880,7 +2900,7 @@ fn move_step_within_edit_group(model: &mut BoardModel, forward: bool) -> bool {
 }
 
 fn select_add_step(model: &mut BoardModel) {
-    if let Some(form) = model.form.as_mut().filter(|form| form.is_task()) {
+    if let Some(form) = model.form.as_mut() {
         form.steps.cursor = None;
         form.steps.add_selected = true;
         model.input_mode = BoardInputMode::TaskPage;
