@@ -141,13 +141,16 @@ Before calling a docs pass done, diff the guide against `src/`: keymaps in
 The web demo uses bare verb keys on purpose (browsers reserve control chords); do not
 "fix" that to match the TUI.
 
-Any edit to `skills/tsk-cli/SKILL.md` bumps its frontmatter `version:` (never backwards:
-shipped versions are on users' disks) and the two pins in `embedded_skill_declares_semver`
-(`src/setup_agent.rs`): the version string and the FNV-1a content hash. On failure the
-assertion's `left` value is the new hash; paste it in. `tsk setup <agent>` compares the version against
-the installed copy and only rewrites on a difference, so an unbumped edit leaves every
-installed skill silently stale. The skill is also `tsk guide` and
-`/docs/agents/`, so it counts as user-visible.
+The skill's frontmatter `version:` moves **once per release**, not once per edit. The first
+skill change after a release bumps it one minor above the version the last release shipped
+(check `git show vX.Y.Z:skills/tsk-cli/SKILL.md`); every further edit while that number is
+still unreleased keeps it and only refreshes the FNV-1a content hash pin in
+`embedded_skill_declares_semver` (`src/setup_agent.rs`). Never go below a shipped version:
+those copies are on users' disks. On failure the assertion's `left` value is the new hash;
+paste it in. `tsk setup <agent>` compares the version against the installed copy and only
+rewrites on a difference, so a skill edit without a bump since the last release leaves every
+installed skill silently stale. The skill is also `tsk guide` and `/docs/agents/`, so it
+counts as user-visible.
 
 ## Invariants
 
