@@ -4029,8 +4029,10 @@ pub(crate) struct IndexColumns {
     pub motion_end: usize,
     /// Exclusive right edge of ON DECK.
     pub on_deck_end: usize,
-    /// Exclusive right edge of DONE.
+    /// Exclusive right edge of DONE, or the compact overflow marker when DONE is hidden.
     pub done_end: usize,
+    /// Whether the DONE count lane is present (the narrow preview rail shows `…` instead).
+    pub done_visible: bool,
     /// Column legend words, shortened where four full labels would crowd the name.
     pub labels: (&'static str, &'static str, &'static str, &'static str),
 }
@@ -4047,7 +4049,12 @@ const INDEX_FULL_LABELS_MIN_WIDTH: usize = 66;
 
 pub(crate) fn index_columns(width: usize) -> IndexColumns {
     let compact = width < INDEX_FULL_LABELS_MIN_WIDTH;
-    let labels = if compact {
+    // The 32-cell preview rail cannot carry four count lanes beside a readable PROJECT
+    // heading. Hide DONE there behind an overflow marker; 50-column full boards are unchanged.
+    let done_visible = width >= 34;
+    let labels = if !done_visible {
+        ("NEED", "MOTION", "DECK", "…")
+    } else if compact {
         ("NEED", "MOTION", "DECK", "DONE")
     } else {
         ("NEEDS YOU", "IN MOTION", "ON DECK", "DONE")
@@ -4077,6 +4084,7 @@ pub(crate) fn index_columns(width: usize) -> IndexColumns {
         motion_end,
         on_deck_end,
         done_end,
+        done_visible,
         labels,
     }
 }
@@ -4244,15 +4252,18 @@ fn paint_project_row(
             place_span(&mut spans, &mut x, threads_x, cell, style_dim());
         }
     }
-    for (end, (text, style)) in [
+    let mut counts = vec![
         (columns.needs_end, index_count(row.needs_you, style_bold())),
         (
             columns.motion_end,
             index_count(row.in_motion, style_plain()),
         ),
         (columns.on_deck_end, index_count(row.on_deck, style_dim())),
-        (columns.done_end, index_count(row.done, style_dim())),
-    ] {
+    ];
+    if columns.done_visible {
+        counts.push((columns.done_end, index_count(row.done, style_dim())));
+    }
+    for (end, (text, style)) in counts {
         place_right(&mut spans, &mut x, end, text, style);
     }
     bound_line(Line::from(spans), width as usize)

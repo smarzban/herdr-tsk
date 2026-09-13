@@ -4,10 +4,10 @@
 │                                │                                                                             │
 │                     Overview ▾ │  IN MOTION ───────────────────────────────────────────────────────────────1 │
 │                                │                                                                             │
-│   PROJECTNEED MOTION DECK DONE │ ▸ ● T1 Smoke-test worktree dispatch                                         │
+│   PROJECT NEED MOTION DECK   … │ ▸ ● T1 Smoke-test worktree dispatch                                         │
 │                                │                                                                             │
-│ ▸ tsk       ·      1    2    1 │  ON DECK ─────────────────────────────────────────────────────────────────2 │
-│   herdr     2      1    ·    · │                                                                             │
+│ ▸ tsk        ·      1    2     │  ON DECK ─────────────────────────────────────────────────────────────────2 │
+│   herdr      2      1    ·     │                                                                             │
 │                                │   ○ T4 Cut rust-toolchain pin into CI docs                                  │
 │                                │   ○ T3 Prototype the queue-style board UI                                   │
 │                                │                                                                             │
