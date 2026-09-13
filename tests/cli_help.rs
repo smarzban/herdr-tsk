@@ -184,6 +184,62 @@ fn help_without_an_operand_is_top_level_help() {
 }
 
 #[test]
+fn command_help_lines_have_no_trailing_whitespace() {
+    for args in [
+        &["--help"][..],
+        &["add", "--help"],
+        &["list", "--help"],
+        &["status", "--help"],
+        &["edit", "--help"],
+        &["steps", "--help"],
+        &["archive", "--help"],
+        &["unarchive", "--help"],
+        &["project", "--help"],
+        &["trash", "--help"],
+        &["setup", "--help"],
+        &["update", "--help"],
+        &["guide", "--help"],
+    ] {
+        let output = executable(args);
+        assert_eq!(output.status.code(), Some(0), "{args:?}");
+        let stdout = String::from_utf8(output.stdout).expect("UTF-8 help");
+        assert!(
+            stdout.lines().all(|line| line == line.trim_end()),
+            "{args:?} contains trailing whitespace:\n{stdout}"
+        );
+    }
+}
+
+#[test]
+fn every_command_help_purpose_is_a_capitalized_sentence() {
+    for args in [
+        &["add", "--help"][..],
+        &["list", "--help"],
+        &["status", "--help"],
+        &["edit", "--help"],
+        &["steps", "--help"],
+        &["archive", "--help"],
+        &["unarchive", "--help"],
+        &["project", "--help"],
+        &["trash", "--help"],
+        &["setup", "--help"],
+        &["update", "--help"],
+        &["guide", "--help"],
+    ] {
+        let output = help(&["tsk", args[0], "--help"]);
+        let purpose = output
+            .stdout
+            .split("\n\n")
+            .nth(1)
+            .expect("purpose after usage");
+        assert!(
+            purpose.chars().next().is_some_and(char::is_uppercase) && purpose.ends_with('.'),
+            "{args:?} purpose should be a capitalized sentence: {purpose:?}"
+        );
+    }
+}
+
+#[test]
 fn help_operand_matches_verb_help_byte_for_byte() {
     let via_help = executable(&["help", "add"]);
     let direct = executable(&["add", "--help"]);

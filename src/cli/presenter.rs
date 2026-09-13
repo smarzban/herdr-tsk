@@ -37,7 +37,7 @@ impl HelpDoc {
         let mut output = String::new();
         for (index, usage) in self.usage.iter().enumerate() {
             let prefix = if index == 0 { "usage: " } else { "       " };
-            append_wrapped(&mut output, prefix, "       ", usage, WIDTH);
+            append_usage_wrapped(&mut output, prefix, "       ", usage, WIDTH);
         }
         output.push('\n');
         append_wrapped(&mut output, "", "", &self.purpose, WIDTH);
@@ -160,9 +160,9 @@ pub fn add_help() -> CliOutput {
         ],
         purpose: "Create one task or apply a JSON plan.".into(),
         groups: vec![
-            group("Scope", &[("-p, --project <project>", "create in a project"), ("--desk", "create on your desk"), ("--state-dir <dir>", "use another board store")]),
+            group("Scope", &[("-p, --project <project>", "create in a project"), ("--desk", "create on your desk")]),
             group("Output", &[("--json", "print one result object for a flag add")]),
-            group("Values", &[("-t, --title <title>", "required task title"), ("-n, --notes <notes>", "optional notes"), ("--thread <name>", "optional normalized thread"), ("--file <path|->", "read a JSON plan from a file or stdin"), ("--flag=<value>", "use equals syntax for dash-leading title, notes, project, state-dir, or file values")]),
+            group("Values", &[("-t, --title <title>", "required task title"), ("-n, --notes <notes>", "optional notes"), ("--thread <name>", "optional normalized thread"), ("--file <path|->", "read a JSON plan from a file or stdin"), ("--state-dir <dir>", "use another board store"), ("--flag=<value>", "use equals syntax for dash-leading title, notes, project, state-dir, or file values")]),
         ],
         examples: vec!["tsk add -t \"Draft release notes\"".into(), "tsk add -t \"Buy milk\" --desk".into(), "tsk add -t \"Fix widget\" --project widget --thread release-2026".into(), "tsk add --file plan.json".into(), "cat plan.json | tsk add".into()],
         refusals: vec![
@@ -503,6 +503,88 @@ fn wrap_list_document(text: &str, terminal_width: Option<usize>) -> String {
     output
 }
 
+/// Append usage within one terminal width, keeping syntax groups intact.
+fn append_usage_wrapped(
+    output: &mut String,
+    first_prefix: &str,
+    continuation_prefix: &str,
+    usage: &str,
+    output_width: usize,
+) {
+    let tokens = usage_tokens(usage);
+    let mut prefix = first_prefix;
+    let mut line = String::new();
+    for token in tokens {
+        if line.is_empty() {
+            line = token;
+        } else if prefix.len() + line.len() + 1 + token.len() > output_width {
+            output.push_str(prefix);
+            output.push_str(line.trim_end());
+            output.push('\n');
+            prefix = continuation_prefix;
+            line = token;
+        } else {
+            line.push(' ');
+            line.push_str(&token);
+        }
+    }
+    if !line.is_empty() {
+        output.push_str(prefix);
+        output.push_str(line.trim_end());
+        output.push('\n');
+    }
+}
+
+fn usage_tokens(usage: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut token = String::new();
+    let mut bracket_depth = 0;
+    let mut angle_depth = 0;
+    for character in usage.chars() {
+        match character {
+            '[' => {
+                bracket_depth += 1;
+                token.push(character);
+            }
+            ']' => {
+                bracket_depth -= 1;
+                token.push(character);
+            }
+            '<' => {
+                angle_depth += 1;
+                token.push(character);
+            }
+            '>' => {
+                angle_depth -= 1;
+                token.push(character);
+            }
+            character if character.is_whitespace() && bracket_depth == 0 && angle_depth == 0 => {
+                if !token.is_empty() {
+                    tokens.push(std::mem::take(&mut token));
+                }
+            }
+            _ => token.push(character),
+        }
+    }
+    if !token.is_empty() {
+        tokens.push(token);
+    }
+
+    let mut grouped = Vec::new();
+    let mut index = 0;
+    while index < tokens.len() {
+        let mut group = tokens[index].clone();
+        while index + 2 < tokens.len() && tokens[index + 1] == "|" {
+            group.push_str(" | ");
+            group.push_str(&tokens[index + 2]);
+            index += 2;
+        }
+        grouped.push(group);
+        index += 1;
+    }
+    grouped
+}
+
 /// Append text within one terminal width. Prefixes are ASCII CLI chrome, so
 /// their byte lengths are also their display widths.
 fn append_wrapped(
@@ -522,7 +604,7 @@ fn append_wrapped(
         } else {
             continuation_prefix
         });
-        output.push_str(&row.text);
+        output.push_str(row.text.trim_end());
         output.push('\n');
     }
 }
@@ -973,9 +1055,14 @@ pub fn archive_help(verb: &str) -> CliOutput {
     } else {
         "archive"
     };
+    let verb_title = if verb == "archive" {
+        "Archive"
+    } else {
+        "Unarchive"
+    };
     help(HelpDoc {
         usage: vec![format!("tsk {verb} <task> [--state-dir <dir>]")],
-        purpose: format!("{verb} one task while keeping its human status."),
+        purpose: format!("{verb_title} one task while keeping its human status."),
         groups: vec![group(
             "Values",
             &[
@@ -1405,6 +1492,7 @@ mod tests {
         .render();
 
         assert!(output.lines().all(|line| line.len() <= 80));
+        assert!(output.lines().all(|line| line == line.trim_end()));
         assert!(output.find("Scope").unwrap() < output.find("Filters").unwrap());
         assert!(!output.contains("Empty\n"));
         assert!(!output.contains("Examples:"));
@@ -1419,6 +1507,33 @@ mod tests {
         let text_column = long.find("a long option").unwrap();
         assert_eq!(short.find("short option"), Some(text_column));
         assert!(lines[long_index + 1].starts_with(&" ".repeat(text_column)));
+
+        let mut usage = String::new();
+        append_usage_wrapped(
+            &mut usage,
+            "usage: ",
+            "       ",
+            "tsk setup [herdr | agents | claude | pi | omp | cursor | grok | codex | opencode | --skill-dir <path>] [--yes]",
+            80,
+        );
+        assert_eq!(
+            usage,
+            "usage: tsk setup\n       [herdr | agents | claude | pi | omp | cursor | grok | codex | opencode | --skill-dir <path>]\n       [--yes]\n"
+        );
+        assert!(usage.lines().all(|line| line == line.trim_end()));
+
+        let mut alternatives = String::new();
+        append_usage_wrapped(
+            &mut alternatives,
+            "usage: ",
+            "       ",
+            "tsk pick alpha | beta | gamma [--long argument]",
+            28,
+        );
+        assert_eq!(
+            alternatives,
+            "usage: tsk pick\n       alpha | beta | gamma\n       [--long argument]\n"
+        );
     }
 
     #[test]
