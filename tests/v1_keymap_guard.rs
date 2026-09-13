@@ -33,6 +33,11 @@ fn normal_mode_keymap_equals_the_readme_and_queue_board_v1_set() {
         (KeyCode::Esc, BoardIntent::CloseLayer, false),
         (KeyCode::Char('s'), BoardIntent::PrimaryVerb, true),
         (KeyCode::Char('d'), BoardIntent::Complete, true),
+        (
+            KeyCode::Char('n'),
+            BoardIntent::SetStatus(tsk_tui::domain::HumanStatus::Ready),
+            true,
+        ),
         (KeyCode::Char('o'), BoardIntent::Reopen, true),
         (KeyCode::Char('b'), BoardIntent::ToggleBlock, true),
         (KeyCode::Char('r'), BoardIntent::ToggleReview, true),
@@ -87,7 +92,7 @@ fn normal_mode_keymap_equals_the_readme_and_queue_board_v1_set() {
     );
     assert_eq!(ctrl(KeyCode::Char('d')), Some(BoardIntent::Complete));
 
-    for retired in ['a', 'l', 'c', 'n', 'i', 'z', 'P', '1', '2', '3', '[', ']'] {
+    for retired in ['a', 'l', 'c', 'i', 'z', 'P', '1', '2', '3', '[', ']'] {
         assert_eq!(
             normal(KeyCode::Char(retired)),
             None,
