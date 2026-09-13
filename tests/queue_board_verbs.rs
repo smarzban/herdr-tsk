@@ -642,120 +642,294 @@ fn palette_window_keeps_wrapped_last_command_visible() {
     );
 }
 
-/// help card lists every binding of every surface, scrolls, and closes on esc / ? / q.
+#[test]
+fn help_card_uses_one_binding_per_row_and_opens_from_the_task_page() {
+    let (mut domain, mut model, _id) = board_with_task("help structure", HumanStatus::Ready);
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenHelp, None).expect("help");
+    let frame = rendered_board(&model, 80, 24);
+    assert!(
+        frame.lines().all(|line| !line.contains(" | ")),
+        "help must not pair unrelated bindings on one row:\n{frame}"
+    );
+    assert_eq!(
+        map_key(BoardInputMode::TaskPage, press(KeyCode::Char('?'))),
+        Some(BoardIntent::OpenHelp),
+        "question mark opens help from the non-editing task page"
+    );
+}
+
+/// Help lists every binding, filters from its focused query, scrolls, and closes progressively.
 #[test]
 fn help_card_lists_every_binding_scrolls_and_closes_on_esc() {
     let (mut domain, mut model, _id) = board_with_task("help me", HumanStatus::Ready);
     apply_intent(&mut domain, &mut model, BoardIntent::OpenHelp, None).expect("help");
     assert_eq!(model.input_mode(), BoardInputMode::Help);
+    assert_eq!(model.help_query(), "");
 
-    // Tall enough that every line fits: each board binding is on the card.
-    let frame = rendered_board(&model, 100, 60);
+    let lines = tsk_tui::ui::input::help_card_lines();
     let bindings = normal_help_bindings();
     assert!(
         !bindings.is_empty(),
         "help bindings table must not be empty"
     );
     for (chord, label) in bindings {
-        for token in chord.split(|c: char| c.is_whitespace() || c == '·' || c == '/') {
-            let token = token.trim();
-            if token.is_empty() {
-                continue;
-            }
-            assert!(
-                frame.contains(token),
-                "help card missing chord token {token:?} from {chord:?}\n{frame}"
-            );
-        }
         assert!(
-            frame
-                .to_ascii_lowercase()
-                .contains(&label.to_ascii_lowercase()),
-            "help card missing label {label:?}\n{frame}"
+            lines.iter().any(|line| {
+                line.contains(label)
+                    && chord.split(" / ").all(|part| {
+                        line.to_ascii_lowercase()
+                            .contains(&part.to_ascii_lowercase())
+                    })
+            }),
+            "help content must keep {chord:?} and {label:?} on one row:\n{}",
+            lines.join("\n")
         );
     }
-    // Every surface has a section, and the remapped keys read as they now are.
-    for section in [
-        " board",
-        " task page",
-        " editing",
-        " quick-add",
-        " pickers · palette",
+    for group in [
+        "NAVIGATION",
+        "TASK ACTIONS",
+        "CREATE & EDIT",
+        "VIEWS & FIND",
+        "SURFACE CONTROLS",
+        "APP CONTROLS",
     ] {
         assert!(
-            frame.contains(section),
-            "missing section {section:?}\n{frame}"
+            lines.iter().any(|line| line.contains(group)),
+            "missing {group}"
         );
     }
-    for expected in [
-        "ctrl+r review",
-        "d done drawer",
-        "g archived group",
-        "p projects",
-        "enter toggle step",
-        "enter (title) next field",
-        "shift+enter save edit",
-        "1 · 2 · 3",
+    assert!(lines.iter().all(|line| !line.contains(" | ")));
+    for (chord, action) in [
+        ("ctrl+x / ctrl+delete", "delete"),
+        ("ctrl+c", "cancel editing"),
+        ("ctrl+e", "line end (text input)"),
+        ("ctrl+←", "word left (text input)"),
+        ("home", "line start (text input)"),
+        ("backspace", "delete backward (text input)"),
+        ("q", "close project picker"),
+        ("y", "unarchive launch project"),
+        ("r / enter", "retry failed save"),
+        ("↑↓ / page keys", "scroll Help"),
     ] {
-        assert!(frame.contains(expected), "missing {expected:?}\n{frame}");
-    }
-    for retired in ["z drawer", "P project", "ctrl+g", "any key"] {
         assert!(
-            !frame.contains(retired),
-            "retired {retired:?} still on the card\n{frame}"
+            lines
+                .iter()
+                .any(|line| line.contains(chord) && line.contains(action)),
+            "missing help row for {chord:?} {action:?}"
         );
     }
 
-    // At the 40x10 floor the card windows the list and marks the rest with ▼.
+    let filtered = tsk_tui::ui::input::help_card_lines_for_query("drawer");
+    let filtered_text = filtered.join("\n");
+    assert!(filtered_text.contains("VIEWS & FIND"));
+    assert!(filtered_text.contains("done drawer"));
+    assert!(!filtered_text.contains("start / reopen"));
+    let aliases = tsk_tui::ui::input::help_card_lines_for_query("finish").join("\n");
+    assert!(aliases.contains("TASK ACTIONS") && aliases.contains("done"));
+
+    // The centered card never exceeds half the available height.
+    let frame = rendered_board(&model, 100, 60);
+    let rows: Vec<_> = frame.lines().collect();
+    let top = rows
+        .iter()
+        .position(|row| row.contains("┌─ help"))
+        .expect("top");
+    let bottom = rows
+        .iter()
+        .position(|row| row.contains('└'))
+        .expect("bottom");
+    assert!(bottom - top < 30, "help exceeds half height:\n{frame}");
+    assert!(frame.contains("search keys or actions"));
+
     let compact = rendered_board(&model, 40, 10);
     assert!(
         compact.contains("help ▼"),
-        "compact help card must mark its title truncated: {compact:?}"
-    );
-    assert!(
-        compact.contains("esc close"),
-        "compact help card must keep its close legend: {compact:?}"
+        "compact help must mark overflow: {compact}"
     );
 
-    // Scrolling: ↓ / j / wheel move the window, ▲ appears, and the top line leaves.
     let down = map_key(BoardInputMode::Help, press(KeyCode::Down)).expect("↓ scrolls");
     assert_eq!(down, BoardIntent::HelpScrollDown);
     assert_eq!(
         map_key(BoardInputMode::Help, press(KeyCode::Char('j'))),
-        Some(BoardIntent::HelpScrollDown)
-    );
-    assert_eq!(
-        map_key(BoardInputMode::Help, press(KeyCode::Char('k'))),
-        Some(BoardIntent::HelpScrollUp)
-    );
-    apply_intent(&mut domain, &mut model, down.clone(), None).expect("scroll");
-    apply_intent(&mut domain, &mut model, down, None).expect("scroll");
-    let scrolled = rendered_board(&model, 40, 10);
-    assert!(
-        scrolled.contains("help ▲"),
-        "scrolled card marks rows above: {scrolled:?}"
-    );
-    assert!(
-        !scrolled.contains("board"),
-        "the section heading scrolled out of view: {scrolled:?}"
-    );
-
-    // Only esc / ? / q close; a stray letter is inert.
-    assert_eq!(
-        map_key(BoardInputMode::Help, press(KeyCode::Char('x'))),
-        None
+        Some(BoardIntent::HelpQueryInsert('j'))
     );
     assert_eq!(
         map_key(BoardInputMode::Help, press(KeyCode::Char('?'))),
-        Some(BoardIntent::CloseLayer)
+        Some(BoardIntent::HelpQueryInsert('?'))
     );
-    let close = map_key(BoardInputMode::Help, press(KeyCode::Char('q'))).expect("q closes");
-    assert_eq!(close, BoardIntent::CloseLayer);
-    apply_intent(&mut domain, &mut model, close, None).expect("close");
+
+    for character in "drawer".chars() {
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::HelpQueryInsert(character),
+            None,
+        )
+        .expect("type query");
+    }
+    assert_eq!(model.help_query(), "drawer");
+    let searched = rendered_board(&model, 80, 24);
+    assert!(
+        searched.contains("done drawer"),
+        "matching action remains:\n{searched}"
+    );
+    let compact_search = rendered_board(&model, 40, 10);
+    assert!(
+        compact_search.contains("done drawer"),
+        "compact help must show a filtered result below search:\n{compact_search}"
+    );
+    let compact_rows: Vec<_> = compact_search.lines().collect();
+    let query_row = compact_rows
+        .iter()
+        .position(|row| row.contains("/ drawer"))
+        .expect("focused Help query");
+    assert!(
+        compact_rows[query_row + 1].matches('─').count() > 10,
+        "a dim divider belongs directly below search:\n{compact_search}"
+    );
+    let compact_top = compact_rows
+        .iter()
+        .position(|row| row.contains("┌─ help"))
+        .expect("compact Help top");
+    let compact_bottom = compact_rows
+        .iter()
+        .rposition(|row| row.contains('└'))
+        .expect("compact Help bottom");
+    assert!(
+        compact_bottom - compact_top < 6,
+        "short Help may grow to six rows, no more:\n{compact_search}"
+    );
+
+    let mut wrapped_model = model.clone();
+    for _ in 0..wrapped_model.help_query().chars().count() {
+        apply_intent(
+            &mut domain,
+            &mut wrapped_model,
+            BoardIntent::HelpQueryBackspace,
+            None,
+        )
+        .expect("clear cloned query");
+    }
+    for character in "previous step".chars() {
+        apply_intent(
+            &mut domain,
+            &mut wrapped_model,
+            BoardIntent::HelpQueryInsert(character),
+            None,
+        )
+        .expect("type wrapping query");
+    }
+    let wrapped_help = rendered_board(&wrapped_model, 48, 19);
+    let wrapped_rows: Vec<_> = wrapped_help.lines().collect();
+    let binding_row = wrapped_rows
+        .iter()
+        .position(|row| row.contains("shift+tab") && row.contains("select previous step"))
+        .expect("wrapped binding first row");
+    let description_col = wrapped_rows[binding_row]
+        .find("select previous step")
+        .expect("description column");
+    assert_eq!(
+        wrapped_rows[binding_row + 1].find("(task page)"),
+        Some(description_col),
+        "continuation must align under the description:\n{wrapped_help}"
+    );
+    assert!(
+        !searched.contains("start / reopen"),
+        "non-match remains:\n{searched}"
+    );
+
+    let close = map_key(BoardInputMode::Help, press(KeyCode::Esc)).expect("esc");
+    apply_intent(&mut domain, &mut model, close.clone(), None).expect("clear query");
+    assert_eq!(model.input_mode(), BoardInputMode::Help);
+    assert_eq!(model.help_query(), "");
+    apply_intent(&mut domain, &mut model, close, None).expect("close help");
     assert_eq!(model.input_mode(), BoardInputMode::Normal);
-    // Reopening starts at the top again.
-    apply_intent(&mut domain, &mut model, BoardIntent::OpenHelp, None).expect("help");
-    assert!(rendered_board(&model, 40, 10).contains("board"));
+
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("task page");
+    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenHelp, None).expect("task help");
+    apply_intent(&mut domain, &mut model, BoardIntent::CloseLayer, None).expect("close task help");
+    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+
+    assert_eq!(
+        map_key(BoardInputMode::ProjectPicker, press(KeyCode::Char('?'))),
+        Some(BoardIntent::OpenHelp)
+    );
+    assert_eq!(
+        map_key(BoardInputMode::LaunchCard, press(KeyCode::Char('?'))),
+        Some(BoardIntent::OpenHelp)
+    );
+    for mode in [
+        BoardInputMode::SelectThread,
+        BoardInputMode::EditScope,
+        BoardInputMode::FormScopeDropdown,
+    ] {
+        assert_eq!(
+            map_key(mode, press(KeyCode::Char('?'))),
+            Some(BoardIntent::OpenHelp),
+            "question mark opens Help from non-text control {mode:?}"
+        );
+    }
+    for mode in [
+        BoardInputMode::EditTitle,
+        BoardInputMode::EditNotes,
+        BoardInputMode::EditThread,
+    ] {
+        assert_eq!(
+            map_key(mode, press(KeyCode::Char('?'))),
+            Some(BoardIntent::EditInsert('?')),
+            "question mark remains text while editing {mode:?}"
+        );
+    }
+    for (mode, expected) in [
+        (BoardInputMode::QuickAdd, BoardIntent::QuickAddInsert('?')),
+        (
+            BoardInputMode::Palette,
+            BoardIntent::CommandQueryInsert('?'),
+        ),
+        (
+            BoardInputMode::ListPicker,
+            BoardIntent::ListPickerQueryInsert('?'),
+        ),
+        (
+            BoardInputMode::ProjectsSearch,
+            BoardIntent::ProjectsQueryInsert('?'),
+        ),
+    ] {
+        assert_eq!(
+            map_key(mode, press(KeyCode::Char('?'))),
+            Some(expected),
+            "question mark remains text in {mode:?}"
+        );
+    }
+    apply_intent(&mut domain, &mut model, BoardIntent::CloseLayer, None).expect("close task page");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenProjectSelector,
+        None,
+    )
+    .expect("project picker");
+    assert_eq!(model.input_mode(), BoardInputMode::ProjectPicker);
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenHelp, None).expect("picker help");
+    assert_eq!(model.input_mode(), BoardInputMode::Help);
+    apply_intent(&mut domain, &mut model, BoardIntent::CloseLayer, None)
+        .expect("close picker help");
+    assert_eq!(model.input_mode(), BoardInputMode::ProjectPicker);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::CancelProjectPicker,
+        None,
+    )
+    .expect("close picker");
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("task page");
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditScope, None)
+        .expect("scope control");
+    assert_eq!(model.input_mode(), BoardInputMode::EditScope);
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenHelp, None).expect("scope help");
+    apply_intent(&mut domain, &mut model, BoardIntent::CloseLayer, None).expect("close scope help");
+    assert_eq!(model.input_mode(), BoardInputMode::EditScope);
 }
 
 /// project-scope chip/dropdown filters every visible section and count.
@@ -3528,6 +3702,13 @@ fn ctrl_u_on_an_archived_selection_unarchives_without_popping_the_undo_stack() {
 fn help_card_lists_ctrl_f_and_the_verb_bar_keeps_archive_out_of_its_seats() {
     let (mut domain, mut model, _id) = board_with_task("help me", HumanStatus::Ready);
     apply_intent(&mut domain, &mut model, BoardIntent::OpenHelp, None).expect("help");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::HelpQueryInsertText("archive".to_string()),
+        None,
+    )
+    .expect("search help");
     let frame = rendered_board(&model, 80, 24);
     assert!(
         frame.contains("ctrl+f"),
@@ -3537,6 +3718,8 @@ fn help_card_lists_ctrl_f_and_the_verb_bar_keeps_archive_out_of_its_seats() {
         frame.to_ascii_lowercase().contains("archive"),
         "help card must label the archive verb:\n{frame}"
     );
+    apply_intent(&mut domain, &mut model, BoardIntent::CloseLayer, None)
+        .expect("clear help search");
     apply_intent(&mut domain, &mut model, BoardIntent::CloseLayer, None).expect("close help");
 
     // Archive has no bar seat: the row's bar is the shared shape, and `?` carries ctrl+f.

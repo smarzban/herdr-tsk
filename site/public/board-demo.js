@@ -335,6 +335,7 @@ import { parseCapture } from "./capture.js";
     draft: "",
     paletteQ: "",
     paletteI: 0,
+    helpQ: "",
     pickerI: 0,
     editField: null,
     editDraft: "",
@@ -874,7 +875,10 @@ import { parseCapture } from "./capture.js";
       else openFullPage();
     }
     if (id === "capture") openQuickAdd();
-    if (id === "help") state.overlay = "help";
+    if (id === "help") {
+      state.overlay = "help";
+      state.helpQ = "";
+    }
     if (id === "palette") {
       state.overlay = "palette";
       state.paletteQ = "";
@@ -918,7 +922,14 @@ import { parseCapture } from "./capture.js";
         run: () => goTab("project"),
       },
       { id: "capture", label: "capture", run: () => openQuickAdd() },
-      { id: "help", label: "help", run: () => (state.overlay = "help") },
+      {
+        id: "help",
+        label: "help",
+        run: () => {
+          state.overlay = "help";
+          state.helpQ = "";
+        },
+      },
       { id: "reset", label: "reset demo", run: resetDemo },
     ];
     if (!state.focusProject && state.tab === "projects") {
@@ -1094,21 +1105,50 @@ import { parseCapture } from "./capture.js";
   }
 
   function renderHelp() {
+    const rows = [
+      ["navigation", "↑↓ / jk", "move", "select"],
+      ["navigation", "enter", "open task", "detail"],
+      ["navigation", "→ / ←", "peek or slide", "wide view"],
+      ["task actions", "s", "start / reopen", "status ready"],
+      ["task actions", "d", "done", "status finish complete"],
+      ["task actions", "b", "block", "status"],
+      ["task actions", "r", "review", "status"],
+      ["task actions", "o", "reopen", "status ready"],
+      ["task actions", "x", "delete", "remove"],
+      ["task actions", "u", "undo", "restore"],
+      ["task actions", "f", "archive", "file hide"],
+      ["create & edit", "+", "quick-add", "capture new task"],
+      ["create & edit", "e", "edit title", "rename"],
+      ["create & edit", "a", "add step (task page)", "checklist"],
+      ["views & find", "1", "desk", "switch view"],
+      ["views & find", "2", "selected project", "switch view"],
+      ["views & find", "3", "projects", "switch view"],
+      ["views & find", "p", "project picker", "switch find"],
+      ["views & find", "z / D", "done drawer", "completed tasks"],
+      ["views & find", "g", "toggle groups", "collapse expand archived"],
+      ["views & find", "/", "search projects", "find filter"],
+      ["views & find", ":", "command palette", "find actions"],
+      ["app controls", "?", "help", "shortcuts keys"],
+      ["app controls", "esc", "clear / close", "cancel"],
+      ["app controls", "q", "quit", "exit"],
+    ];
+    const query = state.helpQ.trim().toLowerCase();
+    const visible = rows.filter((row) => !query || row.join(" ").toLowerCase().includes(query));
+    let previous = "";
+    const list = visible
+      .map((row) => {
+        const heading = row[0] === previous ? "" : `<div class="tsk-help-group">${esc(row[0].toUpperCase())}</div>`;
+        previous = row[0];
+        return `${heading}<div class="tsk-help-row"><span>${esc(row[1])}</span><span>${esc(row[2])}</span></div>`;
+      })
+      .join("");
     return `
       <div class="tsk-box tsk-help" role="dialog" aria-label="help">
         <div class="tsk-box-top"><span class="tsk-box-title">help</span><button type="button" class="tsk-box-close" data-close="1" aria-label="close">[x]</button></div>
-        <div class="tsk-box-body tsk-help-body">
-          <div>board</div>
-          <div>j/k · ↑/↓ move | enter open | →/← peek or slide</div>
-          <div>s start / reopen | d done | o reopen | b block | r review</div>
-          <div>e edit title | x delete | u undo | f archive | + add</div>
-          <div>z or D drawer (app: d) | g archived group | p projects | 1 2 3 destinations</div>
-          <div>/ search projects | : palette | ? help</div>
-          <div>steps: tab / shift+tab select | enter toggle | a add</div>
-          <div>e rename selected step | x twice delete | shift+enter save | esc cancel</div>
-          <div class="dim">app needs ctrl on verbs · demo also accepts bare keys</div>
-        </div>
-        <div class="tsk-box-foot">esc close</div>
+        <div class="tsk-help-search"><span>/ </span><span>${state.helpQ ? esc(state.helpQ) : '<span class="dim">search keys or actions…</span>'}</span><span class="cursor">█</span></div>
+        <div class="tsk-help-divider" aria-hidden="true"></div>
+        <div class="tsk-box-body tsk-help-body">${list || '<div class="dim">no shortcuts match</div>'}</div>
+        <div class="tsk-box-foot">type search · ↑/↓ scroll · esc clear/close</div>
       </div>`;
   }
 
@@ -1754,9 +1794,31 @@ import { parseCapture } from "./capture.js";
     }
 
     if (state.overlay === "help") {
-      e.preventDefault();
-      state.overlay = null;
-      render();
+      if (e.key === "Escape") {
+        e.preventDefault();
+        if (state.helpQ) state.helpQ = "";
+        else state.overlay = null;
+        render();
+        return;
+      }
+      if (e.key === "Backspace") {
+        e.preventDefault();
+        state.helpQ = state.helpQ.slice(0, -1);
+        render();
+        return;
+      }
+      if (["ArrowUp", "ArrowDown", "PageUp", "PageDown"].includes(e.key)) {
+        e.preventDefault();
+        const body = frame.querySelector(".tsk-help-body");
+        const direction = e.key === "ArrowUp" || e.key === "PageUp" ? -1 : 1;
+        body?.scrollBy({ top: direction * (e.key.startsWith("Page") ? body.clientHeight : 24) });
+        return;
+      }
+      if (e.key.length === 1 && !e.altKey && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        state.helpQ += e.key;
+        render();
+      }
       return;
     }
 
@@ -1928,6 +1990,7 @@ import { parseCapture } from "./capture.js";
     if (e.key === "?") {
       e.preventDefault();
       state.overlay = "help";
+      state.helpQ = "";
       render();
       return;
     }
@@ -2168,6 +2231,7 @@ import { parseCapture } from "./capture.js";
     if (close) {
       state.overlay = null;
       state.paletteQ = "";
+      state.helpQ = "";
       frame.focus();
       render();
       return;

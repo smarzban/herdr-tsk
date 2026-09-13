@@ -162,7 +162,9 @@ Search matches letters in order: `ssr` finds `set status: review`.
 
 ## Help
 
-Press `?` for every shortcut. Scroll with arrows, `j`/`k`, page keys, or the wheel. Close with `Esc`, `?`, or `q`.
+Press `?` on the board, task page, or another non-text surface to open the searchable shortcut reference. A dim divider separates its focused search field from shortcuts, grouped one binding per row by function. Long descriptions wrap beneath the description column. The card uses at most half the terminal height, except below 15 rows where it may grow to six rows so one result stays visible. Type or paste to filter by a key, action, group, or related term; use arrows, page keys, or the wheel to scroll. `Esc` clears a nonempty search first, then closes Help.
+
+When a text field already owns input, `?` remains text instead of opening Help.
 
 ## Save failures
 

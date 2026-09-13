@@ -9,6 +9,10 @@ the GitHub release notes verbatim.
 
 ## Unreleased
 
+### Changed
+
+- Help is now a searchable shortcut reference with a focused search field, dim divider, and one binding per row grouped by function; long descriptions wrap beneath their description column. It stays within half the terminal height except below 15 rows, where it may grow to six rows to keep a result visible. Press `?` from any non-text surface; typing filters by key or action, and `Esc` clears the search before closing.
+
 ## v0.8.2
 
 ### Breaking

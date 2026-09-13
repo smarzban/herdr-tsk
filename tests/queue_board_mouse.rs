@@ -1179,9 +1179,8 @@ fn the_modal_cards_close_control_and_chrome_behave_the_same_on_palette_help_and_
         "a click on the card's border/footer must be inert"
     );
 
-    // Help: `[x]` closes the layer the same as any other key; the card's border is inert,
-    // but (unlike the other two) its own body text still closes -- there is nothing to
-    // select inside it, so it keeps mouse parity with the keyboard's "any key closes".
+    // Help: `[x]` closes the layer, while its border, focused search field, and binding
+    // rows are inert. Only an explicit close or a click outside dismisses the searchable card.
     let (mut domain, mut model, _id) = board_with_task("modal card help", HumanStatus::Ready);
     apply_intent(&mut domain, &mut model, BoardIntent::OpenHelp, None).expect("open help");
     let hits = board_hit_map(STANDARD, &model);
@@ -1192,7 +1191,22 @@ fn the_modal_cards_close_control_and_chrome_behave_the_same_on_palette_help_and_
         .expect("the help card must paint an `[x]` close control");
     assert_eq!(
         click(close_hit, &model, &hits),
-        Some(BoardIntent::CloseLayer)
+        Some(BoardIntent::CloseHelp)
+    );
+    let mut queried = model.clone();
+    apply_intent(
+        &mut domain,
+        &mut queried,
+        BoardIntent::HelpQueryInsertText("done".to_string()),
+        None,
+    )
+    .expect("type help query");
+    apply_intent(&mut domain, &mut queried, BoardIntent::CloseHelp, None)
+        .expect("mouse close help");
+    assert_eq!(
+        queried.input_mode(),
+        BoardInputMode::Normal,
+        "mouse dismissal closes immediately instead of only clearing the query"
     );
     let chrome_hit = hits
         .regions
@@ -1204,18 +1218,21 @@ fn the_modal_cards_close_control_and_chrome_behave_the_same_on_palette_help_and_
         None,
         "a click on the card's border/footer must be inert"
     );
-    // The card repaints `HelpDismiss` over its own content rect *after* the full-frame
-    // one `paint_modal_card` pushes first, so the later (content-sized) region is the
-    // last `HelpDismiss` hit in the map.
-    let body_hit = hits
-        .regions
+    let card = chrome_hit.area;
+    let body = hits
+        .copyable
         .iter()
-        .rev()
-        .find(|hit| matches!(hit.target, QueueHitTarget::HelpDismiss))
-        .expect("the help card's body must repaint HelpDismiss over its own content rect");
+        .find(|rect| {
+            rect.y > card.y
+                && rect.y < card.y.saturating_add(card.height).saturating_sub(1)
+                && rect.x >= card.x
+                && rect.x.saturating_add(rect.width) <= card.x.saturating_add(card.width)
+        })
+        .expect("help has a binding row");
     assert_eq!(
-        click(body_hit, &model, &hits),
-        Some(BoardIntent::CloseLayer)
+        map_board_mouse(&model, &hits, left_click(body.x, body.y)),
+        None,
+        "clicking searchable help content must not dismiss it"
     );
 
     // A click on the board behind the help card still dismisses it -- the far corner of
@@ -1224,7 +1241,7 @@ fn the_modal_cards_close_control_and_chrome_behave_the_same_on_palette_help_and_
     let outside = left_click(STANDARD.width - 1, STANDARD.height - 1);
     assert_eq!(
         map_board_mouse(&model, &hits, outside),
-        Some(BoardIntent::CloseLayer)
+        Some(BoardIntent::CloseHelp)
     );
 }
 
@@ -2490,21 +2507,26 @@ fn the_modal_cards_copyable_rects_exclude_its_own_border_and_footer() {
         "a drag across the card's border must yield no copyable text"
     );
 
-    // A real body row -- one of Help's own binding lines -- is copyable and yields text.
-    let body_hit = hits
+    // A real binding row is copyable. The focused search row above it is input, not text
+    // selection content, and the card body itself stays inert instead of dismissing help.
+    let card = hits
         .regions
         .iter()
-        .rev()
-        .find(|hit| matches!(hit.target, QueueHitTarget::HelpDismiss))
-        .expect("the help card's body repaints HelpDismiss over its content rect")
+        .find(|hit| matches!(hit.target, QueueHitTarget::ModalChrome))
+        .expect("the help card paints modal chrome")
         .area;
+    let body_hit = hits
+        .copyable
+        .iter()
+        .copied()
+        .find(|rect| {
+            rect.y > card.y
+                && rect.y < card.y.saturating_add(card.height).saturating_sub(1)
+                && rect.x >= card.x
+                && rect.x.saturating_add(rect.width) <= card.x.saturating_add(card.width)
+        })
+        .expect("the help card paints a copyable binding row");
     let body_y = body_hit.y;
-    assert!(
-        hits.copyable
-            .iter()
-            .any(|rect| rect.y == body_y && rect.height == 1),
-        "the card's first body row must be copyable"
-    );
     let body = TextSelection::new(
         Position::new(body_hit.x, body_y),
         Position::new(

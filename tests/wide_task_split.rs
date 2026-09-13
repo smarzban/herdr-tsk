@@ -1629,7 +1629,7 @@ fn help_and_palette_close_on_task_column_clicks_without_dispatching() {
     for (open, expected, mode) in [
         (
             BoardIntent::OpenHelp,
-            BoardIntent::CloseLayer,
+            BoardIntent::CloseHelp,
             BoardInputMode::Help,
         ),
         (

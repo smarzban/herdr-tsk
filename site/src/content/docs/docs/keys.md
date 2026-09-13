@@ -5,7 +5,7 @@ description: Keyboard shortcuts by action and surface.
 
 Use the mouse, the keyboard, or both. Tabs, selectors, tasks, and footer actions are clickable; double-click a task to open it.
 
-Press `?` on the board for all shortcuts. Status and delete shortcuts use **Ctrl**; navigation uses bare keys. The website demo uses bare status keys because browsers reserve control chords.
+Press `?` on the board, task page, or another non-text surface for a searchable list of all shortcuts. Status and delete shortcuts use **Ctrl**; navigation uses bare keys. The website demo uses bare status keys because browsers reserve control chords.
 
 ## Board
 
@@ -53,6 +53,7 @@ These keys apply in **view mode**:
 | Edit notes | `ctrl+n` |
 | Change task status | Board status shortcuts above |
 | Mark/remove selected step; otherwise confirm/delete task | `ctrl+x` |
+| All shortcuts | `?` |
 | Close task | `Esc` |
 
 Click a step to select it. Click **+ step** to add. Field clicks become editable only after task editing starts.
@@ -97,17 +98,17 @@ In Herdr quick capture, `Shift+Enter` saves and closes the popup. `Esc` closes a
 
 | Surface | Controls |
 | --- | --- |
-| Project picker | Arrows or `j`/`k` select; `Tab` or `←`/`→` switch tabs; `Enter` opens; `Esc` or `q` closes |
+| Project picker | Arrows or `j`/`k` select; `Tab` or `←`/`→` switch tabs; `Enter` opens; `?` opens Help; `Esc` or `q` closes |
 | Project archive | `ctrl+f` archives; on archived tab, `ctrl+f` or `ctrl+u` restores |
 | Archived project view | `ctrl+u` restores; `Esc`, `p`, or `1`–`3` leaves |
 | Thread/view selector | Type or paste to filter; arrows or `Tab` select; `Enter` chooses; `Esc` closes |
 | Projects search | Type or paste; `Backspace` edits; `Enter` opens result; `Esc` clears and closes |
 | Palette | Type to filter; arrows or `Tab` select; `Enter` runs; `Esc` closes |
-| Help | Arrows, `j`/`k`, page keys, or wheel scroll; `Esc`, `?`, or `q` closes |
-| Archived-project launch prompt | `y` restores; `n` or `Esc` keeps archived |
+| Help | Type or paste to filter by key or action; arrows, page keys, or wheel scroll; `Esc` clears the search, then closes |
+| Archived-project launch prompt | `y` restores; `n` or `Esc` keeps archived; `?` opens Help |
 | Failed save | `r` or `Enter` retries; `c` or `Esc` cancels |
 
-`j` and `k` are text in thread/view filters, not navigation.
+`j` and `k` are text in thread/view filters and Help search, not navigation. `?` is text in every input field, including Help search.
 
 ## Wide stage slider
 

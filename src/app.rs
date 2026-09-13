@@ -1300,7 +1300,7 @@ fn press_survives_off_focus(
     );
     let existing_mode_route = matches!(
         (mode, responsive_intent),
-        (BoardInputMode::Help, Some(BoardIntent::CloseLayer))
+        (BoardInputMode::Help, Some(BoardIntent::CloseHelp))
             | (
                 BoardInputMode::Palette,
                 Some(BoardIntent::CloseCommandSurface)
@@ -4622,7 +4622,11 @@ mod tests {
                 KeyCode::Char('r'),
                 Some(BoardIntent::CommandQueryInsert('r')),
             ),
-            (BoardInputMode::Help, KeyCode::Char('r'), None),
+            (
+                BoardInputMode::Help,
+                KeyCode::Char('r'),
+                Some(BoardIntent::HelpQueryInsert('r')),
+            ),
             (
                 BoardInputMode::Help,
                 KeyCode::Esc,

@@ -798,13 +798,50 @@ html[data-theme="light"] .pane {
   min-height: 3.2em;
 }
 
+.tsk-help {
+  top: 50%;
+  transform: translate(-50%, -50%);
+  max-height: 50%;
+  display: flex;
+  flex-direction: column;
+}
+
+.tsk-help-search {
+  display: flex;
+  padding: 0.2rem 2ch;
+  color: var(--ink-2);
+  white-space: pre;
+}
+
+.tsk-help-divider {
+  border-top: 1px solid var(--dim);
+}
+
 .tsk-help-body {
   display: grid;
   gap: 0.15rem;
+  overflow-y: auto;
   color: var(--ink-2);
   padding-left: 2ch;
   padding-right: 2ch;
   white-space: pre;
+}
+
+.tsk-help-group {
+  margin-top: 0.2rem;
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.tsk-help-row {
+  display: grid;
+  grid-template-columns: 18ch minmax(0, 1fr);
+  gap: 1ch;
+}
+
+.tsk-help-row span:last-child {
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .tsk-box-foot {
