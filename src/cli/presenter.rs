@@ -1081,6 +1081,11 @@ pub fn archive_help(verb: &str) -> CliOutput {
     } else {
         "Unarchive"
     };
+    let success = if verb == "archive" {
+        "task archived, or already was"
+    } else {
+        "task unarchived, or already was"
+    };
     help(HelpDoc {
         usage: vec![format!("tsk {verb} <task> [--state-dir <dir>]")],
         purpose: format!("{verb_title} one task while keeping its human status."),
@@ -1093,11 +1098,7 @@ pub fn archive_help(verb: &str) -> CliOutput {
         )],
         examples: vec![format!("tsk {verb} T12"), format!("tsk {antiverb} T12")],
         refusals: vec!["unknown-task".into(), "soft-deleted-task".into()],
-        exit: exit_line(
-            "archived flag set, or already had the value",
-            Some("unknown or deleted task"),
-            true,
-        ),
+        exit: exit_line(success, Some("unknown or deleted task"), true),
     })
 }
 
@@ -1187,10 +1188,12 @@ pub fn archived(result: ArchiveResult, verb: &str) -> CliOutput {
 pub fn archive_rejected(error: ArchiveCliError, verb: &str) -> CliOutput {
     // Task-verb refusals name the invoked verb (`tsk archive:` / `tsk unarchive:`);
     // project refusals keep their own prefix.
+    let error_code = error.code();
     let (verb, detail, code) = match error {
         ArchiveCliError::Store(detail) => (verb.to_string(), detail, 3),
-        ArchiveCliError::UnknownTask(detail) => (verb.to_string(), detail, 1),
-        ArchiveCliError::SoftDeleted(detail) => (verb.to_string(), detail, 1),
+        ArchiveCliError::UnknownTask(detail) | ArchiveCliError::SoftDeleted(detail) => {
+            (verb.to_string(), format!("{error_code}: {detail}"), 1)
+        }
         ArchiveCliError::UnknownProject(detail) => {
             ("project".to_string(), terminal_text(&detail), 1)
         }

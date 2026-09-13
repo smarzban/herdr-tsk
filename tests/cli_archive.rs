@@ -107,21 +107,27 @@ fn archive_and_unarchive_by_number_exit_0_and_repeat_is_idempotent() {
 }
 
 #[test]
-fn archive_of_an_unknown_number_or_a_soft_deleted_task_exits_1_with_a_message() {
+fn archive_and_unarchive_refusals_include_stable_codes_and_human_messages() {
     let dir = temp_state_dir("refusals");
     let _guard = TempDirGuard(dir.clone());
     let added = add_task(&dir, "delete me later");
     assert_eq!(added.code, 0);
 
-    let unknown = archive(&dir, "archive", "T99");
-    assert_eq!(unknown.code, 1, "{:?}", unknown.stdout);
-    assert!(
-        unknown.stderr.contains("T99"),
-        "the refusal names the address: {:?}",
-        unknown.stderr
-    );
+    for verb in ["archive", "unarchive"] {
+        let unknown = archive(&dir, verb, "T99");
+        assert_eq!(unknown.code, 1, "{:?}", unknown.stdout);
+        assert!(
+            unknown.stderr.contains("unknown-task"),
+            "{verb}: {:?}",
+            unknown.stderr
+        );
+        assert!(
+            unknown.stderr.contains("T99 is not on the board"),
+            "{verb}: {:?}",
+            unknown.stderr
+        );
+    }
 
-    // Soft-delete the task, then archive must refuse and unarchive must refuse too.
     let deleted = cli(vec![
         "tsk".into(),
         "add".into(),
@@ -145,15 +151,20 @@ fn archive_of_an_unknown_number_or_a_soft_deleted_task_exits_1_with_a_message() 
         .save(&writable)
         .expect("persist the soft delete");
 
-    let archived_deleted = archive(&dir, "archive", "T2");
-    assert_eq!(archived_deleted.code, 1, "{:?}", archived_deleted.stdout);
-    assert!(
-        archived_deleted.stderr.contains("deleted"),
-        "the refusal says the task is deleted: {:?}",
-        archived_deleted.stderr
-    );
-    let unarchived_deleted = archive(&dir, "unarchive", "T2");
-    assert_eq!(unarchived_deleted.code, 1);
+    for verb in ["archive", "unarchive"] {
+        let rejected = archive(&dir, verb, "T2");
+        assert_eq!(rejected.code, 1, "{verb}: {:?}", rejected.stdout);
+        assert!(
+            rejected.stderr.contains("soft-deleted-task"),
+            "{verb}: {:?}",
+            rejected.stderr
+        );
+        assert!(
+            rejected.stderr.contains("T2 is deleted"),
+            "{verb}: {:?}",
+            rejected.stderr
+        );
+    }
 }
 
 #[test]

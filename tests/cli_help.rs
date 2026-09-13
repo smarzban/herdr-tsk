@@ -184,6 +184,19 @@ fn help_without_an_operand_is_top_level_help() {
 }
 
 #[test]
+fn archive_help_uses_verb_specific_exit_lines() {
+    let archive = help(&["tsk", "archive", "--help"]);
+    assert!(archive.stdout.contains("0 task archived, or already was"));
+    assert!(!archive.stdout.contains("task unarchived"));
+
+    let unarchive = help(&["tsk", "unarchive", "--help"]);
+    assert!(unarchive
+        .stdout
+        .contains("0 task unarchived, or already was"));
+    assert!(!unarchive.stdout.contains("archived flag set"));
+}
+
+#[test]
 fn command_help_lines_have_no_trailing_whitespace() {
     for args in [
         &["--help"][..],

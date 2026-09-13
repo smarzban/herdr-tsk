@@ -351,6 +351,7 @@ After an uncertain add, inspect `tsk list --all --json`. Also check `--done` and
 | Steps | `empty-step-text`, `invalid-step-text`, `unknown-task`, `soft-deleted-task`, `unknown-step`, `ambiguous-step` |
 | Status | `unknown-task`, `soft-deleted-task` |
 | Edit | `unknown-task`, `soft-deleted-task`, `empty-title`, `invalid-title` |
+| Archive / unarchive | `unknown-task`, `soft-deleted-task` |
 
 Invalid thread flags fail argument parsing with exit 2; an invalid thread in a JSON plan is an item refusal with exit 1. An archived-project refusal saves nothing for that item; other valid plan items can still save.
 
