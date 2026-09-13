@@ -123,7 +123,7 @@ At 110 usable columns or wider, arrows move through these views when you are not
 
 `Enter` from the board opens full screen and remembers the previous view. `Tab` navigates task fields or steps; it does not switch wide views.
 
-On **Projects Overview** at 110+ columns, the project slider is shorter:
+On **Projects Overview** at 110+ columns, clicking a row or moving the index selection opens the Split preview automatically. The project slider is shorter:
 
 | Stage | `→` | `←` | `Esc` |
 | --- | --- | --- | --- |
