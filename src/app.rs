@@ -467,26 +467,76 @@ fn run_board_loop(
                     // longer varies by area, per fix 1's gate removal), so no held-open modal
                     // can end up invisible under a shrunk pane and leave q / Esc unreachable.
                     let mode = resolve_board_surface(area, &mut model);
-                    let Some(intent) = board_keyboard_intent_for_area(&model, area, mode, key)
-                    else {
+                    let Some(intent) = (if let Some(right) = model
+                        .right_seat()
+                        .filter(|_| model.project_right_seat_focused())
+                    {
+                        board_keyboard_intent_for_area(right, area, mode, key)
+                    } else {
+                        board_keyboard_intent_for_area(&model, area, mode, key)
+                    }) else {
                         continue;
+                    };
+                    let intent = if intent == BoardIntent::CollapseDetail
+                        && model.project_right_board_leave_requested()
+                    {
+                        BoardIntent::StageLeft
+                    } else {
+                        intent
                     };
                     let Some(intent) = board_intent_for_area(area, intent) else {
                         continue;
                     };
                     // A command-surface confirmation dispatches its existing intent route.
-                    let Some(intent) = resolve_board_command(&mut model, intent) else {
+                    let return_to_index = intent == BoardIntent::CloseLayer
+                        && model.project_right_board_leave_requested();
+                    let leave_from_arrow = intent == BoardIntent::StageLeft
+                        && model.project_right_board_leave_requested();
+                    let global_navigation = model.project_right_seat_focused()
+                        && matches!(
+                            intent,
+                            BoardIntent::SelectNavTab(_) | BoardIntent::OpenProjectSelector
+                        );
+                    let Some(intent) = resolve_board_command(
+                        if leave_from_arrow || global_navigation {
+                            &mut model
+                        } else {
+                            model.input_target_mut()
+                        },
+                        intent,
+                    ) else {
                         continue;
                     };
-                    if handle_board_intent(
+                    let quit = handle_board_intent(
                         &store,
                         &mut domain,
-                        &mut model,
+                        if return_to_index {
+                            model.input_target_mut()
+                        } else if leave_from_arrow || global_navigation {
+                            &mut model
+                        } else {
+                            model.input_target_mut()
+                        },
                         intent,
                         &mut save_recovery,
                         quick_capture,
-                    )? {
+                    )?;
+                    sync_focused_project_preview(&mut model, &domain, &save_recovery);
+                    if quit {
                         break;
+                    }
+                    if return_to_index {
+                        if handle_board_intent(
+                            &store,
+                            &mut domain,
+                            &mut model,
+                            BoardIntent::StageLeft,
+                            &mut save_recovery,
+                            quick_capture,
+                        )? {
+                            break;
+                        }
+                        sync_focused_project_preview(&mut model, &domain, &save_recovery);
                     }
                 }
                 Event::Mouse(mouse) => {
@@ -526,14 +576,16 @@ fn run_board_loop(
                         ScrollbarMouse::Intent(intent) => {
                             reflow_click.clear();
                             drag_gesture.clear();
-                            if handle_board_intent(
+                            let quit = handle_board_intent(
                                 &store,
                                 &mut domain,
-                                &mut model,
+                                mouse_intent_target_mut(&mut model, area, mouse, &intent),
                                 intent,
                                 &mut save_recovery,
                                 quick_capture,
-                            )? {
+                            )?;
+                            sync_focused_project_preview(&mut model, &domain, &save_recovery);
+                            if quit {
                                 break;
                             }
                             continue;
@@ -690,14 +742,16 @@ fn run_board_loop(
                     let Some(intent) = intent else {
                         continue;
                     };
-                    if handle_board_intent(
+                    let quit = handle_board_intent(
                         &store,
                         &mut domain,
-                        &mut model,
+                        mouse_intent_target_mut(&mut model, area, click, &intent),
                         intent,
                         &mut save_recovery,
                         quick_capture,
-                    )? {
+                    )?;
+                    sync_focused_project_preview(&mut model, &domain, &save_recovery);
+                    if quit {
                         break;
                     }
                 }
@@ -706,14 +760,16 @@ fn run_board_loop(
                     let Some(intent) = board_paste_intent(area, &mut model, &text) else {
                         continue;
                     };
-                    if handle_board_intent(
+                    let quit = handle_board_intent(
                         &store,
                         &mut domain,
-                        &mut model,
+                        model.input_target_mut(),
                         intent,
                         &mut save_recovery,
                         quick_capture,
-                    )? {
+                    )?;
+                    sync_focused_project_preview(&mut model, &domain, &save_recovery);
+                    if quit {
                         break;
                     }
                 }
@@ -785,7 +841,9 @@ fn clamp_position_to_area(position: Position, area: Rect) -> Position {
 /// Content rect that edge auto-scroll watches during a text drag.
 pub fn drag_content_area(model: &BoardModel, area: Rect) -> Rect {
     let responsive = model.responsive_geometry(area);
-    let surface = if model.focused_surface() == crate::ui::tier::FocusedSurface::Task {
+    let right_seat = model.project_right_seat_focused();
+    let task_focus = model.input_focused_surface() == crate::ui::tier::FocusedSurface::Task;
+    let surface = if right_seat || task_focus {
         responsive.task_content()
     } else {
         responsive.board
@@ -793,7 +851,7 @@ pub fn drag_content_area(model: &BoardModel, area: Rect) -> Rect {
     // Only chrome row positions shape this drag viewport; they depend on the live
     // content height, not the renderer's standard/compact density decision.
     let geo = crate::ui::tier::resolve(surface.width, surface.height);
-    if model.focused_surface() == crate::ui::tier::FocusedSurface::Task {
+    if task_focus {
         // Approximate the shared notes/steps viewport: below the two-row header, above
         // the rule. Exact step halving is unnecessary for edge detection.
         let top = surface.y.saturating_add(geo.viewport_top).saturating_add(1);
@@ -820,7 +878,7 @@ pub fn tick_drag_autoscroll(
     copyable: &[Rect],
     content: Rect,
 ) {
-    let delta = match model.focused_surface() {
+    let delta = match model.input_focused_surface() {
         crate::ui::tier::FocusedSurface::Task
             if matches!(
                 model.input_mode(),
@@ -1005,7 +1063,7 @@ fn board_keyboard_intent_for_area(
     key: crossterm::event::KeyEvent,
 ) -> Option<BoardIntent> {
     let presentation = model.responsive_geometry(area).presentation;
-    match route_responsive_key(mode, model.wide_stage(), presentation, key) {
+    match route_responsive_key(mode, model.input_stage(), presentation, key) {
         ResponsiveKeyRoute::Intent(intent) => Some(intent),
         ResponsiveKeyRoute::Inert => None,
         ResponsiveKeyRoute::Surface => board_keyboard_intent(model, mode, key),
@@ -1278,10 +1336,11 @@ fn board_intent_for_area(_area: Rect, intent: BoardIntent) -> Option<BoardIntent
 /// same surface resolution, area gate, and command resolution the key route applies, so a
 /// paste can never reach a route a key press could not.
 fn board_paste_intent(area: Rect, model: &mut BoardModel, text: &str) -> Option<BoardIntent> {
-    let mode = resolve_board_surface(area, model);
+    let target = model.input_target_mut();
+    let mode = resolve_board_surface(area, target);
     let intent = map_edit_paste(mode, text)?;
     let intent = board_intent_for_area(area, intent)?;
-    resolve_board_command(model, intent)
+    resolve_board_command(target, intent)
 }
 
 /// Whether a press outside the focused column still reaches dispatch: an explicit row
@@ -1301,6 +1360,7 @@ fn press_survives_off_focus(
         responsive_intent,
         Some(
             BoardIntent::FocusBoardAndSelectIndex(_)
+                | BoardIntent::SelectProjectRow(_)
                 | BoardIntent::StageLeft
                 | BoardIntent::StageRight
         )
@@ -1402,7 +1462,9 @@ fn board_mouse_click_intent_after_focus<E>(
         model.cancel_project_header_double_click();
         let intent = map_responsive_board_mouse(model, painted_hits, area, click)
             .and_then(|intent| board_intent_for_area(area, intent))
-            .and_then(|intent| resolve_board_command(model, intent));
+            .and_then(|intent| {
+                resolve_board_command(mouse_intent_target_mut(model, area, click, &intent), intent)
+            });
         return Ok((false, intent));
     }
     let intent = board_mouse_intent(area, model, click);
@@ -1476,6 +1538,30 @@ fn board_scrollbar_mouse_route<E>(
 /// [`draw_board`] uses, so the click and the screen the user is looking at can never
 /// disagree about where a control is. The area gate and command resolution afterward are
 /// the same ones the key and paste routes already pass through.
+fn mouse_intent_target_mut<'a>(
+    model: &'a mut BoardModel,
+    area: Rect,
+    mouse: crossterm::event::MouseEvent,
+    intent: &BoardIntent,
+) -> &'a mut BoardModel {
+    let pos = Position::new(mouse.column, mouse.row);
+    let responsive = model.responsive_geometry(area);
+    let right_surface = model.project_right_seat_focused()
+        && responsive.task.contains(pos)
+        && !matches!(
+            intent,
+            BoardIntent::StageLeft | BoardIntent::StageRight | BoardIntent::SelectProjectRow(_)
+        );
+    let right_footer = model.project_right_seat_focused()
+        && pos.y >= area.height.saturating_sub(4)
+        && !matches!(intent, BoardIntent::ListScrollTo(_));
+    if right_surface || right_footer {
+        model.input_target_mut()
+    } else {
+        model
+    }
+}
+
 fn board_mouse_intent(
     area: Rect,
     model: &mut BoardModel,
@@ -1523,7 +1609,7 @@ fn board_mouse_intent(
     }
     let intent = intent?;
     let intent = board_intent_for_area(area, intent)?;
-    resolve_board_command(model, intent)
+    resolve_board_command(mouse_intent_target_mut(model, area, mouse, &intent), intent)
 }
 
 /// Apply one board intent and present any refusal instead of discarding it.
@@ -1667,6 +1753,20 @@ fn copy_task_number_with(
         "copy failed".to_string()
     };
     model.set_ephemeral_message(message, Duration::from_secs(2));
+}
+
+/// Refresh the outer model after a right-seat action. The nested board owns a cloned task
+/// snapshot so its reducer can remain the ordinary board reducer; this keeps the projects index
+/// counts and the right seat on the same durable state before the next paint. Save recovery is
+/// excluded because its caller intentionally leaves the working snapshot outside `domain`.
+fn sync_focused_project_preview(
+    model: &mut BoardModel,
+    domain: &DomainState,
+    recovery: &SaveRecovery<DomainState>,
+) {
+    if model.project_right_seat_focused() && !recovery.is_pending() {
+        model.sync_from_domain(domain);
+    }
 }
 
 /// Apply a board intent. Returns `true` when the board loop should quit.
@@ -2439,6 +2539,8 @@ mod tests {
     use crossterm::event::{
         KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
     };
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
 
     use crate::context::InvocationSnapshot;
     use crate::domain::{HumanStatus, ProvenanceOrigin, TaskScope};
@@ -2481,6 +2583,254 @@ mod tests {
         for _ in 0..times {
             apply_intent(domain, model, BoardIntent::StageRight, None).expect("stage right");
         }
+    }
+
+    fn projects_preview_fixture() -> (DomainState, BoardModel, uuid::Uuid) {
+        let mut domain = DomainState::new();
+        let id = domain
+            .create(
+                "preview task",
+                Some("preview notes".into()),
+                TaskScope::Project {
+                    path: "/repos/preview".into(),
+                },
+                ProvenanceOrigin::Manual,
+                None,
+            )
+            .expect("create preview task");
+        let mut model = BoardModel::from_domain(&domain, None);
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::SelectNavTab(NavTab::Projects),
+            None,
+        )
+        .expect("open projects overview");
+        stage_right(&mut domain, &mut model, 2);
+        (domain, model, id)
+    }
+
+    fn preview_key_intent(model: &mut BoardModel, area: Rect, key: KeyEvent) -> BoardIntent {
+        let mode = resolve_board_surface(area, model);
+        let right = model.right_seat().expect("projects rail has a right seat");
+        board_keyboard_intent_for_area(right, area, mode, key).expect("preview key intent")
+    }
+
+    #[test]
+    fn projects_preview_keyboard_uses_right_seat_for_task_actions() {
+        let (mut domain, mut model, id) = projects_preview_fixture();
+        let area = Rect::new(0, 0, 110, 30);
+        let intent = preview_key_intent(
+            &mut model,
+            area,
+            KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL),
+        );
+        assert_eq!(intent, BoardIntent::Complete);
+        apply_intent(&mut domain, model.input_target_mut(), intent, None)
+            .expect("complete preview task");
+        assert_eq!(
+            domain.get(id).map(|task| task.status),
+            Some(HumanStatus::Done)
+        );
+        assert!(
+            model.selected_id().is_none(),
+            "the index has no task selection"
+        );
+    }
+
+    #[test]
+    fn projects_preview_nested_arrows_keep_the_narrow_peek_keymap() {
+        let (mut domain, mut model, _) = projects_preview_fixture();
+        let area = Rect::new(0, 0, 110, 30);
+        let peek = preview_key_intent(
+            &mut model,
+            area,
+            KeyEvent::new(KeyCode::Right, KeyModifiers::NONE),
+        );
+        assert_eq!(peek, BoardIntent::PeekDetail);
+        apply_intent(&mut domain, model.input_target_mut(), peek, None).expect("peek nested task");
+        assert!(model
+            .right_seat()
+            .and_then(BoardModel::detail_open)
+            .is_some());
+
+        let collapse = preview_key_intent(
+            &mut model,
+            area,
+            KeyEvent::new(KeyCode::Left, KeyModifiers::NONE),
+        );
+        assert_eq!(collapse, BoardIntent::CollapseDetail);
+        apply_intent(&mut domain, model.input_target_mut(), collapse, None)
+            .expect("collapse nested task peek");
+        assert!(model
+            .right_seat()
+            .and_then(BoardModel::detail_open)
+            .is_none());
+        assert_eq!(
+            model.right_seat().map(BoardModel::wide_stage),
+            Some(crate::ui::tier::WideStage::FullBoard)
+        );
+    }
+
+    #[test]
+    fn projects_preview_esc_leaves_task_page_then_returns_to_index() {
+        let (mut domain, mut model, _) = projects_preview_fixture();
+        let area = Rect::new(0, 0, 110, 30);
+        let enter = preview_key_intent(
+            &mut model,
+            area,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+        );
+        apply_intent(&mut domain, model.input_target_mut(), enter, None)
+            .expect("open preview task");
+        assert_eq!(
+            model.right_seat().map(BoardModel::wide_stage),
+            Some(crate::ui::tier::WideStage::FullTask)
+        );
+
+        let close = preview_key_intent(
+            &mut model,
+            area,
+            KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+        );
+        assert_eq!(close, BoardIntent::CloseLayer);
+        apply_intent(&mut domain, model.input_target_mut(), close, None)
+            .expect("close preview task page");
+        assert_eq!(
+            model.right_seat().map(BoardModel::wide_stage),
+            Some(crate::ui::tier::WideStage::FullBoard)
+        );
+
+        let outer_close = preview_key_intent(
+            &mut model,
+            area,
+            KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+        );
+        let outer_intent = if outer_close == BoardIntent::CloseLayer
+            && model.project_right_board_leave_requested()
+        {
+            BoardIntent::StageLeft
+        } else {
+            outer_close
+        };
+        apply_intent(&mut domain, &mut model, outer_intent, None).expect("return to index");
+        assert_eq!(model.wide_stage(), crate::ui::tier::WideStage::Split);
+        assert!(!model.project_right_seat_focused());
+    }
+
+    #[test]
+    fn projects_preview_task_page_paints_its_wide_column_header() {
+        let area = Rect::new(0, 0, 110, 30);
+        let (mut domain, mut model, _) = projects_preview_fixture();
+        let enter = preview_key_intent(
+            &mut model,
+            area,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+        );
+        apply_intent(&mut domain, model.input_target_mut(), enter, None)
+            .expect("open preview task");
+
+        let mut terminal =
+            Terminal::new(TestBackend::new(area.width, area.height)).expect("test terminal");
+        let mut hits = crate::ui::render::QueueHitMap::default();
+        terminal
+            .draw(|frame| hits = draw_board(frame, &model))
+            .expect("draw preview task page");
+        let buffer = terminal.backend().buffer();
+        let task_area = model.responsive_geometry(area).task;
+        let rendered = (task_area.y..task_area.bottom())
+            .map(|y| {
+                (task_area.x..task_area.right())
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\\n");
+        assert!(
+            rendered.contains("preview task"),
+            "task page header should retain the selected task title:\\n{rendered}"
+        );
+        assert!(hits
+            .regions
+            .iter()
+            .any(|hit| matches!(hit.target, crate::ui::render::QueueHitTarget::FormTitle)));
+    }
+
+    #[test]
+    fn projects_preview_save_recovery_maps_retry_and_cancel_in_the_right_seat() {
+        let area = Rect::new(0, 0, 110, 30);
+        let (mut domain, mut model, _) = projects_preview_fixture();
+        let mut recovery = SaveRecovery::new();
+        let baseline = domain.clone();
+        let outcome = apply_board_intent_with_save_recovery(
+            &mut domain,
+            model.input_target_mut(),
+            &mut recovery,
+            BoardSaveContext {
+                baseline,
+                intent: BoardIntent::Complete,
+                snapshot: None,
+            },
+            |_| Err("preview save failed".into()),
+        )
+        .expect("failed preview save enters recovery");
+        assert_eq!(outcome, IntentOutcome::None);
+        assert!(recovery.is_pending());
+        assert_eq!(model.input_mode(), BoardInputMode::SaveRecovery);
+        let retry = preview_key_intent(
+            &mut model,
+            area,
+            KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE),
+        );
+        assert_eq!(retry, BoardIntent::RetrySave);
+        apply_board_intent_with_save_recovery(
+            &mut domain,
+            model.input_target_mut(),
+            &mut recovery,
+            BoardSaveContext {
+                baseline: DomainState::new(),
+                intent: retry,
+                snapshot: None,
+            },
+            |_| Ok(()),
+        )
+        .expect("retry preview save");
+        assert!(!recovery.is_pending());
+
+        let (mut domain, mut model, _) = projects_preview_fixture();
+        let mut recovery = SaveRecovery::new();
+        let baseline = domain.clone();
+        apply_board_intent_with_save_recovery(
+            &mut domain,
+            model.input_target_mut(),
+            &mut recovery,
+            BoardSaveContext {
+                baseline,
+                intent: BoardIntent::Complete,
+                snapshot: None,
+            },
+            |_| Err("preview save failed".into()),
+        )
+        .expect("failed preview save enters recovery");
+        let cancel = preview_key_intent(
+            &mut model,
+            area,
+            KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE),
+        );
+        assert_eq!(cancel, BoardIntent::CancelSave);
+        apply_board_intent_with_save_recovery(
+            &mut domain,
+            model.input_target_mut(),
+            &mut recovery,
+            BoardSaveContext {
+                baseline: DomainState::new(),
+                intent: cancel,
+                snapshot: None,
+            },
+            |_| panic!("CancelSave must not persist"),
+        )
+        .expect("cancel preview save");
+        assert!(!recovery.is_pending());
     }
 
     #[test]

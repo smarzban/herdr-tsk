@@ -27,11 +27,57 @@ use tsk_tui::ui::{
 const REPO: &str = "/repos/tsk";
 
 const T12_NOTES: &str = "Rework the wide split so the task page reads as a **detail pane**, not a boxed clone.\n\n- keep board unboxed\n- decide separator\n- verb bar ownership\n\n```\nresolve_responsive(w, h, focus)\n```";
+const PROJECT_A: &str = "/repos/alpha";
+const PROJECT_B: &str = "/repos/beta";
 
 /// The brief's reference fixture: T12 started with markdown notes in this repo, T15 ready on
 /// the desk. The model carries the numbers; the domain shares the ids.
 fn fixture() -> (DomainState, BoardModel) {
     fixture_with_titles("Frame the wide task view", "Renew domain")
+}
+
+fn projects_fixture() -> (DomainState, BoardModel) {
+    let mut domain = DomainState::new();
+    domain
+        .create(
+            "alpha task",
+            Some("alpha notes".to_string()),
+            TaskScope::Project {
+                path: PROJECT_A.to_string(),
+            },
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create alpha task");
+    let beta = domain
+        .create(
+            "beta task",
+            Some("beta notes".to_string()),
+            TaskScope::Project {
+                path: PROJECT_B.to_string(),
+            },
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create beta task");
+    domain
+        .edit(
+            beta,
+            "beta task",
+            Some("beta notes".to_string()),
+            TaskScope::Project {
+                path: PROJECT_B.to_string(),
+            },
+            Some("release".to_string()),
+        )
+        .expect("thread beta task");
+    let mut model = BoardModel::from_domain(&domain, None);
+    go(
+        &mut domain,
+        &mut model,
+        BoardIntent::SelectNavTab(tsk_tui::ui::queue::NavTab::Projects),
+    );
+    (domain, model)
 }
 
 fn fixture_with_titles(first: &str, second: &str) -> (DomainState, BoardModel) {
@@ -163,6 +209,179 @@ fn inside(area: Rect, hit: Rect) -> bool {
 // ---------------------------------------------------------------------------
 // T2 chrome
 // ---------------------------------------------------------------------------
+
+#[test]
+fn projects_preview_stages_bind_a_nested_project_board_and_keep_the_index_cursor() {
+    let (mut domain, mut model) = projects_fixture();
+    assert_eq!(model.wide_stage(), WideStage::FullBoard);
+    go(&mut domain, &mut model, BoardIntent::StageRight);
+    assert_eq!(model.wide_stage(), WideStage::Split);
+    let first_path = model
+        .selected_project_row()
+        .expect("projects cursor")
+        .path
+        .clone();
+    assert_eq!(
+        model
+            .right_seat()
+            .and_then(BoardModel::active_project)
+            .map(|path| path.to_string_lossy().into_owned()),
+        Some(first_path)
+    );
+    let (split_rows, split_hits) = render(&model, 110, 30);
+    assert!(split_rows.iter().any(|row| row.contains("alpha task")));
+    assert!(split_hits
+        .regions
+        .iter()
+        .any(|hit| matches!(hit.target, QueueHitTarget::Task(_))));
+    go(&mut domain, &mut model, BoardIntent::StageRight);
+    assert_eq!(model.wide_stage(), WideStage::Rail);
+    assert!(model.right_seat().is_some());
+    go(&mut domain, &mut model, BoardIntent::StageRight);
+    assert_eq!(model.wide_stage(), WideStage::Rail);
+
+    let (rows, hits) = render(&model, 110, 30);
+    assert!(rows
+        .iter()
+        .any(|row| row.contains("alpha task") || row.contains("beta task")));
+    assert!(hits
+        .regions
+        .iter()
+        .any(|hit| matches!(hit.target, QueueHitTarget::ProjectRow(_))));
+    assert!(hits
+        .regions
+        .iter()
+        .any(|hit| matches!(hit.target, QueueHitTarget::Task(_))));
+}
+
+#[test]
+fn projects_preview_stage_left_walks_back_without_reaching_full_task() {
+    let (mut domain, mut model) = projects_fixture();
+    go(&mut domain, &mut model, BoardIntent::StageRight);
+    go(&mut domain, &mut model, BoardIntent::StageRight);
+    assert_eq!(model.wide_stage(), WideStage::Rail);
+    go(&mut domain, &mut model, BoardIntent::StageLeft);
+    assert_eq!(model.wide_stage(), WideStage::Split);
+    go(&mut domain, &mut model, BoardIntent::StageLeft);
+    assert_eq!(model.wide_stage(), WideStage::FullBoard);
+    go(&mut domain, &mut model, BoardIntent::StageRight);
+    go(&mut domain, &mut model, BoardIntent::StageRight);
+    go(&mut domain, &mut model, BoardIntent::StageRight);
+    assert_eq!(model.wide_stage(), WideStage::Rail);
+}
+
+#[test]
+fn projects_preview_mouse_focuses_rail_and_rail_rows_return_to_split() {
+    let area = Rect::new(0, 0, 110, 30);
+    let (mut domain, mut model) = projects_fixture();
+    go(&mut domain, &mut model, BoardIntent::StageRight);
+    let geometry = resolve_responsive(area.width, area.height, WideStage::Split);
+    let (_, hits) = render(&model, area.width, area.height);
+    let task = hits
+        .regions
+        .iter()
+        .find(|hit| {
+            inside(geometry.task, hit.area) && matches!(hit.target, QueueHitTarget::Task(_))
+        })
+        .expect("project preview task hit")
+        .area;
+    let click = left_click(task.x, task.y);
+    assert_eq!(
+        map_responsive_board_mouse(&model, &hits, area, click),
+        None,
+        "the preview is inert before focus moves right"
+    );
+    assert_eq!(
+        wide_mouse_focus_intent(&model, &hits, area, click),
+        Some(BoardIntent::StageRight)
+    );
+    go(&mut domain, &mut model, BoardIntent::StageRight);
+    assert_eq!(model.wide_stage(), WideStage::Rail);
+    assert!(model.project_right_seat_focused());
+
+    let current = model
+        .selected_project_row()
+        .expect("selected project")
+        .path
+        .clone();
+    let rail = resolve_responsive(area.width, area.height, WideStage::Rail);
+    let (_, hits) = render(&model, area.width, area.height);
+    let row = hits
+        .regions
+        .iter()
+        .find(|hit| {
+            inside(rail.board, hit.area)
+                && matches!(hit.target, QueueHitTarget::ProjectRow(index) if {
+                    model
+                        .project_rows()
+                        .into_iter()
+                        .nth(index)
+                        .is_some_and(|row| row.path != current)
+                })
+        })
+        .expect("another project row hit")
+        .area;
+    let intent = map_responsive_board_mouse(&model, &hits, area, left_click(row.x, row.y))
+        .expect("rail project row maps");
+    assert!(matches!(intent, BoardIntent::SelectProjectRow(_)));
+    go(&mut domain, &mut model, intent);
+    assert_eq!(model.wide_stage(), WideStage::Split);
+    assert!(!model.project_right_seat_focused());
+    assert_ne!(
+        model
+            .right_seat()
+            .and_then(BoardModel::active_project)
+            .map(|path| path.to_string_lossy().into_owned()),
+        Some(current)
+    );
+}
+
+#[test]
+fn projects_preview_cursor_rebinds_split_and_thread_view_drops_it() {
+    let (mut domain, mut model) = projects_fixture();
+    go(&mut domain, &mut model, BoardIntent::StageRight);
+    let before = model
+        .right_seat()
+        .and_then(BoardModel::active_project)
+        .map(|path| path.to_path_buf());
+    go(&mut domain, &mut model, BoardIntent::SelectNext);
+    let after = model
+        .right_seat()
+        .and_then(BoardModel::active_project)
+        .map(|path| path.to_path_buf());
+    assert_ne!(before, after);
+    go(&mut domain, &mut model, BoardIntent::OpenProjectsViewPicker);
+    go(&mut domain, &mut model, BoardIntent::ListPickerNext);
+    go(&mut domain, &mut model, BoardIntent::ConfirmListPicker);
+    assert_eq!(model.wide_stage(), WideStage::FullBoard);
+    assert!(model.right_seat().is_none());
+}
+
+#[test]
+fn projects_preview_cursor_does_not_change_remembered_project_until_enter() {
+    let (mut domain, mut model) = projects_fixture();
+    model.set_selected_project(Some(PathBuf::from(PROJECT_A)));
+    go(
+        &mut domain,
+        &mut model,
+        BoardIntent::SelectNavTab(tsk_tui::ui::queue::NavTab::Projects),
+    );
+    go(&mut domain, &mut model, BoardIntent::StageRight);
+    go(&mut domain, &mut model, BoardIntent::SelectNext);
+    assert_eq!(
+        model.selected_project(),
+        Some(std::path::Path::new(PROJECT_A))
+    );
+    go(&mut domain, &mut model, BoardIntent::OpenTaskPage);
+    assert_eq!(
+        model.active_project(),
+        Some(std::path::Path::new(PROJECT_B))
+    );
+    assert_eq!(
+        model.selected_project(),
+        Some(std::path::Path::new(PROJECT_B))
+    );
+}
 
 #[test]
 fn wide_frames_are_mono_at_every_stage_width_and_height() {

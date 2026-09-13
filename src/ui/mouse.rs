@@ -365,7 +365,7 @@ fn hit_at(hits: &QueueHitMap, pos: Position) -> Option<QueueHitTarget> {
 /// Rectangle that currently owns pointer input for this presentation.
 pub fn focused_mouse_area(model: &BoardModel, area: Rect) -> Rect {
     let responsive = model.responsive_geometry(area);
-    if model.focused_surface() == FocusedSurface::Task {
+    if model.project_right_seat_focused() || model.focused_surface() == FocusedSurface::Task {
         responsive.task_content()
     } else {
         responsive.board
@@ -415,7 +415,11 @@ pub fn wide_mouse_focus_intent(
     let pos = point(mouse.column, mouse.row);
     (responsive.task.contains(pos)
         && pos.y < wide_footer_top(area)
-        && model.selected_id().is_some())
+        && if model.projects_overview() {
+            model.selected_project_row().is_some()
+        } else {
+            model.selected_id().is_some()
+        })
     .then_some(BoardIntent::StageRight)
 }
 
@@ -433,6 +437,13 @@ pub fn map_responsive_board_mouse(
     let pos = point(mouse.column, mouse.row);
     match mouse.kind {
         MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
+            if model.project_right_seat_focused() {
+                return responsive.task.contains(pos).then(|| {
+                    model
+                        .right_seat()
+                        .and_then(|right| map_board_mouse(right, hits, mouse))
+                })?;
+            }
             if model.input_mode() == BoardInputMode::Help {
                 return map_board_mouse(model, hits, mouse);
             }
@@ -447,7 +458,31 @@ pub fn map_responsive_board_mouse(
     // The shared footer belongs to whichever surface owns input: its verbs, status controls
     // and inputs route exactly as the single-pane frame's own bottom rows do.
     if pos.y >= wide_footer_top(area) {
-        return map_board_mouse(model, hits, mouse);
+        return if model.project_right_seat_focused() {
+            model
+                .right_seat()
+                .and_then(|right| map_board_mouse(right, hits, mouse))
+        } else {
+            map_board_mouse(model, hits, mouse)
+        };
+    }
+
+    // In the projects Rail the left side is still a clickable index, but every other control
+    // in that side only moves the slider back. The project board is a complete narrow board
+    // session, so its own mapper owns the translated hits and wheel behavior.
+    if model.project_right_seat_focused() {
+        if responsive.task.contains(pos) {
+            return model
+                .right_seat()
+                .and_then(|right| map_board_mouse(right, hits, mouse));
+        }
+        if responsive.board.contains(pos) {
+            if let Some(QueueHitTarget::ProjectRow(index)) = hit_at(hits, pos) {
+                return Some(BoardIntent::SelectProjectRow(index));
+            }
+            return Some(BoardIntent::StageLeft);
+        }
+        return None;
     }
 
     let view_mode = matches!(

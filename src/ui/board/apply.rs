@@ -10,6 +10,7 @@ use crate::domain::{
     normalize_thread, thread_refusal_message, DomainError, DomainState, HumanStatus, TaskScope,
     ThreadError,
 };
+use crate::scope::paths_equivalent;
 use crate::ui::capture::{CaptureField, TITLE_REQUIRED_MESSAGE};
 use crate::ui::edit::{flatten_line_breaks, EditBuffer};
 use crate::ui::input::BoardIntent;
@@ -19,8 +20,9 @@ use crate::ui::tier::{FocusedSurface, WideStage};
 
 use super::commands::{resolve_board_command, CommandSurface};
 use super::model::{
-    BoardForm, BoardInputMode, BoardLocation, BoardModel, IntentOutcome, PickerTab,
-    ProjectPickerState, ProjectScopeOption, ProjectsView, StepEditor, StepEditorSave, TaskEditSave,
+    BoardForm, BoardInputMode, BoardLocation, BoardModel, IntentOutcome, ListPickerValue,
+    PickerTab, ProjectPickerState, ProjectScopeOption, ProjectsView, StepEditor, StepEditorSave,
+    TaskEditSave, DIRTY_TASK_SWITCH_REFUSAL,
 };
 
 /// What the row says when an action that aims at the selection is asked for on a board that
@@ -1083,6 +1085,18 @@ fn apply_board_intent(
             if matches!(model.popup, BoardPopup::SaveRecovery) {
                 return Ok(IntentOutcome::None);
             }
+            if model.projects_overview() {
+                if model
+                    .right_seat()
+                    .is_some_and(|right| right.has_unsaved_work())
+                {
+                    model.set_message(DIRTY_TASK_SWITCH_REFUSAL);
+                    return Ok(IntentOutcome::None);
+                }
+                model.wide_stage = WideStage::FullBoard;
+                model.stage_origin = None;
+                model.drop_project_preview();
+            }
             // AC-45: `P` leaves the read-only archived lens before the picker paints, so
             // its tasks are hidden again and Esc from the picker lands home, not back in
             // a lens the user thought they had left.
@@ -1184,6 +1198,15 @@ fn apply_board_intent(
             return Ok(IntentOutcome::None);
         }
         BoardIntent::SelectNavTab(tab) => {
+            if matches!(model.board_location, BoardLocation::Projects)
+                && tab != NavTab::Projects
+                && model
+                    .right_seat()
+                    .is_some_and(|right| right.has_unsaved_work())
+            {
+                model.set_message(DIRTY_TASK_SWITCH_REFUSAL);
+                return Ok(IntentOutcome::None);
+            }
             let switched = model.select_nav_tab(tab);
             // Slot 2 never changes meaning: with no project selected it opens the
             // picker, and picking it again while its project is open answers the
@@ -1255,10 +1278,37 @@ fn apply_board_intent(
             return apply_board_intent(domain, model, BoardIntent::ConfirmListPicker, snapshot);
         }
         BoardIntent::ConfirmListPicker => {
-            if model.confirm_list_picker().is_some() {
+            let drops_project_preview = model.projects_preview_active()
+                && model.list_picker_kind() == Some(crate::ui::board::ListPickerKind::ProjectsView)
+                && model
+                    .visible_list_picker_options()
+                    .get(model.list_picker_selected())
+                    .is_some_and(|(_, option)| {
+                        matches!(
+                            &option.value,
+                            ListPickerValue::ProjectsOverview | ListPickerValue::ProjectsThread(_)
+                        )
+                    });
+            if drops_project_preview
+                && model
+                    .right_seat()
+                    .is_some_and(|right| right.has_unsaved_work())
+            {
+                model.set_message(DIRTY_TASK_SWITCH_REFUSAL);
+                return Ok(IntentOutcome::None);
+            }
+            if let Some(value) = model.confirm_list_picker() {
                 let previous = model.selection_id;
                 let previous_visible = model.visible_ids();
                 model.reanchor_selection(previous, &previous_visible);
+                if matches!(
+                    value,
+                    ListPickerValue::ProjectsOverview | ListPickerValue::ProjectsThread(_)
+                ) {
+                    model.wide_stage = WideStage::FullBoard;
+                    model.stage_origin = None;
+                    model.drop_project_preview();
+                }
                 model.input_mode = BoardInputMode::Normal;
             }
             return Ok(IntentOutcome::None);
@@ -1280,8 +1330,19 @@ fn apply_board_intent(
             if model.nav_tab() == NavTab::Projects
                 && matches!(model.projects_view, ProjectsView::Overview)
             {
+                if model.projects_preview_active()
+                    && model
+                        .right_seat()
+                        .is_some_and(|right| right.has_unsaved_work())
+                {
+                    model.set_message(DIRTY_TASK_SWITCH_REFUSAL);
+                    return Ok(IntentOutcome::None);
+                }
                 model.projects_query.push(character);
                 model.projects_selected = 0;
+                if model.projects_preview_active() {
+                    model.bind_project_preview();
+                }
             }
             return Ok(IntentOutcome::None);
         }
@@ -1289,26 +1350,88 @@ fn apply_board_intent(
             if model.nav_tab() == NavTab::Projects
                 && matches!(model.projects_view, ProjectsView::Overview)
             {
+                if model.projects_preview_active()
+                    && model
+                        .right_seat()
+                        .is_some_and(|right| right.has_unsaved_work())
+                {
+                    model.set_message(DIRTY_TASK_SWITCH_REFUSAL);
+                    return Ok(IntentOutcome::None);
+                }
                 model.projects_query.push_str(&text);
                 model.projects_selected = 0;
+                if model.projects_preview_active() {
+                    model.bind_project_preview();
+                }
             }
             return Ok(IntentOutcome::None);
         }
         BoardIntent::ProjectsQueryBackspace => {
+            if model.projects_preview_active()
+                && model
+                    .right_seat()
+                    .is_some_and(|right| right.has_unsaved_work())
+            {
+                model.set_message(DIRTY_TASK_SWITCH_REFUSAL);
+                return Ok(IntentOutcome::None);
+            }
             model.projects_query.pop();
             model.projects_selected = 0;
+            if model.projects_preview_active() {
+                model.bind_project_preview();
+            }
             return Ok(IntentOutcome::None);
         }
         BoardIntent::SelectProjectRow(index) => {
             // Mouse route onto an index row: a click selects it (the status row then names
-            // its path), a second click on the same row inside the double-click window
-            // opens the project in slot 2. Index rows are navigation, never tasks: no
-            // task verb can reach them because `selected_id()` stays untouched.
+            // its path), a second click inside the ordinary index view opens the project in
+            // slot 2. In the live Rail preview, a row click is deliberately only a focus
+            // transfer back to the index, so it cannot unexpectedly leave the projects tab.
             let Some(row) = model.project_rows().into_iter().nth(index) else {
                 return Ok(IntentOutcome::None);
             };
             let path = PathBuf::from(row.path);
+            if model.projects_preview_active() && model.wide_stage == WideStage::Rail {
+                let previous = model.projects_selected;
+                let changing_project = model.selected_project_row().is_some_and(|current| {
+                    !paths_equivalent(&current.path, &path.to_string_lossy())
+                });
+                if changing_project
+                    && model
+                        .right_seat()
+                        .is_some_and(|right| right.has_unsaved_work())
+                {
+                    model.set_message(DIRTY_TASK_SWITCH_REFUSAL);
+                    return Ok(IntentOutcome::None);
+                }
+                model.projects_selected = index;
+                if !model.bind_project_preview() {
+                    model.projects_selected = previous;
+                    return Ok(IntentOutcome::None);
+                }
+                model.wide_stage = WideStage::Split;
+                model.last_project_row_click = None;
+                model.clear_message();
+                return Ok(IntentOutcome::None);
+            }
+            let previous = model.projects_selected;
+            let preview_active = model.projects_preview_active();
+            if preview_active
+                && model
+                    .right_seat()
+                    .is_some_and(|right| right.has_unsaved_work())
+                && model.selected_project_row().is_some_and(|current| {
+                    !paths_equivalent(&current.path, &path.to_string_lossy())
+                })
+            {
+                model.set_message(DIRTY_TASK_SWITCH_REFUSAL);
+                return Ok(IntentOutcome::None);
+            }
             model.projects_selected = index;
+            if preview_active && !model.bind_project_preview() {
+                model.projects_selected = previous;
+                return Ok(IntentOutcome::None);
+            }
             model.clear_message();
             let now = Instant::now();
             let is_double = model
@@ -1319,6 +1442,13 @@ fn apply_board_intent(
                 });
             if is_double {
                 model.last_project_row_click = None;
+                if model
+                    .right_seat()
+                    .is_some_and(|right| right.has_unsaved_work())
+                {
+                    model.set_message(DIRTY_TASK_SWITCH_REFUSAL);
+                    return Ok(IntentOutcome::None);
+                }
                 model.set_board_scope(ProjectScopeOption::Project(path));
             } else {
                 model.last_project_row_click = Some((now, path));
@@ -1434,6 +1564,13 @@ fn apply_board_intent(
                 && matches!(model.projects_view, ProjectsView::Overview)
             {
                 if let Some(row) = model.selected_project_row() {
+                    if model
+                        .right_seat()
+                        .is_some_and(|right| right.has_unsaved_work())
+                    {
+                        model.set_message(DIRTY_TASK_SWITCH_REFUSAL);
+                        return Ok(IntentOutcome::None);
+                    }
                     model.set_board_scope(ProjectScopeOption::Project(PathBuf::from(row.path)));
                     model.clear_message();
                 }
@@ -2138,6 +2275,32 @@ fn edit_draft(model: &mut BoardModel, operation: impl FnOnce(&mut EditBuffer)) {
 /// Move the slider one stage to the right. Stages A, G and F need a selected task; the
 /// pane binds (or rebinds) its page to the selection on the way into G.
 fn stage_right(domain: &DomainState, model: &mut BoardModel) {
+    // A nested project board is painted in the outer task column, so its ordinary FullBoard
+    // stage is exposed to input as a narrow Rail. Keep that translation local: a right arrow
+    // opens the nested task page, never an unpainted intermediate Split stage.
+    if model.preview_seat {
+        if model.wide_stage != WideStage::FullTask {
+            if let Some(id) = model.selected_id().filter(|id| domain.get(*id).is_some()) {
+                open_full_task_page(domain, model, id);
+            }
+        }
+        return;
+    }
+    if model.projects_overview() {
+        match model.wide_stage {
+            WideStage::FullBoard | WideStage::Split => {
+                if model.bind_project_preview() {
+                    model.wide_stage = match model.wide_stage {
+                        WideStage::FullBoard => WideStage::Split,
+                        WideStage::Split => WideStage::Rail,
+                        WideStage::Rail | WideStage::FullTask => unreachable!(),
+                    };
+                }
+            }
+            WideStage::Rail | WideStage::FullTask => {}
+        }
+        return;
+    }
     match model.wide_stage {
         WideStage::FullBoard => {
             if model.selected_id().is_some() {
@@ -2168,6 +2331,41 @@ fn stage_right(domain: &DomainState, model: &mut BoardModel) {
 /// Move the slider one stage to the left. The page session is parked, never dropped: G → A
 /// keeps the pane bound to the same task (a dirty draft included), and F always returns to G.
 fn stage_left(model: &mut BoardModel) {
+    // The nested board has no painted intermediate stages. Its page-owned left arrow returns to
+    // the preview board; the outer app handles the board-owned left arrow and returns to the
+    // projects index.
+    if model.preview_seat {
+        if model.wide_stage == WideStage::FullTask {
+            leave_task_page(model);
+        } else {
+            model.wide_stage = WideStage::FullBoard;
+            model.stage_origin = None;
+        }
+        return;
+    }
+    if model.projects_overview() {
+        match model.wide_stage {
+            WideStage::FullBoard => {}
+            WideStage::Split => {
+                if model
+                    .right_seat()
+                    .is_some_and(|right| right.has_unsaved_work())
+                {
+                    model.set_message(DIRTY_TASK_SWITCH_REFUSAL);
+                } else {
+                    model.wide_stage = WideStage::FullBoard;
+                    model.drop_project_preview();
+                }
+            }
+            WideStage::Rail => model.wide_stage = WideStage::Split,
+            WideStage::FullTask => {
+                model.stage_origin = None;
+                model.wide_stage = WideStage::FullBoard;
+                model.drop_project_preview();
+            }
+        }
+        return;
+    }
     match model.wide_stage {
         WideStage::FullBoard => {}
         WideStage::Split => model.wide_stage = WideStage::FullBoard,

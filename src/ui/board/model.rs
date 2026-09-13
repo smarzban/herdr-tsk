@@ -32,7 +32,7 @@ use super::commands::CommandSurface;
 /// Visible board title. Also the herdr pane title.
 pub const BOARD_TITLE: &str = "Tasks";
 
-const DIRTY_TASK_SWITCH_REFUSAL: &str = "save or cancel edits before switching tasks";
+pub(super) const DIRTY_TASK_SWITCH_REFUSAL: &str = "save or cancel edits before switching tasks";
 
 fn is_header_row(id: Uuid) -> bool {
     matches!(
@@ -801,6 +801,11 @@ pub struct BoardModel {
     pub(super) command_query: String,
     /// Selection into the currently visible command set.
     pub(super) command_selected: usize,
+    /// The narrow project board that owns the right column while the projects overview is in
+    /// Split or Rail. It is a full board session rather than a second durable state document.
+    pub(super) right_seat: Option<Box<BoardModel>>,
+    /// Marks a nested board so its own FullBoard stage still behaves as a narrow live surface.
+    pub(super) preview_seat: bool,
 }
 
 /// How an unresolved failed save ended.
@@ -864,6 +869,8 @@ impl BoardModel {
             surface: CommandSurface::None,
             command_query: String::new(),
             command_selected: 0,
+            right_seat: None,
+            preview_seat: false,
             mouse_press: None,
             mouse_press_scroll: None,
             list_scroll: Cell::new(0),
@@ -1091,6 +1098,9 @@ impl BoardModel {
         let previous_id_set: HashSet<Uuid> = self.tasks.iter().map(|task| task.id).collect();
         self.tasks = state.tasks().to_vec();
         self.archived_projects = state.archived_projects();
+        if let Some(right) = self.right_seat.as_mut() {
+            right.sync_from_domain(state);
+        }
         let new_ids: Vec<Uuid> = self
             .tasks
             .iter()
@@ -1164,6 +1174,9 @@ impl BoardModel {
             }
             self.reanchor_selection(previous, &previous_visible);
         }
+        if self.projects_preview_active() {
+            self.bind_project_preview();
+        }
     }
 
     /// Presenter / pane title string.
@@ -1221,6 +1234,86 @@ impl BoardModel {
         true
     }
 
+    /// Whether the projects overview owns the wide slider's project-preview stages.
+    pub fn projects_overview(&self) -> bool {
+        matches!(self.board_location, BoardLocation::Projects)
+            && matches!(self.projects_view, ProjectsView::Overview)
+    }
+
+    /// Whether the projects overview owns a transient preview seat.
+    pub(crate) fn projects_preview_active(&self) -> bool {
+        self.projects_overview() && matches!(self.wide_stage, WideStage::Split | WideStage::Rail)
+    }
+
+    /// Whether the right project board is the active input seat.
+    pub fn project_right_seat_focused(&self) -> bool {
+        self.projects_preview_active()
+            && matches!(self.wide_stage, WideStage::Rail)
+            && self.right_seat.is_some()
+    }
+
+    /// The project-board session currently painted in the right column, if one is bound.
+    pub fn right_seat(&self) -> Option<&BoardModel> {
+        self.right_seat.as_deref()
+    }
+
+    /// Mutable board session that owns keyboard, mouse, and modal dispatch.
+    pub(crate) fn input_target_mut(&mut self) -> &mut BoardModel {
+        if self.project_right_seat_focused() {
+            self.right_seat
+                .as_deref_mut()
+                .expect("focused project rail has a right seat")
+        } else {
+            self
+        }
+    }
+
+    /// Rebuild the right project board for the index cursor. A same-project seat keeps its
+    /// selection, scroll, drawer, peek, and page session; a changed project refuses when that
+    /// seat owns unsaved work rather than dropping the form behind the cursor.
+    pub(crate) fn bind_project_preview(&mut self) -> bool {
+        if !self.projects_overview() {
+            self.right_seat = None;
+            return false;
+        }
+        let Some(row) = self.selected_project_row() else {
+            self.right_seat = None;
+            return false;
+        };
+        let path = PathBuf::from(row.path);
+        let same = self.right_seat.as_ref().is_some_and(|right| {
+            right.active_project().is_some_and(|active| {
+                paths_equivalent(&active.to_string_lossy(), &path.to_string_lossy())
+            })
+        });
+        if same {
+            return true;
+        }
+        if self
+            .right_seat
+            .as_ref()
+            .is_some_and(|right| right.has_unsaved_work())
+        {
+            self.set_message(DIRTY_TASK_SWITCH_REFUSAL);
+            return false;
+        }
+        let mut right = BoardModel::from_tasks(self.tasks.clone(), self.this_repo.clone());
+        right.archived_projects = self.archived_projects.clone();
+        right.board_location = BoardLocation::Project(path.clone());
+        right.selected_project = Some(path);
+        right.preview_seat = true;
+        right.selection_id = None;
+        right.update_notice = self.update_notice.clone();
+        right.seed_selection();
+        self.right_seat = Some(Box::new(right));
+        true
+    }
+
+    /// Drop the projects overview's transient right-column session.
+    pub(crate) fn drop_project_preview(&mut self) {
+        self.right_seat = None;
+    }
+
     /// Move to `target` through the one shared guarded transition: reanchor by the
     /// previous visible order, clear a project-scoped thread filter when the project
     /// changes, and never touch open forms or save-recovery state.
@@ -1243,6 +1336,13 @@ impl BoardModel {
             return;
         }
         self.thread_filter = ThreadFilter::All;
+        let entering_projects = matches!(target, BoardLocation::Projects)
+            && !matches!(self.board_location, BoardLocation::Projects);
+        if entering_projects || !matches!(target, BoardLocation::Projects) {
+            self.right_seat = None;
+            self.wide_stage = WideStage::FullBoard;
+            self.stage_origin = None;
+        }
         self.board_location = target;
         self.reanchor_selection(previous, &previous_visible);
     }
@@ -1269,6 +1369,13 @@ impl BoardModel {
     /// Whether changing invocation context would discard or hide an unsaved draft.
     /// Reopen requests defer while any editor or non-empty quick-add owns the user's text.
     pub fn has_unsaved_work(&self) -> bool {
+        if self
+            .right_seat
+            .as_ref()
+            .is_some_and(|right| right.has_unsaved_work())
+        {
+            return true;
+        }
         if self.task_session_dirty()
             || self.quick_add_save.is_some()
             || self.task_edit_save.is_some()
@@ -1291,6 +1398,9 @@ impl BoardModel {
     /// Clear non-dirty presentation layers so a context switch lands on the target board,
     /// rather than leaving a clean task page, picker, search, or empty quick-add in front of it.
     fn dismiss_clean_surfaces_for_reopen(&mut self) {
+        if let Some(right) = self.right_seat.as_mut() {
+            right.dismiss_clean_surfaces_for_reopen();
+        }
         self.detail_open = None;
         self.wide_stage = WideStage::FullBoard;
         self.stage_origin = None;
@@ -1313,6 +1423,7 @@ impl BoardModel {
         self.last_row_click = None;
         self.last_project_header_click = None;
         self.last_project_row_click = None;
+        self.right_seat = None;
     }
 
     /// Apply a reopen that opens a supplied project, or Desk when none was supplied.
@@ -1476,12 +1587,24 @@ impl BoardModel {
     /// The press cell is what a following drag grows the selection from; a plain
     /// click never reads it. Called for every left press, whatever the input mode.
     pub fn begin_mouse_press(&mut self, position: Position) {
+        if self.project_right_seat_focused() {
+            self.text_selection = None;
+            self.input_target_mut().begin_mouse_press(position);
+            return;
+        }
         self.mouse_press = Some(position);
         self.mouse_press_scroll = Some(self.content_scroll());
         self.text_selection = None;
     }
 
     fn content_scroll(&self) -> usize {
+        if let Some(right) = self
+            .right_seat
+            .as_deref()
+            .filter(|_| self.project_right_seat_focused())
+        {
+            return right.content_scroll();
+        }
         if self.focused_surface() == FocusedSurface::Task {
             self.form
                 .as_ref()
@@ -1511,6 +1634,10 @@ impl BoardModel {
     /// Inert without a live press (a drag that starts mid-gesture, e.g. before tsk
     /// saw the press), so it can never invent an anchor.
     pub fn drag_text_selection(&mut self, position: Position) {
+        if self.project_right_seat_focused() {
+            self.input_target_mut().drag_text_selection(position);
+            return;
+        }
         if let Some(press) = self.mouse_press {
             let anchor = self.content_relative_anchor(press);
             self.text_selection = Some(TextSelection::new(anchor, position));
@@ -1519,23 +1646,41 @@ impl BoardModel {
 
     /// Recompute the live highlight after the viewport scrolled under a held drag.
     pub fn recompute_text_selection_head(&mut self, head: Position) {
+        if self.project_right_seat_focused() {
+            self.input_target_mut().recompute_text_selection_head(head);
+            return;
+        }
         self.drag_text_selection(head);
     }
 
     /// Clear the press on release; the selection itself stays until copy clears it
     /// or the next press replaces it.
     pub fn end_mouse_press(&mut self) {
+        if self.project_right_seat_focused() {
+            self.input_target_mut().end_mouse_press();
+            return;
+        }
         self.mouse_press = None;
         self.mouse_press_scroll = None;
     }
 
     /// Drop a finished text selection highlight (after copy, Esc, or cancel).
     pub fn clear_text_selection(&mut self) {
+        if self.project_right_seat_focused() {
+            self.input_target_mut().clear_text_selection();
+            return;
+        }
         self.text_selection = None;
     }
 
     /// The live drag selection, if a drag is (or was) in progress.
     pub fn text_selection(&self) -> Option<TextSelection> {
+        if self.project_right_seat_focused() {
+            return self
+                .right_seat
+                .as_deref()
+                .and_then(BoardModel::text_selection);
+        }
         self.text_selection
     }
 
@@ -1548,6 +1693,13 @@ impl BoardModel {
         direction: crate::ui::text_select::AutoScrollDirection,
         rows: u16,
     ) -> usize {
+        if let Some(right) = self
+            .right_seat
+            .as_deref()
+            .filter(|_| self.project_right_seat_focused())
+        {
+            return right.nudge_list_scroll(direction, rows);
+        }
         use crate::ui::text_select::AutoScrollDirection;
         self.follow_list.set(false);
         let max = self.list_max_scroll.get();
@@ -1566,6 +1718,11 @@ impl BoardModel {
         direction: crate::ui::text_select::AutoScrollDirection,
         rows: u16,
     ) -> usize {
+        if self.project_right_seat_focused() {
+            if let Some(right) = self.right_seat.as_deref_mut() {
+                return right.nudge_notes_scroll(direction, rows);
+            }
+        }
         use crate::ui::text_select::AutoScrollDirection;
         let Some(form) = self.form.as_mut() else {
             return 0;
@@ -1737,11 +1894,16 @@ impl BoardModel {
             self.projects_selected = 0;
             return false;
         }
+        let previous = self.projects_selected;
         self.projects_selected = if forward {
             (self.projects_selected + 1) % len
         } else {
             self.projects_selected.checked_sub(1).unwrap_or(len - 1)
         };
+        if self.projects_preview_active() && !self.bind_project_preview() {
+            self.projects_selected = previous;
+            return false;
+        }
         true
     }
 
@@ -2091,6 +2253,15 @@ impl BoardModel {
         self.wide_stage.focused_surface()
     }
 
+    /// Focused surface inside the seat that currently owns input. The outer projects Rail remains
+    /// task-shaped for layout, while its right board can still be a board-shaped surface.
+    pub fn input_focused_surface(&self) -> FocusedSurface {
+        self.right_seat
+            .as_deref()
+            .filter(|_| self.project_right_seat_focused())
+            .map_or_else(|| self.focused_surface(), BoardModel::focused_surface)
+    }
+
     /// Whether a capture draft (quick-add expanded with `Tab`) owns the frame. The draft is
     /// neither the board nor a task, so the wide slider has no column for it: while it is open
     /// the frame is painted and pointer-routed as a single surface at every width.
@@ -2129,6 +2300,37 @@ impl BoardModel {
     /// Session-only wide-slider stage. The board always opens in `FullBoard`.
     pub fn wide_stage(&self) -> WideStage {
         self.wide_stage
+    }
+
+    /// Wide stage of the seat that currently owns keyboard input. The outer stage remains the
+    /// layout stage, while a focused project preview may be in its own FullTask page.
+    pub fn input_stage(&self) -> WideStage {
+        if self.preview_seat {
+            return if self.wide_stage == WideStage::FullTask
+                && self.input_mode_local() == BoardInputMode::TaskPage
+            {
+                WideStage::FullTask
+            } else {
+                WideStage::Rail
+            };
+        }
+        self.right_seat
+            .as_deref()
+            .filter(|_| self.project_right_seat_focused())
+            .map_or(self.wide_stage, |right| right.input_stage())
+    }
+
+    /// Whether an otherwise-unhandled close on the nested project board should return focus to
+    /// the projects index instead of closing the outer board.
+    pub(crate) fn project_right_board_leave_requested(&self) -> bool {
+        self.project_right_seat_focused()
+            && self.right_seat.as_ref().is_some_and(|right| {
+                matches!(right.wide_stage, WideStage::FullBoard | WideStage::Rail)
+                    && right.input_mode() == BoardInputMode::Normal
+                    && right.surface == CommandSurface::None
+                    && right.popup == BoardPopup::None
+                    && right.detail_open.is_none()
+            })
     }
 
     /// Stage the full task page returns to on `Esc`, while one is remembered.
@@ -2179,6 +2381,17 @@ impl BoardModel {
     }
     /// Current input mode (normal vs edit field).
     pub fn input_mode(&self) -> BoardInputMode {
+        if let Some(right) = self
+            .right_seat
+            .as_deref()
+            .filter(|_| self.project_right_seat_focused())
+        {
+            return right.input_mode_local();
+        }
+        self.input_mode_local()
+    }
+
+    fn input_mode_local(&self) -> BoardInputMode {
         if self.input_mode == BoardInputMode::Help {
             return BoardInputMode::Help;
         }
@@ -2760,6 +2973,13 @@ impl BoardModel {
 
     /// Chrome status/message line feedback.
     pub fn message(&self) -> Option<&str> {
+        if let Some(right) = self
+            .right_seat
+            .as_deref()
+            .filter(|_| self.project_right_seat_focused())
+        {
+            return right.message();
+        }
         self.message.as_deref()
     }
 
@@ -2772,6 +2992,10 @@ impl BoardModel {
     }
 
     pub fn set_message(&mut self, msg: impl Into<String>) {
+        if self.project_right_seat_focused() {
+            self.input_target_mut().set_message(msg);
+            return;
+        }
         self.message = Some(terminal_text(&msg.into()));
         self.message_expires_at = None;
         self.message_restore = None;
@@ -2782,6 +3006,10 @@ impl BoardModel {
     /// A sticky status already on the line (save-recovery banner, etc.) is stashed and
     /// restored when the toast expires, so a `copied` flash cannot erase it.
     pub fn set_ephemeral_message(&mut self, msg: impl Into<String>, ttl: std::time::Duration) {
+        if self.project_right_seat_focused() {
+            self.input_target_mut().set_ephemeral_message(msg, ttl);
+            return;
+        }
         if self.message_expires_at.is_none() {
             self.message_restore = self.message.clone();
         }
@@ -2790,6 +3018,10 @@ impl BoardModel {
     }
 
     pub fn clear_message(&mut self) {
+        if self.project_right_seat_focused() {
+            self.input_target_mut().clear_message();
+            return;
+        }
         self.message = None;
         self.message_expires_at = None;
         self.message_restore = None;
@@ -2798,6 +3030,10 @@ impl BoardModel {
     /// Drop an ephemeral status line whose TTL has elapsed. Sticky messages are untouched;
     /// a stashed sticky under a toast is restored.
     pub fn expire_ephemeral_message(&mut self) {
+        if self.project_right_seat_focused() {
+            self.input_target_mut().expire_ephemeral_message();
+            return;
+        }
         if self
             .message_expires_at
             .is_some_and(|deadline| Instant::now() >= deadline)
