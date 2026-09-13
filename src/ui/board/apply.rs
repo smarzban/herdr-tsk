@@ -542,7 +542,7 @@ fn apply_board_intent(
                         .as_ref()
                         .is_some_and(|form| form.steps.add_selected)
                     {
-                        model.focus_form_field(CaptureField::Scope);
+                        model.focus_form_field(CaptureField::Thread);
                     } else if !move_step_within_edit_group(model, true) {
                         select_add_step(model);
                     }
@@ -556,13 +556,13 @@ fn apply_board_intent(
             } else if model.input_mode == BoardInputMode::EditScope
                 && model.form.as_ref().is_some_and(|form| form.is_task())
             {
-                model.focus_form_field(CaptureField::Thread);
+                model.focus_form_field(CaptureField::Notes);
             } else if matches!(
                 model.input_mode,
                 BoardInputMode::SelectThread | BoardInputMode::EditThread
             ) && model.form.as_ref().is_some_and(|form| form.is_task())
             {
-                model.focus_form_field(CaptureField::Title);
+                model.focus_form_field(CaptureField::Scope);
             } else if model.form.is_some() && model.input_mode != BoardInputMode::FormScopeDropdown
             {
                 model.move_form_focus(true);
@@ -597,17 +597,17 @@ fn apply_board_intent(
             if model.input_mode == BoardInputMode::EditTitle
                 && model.form.as_ref().is_some_and(|form| form.is_task())
             {
-                model.focus_form_field(CaptureField::Thread);
+                model.focus_form_field(CaptureField::Scope);
             } else if matches!(
                 model.input_mode,
                 BoardInputMode::SelectThread | BoardInputMode::EditThread
             ) && model.form.as_ref().is_some_and(|form| form.is_task())
             {
-                model.focus_form_field(CaptureField::Scope);
+                select_step_from_tab(model, false);
             } else if model.input_mode == BoardInputMode::EditScope
                 && model.form.as_ref().is_some_and(|form| form.is_task())
             {
-                select_step_from_tab(model, false);
+                model.focus_form_field(CaptureField::Thread);
             } else if model.form.is_some() && model.input_mode != BoardInputMode::FormScopeDropdown
             {
                 model.move_form_focus(false);
@@ -2719,7 +2719,7 @@ fn select_step_from_tab(model: &mut BoardModel, forward: bool) {
         if !form.is_task()
             || !form.editing
             || (forward && form.focus != CaptureField::Notes)
-            || (!forward && form.focus != CaptureField::Scope)
+            || (!forward && form.focus != CaptureField::Thread)
         {
             None
         } else {

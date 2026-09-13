@@ -501,10 +501,12 @@ impl BoardForm {
 
     pub(super) fn focus_next(&mut self) {
         self.focus = match self.focus {
+            // Title is the entry point only. The details ring starts at Notes and never
+            // returns to Title in the forward direction.
             CaptureField::Title => CaptureField::Notes,
             CaptureField::Notes => CaptureField::Thread,
             CaptureField::Thread => CaptureField::Scope,
-            CaptureField::Scope => CaptureField::Title,
+            CaptureField::Scope => CaptureField::Notes,
         };
     }
 

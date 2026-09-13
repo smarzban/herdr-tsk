@@ -579,8 +579,8 @@ fn build_task_page_overlay<'a>(
     form.steps.content_start.set(content.steps_start);
     form.notes_width.set(notes_width);
 
-    // Meta footer: scope · thread · created · updated (ages only while the bound task is
-    // present). The identifier belongs in the header, so it never competes with scope hits.
+    // Meta footer: thread · scope · created · updated (ages only while the bound task is
+    // present). The identifier belongs in the header, so it never competes with footer hits.
     // A wide column moves the project up into its header slot: the scope footer paints only
     // while the edit session can change it, so its control stays reachable by mouse.
     let editing_session = !form.is_task() || form.editing || model.open_field_edit().is_some();
@@ -595,8 +595,6 @@ fn build_task_page_overlay<'a>(
     };
     let meta_scope_width = u16::try_from(render::display_width(&meta_scope)).unwrap_or(u16::MAX);
     let mut meta = String::new();
-    let meta_scope_x = 0;
-    meta.push_str(&meta_scope);
     let mut thread_slot = None;
     let capture_form = !form.is_task();
     let shown_thread = if capture_form || (form.is_task() && form.editing) {
@@ -605,12 +603,10 @@ fn build_task_page_overlay<'a>(
         bound_task.and_then(|task| task.thread.as_deref())
     };
     if bound_task.is_some() || capture_form {
-        let task = bound_task;
-        // Without a scope ahead of it (a wide column outside an edit session) the thread
-        // leads the footer and drops its separator.
-        let separator = if meta.is_empty() { "" } else { " · " };
+        // Thread leads the footer, so its slot has no separator even when the scope is hidden
+        // in a wide read-only column. The editing placeholder keeps the same hit target.
         thread_slot = if let Some(thread) = shown_thread.filter(|thread| !thread.is_empty()) {
-            Some(format!("{separator}#{}", terminal_text(thread)))
+            Some(format!("#{}", terminal_text(thread)))
         } else if capture_form
             || (form.is_task() && form.editing)
             || matches!(
@@ -623,28 +619,33 @@ fn build_task_page_overlay<'a>(
                     | BoardInputMode::FormScopeDropdown
             )
         {
-            // An empty thread still needs a visible field-sized footer target while the form
-            // is editing, otherwise mouse users can only reach Thread after it already exists.
-            Some(format!("{separator}thread"))
+            Some("thread".to_string())
         } else {
             None
         };
         if let Some(slot) = &thread_slot {
             meta.push_str(slot);
         }
-        if let Some(task) = task {
-            let now = SystemTime::now();
-            let ages = format!(
-                "created {} ago · updated {} ago",
-                render::format_age(now, task.created_at),
-                render::format_age(now, task.updated_at),
-            );
-            if meta.is_empty() {
-                meta.push_str(&ages);
-            } else {
-                meta.push_str(" · ");
-                meta.push_str(&ages);
-            }
+    }
+    let meta_scope_x = u16::try_from(render::display_width(&meta)).unwrap_or(u16::MAX);
+    if !meta_scope.is_empty() {
+        if !meta.is_empty() {
+            meta.push_str(" · ");
+        }
+        meta.push_str(&meta_scope);
+    }
+    if let Some(task) = bound_task {
+        let now = SystemTime::now();
+        let ages = format!(
+            "created {} ago · updated {} ago",
+            render::format_age(now, task.created_at),
+            render::format_age(now, task.updated_at),
+        );
+        if meta.is_empty() {
+            meta.push_str(&ages);
+        } else {
+            meta.push_str(" · ");
+            meta.push_str(&ages);
         }
     }
     let thread_slot_width = thread_slot

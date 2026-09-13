@@ -316,23 +316,27 @@ import { parseCapture } from "./capture.js";
         title: "Plan the support handoff",
         status: "ready",
         thread: "triage",
-        notes: "Pick the owner, escalation path, and first response expectations before the pilot opens.",
+        notes:
+          "Pick the owner, escalation path, and first response expectations before the pilot opens.",
       }),
       task({
         title: "Clean up stale local branches",
         status: "ready",
-        notes: "Keep only the branches needed for the release train and document anything retained.",
+        notes:
+          "Keep only the branches needed for the release train and document anything retained.",
       }),
       task({
         title: "Sort feedback from the pilot",
         status: "open",
         thread: "triage",
-        notes: "Group feedback by workflow before deciding which issues to pick next.",
+        notes:
+          "Group feedback by workflow before deciding which issues to pick next.",
       }),
       task({
         title: "Record the retry runbook",
         status: "open",
-        notes: "Capture the safe retry steps while the incident details are still fresh.",
+        notes:
+          "Capture the safe retry steps while the incident details are still fresh.",
       }),
       task({
         title: "Add audit events for admin changes",
@@ -346,14 +350,16 @@ import { parseCapture } from "./capture.js";
         status: "open",
         project: "launchpad",
         thread: "ops",
-        notes: "Measure queue depth and worker lag before choosing a scaling threshold.",
+        notes:
+          "Measure queue depth and worker lag before choosing a scaling threshold.",
       }),
       task({
         title: "Document regional failover checks",
         status: "open",
         project: "launchpad",
         thread: "ops",
-        notes: "Write the operator checks that confirm a region can take traffic safely.",
+        notes:
+          "Write the operator checks that confirm a region can take traffic safely.",
       }),
     ];
   };
@@ -1844,10 +1850,24 @@ import { parseCapture } from "./capture.js";
       .join(
         "",
       )}${pageSteps.editor && !pageSteps.editor.id ? `<div class="tsk-step-new">${inlineEditor}</div>` : `<button type="button" class="tsk-step-add dim" ${addAttribute}="1">   + step</button>`}</div>`;
-    const meta = previewMode
-      ? `<div class="tsk-page-meta dim">${esc(project)}${task.thread ? ` · #${esc(task.thread)}` : ""} · created ${esc(age(task.createdAt))} ago · updated ${esc(age(task.updatedAt))} ago</div>`
-      : `<div class="tsk-page-meta dim">${narrow ? `${esc(project)} · ` : ""}${task.thread ? `#${esc(task.thread)} · ` : ""}created ${esc(age(task.createdAt))} ago · updated ${esc(age(task.updatedAt))} ago</div>`;
-    return `<div class="tsk-task-column tsk-surface ${narrow ? "is-narrow" : ""}" aria-label="T${task.number}${previewMode ? " project" : ""} task column" data-status="${esc(task.status)}" data-edit-state="${pageSteps.editor ? "editing" : pageSteps.dirty ? "unsaved" : "view"}">${header}<div class="tsk-task-surface tsk-page">${notes}${stepList}</div>${meta}</div>`;
+    const metaField = (field, text) =>
+      editing === field
+        ? `<span class="tsk-meta-selected" data-page-field="${field}">${text}</span>`
+        : text;
+    const thread = task.thread
+      ? `#${esc(task.thread)}`
+      : editing === "thread"
+        ? "thread"
+        : "";
+    const scope = previewMode || narrow || editing ? esc(project) : "";
+    const parts = [
+      thread && metaField("thread", thread),
+      scope && metaField("scope", scope),
+      `created ${esc(age(task.createdAt))} ago`,
+      `updated ${esc(age(task.updatedAt))} ago`,
+    ].filter(Boolean);
+    const meta = `<div class="tsk-page-meta dim">${parts.join(" · ")}</div>`;
+    return `<div class="tsk-task-column tsk-surface ${narrow ? "is-narrow" : ""}" aria-label="T${task.number}${previewMode ? " project" : ""} task column" data-status="${esc(task.status)}" data-edit-state="${pageSteps.editor ? "editing" : pageSteps.dirty ? "unsaved" : "view"}" data-edit-field="${esc(editing || "")}">${header}<div class="tsk-task-surface tsk-page">${notes}${stepList}</div>${meta}</div>`;
   }
 
   function renderPage(embedded = false) {
@@ -2043,7 +2063,7 @@ import { parseCapture } from "./capture.js";
         if (row.kind === "inbox") {
           const mark = state.inboxOpen ? "▾" : "▸";
           const selected = row.id === state.selectedId;
-          return `<button type="button" class="tsk-group tsk-inbox" data-inbox-header="1"><span class="dim">${mark}</span> <span class="sec">${selected ? "<strong>inbox</strong>" : "inbox"}</span><span class="count dim">${row.count}</span></button>`;
+          return `<button type="button" class="tsk-group tsk-inbox" data-inbox-header="1"><span>${mark}</span> <span class="sec">${selected ? "<strong>inbox</strong>" : "inbox"}</span><span class="count">${row.count}</span></button>`;
         }
         if (row.kind === "archived") {
           const mark = state.archivedOpen ? "▾" : "▸";
@@ -2326,12 +2346,45 @@ import { parseCapture } from "./capture.js";
     if (state.editField === "title") {
       const title = state.editDraft.trim();
       if (title) task.title = title;
-    } else {
+    } else if (state.editField === "notes") {
       task.notes = state.editDraft;
     }
     task.updatedAt = clock();
     state.editField = null;
     state.editDraft = "";
+  }
+
+  // Title is the entry point. The editable page ring itself is Notes → steps → Thread
+  // → Scope → Notes, with Shift+Tab from Notes returning to Title.
+  function movePageFocus(reverse = false) {
+    const current = state.editField;
+    if (!current) return;
+    const next = reverse
+      ? {
+          notes: "title",
+          title: "scope",
+          scope: "thread",
+          thread: "steps",
+          steps: "notes",
+        }
+      : {
+          title: "notes",
+          notes: "steps",
+          steps: "thread",
+          thread: "scope",
+          scope: "notes",
+        };
+    state.editField = next[current] || "notes";
+    state.editDraft =
+      state.editField === "title"
+        ? selectedTask()?.title || ""
+        : state.editField === "notes"
+          ? selectedTask()?.notes || ""
+          : "";
+    if (state.editField === "steps") {
+      const task = selectedTask();
+      if (task) steps.selected = task.steps.at(-1)?.id || "add";
+    }
   }
 
   function handlePreviewPageKey(e) {
@@ -2756,6 +2809,12 @@ import { parseCapture } from "./capture.js";
       }
     }
     if (taskPageActive && state.editField) {
+      if (e.key === "Tab") {
+        e.preventDefault();
+        movePageFocus(e.shiftKey);
+        render();
+        return;
+      }
       if (e.key === "Escape") {
         e.preventDefault();
         state.editField = null;
@@ -3361,7 +3420,11 @@ import { parseCapture } from "./capture.js";
       const project = projectRow.dataset.projectRow;
       const now = Date.now();
       if (lastClick.id === id && now - lastClick.at < 350) {
-        if (projectsOverview() && projectsPreviewActive() && previewHasUnsavedWork()) {
+        if (
+          projectsOverview() &&
+          projectsPreviewActive() &&
+          previewHasUnsavedWork()
+        ) {
           preview.message = "save or cancel edits before switching tasks";
           render();
           return;

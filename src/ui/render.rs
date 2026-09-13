@@ -466,7 +466,7 @@ pub enum QueueOverlay<'a> {
         inline_step_editor: Option<InlineStepEditor<'a>>,
         /// The thread field still uses the shared bottom input slot.
         bottom_input: Option<BottomInputSlot<'a>>,
-        /// Footer: task number · scope · thread · created · updated.
+        /// Footer: thread · scope · created · updated (the task number remains in the header).
         meta: String,
         /// Display width before the scope inside `meta`. The number is chrome, not a scope hit.
         meta_scope_x: u16,
@@ -3147,7 +3147,7 @@ fn paint_task_page(
         );
     }
 
-    // Meta footer: scope · thread · created · updated. Inline step drafts leave this footer
+    // Meta footer: thread · scope · created · updated. Inline step drafts leave this footer
     // visible and do not claim its input slot.
     if let Some(y) = lay.meta_y {
         put_line(
@@ -3158,28 +3158,20 @@ fn paint_task_page(
             paint_bounded_line(&format!("  {meta}"), width, style_dim()),
         );
 
-        let scope_x = 2u16.saturating_add(meta_scope_x).min(width);
-        let thread_x = scope_x.saturating_add(meta_scope_width).min(width);
+        let thread_x = 2u16;
+        let scope_slot: String = meta.chars().skip(usize::from(meta_scope_x)).collect();
+        // The separator stays footer chrome. Scope begins after it, while a leading Thread
+        // slot starts at the footer inset and has no separator to exclude.
+        let scope_prefix = u16::from(scope_slot.starts_with(" · ")) * 3;
+        let scope_x = 2u16
+            .saturating_add(meta_scope_x)
+            .saturating_add(scope_prefix)
+            .min(width);
         let selected = match focus {
             Some(CaptureField::Scope) => Some((scope_x, meta_scope_width)),
-            // The separator belongs to footer chrome. Only the thread marker and name are
-            // the selected control, so ` · #auth` keeps its dot dim while `#auth` reverses.
-            Some(CaptureField::Thread) => thread_slot_width.map(|slot_width| {
-                // ` · #auth` inside a longer footer; a leading `#auth` when the thread opens it.
-                let slot: String = meta
-                    .chars()
-                    .skip(usize::from(meta_scope_x.saturating_add(meta_scope_width)))
-                    .collect();
-                let thread_prefix = if slot.starts_with(" · ") {
-                    3u16
-                } else {
-                    u16::from(slot.starts_with('#'))
-                };
-                (
-                    thread_x.saturating_add(thread_prefix),
-                    slot_width.saturating_sub(thread_prefix),
-                )
-            }),
+            Some(CaptureField::Thread) => {
+                thread_slot_width.map(|slot_width| (thread_x, slot_width))
+            }
             _ => None,
         };
         if let Some((selected_x, selected_width)) = selected {
@@ -3925,6 +3917,7 @@ fn build_list_rows(
                     geo.row_width,
                     model.archived_header_selected,
                     model.archived_collapsed,
+                    true,
                 ),
             });
             // The header pin must drive viewport follow exactly like a task row.
@@ -3959,12 +3952,12 @@ fn build_list_rows(
                     geo.row_width,
                     model.inbox_header_selected,
                     model.inbox_collapsed,
+                    false,
                 ),
             });
             if model.inbox_header_selected {
                 selected_idx = Some(out.len() - 1);
             }
-            out.push(ListRow::Blank);
             if model.inbox_collapsed {
                 continue;
             }
@@ -4331,9 +4324,16 @@ fn paint_group_header(
     width: u16,
     selected: bool,
     collapsed: bool,
+    dim: bool,
 ) -> Line<'static> {
-    let word_style = if selected { style_bold() } else { style_dim() };
-    let rest_style = style_dim();
+    let word_style = if selected {
+        style_bold()
+    } else if dim {
+        style_dim()
+    } else {
+        style_plain()
+    };
+    let rest_style = if dim { style_dim() } else { style_plain() };
     let chevron = if collapsed { "\u{25b8}" } else { "\u{25be}" };
     bound_line(
         Line::from(vec![

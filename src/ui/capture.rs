@@ -301,16 +301,19 @@ impl CaptureModel {
     fn focus_next(&mut self) {
         self.abandon_path_edit();
         self.focused = match self.focused {
+            // Title is the capture entry point. Once focus leaves it, the shared details ring
+            // runs Notes → Thread → Scope → Notes without returning to the title.
             CaptureField::Title => CaptureField::Notes,
             CaptureField::Notes => CaptureField::Thread,
             CaptureField::Thread => CaptureField::Scope,
-            CaptureField::Scope => CaptureField::Title,
+            CaptureField::Scope => CaptureField::Notes,
         };
     }
 
     fn focus_prev(&mut self) {
         self.abandon_path_edit();
         self.focused = match self.focused {
+            // Reverse traversal exposes the entry point only from Notes.
             CaptureField::Title => CaptureField::Scope,
             CaptureField::Notes => CaptureField::Title,
             CaptureField::Thread => CaptureField::Notes,
@@ -2096,10 +2099,12 @@ mod tests {
         // Park the Notes cursor at its start; this must not disturb Title's own cursor.
         apply(&mut domain, &snap, &mut model, CaptureIntent::MoveLineStart);
 
-        // Back to Title the long way round (Notes → Thread → Scope → Title).
+        // Title is entry-only: the details ring returns to Notes, then Shift+Tab reaches Title.
         apply(&mut domain, &snap, &mut model, CaptureIntent::FocusNext);
         apply(&mut domain, &snap, &mut model, CaptureIntent::FocusNext);
         apply(&mut domain, &snap, &mut model, CaptureIntent::FocusNext);
+        assert_eq!(model.focused(), CaptureField::Notes);
+        apply(&mut domain, &snap, &mut model, CaptureIntent::FocusPrev);
         assert_eq!(model.focused(), CaptureField::Title);
         apply(&mut domain, &snap, &mut model, CaptureIntent::Insert('#'));
         assert_eq!(model.title(), "ti#tle", "Title lost its own cursor");

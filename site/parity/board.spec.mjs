@@ -224,9 +224,13 @@ test("projects overview opens a live project preview and keeps its task seat", a
   await expect(
     page.locator('[role="dialog"][aria-label="project thread filter"]'),
   ).toBeVisible();
-  await page.keyboard.press("ArrowDown");
-  await page.keyboard.press("Enter");
-  await expect(page.locator('[role="dialog"][aria-label="project thread filter"]')).toHaveCount(0);
+  await page
+    .locator("[data-preview-filter-option]")
+    .filter({ hasText: "#release" })
+    .click();
+  await expect(
+    page.locator('[role="dialog"][aria-label="project thread filter"]'),
+  ).toHaveCount(0);
   await expect(page.locator("[data-preview-task]")).toHaveCount(2);
   await expect(
     page.locator("[data-preview-task]").filter({
@@ -286,6 +290,55 @@ test("projects preview quick-add shows the title while editing notes", async ({
   await page.locator("#tsk-preview-edit").fill("preview note");
   await page.keyboard.press("Control+Enter");
   await expect(page.locator(".tsk-page-notes")).toContainText("preview note");
+});
+
+test("task pages and expanded quick-add share the title-entry-only tab ring", async ({
+  page,
+}) => {
+  await page.goto("http://127.0.0.1:4180/");
+  await page.locator('[data-tab="project"]').click();
+  await page.locator("#board-demo").focus();
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("Control+e");
+  const column = page.locator(".tsk-task-column");
+  await expect(column).toHaveAttribute("data-edit-field", "title");
+  await page.keyboard.press("Tab");
+  await expect(column).toHaveAttribute("data-edit-field", "notes");
+  await page.keyboard.press("Tab");
+  await expect(column).toHaveAttribute("data-edit-field", "steps");
+  await page.keyboard.press("Tab");
+  await expect(column).toHaveAttribute("data-edit-field", "thread");
+  await expect(page.locator(".tsk-page-meta")).toContainText(
+    /#auth · launchpad · created/,
+  );
+  const footerColors = await page
+    .locator(".tsk-page-meta")
+    .evaluate((meta) => [
+      getComputedStyle(meta).color,
+      getComputedStyle(meta.querySelector("[data-page-field='thread']")).color,
+    ]);
+  expect(footerColors[1]).not.toBe(footerColors[0]);
+  await page.keyboard.press("Tab");
+  await expect(column).toHaveAttribute("data-edit-field", "scope");
+  await page.keyboard.press("Tab");
+  await expect(column).toHaveAttribute("data-edit-field", "notes");
+  await page.keyboard.press("Shift+Tab");
+  await expect(column).toHaveAttribute("data-edit-field", "title");
+
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("+");
+  await page.locator("#tsk-add").fill("Quick ring");
+  await page.keyboard.press("Tab");
+  await expect(column).toHaveAttribute("data-edit-field", "notes");
+  await page.keyboard.press("Tab");
+  await expect(column).toHaveAttribute("data-edit-field", "steps");
+  await page.keyboard.press("Tab");
+  await expect(column).toHaveAttribute("data-edit-field", "thread");
+  await page.keyboard.press("Tab");
+  await expect(column).toHaveAttribute("data-edit-field", "scope");
+  await page.keyboard.press("Tab");
+  await expect(column).toHaveAttribute("data-edit-field", "notes");
 });
 
 test("landing column readout excludes board padding", async ({ page }) => {

@@ -683,6 +683,11 @@ html[data-theme="light"] .pane {
   color: var(--ink);
 }
 
+/* Inbox is active queue chrome, while the archived group remains dim. */
+.tsk-inbox {
+  color: var(--ink);
+}
+
 .tsk-row {
   display: flex;
   justify-content: space-between;
@@ -2667,6 +2672,7 @@ html[data-theme="light"] .pane {
 .tsk-task-column .tsk-task-surface { min-height: 0; padding-top: 0; }
 .tsk-task-column .tsk-page-notes { margin: 0; padding-right: 2ch; overflow-wrap: anywhere; }
 .tsk-page-meta { flex: none; min-height: 1lh; white-space: pre-wrap; overflow-wrap: anywhere; }
+.tsk-page-meta .tsk-meta-selected { color: var(--bg); background: var(--ink); }
 .tsk-steps { margin-top: 2lh; }
 .tsk-step { display: flex; align-items: start; cursor: pointer; }
 .tsk-step-glyph { flex: none; white-space: pre; }

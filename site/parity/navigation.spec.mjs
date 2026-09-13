@@ -103,14 +103,18 @@ test("landing seeds keep ready picks and inbox rows visible on desk and launchpa
     "Sort feedback from the pilot",
     "Record the retry runbook",
   ])
-    await expect(page.locator("[data-task]").filter({ hasText: title })).toHaveCount(1);
+    await expect(
+      page.locator("[data-task]").filter({ hasText: title }),
+    ).toHaveCount(1);
   await page.locator('[data-tab="project"]').click();
   for (const title of [
     "Add audit events for admin changes",
     "Trace worker queue saturation",
     "Document regional failover checks",
   ])
-    await expect(page.locator("[data-task]").filter({ hasText: title })).toHaveCount(1);
+    await expect(
+      page.locator("[data-task]").filter({ hasText: title }),
+    ).toHaveCount(1);
 });
 
 test("project counts, thread labels and counted menu order match the app", async ({

@@ -647,13 +647,11 @@ fn assert_exact_header_spacing(
         "{dimensions}: {header:?} and its surrounding rows must be visible after selection scrolling:\n{:#?}",
         rows
     );
-    // At the compact floor the sticky ON DECK header can occupy the row immediately
-    // above inbox, so only the inbox-to-task spacing remains paintable.
-    if header == "inbox" && !list_body(&rows[header_row - 1]).is_empty() {
+    if header == "inbox" {
         assert!(
-            list_body(&rows[header_row + 1]).is_empty()
-                && list_body(&rows[header_row + 2]).contains(first_content),
-            "{dimensions}: inbox must keep one blank row before its task:\n{:#?}",
+            list_body(&rows[header_row - 1]).is_empty()
+                && list_body(&rows[header_row + 1]).contains(first_content),
+            "{dimensions}: inbox keeps its blank row above but its first task follows directly:\n{:#?}",
             rows
         );
         return;
@@ -2109,7 +2107,10 @@ fn shift_tab_from_scope_resets_notes_stream_origin_and_aligns_caret() {
         shift_tab.clone().expect("Shift+Tab intent"),
         None,
     )
-    .expect("Shift+Tab selects the trailing add target");
+    .expect("Shift+Tab reaches Thread from Scope");
+    assert_eq!(model.input_mode(), BoardInputMode::SelectThread);
+    apply_intent(&mut domain, &mut model, BoardIntent::FormFocusPrev, None)
+        .expect("Shift+Tab selects the trailing add target");
     assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
     apply_intent(&mut domain, &mut model, BoardIntent::FormFocusPrev, None)
         .expect("Shift+Tab from the add target enters Notes");
