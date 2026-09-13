@@ -1089,41 +1089,6 @@ impl BoardModel {
         }
     }
 
-    /// Whether a project preview still owns unsaved work while its session is retained.
-    pub fn has_dirty_project_preview(&self) -> bool {
-        self.projects_overview()
-            && matches!(self.wide_stage, WideStage::Split | WideStage::Rail)
-            && self
-                .right_seat
-                .as_deref()
-                .is_some_and(|right| right.active_project().is_some() && right.has_unsaved_work())
-    }
-
-    fn should_defer_project_preview_sync(&self, state: &DomainState) -> bool {
-        if !self.has_dirty_project_preview() {
-            return false;
-        }
-        let Some(right) = self.right_seat.as_deref() else {
-            return false;
-        };
-        let Some(path) = right.active_project() else {
-            return false;
-        };
-        let archived_projects = state.archived_projects();
-        let incoming = queue::query_board(
-            state.tasks(),
-            &archived_projects,
-            self.this_repo.as_deref(),
-            BoardLens::Projects,
-            false,
-            &ThreadFilter::All,
-        );
-        !incoming
-            .projects
-            .iter()
-            .any(|row| paths_equivalent(&row.path, &path.to_string_lossy()))
-    }
-
     /// Navigation is never yanked by saves or background merges: a save reanchors the
     /// pin only when the current destination already renders the saved task, and no
     /// path switches the board to another project merely to reveal a row.
@@ -1241,10 +1206,11 @@ impl BoardModel {
                 .as_ref()
                 .and_then(|right| right.active_project())
                 .map(Path::to_path_buf);
-            let path_changed = previous_project_path
-                .as_deref()
-                .zip(selected_path.as_deref())
-                .is_some_and(|(previous, current)| !paths_equivalent(previous, current));
+            let path_changed = match (previous_project_path.as_deref(), selected_path.as_deref()) {
+                (Some(previous), Some(current)) => !paths_equivalent(previous, current),
+                (Some(_), None) => true,
+                _ => false,
+            };
             let seat_needs_binding = match (selected_path.as_deref(), seat_path.as_deref()) {
                 (Some(selected), Some(seat)) => {
                     !paths_equivalent(selected, &seat.to_string_lossy())
@@ -1252,22 +1218,36 @@ impl BoardModel {
                 (None, None) => false,
                 _ => true,
             };
-            if path_changed || seat_needs_binding {
-                self.bind_project_preview();
+            let seat_dirty = self
+                .right_seat
+                .as_ref()
+                .is_some_and(|right| right.has_unsaved_work());
+            let mut bind_refused = false;
+            if path_changed || (seat_needs_binding && !seat_dirty) {
+                if seat_dirty && selected_path.is_none() {
+                    // There is no row for the dirty seat to refuse through bind_project_preview.
+                    // Keep its parked session and report the same guarded switch once.
+                    self.set_message(DIRTY_TASK_SWITCH_REFUSAL);
+                    bind_refused = true;
+                } else {
+                    bind_refused = !self.bind_project_preview();
+                }
+            }
+            if path_changed && bind_refused && seat_dirty {
+                // A dirty seat owns the old project even when the cursor was clamped to a
+                // different row after that project disappeared. Re-anchor the cursor to the
+                // seat when its row still exists; otherwise keep the clamped cursor above.
+                if let Some(seat_path) = seat_path.as_deref() {
+                    let projects = self.queue_view().projects;
+                    if let Some(index) = projects
+                        .iter()
+                        .position(|row| paths_equivalent(&row.path, &seat_path.to_string_lossy()))
+                    {
+                        self.projects_selected = index;
+                    }
+                }
             }
         }
-    }
-
-    /// Merge an externally loaded snapshot without replacing a dirty preview with a different
-    /// project. Returning `false` leaves the caller's snapshot and file signature unacknowledged,
-    /// so a later idle tick can retry after the user saves or cancels the draft.
-    pub fn sync_from_external_domain(&mut self, state: &DomainState) -> bool {
-        if self.should_defer_project_preview_sync(state) {
-            self.set_message(DIRTY_TASK_SWITCH_REFUSAL);
-            return false;
-        }
-        self.sync_from_domain(state);
-        true
     }
 
     /// Presenter / pane title string.
@@ -3879,7 +3859,7 @@ mod tests {
     }
 
     #[test]
-    fn dirty_project_preview_sync_is_atomic_when_project_disappears() {
+    fn dirty_project_preview_sync_reanchors_cursor_without_stale_domain() {
         let mut domain = DomainState::new();
         let alpha = create(&mut domain, "alpha task", project(REPO_A));
         create(&mut domain, "beta task", project(REPO_B));
@@ -3914,35 +3894,33 @@ mod tests {
         right.input_mode = BoardInputMode::EditTitle;
         assert!(model.has_unsaved_work());
 
-        let mut incoming = domain.clone();
-        incoming.soft_delete(alpha).expect("remove alpha");
-        assert!(
-            !model.sync_from_external_domain(&incoming),
-            "a dirty preview must defer a snapshot that removes its project"
-        );
-        assert!(model.tasks.iter().any(|task| task.id == alpha));
-        assert_eq!(
-            model.selected_project_row().map(|row| row.path),
-            Some(REPO_A.into())
-        );
-        assert_eq!(
-            model.right_seat().and_then(BoardModel::active_project),
-            Some(Path::new(REPO_A))
-        );
-        assert!(model.right_seat().is_some_and(BoardModel::has_unsaved_work));
+        domain.soft_delete(alpha).expect("remove alpha");
+        model.sync_from_domain(&domain);
 
-        let right = model.right_seat.as_deref_mut().expect("preview seat");
-        right.form = None;
-        right.input_mode = BoardInputMode::Normal;
-        assert!(model.sync_from_external_domain(&incoming));
+        assert_eq!(model.tasks.as_slice(), domain.tasks());
         assert_eq!(
             model.selected_project_row().map(|row| row.path),
             Some(REPO_B.into())
         );
         assert_eq!(
             model.right_seat().and_then(BoardModel::active_project),
-            Some(Path::new(REPO_B))
+            Some(Path::new(REPO_A))
         );
+        assert!(model.right_seat().is_some_and(BoardModel::has_unsaved_work));
+        assert_eq!(model.message(), Some(DIRTY_TASK_SWITCH_REFUSAL));
+
+        model
+            .right_seat
+            .as_deref_mut()
+            .expect("preview seat")
+            .set_message("keep this message");
+        model.sync_from_domain(&domain);
+        assert_eq!(model.tasks.as_slice(), domain.tasks());
+        assert_eq!(
+            model.right_seat().and_then(BoardModel::active_project),
+            Some(Path::new(REPO_A))
+        );
+        assert_eq!(model.message(), Some("keep this message"));
     }
 
     #[test]
