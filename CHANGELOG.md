@@ -23,7 +23,7 @@ the GitHub release notes verbatim.
 
 ### Changed
 
-- The agent skill (`tsk guide`, `tsk setup <agent>`) is slimmed to rules of engagement, board language, the exit contract, and workflows; flag tables and JSON shapes now live in `tsk help <command>` and the CLI guide. It gains a `Refine a task` section: a shaping pass that reads the task and its neighbours, grounds in code, proposes, and only then writes the rewrite back with `tsk edit` or `tsk add`. Still skill 1.2.0; rerun `tsk setup` to update installed copies.
+- The agent skill (`tsk guide`, `tsk setup <agent>`) is slimmed to rules of engagement, board language, the exit contract, and workflows; flag tables and JSON shapes now live in `tsk help <command>` and the CLI guide. It gains a `Refine a task` section: a shaping pass that reads the task and its neighbours, grounds in code, proposes, and only then writes the rewrite back with `tsk edit` or `tsk add`. Skill version 1.2.0; rerun `tsk setup` to update installed copies.
 - Task-verb refusals print as `code: message` on stderr for every command: `archive` and `unarchive` gain the stable `unknown-task` and `soft-deleted-task` codes, and `status`, `edit`, and `steps` gain a human message after theirs.
 - Command help now uses one 80-column reference skeleton with usage, options, examples, refusals, and exits; detailed retry and output rules remain in the CLI guide.
 - `ctrl+s` now starts both open and ready tasks. The bundled agent skill is version 1.2.0 and documents the inbox and status filters.

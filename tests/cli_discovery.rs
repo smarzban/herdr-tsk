@@ -21,7 +21,7 @@ fn skill_documents_retry_and_misfiling() {
         "list --all --json",
         "Human status is the user's",
         "## Refine a task",
-        "Propose, then write",
+        "propose, then write",
     ] {
         assert!(skill.contains(term), "skill should contain {term:?}");
     }
