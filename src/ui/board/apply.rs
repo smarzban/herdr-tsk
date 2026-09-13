@@ -1359,10 +1359,10 @@ fn apply_board_intent(
                 HumanStatus::Open | HumanStatus::Ready => {
                     domain.set_status(id, HumanStatus::Started)?;
                 }
-                HumanStatus::Done => {
-                    domain.reopen(id)?;
-                }
-                HumanStatus::Started | HumanStatus::Blocked | HumanStatus::Review => {
+                HumanStatus::Started
+                | HumanStatus::Blocked
+                | HumanStatus::Review
+                | HumanStatus::Done => {
                     return Ok(IntentOutcome::None);
                 }
             }

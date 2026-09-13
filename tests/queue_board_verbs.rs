@@ -185,8 +185,8 @@ fn space_on_todo_sets_doing_via_domain() {
 }
 
 #[test]
-fn space_on_done_reopens() {
-    let (mut domain, mut model, id) = board_with_task("reopen me", HumanStatus::Done);
+fn space_on_done_is_silent_noop() {
+    let (mut domain, mut model, id) = board_with_task("keep done", HumanStatus::Done);
     // Done tasks live in the drawer; open it so selection can hold the done id.
     apply_intent(&mut domain, &mut model, BoardIntent::ToggleDoneDrawer, None).expect("drawer");
     // Re-select the done task if reanchor moved off it.
@@ -200,10 +200,14 @@ fn space_on_done_reopens() {
             .expect("select done");
     }
 
+    let before = domain.get(id).expect("task").clone();
     let outcome =
         apply_intent(&mut domain, &mut model, BoardIntent::PrimaryVerb, None).expect("primary");
-    assert_eq!(outcome, IntentOutcome::Persist);
-    assert_eq!(domain.get(id).expect("task").status, HumanStatus::Open);
+    let after = domain.get(id).expect("task");
+    assert_eq!(outcome, IntentOutcome::None);
+    assert_eq!(after.status, HumanStatus::Done);
+    assert_eq!(after.revision, before.revision);
+    assert_eq!(after.history, before.history);
 }
 
 #[test]
