@@ -3885,7 +3885,7 @@ fn build_list_rows(
                     &mut anchor_last_idx,
                     false,
                     thread_label,
-                    true,
+                    false,
                 );
             }
             continue;
