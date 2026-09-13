@@ -1723,30 +1723,42 @@ import { parseCapture } from "./capture.js";
         : cols;
   }
 
-  function renderPage(embedded = false) {
-    const task = selectedTask();
-    const focused = taskFocus();
+  function renderTaskPage(task, { preview: previewMode, embedded }) {
+    const pageSteps = previewMode ? previewSteps : steps;
+    const editing = previewMode ? preview.editField : state.editField;
+    const editDraft = previewMode ? preview.editDraft : state.editDraft;
+    const focused = previewMode || taskFocus();
+    const narrow = !previewMode && !isWideSplit();
+    const editId = previewMode ? "tsk-preview-edit" : "tsk-edit";
+    const stepEditId = previewMode ? "tsk-preview-step-edit" : "tsk-step-edit";
+    const stepAttribute = previewMode ? "data-preview-step" : "data-step";
+    const addAttribute = previewMode
+      ? "data-preview-step-add"
+      : "data-step-add";
+    const project = previewMode
+      ? preview.project || "project"
+      : task
+        ? projectName(task)
+        : "desk";
     if (!task) {
       if (embedded) {
-        return `<div class="tsk-task-column tsk-surface" aria-label="task column"><div class="tsk-task-header dim"><span class="sec">no task</span></div><div class="tsk-task-rule" aria-hidden="true"></div><div class="tsk-task-surface"><div class="dim">  select a task to preview it here</div></div></div>`;
+        return `<div class="tsk-task-column tsk-surface" aria-label="${previewMode ? "project " : ""}task column"><div class="tsk-task-header dim"><span class="sec">no task</span></div><div class="tsk-task-rule" aria-hidden="true"></div><div class="tsk-task-surface"><div class="dim">  select a task to preview it here</div></div></div>`;
       }
       return `<div class="tsk-overlay"><div class="dim">no task</div><div class="dim">  select a task to preview it here</div></div>`;
     }
-    steps.bind(task);
-    const editing = state.editField;
-    const narrow = !isWideSplit();
-    const stateSlot = steps.editor
+    pageSteps.bind(task);
+    const stateSlot = pageSteps.editor
       ? "editing step"
-      : steps.dirty
+      : pageSteps.dirty
         ? "unsaved"
         : editing
           ? `editing ${editing}`
           : narrow
             ? task.status
-            : `${task.status} · ${projectName(task)}`;
+            : `${task.status} · ${project}`;
     const headTitle =
       editing === "title"
-        ? `<input class="tsk-field" id="tsk-edit" value="${esc(state.editDraft)}" />`
+        ? `<input class="tsk-field" id="${editId}" value="${esc(editDraft)}" />`
         : esc(task.title);
     const glyph = GLYPH[task.status] || "○";
     let header = `<div class="tsk-task-header ${focused ? "is-bold" : "dim"}"><span class="glyph">${glyph}</span> <span class="tsk-task-id" data-copy-task="${esc(task.id)}" title="copy T${task.number}">T${task.number}</span> <span class="sec">${headTitle}</span><span class="tsk-state-slot">${esc(stateSlot)}</span></div><div class="tsk-task-rule" aria-hidden="true"></div>`;
@@ -1761,20 +1773,20 @@ import { parseCapture } from "./capture.js";
     }
     const notes =
       editing === "notes"
-        ? `<textarea class="tsk-field tsk-notes" id="tsk-edit">${esc(state.editDraft)}</textarea>`
+        ? `<textarea class="tsk-field tsk-notes" id="${editId}">${esc(editDraft)}</textarea>`
         : `<div class="tsk-page-notes">${wrapText(
             task.notes || "no notes yet",
             taskColumnWidth() - 6,
           )
             .map((line) => `<span>${esc(line) || " "}</span>`)
             .join("")}</div>`;
-    const stepRows = steps.rows(task);
-    const inlineEditor = `<textarea id="tsk-step-edit" class="tsk-field" aria-label="Step text" rows="${wrapText(steps.editor?.text ?? "", taskColumnWidth() - 8).length}">${esc(steps.editor?.text ?? "")}</textarea><span class="tsk-step-refusal">${esc(steps.refusal)}</span>`;
+    const stepRows = pageSteps.rows(task);
+    const inlineEditor = `<textarea id="${stepEditId}" class="tsk-field" aria-label="Step text" rows="${wrapText(pageSteps.editor?.text ?? "", taskColumnWidth() - 8).length}">${esc(pageSteps.editor?.text ?? "")}</textarea><span class="tsk-step-refusal">${esc(pageSteps.refusal)}</span>`;
     const stepList = `<div class="tsk-steps"><div class="tsk-steps-heading dim">steps ${stepRows.filter((step) => step.done).length}/${stepRows.length}</div>${stepRows
       .map(
         (step) =>
-          `<div class="tsk-step" data-step="${esc(step.id)}" role="option" aria-selected="${steps.selected === step.id}"><span class="tsk-step-glyph">${steps.selected === step.id ? "▸ " : "  "}${steps.marked === step.id ? "✗" : step.done ? "✓" : "▪"} </span>${
-            steps.editor?.id === step.id
+          `<div class="tsk-step" ${stepAttribute}="${esc(step.id)}" role="option" aria-selected="${pageSteps.selected === step.id}"><span class="tsk-step-glyph">${pageSteps.selected === step.id ? "▸ " : "  "}${pageSteps.marked === step.id ? "✗" : step.done ? "✓" : "▪"} </span>${
+            pageSteps.editor?.id === step.id
               ? inlineEditor
               : `<span class="tsk-step-text">${wrapText(
                   step.text,
@@ -1788,9 +1800,15 @@ import { parseCapture } from "./capture.js";
       )
       .join(
         "",
-      )}${steps.editor && !steps.editor.id ? `<div class="tsk-step-new">${inlineEditor}</div>` : `<button type="button" class="tsk-step-add dim" data-step-add="1">   + step</button>`}</div>`;
-    const meta = `<div class="tsk-page-meta dim">${narrow ? `${esc(projectName(task))} · ` : ""}${task.thread ? `#${esc(task.thread)} · ` : ""}created ${esc(age(task.createdAt))} ago · updated ${esc(age(task.updatedAt))} ago</div>`;
-    return `<div class="tsk-task-column tsk-surface ${narrow ? "is-narrow" : ""}" aria-label="T${task.number} task column" data-status="${esc(task.status)}" data-edit-state="${steps.editor ? "editing" : steps.dirty ? "unsaved" : "view"}">${header}<div class="tsk-task-surface tsk-page">${notes}${stepList}</div>${meta}</div>`;
+      )}${pageSteps.editor && !pageSteps.editor.id ? `<div class="tsk-step-new">${inlineEditor}</div>` : `<button type="button" class="tsk-step-add dim" ${addAttribute}="1">   + step</button>`}</div>`;
+    const meta = previewMode
+      ? `<div class="tsk-page-meta dim">${esc(project)}${task.thread ? ` · #${esc(task.thread)}` : ""} · created ${esc(age(task.createdAt))} ago · updated ${esc(age(task.updatedAt))} ago</div>`
+      : `<div class="tsk-page-meta dim">${narrow ? `${esc(project)} · ` : ""}${task.thread ? `#${esc(task.thread)} · ` : ""}created ${esc(age(task.createdAt))} ago · updated ${esc(age(task.updatedAt))} ago</div>`;
+    return `<div class="tsk-task-column tsk-surface ${narrow ? "is-narrow" : ""}" aria-label="T${task.number}${previewMode ? " project" : ""} task column" data-status="${esc(task.status)}" data-edit-state="${pageSteps.editor ? "editing" : pageSteps.dirty ? "unsaved" : "view"}">${header}<div class="tsk-task-surface tsk-page">${notes}${stepList}</div>${meta}</div>`;
+  }
+
+  function renderPage(embedded = false) {
+    return renderTaskPage(selectedTask(), { preview: false, embedded });
   }
 
   function previewPageVerbBar() {
@@ -1815,54 +1833,7 @@ import { parseCapture } from "./capture.js";
   }
 
   function renderPreviewPage() {
-    const task = previewTask();
-    if (!task) {
-      return `<div class="tsk-task-column tsk-surface" aria-label="project task column"><div class="tsk-task-header dim"><span class="sec">no task</span></div><div class="tsk-task-rule" aria-hidden="true"></div><div class="tsk-task-surface"><div class="dim">  select a task to preview it here</div></div></div>`;
-    }
-    previewSteps.bind(task);
-    const editing = preview.editField;
-    const stateSlot = previewSteps.editor
-      ? "editing step"
-      : previewSteps.dirty
-        ? "unsaved"
-        : editing
-          ? `editing ${editing}`
-          : `${task.status} · ${preview.project}`;
-    const headTitle =
-      editing === "title"
-        ? `<input class="tsk-field" id="tsk-preview-edit" value="${esc(preview.editDraft)}" />`
-        : esc(task.title);
-    const glyph = GLYPH[task.status] || "○";
-    const header = `<div class="tsk-task-header is-bold"><span class="glyph">${glyph}</span> <span class="tsk-task-id" data-copy-task="${esc(task.id)}" title="copy T${task.number}">T${task.number}</span> <span class="sec">${headTitle}</span><span class="tsk-state-slot">${esc(stateSlot)}</span></div><div class="tsk-task-rule" aria-hidden="true"></div>`;
-    const notes =
-      editing === "notes"
-        ? `<textarea class="tsk-field tsk-notes" id="tsk-preview-edit">${esc(preview.editDraft)}</textarea>`
-        : `<div class="tsk-page-notes">${wrapText(
-            task.notes || "no notes yet",
-            taskColumnWidth() - 6,
-          )
-            .map((line) => `<span>${esc(line) || " "}</span>`)
-            .join("")}</div>`;
-    const stepRows = previewSteps.rows(task);
-    const inlineEditor = `<textarea id="tsk-preview-step-edit" class="tsk-field" aria-label="Step text" rows="${wrapText(previewSteps.editor?.text ?? "", taskColumnWidth() - 8).length}">${esc(previewSteps.editor?.text ?? "")}</textarea><span class="tsk-step-refusal">${esc(previewSteps.refusal)}</span>`;
-    const stepList = `<div class="tsk-steps"><div class="tsk-steps-heading dim">steps ${stepRows.filter((step) => step.done).length}/${stepRows.length}</div>${stepRows
-      .map(
-        (step) =>
-          `<div class="tsk-step" data-preview-step="${esc(step.id)}" role="option" aria-selected="${previewSteps.selected === step.id}"><span class="tsk-step-glyph">${previewSteps.selected === step.id ? "▸ " : "  "}${previewSteps.marked === step.id ? "✗" : step.done ? "✓" : "▪"} </span>${
-            previewSteps.editor?.id === step.id
-              ? inlineEditor
-              : `<span class="tsk-step-text">${wrapText(
-                  step.text,
-                  Math.max(8, taskColumnWidth() - 8),
-                )
-                  .map((line) => `<span>${esc(line)}</span>`)
-                  .join("")}</span>`
-          }</div>`,
-      )
-      .join(
-        "",
-      )}${previewSteps.editor && !previewSteps.editor.id ? `<div class="tsk-step-new">${inlineEditor}</div>` : `<button type="button" class="tsk-step-add dim" data-preview-step-add="1">   + step</button>`}</div>`;
-    return `<div class="tsk-task-column tsk-surface" aria-label="T${task.number} project task column" data-status="${esc(task.status)}" data-edit-state="${previewSteps.editor ? "editing" : previewSteps.dirty ? "unsaved" : "view"}">${header}<div class="tsk-task-surface tsk-page">${notes}${stepList}</div><div class="tsk-page-meta dim">${preview.project}${task.thread ? ` · #${esc(task.thread)}` : ""} · created ${esc(age(task.createdAt))} ago · updated ${esc(age(task.updatedAt))} ago</div></div>`;
+    return renderTaskPage(previewTask(), { preview: true, embedded: true });
   }
 
   function renderPreviewBoard(rail) {
@@ -3339,6 +3310,11 @@ import { parseCapture } from "./capture.js";
       const project = projectRow.dataset.projectRow;
       const now = Date.now();
       if (lastClick.id === id && now - lastClick.at < 350) {
+        if (projectsOverview() && projectsPreviewActive() && previewHasUnsavedWork()) {
+          preview.message = "save or cancel edits before switching tasks";
+          render();
+          return;
+        }
         openProject(project);
       } else {
         if (

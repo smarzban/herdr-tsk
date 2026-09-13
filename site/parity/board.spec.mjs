@@ -202,6 +202,8 @@ test("projects overview opens a live project preview and keeps its task seat", a
   await page.keyboard.press("3");
   await expect(page.locator(".tsk-project-row")).toHaveCount(1);
   await expect(page.locator(".tsk-wide-split")).toHaveCount(0);
+  await page.keyboard.press("ArrowDown");
+  await expect(page.locator(".tsk-wide-split.is-split")).toBeVisible();
   await page.locator(".tsk-project-row").click();
   await expect(page.locator(".tsk-wide-split.is-split")).toBeVisible();
   await page.keyboard.press("ArrowLeft");
