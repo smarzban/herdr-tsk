@@ -17,9 +17,10 @@ Press `?` on the board, task page, or another non-text surface for a searchable 
 | Move through wide views | `→` / `←` |
 | Add task | `+` |
 | Edit title | `ctrl+e` |
-| Start ready task; return done task to ready | `ctrl+s` |
+| Start open or ready task | `ctrl+s` |
+| Set ready, the picked queue | `ctrl+n` |
+| Set open, the inbox | `ctrl+o` |
 | Mark done | `ctrl+d` |
-| Set ready | `ctrl+o` |
 | Toggle blocked / ready | `ctrl+b` |
 | Toggle review / ready | `ctrl+r` |
 | Delete, with a second press to confirm | `ctrl+x` or `ctrl+Delete` |
@@ -37,7 +38,7 @@ Press `?` on the board, task page, or another non-text surface for a searchable 
 | Close a layer | `Esc` |
 | Quit from board view | `ctrl+q` or `ctrl+c` |
 
-Done tasks cannot be blocked or sent to review until reopened. `ctrl+s` leaves started, blocked, and review tasks unchanged.
+Status shortcuts are absolute. `ctrl+s` starts open or ready tasks and leaves started, blocked, and review tasks unchanged. `ctrl+n` and `ctrl+o` can send a done task directly to ready or open.
 
 ## Task page
 
@@ -50,7 +51,6 @@ These keys apply in **view mode**:
 | Toggle selected step | `Enter` |
 | Add step | `ctrl+a` |
 | Edit title or selected step | `ctrl+e` |
-| Edit notes | `ctrl+n` |
 | Change task status | Board status shortcuts above |
 | Mark/remove selected step; otherwise confirm/delete task | `ctrl+x` |
 | All shortcuts | `?` |
@@ -81,7 +81,7 @@ Click a step to select it. Click **+ step** to add. Field clicks become editable
 
 `ctrl+e` moves to line end in text editors. `ctrl+a` moves to line start in quick-add; on the task page it adds a step instead. Paste preserves line breaks in Notes and converts them to spaces in single-line fields.
 
-Editing keys take precedence over view-mode status shortcuts. In the step editor, `ctrl+d` and `ctrl+o` still address the task. `Alt+Enter` does not save the task edit.
+Editing keys take precedence over view-mode status shortcuts. In the step editor, `ctrl+d`, `ctrl+n`, and `ctrl+o` still address the task. Notes are reached with `ctrl+e`, then `Tab`. `Alt+Enter` does not save the task edit.
 
 ## Quick-add
 

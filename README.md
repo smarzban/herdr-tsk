@@ -4,7 +4,7 @@ A terminal task board for you and your agents: one shared queue, a TUI for you, 
 
 Keep the next task, the work in progress, and the things waiting on you in view.
 Press `+` to capture a thought, add notes and steps when it needs a plan, and give
-your agent the task number when you're ready to work on it.
+your agent the task number when you're ready to work on it. New tasks start in the open inbox; pick the next one when you're ready.
 
 ### the flow
 
@@ -108,7 +108,9 @@ Prefer the keyboard? A few keys for everyday use:
 | `→` / `←` | Peek at a task and close the peek in narrow panes; move between board and task views in wide panes |
 | `+` | Add a task |
 | `Enter` | Open the selected task |
-| `ctrl+s` | Start a ready task or reopen a done task |
+| `ctrl+s` | Start an open or ready task |
+| `ctrl+n` | Pick a task, moving it to ready |
+| `ctrl+o` | Send a task to the open inbox |
 | `ctrl+r` | Move an open task to review, or back to ready |
 | `ctrl+d` | Mark the selected task done |
 | `p` | Switch projects |

@@ -4526,7 +4526,7 @@ mod tests {
             ),
             (
                 KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL),
-                BoardIntent::BeginEditNotes,
+                BoardIntent::SetStatus(HumanStatus::Ready),
             ),
             (
                 KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL),

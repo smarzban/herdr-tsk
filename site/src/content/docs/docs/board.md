@@ -9,7 +9,7 @@ Click to navigate, or use the keyboard. The footer shows actions for the current
 
 | View | Key | Contents |
 | --- | --- | --- |
-| **desk** | `1` | Blocked/review and started tasks across all live projects; ready tasks from your desk |
+| **desk** | `1` | Blocked/review and started tasks across all live projects; ready and open tasks from your desk |
 | **selected project** | `2` | Tasks in the selected project |
 | **projects** | `3` | Project overview |
 
@@ -28,7 +28,7 @@ Press `p` to choose a project, or open **projects** for an overview.
 - Press `Esc` to clear and close search.
 - Check the footer for the selected project's full path.
 
-Counts show work needing attention, in progress, and ready. A dim `·` means zero. `here` marks the launch project. At 100 columns or wider, the overview also lists threads.
+Counts show work needing attention, in progress, and ready. The project index's ready count excludes open tasks; project boards show both under ON DECK. A dim `·` means zero. `here` marks the launch project. At 100 columns or wider, the overview also lists threads.
 
 ## Threads
 
@@ -49,30 +49,32 @@ Assign threads when [capturing](/docs/capture/#title-tokens) or [editing a task]
 | --- | --- |
 | **NEEDS YOU** | `blocked`, `review` |
 | **IN MOTION** | `started` |
-| **ON DECK** | `ready` |
+| **ON DECK** | `ready`, `open` |
+| ↳ **inbox** | `open` |
 | Done drawer | `done` |
 
-On your desk, **ON DECK** contains only desk tasks. On a project board, it contains that project's ready tasks. Use the thread filter to narrow them.
+On your desk, **ON DECK** contains only desk tasks. On a project board, it contains that project's ready and open tasks. Ready tasks are the picked queue; open tasks are the untriaged inbox below it. Ready tasks sort by oldest pick first, open tasks by oldest capture first, and notice rows lead within each group. The **inbox** group starts expanded; press `Enter` on its heading or `g` while the done drawer is closed to fold or unfold it. With the drawer open and archived rows available, `g` addresses its archived group; otherwise it addresses the inbox. Use the thread filter to narrow the tasks.
 
-Sections hold their order while you work: NEEDS YOU, IN MOTION, DONE, and the drawer's ARCHIVED group keep the most recent status change on top, while ON DECK lists its backlog oldest first (`N` rows lead it until you clear them). Editing a task or ticking a step never moves it; setting a status moves it to the top of its new section.
+Sections hold their order while you work: NEEDS YOU, IN MOTION, DONE, and the drawer's ARCHIVED group keep the most recent status change on top, while ON DECK lists ready and inbox backlogs oldest first. (`N` rows lead each group until you clear them.) Editing a task or ticking a step never moves it; setting a status moves it to the top of its new section.
 
 Select a task, then click a footer action or use:
 
 | Key | Action |
 | --- | --- |
-| `ctrl+s` | Start a ready task; return a done task to ready |
+| `ctrl+s` | Start an open or ready task |
+| `ctrl+n` | Set ready, the picked on-deck queue |
+| `ctrl+o` | Set open, the inbox |
 | `ctrl+d` | Mark done |
-| `ctrl+o` | Set ready |
 | `ctrl+b` | Set blocked; press again to return to ready |
 | `ctrl+r` | Set review; press again to return to ready |
 
-`ctrl+s` leaves started, blocked, and review tasks unchanged. Done tasks must be reopened before blocking or sending to review.
+`ctrl+s` leaves started, blocked, and review tasks unchanged. Status verbs are absolute, so repeating the current status does nothing. Done tasks can be sent directly to ready or open.
 
 Agents can set any status with [the CLI](/docs/cli/#status). Task status does not change automatically when steps are checked or an agent stops.
 
 ## Notices
 
-Your first board open seeds four desk tasks with `N` ids (not `T`). They teach the board by being ordinary tasks: open, peek, change status, archive, or delete. `ctrl+d`, `ctrl+f`, and `ctrl+x` all dismiss a notice the same way; that starter task never re-seeds. After an upgrade, one `What's new in tsk` task can appear the same way. Details and the delivery record live under [storage](/docs/storage/#starter-guides-and-release-notes).
+Your first board open seeds four desk tasks with `N` ids (not `T`). They teach the board by being ordinary tasks: open, peek, change status, archive, or delete. `ctrl+d`, `ctrl+f`, and `ctrl+x` all dismiss a notice the same way; that starter task never re-seeds. After an upgrade, one `What's new in tsk` task can appear the same way. Details and the delivery record live under [storage](/docs/storage/#starter-guides-and-release-notes). Starter notices keep their seeded statuses so the tour order stays useful; new release notices enter the inbox.
 
 ## Mouse
 
@@ -114,7 +116,7 @@ Narrowing the pane shows one surface; widening it restores the selected view. Ea
 
 ## Completed tasks
 
-Press `d` to open or close the done drawer. Select a done task and press `ctrl+o` to return it to ready.
+Press `d` to open or close the done drawer. Select a done task and press `ctrl+n` to return it to ready, or `ctrl+o` to send it to the inbox.
 
 The drawer's **archived** group starts closed. Click its heading or press `Enter` on it to expand. `g` folds or unfolds the group while the drawer is open.
 
@@ -154,8 +156,8 @@ Press `:` and type to find an action. Use arrows or `Tab` to select, `Enter` to 
 | Available actions | When |
 | --- | --- |
 | New task, undo, done drawer, help, quit | Always |
-| Set ready/started/blocked/review, edit notes, change scope, delete | A task is selected |
-| Reopen | A done task is selected |
+| Set open/ready/started/blocked/review, edit notes, change scope, delete | A task is selected |
+| Set done | A task is selected |
 | Retry save, cancel save | A save has failed |
 
 Search matches letters in order: `ssr` finds `set status: review`.

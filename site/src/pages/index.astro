@@ -154,7 +154,7 @@ const softwareApplication = {
             </h1>
             <p class="lede">
               One board where you both plan, pick up work, and move it through
-              <b>ready</b>, <b>started</b>, <b>blocked</b>, <b>review</b>, <b>done</b>.
+              <b>open</b>, <b>ready</b>, <b>started</b>, <b>blocked</b>, <b>review</b>, <b>done</b>.
               You and your agents can create, edit, and complete tasks.
             </p>
           </div>
@@ -210,7 +210,7 @@ const softwareApplication = {
                   <p class="agent-line say">The handler applies side effects before recording the event ID. Concurrent retries can both get through.</p>
                   <div class="agent-tool"><span class="tool-name">Bash</span><span class="tool-arg">tsk add -t "Make webhook delivery idempotent" -p launchpad --thread api --json</span><span class="tool-out" data-cli-add-output>&#123;"outcome":"created","id":"00000000-0000-4000-8000-000000000013","number":13,"title":"Make webhook delivery idempotent","project":"launchpad"&#125;</span></div>
                   <div class="agent-tool"><span class="tool-name">Bash</span><span class="tool-arg">tsk steps T13 add "Reproduce duplicate delivery"</span><span class="tool-out" data-cli-step-output>added 3f Reproduce duplicate delivery</span></div>
-                  <p class="agent-line say">T13 is ready with a checklist to reproduce duplicate delivery, persist processed event IDs, and test concurrent retries. Open it on the board to explore the steps.</p>
+                  <p class="agent-line say">T13 is open with a checklist to reproduce duplicate delivery, persist processed event IDs, and test concurrent retries. Pick it when you are ready to work.</p>
                 </div>
                 <div class="agent-input"><span class="agent-prompt">›</span><span class="cursor" aria-hidden="true"></span><span class="agent-shortcut">? for shortcuts</span></div>
               </aside>
@@ -229,7 +229,7 @@ const softwareApplication = {
             Two real layouts. Beside an agent, tsk is the 78-column board herdr opens by default,
             and <kbd>→</kbd> peeks. Give it the whole terminal, or drag the divider past 110
             columns, and the same board becomes the four-stage slider: <kbd>→</kbd> slides the
-            task page in. The demo takes bare <kbd>s</kbd> <kbd>d</kbd> <kbd>b</kbd> <kbd>o</kbd>
+            task page in. The demo takes bare <kbd>s</kbd> <kbd>n</kbd> <kbd>o</kbd> <kbd>d</kbd> <kbd>b</kbd>
             because browsers keep the control chords. In the app, every mutating verb needs
             <kbd>Ctrl</kbd>. This demo covers browsing, starting and opening tasks, plus adding, checking,
             renaming and removing steps. Full task editing and save recovery remain unfinished.
@@ -244,18 +244,24 @@ const softwareApplication = {
             <span class="index">01 <span class="index-label">status</span></span>
             <h2 id="status-heading">One workflow for you and your agents.</h2>
             <p class="band-lede">
-              Five states shared by everyone on the board. You and your agents can create tasks,
-              edit titles and notes, manage steps, and move tasks through the board, from <b>ready</b>
+              Six states shared by everyone on the board. You and your agents can create tasks,
+              edit titles and notes, manage steps, and move tasks through the board, from <b>open</b>
               to <b>done</b>, using the CLI. Checking every step leaves the task status unchanged until it is explicitly updated.
             </p>
           </header>
 
           <ol class="rail" aria-label="Task statuses">
             <li>
+              <span class="rail-glyph" aria-hidden="true">◌</span>
+              <span class="rail-name">open</span>
+              <span class="rail-how">inbox</span>
+              <kbd>ctrl+o</kbd>
+            </li>
+            <li>
               <span class="rail-glyph" aria-hidden="true">○</span>
               <span class="rail-name">ready</span>
               <span class="rail-how">on deck</span>
-              <kbd>ctrl+o</kbd>
+              <kbd>ctrl+n</kbd>
             </li>
             <li>
               <span class="rail-glyph" aria-hidden="true">●</span>
@@ -285,17 +291,17 @@ const softwareApplication = {
 
           <div class="cycle" data-cycle aria-live="off">
             <div class="cycle-row">
-              <span class="cycle-sec" data-cycle-sec>ON DECK</span>
-              <span class="cycle-glyph" data-cycle-glyph aria-hidden="true">○</span>
+              <span class="cycle-sec" data-cycle-sec>inbox</span>
+              <span class="cycle-glyph" data-cycle-glyph aria-hidden="true">◌</span>
               <span class="tid">T14</span>
               <span class="cycle-title">Ship the landing page</span>
               <span class="cycle-meta">tsk</span>
             </div>
             <div class="cycle-foot">
               <span class="dim">you press</span>
-              <kbd data-cycle-key>ctrl+s</kbd>
+              <kbd data-cycle-key>ctrl+n</kbd>
               <span class="dim">→</span>
-              <span data-cycle-next>started</span>
+              <span data-cycle-next>ready</span>
             </div>
           </div>
 
@@ -335,7 +341,7 @@ const softwareApplication = {
                 keystroke in a focused board cannot finish or delete work. Undo is one chord
                 away.
               </p>
-              <pre class="mini" aria-label="Verb bar"><span class="dim">enter</span> open · <span class="dim">ctrl+d</span> done · <span class="dim">ctrl+b</span> block · <span class="dim">:</span> palette
+              <pre class="mini" aria-label="Verb bar"><span class="dim">enter</span> open · <span class="dim">ctrl+d</span> done · <span class="dim">ctrl+n</span> ready · <span class="dim">ctrl+o</span> open · <span class="dim">:</span> palette
 <span class="dim">ctrl+x</span> delete · <span class="dim">ctrl+u</span> undo · <span class="dim">?</span> help · <span class="dim">+</span> capture</pre>
             </article>
 
@@ -343,7 +349,7 @@ const softwareApplication = {
               <h3>One store. Everyone at the table.</h3>
               <p>
                 You, herdr's quick-capture popup, and your agents edit the same
-                <code>~/.tsk</code>. An agent drops a plan in as JSON and the board shows it on
+                <code>~/.tsk</code>. An agent drops a plan in as JSON, new tasks enter the inbox, and the board shows them on
                 the next tick.
               </p>
               <pre class="mini" aria-label="Three ways in"><span class="prompt">$</span> cat plan.json | tsk add
@@ -401,7 +407,7 @@ const softwareApplication = {
               </div>
               <div class="s-gap"></div>
               <div class="s-row s-sec">
-                <span class="sec">ON DECK · desk</span><span class="rule"></span><span class="count">2</span>
+                <span class="sec">ON DECK · desk</span><span class="rule"></span><span class="count">4</span>
                 <span class="pin">5</span>
               </div>
               <div class="s-row s-task">
@@ -409,6 +415,13 @@ const softwareApplication = {
               </div>
               <div class="s-row s-task">
                 <span class="l"><span class="glyph">○</span> <span class="tid">T18</span> Global backlog note</span>
+              </div>
+              <div class="s-row s-sub"><span class="sec">inbox</span><span class="count">2</span></div>
+              <div class="s-row s-task">
+                <span class="l"><span class="glyph">◌</span> <span class="tid">T31</span> Capture the loose idea</span>
+              </div>
+              <div class="s-row s-task">
+                <span class="l"><span class="glyph">◌</span> <span class="tid">T30</span> Triage the new report</span>
               </div>
               <div class="s-fill"></div>
               <div class="s-row s-footrule"><span class="rule"></span></div>
@@ -441,7 +454,7 @@ const softwareApplication = {
               </li>
               <li>
                 <span class="legend-n">5</span>
-                <div><b>Your loose backlog.</b> Desk's ON DECK contains only tasks without a project. Project backlogs live on their own boards, with thread filters across every status.</div>
+                <div><b>Your loose backlog.</b> Desk's ON DECK contains only tasks without a project. Picked <code>ready</code> tasks lead, then the expandable <code>inbox</code> of <code>open</code> tasks. Project backlogs live on their own boards, with thread filters across every status.</div>
               </li>
               <li>
                 <span class="legend-n">6</span>
@@ -508,10 +521,11 @@ const softwareApplication = {
             <div class="key" role="listitem"><span class="caps"><kbd>Enter</kbd></span><span>open the task page</span></div>
             <div class="key" role="listitem"><span class="caps"><kbd>→</kbd><kbd>←</kbd></span><span>peek · slide the stage when wide</span></div>
             <div class="key" role="listitem"><span class="caps"><kbd>+</kbd></span><span>capture</span></div>
-            <div class="key key-verb" role="listitem"><span class="caps"><kbd>ctrl+s</kbd></span><span>start · reopen if done</span></div>
+            <div class="key key-verb" role="listitem"><span class="caps"><kbd>ctrl+s</kbd></span><span>start open or ready</span></div>
+            <div class="key key-verb" role="listitem"><span class="caps"><kbd>ctrl+n</kbd></span><span>pick for ready</span></div>
+            <div class="key key-verb" role="listitem"><span class="caps"><kbd>ctrl+o</kbd></span><span>send to inbox</span></div>
             <div class="key key-verb" role="listitem"><span class="caps"><kbd>ctrl+d</kbd></span><span>done</span></div>
             <div class="key key-verb" role="listitem"><span class="caps"><kbd>ctrl+b</kbd></span><span>toggle blocked</span></div>
-            <div class="key key-verb" role="listitem"><span class="caps"><kbd>ctrl+o</kbd></span><span>reopen</span></div>
             <div class="key key-verb" role="listitem"><span class="caps"><kbd>ctrl+e</kbd></span><span>edit title</span></div>
             <div class="key key-verb" role="listitem"><span class="caps"><kbd>ctrl+x</kbd><kbd>ctrl+u</kbd></span><span>delete · undo</span></div>
             <div class="key" role="listitem"><span class="caps"><kbd>:</kbd></span><span>command palette</span></div>
@@ -536,7 +550,7 @@ const softwareApplication = {
             <h2 id="cli-heading">Built for agents from the first commit.</h2>
             <p class="band-lede">
               Headless <code>add</code>, <code>list</code>, <code>status</code>, <code>edit</code>, and <code>steps</code> against the
-              same store. An agent drops a plan in as JSON and it lands as <b>ready</b> tasks. It
+              same store. An agent drops a plan in as JSON and it lands as <b>open</b> tasks in the inbox. It
               can move status, rewrite notes, check off steps, and mark work done.
             </p>
           </header>

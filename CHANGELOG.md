@@ -9,12 +9,20 @@ the GitHub release notes verbatim.
 
 ## Unreleased
 
+### Breaking
+
+- Existing `ready` tasks migrate to the new `open` inbox when a v3 store is first saved as v4. `ctrl+n` no longer opens the Notes editor, and `ctrl+o` now sets a task to `open` instead of reopening it to `ready`.
+
 ### Added
+
+- Added the `open` status for captured and untriaged tasks, an expandable inbox group under ON DECK, and explicit `ctrl+n` (ready) and `ctrl+o` (open) board verbs.
+- Added `tsk status T<n> open`, plus `tsk list --open` and `tsk list --ready` filters.
 
 - Direct `tsk list T<n>` output now includes the task's notes, steps, and thread in both human-readable and JSON forms, so agents can read the complete task with one command. Human detail separates notes, steps, and the trailing thread into blocks; step short IDs remain JSON-only. All human `tsk list` content wraps to the terminal width with hanging indentation, supported from 50 columns.
 
 ### Changed
 
+- `ctrl+s` now starts both open and ready tasks. The bundled agent skill is version 1.3.0 and documents the inbox and status filters.
 - Help is now a searchable shortcut reference with a focused search field, dim divider, and one binding per row grouped by function; long descriptions wrap beneath their description column. It stays within half the terminal height except below 15 rows, where it may grow to six rows to keep a result visible. Press `?` from any non-text surface; typing filters by key or action, and `Esc` clears the search before closing.
 - The bundled agent skill now uses JSON as the default contract for every `tsk list` read. Human listings are reserved for output shown to the user or interactive troubleshooting.
 

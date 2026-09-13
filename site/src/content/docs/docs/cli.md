@@ -15,9 +15,9 @@ tsk list
 Install the skill with `tsk setup pi`, or use your [agent's setup target](#setup). `tsk guide` prints the workflow.
 
 1. Read the task with `tsk list T12`.
-2. Set its status with `tsk status T12 started`.
+2. Set its status with `tsk status T12 started` (or `ready` to pick it from the inbox).
 3. Update notes or steps as work progresses.
-4. Set `review`, `blocked`, or `done` explicitly.
+4. Set `review`, `blocked`, `open`, or `done` explicitly.
 
 The CLI can mark a task done with `tsk status <task> done`. Agent lifecycle does not change task status automatically.
 
@@ -67,6 +67,7 @@ A missing or ambiguous basename stays as typed. A typo can create a separate sco
 
 ```sh
 tsk add -t "Fix login timeout" -n "Reproduce on a slow connection" --thread auth
+# new tasks start open; use `tsk status T<n> ready` when picked
 tsk add -t "Buy coffee" --desk
 tsk add -t "Draft release notes" -p atlas --json
 ```
@@ -129,27 +130,31 @@ tsk list T12
 tsk list --all --json
 tsk list -p atlas --thread auth
 tsk list --done --all
+tsk list --open --all
+tsk list --ready --all
 tsk list --archived --all
 tsk list --deleted --all
 ```
 
 ```text
-tsk list [<task>] [-p <project> | --desk | --all] [--thread <name>] [--done | --deleted | --archived] [--json] [--state-dir <dir>]
+tsk list [<task>] [-p <project> | --desk | --all] [--thread <name>] [--open | --ready | --done | --deleted | --archived] [--json] [--state-dir <dir>]
 ```
 
 | Filter | Result |
 | --- | --- |
-| Default | Ready, started, blocked, and review tasks; excludes archived, deleted, and notice (`N`) rows |
+| Default | Open, ready, started, blocked, and review tasks; excludes archived, deleted, and notice (`N`) rows |
+| `--open` | Inbox tasks with status `open` |
+| `--ready` | Picked on-deck tasks with status `ready` |
 | `--done` | Completed tasks |
 | `--archived` | Individually archived tasks and tasks in archived projects, across statuses |
 | `--deleted` | Deleted tasks in the main store and trash, newest first |
 | `--thread` | Filter within the selected scope |
 
-Scope flags are mutually exclusive. So are `--done`, `--deleted`, and `--archived`.
+Scope flags are mutually exclusive. So are `--open`, `--ready`, `--done`, `--deleted`, and `--archived`.
 
 A direct task address searches the main store, including done, archived, and recently deleted tasks. It cannot be combined with scope, thread, or status filters. A missing task exits 2. Tasks already moved to trash require `--deleted`.
 
-Human output groups by status; filtered rows include the task number and thread, and `--all` adds scope labels. Every non-JSON list element, including help and errors, wraps to the attached terminal width with hanging indentation. Task rows, scope labels, notes, steps, archived marks, and threads use the same wrapping behavior, supported from 50 columns. Redirected output keeps stored logical lines.
+Human output groups by status in `STARTED`, `READY`, `OPEN`, `BLOCKED`, `REVIEW` order; filtered rows include the task number and thread, and `--all` adds scope labels. Every non-JSON list element, including help and errors, wraps to the attached terminal width with hanging indentation. Task rows, scope labels, notes, steps, archived marks, and threads use the same wrapping behavior, supported from 50 columns. Redirected output keeps stored logical lines.
 
 Single-task output removes the thread from the title row and presents notes, steps, then `#thread` as separate blocks. A blank line separates adjacent blocks that exist. Human step rows show state and text without machine-oriented short IDs.
 
@@ -158,11 +163,13 @@ JSON returns an array with `id`, `number`, `title`, `status`, `project`, and `th
 ## status
 
 ```sh
+tsk status T12 open
+tsk status T12 ready
 tsk status T12 started
 tsk status T12 review
 ```
 
-Accepts `ready`, `started` (or `start`), `blocked`, `review`, and `done`.
+Accepts `open`, `ready`, `started` (or `start`), `blocked`, `review`, and `done`.
 
 Unlike keyboard toggles, this command sets the requested status directly. Repeating the same value is safe.
 

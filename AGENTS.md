@@ -25,7 +25,7 @@ present, and refresh it when you stop mid-work.
 ## What this is
 
 **tsk** is a terminal task board: a queue board for capture and human-status verbs
-(`ready` · `started` · `blocked` · `review` · `done`). It ships as the herdr plugin
+(`open` · `ready` · `started` · `blocked` · `review` · `done`). It ships as the herdr plugin
 `herdr-tsk`; the built binary (`tsk`) also runs standalone.
 
 For scriptable board work use `tsk add`, `tsk list`, `tsk status`, `tsk edit`,
