@@ -1089,10 +1089,18 @@ impl BoardModel {
         }
     }
 
+    /// Whether a project preview still owns unsaved work while its session is retained.
+    pub fn has_dirty_project_preview(&self) -> bool {
+        self.projects_overview()
+            && matches!(self.wide_stage, WideStage::Split | WideStage::Rail)
+            && self
+                .right_seat
+                .as_deref()
+                .is_some_and(|right| right.active_project().is_some() && right.has_unsaved_work())
+    }
+
     fn should_defer_project_preview_sync(&self, state: &DomainState) -> bool {
-        if !self.projects_overview()
-            || !matches!(self.wide_stage, WideStage::Split | WideStage::Rail)
-        {
+        if !self.has_dirty_project_preview() {
             return false;
         }
         let Some(right) = self.right_seat.as_deref() else {
@@ -1101,9 +1109,6 @@ impl BoardModel {
         let Some(path) = right.active_project() else {
             return false;
         };
-        if !right.has_unsaved_work() {
-            return false;
-        }
         let archived_projects = state.archived_projects();
         let incoming = queue::query_board(
             state.tasks(),

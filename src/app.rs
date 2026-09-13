@@ -944,25 +944,31 @@ fn board_background_work_allowed(recovery: &SaveRecovery<DomainState>) -> bool {
 
 /// Cheap idle-tick change detector for the store's on-disk document.
 ///
-/// Holds only `tsk.json`'s last-seen [`StoreSignature`], so the frame loop's Idle
-/// branch -- which runs about 4 times a second --
-/// pays for a `stat`, not a parse, on every tick where nothing changed.
+/// Holds `tsk.json`'s last-seen [`StoreSignature`], so the frame loop's Idle branch -- which
+/// runs about 4 times a second -- pays for a `stat`, not a parse, on every tick where nothing
+/// changed. A deferred dirty-preview signature is remembered separately: it stays unacknowledged
+/// for correctness, but does not force a repeated parse until the draft changes state.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct StoreWatch {
     last_seen: Option<StoreSignature>,
+    deferred: Option<Option<StoreSignature>>,
 }
 
 impl StoreWatch {
     /// Unseeded: the first check always reports changed. Prefer [`Self::seeded`] right after a
     /// load so the first idle tick does not immediately re-merge what was just read.
     pub fn new() -> Self {
-        Self { last_seen: None }
+        Self {
+            last_seen: None,
+            deferred: None,
+        }
     }
 
     /// Seed from the store's current on-disk signature (e.g. right after `load_board()`).
     pub fn seeded(store: &TaskStore) -> Self {
         Self {
             last_seen: store.state_signature(),
+            deferred: None,
         }
     }
 
@@ -971,6 +977,8 @@ impl StoreWatch {
     /// [`Self::record`] with the returned signature only once the load it gates actually
     /// succeeds, so a transient read failure leaves the watch exactly where it was
     /// and the very next tick tries again instead of treating the failed read as caught up.
+    /// A snapshot deferred by a dirty preview remains unrecorded, but the revalidator caches that
+    /// fact separately while the same draft is still open.
     fn poll(&self, store: &TaskStore) -> Option<Option<StoreSignature>> {
         let current = store.state_signature();
         if current == self.last_seen {
@@ -984,16 +992,27 @@ impl StoreWatch {
     /// succeeded.
     fn record(&mut self, signature: Option<StoreSignature>) {
         self.last_seen = signature;
+        self.deferred = None;
+    }
+
+    /// Keep a changed signature eligible for a later retry without reloading it on every idle
+    /// tick while the same dirty preview is still open.
+    fn defer(&mut self, signature: Option<StoreSignature>) {
+        self.deferred = Some(signature);
+    }
+
+    fn is_deferred(&self, signature: Option<StoreSignature>) -> bool {
+        self.deferred == Some(signature)
     }
 }
 
 /// On the frame loop's Idle branch: revalidate the store cheaply, no host calls.
 ///
-/// Only when [`StoreWatch::poll`] reports a changed signature does this pay for
+/// Only when [`StoreWatch::poll`] reports a changed, non-deferred signature does this pay for
 /// `store.load()` + [`DomainState::merge_tasks_from_disk`] + [`BoardModel::sync_from_domain`],
 /// so a quick-capture popup (a separate process writing the same `tsk.json`) becomes
 /// visible on an open, idle board without a persisting intent from this board and without a
-/// host call.
+/// host call. A deferred dirty-preview signature is retried when that draft is no longer dirty.
 ///
 /// Skips entirely while a failed save owns the displayed working state
 /// ([`board_background_work_allowed`]): reloading disk under save recovery would replace the
@@ -1021,13 +1040,18 @@ pub fn revalidate_board_from_store(
     let Some(signature) = watch.poll(store) else {
         return false;
     };
+    if watch.is_deferred(signature) && model.has_dirty_project_preview() {
+        return false;
+    }
     let Ok(disk) = store.load() else {
         return false;
     };
     domain.merge_tasks_from_disk(&disk);
     if !model.sync_from_external_domain(domain) {
         // A dirty project preview keeps its old snapshot until the user resolves the draft. Do
-        // not acknowledge the file signature: the next idle tick must retry the deferred merge.
+        // not acknowledge the file signature: the next idle tick must retry the deferred merge,
+        // but remember the already-loaded signature so idle ticks do not parse it repeatedly.
+        watch.defer(signature);
         return false;
     }
     watch.record(signature);
@@ -2523,6 +2547,12 @@ mod idle_store_revalidation_tests {
             watch.poll(&store).is_some(),
             "deferred signatures must be retried"
         );
+        model.set_message("keep this feedback");
+        assert!(
+            !revalidate_board_from_store(&store, &mut domain, &mut model, &mut watch, &recovery),
+            "a still-dirty preview must not repeatedly reload the same deferred snapshot"
+        );
+        assert_eq!(model.message(), Some("keep this feedback"));
         assert_eq!(
             model.selected_project_row().map(|row| row.path),
             Some("/repos/alpha".into())
