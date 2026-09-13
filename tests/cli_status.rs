@@ -144,7 +144,10 @@ fn status_unknown_and_deleted_refuse_without_mutation() {
     let _guard = TempDirGuard(dir.clone());
     let missing = status(&dir, "T9", "started");
     assert_eq!(missing.code, 1);
-    assert!(missing.stderr.contains("unknown-task"));
+    assert_eq!(
+        missing.stderr,
+        "tsk status: unknown-task: T9 is not on the board\n"
+    );
 
     assert_eq!(add_task(&dir, "delete me").code, 0);
     let mut state = TaskStore::new(&dir).load().expect("load");
@@ -156,7 +159,10 @@ fn status_unknown_and_deleted_refuse_without_mutation() {
 
     let deleted = status(&dir, "T1", "started");
     assert_eq!(deleted.code, 1);
-    assert!(deleted.stderr.contains("soft-deleted-task"));
+    assert_eq!(
+        deleted.stderr,
+        "tsk status: soft-deleted-task: T1 is deleted\n"
+    );
     assert_eq!(fs::read(&state_file).expect("read after"), before);
 }
 

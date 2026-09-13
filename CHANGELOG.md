@@ -23,7 +23,7 @@ the GitHub release notes verbatim.
 
 ### Changed
 
-- Archive and unarchive refusals now carry stable `unknown-task` and `soft-deleted-task` codes.
+- Task-verb refusals print as `code: message` on stderr for every command: `archive` and `unarchive` gain the stable `unknown-task` and `soft-deleted-task` codes, and `status`, `edit`, and `steps` gain a human message after theirs.
 - Command help now uses one 80-column reference skeleton with usage, options, examples, refusals, and exits; detailed retry and output rules remain in the CLI guide.
 - `ctrl+s` now starts both open and ready tasks. The bundled agent skill is version 1.2.0 and documents the inbox and status filters.
 - Help is now a searchable shortcut reference with a focused search field, dim divider, and one binding per row grouped by function; long descriptions wrap beneath their description column. It stays within half the terminal height except below 15 rows, where it may grow to six rows to keep a result visible. Press `?` from any non-text surface; typing filters by key or action, and `Esc` clears the search before closing.

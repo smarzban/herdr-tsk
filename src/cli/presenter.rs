@@ -7,6 +7,7 @@ use crate::cli::add::{AddError, FlagAddResult};
 use crate::cli::archive::{ArchiveCliError, ArchiveResult, ProjectResult};
 use crate::cli::edit::{EditError, EditResult};
 use crate::cli::list::{ListError, ListResult, ListRow, ListView};
+use crate::cli::parser::TaskAddress;
 use crate::cli::status::{StatusError, StatusResult};
 use crate::cli::steps::{StepLine, StepsError, StepsResult};
 use crate::cli::trash::{TrashCliError, TrashRestoreResult};
@@ -849,10 +850,28 @@ pub fn steps_usage(reason: &str) -> CliOutput {
     }
 }
 
-pub fn steps_rejected(error: StepsError) -> CliOutput {
+/// Human tail for a task-verb refusal, painted after its stable code as
+/// `code: message` so scripts branch on the code and people read the message.
+fn task_refusal_message(code: &str, task: TaskAddress) -> String {
+    let display = task.display();
+    let message = match code {
+        "unknown-task" => format!("{display} is not on the board"),
+        "soft-deleted-task" => format!("{display} is deleted"),
+        "empty-title" => "the title is empty".to_string(),
+        "invalid-title" => "the title contains control characters".to_string(),
+        "empty-step-text" => "the step text is empty".to_string(),
+        "invalid-step-text" => "the step text contains control characters".to_string(),
+        "unknown-step" => format!("no step on {display} matches that id"),
+        "ambiguous-step" => format!("more than one step on {display} matches that id"),
+        _ => return code.to_string(),
+    };
+    format!("{code}: {message}")
+}
+
+pub fn steps_rejected(error: StepsError, task: TaskAddress) -> CliOutput {
     let (detail, code) = match error {
         StepsError::Store(detail) => (detail, 3),
-        other => (other.code().into(), 1),
+        other => (task_refusal_message(other.code(), task), 1),
     };
     CliOutput {
         stdout: String::new(),
@@ -924,10 +943,10 @@ pub fn status_usage(reason: &str) -> CliOutput {
     }
 }
 
-pub fn status_rejected(error: StatusError) -> CliOutput {
+pub fn status_rejected(error: StatusError, task: TaskAddress) -> CliOutput {
     let (detail, code) = match error {
         StatusError::Store(detail) => (detail, 3),
-        other => (other.code().into(), 1),
+        other => (task_refusal_message(other.code(), task), 1),
     };
     CliOutput {
         stdout: String::new(),
@@ -996,10 +1015,10 @@ pub fn edit_usage(reason: &str) -> CliOutput {
     }
 }
 
-pub fn edit_rejected(error: EditError) -> CliOutput {
+pub fn edit_rejected(error: EditError, task: TaskAddress) -> CliOutput {
     let (detail, code) = match error {
         EditError::Store(detail) => (detail, 3),
-        other => (other.code().into(), 1),
+        other => (task_refusal_message(other.code(), task), 1),
     };
     CliOutput {
         stdout: String::new(),

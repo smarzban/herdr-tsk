@@ -123,7 +123,7 @@ fn run_steps(args: Vec<String>) -> CliOutput {
     };
     match steps::run(task, action, input.state_dir) {
         Ok(result) => presenter::steps(result),
-        Err(error) => presenter::steps_rejected(error),
+        Err(error) => presenter::steps_rejected(error, task),
     }
 }
 
@@ -144,7 +144,7 @@ fn run_status(args: Vec<String>) -> CliOutput {
     };
     match status::run(task, status, input.state_dir) {
         Ok(result) => presenter::status(result),
-        Err(error) => presenter::status_rejected(error),
+        Err(error) => presenter::status_rejected(error, task),
     }
 }
 
@@ -171,7 +171,7 @@ fn run_edit(args: Vec<String>) -> CliOutput {
         input.state_dir,
     ) {
         Ok(result) => presenter::edited(result),
-        Err(error) => presenter::edit_rejected(error),
+        Err(error) => presenter::edit_rejected(error, task),
     }
 }
 

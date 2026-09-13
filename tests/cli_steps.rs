@@ -338,7 +338,10 @@ fn steps_on_soft_deleted_task_refuses_without_mutation() {
     let add = steps(&add);
     assert_eq!(add.code, 1);
     assert!(add.stdout.is_empty());
-    assert!(add.stderr.contains("soft-deleted-task"));
+    assert_eq!(
+        add.stderr,
+        format!("tsk steps: soft-deleted-task: {task} is deleted\n")
+    );
     assert_eq!(
         std::fs::read(&state_file).expect("read store after refusal"),
         before,
@@ -416,7 +419,10 @@ fn steps_unknown_number_is_unknown_task() {
 
     assert_eq!(output.code, 1);
     assert!(output.stdout.is_empty());
-    assert!(output.stderr.contains("unknown-task"));
+    assert_eq!(
+        output.stderr,
+        "tsk steps: unknown-task: T999 is not on the board\n"
+    );
     let _ = std::fs::remove_dir_all(dir);
 }
 

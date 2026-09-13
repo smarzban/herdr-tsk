@@ -353,6 +353,8 @@ After an uncertain add, inspect `tsk list --all --json`. Also check `--done` and
 | Edit | `unknown-task`, `soft-deleted-task`, `empty-title`, `invalid-title` |
 | Archive / unarchive | `unknown-task`, `soft-deleted-task` |
 
+A refusal prints as `tsk <command>: <code>: <message>` on stderr, for example `tsk status: unknown-task: T99 is not on the board`. Branch on the code; the message is for people and may change.
+
 Invalid thread flags fail argument parsing with exit 2; an invalid thread in a JSON plan is an item refusal with exit 1. An archived-project refusal saves nothing for that item; other valid plan items can still save.
 
 Human-readable output escapes stored terminal control characters. JSON retains the underlying text.
