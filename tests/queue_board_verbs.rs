@@ -656,6 +656,13 @@ fn help_card_uses_one_binding_per_row_and_opens_from_the_task_page() {
         Some(BoardIntent::OpenHelp),
         "question mark opens help from the non-editing task page"
     );
+    apply_intent(&mut domain, &mut model, BoardIntent::CloseLayer, None).expect("close Help");
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("task page");
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenHelp, None).expect("task Help");
+    assert!(
+        !model.has_unsaved_work(),
+        "Help over a clean task page must not invent unsaved work"
+    );
 }
 
 /// Help lists every binding, filters from its focused query, scrolls, and closes progressively.
@@ -833,6 +840,36 @@ fn help_card_lists_every_binding_scrolls_and_closes_on_esc() {
         Some(description_col),
         "continuation must align under the description:\n{wrapped_help}"
     );
+
+    let mut scroll_model = model.clone();
+    for _ in 0..scroll_model.help_query().chars().count() {
+        apply_intent(
+            &mut domain,
+            &mut scroll_model,
+            BoardIntent::HelpQueryBackspace,
+            None,
+        )
+        .expect("clear scroll query");
+    }
+    let mut scrolled_help = rendered_board(&scroll_model, 40, 10);
+    for _ in 0..200 {
+        apply_intent(
+            &mut domain,
+            &mut scroll_model,
+            BoardIntent::HelpScrollDown,
+            None,
+        )
+        .expect("scroll wrapped Help");
+        scrolled_help = rendered_board(&scroll_model, 40, 10);
+    }
+    assert!(
+        scroll_model.help_scroll() > tsk_tui::ui::input::help_card_lines().len() - 1,
+        "wrapped rows must extend the scroll horizon"
+    );
+    assert!(
+        scrolled_help.contains("ctrl+q") && scrolled_help.contains("page"),
+        "the wrapped tail must remain reachable:\n{scrolled_help}"
+    );
     assert!(
         !searched.contains("start / reopen"),
         "non-match remains:\n{searched}"
@@ -848,6 +885,10 @@ fn help_card_lists_every_binding_scrolls_and_closes_on_esc() {
     apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("task page");
     assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
     apply_intent(&mut domain, &mut model, BoardIntent::OpenHelp, None).expect("task help");
+    assert!(
+        !model.has_unsaved_work(),
+        "Help over a clean task page must not invent unsaved work"
+    );
     apply_intent(&mut domain, &mut model, BoardIntent::CloseLayer, None).expect("close task help");
     assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
 

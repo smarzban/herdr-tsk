@@ -1161,6 +1161,12 @@ pub fn apply_board_intent_with_save_recovery(
             | BoardIntent::CommandQueryBackspace
             | BoardIntent::CloseCommandSurface
             | BoardIntent::OpenHelp
+            | BoardIntent::CloseHelp
+            | BoardIntent::HelpQueryInsert(_)
+            | BoardIntent::HelpQueryInsertText(_)
+            | BoardIntent::HelpQueryBackspace
+            | BoardIntent::HelpScrollUp
+            | BoardIntent::HelpScrollDown
             | BoardIntent::CloseLayer
             | BoardIntent::OpenTaskPage
             | BoardIntent::StageRight

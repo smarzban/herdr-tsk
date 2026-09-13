@@ -1926,8 +1926,8 @@ fn help_card_wheel_scrolls_and_the_offset_clamps_to_the_last_page() {
     }
     let lines = tsk_tui::ui::input::help_card_lines();
     assert!(
-        model.help_scroll() < lines.len(),
-        "offset clamps inside the list: {}",
+        model.help_scroll() > lines.len(),
+        "wrapped screen rows, not source rows, define the compact scroll horizon: {}",
         model.help_scroll()
     );
     let paint = |model: &BoardModel| -> String {

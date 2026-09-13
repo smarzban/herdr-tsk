@@ -1735,14 +1735,10 @@ fn apply_board_intent(
             if model.input_mode != BoardInputMode::Help {
                 return Ok(IntentOutcome::None);
             }
-            // The painter records how far the card could scroll on the last frame, so the
-            // offset never runs past the last page (a stale record from a taller frame is
-            // still bounded by the list itself).
-            let horizon = model.help_max_scroll.get().min(
-                crate::ui::input::help_card_lines_for_query(&model.help_query)
-                    .len()
-                    .saturating_sub(1),
-            );
+            // The painter records the wrapped-row horizon for the last frame. Source catalog
+            // rows are not a valid second bound because one description may occupy several
+            // screen rows at compact widths.
+            let horizon = model.help_max_scroll.get();
             model.help_scroll = match intent {
                 BoardIntent::HelpScrollUp => model.help_scroll.saturating_sub(1),
                 _ => model.help_scroll.saturating_add(1).min(horizon),

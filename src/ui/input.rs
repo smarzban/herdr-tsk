@@ -1857,6 +1857,7 @@ fn map_save_recovery(key: KeyEvent) -> Option<BoardIntent> {
         return None;
     }
     match key.code {
+        KeyCode::Char('?') => Some(BoardIntent::OpenHelp),
         KeyCode::Char('r') | KeyCode::Enter => Some(BoardIntent::RetrySave),
         KeyCode::Char('c') | KeyCode::Esc => Some(BoardIntent::CancelSave),
         KeyCode::Char('j') | KeyCode::Down => Some(BoardIntent::SelectNext),

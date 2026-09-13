@@ -431,6 +431,9 @@ pub fn map_responsive_board_mouse(
     let pos = point(mouse.column, mouse.row);
     match mouse.kind {
         MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
+            if model.input_mode() == BoardInputMode::Help {
+                return map_board_mouse(model, hits, mouse);
+            }
             return focused_mouse_area(model, area)
                 .contains(pos)
                 .then(|| map_board_mouse(model, hits, mouse))?;

@@ -1653,6 +1653,19 @@ fn help_and_palette_close_on_task_column_clicks_without_dispatching() {
             click_map(&model, &hits, click.column, click.row),
             Some(expected)
         );
+        if mode == BoardInputMode::Help {
+            let wheel = MouseEvent {
+                kind: MouseEventKind::ScrollDown,
+                column: geometry.task_content().x + 6,
+                row: 6,
+                modifiers: KeyModifiers::NONE,
+            };
+            assert_eq!(
+                map_responsive_board_mouse(&model, &hits, AREA_130, wheel),
+                Some(BoardIntent::HelpScrollDown),
+                "Help owns wheel input across the centered card"
+            );
+        }
     }
 }
 

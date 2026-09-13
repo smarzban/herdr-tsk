@@ -701,7 +701,7 @@ pub struct BoardModel {
     pub(super) help_scroll: usize,
     /// Furthest help scroll the last painted card could show (renderer-recorded).
     pub(super) help_max_scroll: Cell<usize>,
-    /// Non-input surface to restore after help closes (`Normal` or `TaskPage`).
+    /// Underlying surface to restore after Help closes.
     pub(super) help_return_mode: BoardInputMode,
     pub(super) input_mode: BoardInputMode,
     /// The one active board form. It is present for expanded quick-add and task editing alike;
@@ -1242,7 +1242,12 @@ impl BoardModel {
         {
             return true;
         }
-        if self.form.is_some() && self.input_mode != BoardInputMode::TaskPage {
+        let underlying_mode = if self.input_mode == BoardInputMode::Help {
+            self.help_return_mode
+        } else {
+            self.input_mode
+        };
+        if self.form.is_some() && underlying_mode != BoardInputMode::TaskPage {
             return true;
         }
         self.quick_add
