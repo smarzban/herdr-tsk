@@ -195,6 +195,69 @@ for (const width of [110, 130]) {
   });
 }
 
+test("projects overview opens a live project preview and keeps its task seat", async ({
+  page,
+}) => {
+  await open(page, 110);
+  await page.keyboard.press("3");
+  await expect(page.locator(".tsk-project-row")).toHaveCount(1);
+  await expect(page.locator(".tsk-wide-split")).toHaveCount(0);
+  await page.locator(".tsk-project-row").click();
+  await expect(page.locator(".tsk-wide-split.is-split")).toBeVisible();
+  await page.keyboard.press("ArrowLeft");
+  await expect(page.locator(".tsk-wide-split")).toHaveCount(0);
+  await page.locator(".tsk-project-row").click();
+  await page.keyboard.press("ArrowDown");
+  await expect(page.locator(".tsk-wide-split.is-split")).toBeVisible();
+  await expect(page.locator(".tsk-project-preview.is-preview")).toBeVisible();
+  await page.locator("[data-preview-task]").first().click();
+  await expect(page.locator(".tsk-wide-split.is-rail")).toBeVisible();
+  await page.locator("[data-project-row]").first().click();
+  await expect(page.locator(".tsk-wide-split.is-split")).toBeVisible();
+  await page.keyboard.press("ArrowRight");
+  await expect(page.locator(".tsk-wide-split.is-rail")).toBeVisible();
+  await expect(page.locator(".tsk-project-preview.is-live")).toBeVisible();
+  await expect(page.locator("[data-preview-task]")).not.toHaveCount(0);
+  await page.keyboard.press("t");
+  await expect(
+    page.locator('[role="dialog"][aria-label="project thread filter"]'),
+  ).toBeVisible();
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".tsk-task-column")).toHaveAttribute(
+    "data-status",
+    "blocked",
+  );
+  await page.locator("[data-project-row]").first().click();
+  await expect(page.locator(".tsk-wide-split.is-split")).toBeVisible();
+  await page.keyboard.press("ArrowRight");
+  await expect(page.locator(".tsk-project-preview.is-live")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".tsk-wide-split.is-split")).toBeVisible();
+});
+
+test("projects preview quick-add shows the title while editing notes", async ({
+  page,
+}) => {
+  await open(page, 110);
+  await page.keyboard.press("3");
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("+");
+  await page.locator("#tsk-add").fill("Preview capture");
+  await page.keyboard.press("Tab");
+  await expect(page.locator(".tsk-task-column")).toContainText(
+    "Preview capture",
+  );
+  await expect(page.locator(".tsk-task-header.is-bold")).toContainText(
+    "Preview capture",
+  );
+  await expect(page.locator("#tsk-preview-edit")).toBeVisible();
+  await page.locator("#tsk-preview-edit").fill("preview note");
+  await page.keyboard.press("Control+Enter");
+  await expect(page.locator(".tsk-page-notes")).toContainText("preview note");
+});
+
 test("landing column readout excludes board padding", async ({ page }) => {
   await open(page, 78);
   await page.evaluate(() => {

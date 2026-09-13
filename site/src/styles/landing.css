@@ -985,6 +985,89 @@ html[data-theme="light"] .pane {
   white-space: pre-wrap;
 }
 
+.tsk-rail-project-row .tsk-row-main {
+  display: flex;
+  min-width: 0;
+  white-space: pre-wrap;
+}
+
+.tsk-rail-project-name {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow-wrap: anywhere;
+}
+
+.tsk-rail-project-counts {
+  flex: 0 0 auto;
+  white-space: pre;
+}
+
+.tsk-project-preview {
+  padding: 0 0.8rem;
+}
+
+.tsk-project-preview.is-preview {
+  opacity: 0.65;
+}
+
+.tsk-project-preview-header {
+  display: flex;
+  align-items: baseline;
+  gap: 1ch;
+  min-width: 0;
+  padding-top: 0.15rem;
+  white-space: nowrap;
+}
+
+.tsk-project-preview-header .sec {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  letter-spacing: 0;
+}
+
+.tsk-project-preview-header.is-bold .sec {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.tsk-project-preview-header .tsk-state-slot {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--dim);
+}
+
+.tsk-project-preview > .tsk-list {
+  min-height: 0;
+}
+
+.tsk-project-preview .tsk-task-rule {
+  flex: none;
+  height: 1lh;
+  margin: 0.25rem 0 0.5rem;
+  background: linear-gradient(var(--line-2), var(--line-2)) center / 100% 1px no-repeat;
+}
+
+.tsk-project-preview .tsk-row-main {
+  display: flex;
+  min-width: 0;
+  white-space: pre-wrap;
+}
+
+.tsk-project-preview .tsk-row-title {
+  min-width: 0;
+}
+
+.tsk-project-preview .tsk-title-line {
+  display: block;
+  white-space: pre-wrap;
+}
+
+.tsk-project-preview .tsk-row-prefix {
+  flex: 0 0 auto;
+  white-space: pre;
+}
+
 .tsk-task-column {
   display: flex;
   min-width: 0;
