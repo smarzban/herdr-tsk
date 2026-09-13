@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use tsk_tui::cli::run_with;
+use tsk_tui::cli::{run_with, run_with_terminal_width};
 use tsk_tui::domain::{DomainState, HumanStatus, ProvenanceOrigin, TaskScope};
 use tsk_tui::store::TaskStore;
 
@@ -79,6 +79,15 @@ fn state_dir_arg(dir: &Path) -> String {
 
 fn list(args: &[String]) -> tsk_tui::cli::CliOutput {
     run_with(args, Cursor::new(Vec::<u8>::new()), true)
+}
+
+fn list_at_width(args: &[String], terminal_width: usize) -> tsk_tui::cli::CliOutput {
+    run_with_terminal_width(
+        args,
+        Cursor::new(Vec::<u8>::new()),
+        true,
+        Some(terminal_width),
+    )
 }
 
 fn create_task(state: &mut DomainState, title: &str, scope: TaskScope, status: HumanStatus) {
@@ -843,6 +852,136 @@ fn human_list_escapes_terminal_control_titles_without_changing_json() {
 }
 
 #[test]
+fn direct_human_list_wraps_notes_with_a_hanging_indent() {
+    let dir = temp_state_dir("wrapped-notes");
+    let mut state = DomainState::new();
+    let task = state
+        .create(
+            "wrap target",
+            Some("alpha beta gamma delta epsilon".into()),
+            TaskScope::Global,
+            ProvenanceOrigin::Manual,
+            Some("release-2026-long-thread".into()),
+        )
+        .expect("create wrapping notes task");
+    state
+        .add_step(task, "implement the surprisingly long step")
+        .expect("seed wrapping step");
+    TaskStore::new(&dir).save(&state).expect("seed store");
+
+    let output = list_at_width(
+        &[
+            "tsk".into(),
+            "list".into(),
+            task.to_string(),
+            "--state-dir".into(),
+            state_dir_arg(&dir),
+        ],
+        24,
+    );
+
+    assert_eq!(output.code, 0);
+    assert_eq!(
+        output.stdout,
+        "READY\n - 1 wrap target\n   alpha beta gamma \n   delta epsilon\n\n   [ ] implement the \n       surprisingly \n       long step\n\n   #release-2026-long-th\n   read\n"
+    );
+    assert!(
+        output.stdout.lines().all(|line| line.len() <= 24),
+        "every explicit row fits the reported terminal width: {}",
+        output.stdout
+    );
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn scoped_human_list_wraps_task_rows_and_scope_labels() {
+    let dir = temp_state_dir("wrapped-list-rows");
+    let mut state = DomainState::new();
+    create_task_with_thread(
+        &mut state,
+        "a very long task title that wraps",
+        TaskScope::Project {
+            path: "/projects/a-very-long-project-name".into(),
+        },
+        HumanStatus::Ready,
+        Some("release-2026-long"),
+    );
+    TaskStore::new(&dir).save(&state).expect("seed store");
+
+    let output = list_at_width(
+        &[
+            "tsk".into(),
+            "list".into(),
+            "--all".into(),
+            "--state-dir".into(),
+            state_dir_arg(&dir),
+        ],
+        24,
+    );
+
+    assert_eq!(output.code, 0);
+    assert_eq!(
+        output.stdout,
+        "READY\n  a-very-long-project-na\n  me\n    - 1 a very long \n        task title that \n        wraps \n        #release-2026-lo\n        ng\n"
+    );
+    assert!(
+        output.stdout.lines().all(|line| line.len() <= 24),
+        "every list row fits the reported terminal width: {}",
+        output.stdout
+    );
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn direct_human_list_keeps_note_lines_and_escapes_other_controls() {
+    let _env = env_lock();
+    let dir = temp_state_dir("terminal-control-notes");
+    let notes = "first\tcell\nsecond\u{001b}]52;c;clipboard\u{0007}";
+    let mut state = DomainState::new();
+    let task = state
+        .create(
+            "notes target",
+            Some(notes.into()),
+            TaskScope::Global,
+            ProvenanceOrigin::Manual,
+            Some("release".into()),
+        )
+        .expect("create notes task");
+    TaskStore::new(&dir).save(&state).expect("seed store");
+
+    let human = list(&[
+        "tsk".into(),
+        "list".into(),
+        task.to_string(),
+        "--state-dir".into(),
+        state_dir_arg(&dir),
+    ]);
+    assert_eq!(human.code, 0);
+    assert_eq!(
+        human.stdout,
+        "READY\n - 1 notes target\n   first\\u{0009}cell\n   second\\u{001b}]52;c;clipboard\\u{0007}\n\n   #release\n"
+    );
+    assert!(!human.stdout.contains('\t'));
+    assert!(!human.stdout.contains('\u{001b}'));
+    assert!(!human.stdout.contains('\u{0007}'));
+
+    let json = list(&[
+        "tsk".into(),
+        "list".into(),
+        task.to_string(),
+        "--json".into(),
+        "--state-dir".into(),
+        state_dir_arg(&dir),
+    ]);
+    let rows: Vec<serde_json::Value> = serde_json::from_str(&json.stdout).expect("JSON rows");
+    assert_eq!(rows[0]["notes"], notes);
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn human_list_escapes_terminal_control_thread_markers_without_changing_json() {
     let _env = env_lock();
     let dir = temp_state_dir("terminal-control-thread");
@@ -1201,10 +1340,10 @@ fn state_with_steps(done_first: bool) -> (DomainState, tsk_tui::domain::Step) {
     let id = state
         .create(
             "steps target",
-            None,
+            Some("First note\nSecond note".into()),
             TaskScope::Global,
             ProvenanceOrigin::Manual,
-            None,
+            Some("release".into()),
         )
         .expect("seed steps task");
     state.add_step(id, "First step").expect("seed first step");
@@ -1248,8 +1387,8 @@ fn list_task_prints_step_lines_with_state_and_short_id() {
     assert!(output.stderr.is_empty());
     assert_eq!(
         output.stdout,
-        format!("READY\n - 1 steps target\n   [x] aaa1 First step\n   [ ] aaa2 Second step\n"),
-        "one line per step with state and unambiguous short id"
+        "READY\n - 1 steps target\n   First note\n   Second note\n\n   [x] First step\n   [ ] Second step\n\n   #release\n",
+        "direct detail separates notes, steps, and the trailing thread"
     );
     assert!(
         first_step.id.to_string().starts_with("aaa1"),
@@ -1265,28 +1404,13 @@ fn list_task_prints_step_lines_with_state_and_short_id() {
         state_dir_arg(&dir),
     ]);
     assert_eq!(json.code, 0);
-    let rows: Vec<serde_json::Value> = serde_json::from_str(&json.stdout).expect("JSON rows");
-    assert_eq!(rows.len(), 1);
-    for key in ["id", "number", "project", "status", "thread", "title"] {
-        assert!(rows[0].get(key).is_some(), "single-task row keeps {key}");
-    }
+    let expected_json = format!(
+        "[{{\"id\":\"{}\",\"number\":1,\"project\":null,\"status\":\"ready\",\"title\":\"steps target\",\"notes\":\"First note\\nSecond note\",\"steps\":[{{\"id\":\"{}\",\"done\":true,\"short_id\":\"aaa1\",\"text\":\"First step\"}},{{\"id\":\"aaa22222-0000-4000-8000-000000000002\",\"done\":false,\"short_id\":\"aaa2\",\"text\":\"Second step\"}}],\"thread\":\"release\"}}]\n",
+        task, first_step.id
+    );
     assert_eq!(
-        rows[0]["steps"],
-        serde_json::json!([
-            {
-                "id": first_step.id.to_string(),
-                "done": true,
-                "short_id": "aaa1",
-                "text": "First step",
-            },
-            {
-                "id": "aaa22222-0000-4000-8000-000000000002",
-                "done": false,
-                "short_id": "aaa2",
-                "text": "Second step",
-            },
-        ]),
-        "single-task JSON carries the steps with ids, state, and short ids"
+        json.stdout, expected_json,
+        "direct JSON keeps title, notes, steps, and thread together in contract order"
     );
 
     let _ = std::fs::remove_dir_all(dir);
@@ -1326,15 +1450,13 @@ fn list_task_without_steps_keeps_task_rows_and_rejects_conflicting_flags() {
     assert_eq!(plain_json.code, 0);
     let rows: Vec<serde_json::Value> = serde_json::from_str(&plain_json.stdout).expect("JSON rows");
     assert_eq!(rows.len(), 1);
-    assert_eq!(
-        rows[0]
-            .as_object()
-            .expect("JSON row")
-            .keys()
-            .map(String::as_str)
-            .collect::<Vec<_>>(),
-        vec!["id", "number", "project", "status", "thread", "title"],
-        "a task without steps keeps today's exact JSON row shape"
+    assert_eq!(rows[0]["notes"], serde_json::Value::Null);
+    assert_eq!(rows[0]["steps"], serde_json::json!([]));
+    assert_eq!(rows[0]["thread"], serde_json::Value::Null);
+    let raw = plain_json.stdout.as_str();
+    assert!(
+        raw.contains("\"status\":\"ready\",\"title\":\"plain target\",\"notes\":null,\"steps\":[],\"thread\":null"),
+        "direct JSON keeps empty detail fields and their contract order: {raw}"
     );
 
     for extra in ["--desk", "--all", "--done", "--deleted"] {
@@ -1773,7 +1895,6 @@ fn human_output_appends_thread_marker_iff_row_threaded_snapshots() {
         Some("steps"),
     );
     state.add_step(step, "Keep this line").expect("add step");
-    let step_short_id = state.get(step).expect("step task").steps[0].id.to_string()[..1].to_owned();
     TaskStore::new(&dir).save(&state).expect("seed store");
     let project_name = repo
         .file_name()
@@ -1814,7 +1935,7 @@ fn human_output_appends_thread_marker_iff_row_threaded_snapshots() {
     ]);
     assert_eq!(
         single.stdout,
-        format!("DONE\n - 4 step threaded #steps\n   [ ] {step_short_id} Keep this line\n")
+        "DONE\n - 4 step threaded\n   [ ] Keep this line\n\n   #steps\n"
     );
 
     let _ = std::fs::remove_dir_all(repo);

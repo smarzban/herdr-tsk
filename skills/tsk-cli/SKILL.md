@@ -1,7 +1,7 @@
 ---
 name: tsk-cli
 description: Work the user's tsk task board from the command line. Use when asked to add, update, edit, start, block, finish, archive, or restore a task on the board (or "tsk", "the tsk board", "the desk"), to add or tick steps, or to answer "what's on the board", "what's next", "what's on deck", "what needs me". Always `tsk add|list|status|edit|steps|archive|trash`, never the TUI.
-version: 1.1.0
+version: 1.2.0
 ---
 
 # tsk: the user's task board
@@ -28,10 +28,10 @@ stop. Never run `install.sh`, `brew`, or `cargo build` unless they asked.
 | What's next / on deck | `tsk list`, READY group |
 | What needs the user | `tsk list`, BLOCKED and REVIEW groups |
 | What's in motion | `tsk list`, STARTED group |
-| One task and its steps | `tsk list T12` |
+| One complete task | `tsk list T12` |
 | Start / block / hand back / finish | `tsk status T12 start` · `blocked` · `review` · `done` |
 | Change title or notes | `tsk edit T12 --title "…"` · `--notes "…"` |
-| Steps | `tsk steps T12 add "…"` · `toggle <id>` · `rename <id> "…"` · `remove <id>` |
+| Steps | Read ids with `tsk list T12 --json`; then `tsk steps T12 add|toggle|rename|remove` |
 | Archive / unarchive | `tsk archive T12` · `tsk unarchive T12` · `tsk project archive widget` |
 | Done, archived, deleted | `tsk list --done` · `--archived` · `--deleted` |
 | Bring back a deleted task | `tsk trash restore T12` |
@@ -106,23 +106,28 @@ tsk list --desk          # same for the desk
 tsk list --all           # every scope, grouped by status then project
 tsk list --thread rel-1  # filter within the selected scope
 tsk list --done | --deleted | --archived
-tsk list T12             # one task, with its steps
+tsk list T12             # one task, with notes, steps, and thread
 tsk list --json
 ```
 
-- Human output groups by status: `STARTED`, `READY`, `BLOCKED`, `REVIEW`; a row is
+- Human output groups by status: `STARTED`, `READY`, `BLOCKED`, `REVIEW`; a filtered row is
   ` - <number> <title> #<thread>`. Map board language onto it: *on deck* = READY, *in motion* =
-  STARTED, *needs you* = BLOCKED + REVIEW.
+  STARTED, *needs you* = BLOCKED + REVIEW. All human list content wraps to the attached terminal
+  width with hanging indentation. Direct task output uses separate notes, steps, and `#thread`
+  blocks in that order, with a blank line between blocks that exist; steps show state and text
+  without ids.
 - `--json` is a flat array of `id`, `number`, `title`, `status`, `project` (`null` for desk),
-  `thread` (`null` if none), in display order. `tsk list T12 --json` adds `steps`:
-  `id`, `text`, `done`, `short_id`.
+  `thread` (`null` if none), in display order. `tsk list T12 --json` returns the complete task in
+  this field order: `id`, `number`, `project`, `status`, `title`, `notes`, `steps`, `thread`.
+  Missing notes are `null`, missing steps are `[]`; each step carries `id`, `done`, `short_id`,
+  and `text`.
 - Scope selectors (`-p`, `--desk`, `--all`) are mutually exclusive, so are `--done` and
   `--deleted`. An invalid `--thread` is exit 2, not an empty result.
 - `tsk list T12` ignores cwd and scope and finds the task anywhere, including done and live
   soft-deleted tasks. A task already moved to trash needs `--deleted`. Do not combine a task
   operand with scope, thread, or status filters.
 - `--deleted` shows live soft-deletes plus `trash.jsonl` entries (kept 30 days), newest first.
-- Human output escapes terminal controls in titles, steps, and project names; JSON does not.
+- Human output escapes terminal controls in titles, notes, steps, and project names; JSON does not.
 
 ## Status and edit
 
@@ -150,13 +155,14 @@ tsk steps T12 add "Write the failing test"
 tsk steps T12 toggle a3
 tsk steps T12 rename a3 "Write the failing test first"
 tsk steps T12 remove a3
-tsk list T12              # shows [x]/[ ] and each step's short id
+tsk list T12 --json       # shows [x]/[ ] state and each step's short_id
 ```
 
-- A step short id is the shortest unambiguous prefix of the step id, printed by `tsk list T12`.
+- A step short id is the shortest unambiguous prefix of the step id, printed by
+  `tsk list T12 --json`.
 - `toggle` flips: a retry after an unseen success flips it back. `rename` is idempotent on
   trimmed text. `remove` is not: a retry after an unseen success is `unknown-step`. Run
-  `tsk list T12` before retrying any `steps` command.
+  `tsk list T12 --json` before retrying any `steps` command.
 
 ## Archive
 

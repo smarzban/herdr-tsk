@@ -113,7 +113,13 @@ fn update_main(args: &[String]) -> ExitCode {
 fn headless_main(args: Vec<String>) -> ExitCode {
     let stdin = io::stdin();
     let stdin_is_tty = stdin.is_terminal();
-    let output = tsk_tui::cli::run_with(args, stdin, stdin_is_tty);
+    let terminal_width = io::stdout()
+        .is_terminal()
+        .then(|| crossterm::terminal::size().ok())
+        .flatten()
+        .map(|(columns, _)| usize::from(columns))
+        .filter(|width| *width > 0);
+    let output = tsk_tui::cli::run_with_terminal_width(args, stdin, stdin_is_tty, terminal_width);
     if io::stdout().write_all(output.stdout.as_bytes()).is_err() {
         return ExitCode::from(1);
     }
