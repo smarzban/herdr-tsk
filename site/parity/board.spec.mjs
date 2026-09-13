@@ -362,6 +362,19 @@ test("task page and expanded quick-add keep the full reversible form ring", asyn
   ).toHaveCount(0);
 });
 
+test("Tab does not persist an empty task title", async ({ page }) => {
+  await page.goto("http://127.0.0.1:4180/");
+  await page.locator('[data-tab="project"]').click();
+  await page.locator("#board-demo").focus();
+  await page.keyboard.press("Enter");
+  const originalTitle = await page.locator(".tsk-task-header").textContent();
+  await page.keyboard.press("Control+e");
+  await page.locator("#tsk-edit").fill("");
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".tsk-task-header")).toHaveText(originalTitle || "");
+});
+
 test("project preview expanded quick-add uses the same ring without saving", async ({
   page,
 }) => {

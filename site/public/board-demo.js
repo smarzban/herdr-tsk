@@ -2496,7 +2496,10 @@ import { parseCapture } from "./capture.js";
 
   function persistPageText(form, task) {
     if (!task) return;
-    if (form.editField === "title") task.title = form.editDraft;
+    if (form.editField === "title") {
+      const title = form.editDraft.trim();
+      if (title) task.title = title;
+    }
     if (form.editField === "notes") task.notes = form.editDraft;
   }
 
