@@ -229,7 +229,12 @@ fn projects_preview_stages_bind_a_nested_project_board_and_keep_the_index_cursor
         Some(first_path)
     );
     let (split_rows, split_hits) = render(&model, 110, 30);
+    let split = resolve_responsive(110, 30, WideStage::Split);
     assert!(split_rows.iter().any(|row| row.contains("alpha task")));
+    assert!(
+        column_text(&split_rows, split.task_content(), 1).contains("alpha"),
+        "the split preview should name the selected project in its top chrome"
+    );
     assert!(split_hits
         .regions
         .iter()
@@ -241,9 +246,14 @@ fn projects_preview_stages_bind_a_nested_project_board_and_keep_the_index_cursor
     assert_eq!(model.wide_stage(), WideStage::Rail);
 
     let (rows, hits) = render(&model, 110, 30);
+    let rail = resolve_responsive(110, 30, WideStage::Rail);
     assert!(rows
         .iter()
         .any(|row| row.contains("alpha task") || row.contains("beta task")));
+    assert!(
+        column_text(&rows, rail.task_content(), 1).contains("alpha"),
+        "the rail preview should keep the selected project name in its top chrome"
+    );
     assert!(hits
         .regions
         .iter()

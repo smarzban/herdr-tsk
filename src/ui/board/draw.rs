@@ -1497,6 +1497,9 @@ fn draw_projects_wide_board(
     };
 
     let right = model.right_seat();
+    let right_project_name = right
+        .and_then(BoardModel::active_project)
+        .map(project_option_label);
     let right_view = right.map(BoardModel::queue_view);
     let right_payloads = right.map(OverlayPayloads::collect);
     let right_area = responsive.task_content();
@@ -1701,6 +1704,15 @@ fn draw_projects_wide_board(
                         right_modal.as_ref(),
                     ),
                     None,
+                )
+            } else if let Some(project_name) = right_project_name.as_deref() {
+                render::draw_project_preview_frame(
+                    frame,
+                    right_frame,
+                    right_geo,
+                    column_rect(right_area),
+                    project_name,
+                    stage == tier::WideStage::Rail,
                 )
             } else {
                 render::draw_queue_frame_without_selector(

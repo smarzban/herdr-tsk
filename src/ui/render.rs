@@ -796,7 +796,7 @@ pub fn draw_queue_frame(
     geo: &TierGeometry,
     surface: Rect,
 ) -> (QueueHitMap, Option<(usize, usize)>) {
-    draw_queue_frame_impl(frame, model, geo, surface, false, true, true)
+    draw_queue_frame_impl(frame, model, geo, surface, false, true, true, None)
 }
 
 /// Paint a queue column without its navigation strip or footer. Wide project previews use this
@@ -807,7 +807,53 @@ pub fn draw_queue_frame_without_selector(
     geo: &TierGeometry,
     surface: Rect,
 ) -> (QueueHitMap, Option<(usize, usize)>) {
-    draw_queue_frame_impl(frame, model, geo, surface, false, false, false)
+    draw_queue_frame_impl(frame, model, geo, surface, false, false, false, None)
+}
+
+/// Paint a project preview column with its project name in the selector slot.
+///
+/// The preview has no navigation tabs of its own, but the reserved top row still names the
+/// project whose board is visible. `bold` is used for the live Rail seat and omitted for the
+/// dim Split preview.
+pub fn draw_project_preview_frame(
+    frame: &mut Frame<'_>,
+    model: &QueueFrameModel<'_>,
+    geo: &TierGeometry,
+    surface: Rect,
+    project_name: &str,
+    bold: bool,
+) -> (QueueHitMap, Option<(usize, usize)>) {
+    draw_queue_frame_impl(
+        frame,
+        model,
+        geo,
+        surface,
+        false,
+        false,
+        false,
+        Some((project_name, bold)),
+    )
+}
+
+fn paint_project_preview_header(
+    frame: &mut Frame<'_>,
+    geo: &TierGeometry,
+    surface: Rect,
+    project_name: &str,
+    bold: bool,
+) {
+    let Some(row) = geo.selector_row else {
+        return;
+    };
+    let text = format!(" {project_name}");
+    let style = if bold { style_bold() } else { style_dim() };
+    put_line(
+        frame,
+        surface,
+        row,
+        geo.row_width,
+        paint_bounded_line(&text, geo.row_width, style),
+    );
 }
 
 /// Paint the stage G rail: the board list at rail width, no meta column, no done drawer,
@@ -820,7 +866,7 @@ pub fn draw_rail_frame(
     geo: &TierGeometry,
     surface: Rect,
 ) -> QueueHitMap {
-    let (hits, _) = draw_queue_frame_impl(frame, model, geo, surface, true, true, true);
+    let (hits, _) = draw_queue_frame_impl(frame, model, geo, surface, true, true, true, None);
     let surface = clipped_area(surface, frame.area());
     let buffer = frame.buffer_mut();
     for y in surface.top()..surface.bottom() {
@@ -1094,6 +1140,7 @@ pub struct StatusHint<'a> {
     pub keys: &'a str,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_queue_frame_impl(
     frame: &mut Frame<'_>,
     model: &QueueFrameModel<'_>,
@@ -1102,6 +1149,7 @@ fn draw_queue_frame_impl(
     rail: bool,
     selector: bool,
     footer: bool,
+    project_header: Option<(&str, bool)>,
 ) -> (QueueHitMap, Option<(usize, usize)>) {
     let surface = clipped_area(surface, frame.area());
     let input_slot_geo = bottom_input_slot_geometry(*geo, &model.overlay);
@@ -1263,6 +1311,10 @@ fn draw_queue_frame_impl(
 
     if footer {
         paint_footer(frame, model, geo, surface, &mut hits, None, false);
+    }
+
+    if let Some((project_name, bold)) = project_header {
+        paint_project_preview_header(frame, geo, surface, project_name, bold);
     }
 
     paint_overlay(frame, &model.overlay, geo, surface, &mut hits);
