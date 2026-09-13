@@ -306,12 +306,11 @@ fn query_desk(
 
     // ON DECK · desk is the personal backlog: desk-scope ready and open tasks only.
     // Project backlogs live on their project boards, never here.
-    let mut deck: Vec<&Task> = live
+    let deck: Vec<&Task> = live
         .iter()
         .copied()
         .filter(|t| is_on_deck_status(t.status) && matches!(t.scope, TaskScope::Global))
         .collect();
-    sort_by_created_asc(&mut deck);
 
     let mut sections = Vec::new();
     push_needs_you(&mut sections, &need);
@@ -493,12 +492,11 @@ fn query_thread_view(
         .filter(|t| t.status == HumanStatus::Started)
         .collect();
     sort_by_status_change_desc(&mut motion);
-    let mut deck: Vec<&Task> = live
+    let deck: Vec<&Task> = live
         .iter()
         .copied()
         .filter(|t| is_on_deck_status(t.status))
         .collect();
-    sort_by_created_asc(&mut deck);
 
     let mut sections = Vec::new();
     push_needs_you(&mut sections, &need);
@@ -543,12 +541,11 @@ fn query_project_focus(
 
     // `open` carries both NEEDS YOU and ON DECK rows: FIFO order for the backlog,
     // then NEEDS YOU re-sorted to status-change recency after the split.
-    let mut open: Vec<&Task> = live
+    let open: Vec<&Task> = live
         .iter()
         .copied()
         .filter(|t| !matches!(t.status, HumanStatus::Started | HumanStatus::Done) && admits(t))
         .collect();
-    sort_by_created_asc(&mut open);
     let (mut need, ready) = split_needs_you(&open);
     sort_by_status_change_desc(&mut need);
 
