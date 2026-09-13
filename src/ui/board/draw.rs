@@ -1548,6 +1548,7 @@ fn draw_projects_wide_board(
     let mut right_header_state = String::new();
     let mut right_header_glyph = "○";
     let mut right_header_task = None;
+    let mut right_header_visible = false;
     let mut right_header_title_cursor = None;
     if let (Some(right), Some(geo), Some(_)) =
         (right, right_geo.as_ref(), right_task_overlay.as_ref())
@@ -1555,38 +1556,50 @@ fn draw_projects_wide_board(
         if let Some(form) = right.form.as_ref() {
             if let Some(task_id) = form.task_id() {
                 if let Some(task) = right.tasks.iter().find(|task| task.id == task_id) {
+                    right_header_visible = true;
                     right_header_task = Some(task.id);
                     right_header_glyph = render::status_glyph(task.status);
                     right_header_identifier = task.board_identifier();
                     right_header_state = task_header_state(right, form, task);
-                    let width = geo.row_width as usize;
-                    let glyph_width = render::display_width(right_header_glyph);
-                    let identifier_width = right_header_identifier
-                        .as_deref()
-                        .map(render::display_width)
-                        .unwrap_or(0);
-                    let state_width = render::display_width(&right_header_state) + 1;
-                    let room = render::task_header_title_room(
-                        width,
-                        glyph_width,
-                        identifier_width,
-                        state_width,
-                    );
-                    if right.input_mode() == BoardInputMode::EditTitle {
-                        let (title, cursor) = escaped_line_window(&form.title, room.max(1));
-                        right_header_title = title;
-                        right_header_title_cursor = Some(cursor);
-                    } else {
-                        right_header_title = form.title.value().to_string();
-                    }
+                }
+            } else if !form.is_task() {
+                // Expanded quick-add has no durable task to bind, but it still owns the right
+                // column. Keep its draft title in the same header slot as a saved task instead
+                // of letting draw_task_column replace it with the empty-pane hint.
+                right_header_visible = true;
+                right_header_glyph = render::status_glyph(HumanStatus::Ready);
+                right_header_state = editing_field(right)
+                    .map(|field| format!("editing {field}"))
+                    .unwrap_or_else(|| "ready".to_string());
+            }
+            if right_header_visible {
+                let width = geo.row_width as usize;
+                let glyph_width = render::display_width(right_header_glyph);
+                let identifier_width = right_header_identifier
+                    .as_deref()
+                    .map(render::display_width)
+                    .unwrap_or(0);
+                let state_width = render::display_width(&right_header_state) + 1;
+                let room = render::task_header_title_room(
+                    width,
+                    glyph_width,
+                    identifier_width,
+                    state_width,
+                );
+                if right.input_mode() == BoardInputMode::EditTitle {
+                    let (title, cursor) = escaped_line_window(&form.title, room.max(1));
+                    right_header_title = title;
+                    right_header_title_cursor = Some(cursor);
+                } else {
+                    right_header_title = form.title.value().to_string();
                 }
             }
         }
     }
-    let right_header = right_header_task.map(|task| render::TaskColumnHeader {
+    let right_header = right_header_visible.then_some(render::TaskColumnHeader {
         glyph: right_header_glyph,
         identifier: right_header_identifier.as_deref(),
-        identifier_task: Some(task),
+        identifier_task: right_header_task,
         title: &right_header_title,
         title_cursor_col: right_header_title_cursor,
         state: &right_header_state,

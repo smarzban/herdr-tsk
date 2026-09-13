@@ -26,6 +26,10 @@ the GitHub release notes verbatim.
 - Help is now a searchable shortcut reference with a focused search field, dim divider, and one binding per row grouped by function; long descriptions wrap beneath their description column. It stays within half the terminal height except below 15 rows, where it may grow to six rows to keep a result visible. Press `?` from any non-text surface; typing filters by key or action, and `Esc` clears the search before closing.
 - The bundled agent skill now uses JSON as the default contract for every `tsk list` read. Human listings are reserved for output shown to the user or interactive troubleshooting.
 
+### Fixed
+
+- Expanded quick-add in a project preview now keeps its draft title in the right-column header and renders the active notes line with the editor's focus style.
+
 ## v0.8.2
 
 ### Breaking

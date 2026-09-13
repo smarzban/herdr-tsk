@@ -2540,6 +2540,7 @@ mod tests {
         KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
     };
     use ratatui::backend::TestBackend;
+    use ratatui::style::Modifier;
     use ratatui::Terminal;
 
     use crate::context::InvocationSnapshot;
@@ -2754,6 +2755,95 @@ mod tests {
             .regions
             .iter()
             .any(|hit| matches!(hit.target, crate::ui::render::QueueHitTarget::FormTitle)));
+    }
+
+    /// A project preview owns the expanded capture form in the right seat. Its title must stay
+    /// in the column header, and the active notes line must retain the editor's bold treatment.
+    #[test]
+    fn projects_preview_expanded_quick_add_paints_title_and_active_notes() {
+        let area = Rect::new(0, 0, 110, 30);
+        let (mut domain, mut model, _) = projects_preview_fixture();
+        apply_intent(&mut domain, &mut model, BoardIntent::SelectNext, None)
+            .expect("select preview project");
+        apply_intent(&mut domain, &mut model, BoardIntent::StageRight, None)
+            .expect("focus preview project");
+        assert!(model.project_right_seat_focused());
+
+        apply_intent(
+            &mut domain,
+            model.input_target_mut(),
+            BoardIntent::OpenCapture,
+            None,
+        )
+        .expect("open preview capture");
+        apply_intent(
+            &mut domain,
+            model.input_target_mut(),
+            BoardIntent::QuickAddInsertText("preview draft".to_string()),
+            None,
+        )
+        .expect("type preview title");
+        apply_intent(
+            &mut domain,
+            model.input_target_mut(),
+            BoardIntent::ExpandQuickAdd,
+            None,
+        )
+        .expect("expand preview capture");
+        assert_eq!(model.input_mode(), BoardInputMode::EditNotes);
+        apply_intent(
+            &mut domain,
+            model.input_target_mut(),
+            BoardIntent::EditInsertText("first note".to_string()),
+            None,
+        )
+        .expect("type preview note");
+
+        let mut terminal =
+            Terminal::new(TestBackend::new(area.width, area.height)).expect("test terminal");
+        terminal
+            .draw(|frame| {
+                let _ = draw_board(frame, &model);
+            })
+            .expect("draw expanded preview capture");
+        let buffer = terminal.backend().buffer();
+        let task_area = model.responsive_geometry(area).task;
+        let rendered = (task_area.y..task_area.bottom())
+            .map(|y| {
+                (task_area.x..task_area.right())
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\\n");
+        assert!(
+            rendered.contains("preview draft"),
+            "expanded preview title missing from the right column:\\n{rendered}"
+        );
+        assert!(
+            rendered.contains("first note"),
+            "expanded preview notes missing from the right column:\\n{rendered}"
+        );
+
+        let (note_y, note_x) = (task_area.y..task_area.bottom())
+            .find_map(|y| {
+                (task_area.x..task_area.right()).find_map(|x| {
+                    let remaining = task_area.right().saturating_sub(x) as usize;
+                    let text = (0..remaining)
+                        .map(|offset| buffer[(x + offset as u16, y)].symbol())
+                        .collect::<String>();
+                    text.starts_with("first note").then_some((y, x))
+                })
+            })
+            .expect("painted note row");
+        for offset in 0.."first note".chars().count() {
+            let cell = &buffer[(note_x + offset as u16, note_y)];
+            assert!(
+                cell.modifier.contains(Modifier::BOLD),
+                "active notes cell should be bold: {:?}",
+                cell.symbol()
+            );
+        }
     }
 
     #[test]
