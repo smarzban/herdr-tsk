@@ -60,11 +60,105 @@ fn board_with_task(title: &str, status: HumanStatus) -> (DomainState, BoardModel
             None,
         )
         .expect("create");
-    if status != HumanStatus::Ready {
+    if status != HumanStatus::Open {
         domain.set_status(id, status).expect("status");
     }
     let model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
     (domain, model, id)
+}
+
+fn select_done_task(domain: &mut DomainState, model: &mut BoardModel, id: uuid::Uuid) {
+    apply_intent(domain, model, BoardIntent::ToggleDoneDrawer, None).expect("drawer");
+    let index = model
+        .visible_ids()
+        .iter()
+        .position(|&row| row == id)
+        .expect("done task visible");
+    apply_intent(domain, model, BoardIntent::SelectIndex(index), None).expect("select done");
+}
+
+#[test]
+fn ctrl_n_sets_ready_and_ctrl_o_sets_open_from_every_status_without_ready_open_events() {
+    assert_eq!(
+        map_key(BoardInputMode::Normal, ctrl(KeyCode::Char('n'))),
+        Some(BoardIntent::SetStatus(HumanStatus::Ready))
+    );
+    assert_eq!(
+        map_key(BoardInputMode::Normal, ctrl(KeyCode::Char('o'))),
+        Some(BoardIntent::Reopen)
+    );
+    assert_eq!(
+        map_key(BoardInputMode::TaskPage, ctrl(KeyCode::Char('n'))),
+        Some(BoardIntent::SetStatus(HumanStatus::Ready))
+    );
+
+    for from in [
+        HumanStatus::Open,
+        HumanStatus::Ready,
+        HumanStatus::Started,
+        HumanStatus::Blocked,
+        HumanStatus::Review,
+        HumanStatus::Done,
+    ] {
+        let (mut domain, mut model, id) = board_with_task("ready target", from);
+        if from == HumanStatus::Done {
+            select_done_task(&mut domain, &mut model, id);
+        }
+        let before = domain.get(id).expect("task").clone();
+        let outcome = apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::SetStatus(HumanStatus::Ready),
+            None,
+        )
+        .expect("set ready");
+        let task = domain.get(id).expect("task");
+        assert_eq!(task.status, HumanStatus::Ready, "{from:?} → ready");
+        if from == HumanStatus::Ready {
+            assert_eq!(outcome, IntentOutcome::None, "ready is a no-op");
+            assert_eq!(task.revision, before.revision, "ready has no event");
+            assert_eq!(
+                task.history.len(),
+                before.history.len(),
+                "ready has no history"
+            );
+        } else {
+            assert_eq!(outcome, IntentOutcome::Persist, "{from:?} → ready persists");
+            assert_ne!(task.revision, before.revision, "{from:?} gets one event");
+        }
+
+        let (mut domain, mut model, id) = board_with_task("open target", from);
+        if from == HumanStatus::Done {
+            select_done_task(&mut domain, &mut model, id);
+        }
+        let before = domain.get(id).expect("task").clone();
+        let reopen = map_key(BoardInputMode::Normal, ctrl(KeyCode::Char('o')))
+            .expect("ctrl+o maps to reopen");
+        let outcome = apply_intent(&mut domain, &mut model, reopen, None).expect("set open");
+        let task = domain.get(id).expect("task");
+        assert_eq!(task.status, HumanStatus::Open, "{from:?} → open");
+        if from == HumanStatus::Open {
+            assert_eq!(outcome, IntentOutcome::None, "open is a no-op");
+            assert_eq!(task.revision, before.revision, "open has no event");
+            assert_eq!(
+                task.history.len(),
+                before.history.len(),
+                "open has no history"
+            );
+        } else {
+            assert_eq!(outcome, IntentOutcome::Persist, "{from:?} → open persists");
+            assert_ne!(task.revision, before.revision, "{from:?} gets one event");
+            assert_eq!(
+                task.history.last().expect("open event").kind,
+                if from == HumanStatus::Done {
+                    TaskEventKind::Reopened
+                } else {
+                    TaskEventKind::StatusSet
+                },
+                "ctrl+o event for {from:?}"
+            );
+        }
+    }
 }
 
 #[test]
@@ -91,8 +185,8 @@ fn space_on_todo_sets_doing_via_domain() {
 }
 
 #[test]
-fn space_on_done_reopens() {
-    let (mut domain, mut model, id) = board_with_task("reopen me", HumanStatus::Done);
+fn space_on_done_is_silent_noop() {
+    let (mut domain, mut model, id) = board_with_task("keep done", HumanStatus::Done);
     // Done tasks live in the drawer; open it so selection can hold the done id.
     apply_intent(&mut domain, &mut model, BoardIntent::ToggleDoneDrawer, None).expect("drawer");
     // Re-select the done task if reanchor moved off it.
@@ -106,10 +200,14 @@ fn space_on_done_reopens() {
             .expect("select done");
     }
 
+    let before = domain.get(id).expect("task").clone();
     let outcome =
         apply_intent(&mut domain, &mut model, BoardIntent::PrimaryVerb, None).expect("primary");
-    assert_eq!(outcome, IntentOutcome::Persist);
-    assert_eq!(domain.get(id).expect("task").status, HumanStatus::Ready);
+    let after = domain.get(id).expect("task");
+    assert_eq!(outcome, IntentOutcome::None);
+    assert_eq!(after.status, HumanStatus::Done);
+    assert_eq!(after.revision, before.revision);
+    assert_eq!(after.history, before.history);
 }
 
 #[test]
@@ -147,7 +245,7 @@ fn d_completes_non_done_and_o_reopens_done() {
     }
     let outcome = apply_intent(&mut domain, &mut model, BoardIntent::Reopen, None).expect("reopen");
     assert_eq!(outcome, IntentOutcome::Persist);
-    assert_eq!(domain.get(id).expect("task").status, HumanStatus::Ready);
+    assert_eq!(domain.get(id).expect("task").status, HumanStatus::Open);
 
     assert!(board_intent_may_persist(&BoardIntent::Complete));
     assert!(board_intent_may_persist(&BoardIntent::Reopen));
@@ -463,6 +561,7 @@ fn palette_lists_exactly_m1_commands_for_selection_filters_by_subsequence_and_di
     let labels: Vec<&str> = model.visible_commands().iter().map(|c| c.label).collect();
     let expected = [
         "set status: ready",
+        "set status: open",
         "set status: started",
         "set status: blocked",
         "set status: review",
@@ -480,11 +579,9 @@ fn palette_lists_exactly_m1_commands_for_selection_filters_by_subsequence_and_di
         "palette catalog with a selection must match exactly (no toggle-groups entry: \
          the destinations have no collapsible task groups)"
     );
-    // / the `o` key: reopen is only valid for a done selection, so a ready selection's
-    // catalog must not offer it at all (not merely filtered out above by the exact-match).
     assert!(
-        !labels.contains(&"reopen"),
-        "a ready selection must not offer reopen"
+        labels.contains(&"set status: open"),
+        "a ready selection offers the absolute inbox status"
     );
 
     // Subsequence (not substring): "started" matches only that status label.
@@ -514,8 +611,7 @@ fn palette_lists_exactly_m1_commands_for_selection_filters_by_subsequence_and_di
     apply_intent(&mut domain, &mut model, resolved, None).expect("apply");
     assert_eq!(domain.get(id).expect("task").status, HumanStatus::Started);
 
-    // a doing selection still has nothing to reopen (SetStatus closed the palette
-    // above; reopen it to read the catalog for the new status).
+    // The absolute status commands remain available from every working status.
     apply_intent(
         &mut domain,
         &mut model,
@@ -524,11 +620,14 @@ fn palette_lists_exactly_m1_commands_for_selection_filters_by_subsequence_and_di
     )
     .expect("palette while doing");
     assert!(
-        !model.visible_commands().iter().any(|c| c.label == "reopen"),
-        "a doing selection must not offer reopen"
+        model
+            .visible_commands()
+            .iter()
+            .any(|c| c.label == "set status: open"),
+        "a doing selection offers the absolute inbox status"
     );
 
-    // Key-equivalent: `o` reopen vs palette "reopen".
+    // Key-equivalent: `o` sets open, and the palette has the same absolute route.
     domain.set_status(id, HumanStatus::Done).expect("done");
     model.sync_from_domain(&domain);
     apply_intent(&mut domain, &mut model, BoardIntent::ToggleDoneDrawer, None).expect("drawer");
@@ -548,12 +647,15 @@ fn palette_lists_exactly_m1_commands_for_selection_filters_by_subsequence_and_di
         None,
     )
     .expect("palette again");
-    // the done selection's catalog offers reopen before any query narrows it.
+    // the done selection's catalog offers the absolute inbox command.
     assert!(
-        model.visible_commands().iter().any(|c| c.label == "reopen"),
-        "a done selection must offer reopen"
+        model
+            .visible_commands()
+            .iter()
+            .any(|c| c.label == "set status: open"),
+        "a done selection must offer set status: open"
     );
-    for ch in "reopen".chars() {
+    for ch in "set status: open".chars() {
         apply_intent(
             &mut domain,
             &mut model,
@@ -563,10 +665,10 @@ fn palette_lists_exactly_m1_commands_for_selection_filters_by_subsequence_and_di
         .expect("type reopen");
     }
     let via_palette =
-        resolve_board_command(&mut model, BoardIntent::ConfirmCommand).expect("reopen cmd");
-    assert_eq!(via_palette, BoardIntent::Reopen);
-    apply_intent(&mut domain, &mut model, via_palette, None).expect("reopen");
-    assert_eq!(domain.get(id).expect("task").status, HumanStatus::Ready);
+        resolve_board_command(&mut model, BoardIntent::ConfirmCommand).expect("open cmd");
+    assert_eq!(via_palette, BoardIntent::SetStatus(HumanStatus::Open));
+    apply_intent(&mut domain, &mut model, via_palette, None).expect("open");
+    assert_eq!(domain.get(id).expect("task").status, HumanStatus::Open);
 
     // Direct key route lands on the same intent.
     assert_eq!(
@@ -1158,7 +1260,12 @@ fn project_scope_chip_and_dropdown_filter_all_visible_sections_matching_ac5() {
     assert_eq!(other_view.counts.done, 1);
     assert_eq!(
         model.visible_ids(),
-        vec![motion_other, deck_other, done_other],
+        vec![
+            motion_other,
+            tsk_tui::ui::queue::INBOX_HEADER_ROW_ID,
+            deck_other,
+            done_other,
+        ],
         "a project scope leaves no task from another scope visible"
     );
     assert!(!model.visible_ids().contains(&done_app));
@@ -1350,6 +1457,9 @@ fn delete_notice_prefixes_the_board_verb_bar_with_undo_until_undone() {
         )
         .expect("neighbour");
     let _ = other;
+    // The neighbour must be in the model before reanchoring, so the inbox heading cannot win
+    // merely because the newly grouped open row was absent from the previous visible order.
+    model.sync_from_domain(&domain);
     apply_intent(&mut domain, &mut model, BoardIntent::SoftDelete, None).expect("arm delete");
     apply_intent(&mut domain, &mut model, BoardIntent::SoftDelete, None).expect("delete");
     assert!(domain.get(id).expect("task").soft_deleted);
@@ -1538,7 +1648,7 @@ fn page_verbs_act_on_the_page_task_and_the_page_stays_open() {
     // `o` reopens it, still from the page.
     let reopen = map_key(BoardInputMode::TaskPage, ctrl(KeyCode::Char('o'))).expect("o");
     apply_intent(&mut domain, &mut model, reopen, None).expect("reopen");
-    assert_eq!(domain.get(id).expect("task").status, HumanStatus::Ready);
+    assert_eq!(domain.get(id).expect("task").status, HumanStatus::Open);
     assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
 
     // `b` blocks, `b` again unblocks.
@@ -1876,6 +1986,14 @@ fn ctrl_s_replaces_ctrl_space_as_the_primary_verb() {
         None,
         "the legacy NUL encoding of Ctrl+Space must also be retired"
     );
+
+    for from in [HumanStatus::Open, HumanStatus::Ready] {
+        let (mut domain, mut model, id) = board_with_task("startable", from);
+        let outcome =
+            apply_intent(&mut domain, &mut model, BoardIntent::PrimaryVerb, None).expect("start");
+        assert_eq!(outcome, IntentOutcome::Persist);
+        assert_eq!(domain.get(id).expect("task").status, HumanStatus::Started);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2253,7 +2371,7 @@ fn ctrl_d_with_a_step_selected_completes_the_task_and_enter_toggles_the_step() {
     );
     assert_eq!(
         task.status,
-        HumanStatus::Ready,
+        HumanStatus::Open,
         "toggling a step never changes human status"
     );
     assert_ne!(
@@ -2305,7 +2423,7 @@ fn ctrl_r_toggles_review_and_ready_and_refuses_on_done() {
 
     // Review lives in NEEDS YOU, so the row stays selected and the bar keeps done/block.
     let verbs: Vec<&str> = board_verb_items(&model).iter().map(|v| v.key).collect();
-    assert_eq!(verbs, vec!["enter", "d", "b", "+", "?"]);
+    assert_eq!(verbs, vec!["enter", "d", "b", "o", "+", "?"]);
 
     apply_intent(&mut domain, &mut model, review.clone(), None).expect("back to ready");
     assert_eq!(domain.get(id).expect("task").status, HumanStatus::Ready);
@@ -3631,7 +3749,18 @@ fn ctrl_f_archives_the_selected_task_keeping_status_and_pushing_no_undo() {
     );
 
     // Select the remaining row and undo: nothing about A may change (AC-7).
-    apply_intent(&mut domain, &mut model, BoardIntent::SelectIndex(0), None).expect("select b");
+    let b_index = model
+        .visible_ids()
+        .iter()
+        .position(|&visible| visible == b)
+        .expect("remaining row visible");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::SelectIndex(b_index),
+        None,
+    )
+    .expect("select b");
     assert_eq!(model.selected_id(), Some(b));
     apply_intent(&mut domain, &mut model, BoardIntent::Undo, None).expect("undo");
     let task_a = domain.get(a).expect("task a");
@@ -3642,7 +3771,7 @@ fn ctrl_f_archives_the_selected_task_keeping_status_and_pushing_no_undo() {
     assert_eq!(task_a.status, HumanStatus::Review);
     assert_eq!(
         domain.get(b).expect("task b").status,
-        HumanStatus::Ready,
+        HumanStatus::Open,
         "the empty-stack undo is a no-op"
     );
 }
@@ -3734,7 +3863,7 @@ fn ctrl_u_on_an_archived_selection_unarchives_without_popping_the_undo_stack() {
     apply_intent(&mut domain, &mut model, BoardIntent::Undo, None).expect("undo k");
     assert_eq!(
         domain.get(k).expect("k").status,
-        HumanStatus::Ready,
+        HumanStatus::Open,
         "the seeded undo entry survived the unarchive (stack length unchanged)"
     );
 }
@@ -3771,8 +3900,8 @@ fn help_card_lists_ctrl_f_and_the_verb_bar_keeps_archive_out_of_its_seats() {
     );
     assert_eq!(
         verbs.iter().map(|entry| entry.key).collect::<Vec<_>>(),
-        vec!["enter", "s", "d", "b", "+", "?"],
-        "ready row bar: open · start · done · block · add · help"
+        vec!["enter", "s", "o", "d", "+", "?"],
+        "ready row bar: open · start · inbox · done · add · help"
     );
 
     // The expanded archived group: header shows its toggle, a row shows `f unarchive`.

@@ -138,14 +138,19 @@ fn trash_restore_round_trip_refusals_and_events() {
         output.stdout
     );
 
-    // The trash line is gone and the task is live again: ready, not soft-deleted,
-    // with a restored event, the same number, and a fresh revision.
+    // The trash line is gone and the task is live again: same status as before
+    // delete, not soft-deleted, with a restored event, the same number, and a
+    // fresh revision.
     assert_eq!(trash_line_count(&dir), 0);
     let store = TaskStore::new(&dir);
     let state = store.load().expect("load");
     let task = state.get(deleted_id).expect("task is live");
     assert!(!task.soft_deleted, "restored is not soft-deleted");
-    assert_eq!(task.status, HumanStatus::Ready, "restored as ready");
+    assert_eq!(
+        task.status,
+        HumanStatus::Open,
+        "restored with its prior status"
+    );
     assert_eq!(task.number, Some(2), "the number survives the round trip");
     assert!(
         task.history

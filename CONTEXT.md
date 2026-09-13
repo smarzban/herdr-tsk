@@ -4,7 +4,7 @@ Canonical terms for this repo. No implementation detail.
 
 - **add command**: headless `tsk add` subcommand that creates tasks without opening a TUI.
 - **list command**: headless `tsk list` subcommand that prints tasks from the board store without changing them.
-- **status command**: headless `tsk status` subcommand that sets a task's human status to ready, started, blocked, review, or done. `start` is an alias for `started`.
+- **status command**: headless `tsk status` subcommand that sets a task's human status to open, ready, started, blocked, review, or done. `start` is an alias for `started`.
 - **edit command**: headless `tsk edit` subcommand that updates a task's title and/or notes without changing scope or thread.
 - **bulk add**: one `add` invocation that accepts many items, reports each, and makes one durable write of the successes.
 - **invocation default**: capture scope used when the caller omits `project` / `-p`. The cwd repo when known, otherwise the desk.
@@ -25,7 +25,7 @@ Canonical terms for this repo. No implementation detail.
 - **step cursor**: the task page's step-row focus. Inactive on page open; a bare ↓ activates it (again after any deactivation), ↑ from the first step deactivates it. While active, bare arrows move it and modifier-protected verbs act on it; a single click on a step row moves it.
 - **task number**: the store-global sequential integer assigned when a task is durably created. Spoken and typed as `12`. Unique across desk, every project, and every thread, including done and soft-deleted tasks. An address, not identity and not an ordering promise. Never reused.
 - **step short id**: an unambiguous prefix of a step's stable identity, used to address a step within one task from the CLI.
-- **thread**: an optional single name a task carries, grouping it with same-named tasks in the same scope. Not an entity: no identity beyond the name, no status, no lifecycle. It presents on the board exactly while at least one open task in its scope carries it; the field itself persists on the task regardless of status.
+- **thread**: an optional single name a task carries, grouping it with same-named tasks in the same scope. Not an entity: no identity beyond the name, no status, no lifecycle. It presents on the board exactly while at least one working task in its scope carries it; the field itself persists on the task regardless of status.
 - **thread token**: the `!t name` capture directive, sibling of `!p`; bare `!t` means unthreaded. Stripped from the saved title.
 - **thread label**: the thread name painted beside a project-board task row. It is chrome, not a task; selecting a local thread filter hides redundant labels.
 - **unthreaded**: carrying no thread. Unthreaded tasks remain in the project's flat task board.
@@ -33,7 +33,7 @@ Canonical terms for this repo. No implementation detail.
 - **rail**: the 32-column dim board column of stage G: tabs, section rules, and wrapped task rows, without the meta column or the done drawer.
 - **single-pane view**: a presentation that shows only the focused board or task surface.
 - **focused surface**: the board or task view that currently owns interaction; at wide widths it derives from the wide stage (0/A board-owned, G/F task-owned), below 110 from the single-pane presentation.
-- **open task**: human status ready, blocked, or review, not soft-deleted, and not archived.
+- **working task**: a non-done task with human status open, ready, started, blocked, or review, not soft-deleted and not archived.
 - **archived**: a flag on a task meaning "kept, off the radar". The task keeps its human status and leaves every working lens; it is visible only in the archived group of the done drawer. Not a status, not a place, nothing expires.
 - **archived project**: a project whose project record carries the archived flag. It leaves the projects index, desk IN MOTION and the picker's main list; it is visible only on the picker's archived tab. Its tasks' own archived flags are independent of it.
 - **project record**: the per-project entry in the store, keyed by the project's scope path. Lazy: exists only while the project is archived. The set of projects the board shows is still derived from tasks.

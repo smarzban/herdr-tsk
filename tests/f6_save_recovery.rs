@@ -379,7 +379,7 @@ fn board_save_failure_retains_working_state_blocks_mutations_and_retries_exactly
     assert!(recovery.is_pending());
     assert_eq!(
         recovery.baseline().unwrap().get(id).unwrap().status,
-        HumanStatus::Ready
+        HumanStatus::Open
     );
     assert_eq!(
         recovery.working().unwrap().get(id).unwrap().status,
@@ -513,7 +513,7 @@ fn board_save_recovery_cancel_restores_baseline_and_keyboard_reaches_retry_cance
     .expect("cancel");
     assert_eq!(cancelled, IntentOutcome::None);
     assert!(!recovery.is_pending());
-    assert_eq!(domain.get(id).unwrap().status, HumanStatus::Ready);
+    assert_eq!(domain.get(id).unwrap().status, HumanStatus::Open);
     assert_eq!(model.selected_id(), Some(id));
     let message = model.message().unwrap();
     assert!(message.contains("cancelled"), "{message}");
@@ -728,7 +728,7 @@ fn command_surface_reaches_save_failure_retry_and_cancel_through_the_same_bounda
     assert_eq!(cancelled, IntentOutcome::None);
     assert_eq!(saves, 2);
     assert!(!recovery.is_pending());
-    assert_eq!(domain.get(id).unwrap().status, HumanStatus::Ready);
+    assert_eq!(domain.get(id).unwrap().status, HumanStatus::Open);
     assert_eq!(model.command_surface(), CommandSurface::None);
     let message = model.message().unwrap();
     assert!(message.contains("cancelled"), "{message}");

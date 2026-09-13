@@ -4,3 +4,8 @@
 #
 # id 1 ("Guides and release notes on your desk") was retired before it shipped, so the
 # starter tour is the only thing a 0.7.x upgrader sees. The next entry is id 2.
+
+[[announcement]]
+id = 2
+title = "Open tasks and an inbox for your board"
+notes = "New captures start in an open inbox below ON DECK. Pick work with ctrl+n, send it back with ctrl+o, and use tsk list --open or --ready to filter from the CLI.\n\nChangelog: https://github.com/smarzban/herdr-tsk/blob/main/CHANGELOG.md"

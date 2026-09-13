@@ -70,6 +70,51 @@ fn project(path: &str) -> TaskScope {
 }
 
 /// Deterministic deck-only fixture: motion, multi-project deck, blocked/review glyphs, done.
+fn inbox_golden_tasks() -> Vec<Task> {
+    let mut tasks = vec![
+        task(
+            50,
+            "Ready planning pass",
+            HumanStatus::Ready,
+            TaskScope::Global,
+            20 * 60,
+        ),
+        task(
+            51,
+            "Ready release check",
+            HumanStatus::Ready,
+            TaskScope::Global,
+            10 * 60,
+        ),
+        task(
+            52,
+            "Inbox capture one",
+            HumanStatus::Open,
+            TaskScope::Global,
+            5 * 60,
+        ),
+        task(
+            53,
+            "Inbox capture two",
+            HumanStatus::Open,
+            TaskScope::Global,
+            2 * 60,
+        ),
+    ];
+    for (index, task) in tasks.iter_mut().enumerate() {
+        task.number = Some((index + 50) as u64);
+    }
+    tasks
+}
+
+fn inbox_golden_verbs() -> &'static [VerbEntry<'static>] {
+    static CACHE: OnceLock<Vec<VerbEntry<'static>>> = OnceLock::new();
+    CACHE.get_or_init(|| {
+        let model = BoardModel::from_tasks(inbox_golden_tasks(), Some(PathBuf::from("/repos/tsk")));
+        board_verb_items(&model)
+    })
+}
+
 fn fixture_tasks() -> Vec<Task> {
     let mut tasks = vec![
         task(
@@ -258,19 +303,22 @@ fn palette_commands() -> Vec<PaletteCommandRow<'static>> {
         labels,
         vec![
             "set status: ready",
+            "set status: open",
             "set status: started",
             "set status: blocked",
             "set status: review",
         ],
-        "the \"stat\" query against the real M1 catalog must narrow to exactly the four \
+        "the \"stat\" query against the real M1 catalog must narrow to exactly the five \
          status commands (no dispatch, no other tail entry) -- if the product catalog \
          changed, this fixture must follow it, not be hand-patched"
     );
-    apply_intent(&mut domain, &mut model, BoardIntent::CommandNext, None).expect("command next");
-    apply_intent(&mut domain, &mut model, BoardIntent::CommandNext, None).expect("command next");
+    for _ in 0..3 {
+        apply_intent(&mut domain, &mut model, BoardIntent::CommandNext, None)
+            .expect("command next");
+    }
     assert_eq!(
         model.command_selected(),
-        Some(2),
+        Some(3),
         "fixture must highlight \"set status: blocked\""
     );
     let selected = model.command_selected();
@@ -349,6 +397,8 @@ fn fixture_model_on_tab<'a>(
         follow_list: true,
         archived_collapsed: true,
         archived_header_selected: false,
+        inbox_collapsed: false,
+        inbox_header_selected: false,
         rows_dim: false,
     }
 }
@@ -581,7 +631,14 @@ fn assert_exact_header_spacing(
     let marker = format!("{header} ─");
     let header_row = rows
         .iter()
-        .position(|line| list_body(line).contains(&marker))
+        .position(|line| {
+            let body = list_body(line);
+            if header == "inbox" {
+                body.contains("inbox ·")
+            } else {
+                body.contains(&marker)
+            }
+        })
         .unwrap_or_else(|| panic!("{dimensions}: missing {header:?}:\n{:#?}", rows));
     let viewport_top = geo.viewport_top as usize;
     let viewport_bottom = viewport_top + geo.viewport_height as usize;
@@ -590,6 +647,17 @@ fn assert_exact_header_spacing(
         "{dimensions}: {header:?} and its surrounding rows must be visible after selection scrolling:\n{:#?}",
         rows
     );
+    // At the compact floor the sticky ON DECK header can occupy the row immediately
+    // above inbox, so only the inbox-to-task spacing remains paintable.
+    if header == "inbox" && !list_body(&rows[header_row - 1]).is_empty() {
+        assert!(
+            list_body(&rows[header_row + 1]).is_empty()
+                && list_body(&rows[header_row + 2]).contains(first_content),
+            "{dimensions}: inbox must keep one blank row before its task:\n{:#?}",
+            rows
+        );
+        return;
+    }
     assert!(
         list_body(&rows[header_row - 1]).is_empty() && list_body(&rows[header_row + 1]).is_empty(),
         "{dimensions}: {header:?} needs one blank row immediately above and below:\n{:#?}",
@@ -709,8 +777,12 @@ fn standard_78x24_fixture_has_selector_list_rule_status_verb_and_no_other_chrome
     // task, and `PrimaryVerb` is a silent no-op there, so a correct legend omits the entry
     // rather than advertise a no-op. `enter`/`?` are always present regardless of selection.
     assert!(
-        verbs.contains("enter") && verbs.contains('?') && verbs.contains("+ add"),
-        "standard verb bar must retain open, help, and add: {verbs:?}"
+        verbs.contains("enter")
+            && verbs.contains('?')
+            && verbs.contains("ctrl+n next")
+            && verbs.contains("ctrl+o inbox")
+            && !verbs.contains("+ add"),
+        "in-motion bar keeps its status actions and help without a misleading add seat: {verbs:?}"
     );
 
     // Chrome is exactly selector + rule + status + verb. Viewport rows are list content only
@@ -2805,6 +2877,15 @@ fn golden_scenes() -> Vec<GoldenScene> {
     let done_model = fixture_model(&tasks, &done_view);
     let (done_rows, _) = paint(80, 24, &done_model);
 
+    // `inbox`: desk rows with picked work followed by an expanded inbox. This keeps the
+    // new nested section visible in a reviewer-sized frame, including each open row's glyph.
+    let inbox_tasks = inbox_golden_tasks();
+    let inbox_view = fixture_view(&inbox_tasks, false);
+    let mut inbox_model = fixture_model(&inbox_tasks, &inbox_view);
+    inbox_model.selection_id = Some(Uuid::from_u128(50));
+    inbox_model.verb_items = inbox_golden_verbs();
+    let (inbox_rows, _) = paint(80, 24, &inbox_model);
+
     // `done_drawer_archived`: the drawer open with an expanded archived group below the
     // DONE rows -- the dim header with its count and the dim rows (glyph + T<n> kept).
     let mut archived_tasks = fixture_tasks();
@@ -2862,6 +2943,11 @@ fn golden_scenes() -> Vec<GoldenScene> {
         GoldenScene {
             name: "done_drawer",
             rows: done_rows,
+            width: 80,
+        },
+        GoldenScene {
+            name: "inbox",
+            rows: inbox_rows,
             width: 80,
         },
         GoldenScene {
@@ -2959,6 +3045,7 @@ fn palette_golden_scene_commands_are_bound_to_the_real_m1_catalog_and_exclude_di
         labels,
         vec![
             "set status: ready",
+            "set status: open",
             "set status: started",
             "set status: blocked",
             "set status: review",
@@ -3316,9 +3403,9 @@ fn all_golden_frames_pass_no_color_sgr_scan() {
         scanned += 1;
     }
     assert_eq!(
-        scanned, 7,
-        "expected the seven board surface goldens (board, board_default_split_78, accordion, \
-         palette, help, done_drawer, done_drawer_archived) in {dir:?}"
+        scanned, 8,
+        "expected the eight board surface goldens (board, board_default_split_78, accordion, \
+         palette, help, done_drawer, inbox, done_drawer_archived) in {dir:?}"
     );
 }
 
@@ -3343,7 +3430,7 @@ fn board_list_wraps_a_long_title_onto_a_continuation_row() {
     let rows = board_rows(&model, 80, 24);
     // The head row keeps the classic shape (gutter + glyph + title head).
     assert!(
-        rows.iter().any(|row| row.contains("○ alpha")),
+        rows.iter().any(|row| row.contains("◌ alpha")),
         "head row must keep the glyph + title shape:\n{}",
         rows.join("\n")
     );
@@ -3360,7 +3447,7 @@ fn board_list_wraps_a_long_title_onto_a_continuation_row() {
     // own tier budget is a different surface).
     let head = rows
         .iter()
-        .find(|row| row.contains("○ alpha"))
+        .find(|row| row.contains("◌ alpha"))
         .expect("head row");
     assert!(
         !head.contains('…') && !continuation.contains('…'),
@@ -3492,7 +3579,7 @@ fn notes_edit_arrows_move_across_logical_and_wrapped_rows() {
 fn task_page_caps_a_wrapped_header_inside_the_page_body() {
     let mut domain = DomainState::new();
     let title = "word ".repeat(120);
-    domain
+    let id = domain
         .create(
             &title,
             None,
@@ -3501,6 +3588,10 @@ fn task_page_caps_a_wrapped_header_inside_the_page_body() {
             None,
         )
         .expect("create task");
+    // The original geometry uses the five-column `ready` status word; new tasks default open.
+    domain
+        .set_status(id, HumanStatus::Ready)
+        .expect("keep the original ready header layout");
     let mut model = BoardModel::from_domain(&domain, None);
     apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
 
@@ -3575,7 +3666,7 @@ fn step_cursor_moves_do_not_rescroll_the_page_when_steps_fit() {
 fn edit_title_caret_parks_at_the_capped_headers_end() {
     let mut domain = DomainState::new();
     let title = "word ".repeat(120);
-    domain
+    let id = domain
         .create(
             &title,
             None,
@@ -3584,6 +3675,10 @@ fn edit_title_caret_parks_at_the_capped_headers_end() {
             None,
         )
         .expect("create task");
+    // The original geometry uses the five-column `ready` status word; new tasks default open.
+    domain
+        .set_status(id, HumanStatus::Ready)
+        .expect("keep the original ready header layout");
     let mut model = BoardModel::from_domain(&domain, None);
     apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
     board_rows(&model, 40, 10);
@@ -3600,7 +3695,7 @@ fn edit_title_caret_parks_at_the_capped_headers_end() {
     // that row's past-end column, immediately after the "…".
     let last_header = (1..7)
         .rev()
-        .find(|&y| rows[y].contains("wor…"))
+        .find(|&y| rows[y].starts_with("    ") && rows[y].contains("wor…"))
         .expect("capped header row");
     let cursor = terminal.backend().cursor_position();
     assert_eq!(
@@ -4036,7 +4131,7 @@ fn expanded_archived_rows_are_dim_keep_glyph_and_identifier_and_are_selectable_a
         row_text.contains("T2"),
         "identifier prefix paints: {row_text}"
     );
-    assert!(row_text.contains('○'), "status glyph is kept: {row_text}");
+    assert!(row_text.contains('◌'), "status glyph is kept: {row_text}");
     for x in 0..80 {
         let symbol = buffer[(x, row_y)].symbol();
         if symbol == " " {
@@ -4072,7 +4167,7 @@ fn expanded_archived_rows_are_dim_keep_glyph_and_identifier_and_are_selectable_a
 #[test]
 fn task_page_header_slot_reads_archived_for_an_archived_task() {
     let mut domain = DomainState::new();
-    domain
+    let live_id = domain
         .create(
             "live row task",
             None,
@@ -4138,11 +4233,22 @@ fn task_page_header_slot_reads_archived_for_an_archived_task() {
 
     // An unarchived task still shows its status word.
     let mut model = BoardModel::from_domain(&domain, None);
-    apply_intent(&mut domain, &mut model, BoardIntent::SelectIndex(0), None).expect("select live");
+    let live_index = model
+        .visible_ids()
+        .iter()
+        .position(|&visible| visible == live_id)
+        .expect("live task visible");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::SelectIndex(live_index),
+        None,
+    )
+    .expect("select live");
     apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
     let rows = board_rows(&model, 80, 24);
     assert!(
-        rows.iter().any(|row| row.contains("ready")),
+        rows.iter().any(|row| row.contains("open")),
         "unarchived task keeps its status word:\n{}",
         rows.join("\n")
     );
@@ -5072,7 +5178,7 @@ fn real_thread_picker_paints_query_and_options() {
 fn projects_index_paints_aligned_counts_search_hint_and_selected_path() {
     let mut domain = DomainState::new();
     for path in ["/one/alpha", "/two/alpha"] {
-        domain
+        let id = domain
             .create(
                 "project task",
                 None,
@@ -5081,6 +5187,7 @@ fn projects_index_paints_aligned_counts_search_hint_and_selected_path() {
                 None,
             )
             .expect("task");
+        domain.set_status(id, HumanStatus::Ready).expect("ready");
     }
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from("/one/alpha")));
     apply_intent(

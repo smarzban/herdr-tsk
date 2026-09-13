@@ -112,7 +112,7 @@ fn board_with_task(title: &str, status: HumanStatus) -> (DomainState, BoardModel
             None,
         )
         .expect("create task");
-    if status != HumanStatus::Ready {
+    if status != HumanStatus::Open {
         domain.set_status(id, status).expect("set status");
     }
     let model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
@@ -632,16 +632,17 @@ fn assert_verb_parity(title: &str, status: HumanStatus, chord: &str, key: KeyCod
 
 #[test]
 fn click_and_wheel_match_keyboard_effects_for_each_control() {
-    // Verb bar: every chord a Todo task shows, plus the Done-only reopen chord.
+    // Verb bar: every chord a ready task shows, plus a block chord from IN MOTION and the
+    // Done-only inbox chord.
     assert_verb_parity("s", HumanStatus::Ready, "s", KeyCode::Char('s'));
     assert_verb_parity("enter", HumanStatus::Ready, "enter", KeyCode::Enter);
     assert_verb_parity("d", HumanStatus::Ready, "d", KeyCode::Char('d'));
-    assert_verb_parity("b", HumanStatus::Ready, "b", KeyCode::Char('b'));
+    assert_verb_parity("b", HumanStatus::Started, "b", KeyCode::Char('b'));
     assert_verb_parity("question", HumanStatus::Ready, "?", KeyCode::Char('?'));
-    assert_verb_parity("add", HumanStatus::Started, "+", KeyCode::Char('+'));
+    assert_verb_parity("add", HumanStatus::Ready, "+", KeyCode::Char('+'));
     // Archive has no bar seat: it lives in `?` / `:` and on ctrl+f.
     assert_verb_parity("unblock", HumanStatus::Blocked, "b", KeyCode::Char('b'));
-    assert_verb_parity("reopen", HumanStatus::Done, "o", KeyCode::Char('o'));
+    assert_verb_parity("inbox", HumanStatus::Done, "o", KeyCode::Char('o'));
 
     // Drawer toggle: open it by keyboard on both boards first (a shared start state), then
     // close it by keyboard on one and by clicking the DONE header on the other.
@@ -795,8 +796,9 @@ fn click_and_wheel_match_keyboard_effects_for_each_control() {
     // Each board created its own tasks (different uuids), so compare the *shape* of what
     // is now visible -- one ON DECK task, the one scoped to the chosen project -- rather
     // than exact ids.
-    assert_eq!(model_key.visible_ids().len(), 1);
-    assert_eq!(model_mouse.visible_ids().len(), 1);
+    // The selected project contains one open task plus its inbox heading.
+    assert_eq!(model_key.visible_ids().len(), 2);
+    assert_eq!(model_mouse.visible_ids().len(), 2);
 }
 
 /// non-regression: the standalone quick-capture popup's mouse paths are untouched by
@@ -1022,7 +1024,7 @@ fn click_a_task_row_selects_its_index_on_a_scrolled_list() {
     assert!(
         hits.regions
             .iter()
-            .all(|hit| !matches!(hit.target, QueueHitTarget::Task(id) if id == visible[0])),
+            .all(|hit| !matches!(hit.target, QueueHitTarget::Task(id) if id == visible[1])),
         "the deck must actually be long enough to scroll task 0 out of the viewport: {hits:?} \
          (geo={geo:?})"
     );
@@ -1053,7 +1055,8 @@ fn stepping_selection_past_the_fold_with_select_next_keeps_the_selected_row_pain
     let visible = model.visible_ids();
     let last = visible.len() - 1;
 
-    for step in 0..last {
+    // The inbox heading is visible[0], and the model initially selects task 0 at visible[1].
+    for step in 0..last.saturating_sub(1) {
         apply_intent(&mut domain, &mut model, BoardIntent::SelectNext, None).expect("select next");
         let selected = model
             .selected_id()
@@ -1268,9 +1271,8 @@ fn wheel_scrolls_the_open_command_surface_so_every_command_becomes_reachable() {
     let commands = model.visible_commands();
     assert_eq!(
         commands.len(),
-        12,
-        "this ready fixture must expose every palette command a ready selection has \
-         (reopen joins only for a done selection, AC-17): {commands:?}"
+        13,
+        "this ready fixture must expose every palette command a ready selection has: {commands:?}"
     );
     let last = commands.len() - 1;
     assert_eq!(commands[last].label, "quit");
@@ -1891,15 +1893,38 @@ fn page_verb_clicks_resolve_through_the_page_legend() {
     let verbs: Vec<&str> = board_verb_items(&model).iter().map(|v| v.key).collect();
     assert_eq!(
         verbs,
-        vec!["e", "o", "esc"],
-        "done page bar: edit · reopen · close"
+        vec!["e", "n", "o", "u", "esc"],
+        "done page bar: edit · ready · inbox · undo · close"
     );
     assert_eq!(click_verb(&model, "o"), BoardIntent::Reopen);
-    apply_intent(&mut domain, &mut model, BoardIntent::Reopen, None).expect("reopen");
+    apply_intent(&mut domain, &mut model, BoardIntent::Reopen, None).expect("open");
     let verbs: Vec<&str> = board_verb_items(&model).iter().map(|v| v.key).collect();
-    assert_eq!(verbs, vec!["e", "s", "d", "b", "esc"], "ready page bar");
+    assert_eq!(verbs, vec!["e", "s", "n", "d", "esc"], "open page bar");
     assert_eq!(click_verb(&model, "e"), BoardIntent::BeginEditTitle);
     assert_eq!(click_verb(&model, "s"), BoardIntent::PrimaryVerb);
+    assert_eq!(
+        click_verb(&model, "n"),
+        BoardIntent::SetStatus(HumanStatus::Ready)
+    );
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::SetStatus(HumanStatus::Ready),
+        None,
+    )
+    .expect("pick ready");
+    let verbs: Vec<&str> = board_verb_items(&model).iter().map(|v| v.key).collect();
+    assert_eq!(verbs, vec!["e", "s", "o", "d", "esc"], "ready page bar");
+    assert_eq!(click_verb(&model, "o"), BoardIntent::Reopen);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::SetStatus(HumanStatus::Open),
+        None,
+    )
+    .expect("send to inbox");
+    assert_eq!(click_verb(&model, "s"), BoardIntent::PrimaryVerb);
+    apply_intent(&mut domain, &mut model, BoardIntent::PrimaryVerb, None).expect("start");
     assert_eq!(click_verb(&model, "b"), BoardIntent::ToggleBlock);
     let close = click_verb(&model, "esc");
     assert_eq!(close, BoardIntent::CloseLayer);
@@ -2544,8 +2569,8 @@ fn the_modal_cards_copyable_rects_exclude_its_own_border_and_footer() {
 #[test]
 fn list_scrollbar_click_jumps_viewport_without_changing_selection() {
     let (mut domain, mut model) = deck_of(40);
-    let first = model.visible_ids()[0];
-    assert_eq!(model.selected_id(), Some(first));
+    let first = model.selected_id().expect("the first task is selected");
+    assert_eq!(model.visible_ids()[1], first);
     assert_eq!(model.detail_open(), None);
 
     let hits = board_hit_map(STANDARD, &model);
@@ -2608,8 +2633,8 @@ fn row_click_selects_without_jumping_the_viewport() {
 fn list_scrollbar_still_moves_the_viewport_while_peek_is_open() {
     let (mut domain, mut model) = deck_of(40);
     let _ = page_rows(&model);
-    apply_intent(&mut domain, &mut model, BoardIntent::SelectIndex(0), None)
-        .expect("peek first row");
+    apply_intent(&mut domain, &mut model, BoardIntent::SelectIndex(1), None)
+        .expect("peek first task row");
     assert!(model.detail_open().is_some());
     let before = page_rows(&model);
     let hits = board_hit_map(STANDARD, &model);

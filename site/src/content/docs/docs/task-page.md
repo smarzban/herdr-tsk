@@ -20,14 +20,14 @@ The page opens in view mode.
 | Action | Key |
 | --- | --- |
 | Edit title, or the selected step | `ctrl+e` |
-| Edit notes | `ctrl+n` |
+| Edit notes | `ctrl+e`, then `Tab` |
 | Move through editable fields | `Tab` / `Shift+Tab`, after starting an edit |
 | Save the task edit | `Shift+Enter` |
 | Cancel the current field | `Esc` or `ctrl+c` |
 
 Clicking Title, Notes, Scope, or Thread does not start an edit from view mode. Start editing first; then click the field you want.
 
-In view mode, `Tab` selects steps and **+ step**. It does not cycle task fields.
+In view mode, `Tab` selects steps and **+ step**. It does not cycle task fields. Status shortcuts remain available on the task page; use `ctrl+e`, then `Tab` to reach Notes.
 
 During task editing, the order is Title → Notes → steps → **+ step** → Scope → Thread. A field click moves the cursor and retains staged changes.
 
@@ -63,7 +63,7 @@ If another writer deletes the task, saving refuses. If a save fails, use [retry 
 
 ## Status and steps
 
-In task view, status shortcuts act on the task even when a step is selected. `Enter` toggles the selected step only.
+In task view, status shortcuts act on the task even when a step is selected. `ctrl+n` sets ready and `ctrl+o` sets open; `ctrl+s` starts an open or ready task. `Enter` toggles the selected step only.
 
 While editing a field, use its edit keys. Save or cancel to return to the task's status actions.
 

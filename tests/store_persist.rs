@@ -62,7 +62,7 @@ fn literal_current_v1_fixture_pins_the_complete_store_wire_shape() {
     .expect("install current fixture");
 
     let mut state = TaskStore::new(&dir).load().expect("load current fixture");
-    assert_eq!(state.format_version(), 3, "the v1 fixture loads migrated");
+    assert_eq!(state.format_version(), 4, "the v1 fixture loads migrated");
     assert!(state.projects().is_empty());
     assert_eq!(state.next_task_number, 8);
     assert_eq!(state.next_notice_number, 1);
@@ -120,7 +120,7 @@ fn literal_current_v1_fixture_pins_the_complete_store_wire_shape() {
             .first()
             .expect("fixture task after undo")
             .status,
-        HumanStatus::Ready
+        HumanStatus::Open
     );
 }
 
@@ -136,7 +136,7 @@ fn v1_document_loads_through_the_chain_and_first_save_leaves_tsk_json_v1_beside_
     let store = TaskStore::new(&dir);
 
     let state = store.load().expect("v1 document loads through the chain");
-    assert_eq!(state.format_version(), 3);
+    assert_eq!(state.format_version(), 4);
     assert!(state.projects().is_empty(), "v1 has no archived projects");
     assert!(state.tasks().iter().all(|task| !task.archived));
 
@@ -149,7 +149,7 @@ fn v1_document_loads_through_the_chain_and_first_save_leaves_tsk_json_v1_beside_
     let live: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(dir.join("tsk.json")).expect("read live"))
             .expect("json");
-    assert_eq!(live["format_version"], 3);
+    assert_eq!(live["format_version"], 4);
     assert_eq!(live["projects"], serde_json::json!({}));
     assert_eq!(live["next_notice_number"], 1);
 }
@@ -167,7 +167,7 @@ fn v2_document_loads_with_notice_counter_one_and_first_save_leaves_tsk_json_v2_b
     let store = TaskStore::new(&dir);
 
     let state = store.load().expect("v2 document loads through the chain");
-    assert_eq!(state.format_version(), 3);
+    assert_eq!(state.format_version(), 4);
     assert_eq!(state.next_notice_number, 1);
     assert!(state.tasks().iter().all(|task| !task.is_notice()));
     assert_eq!(state.tasks()[0].board_identifier().as_deref(), Some("T7"));
@@ -180,32 +180,109 @@ fn v2_document_loads_with_notice_counter_one_and_first_save_leaves_tsk_json_v2_b
     );
     assert_eq!(
         fs::read(dir.join("tsk.json")).expect("read migrated live document"),
-        include_bytes!("fixtures/current_store_v3.json").as_slice(),
-        "a migrated v2 document saves as the canonical v3 wire"
+        include_bytes!("fixtures/current_store_v4.json").as_slice(),
+        "a migrated v2 document saves as the canonical v4 wire"
     );
 }
 
 #[test]
-fn literal_current_v3_fixture_round_trips_byte_identical() {
+fn v3_document_loads_ready_as_open_and_first_save_leaves_tsk_json_v3_beside_the_live_file() {
+    let dir = temp_state_dir();
+    let _guard = TempDirGuard(dir.clone());
+    let mut document: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/current_store_v3.json"))
+            .expect("v3 fixture is valid JSON");
+    document["tasks"][0]["status"] = serde_json::json!("ready");
+    let seeded = serde_json::to_vec_pretty(&document).expect("encode v3 with ready");
+    fs::write(dir.join("tsk.json"), &seeded).expect("install v3 ready document");
+    let store = TaskStore::new(&dir);
+
+    let state = store
+        .load()
+        .expect("v3 document with ready tasks loads through the chain");
+    assert_eq!(state.format_version(), 4);
+    let task = state.tasks().first().expect("fixture task");
+    assert_eq!(task.status, HumanStatus::Open, "ready migrates to open");
+    assert_eq!(
+        task.history
+            .iter()
+            .map(|event| event.kind)
+            .collect::<Vec<_>>(),
+        vec![
+            TaskEventKind::Created,
+            TaskEventKind::StepAdded,
+            TaskEventKind::Completed
+        ],
+        "migration must not append a history event"
+    );
+
+    store.save(&state).expect("first save after migration");
+    assert_eq!(
+        fs::read(dir.join("tsk.json.v3")).expect("read version backup"),
+        seeded.as_slice(),
+        "the pre-migration document is backed up byte-identically"
+    );
+    let live: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(dir.join("tsk.json")).expect("read live"))
+            .expect("json");
+    assert_eq!(live["format_version"], 4);
+    assert_eq!(live["tasks"][0]["status"], "open");
+}
+
+#[test]
+fn v3_document_loads_through_the_chain_and_first_save_leaves_tsk_json_v3_beside_the_live_file() {
     let dir = temp_state_dir();
     let _guard = TempDirGuard(dir.clone());
     fs::write(
         dir.join("tsk.json"),
         include_bytes!("fixtures/current_store_v3.json"),
     )
-    .expect("install current v3 fixture");
+    .expect("install v3 fixture");
     let store = TaskStore::new(&dir);
 
     let loaded = store.load().expect("load current v3 fixture");
-    assert_eq!(loaded.format_version(), 3);
+    assert_eq!(loaded.format_version(), 4);
+    assert!(loaded.projects().is_empty());
+    assert_eq!(loaded.next_notice_number, 1);
+    assert_eq!(
+        loaded.tasks().first().expect("fixture task").status,
+        HumanStatus::Done
+    );
+
+    store.save(&loaded).expect("save loaded state");
+    assert_eq!(
+        fs::read(dir.join("tsk.json.v3")).expect("read version backup"),
+        include_bytes!("fixtures/current_store_v3.json").as_slice(),
+        "the pre-migration document is backed up byte-identically"
+    );
+    assert_eq!(
+        fs::read(dir.join("tsk.json")).expect("read migrated live document"),
+        include_bytes!("fixtures/current_store_v4.json").as_slice(),
+        "a migrated v3 document saves as the canonical v4 wire"
+    );
+}
+
+#[test]
+fn literal_current_v4_fixture_round_trips_byte_identical() {
+    let dir = temp_state_dir();
+    let _guard = TempDirGuard(dir.clone());
+    fs::write(
+        dir.join("tsk.json"),
+        include_bytes!("fixtures/current_store_v4.json"),
+    )
+    .expect("install current v4 fixture");
+    let store = TaskStore::new(&dir);
+
+    let loaded = store.load().expect("load current v4 fixture");
+    assert_eq!(loaded.format_version(), 4);
     assert!(loaded.projects().is_empty());
     assert_eq!(loaded.next_notice_number, 1);
 
     store.save(&loaded).expect("save loaded state");
     assert_eq!(
         fs::read(dir.join("tsk.json")).expect("read resaved live document"),
-        include_bytes!("fixtures/current_store_v3.json").as_slice(),
-        "an unchanged v3 state must serialize byte-identically"
+        include_bytes!("fixtures/current_store_v4.json").as_slice(),
+        "an unchanged v4 state must serialize byte-identically"
     );
 }
 
@@ -489,7 +566,7 @@ fn save_then_load_preserves_task_id_title_status_and_events() {
     let task = loaded.get(id).expect("task present after reload");
     assert_eq!(task.id, id);
     assert_eq!(task.title, "Fix flake");
-    assert_eq!(task.status, HumanStatus::Ready);
+    assert_eq!(task.status, HumanStatus::Open);
     assert!(
         task.history
             .iter()
@@ -736,7 +813,7 @@ fn archive_flag_survives_save_and_load() {
     let loaded = store.load().expect("reload archived state");
     let filed_task = loaded.get(filed).expect("archived task survives reload");
     assert!(filed_task.archived);
-    assert_eq!(filed_task.status, HumanStatus::Ready, "status is untouched");
+    assert_eq!(filed_task.status, HumanStatus::Open, "status is untouched");
     assert!(
         !loaded
             .get(kept)
@@ -812,13 +889,13 @@ fn reload_merge_save_keeps_a_sibling_writers_project_record_and_applies_the_loca
 fn noncurrent_store_is_refused_without_rewriting_the_file() {
     let dir = temp_state_dir();
     let _guard = TempDirGuard(dir.clone());
-    let document = serde_json::json!({ "format_version": 4, "next_task_number": 2, "tasks": [], "undo_stack": [] });
+    let document = serde_json::json!({ "format_version": 5, "next_task_number": 2, "tasks": [], "undo_stack": [] });
     let bytes = serde_json::to_vec_pretty(&document).expect("json");
     fs::write(dir.join("tsk.json"), &bytes).expect("write noncurrent store");
     let error = TaskStore::new(&dir)
         .save(&DomainState::new())
         .expect_err("current writer refuses noncurrent store");
-    assert!(error.to_string().contains("expected 3"));
+    assert!(error.to_string().contains("expected 4"));
     assert_eq!(fs::read(dir.join("tsk.json")).expect("read"), bytes);
 }
 
@@ -843,7 +920,7 @@ fn v1_migration_strips_defensive_archived_keys() {
     let state = TaskStore::new(&dir)
         .load()
         .expect("load v1 through the chain");
-    assert_eq!(state.format_version(), 3);
+    assert_eq!(state.format_version(), 4);
     let task = state.tasks().first().expect("fixture task");
     assert!(
         !task.archived,

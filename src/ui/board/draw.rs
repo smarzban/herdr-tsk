@@ -120,12 +120,26 @@ pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
         ];
     }
 
-    // The archived header holds the selection: its own verbs only.
+    // Header rows hold the selection: their own verbs only.
     if model.archived_header_selected() {
         return vec![
             VerbEntry {
                 key: "enter",
                 label: if model.archived_collapsed {
+                    "expand"
+                } else {
+                    "collapse"
+                },
+            },
+            ADD,
+            HELP,
+        ];
+    }
+    if model.inbox_header_selected() {
+        return vec![
+            VerbEntry {
+                key: "enter",
+                label: if model.inbox_collapsed {
                     "expand"
                 } else {
                     "collapse"
@@ -166,54 +180,71 @@ pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
     if let Some(task) = selected_task {
         entries.push(OPEN);
         entries.extend(status_verbs(task.status));
+        // Add is useful from the backlog and inbox, but the status-heavy in-motion and
+        // done legends use that seat for their truthful lifecycle actions.
+        if !matches!(task.status, HumanStatus::Started | HumanStatus::Done) {
+            entries.push(ADD);
+        }
     }
-    entries.push(ADD);
     entries.push(HELP);
     entries
 }
 
-/// The status verbs a task's current status makes meaningful, in the order every bar
-/// paints them: start / reopen, done, block / unblock.
+/// The status verbs a task's current status makes meaningful. `n` picks a task for ON DECK,
+/// while `o` sends it to the inbox.
 fn status_verbs(status: HumanStatus) -> Vec<VerbEntry<'static>> {
+    const START: VerbEntry<'static> = VerbEntry {
+        key: "s",
+        label: "start",
+    };
+    const NEXT: VerbEntry<'static> = VerbEntry {
+        key: "n",
+        label: "next",
+    };
+    const INBOX: VerbEntry<'static> = VerbEntry {
+        key: "o",
+        label: "inbox",
+    };
+    const DONE: VerbEntry<'static> = VerbEntry {
+        key: "d",
+        label: "done",
+    };
     match status {
-        HumanStatus::Ready => vec![
-            VerbEntry {
-                key: "s",
-                label: "start",
-            },
-            VerbEntry {
-                key: "d",
-                label: "done",
-            },
-            VerbEntry {
-                key: "b",
-                label: "block",
-            },
-        ],
-        HumanStatus::Started | HumanStatus::Review => vec![
-            VerbEntry {
-                key: "d",
-                label: "done",
-            },
+        HumanStatus::Open => vec![START, NEXT, DONE],
+        HumanStatus::Ready => vec![START, INBOX, DONE],
+        HumanStatus::Started => vec![
+            DONE,
+            NEXT,
+            INBOX,
             VerbEntry {
                 key: "b",
                 label: "block",
             },
         ],
         HumanStatus::Blocked => vec![
-            VerbEntry {
-                key: "d",
-                label: "done",
-            },
+            DONE,
             VerbEntry {
                 key: "b",
                 label: "unblock",
             },
+            INBOX,
         ],
-        HumanStatus::Done => vec![VerbEntry {
-            key: "o",
-            label: "reopen",
-        }],
+        HumanStatus::Review => vec![
+            DONE,
+            VerbEntry {
+                key: "b",
+                label: "block",
+            },
+            INBOX,
+        ],
+        HumanStatus::Done => vec![
+            NEXT,
+            INBOX,
+            VerbEntry {
+                key: "u",
+                label: "undo",
+            },
+        ],
     }
 }
 
@@ -393,6 +424,7 @@ fn build_task_page_overlay<'a>(
     let status_word = match bound_task {
         Some(task) if task.archived => "archived",
         _ => match status {
+            HumanStatus::Open => "open",
             HumanStatus::Ready => "ready",
             HumanStatus::Started => "started",
             HumanStatus::Blocked => "blocked",
@@ -1068,6 +1100,7 @@ fn task_header_state(model: &BoardModel, form: &BoardForm, task: &crate::domain:
         "archived"
     } else {
         match task.status {
+            HumanStatus::Open => "open",
             HumanStatus::Ready => "ready",
             HumanStatus::Started => "started",
             HumanStatus::Blocked => "blocked",
@@ -1169,6 +1202,8 @@ fn draw_board_hits(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap
         follow_list: model.follow_list.get(),
         archived_collapsed: model.archived_collapsed,
         archived_header_selected: model.archived_header_selected(),
+        inbox_collapsed: model.inbox_collapsed,
+        inbox_header_selected: model.inbox_header_selected(),
         rows_dim: model.focus_is_archived(),
     };
     let (hits, painted_list_scroll) = render::draw_queue_frame(frame, &frame_model, &geo, area);
@@ -1341,6 +1376,8 @@ fn draw_wide_board(
         follow_list: model.follow_list.get(),
         archived_collapsed: model.archived_collapsed,
         archived_header_selected: model.archived_header_selected(),
+        inbox_collapsed: model.inbox_collapsed,
+        inbox_header_selected: model.inbox_header_selected(),
         rows_dim: model.focus_is_archived(),
     };
     let task_frame = QueueFrameModel {

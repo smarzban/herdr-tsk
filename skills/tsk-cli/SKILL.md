@@ -1,12 +1,12 @@
 ---
 name: tsk-cli
 description: Work the user's tsk task board from the command line. Use when asked to add, update, edit, start, block, finish, archive, or restore a task on the board (or "tsk", "the tsk board", "the desk"), to add or tick steps, or to answer "what's on the board", "what's next", "what's on deck", "what needs me". Always `tsk add|list|status|edit|steps|archive|trash`, never the TUI.
-version: 1.2.0
+version: 1.3.0
 ---
 
 # tsk: the user's task board
 
-tsk is the user's task board. Tasks have a human status (`ready` · `started` · `blocked` ·
+tsk is the user's task board. Tasks have a human status (`open` · `ready` · `started` · `blocked` ·
 `review` · `done`), live on the **desk** (no project) or in a **project** (a Git repo root, named
 by its basename), and may carry a **thread** label. The user sees the board in a TUI; you never
 open it. Every read and write goes through the CLI below, and the user's board updates live.
@@ -26,14 +26,15 @@ stop. Never run `install.sh`, `brew`, or `cargo build` unless they asked.
 | Add many | `tsk add --file plan.json` or pipe JSON to `tsk add` |
 | What's on the board | `tsk list --json` · `tsk list --desk --json` · `tsk list --all --json` |
 | What's next / on deck | `tsk list --json`, rows whose `status` is `ready` |
+| What's in the inbox / untriaged | `tsk list --json`, rows whose `status` is `open` |
 | What needs the user | `tsk list --json`, rows whose `status` is `blocked` or `review` |
 | What's in motion | `tsk list --json`, rows whose `status` is `started` |
 | One complete task | `tsk list T12 --json` |
-| Start / block / hand back / finish | `tsk status T12 start` · `blocked` · `review` · `done` |
+| Set inbox / on deck / start / block / hand back / finish | `tsk status T12 open` · `ready` · `start` · `blocked` · `review` · `done` |
 | Change title or notes | `tsk edit T12 --title "…"` · `--notes "…"` |
 | Steps | Read ids with `tsk list T12 --json`; then `add` · `toggle` · `rename` · `remove` |
 | Archive / unarchive | `tsk archive T12` · `tsk unarchive T12` · `tsk project archive widget` |
-| Done, archived, deleted | `tsk list --done --json` · `tsk list --archived --json` · `tsk list --deleted --json` |
+| Done, open, ready, archived, deleted | `tsk list --done --json` · `--open` · `--ready` · `--archived` · `--deleted` |
 | Bring back a deleted task | `tsk trash restore T12` |
 | User-facing display | omit `--json` only when showing output to the user or troubleshooting |
 
@@ -88,7 +89,8 @@ cat plan.json | tsk add
 ```
 
 - Default scope is the Git repo root of the cwd; outside Git, the desk. `-p` takes a project
-  basename (case-insensitive) or a `/full/path`. `--desk` forces the desk.
+  basename (case-insensitive) or a `/full/path`. `--desk` forces the desk. New tasks start `open`
+  in the inbox; set `ready` when the user has picked them for the on-deck queue.
 - Idempotent on trimmed title + resolved scope + normalized thread: a matching live task is a
   success (`task already exists`, exit 0). Safe to retry.
 - `--json` (flag add) prints one object: `outcome` (`created` | `existing`), `id`, `number`,
@@ -110,16 +112,18 @@ tsk list --desk --json             # open desk tasks
 tsk list --all --json              # open tasks in every scope
 tsk list --thread rel-1 --json     # thread within the selected scope
 tsk list --done --json
+tsk list --open --json
+tsk list --ready --json
 tsk list --deleted --json
 tsk list --archived --json
 tsk list T12 --json                # one complete task
 ```
 
 - JSON is the agent read contract. Human output is presentation for the user or interactive
-  troubleshooting; never parse it. Human output groups by status: `STARTED`, `READY`, `BLOCKED`,
-  `REVIEW`; a filtered row is
-  ` - <number> <title> #<thread>`. Map board language onto it: *on deck* = READY, *in motion* =
-  STARTED, *needs you* = BLOCKED + REVIEW. All human list content wraps to the attached terminal
+  troubleshooting; never parse it. Human output groups by status: `STARTED`, `READY`, `OPEN`,
+  `BLOCKED`, `REVIEW`; a filtered row is
+  ` - <number> <title> #<thread>`. Map board language onto it: *on deck* = READY + OPEN (inbox = OPEN),
+  *in motion* = STARTED, *needs you* = BLOCKED + REVIEW. All human list content wraps to the attached terminal
   width with hanging indentation, supported from 50 columns. Direct task output uses separate notes,
   steps, and `#thread` blocks in that order, with a blank line between blocks that exist; steps
   show state and text without ids.
@@ -128,8 +132,9 @@ tsk list T12 --json                # one complete task
   this field order: `id`, `number`, `project`, `status`, `title`, `notes`, `steps`, `thread`.
   Missing notes are `null`, missing steps are `[]`; each step carries `id`, `done`, `short_id`,
   and `text`.
-- Scope selectors (`-p`, `--desk`, `--all`) are mutually exclusive, so are `--done` and
-  `--deleted`. An invalid `--thread` is exit 2, not an empty result.
+- Scope selectors (`-p`, `--desk`, `--all`) are mutually exclusive. Status selectors
+  `--open`, `--ready`, `--done`, `--deleted`, and `--archived` are mutually exclusive. An invalid
+  `--thread` is exit 2, not an empty result.
 - `tsk list T12 --json` ignores cwd and scope and finds the task anywhere, including done and live
   soft-deleted tasks. A task already moved to trash needs `--deleted`. Do not combine a task
   operand with scope, thread, or status filters.
@@ -139,7 +144,9 @@ tsk list T12 --json                # one complete task
 ## Status and edit
 
 ```sh
-tsk status T12 start      # ready → started (start = started)
+tsk status T12 open       # untriaged inbox
+tsk status T12 ready      # picked, on deck
+tsk status T12 start      # ready/open → started (start = started)
 tsk status T12 blocked
 tsk status T12 review     # your work is done, the user decides
 tsk status T12 done       # only when the user said so
@@ -147,8 +154,8 @@ tsk edit T12 --title "New title"
 tsk edit T12 --notes "Replacement notes"
 ```
 
-- `status` accepts `ready`, `started` (or `start`), `blocked`, `review`, `done`; output uses the
-  stored name. Repeating a status is idempotent.
+- `status` accepts `open`, `ready`, `started` (or `start`), `blocked`, `review`, `done`; output
+  uses the stored name. Repeating a status is idempotent.
 - `edit` needs `--title` and/or `--notes`; it never changes scope or thread. Notes that trim
   to nothing clear the notes. Newlines and tabs are kept. Repeating stored values is
   idempotent. Notes render a small markdown subset on the board (`**bold**`, `*em*`,

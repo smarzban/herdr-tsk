@@ -349,7 +349,12 @@ fn quick_add_save_selects_the_new_task_and_navigation_stays_relative_to_it() {
         .expect("saved task is visible");
     let expected_down = visible[(saved_index + 1) % visible.len()];
     apply(&mut domain, &mut model, BoardIntent::SelectNext, None);
-    assert_eq!(model.selected_id(), Some(expected_down));
+    assert!(model.inbox_header_selected());
+    assert_eq!(model.selected_id(), None);
+    assert_eq!(
+        expected_down, visible[0],
+        "the saved row wraps to the inbox heading"
+    );
 
     apply(&mut domain, &mut model, BoardIntent::SelectPrev, None);
     assert_eq!(model.selected_id(), Some(saved));

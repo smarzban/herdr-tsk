@@ -333,6 +333,8 @@ pub enum BoardIntent {
     /// Expand/collapse the done drawer's archived group (Enter or click on its header,
     /// which the intent also selects). Session-only. Reducer lands in.
     ToggleArchivedGroup,
+    /// Expand/collapse the ON DECK inbox group (Enter or click on its header).
+    ToggleInboxGroup,
     /// `?` — open the help card. Surface wiring lands in.
     OpenHelp,
     /// `Esc` — layered close. Full layer order lands in.
@@ -342,7 +344,7 @@ pub enum BoardIntent {
 }
 
 /// Bottom chrome: compact key legend for primary board actions.
-pub const BOARD_HELP_LINE: &str = "↑↓/jk  ·  ctrl+s start  ·  enter open  ·  → peek  ·  ctrl+d done  ·  ctrl+o reopen  ·  ctrl+b block  ·  ctrl+r review  ·  + add  ·  ctrl+e title  ·  ctrl+x del  ·  ctrl+u undo  ·  ctrl+f archive  ·  d drawer  ·  g archived  ·  p projects  ·  : palette  ·  ? help  ·  ctrl+q quit";
+pub const BOARD_HELP_LINE: &str = "↑↓/jk  ·  ctrl+s start  ·  ctrl+n next  ·  enter open  ·  → peek  ·  ctrl+d done  ·  ctrl+o inbox  ·  ctrl+b block  ·  ctrl+r review  ·  + add  ·  ctrl+e title  ·  ctrl+x del  ·  ctrl+u undo  ·  ctrl+f archive  ·  d drawer  ·  g inbox / archived  ·  p projects  ·  : palette  ·  ? help  ·  ctrl+q quit";
 /// Compact legend shown while the action sheet or command palette is open.
 pub const COMMAND_SURFACE_HELP_LINE: &str = "↑↓ select · type to filter · enter run · esc close";
 /// Compact legend shown while the help card is open.
@@ -428,7 +430,7 @@ const NORMAL_KEYMAP: &[NormalKeyEntry] = &[
         code: KeyCode::Char('s'),
         intent: BoardIntent::PrimaryVerb,
         help_chord: "s",
-        help_label: "start / reopen",
+        help_label: "start",
         verb: true,
     },
     NormalKeyEntry {
@@ -439,10 +441,17 @@ const NORMAL_KEYMAP: &[NormalKeyEntry] = &[
         verb: true,
     },
     NormalKeyEntry {
+        code: KeyCode::Char('n'),
+        intent: BoardIntent::SetStatus(HumanStatus::Ready),
+        help_chord: "n",
+        help_label: "next",
+        verb: true,
+    },
+    NormalKeyEntry {
         code: KeyCode::Char('o'),
         intent: BoardIntent::Reopen,
         help_chord: "o",
-        help_label: "reopen",
+        help_label: "inbox",
         verb: true,
     },
     NormalKeyEntry {
@@ -512,12 +521,12 @@ const NORMAL_KEYMAP: &[NormalKeyEntry] = &[
         help_label: "done drawer",
         verb: false,
     },
-    // Bare `g` folds the drawer's archived group; inert while the drawer is closed.
+    // Bare `g` folds inbox, or archived while the drawer is open.
     NormalKeyEntry {
         code: KeyCode::Char('g'),
         intent: BoardIntent::ToggleAllGroups,
         help_chord: "g",
-        help_label: "archived group",
+        help_label: "inbox / archived",
         verb: false,
     },
     // The project slot is mouse-clickable; `p` gives the keyboard the same route.
@@ -675,6 +684,7 @@ fn board_help_group(intent: &BoardIntent) -> HelpGroup {
         | BoardIntent::PeekDetail
         | BoardIntent::CollapseDetail => HelpGroup::Navigation,
         BoardIntent::PrimaryVerb
+        | BoardIntent::SetStatus(_)
         | BoardIntent::Complete
         | BoardIntent::Reopen
         | BoardIntent::ToggleBlock
@@ -756,12 +766,6 @@ fn help_bindings() -> Vec<HelpBinding> {
             "find filter views",
         ),
         help_binding(HelpGroup::AppControls, "ctrl+c", "quit", "exit close app"),
-        help_binding(
-            HelpGroup::CreateEdit,
-            "ctrl+n",
-            "edit notes (task page)",
-            "text write",
-        ),
         help_binding(
             HelpGroup::CreateEdit,
             "ctrl+e",
@@ -1662,6 +1666,7 @@ pub fn intent_primary_action(intent: &BoardIntent) -> Option<PrimaryBoardAction>
         | BoardIntent::ListScrollTo(_)
         | BoardIntent::ToggleDoneDrawer
         | BoardIntent::ToggleArchivedGroup
+        | BoardIntent::ToggleInboxGroup
         | BoardIntent::ProjectPickerSwitchTab
         | BoardIntent::SelectPickerTab(_)
         | BoardIntent::LaunchUnarchive
@@ -1714,8 +1719,8 @@ fn map_normal(key: KeyEvent) -> Option<BoardIntent> {
 }
 
 /// Task page view mode: the page is a focused single-task surface. Ctrl verbs act on the
-/// page's task. Ctrl+E/Ctrl+N enter its edit session, while Tab selects and cycles steps in
-/// task view. Bare arrows scroll unless a step has been selected. Esc closes.
+/// page's task. Ctrl+E enters its edit session, while Ctrl+N sets ready and Tab selects and
+/// cycles steps in task view. Bare arrows scroll unless a step has been selected. Esc closes.
 ///
 /// The step verbs reuse this map's existing intents: Ctrl+S, Ctrl+E, and Ctrl+X act on a
 /// selected step, otherwise on the task. The reducer disambiguates using the model cursor.
@@ -1733,6 +1738,7 @@ fn map_task_page(key: KeyEvent) -> Option<BoardIntent> {
         KeyCode::Char('s') if verb => Some(BoardIntent::PrimaryVerb),
         KeyCode::Char('a') if verb => Some(BoardIntent::BeginAddStep),
         KeyCode::Char('d') if verb => Some(BoardIntent::Complete),
+        KeyCode::Char('n') if verb => Some(BoardIntent::SetStatus(HumanStatus::Ready)),
         KeyCode::Char('o') if verb => Some(BoardIntent::Reopen),
         KeyCode::Char('b') if verb => Some(BoardIntent::ToggleBlock),
         KeyCode::Char('r') if verb => Some(BoardIntent::ToggleReview),
@@ -1740,7 +1746,6 @@ fn map_task_page(key: KeyEvent) -> Option<BoardIntent> {
         KeyCode::Char('u') if verb => Some(BoardIntent::Undo),
         KeyCode::Char('f') if verb => Some(BoardIntent::File),
         KeyCode::Char('e') if verb => Some(BoardIntent::BeginEditTitle),
-        KeyCode::Char('n') if verb => Some(BoardIntent::BeginEditNotes),
         KeyCode::Char('?') if !extra => Some(BoardIntent::OpenHelp),
         KeyCode::Tab if !extra => Some(BoardIntent::FormFocusNext),
         KeyCode::BackTab

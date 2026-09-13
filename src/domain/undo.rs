@@ -145,7 +145,7 @@ mod tests {
         );
         assert_eq!(
             loaded.get(ids[1]).expect("task 1").status,
-            HumanStatus::Ready,
+            HumanStatus::Open,
             "the oldest kept entry still undoes its task"
         );
     }
@@ -181,7 +181,7 @@ mod tests {
         loaded.undo().expect("undo the kept entry");
         assert_eq!(
             loaded.get(live_target).expect("live task").status,
-            HumanStatus::Ready,
+            HumanStatus::Open,
             "the live entry beneath the stale one is kept"
         );
         assert_eq!(
@@ -246,7 +246,7 @@ mod tests {
         }
         assert_eq!(
             loaded.get(ids[0]).expect("task 0").status,
-            HumanStatus::Ready,
+            HumanStatus::Open,
             "a cap-first prune would have evicted this live oldest entry"
         );
     }
@@ -307,12 +307,12 @@ mod tests {
 
         let task = state.get(id).expect("task still in store");
         assert!(!task.soft_deleted);
-        assert_eq!(task.status, HumanStatus::Ready);
+        assert_eq!(task.status, HumanStatus::Open);
         assert_eq!(task.title, "Fix flake");
     }
 
     #[test]
-    fn complete_then_undo_returns_status_ready() {
+    fn complete_then_undo_returns_status_open() {
         let mut state = DomainState::new();
         let id = create_sample(&mut state);
         state.complete(id).expect("complete");
@@ -325,7 +325,7 @@ mod tests {
 
         assert_eq!(
             state.get(id).expect("task exists").status,
-            HumanStatus::Ready
+            HumanStatus::Open
         );
     }
 

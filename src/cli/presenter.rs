@@ -25,11 +25,11 @@ pub fn add_help() -> CliOutput {
 
 pub fn list_help(terminal_width: Option<usize>) -> CliOutput {
     let stdout = concat!(
-            "usage: tsk list [<task>] [-p <project> | --desk | --all] [--thread <name>] [--done | --deleted | --archived] [--json] [--state-dir <dir>]\n\n",
-            "Lists ready, started, blocked, and review tasks in the invocation project (nearest Git repo root) by default inside Git, or your desk outside Git. The current directory outside Git remains available through --project=/full/path.\n",
+            "usage: tsk list [<task>] [-p <project> | --desk | --all] [--thread <name>] [--open | --ready | --done | --deleted | --archived] [--json] [--state-dir <dir>]\n\n",
+            "Lists open, ready, started, blocked, and review tasks in the invocation project (nearest Git repo root) by default inside Git, or your desk outside Git. The current directory outside Git remains available through --project=/full/path.\n",
             "With a task number (bare digits) or UUID from add --json or list --json, lists that one task alone with its notes, steps, and thread as separate blocks, with a blank line between blocks that exist. The thread follows the steps instead of the title; each human step shows only its [x]/[ ] state and text. Direct JSON keeps step short ids for scripting. Direct lookup ignores cwd and searches the live store, including done and live soft-deleted tasks. Tasks that have moved to trash.jsonl need tsk list --deleted. A task operand cannot be combined with scope, thread, or status filters.\n",
             "--project uses the same basename-or-path scope resolution as add; --desk selects your desk, tasks not tied to a project; --all selects every scope. --thread normalizes a thread name and filters within the selected scope; an invalid name is a usage error (exit 2). For dash-leading project and state-directory values, use --project=<scope> and --state-dir=<dir>.\n",
-            "--archived lists archived tasks only: individually archived tasks plus tasks of archived projects, each row marked `archived` or `project archived`. --done lists done tasks only. --deleted lists soft-deleted tasks only, regardless of status: live soft-deletes plus trash entries from trash.jsonl (kept 30 days), deduped by task with the live copy winning, newest deletion first.\n",
+            "--open lists inbox (open) tasks only. --ready lists picked on-deck tasks only. --archived lists archived tasks only: individually archived tasks plus tasks of archived projects, each row marked `archived` or `project archived`. --done lists done tasks only. --deleted lists soft-deleted tasks only, regardless of status: live soft-deletes plus trash entries from trash.jsonl (kept 30 days), deduped by task with the live copy winning, newest deletion first.\n",
             "To recover a typo scope, use tsk list --all --json.\n",
             "--json emits a flat array of id, number, title, status, project, and thread (or null) in displayed group order. Direct task JSON adds notes and steps, including null notes and an empty steps array, ordered as id, number, project, status, title, notes, steps, thread. All non-JSON list content wraps to the attached terminal width with hanging indentation and is supported from 50 columns; redirected output keeps stored logical lines. Human --all groups rows by status, then project scope, using a unique concise trailing path or desk.\n\n",
             "Exit contract:\n",
@@ -177,6 +177,7 @@ fn list_human(result: &ListResult, terminal_width: Option<usize>) -> String {
         ListView::Open => &[
             (Some(HumanStatus::Started), "STARTED"),
             (Some(HumanStatus::Ready), "READY"),
+            (Some(HumanStatus::Open), "OPEN"),
             (Some(HumanStatus::Blocked), "BLOCKED"),
             (Some(HumanStatus::Review), "REVIEW"),
         ],
@@ -604,6 +605,7 @@ pub fn steps_rejected(error: StepsError) -> CliOutput {
 
 fn status_name(status: HumanStatus) -> &'static str {
     match status {
+        HumanStatus::Open => "open",
         HumanStatus::Ready => "ready",
         HumanStatus::Started => "started",
         HumanStatus::Blocked => "blocked",
@@ -616,7 +618,7 @@ pub fn status_help() -> CliOutput {
     CliOutput {
         stdout: concat!(
             "usage: tsk status <task> <status> [--state-dir <dir>]\n\n",
-            "status sets a task's human status to ready, started, blocked, review, or done. start is accepted as an alias for started. The task is a task number (T<number>, or bare digits) or UUID, as shown by tsk list. Repeating the same status is idempotent: the same output prints and nothing changes.\n\n",
+            "status sets a task's human status to open, ready, started, blocked, review, or done. start is accepted as an alias for started. The task is a task number (T<number>, or bare digits) or UUID, as shown by tsk list. Repeating the same status is idempotent: the same output prints and nothing changes.\n\n",
             "Refusal tokens (exit 1): unknown-task, soft-deleted-task.\n\n",
             "Exit contract:\n",
             "  exit 0: status set, or it already had the value\n",
@@ -873,7 +875,7 @@ pub fn archive_rejected(error: ArchiveCliError, verb: &str) -> CliOutput {
 
 pub fn list_usage(reason: &str, terminal_width: Option<usize>) -> CliOutput {
     let stderr = format!(
-        "tsk list: {}\nusage: tsk list [<task>] [-p <project> | --desk | --all] [--thread <name>] [--done | --deleted | --archived] [--json] [--state-dir <dir>]\n",
+        "tsk list: {}\nusage: tsk list [<task>] [-p <project> | --desk | --all] [--thread <name>] [--open | --ready | --done | --deleted | --archived] [--json] [--state-dir <dir>]\n",
         human_reason(reason)
     );
     CliOutput {

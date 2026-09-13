@@ -131,7 +131,7 @@ fn seed(store: &TaskStore, catalog: &[Announcement], fresh_install: bool) -> Res
                 format!("{CATALOG_ID_PREFIX}{bundled}"),
                 TITLE,
                 Some(combined_notes(missed)),
-                HumanStatus::Ready,
+                HumanStatus::Open,
                 TaskScope::Global,
                 Vec::new(),
             )
@@ -320,7 +320,7 @@ mod tests {
         assert_eq!(rows.len(), 1);
         let row = rows[0];
         assert_eq!(row.title, TITLE);
-        assert_eq!(row.status, HumanStatus::Ready);
+        assert_eq!(row.status, HumanStatus::Open);
         assert_eq!(row.scope, TaskScope::Global);
         assert_eq!(row.board_identifier(), Some("N1".to_string()));
         assert_eq!(row.notice.as_ref().unwrap().catalog_id, "announce.3");

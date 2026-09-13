@@ -155,7 +155,11 @@ fn attention_cycle_adds_a_task_ahead_of_the_bound_task_and_confirm_still_lands_o
     merge_disk_into_board(&store, &mut domain, &mut model);
 
     assert_eq!(
-        model.visible_ids(),
+        model
+            .visible_tasks()
+            .iter()
+            .map(|task| task.id)
+            .collect::<Vec<_>>(),
         vec![zebra, alpha],
         "Zebra must now sit ahead of Alpha in the visible order"
     );
@@ -261,7 +265,11 @@ fn attention_cycle_removes_the_bound_task_and_confirm_still_lands_on_it_not_the_
     merge_disk_into_board(&store, &mut domain, &mut model);
 
     assert_eq!(
-        model.visible_ids(),
+        model
+            .visible_tasks()
+            .iter()
+            .map(|task| task.id)
+            .collect::<Vec<_>>(),
         vec![bravo],
         "Alpha must have left the visible list"
     );
@@ -815,7 +823,11 @@ fn a_soft_deleted_bind_opened_through_the_real_key_map_refuses_then_confirms_aft
     // real oracle on which one confirm actually reads.
     merge_disk_into_board(&store, &mut domain, &mut model);
     assert_eq!(
-        model.visible_ids(),
+        model
+            .visible_tasks()
+            .iter()
+            .map(|task| task.id)
+            .collect::<Vec<_>>(),
         vec![bravo],
         "Alpha must have left the visible list once the poll picks up the persisted soft delete"
     );

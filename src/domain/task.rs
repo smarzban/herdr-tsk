@@ -15,6 +15,7 @@ use crate::scope::paths_equivalent;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HumanStatus {
+    Open,
     Ready,
     Started,
     Blocked,
@@ -139,7 +140,7 @@ fn record_mutation(task: &mut Task, kind: TaskEventKind) {
 }
 
 /// Document version written by this binary.
-pub const STORE_FORMAT_VERSION: u32 = 3;
+pub const STORE_FORMAT_VERSION: u32 = 4;
 
 fn default_next_notice_number() -> u64 {
     1
@@ -355,7 +356,7 @@ impl DomainState {
         self.tasks.iter().find(|t| t.id == id)
     }
 
-    /// Create a task with human status `ready`, provenance, and an optional normalized thread.
+    /// Create a task with human status `open`, provenance, and an optional normalized thread.
     ///
     /// Rejects empty/whitespace-only titles. On success, stores exactly one task with the
     /// trimmed title and optional notes, and appends a `Created` event.
@@ -383,7 +384,7 @@ impl DomainState {
             title: title.to_string(),
             notes,
             thread,
-            status: HumanStatus::Ready,
+            status: HumanStatus::Open,
             scope,
             provenance,
             history: vec![TaskEvent {
@@ -447,9 +448,9 @@ impl DomainState {
         Ok(())
     }
 
-    /// Reopen a `done` task to `ready`.
+    /// Reopen a `done` task to `open` (inbox).
     pub fn reopen(&mut self, id: Uuid) -> Result<(), DomainError> {
-        self.apply_status(id, HumanStatus::Ready, TaskEventKind::Reopened)
+        self.apply_status(id, HumanStatus::Open, TaskEventKind::Reopened)
     }
 
     /// Soft-delete: mark excluded from board views until restore. Stays in store.
@@ -1011,7 +1012,7 @@ mod tests {
         let task = &state.tasks()[0];
         assert_eq!(task.id, id);
         assert_eq!(task.title, "Fix flake");
-        assert_eq!(task.status, HumanStatus::Ready);
+        assert_eq!(task.status, HumanStatus::Open);
         assert_eq!(task.notes, None);
         assert!(!task.soft_deleted);
         assert_eq!(task.scope, TaskScope::Global);
@@ -1365,6 +1366,7 @@ mod tests {
         let mut state = DomainState::new();
         let id = create_sample(&mut state);
         for status in [
+            HumanStatus::Open,
             HumanStatus::Ready,
             HumanStatus::Started,
             HumanStatus::Blocked,
@@ -1390,14 +1392,14 @@ mod tests {
     }
 
     #[test]
-    fn reopen_on_done_sets_status_todo() {
+    fn reopen_on_done_sets_status_open() {
         let mut state = DomainState::new();
         let id = create_sample(&mut state);
         state.complete(id).expect("complete known id");
         state.reopen(id).expect("reopen known id");
         assert_eq!(
             state.get(id).expect("task exists").status,
-            HumanStatus::Ready
+            HumanStatus::Open
         );
     }
 

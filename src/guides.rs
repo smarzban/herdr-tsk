@@ -20,19 +20,19 @@ pub const CATALOG: [Guide; 4] = [
         notes: "Hi. This is your board. Every task you make lives here. Take a minute with this one.\n\
                 \n\
                 **Three tabs, always**\n\
-                - `1` is your desk. It shows anything that needs you or is in motion, from every project, plus the ready tasks that belong to no project.\n\
+                - `1` is your desk. It shows anything that needs you or is in motion, from every project, plus the ready and open tasks that belong to no project.\n\
                 - `2` is one project. Press `p` to pick it.\n\
                 - `3` lists every project. `Enter` on a row opens that project's board.\n\
                 \n\
                 **Three sections, decided by status**\n\
                 - **NEEDS YOU** holds `blocked` and `review` tasks. Something is waiting on you. This task is in review, so it sits here until you act on it.\n\
                 - **IN MOTION** holds `started` tasks. Work you are doing right now.\n\
-                - **ON DECK** holds `ready` tasks. Up next. A new task lands here.\n\
+                - **ON DECK** holds picked `ready` tasks first, then the expanded `inbox` of `open` tasks. New tasks land in the inbox.\n\
                 - `done` tasks leave the board for the drawer. Press `d` to open it, `d` again to close it.\n\
                 \n\
                 **Moving around**\n\
                 - `j` and `k` or the arrows move the selection. `Enter` opens a task, `Esc` comes back.\n\
-                - Status keys use Ctrl, so a stray letter never changes anything. `ctrl+s` starts, `ctrl+b` blocks, `ctrl+r` marks review or takes it back to ready, `ctrl+d` finishes, `ctrl+o` reopens.\n\
+                - Status keys use Ctrl, so a stray letter never changes anything. `ctrl+s` starts, `ctrl+n` picks a task for ready, `ctrl+o` sends it to the inbox, `ctrl+b` blocks, `ctrl+r` marks review or takes it back to ready, and `ctrl+d` finishes.\n\
                 - `ctrl+u` undoes the last change.",
         status: HumanStatus::Review,
         steps: &[
@@ -47,7 +47,8 @@ pub const CATALOG: [Guide; 4] = [
         notes: "A task holds a title, notes (the description), and steps. You set its status yourself. Optionally put it on a thread to group related work inside a project, and file it under a project (or leave it on your desk).\n\
                 \n\
                 **Make one**\n\
-                - Press `+`, type a title, press `Enter`. It lands in ON DECK as `ready`.\n\
+                - Press `+`, type a title, press `Enter`. It lands in the ON DECK inbox as `open`.\n\
+                - Press `ctrl+n` when you pick it for the ready queue.\n\
                 - Press `Tab` instead of `Enter` to open the full page first, where you can add notes, steps, a thread, and a project before you save.\n\
                 - Type `!p widget` in the title to file it under the project named widget. Bare `!p` keeps it on your desk.\n\
                 - Type `!t release` in the title to tag it with the thread `release`. Threads group related work inside one project, and the project board can filter by them.\n\
@@ -58,7 +59,7 @@ pub const CATALOG: [Guide; 4] = [
                 - On a terminal 110 columns or wider there is no peek. `→` slides the task page open beside the board, `→` again gives it more room, and `←` slides it back.\n\
                 \n\
                 **Change one**\n\
-                - On the page, `ctrl+e` edits the title and `ctrl+n` edits the notes. `shift+enter` saves.\n\
+                - On the page, `ctrl+e` edits the title, then Tab moves to notes. The palette can also open notes editing. `shift+enter` saves.\n\
                 - `Enter` on a step checks it. The `+ step` row at the bottom adds one.\n\
                 - Steps never finish a task. Check every step below and this task stays `started` until you press `ctrl+d`. You decide when work is done.",
         status: HumanStatus::Started,
@@ -84,14 +85,14 @@ pub const CATALOG: [Guide; 4] = [
                 \n\
                 Every task gets a `T` number, and that number is how each command finds it. Use the number `tsk list` prints for your new task in place of `T1`.\n\
                 \n\
-                `tsk list` shows the tasks of the project you are standing in, or your desk outside a repository. Add `--all` for every project or `--json` for output another program can read.\n\
+                `tsk list` shows the tasks of the project you are standing in, or your desk outside a repository. Add `--all` for every project, `--open` for the inbox, `--ready` for picked tasks, or `--json` for output another program can read.\n\
                 \n\
                 **Let an agent work the board**\n\
                 Run `tsk setup` once: it finds the coding agents on your machine (Claude, Pi, Cursor, Codex, and others) and offers to install the tsk skill for each. `tsk setup claude` targets one. Then ask the agent in plain words. \"Add a task for each failing test.\" \"Mark T7 as review.\" `tsk guide` prints the same instructions if you want to read them yourself.",
         status: HumanStatus::Ready,
         steps: &[
             ("Run tsk add -t \"Try the CLI\" in another terminal", false),
-            ("Watch it appear in ON DECK", false),
+            ("Watch it appear in the ON DECK inbox", false),
             ("Run tsk status T<n> start on it", false),
         ],
     },

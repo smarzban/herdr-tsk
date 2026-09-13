@@ -1178,7 +1178,8 @@ pub fn apply_board_intent_with_save_recovery(
             | BoardIntent::PageWheelScrollUp
             | BoardIntent::PageWheelScrollDown
             | BoardIntent::ToggleDoneDrawer
-            | BoardIntent::ToggleArchivedGroup => return apply_intent(domain, model, intent, None),
+            | BoardIntent::ToggleArchivedGroup
+            | BoardIntent::ToggleInboxGroup => return apply_intent(domain, model, intent, None),
             _ => {
                 model.begin_save_recovery(recovery.error().unwrap_or("save failed"));
                 return Ok(IntentOutcome::None);
@@ -2656,7 +2657,8 @@ mod tests {
                 )
                 .unwrap();
             let mut model = BoardModel::from_domain(&domain, None);
-            let id = model.visible_ids()[1];
+            // The expanded inbox heading is a selectable chrome row before the two tasks.
+            let id = model.visible_ids()[2];
             let mut reflow_click = ReflowRowClick::default();
             let area = Rect::new(0, 0, width, 24);
             let hits = board_hit_map(area, &model);
@@ -3246,7 +3248,7 @@ mod tests {
             "resolving the click must tear the surface down the same way Enter's \
              ConfirmCommand does"
         );
-        assert_eq!(domain.get(id).expect("task").status, HumanStatus::Ready);
+        assert_eq!(domain.get(id).expect("task").status, HumanStatus::Open);
     }
 
     #[test]
@@ -4524,7 +4526,7 @@ mod tests {
             ),
             (
                 KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL),
-                BoardIntent::BeginEditNotes,
+                BoardIntent::SetStatus(HumanStatus::Ready),
             ),
             (
                 KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL),
@@ -4723,7 +4725,7 @@ mod tests {
         assert!(domain.get(id).expect("task").steps[0].done, "alpha toggled");
         assert_eq!(
             domain.get(id).expect("task").status,
-            HumanStatus::Ready,
+            HumanStatus::Open,
             "task status untouched"
         );
 

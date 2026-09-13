@@ -242,7 +242,7 @@ fn title_edit_cursor_and_window_track_the_actual_paint_width_not_a_hardcoded_one
                 let _ = draw_board(frame, &model);
             })
             .expect("draw 40x10");
-        // 62 whitespace-free characters at a 30-cell field wrap as 30 / 30 / 2.
+        // The open status word leaves a 31-cell title field, so this wraps as 31 / 31.
         let head_row = row_text(&terminal, 40, 1);
         assert!(
             head_row.contains("0123456789"),
@@ -259,8 +259,8 @@ fn title_edit_cursor_and_window_track_the_actual_paint_width_not_a_hardcoded_one
         let cursor = terminal.get_cursor_position().expect("cursor position");
         assert_eq!(
             cursor,
-            ratatui::layout::Position::new(4 + 2, tail_row.0),
-            "caret lands at the two-character tail's past-end column"
+            ratatui::layout::Position::new(4 + 31, tail_row.0),
+            "caret lands at the wrapped title's past-end column"
         );
     }
 }
@@ -1261,7 +1261,8 @@ fn task_page_header_identifier_precedes_the_title_and_footer_scope() {
     persisted.number = Some(1);
     let mut model = BoardModel::from_tasks(vec![persisted], Some(PathBuf::from(THIS_REPO)));
     model.set_selected_project(Some(PathBuf::from(THIS_REPO)));
-    apply_intent(&mut domain, &mut model, BoardIntent::SelectIndex(0), None)
+    // The expanded inbox heading is the first visible row; select the task below it.
+    apply_intent(&mut domain, &mut model, BoardIntent::SelectIndex(1), None)
         .expect("select the task");
     apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
 
@@ -1512,7 +1513,7 @@ fn title_edit_on_an_archived_task_persists_and_keeps_the_flag() {
     let task = reloaded.get(id).expect("task survives");
     assert_eq!(task.title, "Archived editable (kept)");
     assert!(task.archived, "the archived flag survives the save");
-    assert_eq!(task.status, HumanStatus::Ready, "status is unchanged");
+    assert_eq!(task.status, HumanStatus::Open, "status is unchanged");
     let _ = std::fs::remove_dir_all(&dir);
 }
 

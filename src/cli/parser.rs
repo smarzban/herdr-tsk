@@ -336,6 +336,7 @@ pub fn parse_flag_status(args: &[String]) -> Result<FlagStatus, String> {
 
 fn parse_human_status(value: &str) -> Result<HumanStatus, String> {
     match value {
+        "open" => Ok(HumanStatus::Open),
         "ready" => Ok(HumanStatus::Ready),
         "start" | "started" => Ok(HumanStatus::Started),
         "blocked" => Ok(HumanStatus::Blocked),
@@ -510,6 +511,10 @@ mod tests {
             parse_flag_status(&["tsk".into(), "status".into(), "T4".into(), "start".into()])
                 .expect("start alias");
         assert_eq!(parsed.status, Some(HumanStatus::Started));
+        let parsed =
+            parse_flag_status(&["tsk".into(), "status".into(), "T4".into(), "open".into()])
+                .expect("open status");
+        assert_eq!(parsed.status, Some(HumanStatus::Open));
     }
 
     #[test]

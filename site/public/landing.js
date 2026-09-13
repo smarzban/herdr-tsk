@@ -24,10 +24,17 @@
     reveal.forEach((el) => el.classList.add("is-in"));
   }
 
-  // ── status cycle: one row walking through the five human states ──────────
+  // ── status cycle: one row walking through the six human states ──────────
   const cycle = document.querySelector("[data-cycle]");
   if (cycle) {
     const steps = [
+      {
+        sec: "inbox",
+        glyph: "◌",
+        status: "open",
+        key: "ctrl+n",
+        next: "ready",
+      },
       {
         sec: "ON DECK",
         glyph: "○",
@@ -63,7 +70,7 @@
         key: "ctrl+d",
         next: "done",
       },
-      { sec: "DONE", glyph: "✓", status: "done", key: "ctrl+o", next: "ready" },
+      { sec: "DONE", glyph: "✓", status: "done", key: "ctrl+o", next: "open" },
     ];
     const sec = cycle.querySelector("[data-cycle-sec]");
     const glyph = cycle.querySelector("[data-cycle-glyph]");

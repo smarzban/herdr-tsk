@@ -10,6 +10,7 @@ import { parseCapture } from "./capture.js";
   const WIDE_SPLIT_MIN_COLUMNS = 110;
 
   const GLYPH = {
+    open: "◌",
     ready: "○",
     started: "●",
     blocked: "■",
@@ -102,7 +103,7 @@ import { parseCapture } from "./capture.js";
       }),
       task({
         title: "Investigate slow integration tests",
-        status: "ready",
+        status: "open",
         project: null,
         thread: null,
         notes:
@@ -227,7 +228,7 @@ import { parseCapture } from "./capture.js";
       }),
       task({
         title: "Add cursor pagination to the events endpoint",
-        status: "ready",
+        status: "open",
         project: "launchpad",
         thread: "api",
         notes:
@@ -331,6 +332,7 @@ import { parseCapture } from "./capture.js";
     copyNotice: "",
     drawer: false,
     archivedOpen: false,
+    inboxOpen: true,
     overlay: null,
     draft: "",
     paletteQ: "",
@@ -413,8 +415,8 @@ import { parseCapture } from "./capture.js";
 
   const projectName = (task) => task.project || "desk";
   // Same rule as the TUI: status sections show the newest status change first (statusAt
-  // moves only in setStatus, never on an edit or a step), ready backlogs are FIFO by
-  // capture time. Ties break by createdAt then id so the order is stable.
+  // moves only in setStatus, never on an edit or a step), ready and inbox backlogs are FIFO
+  // by pick or capture time. Ties break by createdAt then id so the order is stable.
   const statusAt = (t) => t.statusAt ?? t.createdAt;
   const byStatusChange = (a, b) =>
     statusAt(b) - statusAt(a) ||
@@ -590,6 +592,9 @@ import { parseCapture } from "./capture.js";
         ready: open
           .filter((t) => inP(t) && t.status === "ready")
           .sort(byCreated),
+        inbox: open
+          .filter((t) => inP(t) && t.status === "open")
+          .sort(byCreated),
         done: done.filter(inP),
       };
     }
@@ -603,6 +608,9 @@ import { parseCapture } from "./capture.js";
           .sort(byStatusChange),
         desk: open
           .filter((t) => !t.project && t.status === "ready")
+          .sort(byCreated),
+        inbox: open
+          .filter((t) => !t.project && t.status === "open")
           .sort(byCreated),
         done,
       };
@@ -628,9 +636,19 @@ import { parseCapture } from "./capture.js";
       if (v.started.length)
         pushHeader("section", "IN MOTION", v.started.length);
       v.started.forEach((t) => pushTask(t));
-      if (v.desk.length || !v.need.length)
-        pushHeader("section", "ON DECK · desk", v.desk.length);
+      if (v.desk.length || v.inbox.length || !v.need.length)
+        pushHeader("section", "ON DECK · desk", v.desk.length + v.inbox.length);
       v.desk.forEach((t) => pushTask(t));
+      if (v.inbox.length) {
+        rows.push({
+          kind: "inbox",
+          label: "inbox",
+          count: v.inbox.length,
+          selectable: true,
+          id: "nav:inbox",
+        });
+        if (state.inboxOpen) v.inbox.forEach((t) => pushTask(t, 1));
+      }
       if (state.drawer) {
         pushHeader("section", "DONE", v.done.length);
         v.done.forEach((t) => pushTask(t));
@@ -669,8 +687,18 @@ import { parseCapture } from "./capture.js";
       if (v.started.length)
         pushHeader("section", "IN MOTION", v.started.length);
       v.started.forEach((t) => pushTask(t));
-      pushHeader("section", "ON DECK", v.ready.length);
+      pushHeader("section", "ON DECK", v.ready.length + v.inbox.length);
       v.ready.forEach((t) => pushTask(t));
+      if (v.inbox.length) {
+        rows.push({
+          kind: "inbox",
+          label: "inbox",
+          count: v.inbox.length,
+          selectable: true,
+          id: "nav:inbox",
+        });
+        if (state.inboxOpen) v.inbox.forEach((t) => pushTask(t, 1));
+      }
       if (state.drawer) {
         pushHeader("section", "DONE", v.done.length);
         v.done.forEach((t) => pushTask(t));
@@ -850,10 +878,11 @@ import { parseCapture } from "./capture.js";
       ];
     }
     const items = [{ id: "open", label: "enter open" }];
-    if (task.status === "ready") items.push({ id: "start", label: "s start" });
-    if (task.status === "done") {
-      items.push({ id: "reopen", label: "o reopen" });
-    } else {
+    if (task.status === "open" || task.status === "ready")
+      items.push({ id: "start", label: "s start" });
+    if (task.status !== "ready") items.push({ id: "ready", label: "n ready" });
+    if (task.status !== "open") items.push({ id: "inbox", label: "o inbox" });
+    if (task.status !== "done") {
       items.push({ id: "done", label: "d done" });
       items.push({
         id: "block",
@@ -884,7 +913,9 @@ import { parseCapture } from "./capture.js";
       state.paletteQ = "";
       state.paletteI = 0;
     }
-    if (id === "start" || id === "reopen") primaryVerb();
+    if (id === "start") primaryVerb();
+    if (id === "ready") setStatus("ready");
+    if (id === "inbox") setStatus("open");
     if (id === "done") setStatus("done");
     if (id === "block") toggleBlock();
     if (id === "file") fileSelected();
@@ -893,6 +924,11 @@ import { parseCapture } from "./capture.js";
   function paletteCommands() {
     const q = state.paletteQ.trim().toLowerCase();
     const all = [
+      {
+        id: "open",
+        label: "set status: open",
+        run: () => setStatus("open"),
+      },
       {
         id: "ready",
         label: "set status: ready",
@@ -940,7 +976,7 @@ import { parseCapture } from "./capture.js";
 
   function setStatus(status) {
     const task = selectedTask();
-    if (!task) return;
+    if (!task || task.status === status) return;
     task.status = status;
     task.updatedAt = clock();
     task.statusAt = task.updatedAt;
@@ -992,6 +1028,10 @@ import { parseCapture } from "./capture.js";
   }
 
   function toggleAllGroups() {
+    if (!state.drawer && (state.focusProject || state.tab !== "projects")) {
+      state.inboxOpen = !state.inboxOpen;
+      return;
+    }
     if (state.focusProject || state.tab !== "projects") return;
     const groups = buildRows().filter(
       (row) => row.kind === "group" && !row.indent,
@@ -1018,6 +1058,8 @@ import { parseCapture } from "./capture.js";
     state.selectedId = "t1";
     state.peekId = null;
     state.drawer = false;
+    state.archivedOpen = false;
+    state.inboxOpen = true;
     state.overlay = null;
     state.draft = "";
     state.refuse = "";
@@ -1046,7 +1088,7 @@ import { parseCapture } from "./capture.js";
       number: state.nextNumber++,
       title: parsed.title,
       notes: "",
-      status: "ready",
+      status: "open",
       project: parsed.project,
       thread: parsed.thread === undefined ? null : parsed.thread,
       createdAt: now,
@@ -1100,8 +1142,7 @@ import { parseCapture } from "./capture.js";
   function primaryVerb() {
     const task = selectedTask();
     if (!task) return;
-    if (task.status === "ready") setStatus("started");
-    else if (task.status === "done") setStatus("ready");
+    if (task.status === "open" || task.status === "ready") setStatus("started");
   }
 
   function renderHelp() {
@@ -1109,11 +1150,12 @@ import { parseCapture } from "./capture.js";
       ["navigation", "↑↓ / jk", "move", "select"],
       ["navigation", "enter", "open task", "detail"],
       ["navigation", "→ / ←", "peek or slide", "wide view"],
-      ["task actions", "s", "start / reopen", "status ready"],
+      ["task actions", "s", "start", "status open or ready"],
       ["task actions", "d", "done", "status finish complete"],
       ["task actions", "b", "block", "status"],
       ["task actions", "r", "review", "status"],
-      ["task actions", "o", "reopen", "status ready"],
+      ["task actions", "n", "pick", "status ready"],
+      ["task actions", "o", "inbox", "status open"],
       ["task actions", "x", "delete", "remove"],
       ["task actions", "u", "undo", "restore"],
       ["task actions", "f", "archive", "file hide"],
@@ -1125,7 +1167,7 @@ import { parseCapture } from "./capture.js";
       ["views & find", "3", "projects", "switch view"],
       ["views & find", "p", "project picker", "switch find"],
       ["views & find", "z / D", "done drawer", "completed tasks"],
-      ["views & find", "g", "toggle groups", "collapse expand archived"],
+      ["views & find", "g", "toggle inbox / groups", "collapse expand"],
       ["views & find", "/", "search projects", "find filter"],
       ["views & find", ":", "command palette", "find actions"],
       ["app controls", "?", "help", "shortcuts keys"],
@@ -1133,11 +1175,16 @@ import { parseCapture } from "./capture.js";
       ["app controls", "q", "quit", "exit"],
     ];
     const query = state.helpQ.trim().toLowerCase();
-    const visible = rows.filter((row) => !query || row.join(" ").toLowerCase().includes(query));
+    const visible = rows.filter(
+      (row) => !query || row.join(" ").toLowerCase().includes(query),
+    );
     let previous = "";
     const list = visible
       .map((row) => {
-        const heading = row[0] === previous ? "" : `<div class="tsk-help-group">${esc(row[0].toUpperCase())}</div>`;
+        const heading =
+          row[0] === previous
+            ? ""
+            : `<div class="tsk-help-group">${esc(row[0].toUpperCase())}</div>`;
         previous = row[0];
         return `${heading}<div class="tsk-help-row"><span>${esc(row[1])}</span><span>${esc(row[2])}</span></div>`;
       })
@@ -1380,6 +1427,11 @@ import { parseCapture } from "./capture.js";
           const pad = row.indent ? "  " : "";
           return `<button type="button" class="tsk-group" data-collapse="${esc(row.collapseKey)}" data-project="${esc(row.project || "")}">${pad}<span class="dim">${mark}</span> <span class="sec">${esc(row.label)}</span> <span class="count">${row.count}</span></button>`;
         }
+        if (row.kind === "inbox") {
+          const mark = state.inboxOpen ? "▾" : "▸";
+          const selected = row.id === state.selectedId;
+          return `<button type="button" class="tsk-group tsk-inbox" data-inbox-header="1"><span class="dim">${mark}</span> <span class="sec">${selected ? "<strong>inbox</strong>" : "inbox"}</span><span class="count dim">${row.count}</span></button>`;
+        }
         if (row.kind === "archived") {
           const mark = state.archivedOpen ? "▾" : "▸";
           const selected = row.id === state.selectedId;
@@ -1444,7 +1496,7 @@ import { parseCapture } from "./capture.js";
               ].join("")
             : "";
         const dimRow = row.dim ? "dim" : "";
-        return `<button type="button" class="tsk-row ${dimRow} ${selected ? "is-sel" : ""} ${flash ? "is-flash" : ""}" data-task="${task.id}"><span class="tsk-row-main"><span class="tsk-row-prefix">${selected ? "▸ " : "  "}<span class="tsk-row-glyph">${glyph}</span> <span class="tsk-task-id" data-copy-task="${esc(task.id)}" title="copy T${task.number}">T${task.number}</span> </span><span class="tsk-row-title">${title}</span></span></button>${peek}`;
+        return `<button type="button" class="tsk-row ${dimRow} ${selected ? "is-sel" : ""} ${flash ? "is-flash" : ""}" data-task="${task.id}"><span class="tsk-row-main"><span class="tsk-row-prefix">${indent}${selected ? "▸ " : "  "}<span class="tsk-row-glyph">${glyph}</span> <span class="tsk-task-id" data-copy-task="${esc(task.id)}" title="copy T${task.number}">T${task.number}</span> </span><span class="tsk-row-title">${title}</span></span></button>${peek}`;
       })
       .join("");
 
@@ -1811,7 +1863,9 @@ import { parseCapture } from "./capture.js";
         e.preventDefault();
         const body = frame.querySelector(".tsk-help-body");
         const direction = e.key === "ArrowUp" || e.key === "PageUp" ? -1 : 1;
-        body?.scrollBy({ top: direction * (e.key.startsWith("Page") ? body.clientHeight : 24) });
+        body?.scrollBy({
+          top: direction * (e.key.startsWith("Page") ? body.clientHeight : 24),
+        });
         return;
       }
       if (e.key.length === 1 && !e.altKey && !e.ctrlKey && !e.metaKey) {
@@ -2072,6 +2126,7 @@ import { parseCapture } from "./capture.js";
       else {
         const row = selectedRow();
         if (row?.kind === "project") openProject(row.project);
+        else if (row?.kind === "inbox") state.inboxOpen = !state.inboxOpen;
         else if (row?.kind === "archived")
           state.archivedOpen = !state.archivedOpen;
         else openFullPage();
@@ -2093,8 +2148,7 @@ import { parseCapture } from "./capture.js";
     }
     if (e.key === "o") {
       e.preventDefault();
-      const task = selectedTask();
-      if (task && task.status === "done") setStatus("ready");
+      setStatus("open");
       render();
       return;
     }
@@ -2135,12 +2189,7 @@ import { parseCapture } from "./capture.js";
     }
     if (e.key === "n") {
       e.preventDefault();
-      const task = selectedTask();
-      if (task) {
-        enterTaskStage();
-        state.editField = "notes";
-        state.editDraft = task.notes || "";
-      }
+      setStatus("ready");
       render();
       return;
     }
@@ -2258,6 +2307,12 @@ import { parseCapture } from "./capture.js";
         0,
         pickerOptions().indexOf(state.selectedProject),
       );
+      render();
+      return;
+    }
+    const inboxHeader = e.target.closest("[data-inbox-header]");
+    if (inboxHeader) {
+      state.inboxOpen = !state.inboxOpen;
       render();
       return;
     }

@@ -950,15 +950,15 @@ mod tests {
     #[test]
     fn embedded_skill_declares_semver() {
         let version = embedded_skill_version();
-        assert_eq!(version, "1.2.0");
-        assert_eq!(frontmatter_version(SKILL_MD).as_deref(), Some("1.2.0"));
+        assert_eq!(version, "1.3.0");
+        assert_eq!(frontmatter_version(SKILL_MD).as_deref(), Some("1.3.0"));
         let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
         for byte in SKILL_MD.bytes() {
             hash ^= u64::from(byte);
             hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
         }
         assert_eq!(
-            hash, 0x3b4b_9a95_b29c_cd35,
+            hash, 0xf997_7616_3a6b_fb1a,
             "skills/tsk-cli/SKILL.md changed: bump `version:` in its frontmatter and update both pins here"
         );
     }
