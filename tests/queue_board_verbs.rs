@@ -1457,6 +1457,9 @@ fn delete_notice_prefixes_the_board_verb_bar_with_undo_until_undone() {
         )
         .expect("neighbour");
     let _ = other;
+    // The neighbour must be in the model before reanchoring, so the inbox heading cannot win
+    // merely because the newly grouped open row was absent from the previous visible order.
+    model.sync_from_domain(&domain);
     apply_intent(&mut domain, &mut model, BoardIntent::SoftDelete, None).expect("arm delete");
     apply_intent(&mut domain, &mut model, BoardIntent::SoftDelete, None).expect("delete");
     assert!(domain.get(id).expect("task").soft_deleted);
