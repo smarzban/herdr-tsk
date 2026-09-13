@@ -13,6 +13,10 @@ the GitHub release notes verbatim.
 
 - Direct `tsk list T<n>` output now includes the task's notes, steps, and thread in both human-readable and JSON forms, so agents can read the complete task with one command. Human detail separates notes, steps, and the trailing thread into blocks; step short IDs remain JSON-only. All human `tsk list` content wraps to the terminal width with hanging indentation, supported from 50 columns.
 
+### Changed
+
+- The bundled agent skill now uses JSON as the default contract for every `tsk list` read. Human listings are reserved for output shown to the user or interactive troubleshooting.
+
 ## v0.8.2
 
 ### Breaking

@@ -958,9 +958,24 @@ mod tests {
             hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
         }
         assert_eq!(
-            hash, 0xfc0d_620e_fd3d_f2cc,
+            hash, 0xc5ab_8cee_cd77_2391,
             "skills/tsk-cli/SKILL.md changed: bump `version:` in its frontmatter and update both pins here"
         );
+    }
+
+    #[test]
+    fn embedded_skill_uses_json_for_agent_list_reads() {
+        assert!(SKILL_MD.contains("**Read JSON, not presentation.**"));
+        assert!(SKILL_MD.contains("Always add `--json` to `tsk list`."));
+        for line in SKILL_MD
+            .lines()
+            .filter(|line| line.starts_with("tsk list "))
+        {
+            assert!(
+                line.contains("--json"),
+                "agent-facing list example must use JSON: {line}"
+            );
+        }
     }
 
     #[test]
