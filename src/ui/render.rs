@@ -16,7 +16,7 @@ use ratatui::Frame;
 use uuid::Uuid;
 
 use super::capture::CaptureField;
-use super::edit::{place_edit_cursor, place_edit_cursor_at};
+use super::edit::{escaped_line_window, place_edit_cursor, place_edit_cursor_at, EditBuffer};
 use super::present_line;
 use super::queue::{NavTab, ProjectRow, QueueSection, QueueView, SectionKind};
 use super::scrollbar;
@@ -390,6 +390,7 @@ pub enum QueueOverlay<'a> {
     },
     /// Help card (`?`).
     Help {
+        query: &'a str,
         lines: &'a [String],
         /// First list row in view; the painter clamps it to the rows that fit.
         scroll: usize,
@@ -637,10 +638,8 @@ pub enum QueueHitTarget {
     PickerTab(crate::ui::board::PickerTab),
     /// One choice row of the launch card (0 = unarchive, 1 = keep archived).
     LaunchOption(usize),
-    /// The open help card's full-frame dismiss hit -- a click anywhere the card's own
-    /// `ModalClose`/`ModalChrome`/body hits do not shadow closes it, matching the
-    /// keyboard's "any key closes". The board behind the card stays visible and painted;
-    /// only [`paint_modal_card`]'s own rect is cleared and repainted.
+    /// The open help card's full-frame dismiss hit. The card's own chrome and searchable
+    /// body shadow it, so only a click on the visible board behind the card closes Help.
     HelpDismiss,
     /// Shared-form title row. A click focuses Title without recreating the form.
     FormTitle,
@@ -1568,8 +1567,12 @@ fn paint_overlay(
         QueueOverlay::Palette { query, commands } => {
             paint_palette_overlay(frame, geo, surface, query, commands, hits);
         }
-        QueueOverlay::Help { lines, scroll } => {
-            paint_help_overlay(frame, geo, surface, lines, *scroll, hits);
+        QueueOverlay::Help {
+            query,
+            lines,
+            scroll,
+        } => {
+            paint_help_overlay(frame, geo, surface, query, lines, *scroll, hits);
         }
         QueueOverlay::LaunchCard { name } => {
             paint_launch_card(frame, geo, surface, name, hits);
@@ -1819,6 +1822,16 @@ fn modal_chrome_rows(tier: Tier, has_footer: bool) -> u16 {
     2 + footer_rows + 2 * pad
 }
 
+fn modal_card_width(geo: &TierGeometry, bounds: Rect, min_content_width: u16) -> u16 {
+    let pad: u16 = if geo.tier == Tier::Compact { 0 } else { 1 };
+    bounds
+        .width
+        .saturating_sub(4)
+        .clamp(1, 62)
+        .max(min_content_width.saturating_add(2 + 2 * pad))
+        .min(bounds.width)
+}
+
 /// Returns the content `Rect` the caller paints its body into (zero-area when nothing
 /// fits, e.g. a zero-sized frame).
 fn paint_modal_card(
@@ -1847,12 +1860,7 @@ fn paint_modal_card(
     // Blank inset around the content, shed on both axes in compact so its scarce cells
     // go to actual body text instead of decorative breathing room.
     let pad: u16 = if geo.tier == Tier::Compact { 0 } else { 1 };
-    let card_w = bounds
-        .width
-        .saturating_sub(4)
-        .clamp(1, 62)
-        .max(min_content_width.saturating_add(2 + 2 * pad))
-        .min(bounds.width);
+    let card_w = modal_card_width(geo, bounds, min_content_width);
     let chrome_rows = modal_chrome_rows(geo.tier, !legend.is_empty());
     let shown_content = content_rows.min(bounds.height.saturating_sub(chrome_rows));
     let card_h = (chrome_rows + shown_content).min(bounds.height).max(1);
@@ -2051,12 +2059,16 @@ fn modal_bounds(geo: &TierGeometry) -> Rect {
 /// Legend footer for the Help card.
 const HELP_FOOTER: &[VerbEntry<'static>] = &[
     VerbEntry {
+        key: "type",
+        label: "search",
+    },
+    VerbEntry {
         key: "↑↓",
         label: "scroll",
     },
     VerbEntry {
         key: "esc",
-        label: "close",
+        label: "clear/close",
     },
 ];
 
@@ -2289,10 +2301,43 @@ fn paint_palette_query(
     );
 }
 
+fn wrap_help_lines(lines: &[String], width: u16) -> Vec<String> {
+    let mut wrapped = Vec::new();
+    for line in lines {
+        let trimmed = line.trim();
+        let heading = !trimmed.is_empty() && trimmed == trimmed.to_ascii_uppercase();
+        if trimmed.is_empty() || heading {
+            wrapped.push(line.clone());
+            continue;
+        }
+
+        let body = line.strip_prefix(' ').unwrap_or(line);
+        let Some(separator) = body.find("  ") else {
+            wrapped.push(line.clone());
+            continue;
+        };
+        let chord = &body[..separator];
+        let action = body[separator..].trim_start();
+        let prefix = format!(" {chord:<17}  ");
+        let indent = display_width(&prefix);
+        let action_width = (width as usize).saturating_sub(indent).max(1);
+        let segments = crate::ui::edit::wrap_text(action, action_width);
+        for (index, segment) in segments.into_iter().enumerate() {
+            if index == 0 {
+                wrapped.push(format!("{prefix}{}", segment.text));
+            } else {
+                wrapped.push(format!("{}{}", " ".repeat(indent), segment.text));
+            }
+        }
+    }
+    wrapped
+}
+
 fn paint_help_overlay(
     frame: &mut Frame<'_>,
     geo: &TierGeometry,
     surface: Rect,
+    query: &str,
     lines: &[String],
     scroll: usize,
     hits: &mut QueueHitMap,
@@ -2300,10 +2345,7 @@ fn paint_help_overlay(
     if geo.row_width == 0 || geo.height == 0 || lines.is_empty() {
         return;
     }
-    // Compact: omit decorative blank rows, and drop each line's leading indent column --
-    // the card's own border already insets the body, so the width that bought is worth
-    // more here than the indent. Neither line up needs an inset from the other; the
-    // card's `pad` already covers it.
+    // Compact drops decorative group spacing and the redundant leading body indent.
     let shown: Vec<String> = if geo.tier == Tier::Compact {
         lines
             .iter()
@@ -2314,20 +2356,35 @@ fn paint_help_overlay(
         lines.to_vec()
     };
 
-    // Help has nothing worth preserving underneath it (no query row like the palette),
-    // so it takes the whole frame as its ceiling -- the one place that actually matters:
-    // a narrow compact terminal, where every row the border+footer would otherwise leave
-    // idle buys another binding into view.
+    // The shared card still centers in the whole frame. Half the frame is the normal hard
+    // ceiling; below 15 rows, allow the sixth row needed for border, search, divider, group,
+    // and one binding.
     let bounds = Rect::new(0, 0, geo.row_width, geo.height);
-    let capacity = bounds
-        .height
-        .saturating_sub(modal_chrome_rows(geo.tier, true)) as usize;
-    // The list scrolls with the arrows, `j`/`k`, page keys, and the wheel. The offset is
-    // clamped so the last page is always full; `▲`/`▼` mark the rows out of view.
-    let max_scroll = shown.len().saturating_sub(capacity);
+    let pad: u16 = if geo.tier == Tier::Compact { 0 } else { 1 };
+    let content_width = modal_card_width(geo, bounds, 0).saturating_sub(2 + 2 * pad);
+    let shown = wrap_help_lines(&shown, content_width);
+    let max_card_height = if geo.height < 15 {
+        (geo.height / 2).max(6).min(geo.height)
+    } else {
+        (geo.height / 2).max(1)
+    };
+    let legend = if geo.tier == Tier::Compact {
+        &[]
+    } else {
+        HELP_FOOTER
+    };
+    let content_capacity =
+        max_card_height.saturating_sub(modal_chrome_rows(geo.tier, !legend.is_empty())) as usize;
+    let list_capacity = content_capacity.saturating_sub(2); // focused search row + divider
+    let max_scroll = shown.len().saturating_sub(list_capacity);
     hits.help_max_scroll = Some(max_scroll);
     let scroll = scroll.min(max_scroll);
-    let window: Vec<String> = shown.iter().skip(scroll).take(capacity).cloned().collect();
+    let window: Vec<String> = shown
+        .iter()
+        .skip(scroll)
+        .take(list_capacity)
+        .cloned()
+        .collect();
     let title = titled_with_scroll_marker("help", scroll > 0, scroll + window.len() < shown.len());
     let content = paint_modal_card(
         frame,
@@ -2336,29 +2393,68 @@ fn paint_help_overlay(
         bounds,
         ModalCardSpec {
             title: &title,
-            content_rows: window.len() as u16,
+            content_rows: (2 + window.len()) as u16,
             min_content_width: 0,
-            legend: HELP_FOOTER,
+            legend,
             dismiss: Some(QueueHitTarget::HelpDismiss),
             legend_hits: None,
         },
         hits,
     );
-    // The card's blanket `ModalChrome` (pushed for the whole card, border included) would
-    // otherwise make the body text itself inert too. Help's body is not an interactive
-    // surface like the palette's command rows or the picker's options -- there is nothing
-    // to select inside it -- so it keeps mouse parity with the keyboard's "any key" by
-    // reclaiming its own content rect as a `HelpDismiss` hit, the same close its own `[x]`
-    // and the frame outside the card already resolve to.
-    hits.push(QueueHitTarget::HelpDismiss, content);
-    for (j, ln) in window.iter().take(content.height as usize).enumerate() {
-        let y = content.y.saturating_add(j as u16);
+    if content.height == 0 {
+        return;
+    }
+
+    let prefix = " / ";
+    let query_width = content.width.saturating_sub(display_width(prefix) as u16) as usize;
+    let draft = EditBuffer::new(query, query.chars().count());
+    let (query_text, cursor_col) = escaped_line_window(&draft, query_width);
+    let search_line = if query.is_empty() {
+        Line::from(vec![
+            Span::styled(prefix.to_string(), style_bold()),
+            Span::styled("search keys or actions…".to_string(), style_dim()),
+        ])
+    } else {
+        Line::from(vec![
+            Span::styled(prefix.to_string(), style_bold()),
+            Span::styled(query_text, style_plain()),
+        ])
+    };
+    let search_rect = Rect::new(content.x, content.y, content.width, 1);
+    put_line_at(
+        frame,
+        surface,
+        search_rect,
+        bound_line(search_line, content.width as usize),
+    );
+    place_edit_cursor(
+        frame,
+        local_rect(surface, search_rect),
+        (display_width(prefix) as u16).saturating_add(cursor_col),
+    );
+
+    if content.height > 1 {
+        let divider_rect = Rect::new(content.x, content.y.saturating_add(1), content.width, 1);
+        put_line_at(frame, surface, divider_rect, paint_rule_row(content.width));
+    }
+
+    for (j, ln) in window
+        .iter()
+        .take(content.height.saturating_sub(2) as usize)
+        .enumerate()
+    {
+        let y = content.y.saturating_add(2 + j as u16);
         let rect = Rect::new(content.x, y, content.width, 1);
+        let heading = !ln.trim().is_empty() && ln.trim() == ln.trim().to_ascii_uppercase();
         put_line_at(
             frame,
             surface,
             rect,
-            paint_bounded_line(ln, content.width, style_plain()),
+            paint_bounded_line(
+                ln,
+                content.width,
+                if heading { style_bold() } else { style_plain() },
+            ),
         );
         hits.push_copyable(rect);
     }

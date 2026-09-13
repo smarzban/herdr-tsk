@@ -11,7 +11,7 @@ use crate::ui::capture::CaptureField;
 use crate::ui::edit::{
     escaped_line_window, wrap_text, wrapped_draft_rows, wrapped_edit_rows, EditBuffer,
 };
-use crate::ui::input::help_card_lines;
+use crate::ui::input::help_card_lines_for_query;
 use crate::ui::mouse::BoardPopup;
 use crate::ui::queue::ThreadFilter;
 use crate::ui::render::{
@@ -784,7 +784,7 @@ struct OverlayPayloads<'a> {
 impl<'a> OverlayPayloads<'a> {
     fn collect(model: &'a BoardModel) -> Self {
         let help_lines = if model.input_mode() == BoardInputMode::Help {
-            help_card_lines()
+            help_card_lines_for_query(model.help_query())
         } else {
             Vec::new()
         };
@@ -956,6 +956,7 @@ impl<'a> OverlayPayloads<'a> {
         }
         if model.input_mode() == BoardInputMode::Help {
             return Some(QueueOverlay::Help {
+                query: model.help_query(),
                 lines: &self.help_lines,
                 scroll: model.help_scroll(),
             });

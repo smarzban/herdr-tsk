@@ -193,6 +193,11 @@ migration or design work they imply. What the behaviour *is* lives in the docs
 - `map_edit` and `map_board_form_key` share `map_form_edit_key`. Save-recovery
   `r`/`c`/Esc must reach Retry/Cancel even if a form is allocated (`src/app.rs`
   allowlist).
+- Help is a presentation override, not the underlying input state. Checks such as
+  `has_unsaved_work` use `help_return_mode`; its scroll horizon is measured in wrapped
+  screen rows recorded by the renderer, never unwrapped catalog rows.
+- A centered overlay in wide split owns mouse input across the whole frame before the
+  focused-column gate runs; otherwise its task-column half is visibly inert.
 - A form and its input mode must outlive the save call. Never clear the form or switch
   mode before the persistence boundary confirms: a cancelled failed save otherwise
   leaves an edit mode with no form, which no key can escape.

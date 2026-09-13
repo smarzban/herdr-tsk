@@ -133,10 +133,17 @@ test("demo keeps project navigation, attribution, and search contracts", async (
 
 test("demo matches the quick-add, peek, and group-toggle contracts", async () => {
   const demo = await read("../public/board-demo.js");
+  const landing = await read("../src/styles/landing.css");
   assert.match(demo, /if \(e\.key === "Enter" && !e\.ctrlKey && !e\.altKey && !e\.metaKey\)/);
   assert.match(demo, /saveDraft\(e\.shiftKey\)/);
   assert.match(demo, /enter save · tab details · esc close/);
-  assert.match(demo, /z or D drawer \(app: d\)/);
+  assert.match(demo, /\["views & find", "z \/ D", "done drawer"/);
+  assert.match(demo, /state\.helpQ/);
+  assert.match(demo, /search keys or actions/);
+  assert.match(demo, /tsk-help-divider/);
+  assert.match(demo, /tsk-help-row/);
+  assert.match(landing, /\.tsk-help-row span:last-child/);
+  assert.match(landing, /overflow-wrap: anywhere/);
   assert.match(demo, /e\.key === "z" \|\| e\.key === "D"/);
   assert.doesNotMatch(demo, /saveDraft\(e\.ctrlKey \|\| e\.metaKey\)/);
   assert.doesNotMatch(demo, /thread #\$\{task\.thread\}|scope \$\{projectName\(task\)\}|created \$\{age\(/);

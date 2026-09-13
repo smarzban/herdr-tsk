@@ -521,6 +521,90 @@ fn board_save_recovery_cancel_restores_baseline_and_keyboard_reaches_retry_cance
 }
 
 #[test]
+fn help_opens_and_remains_operable_during_save_recovery() {
+    let (mut domain, mut model, _) = board_state();
+    let baseline =
+        serde_json::from_str(&serde_json::to_string(&domain).expect("serialize baseline"))
+            .expect("deserialize baseline");
+    let mut recovery = SaveRecovery::new();
+    apply_board_intent_with_save_recovery(
+        &mut domain,
+        &mut model,
+        &mut recovery,
+        BoardSaveContext {
+            baseline,
+            intent: BoardIntent::Complete,
+            snapshot: None,
+        },
+        |_| Err("injected board save failure".into()),
+    )
+    .expect("failure reducer");
+    assert_eq!(model.input_mode(), BoardInputMode::SaveRecovery);
+
+    let open = map_key(
+        BoardInputMode::SaveRecovery,
+        KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE),
+    );
+    assert_eq!(open, Some(BoardIntent::OpenHelp));
+    for intent in [
+        open.expect("Help route"),
+        BoardIntent::HelpQueryInsert('d'),
+        BoardIntent::HelpScrollDown,
+    ] {
+        apply_board_intent_with_save_recovery(
+            &mut domain,
+            &mut model,
+            &mut recovery,
+            BoardSaveContext {
+                baseline: DomainState::new(),
+                intent,
+                snapshot: None,
+            },
+            |_| panic!("Help presentation must not persist"),
+        )
+        .expect("Help intent through recovery boundary");
+    }
+    assert_eq!(model.input_mode(), BoardInputMode::Help);
+    assert_eq!(model.help_query(), "d");
+    apply_board_intent_with_save_recovery(
+        &mut domain,
+        &mut model,
+        &mut recovery,
+        BoardSaveContext {
+            baseline: DomainState::new(),
+            intent: BoardIntent::CloseHelp,
+            snapshot: None,
+        },
+        |_| panic!("Help close must not persist"),
+    )
+    .expect("close Help through recovery boundary");
+    assert_eq!(model.input_mode(), BoardInputMode::SaveRecovery);
+    assert!(recovery.is_pending());
+
+    let (mut quick_domain, mut quick_model, _) = board_state();
+    apply_intent(
+        &mut quick_domain,
+        &mut quick_model,
+        BoardIntent::OpenCapture,
+        None,
+    )
+    .expect("open quick-add");
+    quick_model.begin_save_recovery("injected save failure");
+    apply_intent(
+        &mut quick_domain,
+        &mut quick_model,
+        BoardIntent::OpenHelp,
+        None,
+    )
+    .expect("open Help over quick-add recovery");
+    let rendered = board_painted(&quick_model);
+    assert!(
+        rendered.contains("search keys or actions"),
+        "Help must outrank the retained quick-add overlay:\n{rendered}"
+    );
+}
+
+#[test]
 fn command_surface_reaches_save_failure_retry_and_cancel_through_the_same_boundary() {
     let (mut domain, mut model, id) = board_state();
     let baseline =
@@ -2146,7 +2230,10 @@ fn input_surface_help_lines_use_the_shared_lowercase_verb_grammar() {
         COMMAND_SURFACE_HELP_LINE,
         "↑↓ select · type to filter · enter run · esc close"
     );
-    assert_eq!(HELP_SURFACE_HELP_LINE, "↑↓ scroll · esc close");
+    assert_eq!(
+        HELP_SURFACE_HELP_LINE,
+        "type search · ↑↓ scroll · esc clear/close"
+    );
     assert_eq!(LAUNCH_CARD_HELP_LINE, "y unarchive · n keep archived");
     assert_eq!(SAVE_RECOVERY_HELP_LINE, "↑↓ · r retry · c cancel");
     assert_eq!(

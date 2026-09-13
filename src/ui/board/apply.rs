@@ -1687,27 +1687,58 @@ fn apply_board_intent(
             return Ok(IntentOutcome::None);
         }
         BoardIntent::OpenHelp => {
-            if model.project_picker.is_some() {
-                return Ok(IntentOutcome::None);
-            }
+            let active_mode = model.input_mode();
+            let return_mode = model.input_mode;
             model.close_command_surface();
-            model.close_popup();
+            if !matches!(
+                active_mode,
+                BoardInputMode::ProjectPicker | BoardInputMode::LaunchCard
+            ) {
+                model.close_popup();
+            }
+            model.help_return_mode = return_mode;
+            model.help_query.clear();
             model.help_scroll = 0;
             model.help_max_scroll.set(usize::MAX);
             model.input_mode = BoardInputMode::Help;
+            return Ok(IntentOutcome::None);
+        }
+        BoardIntent::HelpQueryInsert(character) => {
+            if model.input_mode == BoardInputMode::Help {
+                model.help_query.push(character);
+                model.help_scroll = 0;
+                model.help_max_scroll.set(usize::MAX);
+            }
+            return Ok(IntentOutcome::None);
+        }
+        BoardIntent::HelpQueryInsertText(text) => {
+            if model.input_mode == BoardInputMode::Help {
+                model.help_query.push_str(&flatten_line_breaks(&text));
+                model.help_scroll = 0;
+                model.help_max_scroll.set(usize::MAX);
+            }
+            return Ok(IntentOutcome::None);
+        }
+        BoardIntent::HelpQueryBackspace => {
+            if model.input_mode == BoardInputMode::Help {
+                model.help_query.pop();
+                model.help_scroll = 0;
+                model.help_max_scroll.set(usize::MAX);
+            }
+            return Ok(IntentOutcome::None);
+        }
+        BoardIntent::CloseHelp => {
+            model.close_help();
             return Ok(IntentOutcome::None);
         }
         BoardIntent::HelpScrollUp | BoardIntent::HelpScrollDown => {
             if model.input_mode != BoardInputMode::Help {
                 return Ok(IntentOutcome::None);
             }
-            // The painter records how far the card could scroll on the last frame, so the
-            // offset never runs past the last page (a stale record from a taller frame is
-            // still bounded by the list itself).
-            let horizon = model
-                .help_max_scroll
-                .get()
-                .min(crate::ui::input::help_card_lines().len().saturating_sub(1));
+            // The painter records the wrapped-row horizon for the last frame. Source catalog
+            // rows are not a valid second bound because one description may occupy several
+            // screen rows at compact widths.
+            let horizon = model.help_max_scroll.get();
             model.help_scroll = match intent {
                 BoardIntent::HelpScrollUp => model.help_scroll.saturating_sub(1),
                 _ => model.help_scroll.saturating_add(1).min(horizon),
@@ -1723,7 +1754,13 @@ fn apply_board_intent(
                 return Ok(IntentOutcome::None);
             }
             if model.input_mode == BoardInputMode::Help {
-                model.input_mode = BoardInputMode::Normal;
+                if model.help_query.is_empty() {
+                    model.close_help();
+                } else {
+                    model.help_query.clear();
+                    model.help_scroll = 0;
+                    model.help_max_scroll.set(usize::MAX);
+                }
                 return Ok(IntentOutcome::None);
             }
             if model.input_mode == BoardInputMode::ProjectsSearch {

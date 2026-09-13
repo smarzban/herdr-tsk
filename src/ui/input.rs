@@ -288,9 +288,14 @@ pub enum BoardIntent {
     ToggleBlock,
     /// `ctrl+r` — toggle review ↔ ready. Reducer lands in.
     ToggleReview,
-    /// Help card: scroll its key list one row.
+    /// Help card: edit its focused search query or scroll the filtered key list.
+    HelpQueryInsert(char),
+    HelpQueryInsertText(String),
+    HelpQueryBackspace,
     HelpScrollUp,
     HelpScrollDown,
+    /// Explicit mouse dismissal closes Help immediately, even with a nonempty query.
+    CloseHelp,
     /// `Enter` on a stored task-page step: flip it between done and ready.
     ToggleStep,
     /// `Enter` opens the selected task as a full-page view in single-pane presentation.
@@ -341,7 +346,7 @@ pub const BOARD_HELP_LINE: &str = "↑↓/jk  ·  ctrl+s start  ·  enter open  
 /// Compact legend shown while the action sheet or command palette is open.
 pub const COMMAND_SURFACE_HELP_LINE: &str = "↑↓ select · type to filter · enter run · esc close";
 /// Compact legend shown while the help card is open.
-pub const HELP_SURFACE_HELP_LINE: &str = "↑↓ scroll · esc close";
+pub const HELP_SURFACE_HELP_LINE: &str = "type search · ↑↓ scroll · esc clear/close";
 /// Compact legend shown while a failed board save is unresolved.
 pub const LAUNCH_CARD_HELP_LINE: &str = "y unarchive · n keep archived";
 pub const SAVE_RECOVERY_HELP_LINE: &str = "↑↓ · r retry · c cancel";
@@ -608,122 +613,545 @@ pub fn is_unbound_normal_char(character: char) -> bool {
         .any(|entry| entry.code == KeyCode::Char(character))
 }
 
-/// The board section of the help card: every normal-mode binding, Ctrl chords spelled
-/// out, plus the bare routes the keymap table does not own (`1`/`2`/`3`, `ctrl+c`).
-fn board_help_bindings() -> Vec<(String, &'static str)> {
-    let mut seen: Vec<(String, &'static str)> = Vec::new();
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HelpGroup {
+    Navigation,
+    TaskActions,
+    CreateEdit,
+    ViewsFind,
+    SurfaceControls,
+    AppControls,
+}
+
+impl HelpGroup {
+    const ALL: [Self; 6] = [
+        Self::Navigation,
+        Self::TaskActions,
+        Self::CreateEdit,
+        Self::ViewsFind,
+        Self::SurfaceControls,
+        Self::AppControls,
+    ];
+
+    const fn title(self) -> &'static str {
+        match self {
+            Self::Navigation => "NAVIGATION",
+            Self::TaskActions => "TASK ACTIONS",
+            Self::CreateEdit => "CREATE & EDIT",
+            Self::ViewsFind => "VIEWS & FIND",
+            Self::SurfaceControls => "SURFACE CONTROLS",
+            Self::AppControls => "APP CONTROLS",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct HelpBinding {
+    group: HelpGroup,
+    chord: String,
+    action: &'static str,
+    aliases: &'static str,
+}
+
+fn help_binding(
+    group: HelpGroup,
+    chord: impl Into<String>,
+    action: &'static str,
+    aliases: &'static str,
+) -> HelpBinding {
+    HelpBinding {
+        group,
+        chord: chord.into(),
+        action,
+        aliases,
+    }
+}
+
+fn board_help_group(intent: &BoardIntent) -> HelpGroup {
+    match intent {
+        BoardIntent::SelectNext
+        | BoardIntent::SelectPrev
+        | BoardIntent::OpenTaskPage
+        | BoardIntent::PeekDetail
+        | BoardIntent::CollapseDetail => HelpGroup::Navigation,
+        BoardIntent::PrimaryVerb
+        | BoardIntent::Complete
+        | BoardIntent::Reopen
+        | BoardIntent::ToggleBlock
+        | BoardIntent::ToggleReview
+        | BoardIntent::SoftDelete
+        | BoardIntent::Undo
+        | BoardIntent::File => HelpGroup::TaskActions,
+        BoardIntent::OpenCapture | BoardIntent::BeginEditTitle => HelpGroup::CreateEdit,
+        BoardIntent::ToggleDoneDrawer
+        | BoardIntent::ToggleAllGroups
+        | BoardIntent::OpenProjectSelector
+        | BoardIntent::OpenThreadFilterPicker
+        | BoardIntent::OpenProjectsViewPicker
+        | BoardIntent::OpenCommandPalette => HelpGroup::ViewsFind,
+        BoardIntent::CloseLayer | BoardIntent::OpenHelp | BoardIntent::Quit => {
+            HelpGroup::AppControls
+        }
+        _ => HelpGroup::SurfaceControls,
+    }
+}
+
+/// Every help binding, functionally grouped. The board entries continue to come from the
+/// live keymap; surface-specific entries name their context so repeated keys stay clear.
+fn help_bindings() -> Vec<HelpBinding> {
+    let mut bindings = Vec::new();
     for entry in NORMAL_KEYMAP {
         let chord = if entry.verb {
-            format!("ctrl+{}", entry.help_chord)
+            entry
+                .help_chord
+                .split(" / ")
+                .map(|part| format!("ctrl+{part}"))
+                .collect::<Vec<_>>()
+                .join(" / ")
         } else {
             entry.help_chord.to_string()
         };
-        let binding = (chord, entry.help_label);
-        if !seen.contains(&binding) {
-            seen.push(binding);
+        let binding = help_binding(
+            board_help_group(&entry.intent),
+            chord,
+            entry.help_label,
+            match board_help_group(&entry.intent) {
+                HelpGroup::TaskActions => "task status lifecycle complete finish",
+                HelpGroup::CreateEdit => "task capture create editing",
+                HelpGroup::ViewsFind => "board filter search open",
+                _ => "board",
+            },
+        );
+        if !bindings
+            .iter()
+            .any(|seen: &HelpBinding| seen.chord == binding.chord && seen.action == binding.action)
+        {
+            bindings.push(binding);
         }
     }
-    seen.push(("1 · 2 · 3".to_string(), "desk · project · projects"));
-    seen.push(("/".to_string(), "search projects"));
-    seen.push(("ctrl+c".to_string(), "quit"));
-    seen
+
+    bindings.extend([
+        help_binding(
+            HelpGroup::ViewsFind,
+            "1",
+            "open desk",
+            "switch view navigate board",
+        ),
+        help_binding(
+            HelpGroup::ViewsFind,
+            "2",
+            "open selected project",
+            "switch view navigate board",
+        ),
+        help_binding(
+            HelpGroup::ViewsFind,
+            "3",
+            "open projects",
+            "switch view navigate board",
+        ),
+        help_binding(
+            HelpGroup::ViewsFind,
+            "/",
+            "search projects",
+            "find filter views",
+        ),
+        help_binding(HelpGroup::AppControls, "ctrl+c", "quit", "exit close app"),
+        help_binding(
+            HelpGroup::CreateEdit,
+            "ctrl+n",
+            "edit notes (task page)",
+            "text write",
+        ),
+        help_binding(
+            HelpGroup::CreateEdit,
+            "ctrl+e",
+            "edit title / selected step (task page)",
+            "rename checklist",
+        ),
+        help_binding(
+            HelpGroup::CreateEdit,
+            "ctrl+a",
+            "add step (task page)",
+            "create checklist",
+        ),
+        help_binding(
+            HelpGroup::Navigation,
+            "tab / ↓",
+            "select steps (task page)",
+            "move checklist",
+        ),
+        help_binding(
+            HelpGroup::Navigation,
+            "shift+tab",
+            "select previous step (task page)",
+            "move checklist",
+        ),
+        help_binding(
+            HelpGroup::TaskActions,
+            "enter",
+            "toggle step (task page)",
+            "check complete checklist",
+        ),
+        help_binding(
+            HelpGroup::TaskActions,
+            "ctrl+x",
+            "delete step / task (task page)",
+            "remove checklist",
+        ),
+        help_binding(
+            HelpGroup::Navigation,
+            "↑↓ / jk",
+            "scroll (task page)",
+            "move view notes steps",
+        ),
+        help_binding(
+            HelpGroup::Navigation,
+            "→ / ←",
+            "wide stage (task page)",
+            "move view slider",
+        ),
+        help_binding(
+            HelpGroup::SurfaceControls,
+            "enter (title)",
+            "next field",
+            "editing form",
+        ),
+        help_binding(
+            HelpGroup::SurfaceControls,
+            "enter (notes)",
+            "new line",
+            "editing form",
+        ),
+        help_binding(
+            HelpGroup::SurfaceControls,
+            "enter (step)",
+            "save step, next row",
+            "editing form checklist",
+        ),
+        help_binding(
+            HelpGroup::SurfaceControls,
+            "enter (thread)",
+            "edit / stop editing thread",
+            "footer group",
+        ),
+        help_binding(
+            HelpGroup::SurfaceControls,
+            "shift+enter",
+            "save edit",
+            "editing form commit",
+        ),
+        help_binding(
+            HelpGroup::SurfaceControls,
+            "tab",
+            "next field (editing)",
+            "form move",
+        ),
+        help_binding(
+            HelpGroup::SurfaceControls,
+            "shift+tab",
+            "previous field (editing)",
+            "form move",
+        ),
+        help_binding(
+            HelpGroup::SurfaceControls,
+            "space / ← / →",
+            "cycle scope (editing)",
+            "form project desk",
+        ),
+        help_binding(
+            HelpGroup::SurfaceControls,
+            "enter (scope)",
+            "open scope options",
+            "editing form project desk",
+        ),
+        help_binding(
+            HelpGroup::CreateEdit,
+            "enter",
+            "save (quick-add)",
+            "capture create",
+        ),
+        help_binding(
+            HelpGroup::CreateEdit,
+            "shift+enter",
+            "save, keep open (quick-add)",
+            "capture create another",
+        ),
+        help_binding(
+            HelpGroup::CreateEdit,
+            "tab",
+            "expand to page (quick-add)",
+            "capture details",
+        ),
+        help_binding(
+            HelpGroup::CreateEdit,
+            "!p name",
+            "choose project (quick-add)",
+            "capture scope",
+        ),
+        help_binding(
+            HelpGroup::CreateEdit,
+            "!p",
+            "choose desk (quick-add)",
+            "capture scope",
+        ),
+        help_binding(
+            HelpGroup::CreateEdit,
+            "!t name",
+            "choose thread (quick-add)",
+            "capture group",
+        ),
+        help_binding(
+            HelpGroup::CreateEdit,
+            "!t",
+            "clear thread (quick-add)",
+            "capture group none",
+        ),
+        help_binding(
+            HelpGroup::SurfaceControls,
+            "↑↓ / jk",
+            "move (picker)",
+            "select navigation",
+        ),
+        help_binding(
+            HelpGroup::SurfaceControls,
+            "type",
+            "filter (picker / palette)",
+            "search find query",
+        ),
+        help_binding(
+            HelpGroup::SurfaceControls,
+            "type",
+            "search Help",
+            "keys actions groups aliases",
+        ),
+        help_binding(
+            HelpGroup::SurfaceControls,
+            "enter",
+            "choose (picker / palette)",
+            "select run",
+        ),
+        help_binding(
+            HelpGroup::SurfaceControls,
+            "ctrl+f (picker)",
+            "archive project",
+            "hide file",
+        ),
+        help_binding(
+            HelpGroup::SurfaceControls,
+            "ctrl+u (picker)",
+            "unarchive project",
+            "restore",
+        ),
+        help_binding(
+            HelpGroup::SurfaceControls,
+            "tab / ← / →",
+            "switch project-picker tab",
+            "main archived view",
+        ),
+        help_binding(
+            HelpGroup::SurfaceControls,
+            "tab",
+            "next option (list picker / palette)",
+            "select move",
+        ),
+        help_binding(
+            HelpGroup::SurfaceControls,
+            "ctrl+c",
+            "cancel editing",
+            "close form input",
+        ),
+        help_binding(
+            HelpGroup::SurfaceControls,
+            "ctrl+a",
+            "line start (text input)",
+            "cursor home quick-add editing",
+        ),
+        help_binding(
+            HelpGroup::SurfaceControls,
+            "ctrl+e",
+            "line end (text input)",
+            "cursor quick-add editing",
+        ),
+        help_binding(
+            HelpGroup::SurfaceControls,
+            "ctrl+←",
+            "word left (text input)",
+            "cursor editing quick-add",
+        ),
+        help_binding(
+            HelpGroup::SurfaceControls,
+            "ctrl+→",
+            "word right (text input)",
+            "cursor editing quick-add",
+        ),
+        help_binding(
+            HelpGroup::SurfaceControls,
+            "←",
+            "character left (text input)",
+            "cursor editing quick-add",
+        ),
+        help_binding(
+            HelpGroup::SurfaceControls,
+            "→",
+            "character right (text input)",
+            "cursor editing quick-add",
+        ),
+        help_binding(
+            HelpGroup::SurfaceControls,
+            "↑",
+            "wrapped row up (notes)",
+            "cursor editing text",
+        ),
+        help_binding(
+            HelpGroup::SurfaceControls,
+            "↓",
+            "wrapped row down (notes)",
+            "cursor editing text",
+        ),
+        help_binding(
+            HelpGroup::SurfaceControls,
+            "home",
+            "line start (text input)",
+            "cursor editing quick-add",
+        ),
+        help_binding(
+            HelpGroup::SurfaceControls,
+            "end",
+            "line end (text input)",
+            "cursor editing quick-add",
+        ),
+        help_binding(
+            HelpGroup::SurfaceControls,
+            "backspace",
+            "delete backward (text input)",
+            "edit query filter",
+        ),
+        help_binding(
+            HelpGroup::SurfaceControls,
+            "delete",
+            "delete forward (text input)",
+            "edit cursor",
+        ),
+        help_binding(
+            HelpGroup::SurfaceControls,
+            "esc",
+            "cancel editing",
+            "close form input",
+        ),
+        help_binding(
+            HelpGroup::SurfaceControls,
+            "q",
+            "close project picker",
+            "cancel",
+        ),
+        help_binding(
+            HelpGroup::SurfaceControls,
+            "shift+tab",
+            "previous option (picker / palette)",
+            "select move",
+        ),
+        help_binding(
+            HelpGroup::SurfaceControls,
+            "y",
+            "unarchive launch project",
+            "restore prompt",
+        ),
+        help_binding(
+            HelpGroup::SurfaceControls,
+            "n",
+            "keep launch project archived",
+            "cancel prompt desk",
+        ),
+        help_binding(
+            HelpGroup::SurfaceControls,
+            "r / enter",
+            "retry failed save",
+            "recovery persistence",
+        ),
+        help_binding(
+            HelpGroup::SurfaceControls,
+            "c / esc",
+            "cancel failed save",
+            "recovery persistence",
+        ),
+        help_binding(
+            HelpGroup::SurfaceControls,
+            "↑↓ / jk",
+            "move during failed save",
+            "recovery select",
+        ),
+        help_binding(
+            HelpGroup::SurfaceControls,
+            "↑↓ / page keys",
+            "scroll Help",
+            "search results",
+        ),
+        help_binding(
+            HelpGroup::SurfaceControls,
+            "esc",
+            "clear search / close Help",
+            "query cancel",
+        ),
+        help_binding(
+            HelpGroup::AppControls,
+            "ctrl+q",
+            "close task page",
+            "exit back",
+        ),
+    ]);
+    bindings
 }
 
-/// Task-page chords the help card lists under the board bindings. The page has no
-/// `?` of its own, so the board's card is the one place a user can read them.
-pub fn task_page_help_bindings() -> Vec<(&'static str, &'static str)> {
-    vec![
-        ("ctrl+e", "edit title"),
-        ("ctrl+n", "edit notes"),
-        ("ctrl+a", "add step"),
-        ("tab / ↓", "select steps"),
-        ("enter", "toggle step"),
-        ("ctrl+s/d/b/r", "task status"),
-        ("ctrl+o", "reopen task"),
-        ("ctrl+x", "delete step / task"),
-        ("ctrl+f", "archive"),
-        ("→ / ←", "wide stage"),
-        ("esc", "close"),
-    ]
+fn help_matches(binding: &HelpBinding, query: &str) -> bool {
+    let query = query.trim().to_ascii_lowercase();
+    if query.is_empty() {
+        return true;
+    }
+    let searchable = format!(
+        "{} {} {} {}",
+        binding.group.title(),
+        binding.chord,
+        binding.action,
+        binding.aliases
+    )
+    .to_ascii_lowercase();
+    query
+        .split_whitespace()
+        .all(|term| searchable.contains(term))
 }
 
-/// Editing chords, shared by the task page's field editors and the quick-add draft.
-fn editing_help_bindings() -> Vec<(&'static str, &'static str)> {
-    vec![
-        ("enter (title)", "next field"),
-        ("enter (notes)", "new line"),
-        ("enter (step)", "save step, next row"),
-        ("shift+enter", "save edit"),
-        ("tab / shift+tab", "next / prev field"),
-        ("space (scope)", "cycle"),
-        ("esc", "cancel"),
-    ]
-}
-
-/// Quick-add bar chords and capture tokens.
-fn quick_add_help_bindings() -> Vec<(&'static str, &'static str)> {
-    vec![
-        ("+", "open quick-add"),
-        ("enter", "save"),
-        ("shift+enter", "save, keep open"),
-        ("tab", "expand to page"),
-        ("!p name · !p", "project · desk"),
-        ("!t name · !t", "thread · none"),
-    ]
-}
-
-/// Picker, palette, and help chords.
-fn picker_help_bindings() -> Vec<(&'static str, &'static str)> {
-    vec![
-        ("↑↓ / jk", "move"),
-        ("type", "filter"),
-        ("enter", "choose"),
-        ("ctrl+f (picker)", "archive project"),
-        ("ctrl+u (picker)", "unarchive"),
-        ("tab (picker)", "main · archived"),
-        ("esc", "close"),
-    ]
-}
-
-/// Help-card body lines painted by the renderer: one section per surface, each a
-/// two-column key list. Complete by construction for the board (it walks the keymap);
-/// the other sections are the surfaces' own maps, kept in step by the keymap tests.
-///
-/// No heading or trailing close instruction: the shared modal card's own title (`help`)
-/// and footer legend already say both.
-pub fn help_card_lines() -> Vec<String> {
-    let owned = |bindings: Vec<(&'static str, &'static str)>| -> Vec<(String, &'static str)> {
-        bindings
-            .into_iter()
-            .map(|(chord, label)| (chord.to_string(), label))
-            .collect()
-    };
+/// Complete, one-binding-per-row help content, filtered by shortcut, action, functional
+/// group, or aliases. Group headings only appear when they retain a matching binding.
+pub fn help_card_lines_for_query(query: &str) -> Vec<String> {
+    let bindings = help_bindings();
     let mut lines = Vec::new();
-    lines.push(" board".to_string());
-    lines.extend(paired_help_lines(&board_help_bindings()));
-    for (title, bindings) in [
-        (" task page", owned(task_page_help_bindings())),
-        (" editing", owned(editing_help_bindings())),
-        (" quick-add", owned(quick_add_help_bindings())),
-        (" pickers · palette", owned(picker_help_bindings())),
-    ] {
-        lines.push(String::new());
-        lines.push(title.to_string());
-        lines.extend(paired_help_lines(&bindings));
+    for group in HelpGroup::ALL {
+        let matching: Vec<_> = bindings
+            .iter()
+            .filter(|binding| binding.group == group && help_matches(binding, query))
+            .collect();
+        if matching.is_empty() {
+            continue;
+        }
+        if !lines.is_empty() {
+            lines.push(String::new());
+        }
+        lines.push(format!(" {}", group.title()));
+        lines.extend(
+            matching
+                .into_iter()
+                .map(|binding| format!(" {:<17}  {}", binding.chord, binding.action)),
+        );
+    }
+    if lines.is_empty() {
+        lines.push(" no shortcuts match".to_string());
     }
     lines
 }
 
-fn paired_help_lines(bindings: &[(String, &str)]) -> Vec<String> {
-    bindings
-        .chunks(2)
-        .map(|pair| match pair {
-            // Compact's 40-column minimum needs both bindings on one line.
-            [(c1, l1), (c2, l2)] => format!(" {c1} {l1} | {c2} {l2}"),
-            [(c1, l1)] => format!(" {c1} {l1}"),
-            _ => String::new(),
-        })
-        .collect()
+/// Unfiltered help content, retained as the public keymap coverage surface for tests.
+pub fn help_card_lines() -> Vec<String> {
+    help_card_lines_for_query("")
 }
 
 /// Map a key event to a board intent for the current input mode.
@@ -841,6 +1269,13 @@ pub fn route_responsive_key(
 /// Map the selected task-page Thread footer. It is a navigation target until Enter or a
 /// second click deliberately opens the text cursor.
 fn map_selected_thread_key(key: KeyEvent) -> Option<BoardIntent> {
+    if key.code == KeyCode::Char('?')
+        && !key
+            .modifiers
+            .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER)
+    {
+        return Some(BoardIntent::OpenHelp);
+    }
     if key.code == KeyCode::Enter && key.modifiers.is_empty() {
         return Some(BoardIntent::ToggleThreadEditing);
     }
@@ -953,6 +1388,7 @@ fn map_form_scope_dropdown_key(key: KeyEvent) -> Option<BoardIntent> {
         return None;
     }
     match key.code {
+        KeyCode::Char('?') => Some(BoardIntent::OpenHelp),
         KeyCode::Esc => Some(BoardIntent::CancelFormScopeDropdown),
         KeyCode::Enter => Some(BoardIntent::ConfirmFormScopeDropdown),
         KeyCode::Up | KeyCode::Char('k') => Some(BoardIntent::FormScopePrev),
@@ -1018,6 +1454,7 @@ fn map_form_edit_key(
 
     match focused {
         CaptureField::Scope => match key.code {
+            KeyCode::Char('?') => Some(BoardIntent::OpenHelp),
             KeyCode::Esc => Some(BoardIntent::CancelEdit),
             KeyCode::Enter => Some(BoardIntent::OpenFormScopeDropdown),
             KeyCode::Char(' ') | KeyCode::Left | KeyCode::Right => {
@@ -1098,10 +1535,10 @@ pub fn map_edit_paste(mode: BoardInputMode, text: &str) -> Option<BoardIntent> {
             Some(BoardIntent::ProjectsQueryInsertText(text.to_string()))
         }
         BoardInputMode::Palette => Some(BoardIntent::CommandQueryInsertText(text.to_string())),
-        BoardInputMode::Normal
-        | BoardInputMode::ProjectPicker
-        | BoardInputMode::SaveRecovery
-        | BoardInputMode::Help => None,
+        BoardInputMode::Help => Some(BoardIntent::HelpQueryInsertText(text.to_string())),
+        BoardInputMode::Normal | BoardInputMode::ProjectPicker | BoardInputMode::SaveRecovery => {
+            None
+        }
     }
 }
 
@@ -1205,8 +1642,12 @@ pub fn intent_primary_action(intent: &BoardIntent) -> Option<PrimaryBoardAction>
         | BoardIntent::PrimaryVerb
         | BoardIntent::ToggleBlock
         | BoardIntent::ToggleReview
+        | BoardIntent::HelpQueryInsert(_)
+        | BoardIntent::HelpQueryInsertText(_)
+        | BoardIntent::HelpQueryBackspace
         | BoardIntent::HelpScrollUp
         | BoardIntent::HelpScrollDown
+        | BoardIntent::CloseHelp
         | BoardIntent::ToggleStep
         | BoardIntent::OpenTaskPage
         | BoardIntent::StageRight
@@ -1300,6 +1741,7 @@ fn map_task_page(key: KeyEvent) -> Option<BoardIntent> {
         KeyCode::Char('f') if verb => Some(BoardIntent::File),
         KeyCode::Char('e') if verb => Some(BoardIntent::BeginEditTitle),
         KeyCode::Char('n') if verb => Some(BoardIntent::BeginEditNotes),
+        KeyCode::Char('?') if !extra => Some(BoardIntent::OpenHelp),
         KeyCode::Tab if !extra => Some(BoardIntent::FormFocusNext),
         KeyCode::BackTab
             if !mods
@@ -1326,14 +1768,15 @@ fn map_launch_card(key: KeyEvent) -> Option<BoardIntent> {
         return None;
     }
     match key.code {
+        KeyCode::Char('?') => Some(BoardIntent::OpenHelp),
         KeyCode::Char('y') => Some(BoardIntent::LaunchUnarchive),
         KeyCode::Char('n') | KeyCode::Esc => Some(BoardIntent::LaunchKeepArchived),
         _ => None,
     }
 }
 
-/// Help card: arrows, `j`/`k`, and page keys scroll the list; `Esc`, `?`, or `q` close.
-/// Other keys are inert so a stray press cannot dismiss what you were reading.
+/// Help opens with its search field focused. Printable keys, including `?`, `j`, and `q`,
+/// edit that query; arrows and page keys scroll the filtered list. Esc clears, then closes.
 fn map_help(key: KeyEvent) -> Option<BoardIntent> {
     if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
         return Some(BoardIntent::Quit);
@@ -1345,9 +1788,13 @@ fn map_help(key: KeyEvent) -> Option<BoardIntent> {
         return None;
     }
     match key.code {
-        KeyCode::Esc | KeyCode::Char('?') | KeyCode::Char('q') => Some(BoardIntent::CloseLayer),
-        KeyCode::Up | KeyCode::Char('k') | KeyCode::PageUp => Some(BoardIntent::HelpScrollUp),
-        KeyCode::Down | KeyCode::Char('j') | KeyCode::PageDown => Some(BoardIntent::HelpScrollDown),
+        KeyCode::Esc => Some(BoardIntent::CloseLayer),
+        KeyCode::Backspace => Some(BoardIntent::HelpQueryBackspace),
+        KeyCode::Up | KeyCode::PageUp => Some(BoardIntent::HelpScrollUp),
+        KeyCode::Down | KeyCode::PageDown => Some(BoardIntent::HelpScrollDown),
+        KeyCode::Char(character) if !character.is_control() => {
+            Some(BoardIntent::HelpQueryInsert(character))
+        }
         _ => None,
     }
 }
@@ -1368,6 +1815,7 @@ fn map_project_picker(key: KeyEvent) -> Option<BoardIntent> {
         return None;
     }
     match key.code {
+        KeyCode::Char('?') => Some(BoardIntent::OpenHelp),
         KeyCode::Esc | KeyCode::Char('q') => Some(BoardIntent::CancelProjectPicker),
         KeyCode::Enter => Some(BoardIntent::ConfirmProjectChoice),
         KeyCode::Char('j') | KeyCode::Down => Some(BoardIntent::ProjectPickerNext),
@@ -1409,6 +1857,7 @@ fn map_save_recovery(key: KeyEvent) -> Option<BoardIntent> {
         return None;
     }
     match key.code {
+        KeyCode::Char('?') => Some(BoardIntent::OpenHelp),
         KeyCode::Char('r') | KeyCode::Enter => Some(BoardIntent::RetrySave),
         KeyCode::Char('c') | KeyCode::Esc => Some(BoardIntent::CancelSave),
         KeyCode::Char('j') | KeyCode::Down => Some(BoardIntent::SelectNext),

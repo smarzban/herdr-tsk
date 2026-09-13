@@ -431,6 +431,9 @@ pub fn map_responsive_board_mouse(
     let pos = point(mouse.column, mouse.row);
     match mouse.kind {
         MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
+            if model.input_mode() == BoardInputMode::Help {
+                return map_board_mouse(model, hits, mouse);
+            }
             return focused_mouse_area(model, area)
                 .contains(pos)
                 .then(|| map_board_mouse(model, hits, mouse))?;
@@ -478,7 +481,7 @@ pub fn map_responsive_board_mouse(
             return map_board_mouse(model, hits, mouse);
         }
         return match model.input_mode() {
-            BoardInputMode::Help => Some(BoardIntent::CloseLayer),
+            BoardInputMode::Help => Some(BoardIntent::CloseHelp),
             BoardInputMode::Palette => Some(BoardIntent::CloseCommandSurface),
             _ => None,
         };
@@ -717,12 +720,11 @@ pub fn map_board_mouse(
             Some(QueueHitTarget::ModalClose) => Some(BoardIntent::CancelProjectPicker),
             _ => Some(BoardIntent::CancelProjectPicker),
         },
-        // The card's border/title/footer are inert; every other hit -- the `[x]` close
-        // control, the card's own body text, `HelpDismiss`'s full-frame fallback, or no
-        // hit at all -- closes, matching the keyboard's "any key closes".
+        // The searchable card's own chrome and body are inert. Its `[x]` and the
+        // full-frame fallback outside the card close it.
         BoardInputMode::Help => match hit_at(hits, pos) {
             Some(QueueHitTarget::ModalChrome) => None,
-            _ => Some(BoardIntent::CloseLayer),
+            _ => Some(BoardIntent::CloseHelp),
         },
         BoardInputMode::QuickAdd => match hit_at(hits, pos) {
             // The line already owns keyboard focus, so its click is intentionally inert.

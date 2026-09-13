@@ -1063,6 +1063,7 @@ fn overlay_rows_are_padded_exact_no_base_bleed() {
             "any key to close".to_string(),
         ];
         model.overlay = QueueOverlay::Help {
+            query: "",
             lines: &help_lines,
             scroll: 0,
         };
@@ -2789,6 +2790,7 @@ fn golden_scenes() -> Vec<GoldenScene> {
     let mut help_model = fixture_model(&tasks, &board_view);
     let help_lines: Vec<String> = tsk_tui::ui::input::help_card_lines();
     help_model.overlay = QueueOverlay::Help {
+        query: "",
         lines: &help_lines,
         scroll: 0,
     };

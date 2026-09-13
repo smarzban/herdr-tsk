@@ -695,10 +695,14 @@ pub struct BoardModel {
     /// The last projects-index row click (time + row path), kept only to detect a
     /// double-click that opens the project in slot 2. Presentation-only, never persisted.
     pub(super) last_project_row_click: Option<(Instant, PathBuf)>,
-    /// First visible row of the help card's key list. Session-only, reset on open.
+    /// Focused help-card search query. Session-only, reset on open and close.
+    pub(super) help_query: String,
+    /// First visible row of the filtered help-card key list. Session-only, reset on query.
     pub(super) help_scroll: usize,
     /// Furthest help scroll the last painted card could show (renderer-recorded).
     pub(super) help_max_scroll: Cell<usize>,
+    /// Underlying surface to restore after Help closes.
+    pub(super) help_return_mode: BoardInputMode,
     pub(super) input_mode: BoardInputMode,
     /// The one active board form. It is present for expanded quick-add and task editing alike;
     /// task identity or invocation context are held inside it and never rebound after open.
@@ -806,8 +810,10 @@ impl BoardModel {
             last_row_click: None,
             last_project_header_click: None,
             last_project_row_click: None,
+            help_query: String::new(),
             help_scroll: 0,
             help_max_scroll: Cell::new(usize::MAX),
+            help_return_mode: BoardInputMode::Normal,
             input_mode: BoardInputMode::Normal,
             form: None,
             quick_add: None,
@@ -848,10 +854,12 @@ impl BoardModel {
         self.popup = popup;
     }
 
-    /// Dismiss the help layer when another surface must own input.
+    /// Dismiss help and restore the non-input surface it covered.
     pub fn close_help(&mut self) {
         if self.input_mode == BoardInputMode::Help {
-            self.input_mode = BoardInputMode::Normal;
+            self.input_mode = self.help_return_mode;
+            self.help_query.clear();
+            self.help_scroll = 0;
         }
     }
 
@@ -1234,7 +1242,12 @@ impl BoardModel {
         {
             return true;
         }
-        if self.form.is_some() && self.input_mode != BoardInputMode::TaskPage {
+        let underlying_mode = if self.input_mode == BoardInputMode::Help {
+            self.help_return_mode
+        } else {
+            self.input_mode
+        };
+        if self.form.is_some() && underlying_mode != BoardInputMode::TaskPage {
             return true;
         }
         self.quick_add
@@ -1254,6 +1267,9 @@ impl BoardModel {
         self.surface = CommandSurface::None;
         self.command_query.clear();
         self.command_selected = 0;
+        self.help_query.clear();
+        self.help_scroll = 0;
+        self.help_return_mode = BoardInputMode::Normal;
         self.projects_query.clear();
         self.projects_selected = 0;
         self.quick_add = None;
@@ -1647,6 +1663,11 @@ impl BoardModel {
     /// The projects index's current View control.
     pub fn projects_view(&self) -> &ProjectsView {
         &self.projects_view
+    }
+
+    /// The help card's focused search query.
+    pub fn help_query(&self) -> &str {
+        &self.help_query
     }
 
     /// The help card's scroll offset.
@@ -2094,6 +2115,9 @@ impl BoardModel {
     }
     /// Current input mode (normal vs edit field).
     pub fn input_mode(&self) -> BoardInputMode {
+        if self.input_mode == BoardInputMode::Help {
+            return BoardInputMode::Help;
+        }
         if self.surface == CommandSurface::Palette {
             return BoardInputMode::Palette;
         }
