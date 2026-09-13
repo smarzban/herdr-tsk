@@ -21,6 +21,8 @@ pub struct ListInput {
     pub done: bool,
     pub deleted: bool,
     pub archived: bool,
+    pub open: bool,
+    pub ready: bool,
     /// Normalized at the argv boundary so filtering only compares valid names.
     pub thread: Option<String>,
     /// One task addressed by UUID or human number: single-task listing with full detail.
@@ -91,6 +93,8 @@ pub fn parse(args: &[String]) -> Result<ListInput, String> {
         done: false,
         deleted: false,
         archived: false,
+        open: false,
+        ready: false,
         thread: None,
         task: None,
         state_dir: None,
@@ -147,6 +151,14 @@ pub fn parse(args: &[String]) -> Result<ListInput, String> {
                 input.archived = true;
                 index += 1;
             }
+            "--open" => {
+                input.open = true;
+                index += 1;
+            }
+            "--ready" => {
+                input.ready = true;
+                index += 1;
+            }
             "--help" => {
                 input.help = true;
                 index += 1;
@@ -189,11 +201,22 @@ pub fn parse(args: &[String]) -> Result<ListInput, String> {
     if input.task.is_some() && (input.done || input.deleted || input.archived) {
         return Err("task operand cannot be used with --done, --deleted, or --archived".into());
     }
+    if input.task.is_some() && (input.open || input.ready) {
+        return Err("task operand cannot be used with --open or --ready".into());
+    }
     if input.done && input.deleted {
         return Err("--done cannot be used with --deleted".into());
     }
     if input.archived && (input.done || input.deleted) {
         return Err("--archived cannot be used with --done or --deleted".into());
+    }
+    if input.open && input.ready {
+        return Err("--open cannot be used with --ready".into());
+    }
+    if (input.open || input.ready) && (input.done || input.deleted || input.archived) {
+        return Err(
+            "--open and --ready cannot be used with --done, --deleted, or --archived".into(),
+        );
     }
     Ok(input)
 }
@@ -260,7 +283,17 @@ pub fn run(input: ListInput) -> Result<ListResult, ListError> {
                 .is_none_or(|thread| task.thread.as_deref() == Some(thread))
         })
         .filter(|task| match view {
-            ListView::Open => !task.soft_deleted && !domain.is_hidden(task) && is_open(task.status),
+            ListView::Open => {
+                !task.soft_deleted
+                    && !domain.is_hidden(task)
+                    && if input.open {
+                        task.status == HumanStatus::Open
+                    } else if input.ready {
+                        task.status == HumanStatus::Ready
+                    } else {
+                        is_open(task.status)
+                    }
+            }
             ListView::Done => {
                 !task.soft_deleted && !domain.is_hidden(task) && task.status == HumanStatus::Done
             }

@@ -433,7 +433,7 @@ fn flag_add_creates_ready_task_and_prints_added_title() {
     assert_eq!(state.tasks().len(), 1);
     let task = &state.tasks()[0];
     assert_eq!(task.title, "hello  world");
-    assert_eq!(task.status, HumanStatus::Ready);
+    assert_eq!(task.status, HumanStatus::Open);
     assert!(task.notes.is_none());
     assert_eq!(task.provenance, ProvenanceOrigin::Capture);
 

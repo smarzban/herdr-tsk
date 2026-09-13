@@ -77,7 +77,7 @@ fn status_sets_each_agent_status_and_repeat_is_idempotent() {
     let added = add_task(&dir, "move me");
     assert_eq!(added.code, 0, "{:?}", added.stderr);
 
-    for value in ["started", "blocked", "review", "ready"] {
+    for value in ["started", "blocked", "review", "ready", "open"] {
         let output = status(&dir, "T1", value);
         assert_eq!(output.code, 0, "{value}: {:?}", output.stderr);
         assert_eq!(output.stdout, format!("status T1 {value} move me\n"));
@@ -89,17 +89,18 @@ fn status_sets_each_agent_status_and_repeat_is_idempotent() {
                 "blocked" => HumanStatus::Blocked,
                 "review" => HumanStatus::Review,
                 "ready" => HumanStatus::Ready,
+                "open" => HumanStatus::Open,
                 _ => unreachable!(),
             }
         );
     }
 
     let (_, events) = loaded_status(&dir);
-    let again = status(&dir, "T1", "ready");
+    let again = status(&dir, "T1", "open");
     assert_eq!(again.code, 0, "{:?}", again.stderr);
-    assert_eq!(again.stdout, "status T1 ready move me\n");
+    assert_eq!(again.stdout, "status T1 open move me\n");
     let (current, after) = loaded_status(&dir);
-    assert_eq!(current, HumanStatus::Ready);
+    assert_eq!(current, HumanStatus::Open);
     assert_eq!(after, events, "a repeat status writes no second event");
 }
 

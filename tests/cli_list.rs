@@ -158,6 +158,12 @@ fn list_defaults_to_invocation_project_open_tasks_in_human_and_json_group_order(
     );
     create_task(
         &mut state,
+        "open target",
+        project.clone(),
+        HumanStatus::Open,
+    );
+    create_task(
+        &mut state,
         "global hidden",
         TaskScope::Global,
         HumanStatus::Ready,
@@ -198,7 +204,7 @@ fn list_defaults_to_invocation_project_open_tasks_in_human_and_json_group_order(
     assert!(human.stderr.is_empty());
     assert_eq!(
         human.stdout,
-        "STARTED\n - 3 started target\n\nREADY\n - 2 ready target\n\nBLOCKED\n - 4 blocked target\n\nREVIEW\n - 1 review target\n"
+        "STARTED\n - 3 started target\n\nREADY\n - 2 ready target\n\nOPEN\n - 5 open target\n\nBLOCKED\n - 4 blocked target\n\nREVIEW\n - 1 review target\n"
     );
 
     let json = list(&[
@@ -218,6 +224,7 @@ fn list_defaults_to_invocation_project_open_tasks_in_human_and_json_group_order(
         vec![
             "started target",
             "ready target",
+            "open target",
             "blocked target",
             "review target"
         ]
@@ -366,7 +373,7 @@ fn list_done_and_deleted_filters_are_status_and_soft_delete_specific() {
         vec!["deleted done", "deleted ready"]
     );
     assert_eq!(deleted_rows[0]["status"], "done");
-    assert_eq!(deleted_rows[1]["status"], "ready");
+    assert_eq!(deleted_rows[1]["status"], "open");
 
     let deleted_human = list(&[
         "tsk".into(),
@@ -889,7 +896,7 @@ fn direct_human_list_wraps_notes_with_a_hanging_indent() {
     assert_eq!(output.code, 0);
     assert_eq!(
         output.stdout,
-        "READY\n - 1 wrap target with a title long enough to wrap \n     at fifty columns\n   alpha beta gamma delta epsilon zeta eta theta \n   iota kappa lambda\n\n   [ ] implement the surprisingly long step and \n       verify every continuation remains aligned\n\n   #release-2026-long-thread\n"
+        "OPEN\n - 1 wrap target with a title long enough to wrap \n     at fifty columns\n   alpha beta gamma delta epsilon zeta eta theta \n   iota kappa lambda\n\n   [ ] implement the surprisingly long step and \n       verify every continuation remains aligned\n\n   #release-2026-long-thread\n"
     );
     assert!(
         output.stdout.lines().all(|line| line.len() <= 50),
@@ -1139,7 +1146,7 @@ fn direct_human_list_keeps_note_lines_and_escapes_other_controls() {
     assert_eq!(human.code, 0);
     assert_eq!(
         human.stdout,
-        "READY\n - 1 notes target\n   first\\u{0009}cell\n   second\\u{001b}]52;c;clipboard\\u{0007}\n\n   #release\n"
+        "OPEN\n - 1 notes target\n   first\\u{0009}cell\n   second\\u{001b}]52;c;clipboard\\u{0007}\n\n   #release\n"
     );
     assert!(!human.stdout.contains('\t'));
     assert!(!human.stdout.contains('\u{001b}'));
@@ -1565,7 +1572,7 @@ fn list_task_prints_step_lines_with_state_and_short_id() {
     assert!(output.stderr.is_empty());
     assert_eq!(
         output.stdout,
-        "READY\n - 1 steps target\n   First note\n   Second note\n\n   [x] First step\n   [ ] Second step\n\n   #release\n",
+        "OPEN\n - 1 steps target\n   First note\n   Second note\n\n   [x] First step\n   [ ] Second step\n\n   #release\n",
         "direct detail separates notes, steps, and the trailing thread"
     );
     assert!(
@@ -1583,7 +1590,7 @@ fn list_task_prints_step_lines_with_state_and_short_id() {
     ]);
     assert_eq!(json.code, 0);
     let expected_json = format!(
-        "[{{\"id\":\"{}\",\"number\":1,\"project\":null,\"status\":\"ready\",\"title\":\"steps target\",\"notes\":\"First note\\nSecond note\",\"steps\":[{{\"id\":\"{}\",\"done\":true,\"short_id\":\"aaa1\",\"text\":\"First step\"}},{{\"id\":\"aaa22222-0000-4000-8000-000000000002\",\"done\":false,\"short_id\":\"aaa2\",\"text\":\"Second step\"}}],\"thread\":\"release\"}}]\n",
+        "[{{\"id\":\"{}\",\"number\":1,\"project\":null,\"status\":\"open\",\"title\":\"steps target\",\"notes\":\"First note\\nSecond note\",\"steps\":[{{\"id\":\"{}\",\"done\":true,\"short_id\":\"aaa1\",\"text\":\"First step\"}},{{\"id\":\"aaa22222-0000-4000-8000-000000000002\",\"done\":false,\"short_id\":\"aaa2\",\"text\":\"Second step\"}}],\"thread\":\"release\"}}]\n",
         task, first_step.id
     );
     assert_eq!(
@@ -2482,4 +2489,99 @@ fn archived_conflicts_are_usage_errors() {
         "task-operand conflict must name --archived: {:?}",
         with_task.stderr
     );
+}
+
+#[test]
+fn list_open_and_ready_filters_and_json_status() {
+    let dir = temp_state_dir("open-ready-filter");
+    let mut state = DomainState::new();
+    create_task(
+        &mut state,
+        "inbox row",
+        TaskScope::Global,
+        HumanStatus::Open,
+    );
+    create_task(
+        &mut state,
+        "picked row",
+        TaskScope::Global,
+        HumanStatus::Ready,
+    );
+    create_task(
+        &mut state,
+        "started row",
+        TaskScope::Global,
+        HumanStatus::Started,
+    );
+    TaskStore::new(&dir).save(&state).expect("seed store");
+
+    let open = list(&[
+        "tsk".into(),
+        "list".into(),
+        "--open".into(),
+        "--json".into(),
+        "--desk".into(),
+        "--state-dir".into(),
+        state_dir_arg(&dir),
+    ]);
+    assert_eq!(open.code, 0, "{}", open.stderr);
+    let open_rows: Vec<serde_json::Value> = serde_json::from_str(&open.stdout).expect("open JSON");
+    assert_eq!(open_rows.len(), 1);
+    assert_eq!(open_rows[0]["title"], "inbox row");
+    assert_eq!(open_rows[0]["status"], "open");
+
+    let ready = list(&[
+        "tsk".into(),
+        "list".into(),
+        "--ready".into(),
+        "--json".into(),
+        "--desk".into(),
+        "--state-dir".into(),
+        state_dir_arg(&dir),
+    ]);
+    assert_eq!(ready.code, 0, "{}", ready.stderr);
+    let ready_rows: Vec<serde_json::Value> =
+        serde_json::from_str(&ready.stdout).expect("ready JSON");
+    assert_eq!(ready_rows.len(), 1);
+    assert_eq!(ready_rows[0]["title"], "picked row");
+    assert_eq!(ready_rows[0]["status"], "ready");
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn list_open_and_ready_conflicts_are_usage_errors() {
+    let dir = temp_state_dir("open-ready-conflicts");
+    for extra in [
+        vec!["--ready".to_string()],
+        vec!["--done".to_string()],
+        vec!["--deleted".to_string()],
+        vec!["--archived".to_string()],
+    ] {
+        let mut args = vec![
+            "tsk".to_string(),
+            "list".to_string(),
+            "--open".to_string(),
+            "--state-dir".to_string(),
+            state_dir_arg(&dir),
+        ];
+        args.extend(extra.clone());
+        let output = list(&args);
+        assert_eq!(output.code, 2, "{extra:?}: {output:?}");
+        assert!(output.stdout.is_empty());
+        assert!(output.stderr.contains("cannot be used"));
+    }
+
+    let with_task = list(&[
+        "tsk".into(),
+        "list".into(),
+        "T1".into(),
+        "--ready".into(),
+        "--state-dir".into(),
+        state_dir_arg(&dir),
+    ]);
+    assert_eq!(with_task.code, 2, "{with_task:?}");
+    assert!(with_task.stderr.contains("cannot be used"));
+
+    let _ = std::fs::remove_dir_all(dir);
 }
