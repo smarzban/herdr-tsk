@@ -185,7 +185,10 @@ fn edit_unknown_and_deleted_refuse() {
     let _guard = TempDirGuard(dir.clone());
     let missing = edit(&dir, &["T9", "--title", "nope"]);
     assert_eq!(missing.code, 1);
-    assert!(missing.stderr.contains("unknown-task"));
+    assert_eq!(
+        missing.stderr,
+        "tsk edit: unknown-task: T9 is not on the board\n"
+    );
 
     assert_eq!(add_task(&dir, "delete me").code, 0);
     let mut state = TaskStore::new(&dir).load().expect("load");
@@ -194,7 +197,10 @@ fn edit_unknown_and_deleted_refuse() {
     TaskStore::new(&dir).save(&state).expect("save deleted");
     let deleted = edit(&dir, &["T1", "--title", "nope"]);
     assert_eq!(deleted.code, 1);
-    assert!(deleted.stderr.contains("soft-deleted-task"));
+    assert_eq!(
+        deleted.stderr,
+        "tsk edit: soft-deleted-task: T1 is deleted\n"
+    );
 }
 
 #[test]
@@ -218,15 +224,14 @@ fn edit_help_names_title_notes_and_equals_forms() {
         "--notes",
         "--title=<value>",
         "--notes=<value>",
-        "idempotent",
+        "Values",
+        "Refusals (exit 1):",
         "empty-title",
         "invalid-title",
-        "exit 0",
-        "exit 1",
-        "exit 2",
-        "exit 3",
-        "nothing persisted",
-        "indeterminate",
+        "Exit:",
+        "0 fields written",
+        "2 usage, nothing persisted",
+        "3 store I/O",
     ] {
         assert!(
             output.stdout.contains(term),

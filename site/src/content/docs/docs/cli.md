@@ -40,9 +40,24 @@ Use `--json` on `add` or `list` for machine-readable output. Read the [exit cont
 | `tsk setup` | Configure Herdr or install an agent skill |
 | `tsk update` | Upgrade an installer-managed copy, or print Homebrew guidance |
 | `tsk guide` | Print the agent workflow |
-| `tsk --help` | Show help |
+| `tsk help [<command>]` | Show the CLI reference or one command's reference |
+| `tsk --help` | Show the CLI reference |
+| `tsk --version` / `tsk -V` | Print the installed version |
+
+`tsk --help` is the syntax reference. `tsk help` prints the same reference, and `tsk help <command>` is identical to `tsk <command> --help`. Help always wraps at 80 columns, including redirected output. Internal Herdr launcher flags are intentionally absent.
 
 Data commands accept `--state-dir <dir>`. Setup, update, and guide do not use that flag.
+
+### Statuses
+
+| Status | Meaning |
+| --- | --- |
+| `open` | Captured, not yet picked (inbox) |
+| `ready` | Picked, up next (on deck) |
+| `started` | In motion |
+| `blocked` | Waiting on something |
+| `review` | Done by the agent, waiting on you |
+| `done` | Closed |
 
 ### Task addresses
 
@@ -82,7 +97,7 @@ tsk add -t "Draft release notes" -p atlas --json
 | `--file <path>` or `--file -` | Read a JSON plan |
 | `--state-dir <dir>` | Alternate state directory |
 
-Duplicate detection compares the trimmed title, resolved project, and normalized thread. A matching non-deleted task returns successfully without changes, even if done or individually archived. Adding into an archived project refuses.
+Duplicate detection compares the trimmed title, resolved project, and normalized thread. A matching non-deleted task succeeds without changing the task (`outcome: existing` in JSON), even if done or individually archived. Adding into an archived project refuses.
 
 Plain output: `added <title>` or `task already exists`.
 
@@ -147,14 +162,14 @@ tsk list [<task>] [-p <project> | --desk | --all] [--thread <name>] [--open | --
 | `--ready` | Picked on-deck tasks with status `ready` |
 | `--done` | Completed tasks |
 | `--archived` | Individually archived tasks and tasks in archived projects, across statuses |
-| `--deleted` | Deleted tasks in the main store and trash, newest first |
+| `--deleted` | Live soft-deleted tasks and `trash.jsonl` entries, deduped by task with the live copy winning, newest deletion first. Trash is retained for 30 days, see [storage](/docs/storage/#deleted-tasks). |
 | `--thread` | Filter within the selected scope |
 
 Scope flags are mutually exclusive. So are `--open`, `--ready`, `--done`, `--deleted`, and `--archived`.
 
 A direct task address searches the main store, including done, archived, and recently deleted tasks. It cannot be combined with scope, thread, or status filters. A missing task exits 2. Tasks already moved to trash require `--deleted`.
 
-Human output groups by status in `STARTED`, `READY`, `OPEN`, `BLOCKED`, `REVIEW` order; filtered rows include the task number and thread, and `--all` adds scope labels. Every non-JSON list element, including help and errors, wraps to the attached terminal width with hanging indentation. Task rows, scope labels, notes, steps, archived marks, and threads use the same wrapping behavior, supported from 50 columns. Redirected output keeps stored logical lines.
+Human output groups by status in `STARTED`, `READY`, `OPEN`, `BLOCKED`, `REVIEW` order; filtered rows include the task number and thread, and `--all` adds scope labels using a unique concise trailing path or desk. List output and errors wrap to the attached terminal width with hanging indentation. Task rows, scope labels, notes, steps, archived marks, and threads use the same wrapping behavior, supported from 50 columns. Redirected output keeps stored logical lines. Command help is reference text and instead always wraps at 80 columns.
 
 Single-task output removes the thread from the title row and presents notes, steps, then `#thread` as separate blocks. A blank line separates adjacent blocks that exist. Human step rows show state and text without machine-oriented short IDs.
 
@@ -215,7 +230,7 @@ tsk archive T12
 tsk unarchive T12
 ```
 
-Keep the task's status and number. Repeating either command is safe.
+Keep the task's status and number. Archiving removes it from working views, and it remains available through `tsk list --archived` until `tsk unarchive` returns it. Repeating either command is safe.
 
 Output: `archived T12 <title>` or `unarchived T12 <title>`.
 
@@ -228,7 +243,7 @@ tsk project archive atlas
 tsk project unarchive atlas
 ```
 
-Accepts a project basename or path. Repeating an action is safe. An unknown project refuses with `no project named <name> has tasks`.
+Accepts a project basename or path. Archiving removes the whole project from working views, while unarchiving returns its tasks in their existing statuses. Repeating an action is safe. An unknown project refuses with `no project named <name> has tasks`.
 
 Restoring a project preserves task statuses and leaves individually archived tasks archived.
 
@@ -241,9 +256,20 @@ tsk list --deleted --all
 tsk trash restore T12
 ```
 
-Restore returns a task from trash with its original number. A task absent from trash, or already live, refuses with `T12 is not in trash`.
+Restore returns a task from trash with its original number, no soft-delete flag, a restored event, and a new revision. A task absent from trash, or already live, refuses with `T12 is not in trash`.
 
 Recent deletions may still be in the main store; use board undo until they move to trash. [Retention and storage](/docs/storage/#deleted-tasks).
+
+## help and version
+
+```sh
+tsk --help
+tsk help list
+tsk list --help
+tsk --version
+```
+
+Use top-level help to find a command, then use either one-command form for its flags, examples, refusals, and exit contract. `--version` and `-V` print `tsk <version>`. They are global flags, so place them before a command.
 
 ## update
 
@@ -268,7 +294,7 @@ On a TTY, bare `tsk setup` detects global agent skill roots and asks once to ins
 
 ### Herdr
 
-Requires Herdr 0.9+ on PATH. Registers the installed binary and adds **prefix+t** and **prefix+a**. Shortcut conflicts require confirmation; noninteractive conflicts stop before writes.
+Requires Herdr 0.9+ on PATH. Registers the installed binary and adds **prefix+t** and **prefix+a**. Shortcut conflicts require confirmation; noninteractive conflicts stop before writes. It uses `HERDR_CONFIG_PATH`, then `XDG_CONFIG_HOME/herdr/config.toml`, then `~/.config/herdr/config.toml`.
 
 [Reload, upgrades, and removal](/docs/install/#herdr-setup-with-an-installed-binary).
 
@@ -325,6 +351,9 @@ After an uncertain add, inspect `tsk list --all --json`. Also check `--done` and
 | Steps | `empty-step-text`, `invalid-step-text`, `unknown-task`, `soft-deleted-task`, `unknown-step`, `ambiguous-step` |
 | Status | `unknown-task`, `soft-deleted-task` |
 | Edit | `unknown-task`, `soft-deleted-task`, `empty-title`, `invalid-title` |
+| Archive / unarchive | `unknown-task`, `soft-deleted-task` |
+
+A refusal prints as `tsk <command>: <code>: <message>` on stderr, for example `tsk status: unknown-task: T99 is not on the board`. Branch on the code; the message is for people and may change.
 
 Invalid thread flags fail argument parsing with exit 2; an invalid thread in a JSON plan is an item refusal with exit 1. An archived-project refusal saves nothing for that item; other valid plan items can still save.
 

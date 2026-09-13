@@ -1035,9 +1035,11 @@ fn unscoped_human_list_wraps_threaded_task_rows() {
 }
 
 #[test]
-fn list_help_and_usage_errors_wrap_at_the_supported_width() {
+fn list_help_wraps_at_eighty_while_usage_errors_follow_the_terminal_width() {
     let help = list_at_width(&["tsk".into(), "list".into(), "--help".into()], 50);
+    let wide_help = list_at_width(&["tsk".into(), "list".into(), "--help".into()], 100);
     assert_eq!(help.code, 0);
+    assert_eq!(help.stdout, wide_help.stdout);
     let help_width = help
         .stdout
         .lines()
@@ -1045,8 +1047,8 @@ fn list_help_and_usage_errors_wrap_at_the_supported_width() {
         .max()
         .unwrap();
     assert!(
-        help_width <= 50,
-        "help exceeded terminal width: {}",
+        help_width <= 80,
+        "help exceeded its reference width: {}",
         help.stdout
     );
 

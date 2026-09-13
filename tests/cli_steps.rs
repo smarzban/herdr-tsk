@@ -338,7 +338,10 @@ fn steps_on_soft_deleted_task_refuses_without_mutation() {
     let add = steps(&add);
     assert_eq!(add.code, 1);
     assert!(add.stdout.is_empty());
-    assert!(add.stderr.contains("soft-deleted-task"));
+    assert_eq!(
+        add.stderr,
+        format!("tsk steps: soft-deleted-task: {task} is deleted\n")
+    );
     assert_eq!(
         std::fs::read(&state_file).expect("read store after refusal"),
         before,
@@ -416,12 +419,15 @@ fn steps_unknown_number_is_unknown_task() {
 
     assert_eq!(output.code, 1);
     assert!(output.stdout.is_empty());
-    assert!(output.stderr.contains("unknown-task"));
+    assert_eq!(
+        output.stderr,
+        "tsk steps: unknown-task: T999 is not on the board\n"
+    );
     let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
-fn steps_help_documents_toggle_flip_and_verify_guidance() {
+fn steps_help_uses_the_shared_reference() {
     let output = steps(&["tsk".into(), "steps".into(), "--help".into()]);
     assert_eq!(output.code, 0, "{}", output.stderr);
     assert!(output.stderr.is_empty());
@@ -430,16 +436,14 @@ fn steps_help_documents_toggle_flip_and_verify_guidance() {
         "toggle",
         "rename",
         "remove",
-        "flips",
-        "verify",
-        "list",
-        "idempotent",
-        "exit 0",
-        "exit 1",
-        "exit 2",
-        "exit 3",
-        "nothing persisted",
-        "indeterminate",
+        "Values",
+        "Examples:",
+        "Refusals (exit 1):",
+        "Exit:",
+        "0 step created",
+        "1 step refusal",
+        "2 usage, nothing persisted",
+        "3 store I/O",
     ] {
         assert!(
             output.stdout.contains(term),

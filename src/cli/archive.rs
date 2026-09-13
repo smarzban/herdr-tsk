@@ -26,6 +26,17 @@ pub enum ArchiveCliError {
     Store(String),
 }
 
+impl ArchiveCliError {
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::UnknownTask(_) => "unknown-task",
+            Self::SoftDeleted(_) => "soft-deleted-task",
+            Self::UnknownProject(_) => "unknown-project",
+            Self::Store(_) => "store-error",
+        }
+    }
+}
+
 fn display_for(target: &TaskAddress) -> String {
     match target {
         TaskAddress::Number(number) => format!("T{number}"),

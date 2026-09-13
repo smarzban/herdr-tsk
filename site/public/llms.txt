@@ -17,6 +17,8 @@ At 110 usable columns or wider, clicking a task opens or updates its details bes
 - `tsk list T<n>` returns the complete task, including notes, steps, and thread, in human-readable or JSON form
 - Guide: https://gettsk.sh/docs/agents.md
 - CLI: https://gettsk.sh/docs/cli.md
+- `tsk help [<command>]` prints the CLI or one command's syntax reference.
+- `tsk --version` (or `tsk -V`) prints the installed version.
 
 Storage, backups, and release-check settings: https://gettsk.sh/docs/storage.md
 - Full docs: https://gettsk.sh/llms-full.txt

@@ -34,7 +34,9 @@ fn setup_uses_cli_harness() {
     let output =
         tsk_tui::cli::run_with(["tsk", "setup", "herdr", "--help"], std::io::empty(), false);
     assert_eq!(output.code, 0);
-    assert!(output.stdout.contains("prefix+t"));
+    assert!(output.stdout.contains("Values"));
+    assert!(output.stdout.contains("herdr"));
+    assert!(output.stdout.contains("Exit:"));
 }
 #[test]
 fn bare_path_install_materializes_capture_and_version_and_reports_root() {

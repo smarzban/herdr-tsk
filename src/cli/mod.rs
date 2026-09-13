@@ -54,8 +54,15 @@ where
         .map(|argument| argument.as_ref().to_owned())
         .collect::<Vec<_>>();
     match args.get(1).map(String::as_str) {
+        Some("help") => run_help(args),
         Some("setup") => run_setup(args, &mut stdin, stdin_is_tty),
+        Some("guide") if args.get(2).map(String::as_str) == Some("--help") => {
+            presenter::guide_help()
+        }
         Some("guide") => guide::run(),
+        Some("update") if args.get(2).map(String::as_str) == Some("--help") => {
+            presenter::update_help()
+        }
         Some("add") => run_add(args, &mut stdin, stdin_is_tty),
         Some("steps") => run_steps(args),
         Some("list") => run_list(args, terminal_width),
@@ -77,6 +84,32 @@ where
     }
 }
 
+fn run_help(args: Vec<String>) -> CliOutput {
+    match args.get(2..).unwrap_or(&[]) {
+        [] => CliOutput {
+            stdout: presenter::top_level_help(),
+            stderr: String::new(),
+            code: 0,
+        },
+        [verb] => match verb.as_str() {
+            "add" => presenter::add_help(),
+            "steps" => presenter::steps_help(),
+            "list" => presenter::list_help(None),
+            "status" => presenter::status_help(),
+            "edit" => presenter::edit_help(),
+            "trash" => presenter::trash_help(),
+            "archive" => presenter::archive_help("archive"),
+            "unarchive" => presenter::archive_help("unarchive"),
+            "project" => presenter::project_help(),
+            "setup" => presenter::setup_help(),
+            "update" => presenter::update_help(),
+            "guide" => presenter::guide_help(),
+            _ => presenter::help_usage(&format!("unknown command {verb}")),
+        },
+        _ => presenter::help_usage("expected at most one command"),
+    }
+}
+
 fn run_steps(args: Vec<String>) -> CliOutput {
     let input = match parser::parse_flag_steps(&args) {
         Ok(input) => input,
@@ -90,7 +123,7 @@ fn run_steps(args: Vec<String>) -> CliOutput {
     };
     match steps::run(task, action, input.state_dir) {
         Ok(result) => presenter::steps(result),
-        Err(error) => presenter::steps_rejected(error),
+        Err(error) => presenter::steps_rejected(error, task),
     }
 }
 
@@ -111,7 +144,7 @@ fn run_status(args: Vec<String>) -> CliOutput {
     };
     match status::run(task, status, input.state_dir) {
         Ok(result) => presenter::status(result),
-        Err(error) => presenter::status_rejected(error),
+        Err(error) => presenter::status_rejected(error, task),
     }
 }
 
@@ -138,7 +171,7 @@ fn run_edit(args: Vec<String>) -> CliOutput {
         input.state_dir,
     ) {
         Ok(result) => presenter::edited(result),
-        Err(error) => presenter::edit_rejected(error),
+        Err(error) => presenter::edit_rejected(error, task),
     }
 }
 
