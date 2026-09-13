@@ -14,6 +14,7 @@ At 110 usable columns or wider, clicking a task opens or updates its details bes
 ## For agents
 
 - `tsk guide` prints the workflow; `tsk setup` detects agents and can install the skill; `tsk setup <agent>` targets one agent
+- The skill covers rules of engagement, board language, the exit contract, and workflows, and points at `tsk help <command>` for syntax; its `Refine a task` section shapes a rough task into a brief on the board (propose, then write)
 - `tsk list T<n>` returns the complete task, including notes, steps, and thread, in human-readable or JSON form
 - Guide: https://gettsk.sh/docs/agents.md
 - CLI: https://gettsk.sh/docs/cli.md
