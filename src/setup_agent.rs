@@ -945,8 +945,10 @@ mod tests {
     }
 
     /// `install` only rewrites an installed skill when the frontmatter version differs, so
-    /// an edit that leaves the version alone never reaches users. This pins version and
-    /// content together: change one, change the other.
+    /// the version must move between releases. It moves once per release (AGENTS.md): the
+    /// first skill edit after a release bumps it one minor above the shipped version, every
+    /// later edit before the next release keeps it and refreshes only the content hash.
+    /// Development copies installed at the unreleased version need `tsk setup --force`.
     #[test]
     fn embedded_skill_declares_semver() {
         let version = embedded_skill_version();
@@ -958,8 +960,8 @@ mod tests {
             hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
         }
         assert_eq!(
-            hash, 0x523a_a57c_23d0_b14b,
-            "skills/tsk-cli/SKILL.md changed: bump `version:` in its frontmatter and update both pins here"
+            hash, 0xb3cb_1942_61d0_8333,
+            "skills/tsk-cli/SKILL.md changed: refresh this hash pin, and bump `version:` only if this is the first skill edit since the last release"
         );
     }
 
