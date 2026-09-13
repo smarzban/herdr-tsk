@@ -97,7 +97,7 @@ tsk add -t "Draft release notes" -p atlas --json
 | `--file <path>` or `--file -` | Read a JSON plan |
 | `--state-dir <dir>` | Alternate state directory |
 
-Duplicate detection compares the trimmed title, resolved project, and normalized thread. A matching non-deleted task returns successfully without changes, even if done or individually archived. Adding into an archived project refuses.
+Duplicate detection compares the trimmed title, resolved project, and normalized thread. A matching non-deleted task succeeds without changing the task (`outcome: existing` in JSON), even if done or individually archived. Adding into an archived project refuses.
 
 Plain output: `added <title>` or `task already exists`.
 
@@ -162,7 +162,7 @@ tsk list [<task>] [-p <project> | --desk | --all] [--thread <name>] [--open | --
 | `--ready` | Picked on-deck tasks with status `ready` |
 | `--done` | Completed tasks |
 | `--archived` | Individually archived tasks and tasks in archived projects, across statuses |
-| `--deleted` | Deleted tasks in the main store and trash, newest first |
+| `--deleted` | Live soft-deleted tasks and `trash.jsonl` entries, deduped by task with the live copy winning, newest deletion first. Trash is retained for 30 days, see [storage](/docs/storage/#deleted-tasks). |
 | `--thread` | Filter within the selected scope |
 
 Scope flags are mutually exclusive. So are `--open`, `--ready`, `--done`, `--deleted`, and `--archived`.
@@ -294,7 +294,7 @@ On a TTY, bare `tsk setup` detects global agent skill roots and asks once to ins
 
 ### Herdr
 
-Requires Herdr 0.9+ on PATH. Registers the installed binary and adds **prefix+t** and **prefix+a**. Shortcut conflicts require confirmation; noninteractive conflicts stop before writes.
+Requires Herdr 0.9+ on PATH. Registers the installed binary and adds **prefix+t** and **prefix+a**. Shortcut conflicts require confirmation; noninteractive conflicts stop before writes. It uses `HERDR_CONFIG_PATH`, then `XDG_CONFIG_HOME/herdr/config.toml`, then `~/.config/herdr/config.toml`.
 
 [Reload, upgrades, and removal](/docs/install/#herdr-setup-with-an-installed-binary).
 
