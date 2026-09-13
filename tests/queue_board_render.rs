@@ -70,6 +70,51 @@ fn project(path: &str) -> TaskScope {
 }
 
 /// Deterministic deck-only fixture: motion, multi-project deck, blocked/review glyphs, done.
+fn inbox_golden_tasks() -> Vec<Task> {
+    let mut tasks = vec![
+        task(
+            50,
+            "Ready planning pass",
+            HumanStatus::Ready,
+            TaskScope::Global,
+            20 * 60,
+        ),
+        task(
+            51,
+            "Ready release check",
+            HumanStatus::Ready,
+            TaskScope::Global,
+            10 * 60,
+        ),
+        task(
+            52,
+            "Inbox capture one",
+            HumanStatus::Open,
+            TaskScope::Global,
+            5 * 60,
+        ),
+        task(
+            53,
+            "Inbox capture two",
+            HumanStatus::Open,
+            TaskScope::Global,
+            2 * 60,
+        ),
+    ];
+    for (index, task) in tasks.iter_mut().enumerate() {
+        task.number = Some((index + 50) as u64);
+    }
+    tasks
+}
+
+fn inbox_golden_verbs() -> &'static [VerbEntry<'static>] {
+    static CACHE: OnceLock<Vec<VerbEntry<'static>>> = OnceLock::new();
+    CACHE.get_or_init(|| {
+        let model = BoardModel::from_tasks(inbox_golden_tasks(), Some(PathBuf::from("/repos/tsk")));
+        board_verb_items(&model)
+    })
+}
+
 fn fixture_tasks() -> Vec<Task> {
     let mut tasks = vec![
         task(
@@ -2832,6 +2877,15 @@ fn golden_scenes() -> Vec<GoldenScene> {
     let done_model = fixture_model(&tasks, &done_view);
     let (done_rows, _) = paint(80, 24, &done_model);
 
+    // `inbox`: desk rows with picked work followed by an expanded inbox. This keeps the
+    // new nested section visible in a reviewer-sized frame, including each open row's glyph.
+    let inbox_tasks = inbox_golden_tasks();
+    let inbox_view = fixture_view(&inbox_tasks, false);
+    let mut inbox_model = fixture_model(&inbox_tasks, &inbox_view);
+    inbox_model.selection_id = Some(Uuid::from_u128(50));
+    inbox_model.verb_items = inbox_golden_verbs();
+    let (inbox_rows, _) = paint(80, 24, &inbox_model);
+
     // `done_drawer_archived`: the drawer open with an expanded archived group below the
     // DONE rows -- the dim header with its count and the dim rows (glyph + T<n> kept).
     let mut archived_tasks = fixture_tasks();
@@ -2889,6 +2943,11 @@ fn golden_scenes() -> Vec<GoldenScene> {
         GoldenScene {
             name: "done_drawer",
             rows: done_rows,
+            width: 80,
+        },
+        GoldenScene {
+            name: "inbox",
+            rows: inbox_rows,
             width: 80,
         },
         GoldenScene {
@@ -3344,9 +3403,9 @@ fn all_golden_frames_pass_no_color_sgr_scan() {
         scanned += 1;
     }
     assert_eq!(
-        scanned, 7,
-        "expected the seven board surface goldens (board, board_default_split_78, accordion, \
-         palette, help, done_drawer, done_drawer_archived) in {dir:?}"
+        scanned, 8,
+        "expected the eight board surface goldens (board, board_default_split_78, accordion, \
+         palette, help, done_drawer, inbox, done_drawer_archived) in {dir:?}"
     );
 }
 
