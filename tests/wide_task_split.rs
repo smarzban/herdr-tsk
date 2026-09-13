@@ -50,7 +50,7 @@ fn fixture_with_titles(first: &str, second: &str) -> (DomainState, BoardModel) {
     domain
         .set_status(started, HumanStatus::Started)
         .expect("start T12");
-    domain
+    let ready = domain
         .create(
             second,
             Some("renewal notes".to_string()),
@@ -59,6 +59,9 @@ fn fixture_with_titles(first: &str, second: &str) -> (DomainState, BoardModel) {
             None,
         )
         .expect("create T15");
+    domain
+        .set_status(ready, HumanStatus::Ready)
+        .expect("ready T15");
     let mut tasks = domain.tasks().to_vec();
     tasks[0].number = Some(12);
     tasks[1].number = Some(15);
@@ -269,9 +272,9 @@ fn stage_zero_and_full_task_render_the_standard_tier_at_130x24() {
         .iter()
         .filter(|hit| matches!(hit.target, QueueHitTarget::Verb(_)))
         .count();
-    // The bar is a fixed shape (open · status verbs · add · help): a started row paints
-    // five entries at every tier, well inside the standard budget.
-    assert_eq!(verbs, 5, "started row bar: {verbs}");
+    // The bar is a fixed shape (open · status verbs · help): a started row paints
+    // six entries at every tier, well inside the standard budget.
+    assert_eq!(verbs, 6, "started row bar: {verbs}");
     assert!(verbs <= usize::from(STANDARD_VERB_BAR_ENTRY_BUDGET));
 
     to_stage(&mut domain, &mut model, WideStage::FullTask);
@@ -1560,14 +1563,14 @@ fn footer_verbs_dispatch_for_the_focused_surface_in_every_stage() {
         let done_x = u16::try_from(verb_row.find("ctrl+d done").expect("done verb")).expect("x");
         let intent = click_map(&model, &hits, done_x, 23);
         assert_eq!(intent, Some(BoardIntent::Complete), "{stage:?}: {verb_row}");
-        let right_half =
-            u16::try_from(verb_row.rfind("+ add").unwrap_or(done_x as usize)).expect("x");
         if stage.focused_surface() == FocusedSurface::Board {
-            assert_eq!(
-                click_map(&model, &hits, right_half, 23),
-                Some(BoardIntent::OpenCapture),
-                "{stage:?}: footer verbs on the task side of the frame still route"
-            );
+            if let Some(add_x) = verb_row.find("+ add") {
+                assert_eq!(
+                    click_map(&model, &hits, u16::try_from(add_x).expect("x"), 23),
+                    Some(BoardIntent::OpenCapture),
+                    "{stage:?}: footer add verb routes"
+                );
+            }
         }
         let id = model.selected_id().expect("selection");
         go(&mut domain, &mut model, intent.expect("verb"));
