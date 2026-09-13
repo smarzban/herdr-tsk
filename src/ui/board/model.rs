@@ -95,6 +95,9 @@ pub enum BoardInputMode {
     /// click does NOT: field regions are inert in this state, and only move focus once one
     /// of the edit states is already open (see the mouse mapper's form-field arms).
     TaskPage,
+    /// Expanded quick-add has selected a staged step or its trailing `+ step` control. This
+    /// must never resolve to the board's Normal mode: the full-frame capture owns every key.
+    CapturePage,
     /// A one-line add/rename step draft owns input in its own row in the steps section. It is
     /// a Title-like [`crate::ui::edit::EditBuffer`] carried on the page form's steps state,
     /// not one of the three task-form fields: Enter applies the domain command, Shift+Enter
@@ -568,6 +571,9 @@ impl BoardForm {
 pub(super) struct StepEditor {
     pub(super) buffer: EditBuffer,
     pub(super) rename: Option<Uuid>,
+    /// Expanded capture has no durable step ids yet, so an existing staged row is addressed by
+    /// its stable draft index until the capture saves.
+    pub(super) pending_index: Option<usize>,
     pub(super) refusal: Option<String>,
 }
 
@@ -2763,6 +2769,7 @@ impl BoardModel {
             form.steps.editor = Some(StepEditor {
                 buffer: seeded_draft(""),
                 rename: None,
+                pending_index: None,
                 refusal: None,
             });
         } else {

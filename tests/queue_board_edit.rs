@@ -528,6 +528,19 @@ fn row_text(terminal: &Terminal<TestBackend>, width: u16, y: u16) -> String {
         .collect()
 }
 
+fn rendered_board(model: &BoardModel, width: u16, height: u16) -> String {
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("terminal");
+    terminal
+        .draw(|frame| {
+            let _ = draw_board(frame, model);
+        })
+        .expect("draw");
+    (0..height)
+        .map(|y| row_text(&terminal, width, y))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// The page's scope dropdown answers the footer it belongs to: options stack directly
 /// above the meta footer, left-aligned, and carry short project names -- never the
 /// filesystem path, never the selector's corner.
@@ -646,7 +659,7 @@ fn page_view_shows_thread_beside_scope() {
 #[test]
 fn task_page_form_tab_cycle_wraps_through_title() {
     let mut domain = DomainState::new();
-    domain
+    let id = domain
         .create(
             "Unthreaded task",
             None,
@@ -655,48 +668,52 @@ fn task_page_form_tab_cycle_wraps_through_title() {
             None,
         )
         .expect("create");
+    domain.add_step(id, "first").expect("first step");
+    domain.add_step(id, "second").expect("second step");
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
     apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None).expect("open form");
 
-    let mut focus = CaptureField::Title;
-    for expected in [
-        CaptureField::Notes,
-        CaptureField::Notes,
-        CaptureField::Thread,
-        CaptureField::Scope,
-        CaptureField::Title,
-        CaptureField::Notes,
+    apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
+        .expect("Title to Notes");
+    assert_eq!(model.form_focus(), Some(CaptureField::Notes));
+    apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
+        .expect("Notes to first step");
+    assert!(rendered_board(&model, 80, 24).contains("▸ ▪ first"));
+    apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
+        .expect("first step to second");
+    assert!(rendered_board(&model, 80, 24).contains("▸ ▪ second"));
+    apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
+        .expect("second step to add");
+    assert!(rendered_board(&model, 80, 24).contains("▸ + step"));
+    apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None).expect("add to Thread");
+    assert_eq!(model.input_mode(), BoardInputMode::SelectThread);
+    apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
+        .expect("Thread to Scope");
+    assert_eq!(model.input_mode(), BoardInputMode::EditScope);
+    apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
+        .expect("Scope to Title");
+    assert_eq!(model.input_mode(), BoardInputMode::EditTitle);
+
+    apply_intent(&mut domain, &mut model, BoardIntent::FormFocusPrev, None)
+        .expect("Title reverses to Scope");
+    assert_eq!(model.input_mode(), BoardInputMode::EditScope);
+    apply_intent(&mut domain, &mut model, BoardIntent::FormFocusPrev, None)
+        .expect("Scope reverses to Thread");
+    assert_eq!(model.input_mode(), BoardInputMode::SelectThread);
+    for (expected, label) in [
+        ("▸ + step", "Thread reverses to add"),
+        ("second", "add reverses to second"),
+        ("first", "second reverses to first"),
     ] {
-        let tab = map_board_form_key(
-            focus,
-            false,
-            KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE),
-        )
-        .expect("Tab maps on every editable form field");
-        assert_eq!(tab, BoardIntent::FormFocusNext);
-        apply_intent(&mut domain, &mut model, tab, None).expect("Tab focuses the next field");
-        assert_eq!(model.form_focus(), Some(expected));
-        focus = expected;
+        apply_intent(&mut domain, &mut model, BoardIntent::FormFocusPrev, None).expect(label);
+        assert!(rendered_board(&model, 80, 24).contains(expected), "{label}");
     }
-    let shift_tab = map_board_form_key(
-        focus,
-        false,
-        KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT),
-    )
-    .expect("Shift+Tab maps on every editable form field");
-    assert_eq!(shift_tab, BoardIntent::FormFocusPrev);
-    apply_intent(&mut domain, &mut model, shift_tab, None)
-        .expect("Shift+Tab reaches Title from Notes");
-    assert_eq!(model.form_focus(), Some(CaptureField::Title));
     apply_intent(&mut domain, &mut model, BoardIntent::FormFocusPrev, None)
-        .expect("Shift+Tab reaches Scope from Title");
-    assert_eq!(model.form_focus(), Some(CaptureField::Scope));
+        .expect("first reverses to Notes");
+    assert_eq!(model.input_mode(), BoardInputMode::EditNotes);
     apply_intent(&mut domain, &mut model, BoardIntent::FormFocusPrev, None)
-        .expect("Shift+Tab reaches Thread from Scope");
-    assert_eq!(model.form_focus(), Some(CaptureField::Thread));
-    apply_intent(&mut domain, &mut model, BoardIntent::FormFocusPrev, None)
-        .expect("Shift+Tab reaches the trailing step target from Thread");
-    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+        .expect("Notes reverses to Title");
+    assert_eq!(model.input_mode(), BoardInputMode::EditTitle);
 }
 
 #[test]

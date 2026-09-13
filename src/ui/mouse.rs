@@ -817,7 +817,7 @@ pub fn map_board_mouse(
             Some(QueueHitTarget::Verb(index)) => form_verb_intent(model, index),
             _ => None,
         },
-        BoardInputMode::TaskPage => match hit_at(hits, pos) {
+        BoardInputMode::TaskPage | BoardInputMode::CapturePage => match hit_at(hits, pos) {
             Some(QueueHitTarget::TaskNumber(id)) => Some(BoardIntent::CopyTaskNumber(id)),
             Some(QueueHitTarget::FormTitle) if model.task_editing() => {
                 Some(BoardIntent::FocusFormField(CaptureField::Title))

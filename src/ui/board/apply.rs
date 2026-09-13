@@ -535,7 +535,10 @@ fn apply_board_intent(
                         select_add_step(model);
                     }
                 }
-            } else if model.input_mode == BoardInputMode::TaskPage {
+            } else if matches!(
+                model.input_mode,
+                BoardInputMode::TaskPage | BoardInputMode::CapturePage
+            ) {
                 if model.capture_draft_open() {
                     if model
                         .form
@@ -590,7 +593,10 @@ fn apply_board_intent(
                     }
                 }
                 return Ok(IntentOutcome::None);
-            } else if model.input_mode == BoardInputMode::TaskPage {
+            } else if matches!(
+                model.input_mode,
+                BoardInputMode::TaskPage | BoardInputMode::CapturePage
+            ) {
                 if model.capture_draft_open() {
                     if model
                         .form
@@ -627,7 +633,7 @@ fn apply_board_intent(
                 BoardInputMode::SelectThread | BoardInputMode::EditThread
             ) && model.form.as_ref().is_some_and(|form| form.is_task())
             {
-                select_step_from_tab(model, false);
+                select_add_step(model);
             } else if matches!(
                 model.input_mode,
                 BoardInputMode::SelectThread | BoardInputMode::EditThread
@@ -1619,6 +1625,20 @@ fn apply_board_intent(
                 let previous_visible = model.visible_ids();
                 model.toggle_inbox_collapsed();
                 model.reanchor_selection(Some(INBOX_HEADER_ROW_ID), &previous_visible);
+                return Ok(IntentOutcome::None);
+            }
+            // A capture's staged rows have no domain task identity. Their page owns Enter, so
+            // it must never fall through to the board selection hidden behind the draft.
+            if model.capture_draft_open() && model.input_mode == BoardInputMode::CapturePage {
+                if model
+                    .form
+                    .as_ref()
+                    .is_some_and(|form| form.steps.add_selected)
+                {
+                    open_step_editor(model, "", None);
+                } else if let Some(index) = model.form.as_ref().and_then(|form| form.steps.cursor) {
+                    open_capture_pending_step_editor(model, index);
+                }
                 return Ok(IntentOutcome::None);
             }
             // Enter never opens inline step editing. A selected step remains selected in either
@@ -2913,7 +2933,11 @@ fn select_add_step(model: &mut BoardModel) {
     if let Some(form) = model.form.as_mut() {
         form.steps.cursor = None;
         form.steps.add_selected = true;
-        model.input_mode = BoardInputMode::TaskPage;
+        model.input_mode = if form.is_task() {
+            BoardInputMode::TaskPage
+        } else {
+            BoardInputMode::CapturePage
+        };
     }
 }
 
@@ -2931,7 +2955,7 @@ fn select_first_capture_step_or_add(model: &mut BoardModel) {
     } else if let Some(form) = model.form.as_mut() {
         form.steps.cursor = Some(0);
         form.steps.add_selected = false;
-        model.input_mode = BoardInputMode::TaskPage;
+        model.input_mode = BoardInputMode::CapturePage;
     }
 }
 
@@ -2948,7 +2972,7 @@ fn select_last_capture_step(model: &mut BoardModel) -> bool {
     if let Some(form) = model.form.as_mut() {
         form.steps.cursor = Some(index);
         form.steps.add_selected = false;
-        model.input_mode = BoardInputMode::TaskPage;
+        model.input_mode = BoardInputMode::CapturePage;
     }
     true
 }
@@ -2973,7 +2997,7 @@ fn move_capture_step_with_tab(model: &mut BoardModel, forward: bool) -> bool {
     if let Some(form) = model.form.as_mut() {
         form.steps.cursor = Some(next);
         form.steps.add_selected = false;
-        model.input_mode = BoardInputMode::TaskPage;
+        model.input_mode = BoardInputMode::CapturePage;
     }
     true
 }
@@ -3165,6 +3189,7 @@ fn open_step_editor(model: &mut BoardModel, text: &str, rename: Option<Uuid>) {
         form.steps.editor = Some(StepEditor {
             buffer,
             rename,
+            pending_index: None,
             refusal: None,
         });
         model.input_mode = BoardInputMode::EditStep;
@@ -3176,6 +3201,29 @@ fn open_step_editor(model: &mut BoardModel, text: &str, rename: Option<Uuid>) {
 /// save goes with it: a closed row has nothing left for the save boundary to release (the only
 /// path that can be here with one pending is a defensive direct
 /// intent, never the keyboard).
+fn open_capture_pending_step_editor(model: &mut BoardModel, index: usize) {
+    let text = model
+        .form
+        .as_ref()
+        .filter(|form| !form.is_task())
+        .and_then(|form| form.steps.pending_adds.get(index))
+        .cloned();
+    let Some(text) = text else {
+        return;
+    };
+    if let Some(form) = model.form.as_mut() {
+        form.steps.add_selected = false;
+        form.steps.editor = Some(StepEditor {
+            buffer: crate::ui::edit::seeded_draft(&text),
+            rename: None,
+            pending_index: Some(index),
+            refusal: None,
+        });
+        model.input_mode = BoardInputMode::EditStep;
+        model.clear_message();
+    }
+}
+
 fn close_step_editor(model: &mut BoardModel) {
     if let Some(form) = model.form.as_mut() {
         form.steps.pending_save = None;
@@ -3235,17 +3283,25 @@ fn stage_capture_step(
         return Ok(IntentOutcome::None);
     };
     let text = editor.buffer.value().trim().to_string();
+    let pending_index = editor.pending_index;
     if text.is_empty() {
         if let Some(editor) = form.steps.editor.as_mut() {
             editor.refusal = Some(STEP_TEXT_REQUIRED.to_string());
         }
         return Ok(IntentOutcome::None);
     }
-    form.steps.pending_adds.push(text);
+    if let Some(index) = pending_index {
+        if let Some(existing) = form.steps.pending_adds.get_mut(index) {
+            *existing = text;
+        }
+    } else {
+        form.steps.pending_adds.push(text);
+    }
     if keep_open {
         form.steps.editor = Some(StepEditor {
             buffer: crate::ui::edit::seeded_draft(""),
             rename: None,
+            pending_index: None,
             refusal: None,
         });
         model.input_mode = BoardInputMode::EditStep;

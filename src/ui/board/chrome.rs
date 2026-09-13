@@ -78,7 +78,8 @@ fn edit_chrome_legends(mode: BoardInputMode) -> [&'static str; 3] {
         | BoardInputMode::LaunchCard
         | BoardInputMode::Palette
         | BoardInputMode::Help
-        | BoardInputMode::TaskPage => [
+        | BoardInputMode::TaskPage
+        | BoardInputMode::CapturePage => [
             "Enter save · Esc cancel",
             "Enter save · Esc cancel",
             "Enter save · Esc",
