@@ -3578,9 +3578,8 @@ fn notes_edit_arrows_move_across_logical_and_wrapped_rows() {
 #[test]
 fn task_page_caps_a_wrapped_header_inside_the_page_body() {
     let mut domain = DomainState::new();
-    // A whitespace-free title fills each wrap row, so the capped tail needs an ellipsis.
-    let title = "word".repeat(120);
-    domain
+    let title = "word ".repeat(120);
+    let id = domain
         .create(
             &title,
             None,
@@ -3589,6 +3588,10 @@ fn task_page_caps_a_wrapped_header_inside_the_page_body() {
             None,
         )
         .expect("create task");
+    // The original geometry uses the five-column `ready` status word; new tasks default open.
+    domain
+        .set_status(id, HumanStatus::Ready)
+        .expect("keep the original ready header layout");
     let mut model = BoardModel::from_domain(&domain, None);
     apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
 
@@ -3611,7 +3614,7 @@ fn task_page_caps_a_wrapped_header_inside_the_page_body() {
     );
     // The header itself is bounded and honest about what it hides.
     assert!(
-        (1..7).any(|y| rows[y].contains('…')),
+        (1..7).any(|y| rows[y].contains("wor…")),
         "a capped header names the rows it cannot show:\n{}",
         rows.join("\n")
     );
@@ -3662,9 +3665,8 @@ fn step_cursor_moves_do_not_rescroll_the_page_when_steps_fit() {
 #[test]
 fn edit_title_caret_parks_at_the_capped_headers_end() {
     let mut domain = DomainState::new();
-    // A whitespace-free title fills each wrap row, so the capped tail needs an ellipsis.
-    let title = "word".repeat(120);
-    domain
+    let title = "word ".repeat(120);
+    let id = domain
         .create(
             &title,
             None,
@@ -3673,6 +3675,10 @@ fn edit_title_caret_parks_at_the_capped_headers_end() {
             None,
         )
         .expect("create task");
+    // The original geometry uses the five-column `ready` status word; new tasks default open.
+    domain
+        .set_status(id, HumanStatus::Ready)
+        .expect("keep the original ready header layout");
     let mut model = BoardModel::from_domain(&domain, None);
     apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
     board_rows(&model, 40, 10);
@@ -3689,7 +3695,7 @@ fn edit_title_caret_parks_at_the_capped_headers_end() {
     // that row's past-end column, immediately after the "…".
     let last_header = (1..7)
         .rev()
-        .find(|&y| rows[y].starts_with("    ") && rows[y].contains('…'))
+        .find(|&y| rows[y].starts_with("    ") && rows[y].contains("wor…"))
         .expect("capped header row");
     let cursor = terminal.backend().cursor_position();
     assert_eq!(
