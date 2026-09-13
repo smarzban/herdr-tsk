@@ -632,16 +632,17 @@ fn assert_verb_parity(title: &str, status: HumanStatus, chord: &str, key: KeyCod
 
 #[test]
 fn click_and_wheel_match_keyboard_effects_for_each_control() {
-    // Verb bar: every chord a Todo task shows, plus the Done-only reopen chord.
+    // Verb bar: every chord a ready task shows, plus a block chord from IN MOTION and the
+    // Done-only inbox chord.
     assert_verb_parity("s", HumanStatus::Ready, "s", KeyCode::Char('s'));
     assert_verb_parity("enter", HumanStatus::Ready, "enter", KeyCode::Enter);
     assert_verb_parity("d", HumanStatus::Ready, "d", KeyCode::Char('d'));
-    assert_verb_parity("b", HumanStatus::Ready, "b", KeyCode::Char('b'));
+    assert_verb_parity("b", HumanStatus::Started, "b", KeyCode::Char('b'));
     assert_verb_parity("question", HumanStatus::Ready, "?", KeyCode::Char('?'));
-    assert_verb_parity("add", HumanStatus::Started, "+", KeyCode::Char('+'));
+    assert_verb_parity("add", HumanStatus::Ready, "+", KeyCode::Char('+'));
     // Archive has no bar seat: it lives in `?` / `:` and on ctrl+f.
     assert_verb_parity("unblock", HumanStatus::Blocked, "b", KeyCode::Char('b'));
-    assert_verb_parity("reopen", HumanStatus::Done, "o", KeyCode::Char('o'));
+    assert_verb_parity("inbox", HumanStatus::Done, "o", KeyCode::Char('o'));
 
     // Drawer toggle: open it by keyboard on both boards first (a shared start state), then
     // close it by keyboard on one and by clicking the DONE header on the other.
@@ -1270,9 +1271,8 @@ fn wheel_scrolls_the_open_command_surface_so_every_command_becomes_reachable() {
     let commands = model.visible_commands();
     assert_eq!(
         commands.len(),
-        12,
-        "this ready fixture must expose every palette command a ready selection has \
-         (reopen joins only for a done selection, AC-17): {commands:?}"
+        13,
+        "this ready fixture must expose every palette command a ready selection has: {commands:?}"
     );
     let last = commands.len() - 1;
     assert_eq!(commands[last].label, "quit");
@@ -1893,15 +1893,38 @@ fn page_verb_clicks_resolve_through_the_page_legend() {
     let verbs: Vec<&str> = board_verb_items(&model).iter().map(|v| v.key).collect();
     assert_eq!(
         verbs,
-        vec!["e", "o", "esc"],
-        "done page bar: edit · reopen · close"
+        vec!["e", "n", "o", "u", "esc"],
+        "done page bar: edit · ready · inbox · undo · close"
     );
     assert_eq!(click_verb(&model, "o"), BoardIntent::Reopen);
-    apply_intent(&mut domain, &mut model, BoardIntent::Reopen, None).expect("reopen");
+    apply_intent(&mut domain, &mut model, BoardIntent::Reopen, None).expect("open");
     let verbs: Vec<&str> = board_verb_items(&model).iter().map(|v| v.key).collect();
-    assert_eq!(verbs, vec!["e", "s", "d", "b", "esc"], "ready page bar");
+    assert_eq!(verbs, vec!["e", "s", "n", "d", "esc"], "open page bar");
     assert_eq!(click_verb(&model, "e"), BoardIntent::BeginEditTitle);
     assert_eq!(click_verb(&model, "s"), BoardIntent::PrimaryVerb);
+    assert_eq!(
+        click_verb(&model, "n"),
+        BoardIntent::SetStatus(HumanStatus::Ready)
+    );
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::SetStatus(HumanStatus::Ready),
+        None,
+    )
+    .expect("pick ready");
+    let verbs: Vec<&str> = board_verb_items(&model).iter().map(|v| v.key).collect();
+    assert_eq!(verbs, vec!["e", "s", "o", "d", "esc"], "ready page bar");
+    assert_eq!(click_verb(&model, "o"), BoardIntent::Reopen);
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::SetStatus(HumanStatus::Open),
+        None,
+    )
+    .expect("send to inbox");
+    assert_eq!(click_verb(&model, "s"), BoardIntent::PrimaryVerb);
+    apply_intent(&mut domain, &mut model, BoardIntent::PrimaryVerb, None).expect("start");
     assert_eq!(click_verb(&model, "b"), BoardIntent::ToggleBlock);
     let close = click_verb(&model, "esc");
     assert_eq!(close, BoardIntent::CloseLayer);

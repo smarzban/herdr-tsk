@@ -12,6 +12,8 @@ use crossterm::terminal::supports_keyboard_enhancement;
 use ratatui::layout::{Position, Rect};
 use ratatui::widgets::Block;
 
+use crate::domain::HumanStatus;
+
 use super::board::{board_verb_items, BoardInputMode, BoardModel};
 use super::capture::{
     CaptureField, CaptureModel, CaptureScopeChoice, CAPTURE_FIELD_LABEL_WIDTH,
@@ -308,6 +310,7 @@ fn verb_intent(model: &BoardModel, index: usize) -> Option<BoardIntent> {
         "s" => Some(BoardIntent::PrimaryVerb),
         "enter" => Some(BoardIntent::OpenTaskPage),
         "d" => Some(BoardIntent::Complete),
+        "n" => Some(BoardIntent::SetStatus(HumanStatus::Ready)),
         "o" => Some(BoardIntent::Reopen),
         "b" => Some(BoardIntent::ToggleBlock),
         "r" => Some(BoardIntent::ToggleReview),
@@ -315,7 +318,6 @@ fn verb_intent(model: &BoardModel, index: usize) -> Option<BoardIntent> {
         "u" => Some(BoardIntent::Undo),
         "f" => Some(BoardIntent::File),
         "e" => Some(BoardIntent::BeginEditTitle),
-        "n" => Some(BoardIntent::BeginEditNotes),
         "a" => Some(BoardIntent::BeginAddStep),
         "esc" if model.input_mode() == BoardInputMode::EditStep => Some(BoardIntent::CancelEdit),
         "esc" => Some(BoardIntent::CloseLayer),

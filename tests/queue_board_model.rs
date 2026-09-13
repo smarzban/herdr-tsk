@@ -17,6 +17,7 @@ use tsk_tui::ui::board::{apply_intent, draw_board, BoardModel, ProjectScopeOptio
 use tsk_tui::ui::input::BoardIntent;
 use tsk_tui::ui::queue::{
     query_board, query_lens, BoardLens, ProjectRow, QueueView, SectionKind, ThreadFilter,
+    INBOX_HEADER_ROW_ID,
 };
 use uuid::Uuid;
 
@@ -283,7 +284,7 @@ fn from_domain_opens_the_invocation_project_unless_archived() {
         Some(Path::new(THIS_REPO)),
         "launch inside a repo opens that project's board"
     );
-    assert_eq!(model.visible_ids(), vec![live_id]);
+    assert_eq!(model.visible_ids(), vec![INBOX_HEADER_ROW_ID, live_id]);
     assert_eq!(model.nav_tab(), tsk_tui::ui::queue::NavTab::ProjectBoard);
 
     // Empty project: same destination, useful empty state (no fallback lens).
@@ -368,7 +369,7 @@ fn confirming_project_choice_changes_visible_queue_sections() {
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
     assert_eq!(
         model.visible_ids(),
-        vec![app_id],
+        vec![INBOX_HEADER_ROW_ID, app_id],
         "startup sits on the invocation project's board"
     );
 
@@ -407,7 +408,7 @@ fn confirming_project_choice_changes_visible_queue_sections() {
     .unwrap();
 
     assert_eq!(model.selected_project(), Some(Path::new("/repos/other")));
-    assert_eq!(model.visible_ids(), vec![other_id]);
+    assert_eq!(model.visible_ids(), vec![INBOX_HEADER_ROW_ID, other_id]);
 }
 
 /// After a domain sync, selection stays on the same id when it remains visible.
@@ -900,7 +901,11 @@ fn arrow_navigation_crosses_painted_header_task_to_task() {
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
     model.set_selected_project(Some(PathBuf::from(THIS_REPO)));
     let ids = model.visible_ids();
-    assert_eq!(ids, vec![review, ready], "needs-you first, then on deck");
+    assert_eq!(
+        ids,
+        vec![review, INBOX_HEADER_ROW_ID, ready],
+        "needs-you first, then on deck and its inbox heading"
+    );
     apply_intent(&mut domain, &mut model, BoardIntent::SelectIndex(0), None)
         .expect("select first task");
 
@@ -924,11 +929,18 @@ fn arrow_navigation_crosses_painted_header_task_to_task() {
     );
 
     apply_intent(&mut domain, &mut model, BoardIntent::SelectNext, None)
-        .expect("arrow navigation moves to next task");
+        .expect("arrow navigation moves to the inbox heading");
+    assert_eq!(
+        model.selected_id(),
+        None,
+        "the selected inbox heading is chrome, not a task"
+    );
+    apply_intent(&mut domain, &mut model, BoardIntent::SelectNext, None)
+        .expect("arrow navigation crosses the inbox heading");
     assert_eq!(
         model.selected_id(),
         Some(ready),
-        "selection must skip decorative headers and land on the next task"
+        "selection must land on the task below the inbox heading"
     );
 }
 
@@ -989,8 +1001,8 @@ fn two_fresh_models_from_same_store_share_no_ui_state_and_no_ui_writes_under_sta
     );
     assert_eq!(
         b_fresh.visible_ids(),
-        vec![id],
-        "the startup board renders that project's rows"
+        vec![INBOX_HEADER_ROW_ID, id],
+        "the startup board renders that project's rows and inbox heading"
     );
 
     let after_state = list_files_recursive(&state_dir);
