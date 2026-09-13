@@ -2,10 +2,10 @@
 │                                            │                                                                 │
 │ desk  ·  tsk ▾  ·  projects     Overview ▾ │  tsk                                                            │
 │                                            │                                                                 │
-│   PROJECT             NEED  MOTION  READY  │  IN MOTION ───────────────────────────────────────────────────1 │
+│   PROJECT            NEED MOTION DECK DONE │  IN MOTION ───────────────────────────────────────────────────1 │
 │                                            │                                                                 │
-│ ▸ tsk · here             ·       1      2  │ ▸ ● T1 Smoke-test worktree dispatch                             │
-│   herdr                  2       1      ·  │                                                                 │
+│ ▸ tsk · here            ·      1    2    1 │ ▸ ● T1 Smoke-test worktree dispatch                             │
+│   herdr                 2      1    ·    · │                                                                 │
 │                                            │  ON DECK ─────────────────────────────────────────────────────2 │
 │                                            │                                                                 │
 │                                            │   ○ T4 Cut rust-toolchain pin into CI docs                      │

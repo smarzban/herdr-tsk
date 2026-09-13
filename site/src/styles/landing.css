@@ -2710,8 +2710,8 @@ html[data-theme="light"] .pane {
 .tsk-tab-arrow { padding-left: 1ch; }
 .tsk-view-control { margin-left: auto; }
 .board .tsk-row.is-sel { background: transparent; color: var(--ink); }
-.tsk-project-row, .tsk-project-legend { display: grid; grid-template-columns: minmax(0,1fr) 10ch 11ch 7ch; align-items: baseline; padding: 0 2ch 0 1ch; gap: 0; text-align: right; font: inherit; line-height: inherit; }
-.tsk-project-table.with-threads .tsk-project-row, .tsk-project-table.with-threads .tsk-project-legend { grid-template-columns: minmax(0,1fr) var(--project-thread-width) 10ch 11ch 7ch; }
+.tsk-project-row, .tsk-project-legend { display: grid; grid-template-columns: minmax(0,1fr) 10ch 11ch 8ch 6ch; align-items: baseline; padding: 0 2ch 0 1ch; gap: 0; text-align: right; font: inherit; line-height: inherit; }
+.tsk-project-table.with-threads .tsk-project-row, .tsk-project-table.with-threads .tsk-project-legend { grid-template-columns: minmax(0,1fr) var(--project-thread-width) 10ch 11ch 8ch 6ch; }
 .tsk-project-row { appearance: none; border: 0; background: none; color: var(--ink); width: 100%; cursor: pointer; }
 .tsk-project-name, .tsk-project-legend > :first-child { text-align: left; white-space: pre; }
 .tsk-project-row.is-selected .tsk-project-name > span:first-child, .tsk-project-row .is-bold { font-weight: bold; }

@@ -2836,6 +2836,8 @@ fn golden_scenes() -> Vec<GoldenScene> {
         None,
     )
     .expect("open projects overview for goldens");
+    let projects_index_50_rows = board_rows(&projects_model, 50, 20);
+    let projects_index_110_rows = board_rows(&projects_model, 110, 30);
     apply_intent(
         &mut projects_domain,
         &mut projects_model,
@@ -2984,6 +2986,16 @@ fn golden_scenes() -> Vec<GoldenScene> {
             name: "done_drawer_archived",
             rows: archived_rows,
             width: 80,
+        },
+        GoldenScene {
+            name: "projects_index_50x20",
+            rows: projects_index_50_rows,
+            width: 50,
+        },
+        GoldenScene {
+            name: "projects_index_110x30",
+            rows: projects_index_110_rows,
+            width: 110,
         },
         GoldenScene {
             name: "projects_preview_split_110x30",
@@ -3443,10 +3455,11 @@ fn all_golden_frames_pass_no_color_sgr_scan() {
         scanned += 1;
     }
     assert_eq!(
-        scanned, 10,
-        "expected the ten board surface goldens (board, board_default_split_78, accordion, \
-         palette, help, done_drawer, inbox, done_drawer_archived, projects_preview_split_110x30, \
-         projects_preview_rail_110x30) in {dir:?}"
+        scanned, 12,
+        "expected the twelve board surface goldens (board, board_default_split_78, accordion, \
+         palette, help, done_drawer, inbox, done_drawer_archived, projects_index_50x20, \
+         projects_index_110x30, projects_preview_split_110x30, projects_preview_rail_110x30) \
+         in {dir:?}"
     );
 }
 
@@ -5281,11 +5294,11 @@ fn projects_index_paints_aligned_counts_search_hint_and_selected_path() {
     // Positions are char columns, not byte offsets (the marker and dots are multibyte).
     let legend_end =
         |label: &str| char_col(header, header.find(label).expect(label)) + label.len() - 1;
-    let ready_x = char_col(first, first.rfind('1').expect("ready count"));
+    let on_deck_x = char_col(first, first.rfind('1').expect("ON DECK count"));
     assert_eq!(
-        legend_end("READY"),
-        ready_x,
-        "READY right edge over its count:\n{header}\n{first}"
+        legend_end("ON DECK"),
+        on_deck_x,
+        "ON DECK right edge over its count:\n{header}\n{first}"
     );
     let zero_cells: Vec<usize> = first
         .match_indices('·')
@@ -5371,7 +5384,7 @@ fn projects_index_paints_aligned_counts_search_hint_and_selected_path() {
         let project_rows: Vec<&String> = rows
             .iter()
             .filter(|row| {
-                row.contains("alpha") && row.contains('·') && row.trim_end().ends_with('1')
+                row.contains("alpha") && row.matches('·').count() >= 3 && row.contains('1')
             })
             .collect();
         assert_eq!(
@@ -5379,13 +5392,15 @@ fn projects_index_paints_aligned_counts_search_hint_and_selected_path() {
             2,
             "both same-named rows paint at {width}:\n{text}"
         );
-        let ready_end =
-            char_col(header, header.find("READY").expect("ready label")) + "READY".len() - 1;
+        let on_deck_label = if width < 66 { "DECK" } else { "ON DECK" };
+        let on_deck_end = char_col(header, header.find(on_deck_label).expect("ON DECK label"))
+            + on_deck_label.len()
+            - 1;
         for row in &project_rows {
             assert_eq!(
-                row.rfind('1').map(|x| char_col(row, x)),
-                Some(ready_end),
-                "READY count anchors to the right edge at {width}:\n{header}\n{row}"
+                row.find('1').map(|x| char_col(row, x)),
+                Some(on_deck_end),
+                "ON DECK count anchors to the right edge at {width}:\n{header}\n{row}"
             );
             assert!(
                 !row.contains('/'),
@@ -5396,6 +5411,75 @@ fn projects_index_paints_aligned_counts_search_hint_and_selected_path() {
             header.contains("THREADS"),
             width >= 100,
             "THREADS column opens at 100 and above only ({width}):\n{header}"
+        );
+    }
+}
+
+#[test]
+fn projects_index_paints_four_count_columns_at_compact_and_wide_widths() {
+    let mut domain = DomainState::new();
+    for (title, status) in [
+        ("needs", HumanStatus::Blocked),
+        ("motion", HumanStatus::Started),
+        ("deck ready", HumanStatus::Ready),
+        ("deck open", HumanStatus::Open),
+        ("done", HumanStatus::Done),
+    ] {
+        let id = domain
+            .create(
+                title,
+                None,
+                TaskScope::Project {
+                    path: "/counts".into(),
+                },
+                ProvenanceOrigin::Manual,
+                None,
+            )
+            .expect("task");
+        domain.set_status(id, status).expect("status");
+    }
+    let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from("/counts")));
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::SelectNavTab(NavTab::Projects),
+        None,
+    )
+    .expect("projects index");
+
+    for (width, labels) in [
+        (50, ["NEED", "MOTION", "DECK", "DONE"]),
+        (110, ["NEEDS YOU", "IN MOTION", "ON DECK", "DONE"]),
+    ] {
+        let rows = board_rows(&model, width, 20);
+        let text = rows.join("\n");
+        let header = rows
+            .iter()
+            .find(|row| row.contains("PROJECT"))
+            .expect("project legend");
+        for label in labels {
+            assert!(
+                header.contains(label),
+                "{label} missing at {width}:\n{text}"
+            );
+        }
+        let row = rows
+            .iter()
+            .find(|row| row.contains("▸ counts"))
+            .expect("project count row");
+        assert_eq!(
+            row.matches('1').count(),
+            3,
+            "needs, motion, and done each paint one at {width}:\n{row}"
+        );
+        assert!(
+            row.contains('2'),
+            "ready plus open paint one ON DECK total at {width}:\n{row}"
+        );
+        assert_eq!(
+            header.contains("THREADS"),
+            width >= 100,
+            "THREADS column threshold stays at 100 ({width}):\n{header}"
         );
     }
 }

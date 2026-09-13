@@ -128,7 +128,8 @@ test("project counts, thread labels and counted menu order match the app", async
   );
   await expect(project.locator(":scope > span").nth(2)).toHaveText("2");
   await expect(project.locator(":scope > span").nth(3)).toHaveText("1");
-  await expect(project.locator(":scope > span").nth(4)).toHaveText("2");
+  await expect(project.locator(":scope > span").nth(4)).toHaveText("5");
+  await expect(project.locator(":scope > span").nth(5)).toHaveText("1");
   await page.locator('[data-tab="project"]').click();
   await page.locator("[data-filter]").click();
   await expect(page.locator("[data-filter-option]").nth(1)).toContainText(

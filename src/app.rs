@@ -3246,8 +3246,8 @@ mod tests {
             .find(|row| row.path == "/repos/preview")
             .expect("outer project row after completion");
         assert_eq!(
-            outer_row.ready, 1,
-            "post-dispatch sync must refresh the outer project's count"
+            outer_row.on_deck, 1,
+            "post-dispatch sync must refresh the outer project's ON DECK count"
         );
         let right = model.right_seat().expect("right seat after completion");
         assert!(

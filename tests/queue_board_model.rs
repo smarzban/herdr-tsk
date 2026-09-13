@@ -840,7 +840,8 @@ fn projects_index_rows_carry_open_work_counts() {
     assert_eq!(row.path, THIS_REPO);
     assert_eq!(row.needs_you, 1);
     assert_eq!(row.in_motion, 1);
-    assert_eq!(row.ready, 1, "done tasks stay out of the counts");
+    assert_eq!(row.on_deck, 1, "ready and open tasks share ON DECK");
+    assert_eq!(row.done, 1, "live done tasks have their own count");
     assert_eq!(
         row.threads,
         vec!["release".to_string()],

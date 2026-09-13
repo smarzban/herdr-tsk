@@ -4011,7 +4011,7 @@ fn build_list_rows(
     (out, anchor_last_idx, selected_idx)
 }
 
-/// Column geometry of the projects index. The three count columns are anchored to the
+/// Column geometry of the projects index. The four count columns are anchored to the
 /// right edge, so the name column absorbs whatever width the frame has instead of
 /// truncating at a fixed cell. A THREADS column opens between name and counts once the
 /// frame is wide enough to give both a fair share.
@@ -4027,10 +4027,12 @@ pub(crate) struct IndexColumns {
     pub needs_end: usize,
     /// Exclusive right edge of IN MOTION.
     pub motion_end: usize,
-    /// Exclusive right edge of READY.
-    pub ready_end: usize,
-    /// Column legend words, shortened below 52 cells.
-    pub labels: (&'static str, &'static str, &'static str),
+    /// Exclusive right edge of ON DECK.
+    pub on_deck_end: usize,
+    /// Exclusive right edge of DONE.
+    pub done_end: usize,
+    /// Column legend words, shortened where four full labels would crowd the name.
+    pub labels: (&'static str, &'static str, &'static str, &'static str),
 }
 
 /// Cells taken by the ` ▸ ` / `   ` row marker.
@@ -4039,22 +4041,25 @@ const INDEX_NAME_X: usize = 3;
 const INDEX_GAP: usize = 2;
 /// Narrowest frame that paints the THREADS column.
 pub(crate) const INDEX_THREADS_MIN_WIDTH: usize = 100;
-/// Narrowest frame that spells the count legend in full.
-const INDEX_FULL_LABELS_MIN_WIDTH: usize = 52;
+/// The name column's existing 24-cell floor needs short labels through 65 cells: four
+/// full labels, their gaps, and the right margin first fit beside it at 66.
+const INDEX_FULL_LABELS_MIN_WIDTH: usize = 66;
 
 pub(crate) fn index_columns(width: usize) -> IndexColumns {
-    let labels = if width < INDEX_FULL_LABELS_MIN_WIDTH {
-        ("NEED", "MOTION", "READY")
+    let compact = width < INDEX_FULL_LABELS_MIN_WIDTH;
+    let labels = if compact {
+        ("NEED", "MOTION", "DECK", "DONE")
     } else {
-        ("NEEDS YOU", "IN MOTION", "READY")
+        ("NEEDS YOU", "IN MOTION", "ON DECK", "DONE")
     };
-    let ready_end = width.saturating_sub(INDEX_GAP);
-    let motion_end = ready_end.saturating_sub(labels.2.len() + INDEX_GAP);
-    let needs_end = motion_end.saturating_sub(labels.1.len() + INDEX_GAP);
+    // One-cell compact gaps preserve the old 24-cell name floor at 50 columns.
+    let gap = if compact { 1 } else { INDEX_GAP };
+    let done_end = width.saturating_sub(gap);
+    let on_deck_end = done_end.saturating_sub(labels.3.len() + gap);
+    let motion_end = on_deck_end.saturating_sub(labels.2.len() + gap);
+    let needs_end = motion_end.saturating_sub(labels.1.len() + gap);
     let needs_start = needs_end.saturating_sub(labels.0.len());
-    let available = needs_start
-        .saturating_sub(INDEX_GAP)
-        .saturating_sub(INDEX_NAME_X);
+    let available = needs_start.saturating_sub(gap).saturating_sub(INDEX_NAME_X);
     let threads = (width >= INDEX_THREADS_MIN_WIDTH).then(|| {
         // Name keeps two fifths of the shared span, threads the rest.
         let name_w = (available * 2 / 5).max(24);
@@ -4070,7 +4075,8 @@ pub(crate) fn index_columns(width: usize) -> IndexColumns {
         threads: threads.map(|(_, x, w)| (x, w)),
         needs_end,
         motion_end,
-        ready_end,
+        on_deck_end,
+        done_end,
         labels,
     }
 }
@@ -4130,7 +4136,8 @@ fn paint_index_header(width: u16) -> Line<'static> {
     for (end, label) in [
         (columns.needs_end, columns.labels.0),
         (columns.motion_end, columns.labels.1),
-        (columns.ready_end, columns.labels.2),
+        (columns.on_deck_end, columns.labels.2),
+        (columns.done_end, columns.labels.3),
     ] {
         place_right(&mut spans, &mut x, end, label.to_string(), style_dim());
     }
@@ -4138,7 +4145,7 @@ fn paint_index_header(width: u16) -> Line<'static> {
 }
 
 /// A count cell: zero paints a dim `·` so the eye skips it; a live number takes the
-/// weight of its lane (NEEDS YOU bold, IN MOTION plain, READY dim).
+/// weight of its lane (NEEDS YOU bold, IN MOTION plain, ON DECK and DONE dim).
 fn index_count(value: usize, live_style: Style) -> (String, Style) {
     if value == 0 {
         ("\u{b7}".to_string(), style_dim())
@@ -4243,7 +4250,8 @@ fn paint_project_row(
             columns.motion_end,
             index_count(row.in_motion, style_plain()),
         ),
-        (columns.ready_end, index_count(row.ready, style_dim())),
+        (columns.on_deck_end, index_count(row.on_deck, style_dim())),
+        (columns.done_end, index_count(row.done, style_dim())),
     ] {
         place_right(&mut spans, &mut x, end, text, style);
     }
@@ -5139,7 +5147,8 @@ mod tests {
                 path: unsafe_path.clone(),
                 needs_you: 0,
                 in_motion: 0,
-                ready: 1,
+                on_deck: 1,
+                done: 0,
                 threads: Vec::new(),
                 current: false,
             },
@@ -5147,7 +5156,8 @@ mod tests {
                 path: "/other/repo".into(),
                 needs_you: 0,
                 in_motion: 0,
-                ready: 1,
+                on_deck: 1,
+                done: 0,
                 threads: Vec::new(),
                 current: false,
             },

@@ -997,28 +997,30 @@ import { parseCapture } from "./capture.js";
     if (state.tab === "projects") {
       for (const name of matchingProjectNames()) {
         const group = state.tasks.filter(
-          (t) =>
-            (t.project || "desk") === name &&
-            t.status !== "done" &&
-            !t.archived,
+          (t) => (t.project || "desk") === name && !t.archived,
         );
-        const started = group
+        const open = group.filter((t) => t.status !== "done");
+        const started = open
           .filter((t) => t.status === "started")
           .sort(byStatusChange);
-        const review = group
+        const review = open
           .filter((t) => t.status === "review")
           .sort(byStatusChange);
-        const blocked = group
+        const blocked = open
           .filter((t) => t.status === "blocked")
           .sort(byStatusChange);
-        const ready = group.filter((t) => t.status === "ready").sort(byCreated);
+        const onDeck = open.filter(
+          (t) => t.status === "ready" || t.status === "open",
+        );
+        const done = group.filter((t) => t.status === "done");
         rows.push({
           kind: "project",
           label: name,
           project: name,
           needs: review.length + blocked.length,
           motion: started.length,
-          ready: ready.length,
+          onDeck: onDeck.length,
+          done: done.length,
           selectable: true,
           id: `project:${name}`,
         });
@@ -2038,7 +2040,7 @@ import { parseCapture } from "./capture.js";
         if (row.kind === "project") {
           const selected = row.id === state.selectedId;
           if (rail) {
-            return `<button type="button" class="tsk-row tsk-rail-project-row ${selected ? "is-sel" : ""}" data-project-row="${esc(row.project)}" data-nav-id="${esc(row.id)}"><span class="tsk-row-main"><span class="tsk-rail-project-name">${selected ? "▸" : " "} ${esc(row.label)}</span><span class="dim tsk-rail-project-counts">${count(row.needs)} ${count(row.motion)} ${count(row.ready)}</span></span></button>`;
+            return `<button type="button" class="tsk-row tsk-rail-project-row ${selected ? "is-sel" : ""}" data-project-row="${esc(row.project)}" data-nav-id="${esc(row.id)}"><span class="tsk-row-main"><span class="tsk-rail-project-name">${selected ? "▸" : " "} ${esc(row.label)}</span><span class="dim tsk-rail-project-counts">${count(row.needs)} ${count(row.motion)} ${count(row.onDeck)} ${count(row.done)}</span></span></button>`;
           }
           const threads = [
             ...new Set(
@@ -2053,7 +2055,7 @@ import { parseCapture } from "./capture.js";
                 .filter(Boolean),
             ),
           ].sort();
-          return `<button type="button" class="tsk-project-row ${selected ? "is-selected" : ""}" data-project-row="${esc(row.project)}" data-nav-id="${esc(row.id)}"><span class="tsk-project-name">${selected ? "▸" : " "} <span>${esc(row.label)}</span>${row.project === launchProject() ? `<span class="dim"> · here</span>` : ""}</span>${showThreads ? `<span class="dim tsk-project-threads">${esc(threadCell(threads, threadWidth))}</span>` : ""}<span class="${row.needs ? "is-bold" : "dim"}">${count(row.needs)}</span><span>${count(row.motion)}</span><span class="dim">${count(row.ready)}</span></button>`;
+          return `<button type="button" class="tsk-project-row ${selected ? "is-selected" : ""}" data-project-row="${esc(row.project)}" data-nav-id="${esc(row.id)}"><span class="tsk-project-name">${selected ? "▸" : " "} <span>${esc(row.label)}</span>${row.project === launchProject() ? `<span class="dim"> · here</span>` : ""}</span>${showThreads ? `<span class="dim tsk-project-threads">${esc(threadCell(threads, threadWidth))}</span>` : ""}<span class="${row.needs ? "is-bold" : "dim"}">${count(row.needs)}</span><span>${count(row.motion)}</span><span class="dim">${count(row.onDeck)}</span><span class="dim">${count(row.done)}</span></button>`;
         }
         if (row.kind === "group") {
           const mark = row.collapsed ? "▸" : "▾";
@@ -2135,7 +2137,7 @@ import { parseCapture } from "./capture.js";
 
     const column = `
       <div class="tsk-tabs">${tabs}${control}</div>
-      <div class="tsk-list ${index ? "tsk-project-table" : ""} ${showThreads ? "with-threads" : ""}" style="--project-name-width:${nameWidth + 2}ch;--project-thread-width:${threadWidth + 2}ch">${index ? `<div class="tsk-project-legend"><span>  PROJECT</span>${showThreads ? "<span>THREADS</span>" : ""}<span>NEEDS YOU</span><span>IN MOTION</span><span>READY</span></div>` : ""}${body || `<div class="dim">  nothing here</div>`}</div>`;
+      <div class="tsk-list ${index ? "tsk-project-table" : ""} ${showThreads ? "with-threads" : ""}" style="--project-name-width:${nameWidth + 2}ch;--project-thread-width:${threadWidth + 2}ch">${index ? `<div class="tsk-project-legend"><span>  PROJECT</span>${showThreads ? "<span>THREADS</span>" : ""}<span>NEEDS YOU</span><span>IN MOTION</span><span>ON DECK</span><span>DONE</span></div>` : ""}${body || `<div class="dim">  nothing here</div>`}</div>`;
     // Wide stages paint one shared footer under both columns, so a column omits its own.
     return rail || bare ? column : column + renderFooter();
   }
