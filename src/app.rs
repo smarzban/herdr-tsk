@@ -503,8 +503,7 @@ fn run_board_loop(
                         &store,
                         &mut domain,
                         &mut model,
-                        area,
-                        target,
+                        BoardDispatchRoute { area, target },
                         intent,
                         &mut save_recovery,
                         quick_capture,
@@ -516,8 +515,10 @@ fn run_board_loop(
                             &store,
                             &mut domain,
                             &mut model,
-                            area,
-                            BoardIntentTarget::Outer,
+                            BoardDispatchRoute {
+                                area,
+                                target: BoardIntentTarget::Outer,
+                            },
                             BoardIntent::StageLeft,
                             &mut save_recovery,
                             quick_capture,
@@ -569,8 +570,7 @@ fn run_board_loop(
                                 &store,
                                 &mut domain,
                                 &mut model,
-                                area,
-                                target,
+                                BoardDispatchRoute { area, target },
                                 intent,
                                 &mut save_recovery,
                                 quick_capture,
@@ -736,8 +736,7 @@ fn run_board_loop(
                         &store,
                         &mut domain,
                         &mut model,
-                        area,
-                        target,
+                        BoardDispatchRoute { area, target },
                         intent,
                         &mut save_recovery,
                         quick_capture,
@@ -759,8 +758,7 @@ fn run_board_loop(
                         &store,
                         &mut domain,
                         &mut model,
-                        area,
-                        target,
+                        BoardDispatchRoute { area, target },
                         intent,
                         &mut save_recovery,
                         quick_capture,
@@ -1414,6 +1412,12 @@ struct RoutedBoardIntent {
     return_to_index: bool,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct BoardDispatchRoute {
+    area: Rect,
+    target: BoardIntentTarget,
+}
+
 /// Resolve the nested projects-preview escape and ownership rules once for every keyboard route.
 /// The reducer still receives an ordinary board intent, but this helper keeps the outer/index
 /// target and the second Escape transition together and directly testable.
@@ -1916,8 +1920,7 @@ fn dispatch_board_intent(
     store: &TaskStore,
     domain: &mut DomainState,
     model: &mut BoardModel,
-    area: Rect,
-    target: BoardIntentTarget,
+    route: BoardDispatchRoute,
     intent: BoardIntent,
     save_recovery: &mut SaveRecovery<DomainState>,
     quick_capture: bool,
@@ -1926,12 +1929,12 @@ fn dispatch_board_intent(
     let quit = handle_board_intent(
         store,
         domain,
-        board_intent_target_mut(model, target),
+        board_intent_target_mut(model, route.target),
         intent,
         save_recovery,
         quick_capture,
     )?;
-    auto_open_projects_preview(area, model, &intent_for_preview);
+    auto_open_projects_preview(route.area, model, &intent_for_preview);
     sync_focused_project_preview(model, domain, save_recovery);
     Ok(quit)
 }
@@ -3311,8 +3314,10 @@ mod tests {
             &temp.store,
             &mut domain,
             &mut model,
-            area,
-            task_target,
+            BoardDispatchRoute {
+                area,
+                target: task_target,
+            },
             task_intent,
             &mut recovery,
             false,
@@ -3360,8 +3365,10 @@ mod tests {
             &temp.store,
             &mut domain,
             &mut model,
-            area,
-            verb_target,
+            BoardDispatchRoute {
+                area,
+                target: verb_target,
+            },
             verb_intent,
             &mut recovery,
             false,
