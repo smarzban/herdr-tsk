@@ -65,7 +65,7 @@ stop. Never run `install.sh`, `brew`, or `cargo build` unless they asked.
 
 | Exit | Meaning | Do |
 | --- | --- | --- |
-| 0 | done, or already true (idempotent success) | nothing |
+| 0 | done, or already true (idempotent success) | after a mutation, verify the affected task or view with `tsk list … --json`; otherwise nothing |
 | 1 | refusal of one or more items; valid siblings persisted | fix and retry only the refused subset |
 | 2 | usage or parse error, nothing persisted | correct the invocation, run again |
 | 3 | store I/O, commit indeterminate | `tsk list … --json` (also `--done`, `--archived` if hidden), retry only what is missing |

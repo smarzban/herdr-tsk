@@ -958,7 +958,7 @@ mod tests {
             hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
         }
         assert_eq!(
-            hash, 0xc5ab_8cee_cd77_2391,
+            hash, 0x3b4b_9a95_b29c_cd35,
             "skills/tsk-cli/SKILL.md changed: bump `version:` in its frontmatter and update both pins here"
         );
     }
@@ -967,6 +967,11 @@ mod tests {
     fn embedded_skill_uses_json_for_agent_list_reads() {
         assert!(SKILL_MD.contains("**Read JSON, not presentation.**"));
         assert!(SKILL_MD.contains("Always add `--json` to `tsk list`."));
+        let exit_zero = SKILL_MD
+            .lines()
+            .find(|line| line.starts_with("| 0 |"))
+            .expect("exit-zero contract row");
+        assert!(exit_zero.contains("verify") && exit_zero.contains("--json"));
         for line in SKILL_MD
             .lines()
             .filter(|line| line.starts_with("tsk list "))
