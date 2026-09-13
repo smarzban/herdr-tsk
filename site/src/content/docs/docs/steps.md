@@ -54,10 +54,10 @@ Cancelling task editing restores staged removals.
 
 ## CLI
 
-Use the task number and the step's short ID from `tsk list`:
+Use the task number and the step's short ID from direct JSON output:
 
 ```sh
-tsk list T12
+tsk list T12 --json
 tsk steps T12 add "Reproduce the timeout"
 tsk steps T12 toggle <step-short-id>
 tsk steps T12 rename <step-short-id> "Reproduce on a slow connection"
@@ -66,6 +66,6 @@ tsk steps T12 remove <step-short-id>
 
 A short ID is the shortest unique prefix of a step ID. Full UUIDs also work.
 
-Read the task before retrying an uncertain change. Repeating `add` adds another step; repeating `toggle` reverses it; repeating `remove` refuses after success. Repeating the same rename is safe.
+Read the task again with `tsk list T12 --json` before retrying an uncertain change. Repeating `add` adds another step; repeating `toggle` reverses it; repeating `remove` refuses after success. Repeating the same rename is safe.
 
 Deleted tasks refuse step changes. [CLI errors and exit codes](/docs/cli/#exit-contract).

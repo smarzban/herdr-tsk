@@ -1,7 +1,7 @@
 ---
 name: tsk-cli
 description: Work the user's tsk task board from the command line. Use when asked to add, update, edit, start, block, finish, archive, or restore a task on the board (or "tsk", "the tsk board", "the desk"), to add or tick steps, or to answer "what's on the board", "what's next", "what's on deck", "what needs me". Always `tsk add|list|status|edit|steps|archive|trash`, never the TUI.
-version: 1.1.0
+version: 1.2.0
 ---
 
 # tsk: the user's task board
@@ -24,18 +24,18 @@ stop. Never run `install.sh`, `brew`, or `cargo build` unless they asked.
 | Add to the desk / a project / a thread | `tsk add -t "Title" --desk` · `-p widget` · `--thread rel-2026` |
 | Add with notes | `tsk add -t "Title" -n "Notes"` |
 | Add many | `tsk add --file plan.json` or pipe JSON to `tsk add` |
-| What's on the board | `tsk list` (this project) · `tsk list --desk` · `tsk list --all` |
-| What's next / on deck | `tsk list`, READY group |
-| What needs the user | `tsk list`, BLOCKED and REVIEW groups |
-| What's in motion | `tsk list`, STARTED group |
-| One task and its steps | `tsk list T12` |
+| What's on the board | `tsk list --json` · `tsk list --desk --json` · `tsk list --all --json` |
+| What's next / on deck | `tsk list --json`, rows whose `status` is `ready` |
+| What needs the user | `tsk list --json`, rows whose `status` is `blocked` or `review` |
+| What's in motion | `tsk list --json`, rows whose `status` is `started` |
+| One complete task | `tsk list T12 --json` |
 | Start / block / hand back / finish | `tsk status T12 start` · `blocked` · `review` · `done` |
 | Change title or notes | `tsk edit T12 --title "…"` · `--notes "…"` |
-| Steps | `tsk steps T12 add "…"` · `toggle <id>` · `rename <id> "…"` · `remove <id>` |
+| Steps | Read ids with `tsk list T12 --json`; then `add` · `toggle` · `rename` · `remove` |
 | Archive / unarchive | `tsk archive T12` · `tsk unarchive T12` · `tsk project archive widget` |
-| Done, archived, deleted | `tsk list --done` · `--archived` · `--deleted` |
+| Done, archived, deleted | `tsk list --done --json` · `tsk list --archived --json` · `tsk list --deleted --json` |
 | Bring back a deleted task | `tsk trash restore T12` |
-| Machine output | add `--json` to `add` or `list` |
+| User-facing display | omit `--json` only when showing output to the user or troubleshooting |
 
 `T12`, `t12`, `12`, and the UUID all address the same task. Prefer `T12`, it is what the user sees.
 
@@ -50,21 +50,25 @@ stop. Never run `install.sh`, `brew`, or `cargo build` unless they asked.
 3. **Thread names**: lowercase ASCII letters, digits, `-` and `.`, starting with a letter or
    digit, at most 32 characters. `--thread` normalizes case; anything else is refused.
 4. **Never pass `--state-dir`** unless the user asked. It points at a different board.
-5. **Never blind-retry.** Read the exit code, then act (contract below). `add` is idempotent,
+5. **Read JSON, not presentation.** Always add `--json` to `tsk list`. Do not parse human list
+   formatting; use it only when showing output to the user or troubleshooting interactively.
+   Mutation acknowledgements may be human-only: trust their exit and refusal codes, then verify
+   state with `tsk list … --json`.
+6. **Never blind-retry.** Read the exit code, then act (contract below). `add` is idempotent,
    `steps toggle` and `steps remove` are not.
-6. **Ignore notice rows.** Rows the board paints as `N1`… are human-only (starter tasks and
-   release notes). `tsk list` never shows them and no command addresses them.
-7. Values that begin with `-` need the `=` form: `--title="-fix parser"`, `--project="-x"`,
+7. **Ignore notice rows.** Rows the board paints as `N1`… are human-only (starter tasks and
+   release notes). `tsk list --json` never shows them and no command addresses them.
+8. Values that begin with `-` need the `=` form: `--title="-fix parser"`, `--project="-x"`,
    `--notes="-5 degrees"`, `--state-dir=<dir>`, `--file=<path>`.
 
 ## Exit contract (all commands)
 
 | Exit | Meaning | Do |
 | --- | --- | --- |
-| 0 | done, or already true (idempotent success) | nothing |
+| 0 | done, or already true (idempotent success) | after a mutation, verify the affected task or view with `tsk list … --json`; otherwise nothing |
 | 1 | refusal of one or more items; valid siblings persisted | fix and retry only the refused subset |
 | 2 | usage or parse error, nothing persisted | correct the invocation, run again |
-| 3 | store I/O, commit indeterminate | `tsk list …` (also `--done`, `--archived` if it could be hidden), retry only what is missing |
+| 3 | store I/O, commit indeterminate | `tsk list … --json` (also `--done`, `--archived` if hidden), retry only what is missing |
 
 After exit 1 or exit 3, never whole-plan-retry: retry the refused or missing subset only.
 Refusals carry a stable code: `empty-title`,
@@ -101,28 +105,36 @@ cat plan.json | tsk add
 ## Listing
 
 ```sh
-tsk list                 # ready, started, blocked, review in this repo's project
-tsk list --desk          # same for the desk
-tsk list --all           # every scope, grouped by status then project
-tsk list --thread rel-1  # filter within the selected scope
-tsk list --done | --deleted | --archived
-tsk list T12             # one task, with its steps
-tsk list --json
+tsk list --json                    # open tasks in this repo's project
+tsk list --desk --json             # open desk tasks
+tsk list --all --json              # open tasks in every scope
+tsk list --thread rel-1 --json     # thread within the selected scope
+tsk list --done --json
+tsk list --deleted --json
+tsk list --archived --json
+tsk list T12 --json                # one complete task
 ```
 
-- Human output groups by status: `STARTED`, `READY`, `BLOCKED`, `REVIEW`; a row is
+- JSON is the agent read contract. Human output is presentation for the user or interactive
+  troubleshooting; never parse it. Human output groups by status: `STARTED`, `READY`, `BLOCKED`,
+  `REVIEW`; a filtered row is
   ` - <number> <title> #<thread>`. Map board language onto it: *on deck* = READY, *in motion* =
-  STARTED, *needs you* = BLOCKED + REVIEW.
+  STARTED, *needs you* = BLOCKED + REVIEW. All human list content wraps to the attached terminal
+  width with hanging indentation, supported from 50 columns. Direct task output uses separate notes,
+  steps, and `#thread` blocks in that order, with a blank line between blocks that exist; steps
+  show state and text without ids.
 - `--json` is a flat array of `id`, `number`, `title`, `status`, `project` (`null` for desk),
-  `thread` (`null` if none), in display order. `tsk list T12 --json` adds `steps`:
-  `id`, `text`, `done`, `short_id`.
+  `thread` (`null` if none), in display order. `tsk list T12 --json` returns the complete task in
+  this field order: `id`, `number`, `project`, `status`, `title`, `notes`, `steps`, `thread`.
+  Missing notes are `null`, missing steps are `[]`; each step carries `id`, `done`, `short_id`,
+  and `text`.
 - Scope selectors (`-p`, `--desk`, `--all`) are mutually exclusive, so are `--done` and
   `--deleted`. An invalid `--thread` is exit 2, not an empty result.
-- `tsk list T12` ignores cwd and scope and finds the task anywhere, including done and live
+- `tsk list T12 --json` ignores cwd and scope and finds the task anywhere, including done and live
   soft-deleted tasks. A task already moved to trash needs `--deleted`. Do not combine a task
   operand with scope, thread, or status filters.
 - `--deleted` shows live soft-deletes plus `trash.jsonl` entries (kept 30 days), newest first.
-- Human output escapes terminal controls in titles, steps, and project names; JSON does not.
+- Human output escapes terminal controls in titles, notes, steps, and project names; JSON does not.
 
 ## Status and edit
 
@@ -150,13 +162,14 @@ tsk steps T12 add "Write the failing test"
 tsk steps T12 toggle a3
 tsk steps T12 rename a3 "Write the failing test first"
 tsk steps T12 remove a3
-tsk list T12              # shows [x]/[ ] and each step's short id
+tsk list T12 --json       # shows [x]/[ ] state and each step's short_id
 ```
 
-- A step short id is the shortest unambiguous prefix of the step id, printed by `tsk list T12`.
+- A step short id is the shortest unambiguous prefix of the step id, printed by
+  `tsk list T12 --json`.
 - `toggle` flips: a retry after an unseen success flips it back. `rename` is idempotent on
   trimmed text. `remove` is not: a retry after an unseen success is `unknown-step`. Run
-  `tsk list T12` before retrying any `steps` command.
+  `tsk list T12 --json` before retrying any `steps` command.
 
 ## Archive
 
@@ -167,7 +180,7 @@ tsk project archive widget
 tsk project unarchive widget
 ```
 
-- An archived task keeps its status and leaves every working view; `tsk list --archived` shows
+- An archived task keeps its status and leaves every working view; `tsk list --archived --json` shows
   archived tasks and tasks of archived projects (`archived` / `project archived`).
 - Both task verbs are idempotent (exit 0 on repeat). Unknown task: `T12 is not on the board`;
   deleted task: `T12 is deleted` (exit 1).
@@ -178,7 +191,7 @@ tsk project unarchive widget
 ## Trash
 
 ```sh
-tsk list --deleted
+tsk list --deleted --json
 tsk trash restore T12
 ```
 

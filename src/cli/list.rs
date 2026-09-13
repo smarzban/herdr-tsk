@@ -23,7 +23,7 @@ pub struct ListInput {
     pub archived: bool,
     /// Normalized at the argv boundary so filtering only compares valid names.
     pub thread: Option<String>,
-    /// One task addressed by UUID or human number: single-task listing with step lines.
+    /// One task addressed by UUID or human number: single-task listing with full detail.
     pub task: Option<TaskAddress>,
     pub state_dir: Option<PathBuf>,
     pub help: bool,
@@ -60,14 +60,21 @@ pub(crate) struct ListRow {
     pub(crate) archived: Option<&'static str>,
 }
 
+/// Complete detail attached only to a direct single-task listing.
+#[derive(Debug)]
+pub(crate) struct DirectTaskDetails {
+    pub(crate) notes: Option<String>,
+    pub(crate) steps: Vec<crate::cli::steps::StepLine>,
+}
+
 /// Read-only result for the list command.
 #[derive(Debug)]
 pub struct ListResult {
     pub(crate) rows: Vec<ListRow>,
     pub(crate) view: ListView,
     pub(crate) include_scope: bool,
-    /// Step lines for single-task listing; empty for every other listing.
-    pub(crate) steps: Vec<crate::cli::steps::StepLine>,
+    /// Notes and step lines for one directly addressed task; absent for filtered listings.
+    pub(crate) direct: Option<DirectTaskDetails>,
 }
 
 /// Parse `tsk list` arguments, including argv0 and the `list` subcommand.
@@ -198,7 +205,7 @@ pub fn run(input: ListInput) -> Result<ListResult, ListError> {
         .load()
         .map_err(|error| ListError::Store(error.to_string()))?;
     if let Some(task_address) = input.task {
-        // Single-task listing ignores cwd and filters, and includes step lines.
+        // Single-task listing ignores cwd and filters, and includes complete readable detail.
         let task = domain
             .tasks()
             .iter()
@@ -215,7 +222,10 @@ pub fn run(input: ListInput) -> Result<ListResult, ListError> {
             rows: vec![row_for(task)],
             view,
             include_scope: false,
-            steps: crate::cli::steps::step_lines(&task.steps),
+            direct: Some(DirectTaskDetails {
+                notes: task.notes.clone(),
+                steps: crate::cli::steps::step_lines(&task.steps),
+            }),
         });
     }
     let scope = (!input.all).then(|| {
@@ -282,7 +292,7 @@ pub fn run(input: ListInput) -> Result<ListResult, ListError> {
         rows,
         view,
         include_scope: input.all,
-        steps: Vec::new(),
+        direct: None,
     })
 }
 
@@ -330,7 +340,7 @@ fn deleted_rows(
         rows: dated.into_iter().map(|(_, row)| row).collect(),
         view: ListView::Deleted,
         include_scope,
-        steps: Vec::new(),
+        direct: None,
     })
 }
 

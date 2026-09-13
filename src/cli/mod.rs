@@ -27,7 +27,23 @@ pub struct CliOutput {
 }
 
 /// Run a selected headless command. `stdin` is consumed only by plan-form `add`.
-pub fn run_with<S, I, R>(args: I, mut stdin: R, stdin_is_tty: bool) -> CliOutput
+pub fn run_with<S, I, R>(args: I, stdin: R, stdin_is_tty: bool) -> CliOutput
+where
+    S: AsRef<str>,
+    I: IntoIterator<Item = S>,
+    R: Read,
+{
+    run_with_terminal_width(args, stdin, stdin_is_tty, None)
+}
+
+/// Run a headless command with the width of an attached output terminal.
+/// `None` keeps redirected output on its stored logical lines.
+pub fn run_with_terminal_width<S, I, R>(
+    args: I,
+    mut stdin: R,
+    stdin_is_tty: bool,
+    terminal_width: Option<usize>,
+) -> CliOutput
 where
     S: AsRef<str>,
     I: IntoIterator<Item = S>,
@@ -42,7 +58,7 @@ where
         Some("guide") => guide::run(),
         Some("add") => run_add(args, &mut stdin, stdin_is_tty),
         Some("steps") => run_steps(args),
-        Some("list") => run_list(args),
+        Some("list") => run_list(args, terminal_width),
         Some("status") => run_status(args),
         Some("edit") => run_edit(args),
         Some("trash") => run_trash(args),
@@ -164,18 +180,18 @@ fn run_project(args: Vec<String>) -> CliOutput {
     }
 }
 
-fn run_list(args: Vec<String>) -> CliOutput {
+fn run_list(args: Vec<String>, terminal_width: Option<usize>) -> CliOutput {
     let input = match list::parse(&args) {
         Ok(input) => input,
-        Err(reason) => return presenter::list_usage(&reason),
+        Err(reason) => return presenter::list_usage(&reason, terminal_width),
     };
     if input.help {
-        return presenter::list_help();
+        return presenter::list_help(terminal_width);
     }
     let json = input.json;
     match list::run(input) {
-        Ok(result) => presenter::list(result, json),
-        Err(error) => presenter::list_rejected(error),
+        Ok(result) => presenter::list(result, json, terminal_width),
+        Err(error) => presenter::list_rejected(error, terminal_width),
     }
 }
 

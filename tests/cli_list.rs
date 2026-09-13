@@ -1,11 +1,16 @@
+#[cfg(unix)]
+#[allow(dead_code)]
+#[path = "support/pty.rs"]
+mod pty;
+
 use std::ffi::OsString;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard, OnceLock};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use tsk_tui::cli::run_with;
+use tsk_tui::cli::{run_with, run_with_terminal_width};
 use tsk_tui::domain::{DomainState, HumanStatus, ProvenanceOrigin, TaskScope};
 use tsk_tui::store::TaskStore;
 
@@ -79,6 +84,15 @@ fn state_dir_arg(dir: &Path) -> String {
 
 fn list(args: &[String]) -> tsk_tui::cli::CliOutput {
     run_with(args, Cursor::new(Vec::<u8>::new()), true)
+}
+
+fn list_at_width(args: &[String], terminal_width: usize) -> tsk_tui::cli::CliOutput {
+    run_with_terminal_width(
+        args,
+        Cursor::new(Vec::<u8>::new()),
+        true,
+        Some(terminal_width),
+    )
 }
 
 fn create_task(state: &mut DomainState, title: &str, scope: TaskScope, status: HumanStatus) {
@@ -843,6 +857,309 @@ fn human_list_escapes_terminal_control_titles_without_changing_json() {
 }
 
 #[test]
+fn direct_human_list_wraps_notes_with_a_hanging_indent() {
+    let dir = temp_state_dir("wrapped-notes");
+    let mut state = DomainState::new();
+    let title = "wrap target with a title long enough to wrap at fifty columns";
+    let notes = "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda";
+    let step = "implement the surprisingly long step and verify every continuation remains aligned";
+    let task = state
+        .create(
+            title,
+            Some(notes.into()),
+            TaskScope::Global,
+            ProvenanceOrigin::Manual,
+            Some("release-2026-long-thread".into()),
+        )
+        .expect("create wrapping notes task");
+    state.add_step(task, step).expect("seed wrapping step");
+    TaskStore::new(&dir).save(&state).expect("seed store");
+
+    let output = list_at_width(
+        &[
+            "tsk".into(),
+            "list".into(),
+            task.to_string(),
+            "--state-dir".into(),
+            state_dir_arg(&dir),
+        ],
+        50,
+    );
+
+    assert_eq!(output.code, 0);
+    assert_eq!(
+        output.stdout,
+        "READY\n - 1 wrap target with a title long enough to wrap \n     at fifty columns\n   alpha beta gamma delta epsilon zeta eta theta \n   iota kappa lambda\n\n   [ ] implement the surprisingly long step and \n       verify every continuation remains aligned\n\n   #release-2026-long-thread\n"
+    );
+    assert!(
+        output.stdout.lines().all(|line| line.len() <= 50),
+        "every explicit row fits the reported terminal width: {}",
+        output.stdout
+    );
+
+    let redirected = list(&[
+        "tsk".into(),
+        "list".into(),
+        task.to_string(),
+        "--state-dir".into(),
+        state_dir_arg(&dir),
+    ]);
+    for logical_line in [
+        format!(" - 1 {title}"),
+        format!("   {notes}"),
+        format!("   [ ] {step}"),
+    ] {
+        assert!(
+            redirected.stdout.lines().any(|line| line == logical_line),
+            "redirected output split {logical_line:?}: {}",
+            redirected.stdout
+        );
+    }
+
+    let json = list_at_width(
+        &[
+            "tsk".into(),
+            "list".into(),
+            task.to_string(),
+            "--json".into(),
+            "--state-dir".into(),
+            state_dir_arg(&dir),
+        ],
+        50,
+    );
+    assert_eq!(json.stdout.lines().count(), 1, "JSON must not wrap");
+    let rows: Vec<serde_json::Value> = serde_json::from_str(&json.stdout).expect("valid JSON");
+    assert_eq!(rows[0]["notes"], notes);
+    assert_eq!(rows[0]["steps"][0]["text"], step);
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn scoped_human_list_wraps_task_rows_and_scope_labels() {
+    let dir = temp_state_dir("wrapped-list-rows");
+    let mut state = DomainState::new();
+    create_task_with_thread(
+        &mut state,
+        "a very long task title that wraps across the supported terminal floor",
+        TaskScope::Project {
+            path: "/projects/a-very-long-project-name-that-needs-wrapping-at-fifty-columns".into(),
+        },
+        HumanStatus::Ready,
+        Some("release-2026-long"),
+    );
+    TaskStore::new(&dir).save(&state).expect("seed store");
+
+    let output = list_at_width(
+        &[
+            "tsk".into(),
+            "list".into(),
+            "--all".into(),
+            "--state-dir".into(),
+            state_dir_arg(&dir),
+        ],
+        50,
+    );
+
+    assert_eq!(output.code, 0);
+    assert!(
+        output.stdout.lines().all(|line| line.len() <= 50),
+        "every list row fits the reported terminal width: {}",
+        output.stdout
+    );
+
+    assert!(
+        output
+            .stdout
+            .lines()
+            .any(|line| line.starts_with("  ") && line.contains("fifty")),
+        "scope label did not wrap with its hanging indent: {}",
+        output.stdout
+    );
+    assert!(
+        output
+            .stdout
+            .lines()
+            .any(|line| line.starts_with("        ") && line.contains("terminal")),
+        "scoped task row did not wrap with its hanging indent: {}",
+        output.stdout
+    );
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn unscoped_human_list_wraps_threaded_task_rows() {
+    let dir = temp_state_dir("wrapped-unscoped-row");
+    let mut state = DomainState::new();
+    create_task_with_thread(
+        &mut state,
+        "a default list task title that must wrap across the supported fifty column floor",
+        TaskScope::Global,
+        HumanStatus::Ready,
+        Some("release-2026-long"),
+    );
+    TaskStore::new(&dir).save(&state).expect("seed store");
+
+    let output = list_at_width(
+        &[
+            "tsk".into(),
+            "list".into(),
+            "--desk".into(),
+            "--state-dir".into(),
+            state_dir_arg(&dir),
+        ],
+        50,
+    );
+
+    assert_eq!(output.code, 0);
+    assert!(output.stdout.lines().all(|line| line.len() <= 50));
+    assert!(
+        output
+            .stdout
+            .lines()
+            .any(|line| line.starts_with("     ") && line.contains("supported")),
+        "unscoped task row did not wrap with its hanging indent: {}",
+        output.stdout
+    );
+    assert!(output.stdout.contains("#release-2026-long"));
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn list_help_and_usage_errors_wrap_at_the_supported_width() {
+    let help = list_at_width(&["tsk".into(), "list".into(), "--help".into()], 50);
+    assert_eq!(help.code, 0);
+    let help_width = help
+        .stdout
+        .lines()
+        .map(|line| line.chars().count())
+        .max()
+        .unwrap();
+    assert!(
+        help_width <= 50,
+        "help exceeded terminal width: {}",
+        help.stdout
+    );
+
+    let usage = list_at_width(&["tsk".into(), "list".into(), "--bogus".into()], 50);
+    assert_eq!(usage.code, 2);
+    assert!(usage.stdout.is_empty());
+    assert!(
+        usage.stderr.lines().all(|line| line.chars().count() <= 50),
+        "usage exceeded terminal width: {}",
+        usage.stderr
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn binary_uses_stdout_terminal_width_and_leaves_redirects_unwrapped() {
+    let root = pty::scratch_root("list-terminal-width");
+    let title =
+        "a terminal width handoff title deliberately longer than fifty columns at the boundary";
+    let mut state = DomainState::new();
+    let task = create_task_with_thread(
+        &mut state,
+        title,
+        TaskScope::Global,
+        HumanStatus::Ready,
+        None,
+    );
+    TaskStore::new(root.join("state"))
+        .save(&state)
+        .expect("seed PTY store");
+    let number = TaskStore::new(root.join("state"))
+        .load()
+        .expect("reload PTY store")
+        .get(task)
+        .unwrap()
+        .number
+        .unwrap()
+        .to_string();
+    let args = ["list", number.as_str()];
+
+    let redirected = pty::run_with_tty_stdin_and_piped_output(
+        &root,
+        &std::env::current_dir().unwrap(),
+        &args,
+        24,
+        50,
+    );
+    assert!(redirected.status.success());
+    let redirected = String::from_utf8(redirected.stdout).unwrap();
+    assert!(
+        redirected
+            .lines()
+            .any(|line| line == format!(" - 1 {title}")),
+        "piped stdout must stay unwrapped even when stdin is a terminal: {redirected}"
+    );
+
+    let mut terminal =
+        pty::Session::spawn(root, &std::env::current_dir().unwrap(), &args, &[], 24, 50);
+    let rendered = terminal.output_until("boundary").replace("\r\n", "\n");
+    assert!(terminal.wait_exit(Duration::from_secs(2)).success());
+    assert!(
+        rendered.lines().all(|line| line.chars().count() <= 50),
+        "terminal output exceeded its width: {rendered}"
+    );
+    assert!(
+        rendered
+            .lines()
+            .any(|line| line.starts_with("     ") && line.contains("fifty")),
+        "binary did not hand the terminal width to list rendering: {rendered}"
+    );
+}
+
+#[test]
+fn direct_human_list_keeps_note_lines_and_escapes_other_controls() {
+    let _env = env_lock();
+    let dir = temp_state_dir("terminal-control-notes");
+    let notes = "first\tcell\nsecond\u{001b}]52;c;clipboard\u{0007}";
+    let mut state = DomainState::new();
+    let task = state
+        .create(
+            "notes target",
+            Some(notes.into()),
+            TaskScope::Global,
+            ProvenanceOrigin::Manual,
+            Some("release".into()),
+        )
+        .expect("create notes task");
+    TaskStore::new(&dir).save(&state).expect("seed store");
+
+    let human = list(&[
+        "tsk".into(),
+        "list".into(),
+        task.to_string(),
+        "--state-dir".into(),
+        state_dir_arg(&dir),
+    ]);
+    assert_eq!(human.code, 0);
+    assert_eq!(
+        human.stdout,
+        "READY\n - 1 notes target\n   first\\u{0009}cell\n   second\\u{001b}]52;c;clipboard\\u{0007}\n\n   #release\n"
+    );
+    assert!(!human.stdout.contains('\t'));
+    assert!(!human.stdout.contains('\u{001b}'));
+    assert!(!human.stdout.contains('\u{0007}'));
+
+    let json = list(&[
+        "tsk".into(),
+        "list".into(),
+        task.to_string(),
+        "--json".into(),
+        "--state-dir".into(),
+        state_dir_arg(&dir),
+    ]);
+    let rows: Vec<serde_json::Value> = serde_json::from_str(&json.stdout).expect("JSON rows");
+    assert_eq!(rows[0]["notes"], notes);
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn human_list_escapes_terminal_control_thread_markers_without_changing_json() {
     let _env = env_lock();
     let dir = temp_state_dir("terminal-control-thread");
@@ -1201,10 +1518,10 @@ fn state_with_steps(done_first: bool) -> (DomainState, tsk_tui::domain::Step) {
     let id = state
         .create(
             "steps target",
-            None,
+            Some("First note\nSecond note".into()),
             TaskScope::Global,
             ProvenanceOrigin::Manual,
-            None,
+            Some("release".into()),
         )
         .expect("seed steps task");
     state.add_step(id, "First step").expect("seed first step");
@@ -1248,8 +1565,8 @@ fn list_task_prints_step_lines_with_state_and_short_id() {
     assert!(output.stderr.is_empty());
     assert_eq!(
         output.stdout,
-        format!("READY\n - 1 steps target\n   [x] aaa1 First step\n   [ ] aaa2 Second step\n"),
-        "one line per step with state and unambiguous short id"
+        "READY\n - 1 steps target\n   First note\n   Second note\n\n   [x] First step\n   [ ] Second step\n\n   #release\n",
+        "direct detail separates notes, steps, and the trailing thread"
     );
     assert!(
         first_step.id.to_string().starts_with("aaa1"),
@@ -1265,28 +1582,13 @@ fn list_task_prints_step_lines_with_state_and_short_id() {
         state_dir_arg(&dir),
     ]);
     assert_eq!(json.code, 0);
-    let rows: Vec<serde_json::Value> = serde_json::from_str(&json.stdout).expect("JSON rows");
-    assert_eq!(rows.len(), 1);
-    for key in ["id", "number", "project", "status", "thread", "title"] {
-        assert!(rows[0].get(key).is_some(), "single-task row keeps {key}");
-    }
+    let expected_json = format!(
+        "[{{\"id\":\"{}\",\"number\":1,\"project\":null,\"status\":\"ready\",\"title\":\"steps target\",\"notes\":\"First note\\nSecond note\",\"steps\":[{{\"id\":\"{}\",\"done\":true,\"short_id\":\"aaa1\",\"text\":\"First step\"}},{{\"id\":\"aaa22222-0000-4000-8000-000000000002\",\"done\":false,\"short_id\":\"aaa2\",\"text\":\"Second step\"}}],\"thread\":\"release\"}}]\n",
+        task, first_step.id
+    );
     assert_eq!(
-        rows[0]["steps"],
-        serde_json::json!([
-            {
-                "id": first_step.id.to_string(),
-                "done": true,
-                "short_id": "aaa1",
-                "text": "First step",
-            },
-            {
-                "id": "aaa22222-0000-4000-8000-000000000002",
-                "done": false,
-                "short_id": "aaa2",
-                "text": "Second step",
-            },
-        ]),
-        "single-task JSON carries the steps with ids, state, and short ids"
+        json.stdout, expected_json,
+        "direct JSON keeps title, notes, steps, and thread together in contract order"
     );
 
     let _ = std::fs::remove_dir_all(dir);
@@ -1326,15 +1628,13 @@ fn list_task_without_steps_keeps_task_rows_and_rejects_conflicting_flags() {
     assert_eq!(plain_json.code, 0);
     let rows: Vec<serde_json::Value> = serde_json::from_str(&plain_json.stdout).expect("JSON rows");
     assert_eq!(rows.len(), 1);
-    assert_eq!(
-        rows[0]
-            .as_object()
-            .expect("JSON row")
-            .keys()
-            .map(String::as_str)
-            .collect::<Vec<_>>(),
-        vec!["id", "number", "project", "status", "thread", "title"],
-        "a task without steps keeps today's exact JSON row shape"
+    assert_eq!(rows[0]["notes"], serde_json::Value::Null);
+    assert_eq!(rows[0]["steps"], serde_json::json!([]));
+    assert_eq!(rows[0]["thread"], serde_json::Value::Null);
+    let raw = plain_json.stdout.as_str();
+    assert!(
+        raw.contains("\"status\":\"ready\",\"title\":\"plain target\",\"notes\":null,\"steps\":[],\"thread\":null"),
+        "direct JSON keeps empty detail fields and their contract order: {raw}"
     );
 
     for extra in ["--desk", "--all", "--done", "--deleted"] {
@@ -1603,41 +1903,68 @@ fn list_displayed_or_bare_number_finds_the_task_from_another_cwd() {
 fn list_bare_digits_finds_done_and_deleted_tasks() {
     let dir = temp_state_dir("number-done-deleted");
     let mut state = DomainState::new();
-    let done = create_task_with_thread(
-        &mut state,
-        "done target",
-        TaskScope::Global,
-        HumanStatus::Done,
-        None,
-    );
-    let deleted = create_task_with_thread(
-        &mut state,
-        "deleted target",
-        TaskScope::Global,
-        HumanStatus::Ready,
-        None,
-    );
+    let done = state
+        .create(
+            "done target",
+            Some("done notes".into()),
+            TaskScope::Global,
+            ProvenanceOrigin::Manual,
+            Some("done-thread".into()),
+        )
+        .expect("create done task");
+    state
+        .set_status(done, HumanStatus::Done)
+        .expect("finish task");
+    state.add_step(done, "done step").expect("add done step");
+    let deleted = state
+        .create(
+            "deleted target",
+            Some("deleted notes".into()),
+            TaskScope::Global,
+            ProvenanceOrigin::Manual,
+            Some("deleted-thread".into()),
+        )
+        .expect("create deleted task");
+    state
+        .add_step(deleted, "deleted step")
+        .expect("add deleted step");
     state.soft_delete(deleted).expect("soft delete task");
     TaskStore::new(&dir).save(&state).expect("seed store");
 
     let persisted = TaskStore::new(&dir).load().expect("load store");
-    for task in [done, deleted] {
+    for (task, label) in [(done, "done"), (deleted, "deleted")] {
         let number = persisted
             .get(task)
             .expect("task")
             .number
             .expect("task number");
-        let output = list(&[
+        let args = [
             "tsk".into(),
             "list".into(),
             number.to_string(),
-            "--json".into(),
             "--state-dir".into(),
             state_dir_arg(&dir),
-        ]);
+        ];
+        let human = list(&args);
+        assert_eq!(human.code, 0, "{}", human.stderr);
+        let notes_at = human.stdout.find(&format!("   {label} notes")).unwrap();
+        let step_at = human.stdout.find(&format!("   [ ] {label} step")).unwrap();
+        let thread_at = human.stdout.find(&format!("   #{label}-thread")).unwrap();
+        assert!(
+            notes_at < step_at && step_at < thread_at,
+            "{}",
+            human.stdout
+        );
+
+        let mut json_args = args.to_vec();
+        json_args.insert(3, "--json".into());
+        let output = list(&json_args);
         assert_eq!(output.code, 0, "{}", output.stderr);
         let rows: Vec<serde_json::Value> = serde_json::from_str(&output.stdout).expect("JSON rows");
         assert_eq!(rows[0]["id"], task.to_string());
+        assert_eq!(rows[0]["notes"], format!("{label} notes"));
+        assert_eq!(rows[0]["steps"][0]["text"], format!("{label} step"));
+        assert_eq!(rows[0]["thread"], format!("{label}-thread"));
     }
     let _ = std::fs::remove_dir_all(dir);
 }
@@ -1773,7 +2100,6 @@ fn human_output_appends_thread_marker_iff_row_threaded_snapshots() {
         Some("steps"),
     );
     state.add_step(step, "Keep this line").expect("add step");
-    let step_short_id = state.get(step).expect("step task").steps[0].id.to_string()[..1].to_owned();
     TaskStore::new(&dir).save(&state).expect("seed store");
     let project_name = repo
         .file_name()
@@ -1814,7 +2140,7 @@ fn human_output_appends_thread_marker_iff_row_threaded_snapshots() {
     ]);
     assert_eq!(
         single.stdout,
-        format!("DONE\n - 4 step threaded #steps\n   [ ] {step_short_id} Keep this line\n")
+        "DONE\n - 4 step threaded\n   [ ] Keep this line\n\n   #steps\n"
     );
 
     let _ = std::fs::remove_dir_all(repo);

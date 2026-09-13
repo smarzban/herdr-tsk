@@ -64,7 +64,7 @@ fn task_number(dir: &std::path::Path, task: Uuid) -> u64 {
         .expect("persisted task number")
 }
 
-/// One `[state] short-id text` line from single-task list output.
+/// One step from direct task JSON output.
 struct StepLine {
     done: bool,
     short_id: String,
@@ -72,19 +72,15 @@ struct StepLine {
 }
 
 fn step_lines(output: &str) -> Vec<StepLine> {
-    output
-        .lines()
-        .filter(|line| line.contains("[x]") || line.contains("[ ]"))
-        .map(|line| {
-            let trimmed = line.trim_start();
-            let done = trimmed.starts_with("[x]");
-            let rest = trimmed[3..].trim_start();
-            let (short_id, text) = rest.split_once(' ').unwrap_or((rest, ""));
-            StepLine {
-                done,
-                short_id: short_id.to_owned(),
-                text: text.to_owned(),
-            }
+    let rows: Vec<serde_json::Value> = serde_json::from_str(output).expect("direct task JSON");
+    rows[0]["steps"]
+        .as_array()
+        .expect("steps array")
+        .iter()
+        .map(|step| StepLine {
+            done: step["done"].as_bool().expect("step done"),
+            short_id: step["short_id"].as_str().expect("step short id").into(),
+            text: step["text"].as_str().expect("step text").into(),
         })
         .collect()
 }
@@ -109,6 +105,7 @@ fn steps_add_then_toggle_round_trips_step_state() {
         "tsk".into(),
         "list".into(),
         task.to_string(),
+        "--json".into(),
         "--state-dir".into(),
         state_dir_arg(&dir),
     ]);
@@ -133,6 +130,7 @@ fn steps_add_then_toggle_round_trips_step_state() {
         "tsk".into(),
         "list".into(),
         task.to_string(),
+        "--json".into(),
         "--state-dir".into(),
         state_dir_arg(&dir),
     ]);
@@ -464,6 +462,7 @@ fn steps_rename_then_remove_round_trips() {
         "tsk".into(),
         "list".into(),
         task.to_string(),
+        "--json".into(),
         "--state-dir".into(),
         state_dir_arg(&dir),
     ]);
@@ -549,6 +548,7 @@ fn steps_rename_refuses_empty_and_control_char_text_without_mutation() {
         "tsk".into(),
         "list".into(),
         task.to_string(),
+        "--json".into(),
         "--state-dir".into(),
         state_dir_arg(&dir),
     ]);
