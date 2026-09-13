@@ -251,7 +251,7 @@ fn unarchive_refusals_name_the_unarchive_verb() {
     assert!(
         unknown
             .stderr
-            .starts_with("tsk unarchive: T99 is not on the board"),
+            .starts_with("tsk unarchive: unknown-task: T99 is not on the board"),
         "{:?}",
         unknown.stderr
     );
