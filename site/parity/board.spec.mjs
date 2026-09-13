@@ -270,7 +270,99 @@ test("projects preview keeps an unsaved page draft when the index retakes focus"
   );
 });
 
-test("projects preview quick-add shows the title while editing notes", async ({
+async function expectFormRing(
+  page,
+  { preview = false, title, notes, start = "title" },
+) {
+  const column = page.locator(".tsk-task-column");
+  const edit = preview ? "#tsk-preview-edit" : "#tsk-edit";
+  const step = preview ? "[data-preview-step]" : "[data-step]";
+  await expect(column).toHaveAttribute("data-edit-field", start);
+  if (start === "title") {
+    await page.locator(edit).fill(title);
+    await page.keyboard.press("Tab");
+    await expect(column).toHaveAttribute("data-edit-field", "notes");
+    await expect(column).toContainText(title);
+  }
+  await page.locator(edit).fill(notes);
+  await page.keyboard.press("Tab");
+  await expect(column).toHaveAttribute("data-edit-field", "steps");
+  const stepIds = await page
+    .locator(step)
+    .evaluateAll(
+      (rows, attribute) => rows.map((row) => row.getAttribute(attribute)),
+      preview ? "data-preview-step" : "data-step",
+    );
+  if (stepIds.length) {
+    await expect(column).toHaveAttribute("data-edit-target", stepIds[0]);
+    await expect(page.locator(step).first()).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    for (const id of stepIds.slice(1)) {
+      await page.keyboard.press("Tab");
+      await expect(column).toHaveAttribute("data-edit-target", id);
+    }
+    await page.keyboard.press("Tab");
+  }
+  await expect(column).toHaveAttribute("data-edit-target", "add");
+  await page.keyboard.press("Tab");
+  await expect(column).toHaveAttribute("data-edit-field", "thread");
+  await page.keyboard.press("Tab");
+  await expect(column).toHaveAttribute("data-edit-field", "scope");
+  await page.keyboard.press("Tab");
+  await expect(column).toHaveAttribute("data-edit-field", "title");
+  await page.keyboard.press("Shift+Tab");
+  await expect(column).toHaveAttribute("data-edit-field", "scope");
+  await page.keyboard.press("Shift+Tab");
+  await expect(column).toHaveAttribute("data-edit-field", "thread");
+  await page.keyboard.press("Shift+Tab");
+  await expect(column).toHaveAttribute("data-edit-target", "add");
+  for (const id of [...stepIds].reverse()) {
+    await page.keyboard.press("Shift+Tab");
+    await expect(column).toHaveAttribute("data-edit-target", id);
+  }
+  await page.keyboard.press("Shift+Tab");
+  await expect(column).toHaveAttribute("data-edit-field", "notes");
+  await expect(column).toContainText(notes);
+  await page.keyboard.press("Shift+Tab");
+  await expect(column).toHaveAttribute("data-edit-field", "title");
+}
+
+test("task page and expanded quick-add keep the full reversible form ring", async ({
+  page,
+}) => {
+  await page.goto("http://127.0.0.1:4180/");
+  await page.locator('[data-tab="project"]').click();
+  await page.locator("#board-demo").focus();
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("Control+e");
+  await expectFormRing(page, {
+    title: "Task title survives Tab",
+    notes: "Task notes survive Tab",
+  });
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
+
+  await page.keyboard.press("+");
+  await page.locator("#tsk-add").fill("Quick ring");
+  await page.keyboard.press("Tab");
+  await expect(
+    page.locator("[data-task]").filter({ hasText: "Quick ring" }),
+  ).toHaveCount(0);
+  await expectFormRing(page, {
+    title: "Quick ring",
+    notes: "Quick notes survive Tab",
+    start: "notes",
+  });
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#tsk-add")).toHaveValue("Quick ring");
+  await expect(
+    page.locator("[data-task]").filter({ hasText: "Quick ring" }),
+  ).toHaveCount(0);
+});
+
+test("project preview expanded quick-add uses the same ring without saving", async ({
   page,
 }) => {
   await open(page, 110);
@@ -283,64 +375,18 @@ test("projects preview quick-add shows the title while editing notes", async ({
   await expect(page.locator(".tsk-task-column")).toContainText(
     "Preview capture",
   );
-  await expect(page.locator(".tsk-task-header.is-bold")).toContainText(
-    "Preview capture",
-  );
-  await expect(page.locator("#tsk-preview-edit")).toBeVisible();
-  await page.locator("#tsk-preview-edit").fill("preview note");
-  await page.keyboard.press("Control+Enter");
-  await expect(page.locator(".tsk-page-notes")).toContainText("preview note");
-});
-
-test("task pages and expanded quick-add share the title-entry-only tab ring", async ({
-  page,
-}) => {
-  await page.goto("http://127.0.0.1:4180/");
-  await page.locator('[data-tab="project"]').click();
-  await page.locator("#board-demo").focus();
-  await page.keyboard.press("Enter");
-  await page.keyboard.press("Control+e");
-  const column = page.locator(".tsk-task-column");
-  await expect(column).toHaveAttribute("data-edit-field", "title");
-  await page.keyboard.press("Tab");
-  await expect(column).toHaveAttribute("data-edit-field", "notes");
-  await page.keyboard.press("Tab");
-  await expect(column).toHaveAttribute("data-edit-field", "steps");
-  await page.keyboard.press("Tab");
-  await expect(column).toHaveAttribute("data-edit-field", "thread");
-  await expect(page.locator(".tsk-page-meta")).toContainText(
-    /#auth · launchpad · created/,
-  );
-  const selectedThread = page.locator('[data-page-field="thread"]');
-  await expect(selectedThread).not.toHaveClass(/dim/);
-  const footerColors = await page
-    .locator(".tsk-page-meta")
-    .evaluate((meta) => [
-      getComputedStyle(meta).color,
-      getComputedStyle(meta.querySelector("[data-page-field='thread']")).color,
-    ]);
-  expect(footerColors[1]).not.toBe(footerColors[0]);
-  await page.keyboard.press("Tab");
-  await expect(column).toHaveAttribute("data-edit-field", "scope");
-  await page.keyboard.press("Tab");
-  await expect(column).toHaveAttribute("data-edit-field", "notes");
-  await page.keyboard.press("Shift+Tab");
-  await expect(column).toHaveAttribute("data-edit-field", "title");
-
+  await expectFormRing(page, {
+    preview: true,
+    title: "Preview capture",
+    notes: "Preview notes survive Tab",
+    start: "notes",
+  });
   await page.keyboard.press("Escape");
+  await expect(page.locator("#tsk-add")).toHaveValue("Preview capture");
   await page.keyboard.press("Escape");
-  await page.keyboard.press("+");
-  await page.locator("#tsk-add").fill("Quick ring");
-  await page.keyboard.press("Tab");
-  await expect(column).toHaveAttribute("data-edit-field", "notes");
-  await page.keyboard.press("Tab");
-  await expect(column).toHaveAttribute("data-edit-field", "steps");
-  await page.keyboard.press("Tab");
-  await expect(column).toHaveAttribute("data-edit-field", "thread");
-  await page.keyboard.press("Tab");
-  await expect(column).toHaveAttribute("data-edit-field", "scope");
-  await page.keyboard.press("Tab");
-  await expect(column).toHaveAttribute("data-edit-field", "notes");
+  await expect(
+    page.locator("[data-preview-task]").filter({ hasText: "Preview capture" }),
+  ).toHaveCount(0);
 });
 
 test("landing column readout excludes board padding", async ({ page }) => {

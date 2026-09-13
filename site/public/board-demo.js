@@ -390,6 +390,9 @@ import { parseCapture } from "./capture.js";
     pickerI: 0,
     editField: null,
     editDraft: "",
+    quickExpanded: false,
+    capture: null,
+    quickStage: null,
     undo: null,
     refuse: "",
     quickOwner: "outer",
@@ -552,10 +555,14 @@ import { parseCapture } from "./capture.js";
   }
 
   function selectedTask() {
+    if (state.quickExpanded && state.quickOwner === "outer")
+      return state.capture;
     return taskById(state.selectedId) || null;
   }
 
   function previewTask() {
+    if (state.quickExpanded && state.quickOwner === "preview")
+      return state.capture;
     return taskById(preview.selectedId) || null;
   }
 
@@ -1419,6 +1426,9 @@ import { parseCapture } from "./capture.js";
     state.overlay = null;
     state.draft = "";
     state.refuse = "";
+    state.quickExpanded = false;
+    state.capture = null;
+    state.quickStage = null;
     state.quickOwner = "outer";
     state.copyNotice = "";
     state.undo = null;
@@ -1432,6 +1442,128 @@ import { parseCapture } from "./capture.js";
     state.quickOwner = owner;
     state.draft = "";
     state.refuse = "";
+    state.quickExpanded = false;
+    state.capture = null;
+    state.quickStage = null;
+  }
+
+  function captureDirectives(raw) {
+    const parts = String(raw).trim().split(/\s+/).filter(Boolean);
+    const directives = [];
+    for (let i = 0; i < parts.length; i += 1) {
+      if (parts[i] !== "!p" && parts[i] !== "!t") continue;
+      directives.push(parts[i]);
+      if (parts[i + 1] && !parts[i + 1].startsWith("!")) {
+        directives.push(parts[i + 1]);
+        i += 1;
+      }
+    }
+    return directives;
+  }
+
+  function expandQuickAdd() {
+    const parsed = parseCapture(state.draft, fallbackProject());
+    const now = clock();
+    state.capture = {
+      id: "capture-draft",
+      number: state.nextNumber,
+      title: parsed.title,
+      notes: "",
+      steps: [],
+      thread: parsed.thread === undefined ? null : parsed.thread,
+      project: parsed.project,
+      status: "open",
+      createdAt: now,
+      updatedAt: now,
+      rawDraft: state.draft,
+    };
+    state.quickExpanded = true;
+    state.refuse = "";
+    if (state.quickOwner === "preview") {
+      preview.page = true;
+      preview.editField = "notes";
+      preview.editDraft = "";
+      previewSteps.bind(state.capture);
+    } else {
+      state.quickStage = state.stage;
+      state.stage = "page";
+      state.editField = "notes";
+      state.editDraft = "";
+      steps.bind(state.capture);
+    }
+  }
+
+  function collapseQuickAdd() {
+    const capture = state.capture;
+    if (capture) {
+      persistPageText(
+        state.quickOwner === "preview" ? preview : state,
+        capture,
+      );
+      state.draft = [capture.title, ...captureDirectives(capture.rawDraft)]
+        .filter(Boolean)
+        .join(" ");
+    }
+    state.quickExpanded = false;
+    state.capture = null;
+    state.refuse = "";
+    if (state.quickOwner === "preview") {
+      preview.page = false;
+      preview.editField = null;
+      preview.editDraft = "";
+      previewSteps.reset();
+    } else {
+      state.stage = state.quickStage || "board";
+      state.editField = null;
+      state.editDraft = "";
+      steps.reset();
+    }
+    state.quickStage = null;
+  }
+
+  function saveExpandedDraft() {
+    const capture = state.capture;
+    if (!capture) return false;
+    persistPageText(state.quickOwner === "preview" ? preview : state, capture);
+    const title = capture.title.trim();
+    if (!title) {
+      state.refuse = "title needed";
+      return false;
+    }
+    const owner = state.quickOwner;
+    const id = `n${state.nextId++}`;
+    const now = clock();
+    const task = {
+      ...capture,
+      id,
+      number: state.nextNumber++,
+      title,
+      steps: structuredClone(capture.steps),
+      createdAt: now,
+      updatedAt: now,
+    };
+    delete task.rawDraft;
+    state.tasks.unshift(task);
+    state.quickExpanded = false;
+    state.capture = null;
+    state.overlay = null;
+    state.quickOwner = "outer";
+    state.quickStage = null;
+    state.refuse = "";
+    if (owner === "preview") {
+      preview.selectedId = id;
+      preview.editField = null;
+      preview.editDraft = "";
+      previewSteps.reset();
+      preview.page = false;
+    } else {
+      state.selectedId = id;
+      state.editField = null;
+      state.editDraft = "";
+      steps.reset();
+      state.stage = "page";
+    }
+    return true;
   }
 
   function saveDraft(stay) {
@@ -1869,7 +2001,11 @@ import { parseCapture } from "./capture.js";
       `updated ${esc(age(task.updatedAt))} ago`,
     ].filter(Boolean);
     const meta = `<div class="tsk-page-meta dim">${parts.join(" · ")}</div>`;
-    return `<div class="tsk-task-column tsk-surface ${narrow ? "is-narrow" : ""}" aria-label="T${task.number}${previewMode ? " project" : ""} task column" data-status="${esc(task.status)}" data-edit-state="${pageSteps.editor ? "editing" : pageSteps.dirty ? "unsaved" : "view"}" data-edit-field="${esc(editing || "")}">${header}<div class="tsk-task-surface tsk-page">${notes}${stepList}</div>${meta}</div>`;
+    const editField = editing?.startsWith("step:") ? "steps" : editing || "";
+    const editTarget = editing?.startsWith("step:")
+      ? editing.slice("step:".length)
+      : "";
+    return `<div class="tsk-task-column tsk-surface ${narrow ? "is-narrow" : ""}" aria-label="T${task.number}${previewMode ? " project" : ""} task column" data-status="${esc(task.status)}" data-edit-state="${pageSteps.editor ? "editing" : pageSteps.dirty ? "unsaved" : "view"}" data-edit-field="${esc(editField)}" data-edit-target="${esc(editTarget)}">${header}<div class="tsk-task-surface tsk-page">${notes}${stepList}</div>${meta}</div>`;
   }
 
   function renderPage(embedded = false) {
@@ -2191,13 +2327,15 @@ import { parseCapture } from "./capture.js";
             )
             .join("<span> · </span>");
     const footer =
-      state.overlay === "quick"
+      state.overlay === "quick" && !state.quickExpanded
         ? `<div class="tsk-input-row"><span class="tsk-prompt">+</span><input class="tsk-field" id="tsk-add" value="${esc(state.draft)}" placeholder="title  ·  !p project  ·  !t thread" autocomplete="off" /><span class="cursor">█</span></div>
            <div class="foot dim">${state.refuse ? esc(state.refuse) : "enter save · tab details · esc close"}</div>`
-        : state.overlay === "search"
-          ? `<div class="tsk-input-row"><span class="tsk-prompt">/</span><input class="tsk-field" id="tsk-project-search" value="${esc(state.projectQuery)}" placeholder="search projects" autocomplete="off" /><span class="cursor">█</span></div>
+        : state.overlay === "quick"
+          ? `<div class="tsk-status-row"><span class="foot">expanded quick-add</span></div><div class="foot dim">${state.refuse ? esc(state.refuse) : "ctrl+enter save · tab next field · esc one-line draft"}</div>`
+          : state.overlay === "search"
+            ? `<div class="tsk-input-row"><span class="tsk-prompt">/</span><input class="tsk-field" id="tsk-project-search" value="${esc(state.projectQuery)}" placeholder="search projects" autocomplete="off" /><span class="cursor">█</span></div>
              <div class="foot dim">enter open · esc close</div>`
-          : `<div class="tsk-status-row"><button type="button" class="tsk-done-count foot" data-${previewOwnsFooter ? "preview-" : ""}drawer="1">${esc(context)}</button><span class="foot dim tsk-stage-hint">${esc(stageHint())}</span></div>
+            : `<div class="tsk-status-row"><button type="button" class="tsk-done-count foot" data-${previewOwnsFooter ? "preview-" : ""}drawer="1">${esc(context)}</button><span class="foot dim tsk-stage-hint">${esc(stageHint())}</span></div>
            <div class="foot dim tsk-verbs">${verbs}</div>
            ${state.copyNotice ? `<div class="foot dim">${esc(state.copyNotice)}</div>` : ""}`;
     return `
@@ -2356,36 +2494,41 @@ import { parseCapture } from "./capture.js";
     state.editDraft = "";
   }
 
-  // Title is the entry point. The editable page ring itself is Notes → steps → Thread
-  // → Scope → Notes, with Shift+Tab from Notes returning to Title.
-  function movePageFocus(reverse = false) {
-    const current = state.editField;
-    if (!current) return;
-    const next = reverse
-      ? {
-          notes: "title",
-          title: "scope",
-          scope: "thread",
-          thread: "steps",
-          steps: "notes",
-        }
-      : {
-          title: "notes",
-          notes: "steps",
-          steps: "thread",
-          thread: "scope",
-          scope: "notes",
-        };
-    state.editField = next[current] || "notes";
-    state.editDraft =
-      state.editField === "title"
-        ? selectedTask()?.title || ""
-        : state.editField === "notes"
-          ? selectedTask()?.notes || ""
+  function persistPageText(form, task) {
+    if (!task) return;
+    if (form.editField === "title") task.title = form.editDraft;
+    if (form.editField === "notes") task.notes = form.editDraft;
+  }
+
+  // The same reversible ring drives full pages, preview pages, and expanded capture:
+  // Title → Notes → each step → + step → Thread → Scope → Title.
+  function movePageFocus(reverse = false, previewMode = false) {
+    const form = previewMode ? preview : state;
+    const task = previewMode ? previewTask() : selectedTask();
+    const pageSteps = previewMode ? previewSteps : steps;
+    if (!task || !form.editField) return;
+    persistPageText(form, task);
+    const stops = [
+      "title",
+      "notes",
+      ...pageSteps.rows(task).map((step) => `step:${step.id}`),
+      "step:add",
+      "thread",
+      "scope",
+    ];
+    let index = stops.indexOf(form.editField);
+    if (index < 0) index = 0;
+    index = (index + (reverse ? -1 : 1) + stops.length) % stops.length;
+    form.editField = stops[index];
+    form.editDraft =
+      form.editField === "title"
+        ? task.title
+        : form.editField === "notes"
+          ? task.notes || ""
           : "";
-    if (state.editField === "steps") {
-      const task = selectedTask();
-      if (task) steps.selected = task.steps.at(-1)?.id || "add";
+    if (form.editField.startsWith("step:")) {
+      pageSteps.selected = form.editField.slice("step:".length);
+      pageSteps.marked = null;
     }
   }
 
@@ -2394,7 +2537,11 @@ import { parseCapture } from "./capture.js";
     const task = previewTask();
     const bare = !e.ctrlKey && !e.metaKey && !e.altKey;
     if (preview.editField) {
-      if (e.key === "Escape") {
+      if (e.key === "Tab") {
+        e.preventDefault();
+        movePageFocus(e.shiftKey, true);
+        render();
+      } else if (e.key === "Escape") {
         e.preventDefault();
         preview.editField = null;
         preview.editDraft = "";
@@ -2700,7 +2847,27 @@ import { parseCapture } from "./capture.js";
     const wide = isWideSplit();
     const taskPageActive = taskFocus();
     if (state.overlay === "quick") {
-      const owner = state.quickOwner;
+      if (state.quickExpanded) {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          collapseQuickAdd();
+          render();
+          return;
+        }
+        if (e.key === "Tab") {
+          e.preventDefault();
+          movePageFocus(e.shiftKey, state.quickOwner === "preview");
+          render();
+          return;
+        }
+        if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+          e.preventDefault();
+          saveExpandedDraft();
+          render();
+          return;
+        }
+        return;
+      }
       if (e.key === "Escape") {
         e.preventDefault();
         state.overlay = null;
@@ -2719,14 +2886,7 @@ import { parseCapture } from "./capture.js";
       }
       if (e.key === "Tab") {
         e.preventDefault();
-        if (saveDraft(false)) {
-          if (owner === "preview") openPreviewTaskPage("notes");
-          else {
-            openFullPage();
-            state.editField = "notes";
-            state.editDraft = "";
-          }
-        }
+        expandQuickAdd();
         render();
       }
       return;
