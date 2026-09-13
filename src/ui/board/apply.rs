@@ -1891,13 +1891,17 @@ fn apply_board_intent(
                 model.set_message(NO_SELECTION);
                 return Ok(IntentOutcome::None);
             };
-            if domain
-                .get(id)
-                .is_some_and(|task| task.status == HumanStatus::Open)
-            {
+            let Some(status) = domain.get(id).map(|task| task.status) else {
+                return Ok(IntentOutcome::None);
+            };
+            if status == HumanStatus::Open {
                 return Ok(IntentOutcome::None);
             }
-            domain.reopen(id)?;
+            if status == HumanStatus::Done {
+                domain.reopen(id)?;
+            } else {
+                domain.set_status(id, HumanStatus::Open)?;
+            }
         }
         BoardIntent::SoftDelete => {
             model.close_popup();

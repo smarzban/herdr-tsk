@@ -132,8 +132,9 @@ fn ctrl_n_sets_ready_and_ctrl_o_sets_open_from_every_status_without_ready_open_e
             select_done_task(&mut domain, &mut model, id);
         }
         let before = domain.get(id).expect("task").clone();
-        let outcome =
-            apply_intent(&mut domain, &mut model, BoardIntent::Reopen, None).expect("set open");
+        let reopen = map_key(BoardInputMode::Normal, ctrl(KeyCode::Char('o')))
+            .expect("ctrl+o maps to reopen");
+        let outcome = apply_intent(&mut domain, &mut model, reopen, None).expect("set open");
         let task = domain.get(id).expect("task");
         assert_eq!(task.status, HumanStatus::Open, "{from:?} → open");
         if from == HumanStatus::Open {
@@ -147,6 +148,15 @@ fn ctrl_n_sets_ready_and_ctrl_o_sets_open_from_every_status_without_ready_open_e
         } else {
             assert_eq!(outcome, IntentOutcome::Persist, "{from:?} → open persists");
             assert_ne!(task.revision, before.revision, "{from:?} gets one event");
+            assert_eq!(
+                task.history.last().expect("open event").kind,
+                if from == HumanStatus::Done {
+                    TaskEventKind::Reopened
+                } else {
+                    TaskEventKind::StatusSet
+                },
+                "ctrl+o event for {from:?}"
+            );
         }
     }
 }
