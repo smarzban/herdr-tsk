@@ -9,6 +9,8 @@ the GitHub release notes verbatim.
 
 ## Unreleased
 
+## v0.9.0
+
 ### Breaking
 
 - Store format 4: existing `ready` tasks move to the new `open` inbox on first save. Rolling back refuses the file; restore `tsk.json.v3`.
