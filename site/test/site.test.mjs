@@ -150,6 +150,8 @@ test("demo matches the quick-add, peek, and group-toggle contracts", async () =>
   assert.match(demo, /function toggleAllGroups\(\)/);
   assert.match(demo, /id: "groups", label: "toggle groups"/);
   assert.match(demo, /if \(e\.key === "g" && !e\.altKey && !e\.ctrlKey && !e\.metaKey\)/);
+  assert.doesNotMatch(demo, /pushTask\(t, 1\)/);
+  assert.match(landing, /\.demo-invitation p \{[^}]*max-width: none/);
 });
 
 test("the saved theme survives a visit to the docs", async () => {
@@ -199,6 +201,71 @@ test("attribution is peek-only in demo and static anatomy", async () => {
   assert.doesNotMatch(page, /class="r meta"/);
   assert.match(page, /└─ tsk/);
   assert.doesNotMatch(guide, /section headers, row meta/);
+});
+
+test("landing header uses a goto menu plus docs and github", async () => {
+  const page = await read("../src/pages/index.astro");
+  assert.match(page, /class="goto"/);
+  assert.match(page, /href: '#demo', label: 'demo'/);
+  assert.doesNotMatch(page, /href: '#keys'/);
+  assert.doesNotMatch(page, /id="keys"/);
+  assert.ok(page.indexOf('id="why"') < page.indexOf('id="demo"'));
+  assert.ok(page.indexOf('id="demo"') < page.indexOf('id="board"'));
+  assert.ok(page.indexOf('id="board"') < page.indexOf('id="status"'));
+  assert.doesNotMatch(page, /class="nav-demo"/);
+  assert.doesNotMatch(page, /class="nav-icon"/);
+  assert.match(page, /class="nav-text" href="\/docs\/">docs</);
+  assert.match(page, /class="nav-text" href=\{REPO\}[^>]*>github</);
+  assert.doesNotMatch(page, /class="nav-text" href="\/docs\/install\//);
+  assert.match(page, /class="nav-dot"/);
+  const css = await read("../src/styles/landing.css");
+  assert.match(css, /\.goto-chip/);
+  assert.doesNotMatch(css, /nav-demo/);
+  assert.doesNotMatch(css, /\.nav-icon\b/);
+  assert.doesNotMatch(css, /\.keygrid\b/);
+  assert.doesNotMatch(css, /\.cta\b/);
+  assert.doesNotMatch(css, /\.btn-primary\b/);
+  const js = await read("../public/landing.js");
+  assert.match(js, /\[data-goto\]/);
+});
+
+test("hero has the install one-liner and a jump to the demo", async () => {
+  const page = await read("../src/pages/index.astro");
+  assert.match(page, /class="hero-install"/);
+  assert.match(page, /curl -fsSL https:\/\/gettsk.sh\/install.sh \| sh/);
+  assert.match(page, /href="#demo">Try the board/);
+  assert.match(page, /href="\/docs\/install\/">install guide →/);
+  assert.match(page, /macOS &amp; Linux · MIT/);
+  const meta = page.match(/class="hero-install-meta">([\s\S]*?)<\/p>/)[1];
+  assert.ok(meta.indexOf("Try the board") < meta.indexOf("install guide"));
+});
+
+test("hero board pins reveal callout copy", async () => {
+  const page = await read("../src/pages/index.astro");
+  assert.match(page, /data-board-pins/);
+  assert.match(page, /data-pin="7"/);
+  assert.match(page, /s-footrule[\s\S]*data-pin="6"[\s\S]*s-footrule[\s\S]*data-pin="7"/);
+  assert.match(page, /Persistent navigation/);
+  assert.match(page, /aria-label=\{pinLabel\(1\)\}/);
+  const js = await read("../public/landing.js");
+  assert.match(js, /data-board-pins/);
+  assert.match(js, /focusout/);
+});
+
+test("landing agents section points at markdown twins", async () => {
+  const page = await read("../src/pages/index.astro");
+  assert.match(page, /class="agent-handoff"/);
+  assert.match(page, /Every docs page is\s+also Markdown/);
+  assert.match(page, /https:\/\/gettsk\.sh\/docs\/cli\.md/);
+  assert.match(page, /https:\/\/gettsk\.sh\/docs\/agents\.md/);
+  assert.doesNotMatch(page, /gettsk\.sh\/llms\.txt/);
+  assert.match(page, /class="cli-side"[\s\S]*tsk setup grok/);
+  assert.match(page, /class="cli-main"[\s\S]*id="agents"/);
+  assert.doesNotMatch(page, /Hand it to your agent/);
+  assert.ok(page.indexOf("class=\"agent-handoff\"") < page.indexOf("Everything an agent needs"));
+  assert.ok(page.indexOf('id="cli"') < page.indexOf('id="agents"'));
+  assert.ok(page.indexOf('id="agents"') < page.indexOf('id="install"'));
+  assert.doesNotMatch(page, /class="band[^"]*" id="agents"/);
 });
 
 test("quickstarts use the installer, Herdr setup, and task capture", async () => {

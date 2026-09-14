@@ -7,6 +7,58 @@ import { serializeJsonLd } from '../lib/agent-docs.mjs';
 import { VERSION } from '../version.mjs';
 const SITE = 'https://gettsk.sh';
 const REPO = 'https://github.com/smarzban/herdr-tsk';
+const ICON_DOCS =
+  '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5.2C10.4 4.1 8.2 3.5 5.6 3.5c-1 0-2 .1-3.1.3v14.4c1-.2 2-.3 3.1-.3 2.5 0 4.7.6 6.4 1.9 1.7-1.3 3.9-1.9 6.4-1.9 1.1 0 2.1.1 3.1.3V3.8c-1.1-.2-2.1-.3-3.1-.3-2.6 0-4.8.6-6.4 1.7zm-.9 12.4c-1.5-.9-3.4-1.3-5.5-1.3-.5 0-1 0-1.5.1V5.4c.5-.1 1-.1 1.5-.1 2.2 0 4.1.5 5.5 1.5v10.8zm1.8-10.8c1.4-1 3.3-1.5 5.5-1.5.5 0 1 0 1.5.1v11c-.5-.1-1-.1-1.5-.1-2.1 0-4 .4-5.5 1.3V6.8z"/></svg>';
+const ICON_GITHUB =
+  '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .3a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2c-3.3.7-4-1.6-4-1.6-.6-1.4-1.4-1.8-1.4-1.8-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.7-1.6-2.7-.3-5.5-1.3-5.5-5.9 0-1.3.5-2.4 1.2-3.2-.1-.3-.5-1.5.1-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.7 1.7.2 2.9.1 3.2.8.8 1.2 1.9 1.2 3.2 0 4.6-2.8 5.6-5.5 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .3z"/></svg>';
+const PAGE_JUMPS = [
+  { href: '#install', label: 'install' },
+  { href: '#demo', label: 'demo' },
+  { href: '#board', label: 'board' },
+  { href: '#cli', label: 'cli' },
+  { href: '#agents', label: 'agents' },
+];
+const BOARD_PINS = [
+  {
+    n: 1,
+    title: 'Persistent navigation.',
+    body: '<kbd>1</kbd> opens Desk, <kbd>2</kbd> returns to the selected project, and <kbd>3</kbd> opens Projects. <kbd>P</kbd> changes the selected project without hiding the tabs. The active tab is bright and underlined.',
+  },
+  {
+    n: 2,
+    title: 'NEEDS YOU.',
+    body: 'Blocked and review across all projects on Desk, or within the selected project on its board, above IN MOTION.',
+  },
+  {
+    n: 3,
+    title: 'A row.',
+    body: 'A selection arrow without a filled highlight, status glyph, a dim <code>T</code>-number you can click to copy, and the wrapped title. Project or thread attribution appears only at the bottom of an open peek.',
+  },
+  {
+    n: 4,
+    title: 'Peek.',
+    body: 'Below 110 columns, <kbd>→</kbd> or a click shows up to five wrapped note lines under the row. Wide, a click or <kbd>→</kbd> opens the task page beside the board instead. <kbd>Enter</kbd> opens the full page either way.',
+  },
+  {
+    n: 5,
+    title: 'Your loose backlog.',
+    body: "Desk's ON DECK contains only tasks without a project. Picked <code>ready</code> tasks lead, then the expandable <code>inbox</code> of <code>open</code> tasks. Project backlogs live on their own boards, with thread filters across every status.",
+  },
+  {
+    n: 6,
+    title: 'Done drawer.',
+    body: 'Finished work stays out of the way. <kbd>d</kbd> pulls the drawer open.',
+  },
+  {
+    n: 7,
+    title: 'Verb bar.',
+    body: 'The chords that apply right now. Below 78 columns it folds into a compact board that still works at 40×10.',
+  },
+];
+const pinLabel = (n) => {
+  const pin = BOARD_PINS.find((p) => p.n === n);
+  return pin ? `${n}. ${pin.title}` : String(n);
+};
 const softwareApplication = {
   '@context': 'https://schema.org',
   '@type': 'SoftwareApplication',
@@ -111,14 +163,24 @@ const softwareApplication = {
         <a class="wordmark" href="/" aria-label="tsk home"><Wordmark /></a>
         <span class="ver" title="crate and plugin version">v{VERSION}</span>
         <nav class="top-nav" aria-label="Primary">
-          <a href="#demo">demo</a>
-          <a href="#board">board</a>
-          <a href="#keys">keys</a>
-          <a href="#cli">cli</a>
-          <a href="#agents">agents</a>
-          <a href="#install">install</a>
-          <a href="/docs/">docs</a>
-          <a href={REPO} rel="noopener noreferrer">github</a>
+          <div class="nav-links">
+            <details class="goto" data-goto>
+              <summary class="goto-chip" aria-label="Go to" aria-controls="goto-menu">
+                <span class="prompt" aria-hidden="true">:</span>
+                <span class="goto-label">goto</span>
+                <span class="caret" aria-hidden="true">▾</span>
+              </summary>
+              <div class="goto-menu" id="goto-menu">
+                {PAGE_JUMPS.map(({ href, label }) => (
+                  <a href={href}>{label}</a>
+                ))}
+              </div>
+            </details>
+            <span class="nav-dot" aria-hidden="true">.</span>
+            <a class="nav-text" href="/docs/">docs</a>
+            <span class="nav-dot" aria-hidden="true">.</span>
+            <a class="nav-text" href={REPO} rel="noopener noreferrer">github</a>
+          </div>
           <button
             type="button"
             class="theme-toggle"
@@ -157,23 +219,141 @@ const softwareApplication = {
               <b>open</b>, <b>ready</b>, <b>started</b>, <b>blocked</b>, <b>review</b>, <b>done</b>.
               You and your agents can create, edit, and complete tasks.
             </p>
+            <div class="hero-install">
+              <div class="shell-wrap">
+                <pre class="shell" data-copy-source><span class="prompt">$</span> curl -fsSL https://gettsk.sh/install.sh | sh</pre>
+                <button type="button" class="copy" data-copy aria-label="Copy install command">copy</button>
+              </div>
+              <p class="hero-install-meta">
+                macOS &amp; Linux · MIT · <a href="#demo">Try the board ↓</a>
+                · <a href="/docs/install/">install guide →</a>
+              </p>
+            </div>
           </div>
 
-          <div class="hero-side">
-            <dl class="spec" aria-label="At a glance">
-              <div><dt>binary</dt><dd>tsk</dd></div>
-              <div><dt>store</dt><dd>~/.tsk/tsk.json</dd></div>
-              <div><dt>pane</dt><dd>78×24 · operable to 40×10</dd></div>
-              <div><dt>control</dt><dd>board + CLI</dd></div>
-              <div><dt>built with</dt><dd>Rust 1.96</dd></div>
-              <div><dt>runs on</dt><dd>Linux · macOS</dd></div>
-              <div><dt>license</dt><dd>MIT</dd></div>
-            </dl>
-            <div class="cta">
-              <a class="btn btn-primary" href="#install">Install</a>
-              <a class="btn btn-ghost" href="#demo">Try the board <span aria-hidden="true">↓</span></a>
-              <a class="link-plain" href="/docs/">Read the docs <span aria-hidden="true">→</span></a>
+          <div class="hero-side" data-board-pins>
+            <div class="screen" role="group" aria-label="A tsk board at 78 columns. Hover or click a number for its callout.">
+              <div class="s-row s-tabs is-on">
+                <span class="l"><span class="on">desk</span><span class="dim">  ·  </span>tsk ▾<span class="dim">  ·  </span>projects</span>
+                <button type="button" class="pin is-on" data-pin="1" aria-label={pinLabel(1)} aria-controls="pin-card" aria-expanded="true">1</button>
+              </div>
+              <div class="s-gap"></div>
+              <div class="s-row s-sec">
+                <span class="sec">NEEDS YOU</span><span class="rule"></span><span class="count">2</span>
+                <button type="button" class="pin" data-pin="2" aria-label={pinLabel(2)} aria-controls="pin-card" aria-expanded="false">2</button>
+              </div>
+              <div class="s-gap"></div>
+              <div class="s-row s-task is-sel">
+                <span class="l">▸ <span class="glyph">▲</span> <span class="tid">T31</span> <span class="sel-text">Review the release checklist</span></span>
+                <button type="button" class="pin" data-pin="3" aria-label={pinLabel(3)} aria-controls="pin-card" aria-expanded="false">3</button>
+              </div>
+              <div class="s-row s-peek"><span class="l dim">  │ Steps live on the task page. Notes wrap, never truncate.</span></div>
+              <div class="s-row s-peek"><span class="l dim">  └─ tsk</span>
+                <button type="button" class="pin" data-pin="4" aria-label={pinLabel(4)} aria-controls="pin-card" aria-expanded="false">4</button>
+              </div>
+              <div class="s-row s-task">
+                <span class="l"><span class="glyph">■</span> <span class="tid">T29</span> Waiting on the pane label</span>
+              </div>
+              <div class="s-gap"></div>
+              <div class="s-row s-sec">
+                <span class="sec">IN MOTION</span><span class="rule"></span><span class="count">1</span>
+              </div>
+              <div class="s-gap"></div>
+              <div class="s-row s-task">
+                <span class="l"><span class="glyph">●</span> <span class="tid">T27</span> Proof the landing copy once more</span>
+              </div>
+              <div class="s-gap"></div>
+              <div class="s-row s-sec">
+                <span class="sec">ON DECK · desk</span><span class="rule"></span><span class="count">4</span>
+                <button type="button" class="pin" data-pin="5" aria-label={pinLabel(5)} aria-controls="pin-card" aria-expanded="false">5</button>
+              </div>
+              <div class="s-row s-task">
+                <span class="l"><span class="glyph">○</span> <span class="tid">T25</span> Draft the announcement</span>
+              </div>
+              <div class="s-row s-task">
+                <span class="l"><span class="glyph">○</span> <span class="tid">T18</span> Global backlog note</span>
+              </div>
+              <div class="s-row s-sub"><span class="sec">inbox</span><span class="count">2</span></div>
+              <div class="s-row s-task">
+                <span class="l"><span class="glyph">◌</span> <span class="tid">T31</span> Capture the loose idea</span>
+              </div>
+              <div class="s-row s-task">
+                <span class="l"><span class="glyph">◌</span> <span class="tid">T30</span> Triage the new report</span>
+              </div>
+              <div class="s-fill"></div>
+              <div class="s-row s-footrule"><span class="rule"></span></div>
+              <div class="s-row s-foot">
+                <span class="l meta">2 done</span>
+                <button type="button" class="pin" data-pin="6" aria-label={pinLabel(6)} aria-controls="pin-card" aria-expanded="false">6</button>
+              </div>
+              <div class="s-row s-footrule"><span class="rule"></span></div>
+              <div class="s-row s-foot">
+                <span class="l meta">enter open · ctrl+d done · ctrl+b block · : palette · ? help · + capture</span>
+                <button type="button" class="pin" data-pin="7" aria-label={pinLabel(7)} aria-controls="pin-card" aria-expanded="false">7</button>
+              </div>
             </div>
+            {BOARD_PINS.map((pin) => (
+              <template data-pin-copy={pin.n}>
+                <b>{pin.title}</b>{" "}<Fragment set:html={pin.body} />
+              </template>
+            ))}
+            <div class="pin-card" id="pin-card" aria-live="polite">
+              <span class="pin-card-n" data-pin-n>1</span>
+              <div class="pin-card-body" data-pin-body>
+                <b>{BOARD_PINS[0].title}</b>{" "}<Fragment set:html={BOARD_PINS[0].body} />
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ───────────────────────────── why ────────────────────────────── -->
+      <section class="band band-alt" id="why" aria-labelledby="why-heading">
+        <div class="band-inner" data-reveal>
+          <header class="band-head">
+            <span class="index">01 <span class="index-label">why</span></span>
+            <h2 id="why-heading">Not another to-do app.</h2>
+            <p class="band-lede">
+              tsk is the shared surface between a developer and the agents working beside
+              them. It lives in the pane you already have open. No browser tab, no sync
+              service, no form takeover.
+            </p>
+          </header>
+
+          <div class="pillars">
+            <article class="pillar">
+              <h3>Capture never leaves the list.</h3>
+              <p>
+                <kbd>+</kbd> opens one line on the status row. <kbd>Enter</kbd> saves,
+                <kbd>Shift+Enter</kbd> keeps the line open, <kbd>Tab</kbd> expands onto the task
+                page. Two tokens set project and thread from inside the title.
+              </p>
+              <pre class="mini" aria-label="Quick-add example"><span class="prompt">+</span> Fix the flaky bench <span class="tok">!p</span> tsk <span class="tok">!t</span> ci<span class="cursor" aria-hidden="true">█</span>
+<span class="dim">enter save · shift+enter stay · tab page · esc close</span></pre>
+            </article>
+
+            <article class="pillar">
+              <h3>Nothing completes itself.</h3>
+              <p>
+                Every mutating verb needs <kbd>Ctrl</kbd>. Bare letters do nothing, so a stray
+                keystroke in a focused board cannot finish or delete work. Undo is one chord
+                away.
+              </p>
+              <pre class="mini" aria-label="Verb bar"><span class="dim">enter</span> open · <span class="dim">ctrl+d</span> done · <span class="dim">ctrl+n</span> ready · <span class="dim">ctrl+o</span> open · <span class="dim">:</span> palette
+<span class="dim">ctrl+x</span> delete · <span class="dim">ctrl+u</span> undo · <span class="dim">?</span> help · <span class="dim">+</span> capture</pre>
+            </article>
+
+            <article class="pillar">
+              <h3>One store. Everyone at the table.</h3>
+              <p>
+                You, herdr's quick-capture popup, and your agents edit the same
+                <code>~/.tsk</code>. An agent drops a plan in as JSON, new tasks enter the inbox, and the board shows them on
+                the next tick.
+              </p>
+              <pre class="mini" aria-label="Three ways in"><span class="prompt">$</span> cat plan.json | tsk add
+<span class="dim">&#123; "created": [T33, T34, T35], "existing": [], "failed": [] &#125;</span>
+<span class="prompt">$</span> herdr plugin action invoke quick-capture --plugin herdr-tsk</pre>
+            </article>
           </div>
         </div>
       </section>
@@ -239,11 +419,64 @@ const softwareApplication = {
         </div>
       </section>
 
-      <!-- ──────────────────────────── status ──────────────────────────── -->
-      <section class="band" id="status" aria-labelledby="status-heading">
+      <!-- ──────────────────────────── board ───────────────────────────── -->
+      <section class="band" id="board" aria-labelledby="board-heading">
         <div class="band-inner" data-reveal>
           <header class="band-head">
-            <span class="index">01 <span class="index-label">status</span></span>
+            <span class="index">02 <span class="index-label">board</span></span>
+            <h2 id="board-heading">One list, ordered by urgency.</h2>
+            <p class="band-lede">
+              Inside Git, start on the repo’s project board. Outside Git, start on <b>desk</b> with the current directory one tab away. <b>desk</b> shows what
+              needs you across projects, active work, and your loose backlog. The selected
+              <b>project</b> stays one key away; <b>projects</b> is a searchable index with
+              a View selector for cross-project threads. Filter threads within a project
+              with <kbd>t</kbd>, or across projects with <kbd>v</kbd> on the index.
+              Give the board 110 columns and it becomes a slider.
+            </p>
+          </header>
+
+          <div class="stages">
+            <div class="stages-head">
+              <h3>Wide: the four-stage slider.</h3>
+              <p>At 110 columns and up, focus and geometry are the same thing. One rule, one footer, no colour.</p>
+            </div>
+            <ol class="stage-strip" aria-label="The four stages: board, split, rail, page">
+              <li>
+                <div class="frame f-0" aria-hidden="true"><i class="b is-focus"></i></div>
+                <div class="stage-name"><b>Board</b></div>
+                <div class="stage-focus">full width · board has focus</div>
+              </li>
+              <li>
+                <div class="frame f-a" aria-hidden="true"><i class="b is-focus"></i><i class="r"></i><i class="t"></i></div>
+                <div class="stage-name"><b>Split</b></div>
+                <div class="stage-focus">board 40%, task page beside it · board has focus</div>
+              </li>
+              <li>
+                <div class="frame f-g" aria-hidden="true"><i class="b is-dim"></i><i class="r"></i><i class="t is-focus"></i></div>
+                <div class="stage-name"><b>Rail</b></div>
+                <div class="stage-focus">dim 32-column rail, task page · task has focus</div>
+              </li>
+              <li>
+                <div class="frame f-f" aria-hidden="true"><i class="t is-focus"></i></div>
+                <div class="stage-name"><b>Page</b></div>
+                <div class="stage-focus">full width · task has focus</div>
+              </li>
+            </ol>
+            <p class="stages-keys">
+              <span><kbd>→</kbd> one stage right</span>
+              <span><kbd>←</kbd> one stage left</span>
+              <span><kbd>Enter</kbd> jump to the page and remember where you were</span>
+              <span><kbd>Esc</kbd> go back there</span>
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ──────────────────────────── status ──────────────────────────── -->
+      <section class="band band-alt" id="status" aria-labelledby="status-heading">
+        <div class="band-inner" data-reveal>
+          <header class="band-head">
+            <span class="index">03 <span class="index-label">status</span></span>
             <h2 id="status-heading">One workflow for you and your agents.</h2>
             <p class="band-lede">
               Six states shared by everyone on the board. You and your agents can create tasks,
@@ -306,241 +539,6 @@ const softwareApplication = {
               <span data-cycle-next>ready</span>
             </div>
           </div>
-
-
-        </div>
-      </section>
-
-      <!-- ───────────────────────────── why ────────────────────────────── -->
-      <section class="band band-alt" id="why" aria-labelledby="why-heading">
-        <div class="band-inner" data-reveal>
-          <header class="band-head">
-            <span class="index">02 <span class="index-label">why</span></span>
-            <h2 id="why-heading">Not another to-do app.</h2>
-            <p class="band-lede">
-              tsk is the shared surface between a developer and the agents working beside
-              them. It lives in the pane you already have open. No browser tab, no sync
-              service, no form takeover.
-            </p>
-          </header>
-
-          <div class="pillars">
-            <article class="pillar">
-              <h3>Capture never leaves the list.</h3>
-              <p>
-                <kbd>+</kbd> opens one line on the status row. <kbd>Enter</kbd> saves,
-                <kbd>Shift+Enter</kbd> keeps the line open, <kbd>Tab</kbd> expands onto the task
-                page. Two tokens set project and thread from inside the title.
-              </p>
-              <pre class="mini" aria-label="Quick-add example"><span class="prompt">+</span> Fix the flaky bench <span class="tok">!p</span> tsk <span class="tok">!t</span> ci<span class="cursor" aria-hidden="true">█</span>
-<span class="dim">enter save · shift+enter stay · tab page · esc close</span></pre>
-            </article>
-
-            <article class="pillar">
-              <h3>Nothing completes itself.</h3>
-              <p>
-                Every mutating verb needs <kbd>Ctrl</kbd>. Bare letters do nothing, so a stray
-                keystroke in a focused board cannot finish or delete work. Undo is one chord
-                away.
-              </p>
-              <pre class="mini" aria-label="Verb bar"><span class="dim">enter</span> open · <span class="dim">ctrl+d</span> done · <span class="dim">ctrl+n</span> ready · <span class="dim">ctrl+o</span> open · <span class="dim">:</span> palette
-<span class="dim">ctrl+x</span> delete · <span class="dim">ctrl+u</span> undo · <span class="dim">?</span> help · <span class="dim">+</span> capture</pre>
-            </article>
-
-            <article class="pillar">
-              <h3>One store. Everyone at the table.</h3>
-              <p>
-                You, herdr's quick-capture popup, and your agents edit the same
-                <code>~/.tsk</code>. An agent drops a plan in as JSON, new tasks enter the inbox, and the board shows them on
-                the next tick.
-              </p>
-              <pre class="mini" aria-label="Three ways in"><span class="prompt">$</span> cat plan.json | tsk add
-<span class="dim">&#123; "created": [T33, T34, T35], "existing": [], "failed": [] &#125;</span>
-<span class="prompt">$</span> herdr plugin action invoke quick-capture --plugin herdr-tsk</pre>
-            </article>
-          </div>
-        </div>
-      </section>
-
-      <!-- ──────────────────────────── board ───────────────────────────── -->
-      <section class="band" id="board" aria-labelledby="board-heading">
-        <div class="band-inner" data-reveal>
-          <header class="band-head">
-            <span class="index">03 <span class="index-label">board</span></span>
-            <h2 id="board-heading">One list, ordered by urgency.</h2>
-            <p class="band-lede">
-              Inside Git, start on the repo’s project board. Outside Git, start on <b>desk</b> with the current directory one tab away. <b>desk</b> shows what
-              needs you across projects, active work, and your loose backlog. The selected
-              <b>project</b> stays one key away; <b>projects</b> is a searchable index with
-              a View selector for cross-project threads. Filter threads within a project
-              with <kbd>t</kbd>, or across projects with <kbd>v</kbd> on the index.
-              Give the board 110 columns and it becomes a slider.
-            </p>
-          </header>
-
-          <div class="anatomy">
-            <div class="screen" role="img" aria-label="A tsk board at 78 columns, annotated with seven callouts">
-              <div class="s-row s-tabs">
-                <span class="l"><span class="on">desk</span><span class="dim">  ·  </span>tsk ▾<span class="dim">  ·  </span>projects</span>
-                <span class="pin">1</span>
-              </div>
-              <div class="s-gap"></div>
-              <div class="s-row s-sec">
-                <span class="sec">NEEDS YOU</span><span class="rule"></span><span class="count">2</span>
-                <span class="pin">2</span>
-              </div>
-              <div class="s-gap"></div>
-              <div class="s-row s-task is-sel">
-                <span class="l">▸ <span class="glyph">▲</span> <span class="tid">T31</span> <span class="sel-text">Review the release checklist</span></span>
-                <span class="pin">3</span>
-              </div>
-              <div class="s-row s-peek"><span class="l dim">  │ Steps live on the task page. Notes wrap, never truncate.</span></div>
-              <div class="s-row s-peek"><span class="l dim">  └─ tsk</span><span class="pin">4</span></div>
-              <div class="s-row s-task">
-                <span class="l"><span class="glyph">■</span> <span class="tid">T29</span> Waiting on the pane label</span>
-              </div>
-              <div class="s-gap"></div>
-              <div class="s-row s-sec">
-                <span class="sec">IN MOTION</span><span class="rule"></span><span class="count">1</span>
-              </div>
-              <div class="s-gap"></div>
-              <div class="s-row s-task">
-                <span class="l"><span class="glyph">●</span> <span class="tid">T27</span> Proof the landing copy once more</span>
-              </div>
-              <div class="s-gap"></div>
-              <div class="s-row s-sec">
-                <span class="sec">ON DECK · desk</span><span class="rule"></span><span class="count">4</span>
-                <span class="pin">5</span>
-              </div>
-              <div class="s-row s-task">
-                <span class="l"><span class="glyph">○</span> <span class="tid">T25</span> Draft the announcement</span>
-              </div>
-              <div class="s-row s-task">
-                <span class="l"><span class="glyph">○</span> <span class="tid">T18</span> Global backlog note</span>
-              </div>
-              <div class="s-row s-sub"><span class="sec">inbox</span><span class="count">2</span></div>
-              <div class="s-row s-task">
-                <span class="l"><span class="glyph">◌</span> <span class="tid">T31</span> Capture the loose idea</span>
-              </div>
-              <div class="s-row s-task">
-                <span class="l"><span class="glyph">◌</span> <span class="tid">T30</span> Triage the new report</span>
-              </div>
-              <div class="s-fill"></div>
-              <div class="s-row s-footrule"><span class="rule"></span></div>
-              <div class="s-row s-foot">
-                <span class="l meta">2 done</span>
-                <span class="pin">6</span>
-              </div>
-              <div class="s-row s-foot">
-                <span class="l meta">enter open · ctrl+d done · ctrl+b block · : palette · ? help · + capture</span>
-                <span class="pin">7</span>
-              </div>
-            </div>
-
-            <ol class="legend">
-              <li>
-                <span class="legend-n">1</span>
-                <div><b>Persistent navigation.</b> <kbd>1</kbd> opens Desk, <kbd>2</kbd> returns to the selected project, and <kbd>3</kbd> opens Projects. <kbd>P</kbd> changes the selected project without hiding the tabs. The active tab is bright and underlined.</div>
-              </li>
-              <li>
-                <span class="legend-n">2</span>
-                <div><b>NEEDS YOU.</b> Blocked and review across all projects on Desk, or within the selected project on its board, above IN MOTION.</div>
-              </li>
-              <li>
-                <span class="legend-n">3</span>
-                <div><b>A row.</b> A selection arrow without a filled highlight, status glyph, a dim <code>T</code>-number you can click to copy, and the wrapped title. Project or thread attribution appears only at the bottom of an open peek.</div>
-              </li>
-              <li>
-                <span class="legend-n">4</span>
-                <div><b>Peek.</b> Below 110 columns, <kbd>→</kbd> or a click shows up to five wrapped note lines under the row. Wide, a click or <kbd>→</kbd> opens the task page beside the board instead. <kbd>Enter</kbd> opens the full page either way.</div>
-              </li>
-              <li>
-                <span class="legend-n">5</span>
-                <div><b>Your loose backlog.</b> Desk's ON DECK contains only tasks without a project. Picked <code>ready</code> tasks lead, then the expandable <code>inbox</code> of <code>open</code> tasks. Project backlogs live on their own boards, with thread filters across every status.</div>
-              </li>
-              <li>
-                <span class="legend-n">6</span>
-                <div><b>Done drawer.</b> Finished work stays out of the way. <kbd>d</kbd> pulls the drawer open.</div>
-              </li>
-              <li>
-                <span class="legend-n">7</span>
-                <div><b>Verb bar.</b> The chords that apply right now. Below 78 columns it folds into a compact board that still works at 40×10.</div>
-              </li>
-            </ol>
-          </div>
-
-          <div class="stages">
-            <div class="stages-head">
-              <h3>Wide: the four-stage slider.</h3>
-              <p>At 110 columns and up, focus and geometry are the same thing. One rule, one footer, no colour.</p>
-            </div>
-            <ol class="stage-strip" aria-label="The four stages: board, split, rail, page">
-              <li>
-                <div class="frame f-0" aria-hidden="true"><i class="b is-focus"></i></div>
-                <div class="stage-name"><b>Board</b></div>
-                <div class="stage-focus">full width · board has focus</div>
-              </li>
-              <li>
-                <div class="frame f-a" aria-hidden="true"><i class="b is-focus"></i><i class="r"></i><i class="t"></i></div>
-                <div class="stage-name"><b>Split</b></div>
-                <div class="stage-focus">board 40%, task page beside it · board has focus</div>
-              </li>
-              <li>
-                <div class="frame f-g" aria-hidden="true"><i class="b is-dim"></i><i class="r"></i><i class="t is-focus"></i></div>
-                <div class="stage-name"><b>Rail</b></div>
-                <div class="stage-focus">dim 32-column rail, task page · task has focus</div>
-              </li>
-              <li>
-                <div class="frame f-f" aria-hidden="true"><i class="t is-focus"></i></div>
-                <div class="stage-name"><b>Page</b></div>
-                <div class="stage-focus">full width · task has focus</div>
-              </li>
-            </ol>
-            <p class="stages-keys">
-              <span><kbd>→</kbd> one stage right</span>
-              <span><kbd>←</kbd> one stage left</span>
-              <span><kbd>Enter</kbd> jump to the page and remember where you were</span>
-              <span><kbd>Esc</kbd> go back there</span>
-            </p>
-          </div>
-        </div>
-      </section>
-
-      <!-- ───────────────────────────── keys ───────────────────────────── -->
-      <section class="band band-alt" id="keys" aria-labelledby="keys-heading">
-        <div class="band-inner" data-reveal>
-          <header class="band-head">
-            <span class="index">04 <span class="index-label">keys</span></span>
-            <h2 id="keys-heading">Learn it in a minute. Keep it in your hands.</h2>
-            <p class="band-lede">
-              Navigation is bare. Anything that changes a task takes <kbd>Ctrl</kbd>.
-              <kbd>Esc</kbd> always closes one layer.
-            </p>
-          </header>
-
-          <div class="keygrid" role="list">
-            <div class="key" role="listitem"><span class="caps"><kbd>j</kbd><kbd>k</kbd></span><span>move</span></div>
-            <div class="key" role="listitem"><span class="caps"><kbd>Enter</kbd></span><span>open the task page</span></div>
-            <div class="key" role="listitem"><span class="caps"><kbd>→</kbd><kbd>←</kbd></span><span>peek · slide the stage when wide</span></div>
-            <div class="key" role="listitem"><span class="caps"><kbd>+</kbd></span><span>capture</span></div>
-            <div class="key key-verb" role="listitem"><span class="caps"><kbd>ctrl+s</kbd></span><span>start open or ready</span></div>
-            <div class="key key-verb" role="listitem"><span class="caps"><kbd>ctrl+n</kbd></span><span>pick for ready</span></div>
-            <div class="key key-verb" role="listitem"><span class="caps"><kbd>ctrl+o</kbd></span><span>send to inbox</span></div>
-            <div class="key key-verb" role="listitem"><span class="caps"><kbd>ctrl+d</kbd></span><span>done</span></div>
-            <div class="key key-verb" role="listitem"><span class="caps"><kbd>ctrl+b</kbd></span><span>toggle blocked</span></div>
-            <div class="key key-verb" role="listitem"><span class="caps"><kbd>ctrl+e</kbd></span><span>edit title</span></div>
-            <div class="key key-verb" role="listitem"><span class="caps"><kbd>ctrl+x</kbd><kbd>ctrl+u</kbd></span><span>delete · undo</span></div>
-            <div class="key" role="listitem"><span class="caps"><kbd>:</kbd></span><span>command palette</span></div>
-            <div class="key" role="listitem"><span class="caps"><kbd>?</kbd></span><span>help card</span></div>
-            <div class="key" role="listitem"><span class="caps"><kbd>d</kbd></span><span>done drawer</span></div>
-            <div class="key" role="listitem"><span class="caps"><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd></span><span>desk · selected project · projects</span></div>
-            <div class="key" role="listitem"><span class="caps"><kbd>p</kbd></span><span>project picker</span></div>
-            <div class="key" role="listitem"><span class="caps"><kbd>Esc</kbd></span><span>close one layer</span></div>
-          </div>
-          <p class="keynote">
-            Full chord tables for the board, task page, and quick capture live in the
-            <a href="/docs/keys/">keys reference</a>.
-          </p>
         </div>
       </section>
 
@@ -548,7 +546,7 @@ const softwareApplication = {
       <section class="band" id="cli" aria-labelledby="cli-heading">
         <div class="band-inner" data-reveal>
           <header class="band-head">
-            <span class="index">05 <span class="index-label">cli</span></span>
+            <span class="index">04 <span class="index-label">cli</span></span>
             <h2 id="cli-heading">Built for agents from the first commit.</h2>
             <p class="band-lede">
               Headless <code>add</code>, <code>list</code>, <code>status</code>, <code>edit</code>, and <code>steps</code> against the
@@ -558,7 +556,8 @@ const softwareApplication = {
           </header>
 
           <div class="cli-grid">
-            <pre class="shell" aria-label="CLI session"><span class="prompt">$</span> tsk add -t "Draft release notes" -p tsk --thread release --json
+            <div class="cli-main">
+              <pre class="shell" aria-label="CLI session"><span class="prompt">$</span> tsk add -t "Draft release notes" -p tsk --thread release --json
 <span class="dim">&#123;"outcome":"created","id":"5c1e…","number":32,"title":"Draft release notes","project":"tsk"&#125;</span>
 <span class="prompt">$</span> tsk steps T32 add "Write the failing test"
 <span class="dim">added 9f Write the failing test</span>
@@ -571,6 +570,20 @@ const softwareApplication = {
 <span class="prompt">$</span> cat plan.json | tsk add
 <span class="dim">&#123; "created": [...], "existing": [...], "failed": [] &#125;</span></pre>
 
+              <section class="agent-block" id="agents" aria-label="Agents">
+                <div class="agent-handoff">
+                  <div class="shell-wrap">
+                    <pre class="shell" data-copy-source>Use tsk for my task board. Run `tsk guide` and follow it; if tsk is not installed, read https://gettsk.sh/docs/agents.md and ask me before installing.</pre>
+                    <button type="button" class="copy" data-copy aria-label="Copy bootstrap prompt">copy</button>
+                  </div>
+                </div>
+                <p class="band-lede">
+                  Everything an agent needs is one command or one URL. Every docs page is
+                  also Markdown: <span class="md-twin"><code>/docs/cli/</code> is <code>/docs/cli.md</code></span>.
+                </p>
+              </section>
+            </div>
+
             <div class="cli-side">
               <h3 class="side-title">Exit contract</h3>
               <table class="exits">
@@ -581,6 +594,18 @@ const softwareApplication = {
                   <tr><th scope="row">3</th><td>store I/O. Indeterminate. <code>tsk list</code> before retrying.</td></tr>
                 </tbody>
               </table>
+              <ul class="agent-paths" aria-label="Agent surfaces">
+                <li class="shell-wrap">
+                  <span class="agent-path-k">skill</span>
+                  <pre class="shell" data-copy-source>tsk setup grok</pre>
+                  <button type="button" class="copy" data-copy aria-label="Copy skill command">copy</button>
+                </li>
+                <li class="shell-wrap">
+                  <span class="agent-path-k">docs</span>
+                  <pre class="shell" data-copy-source>https://gettsk.sh/docs/cli.md</pre>
+                  <button type="button" class="copy" data-copy aria-label="Copy docs markdown URL">copy</button>
+                </li>
+              </ul>
               <p class="side-note">
                 Adds are idempotent on title, project, and thread. <code>--json</code> is flat
                 and stable. <a href="/docs/cli/">CLI reference →</a>
@@ -590,40 +615,11 @@ const softwareApplication = {
         </div>
       </section>
 
-      <!-- ──────────────────────────── agents ─────────────────────────── -->
-      <section class="band band-alt" id="agents" aria-labelledby="agents-heading">
-        <div class="band-inner" data-reveal>
-          <header class="band-head">
-            <span class="index">06 <span class="index-label">agents</span></span>
-            <h2 id="agents-heading">Hand it to your agent.</h2>
-            <p class="band-lede">
-              Everything an agent needs is one command or one URL.
-            </p>
-          </header>
-
-          <div class="cli-grid">
-            <div class="shell-wrap">
-              <pre class="shell" data-copy-source>Use tsk for my task board. Run `tsk guide` and follow it;
-if tsk is not installed, read https://gettsk.sh/docs/agents/
-and ask me before installing.</pre>
-              <button type="button" class="copy" data-copy aria-label="Copy bootstrap prompt">copy</button>
-            </div>
-            <div class="cli-side">
-              <dl class="spec" aria-label="Agent surfaces">
-                <div><dt>skill</dt><dd>tsk setup grok</dd></div>
-                <div><dt>markdown</dt><dd>any /docs/ URL + .md</dd></div>
-                <div><dt>index</dt><dd>gettsk.sh/llms.txt</dd></div>
-              </dl>
-            </div>
-          </div>
-        </div>
-      </section>
-
       <!-- ──────────────────────────── install ─────────────────────────── -->
-      <section class="band" id="install" aria-labelledby="install-heading">
+      <section class="band band-alt" id="install" aria-labelledby="install-heading">
         <div class="band-inner" data-reveal>
           <header class="band-head">
-            <span class="index">07 <span class="index-label">install</span></span>
+            <span class="index">05 <span class="index-label">install</span></span>
             <h2 id="install-heading">Install it. Open the board.</h2>
             <p class="band-lede">
               One binary, standalone or in Herdr. State lives in <code>~/.tsk</code> whether you run it
@@ -678,10 +674,10 @@ and ask me before installing.</pre>
           </div>
         </div>
       </section>
-      <section class="band band-alt" id="coming-soon" aria-labelledby="coming-soon-heading">
+      <section class="band" id="coming-soon" aria-labelledby="coming-soon-heading">
         <div class="band-inner" data-reveal>
           <header class="band-head">
-            <span class="index">08 <span class="index-label">next phase</span></span>
+            <span class="index">06 <span class="index-label">next phase</span></span>
             <p class="coming-announcement">Coming soon</p>
             <h2 id="coming-soon-heading">From task to implementation.</h2>
             <p class="band-lede">
@@ -707,10 +703,10 @@ and ask me before installing.</pre>
         </p>
         <p class="foot-links">
           <a href="/docs/" aria-label="Documentation" title="docs">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5.2C10.4 4.1 8.2 3.5 5.6 3.5c-1 0-2 .1-3.1.3v14.4c1-.2 2-.3 3.1-.3 2.5 0 4.7.6 6.4 1.9 1.7-1.3 3.9-1.9 6.4-1.9 1.1 0 2.1.1 3.1.3V3.8c-1.1-.2-2.1-.3-3.1-.3-2.6 0-4.8.6-6.4 1.7zm-.9 12.4c-1.5-.9-3.4-1.3-5.5-1.3-.5 0-1 0-1.5.1V5.4c.5-.1 1-.1 1.5-.1 2.2 0 4.1.5 5.5 1.5v10.8zm1.8-10.8c1.4-1 3.3-1.5 5.5-1.5.5 0 1 0 1.5.1v11c-.5-.1-1-.1-1.5-.1-2.1 0-4 .4-5.5 1.3V6.8z"/></svg>
+            <Fragment set:html={ICON_DOCS} />
           </a>
           <a href={REPO} rel="noopener noreferrer" aria-label="GitHub repository" title="github">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .3a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2c-3.3.7-4-1.6-4-1.6-.6-1.4-1.4-1.8-1.4-1.8-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.7-1.6-2.7-.3-5.5-1.3-5.5-5.9 0-1.3.5-2.4 1.2-3.2-.1-.3-.5-1.5.1-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.7 1.7.2 2.9.1 3.2.8.8 1.2 1.9 1.2 3.2 0 4.6-2.8 5.6-5.5 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .3z"/></svg>
+            <Fragment set:html={ICON_GITHUB} />
           </a>
           <a href="https://x.com/smarzbanX" rel="noopener noreferrer" aria-label="smarzbanX on X" title="@smarzbanX">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18.9 1.2h3.7l-8 9.2 9.4 12.4h-7.4l-5.8-7.5-6.6 7.5H.5l8.6-9.8L.1 1.2h7.6l5.2 6.9 6-6.9zm-1.3 19.4h2L6.5 3.3H4.3l13.3 17.3z"/></svg>

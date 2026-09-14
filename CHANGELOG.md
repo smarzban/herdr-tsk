@@ -9,6 +9,15 @@ the GitHub release notes verbatim.
 
 ## Unreleased
 
+### Changed
+
+- The landing header is a `: goto` menu instead of eight inline links, with docs and github as text beside it. Demo lives in the menu.
+- The agent prompt sits under the CLI session, with the markdown-twin note beneath it; the skill command and markdown docs URL sit in the exit-contract sidebar.
+- The why section sits above the live demo, and the board section sits below it.
+- The landing keys grid is gone; the keys reference stays in the docs.
+- The hero shows the annotated board; numbered callouts reveal their detail on hover or click. A rule sits above the verb bar.
+- The hero has the install one-liner under the lede, with a copy button, a jump to the live board, and a link to the install guide.
+
 ## v0.9.0
 
 ### Breaking
