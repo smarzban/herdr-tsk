@@ -9,11 +9,6 @@ the GitHub release notes verbatim.
 
 ## Unreleased
 
-### Changed
-
-- The upgrade notice (`What's new in tsk`) now arrives in `review` under NEEDS YOU, and the last starter guide seeds in the inbox as `open` so a fresh board shows both ON DECK groups.
-- The Homebrew caveat also points at `tsk setup agents`.
-
 ## v0.9.0
 
 ### Breaking
@@ -42,6 +37,8 @@ the GitHub release notes verbatim.
 - Board help (`?`) is a searchable shortcut reference: type to filter by key or action, `Esc` clears then closes.
 - Human `tsk list` output wraps to the terminal width, supported from 50 columns.
 - The starter tour mentions the projects preview and `tsk help`; the upgrade notice covers this release's features.
+- The upgrade notice (`What's new in tsk`) arrives in `review` under NEEDS YOU; the last starter guide seeds as `open` so a fresh board shows both ON DECK groups.
+- The Homebrew caveat also points at `tsk setup agents`.
 
 ### Fixed
 
