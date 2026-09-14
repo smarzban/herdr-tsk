@@ -139,7 +139,16 @@ test("demo matches the quick-add, peek, and group-toggle contracts", async () =>
   assert.match(demo, /id: "save", label: "enter save"/);
   assert.match(demo, /id: "details", label: "tab details"/);
   assert.match(demo, /id: "close", label: "esc close"/);
-  assert.match(demo, /if \(id === "close"\) \{\s*state\.overlay = null;\s*leaveTaskPage/);
+  // Closing the page by click must drop any open title/notes draft, or the next task
+  // opens in edit mode carrying it; the verbs hide while an editor owns the footer.
+  assert.match(
+    demo,
+    /if \(id === "close"\) \{\s*state\.overlay = null;\s*state\.editField = null;\s*state\.editDraft = "";\s*leaveTaskPage/,
+  );
+  assert.match(
+    demo,
+    /function pageVerbBar\(\)[\s\S]{0,240}?steps\.editor \|\| steps\.dirty \|\| state\.editField/,
+  );
   assert.match(demo, /function runHint/);
   assert.match(demo, /data-hint=/);
   assert.match(demo, /"inbox"\}<\/span> · <span class="count">\$\{row\.count\}<\/span>/);

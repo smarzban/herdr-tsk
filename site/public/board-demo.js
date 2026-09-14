@@ -1889,6 +1889,8 @@ import { parseCapture } from "./capture.js";
   function runPageVerb(id) {
     if (id === "close") {
       state.overlay = null;
+      state.editField = null;
+      state.editDraft = "";
       leaveTaskPage();
       return;
     }
@@ -2337,7 +2339,10 @@ import { parseCapture } from "./capture.js";
   ];
 
   function pageVerbBar() {
-    if (steps.editor || steps.dirty) return "shift+enter save · esc cancel";
+    // Same guard as previewPageVerbBar: a title or notes editor owns the footer, so the
+    // verbs are not clickable while typing.
+    if (steps.editor || steps.dirty || state.editField)
+      return "shift+enter save · esc cancel";
     return PAGE_VERBS.map(
       (v) =>
         `<button type="button" class="tsk-verb" data-page-verb="${v.id}">${v.label}</button>`,
