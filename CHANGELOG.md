@@ -11,33 +11,37 @@ the GitHub release notes verbatim.
 
 ### Breaking
 
-- Existing `ready` tasks migrate to the new `open` inbox when a v3 store is first saved as v4. `ctrl+n` no longer opens the Notes editor, and `ctrl+o` now sets a task to `open` instead of reopening it to `ready`.
+- Store format 4: existing `ready` tasks move to the new `open` inbox on first save. Rolling back refuses the file; restore `tsk.json.v3`.
+- `ctrl+n` now sets ready (it no longer opens Notes) and `ctrl+o` sets open (it no longer reopens to ready).
 
 ### Added
 
-- Added `tsk help <command>` as an alias for each command's `--help`, and `tsk --version` / `tsk -V` for the installed version.
-- Added the `open` status for captured and untriaged tasks, an expandable inbox group under ON DECK, and explicit `ctrl+n` (ready) and `ctrl+o` (open) board verbs.
-- Added `tsk status T<n> open`, plus `tsk list --open` and `tsk list --ready` filters.
-- The Projects Overview now previews the cursored project beside the index at wide widths, opening the Split preview when you click or move the index selection. It has a live narrow project board at the Rail stage and no full-screen task stage. The right board names the selected project in its top row and keeps its own selection and editing state.
-- Direct `tsk list T<n>` output now includes the task's notes, steps, and thread in both human-readable and JSON forms, so agents can read the complete task with one command. Human detail separates notes, steps, and the trailing thread into blocks; step short IDs remain JSON-only. All human `tsk list` content wraps to the terminal width with hanging indentation, supported from 50 columns.
+- `open` status for captured, untriaged tasks: an expandable `inbox` group under ON DECK, `ctrl+n` picks a task for ready, `ctrl+o` sends it back.
+- `tsk status T<n> open`, `tsk list --open`, `tsk list --ready`.
+- Projects tab at 110+ columns: the cursored project previews beside the index, `→` makes it a live board, `←` and `Esc` walk back.
+- Projects index counts ON DECK and DONE next to NEEDS YOU and IN MOTION.
+- `tsk list T<n>` prints the whole task: notes, steps, and thread, in human and JSON form.
+- `tsk help <command>` as an alias for `--help`, and `tsk --version` / `-V`.
 
 ### Changed
 
-- The starter tour mentions the wide projects preview and `tsk help`; the upgrade notice for this release covers the inbox, the projects preview, and the CLI reference.
-- Task-page and expanded quick-add Tab rings now wrap through Title, task-page footers show thread before scope, inbox headings use normal text, and Projects Overview counts NEEDS YOU, IN MOTION, ON DECK, and DONE.
-- The agent skill (`tsk guide`, `tsk setup <agent>`) is slimmed to rules of engagement, board language, the exit contract, and workflows; flag tables and JSON shapes now live in `tsk help <command>` and the CLI guide. It gains a `Refine a task` section: a shaping pass that reads the task and its neighbours, grounds in code, proposes, and only then writes the rewrite back with `tsk edit` or `tsk add`. Skill version 1.2.0; rerun `tsk setup` to update installed copies.
-- Task-verb refusals print as `code: message` on stderr for every command: `archive` and `unarchive` gain the stable `unknown-task` and `soft-deleted-task` codes, and `status`, `edit`, and `steps` gain a human message after theirs.
-- Command help now uses one 80-column reference skeleton with usage, options, examples, refusals, and exits; detailed retry and output rules remain in the CLI guide.
-- `ctrl+s` now starts both open and ready tasks. The bundled agent skill is version 1.2.0 and documents the inbox and status filters.
-- Help is now a searchable shortcut reference with a focused search field, dim divider, and one binding per row grouped by function; long descriptions wrap beneath their description column. It stays within half the terminal height except below 15 rows, where it may grow to six rows to keep a result visible. Press `?` from any non-text surface; typing filters by key or action, and `Esc` clears the search before closing.
-- The bundled agent skill now uses JSON as the default contract for every `tsk list` read. Human listings are reserved for output shown to the user or interactive troubleshooting.
+- `tsk --help` is the CLI reference: commands grouped with a Statuses block, and one 80-column skeleton per command (usage, options, examples, refusals, exit codes). Long-form detail lives in the CLI guide.
+- Refusals print as `code: message` on stderr for every task command; `archive` and `unarchive` gain stable codes.
+- The agent skill (`tsk guide`, `tsk setup <agent>`) is slimmed to rules of engagement, board language, the exit contract, and workflows, reads JSON by default, and gains a `Refine a task` section. Skill 1.2.0; rerun `tsk setup` to update installed copies.
+- Task page and expanded quick-add share one Tab ring: Title, Notes, steps, + step, Thread, Scope, back to Title; `Shift+Tab` reverses it.
+- Task-page footer shows the thread before the project.
+- Inbox heading paints in normal text with no blank row under it.
+- `ctrl+s` starts open tasks as well as ready ones.
+- Board help (`?`) is a searchable shortcut reference: type to filter by key or action, `Esc` clears then closes.
+- Human `tsk list` output wraps to the terminal width, supported from 50 columns.
+- The starter tour mentions the projects preview and `tsk help`; the upgrade notice covers this release's features.
 
 ### Fixed
 
-- `tsk setup agents --yes --force` rewrites every detected agent skill even when the installed version already matches; before, `--force` only worked with a single named agent.
-- `tsk setup herdr` no longer prints the content-addressed plugin root on success (it stays in error messages), and says `previous registration at <path> is gone, re-registering` when the root Herdr had registered no longer exists.
-- Selected task-page footer controls no longer retain dim styling.
-- Expanded quick-add in a project preview now keeps its draft title in the right-column header and renders the active notes line with the editor's focus style.
+- `tsk setup agents --yes --force` rewrites every detected agent skill even when the version already matches.
+- `tsk setup herdr` no longer prints the plugin root on success and reports a previous registration whose root is gone before re-registering.
+- The selected task-page footer control is no longer dim inside its highlight.
+- Expanded quick-add in a project preview keeps its draft title in the column header and styles the active notes line as an editor.
 
 ## v0.8.2
 
