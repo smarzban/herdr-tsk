@@ -1,7 +1,7 @@
 ---
 name: tsk-cli
 description: Work the user's tsk task board from the command line. Use when asked to add, update, edit, start, block, finish, archive, or restore a task on the board (or "tsk", "the tsk board", "the desk"), to add or tick steps, to answer "what's on the board", "what's next", "what's on deck", "what needs me", or to refine a task ("refine T12", "let's discuss T12", "what's missing from T12", "improve / rewrite this task"). Always `tsk add|list|status|edit|steps|archive|trash`, never the TUI.
-version: 1.3.0
+version: 1.2.0
 ---
 
 # tsk: the user's task board
@@ -50,7 +50,7 @@ New tasks start `open` in the inbox; `ready` means the user picked it.
    `archive` are idempotent; `steps toggle` and `steps remove` are not, so run
    `tsk list T12 --json` before retrying any `steps` command.
 5. **Never pass `--state-dir`** unless the user asked. It points at a different board.
-6. **Ignore notice tasks.** Tasks the board paints as `N1`… are human-only (starter tasks and
+6. **Ignore notice rows.** Rows the board paints as `N1`… are human-only (starter tasks and
    release notes). `tsk list --json` never shows them and no command addresses them.
 7. Values that begin with `-` need the `=` form: `--title="-fix parser"`, `--notes="-5 degrees"`.
 8. **Thread names** start with a letter or digit, then lowercase letters, digits, `-` and `.`, up

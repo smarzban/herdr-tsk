@@ -17,7 +17,7 @@ the GitHub release notes verbatim.
 - The landing keys grid is gone; the keys reference stays in the docs.
 - The hero shows the annotated board; numbered callouts reveal their detail on hover or click. Its footer is the one the board paints: one rule, the scope line, the verb bar, and rows wrap instead of truncating.
 - The hero has the install one-liner under the lede, with a copy button, a jump to the live board, and a link to the install guide.
-- The hero callouts read as tabs and tasks: the first explains desk, selected project, and projects; the third is `A task`. Docs and the skill (1.3.0) say task, not row, wherever they mean a task.
+- The hero callouts read as tabs and tasks: the first explains desk, selected project, and projects; the third is `A task`. Docs say task, not row, wherever they mean a task.
 
 ### Fixed
 
