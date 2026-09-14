@@ -1566,6 +1566,50 @@ import { parseCapture } from "./capture.js";
     return true;
   }
 
+  function hintBar(items) {
+    return items
+      .map(
+        (item) =>
+          `<button type="button" class="tsk-verb" data-hint="${esc(item.id)}">${esc(item.label)}</button>`,
+      )
+      .join("<span> · </span>");
+  }
+
+  function runHint(id) {
+    const add = document.getElementById("tsk-add");
+    if (add) state.draft = add.value;
+    if (state.overlay === "quick" && !state.quickExpanded) {
+      if (id === "save") saveDraft(false);
+      else if (id === "details") expandQuickAdd();
+      else if (id === "close") {
+        state.overlay = null;
+        state.quickOwner = "outer";
+        state.refuse = "";
+        frame.focus();
+      } else return false;
+      return true;
+    }
+    if (state.overlay === "quick" && state.quickExpanded) {
+      if (id === "save-expanded") saveExpandedDraft();
+      else if (id === "next-field")
+        movePageFocus(false, state.quickOwner === "preview");
+      else if (id === "collapse") collapseQuickAdd();
+      else return false;
+      return true;
+    }
+    if (state.overlay === "search") {
+      if (id === "open") {
+        openProjectSearchMatch();
+        state.overlay = null;
+      } else if (id === "close") {
+        state.projectQuery = "";
+        state.overlay = null;
+      } else return false;
+      return true;
+    }
+    return false;
+  }
+
   function saveDraft(stay) {
     const owner = state.quickOwner === "preview" ? "preview" : "outer";
     const parsed = parseCapture(state.draft, fallbackProject());
@@ -1843,6 +1887,13 @@ import { parseCapture } from "./capture.js";
   }
 
   function runPageVerb(id) {
+    if (id === "close") {
+      state.overlay = null;
+      state.editField = null;
+      state.editDraft = "";
+      leaveTaskPage();
+      return;
+    }
     enterTaskStage();
     const task = selectedTask();
     if (!task) return;
@@ -1864,6 +1915,10 @@ import { parseCapture } from "./capture.js";
   }
 
   function runPreviewPageVerb(id) {
+    if (id === "close") {
+      leavePreviewTaskPage();
+      return;
+    }
     const task = previewTask();
     if (!task) return;
     if (
@@ -2015,12 +2070,10 @@ import { parseCapture } from "./capture.js";
   function previewPageVerbBar() {
     if (previewSteps.editor || previewSteps.dirty || preview.editField)
       return "shift+enter save · esc cancel";
-    return (
-      PAGE_VERBS.map(
-        (verb) =>
-          `<button type="button" class="tsk-verb" data-preview-page-verb="${verb.id}">${verb.label}</button>`,
-      ).join("<span> · </span>") + "<span> · </span><span>esc close</span>"
-    );
+    return PAGE_VERBS.map(
+      (verb) =>
+        `<button type="button" class="tsk-verb" data-preview-page-verb="${verb.id}">${verb.label}</button>`,
+    ).join("<span> · </span>");
   }
 
   function previewBoardWidth() {
@@ -2201,7 +2254,7 @@ import { parseCapture } from "./capture.js";
         if (row.kind === "inbox") {
           const mark = state.inboxOpen ? "▾" : "▸";
           const selected = row.id === state.selectedId;
-          return `<button type="button" class="tsk-group tsk-inbox" data-inbox-header="1"><span>${mark}</span> <span class="sec">${selected ? "<strong>inbox</strong>" : "inbox"}</span><span class="count">${row.count}</span></button>`;
+          return `<button type="button" class="tsk-group tsk-inbox" data-inbox-header="1"><span>${mark}</span> <span class="sec">${selected ? "<strong>inbox</strong>" : "inbox"}</span> · <span class="count">${row.count}</span></button>`;
         }
         if (row.kind === "archived") {
           const mark = state.archivedOpen ? "▾" : "▸";
@@ -2282,16 +2335,18 @@ import { parseCapture } from "./capture.js";
     { id: "edit", label: "e edit" },
     { id: "done", label: "d done" },
     { id: "block", label: "b block" },
+    { id: "close", label: "esc close" },
   ];
 
   function pageVerbBar() {
-    if (steps.editor || steps.dirty) return "shift+enter save · esc cancel";
-    return (
-      PAGE_VERBS.map(
-        (v) =>
-          `<button type="button" class="tsk-verb" data-page-verb="${v.id}">${v.label}</button>`,
-      ).join("<span> · </span>") + "<span> · </span><span>esc close</span>"
-    );
+    // Same guard as previewPageVerbBar: a title or notes editor owns the footer, so the
+    // verbs are not clickable while typing.
+    if (steps.editor || steps.dirty || state.editField)
+      return "shift+enter save · esc cancel";
+    return PAGE_VERBS.map(
+      (v) =>
+        `<button type="button" class="tsk-verb" data-page-verb="${v.id}">${v.label}</button>`,
+    ).join("<span> · </span>");
   }
 
   // One footer for the frame: a rule, the status row (active lens · stage crumb), and the verb
@@ -2329,12 +2384,12 @@ import { parseCapture } from "./capture.js";
     const footer =
       state.overlay === "quick" && !state.quickExpanded
         ? `<div class="tsk-input-row"><span class="tsk-prompt">+</span><input class="tsk-field" id="tsk-add" value="${esc(state.draft)}" placeholder="title  ·  !p project  ·  !t thread" autocomplete="off" /><span class="cursor">█</span></div>
-           <div class="foot dim">${state.refuse ? esc(state.refuse) : "enter save · tab details · esc close"}</div>`
+           <div class="foot dim tsk-verbs">${state.refuse ? esc(state.refuse) : hintBar([{ id: "save", label: "enter save" }, { id: "details", label: "tab details" }, { id: "close", label: "esc close" }])}</div>`
         : state.overlay === "quick"
-          ? `<div class="tsk-status-row"><span class="foot">expanded quick-add</span></div><div class="foot dim">${state.refuse ? esc(state.refuse) : "ctrl+enter save · tab next field · esc one-line draft"}</div>`
+          ? `<div class="tsk-status-row"><span class="foot">expanded quick-add</span></div><div class="foot dim tsk-verbs">${state.refuse ? esc(state.refuse) : hintBar([{ id: "save-expanded", label: "ctrl+enter save" }, { id: "next-field", label: "tab next field" }, { id: "collapse", label: "esc one-line draft" }])}</div>`
           : state.overlay === "search"
             ? `<div class="tsk-input-row"><span class="tsk-prompt">/</span><input class="tsk-field" id="tsk-project-search" value="${esc(state.projectQuery)}" placeholder="search projects" autocomplete="off" /><span class="cursor">█</span></div>
-             <div class="foot dim">enter open · esc close</div>`
+             <div class="foot dim tsk-verbs">${hintBar([{ id: "open", label: "enter open" }, { id: "close", label: "esc close" }])}</div>`
             : `<div class="tsk-status-row"><button type="button" class="tsk-done-count foot" data-${previewOwnsFooter ? "preview-" : ""}drawer="1">${esc(context)}</button><span class="foot dim tsk-stage-hint">${esc(stageHint())}</span></div>
            <div class="foot dim tsk-verbs">${verbs}</div>
            ${state.copyNotice ? `<div class="foot dim">${esc(state.copyNotice)}</div>` : ""}`;
@@ -3698,6 +3753,11 @@ import { parseCapture } from "./capture.js";
       );
       state.overlay = null;
       if (hit) hit.run();
+      render();
+      return;
+    }
+    const hint = e.target.closest("[data-hint]");
+    if (hint && runHint(hint.getAttribute("data-hint"))) {
       render();
       return;
     }

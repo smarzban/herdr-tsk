@@ -157,7 +157,7 @@ tsk list [<task>] [-p <project> | --desk | --all] [--thread <name>] [--open | --
 
 | Filter | Result |
 | --- | --- |
-| Default | Open, ready, started, blocked, and review tasks; excludes archived, deleted, and notice (`N`) rows |
+| Default | Open, ready, started, blocked, and review tasks; excludes archived, deleted, and notice (`N`) tasks |
 | `--open` | Inbox tasks with status `open` |
 | `--ready` | Picked on-deck tasks with status `ready` |
 | `--done` | Completed tasks |

@@ -7,21 +7,6 @@ that makes it, written for a user, not a contributor: omit demo alignment, CI wi
 review history, and other maintainer-only work. On release the version's section becomes
 the GitHub release notes verbatim.
 
-## Unreleased
-
-### Changed
-
-- The landing header is a `: goto` menu instead of eight inline links, with docs and github as text beside it. Demo lives in the menu.
-- The agent prompt sits under the CLI session, with the markdown-twin note beneath it; the skill command and markdown docs URL sit in the exit-contract sidebar.
-- The why section sits above the live demo, and the board section sits below it.
-- The landing keys grid is gone; the keys reference stays in the docs.
-- The hero shows the annotated board; numbered callouts reveal their detail on hover or click. Its footer is the one the board paints: one rule, the scope line, the verb bar, and rows wrap instead of truncating.
-- The hero has the install one-liner under the lede, with a copy button, a jump to the live board, and a link to the install guide.
-
-### Fixed
-
-- The web demo no longer indents inbox rows under ON DECK; they sit flush with ready rows, as on the board.
-
 ## v0.9.0
 
 ### Breaking

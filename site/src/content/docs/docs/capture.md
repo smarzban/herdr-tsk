@@ -3,7 +3,7 @@ title: Capture
 description: Add a task without leaving your work.
 ---
 
-Press `+` or click **+ add**. Type a title, then press `Enter`. New captures land in the **inbox** with status `open`.
+Press `+` or click **+ add**. Type a title, then press `Enter`. On the website demo, the capture footer actions are clickable. New captures land in the **inbox** with status `open`.
 
 ## Quick-add
 

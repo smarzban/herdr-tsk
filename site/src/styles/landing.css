@@ -320,17 +320,15 @@ kbd + kbd {
   height: 2rem;
   margin: 0;
   padding: 0;
-  border: 1px solid var(--line);
-  border-radius: 50%;
+  border: 0;
   background: transparent;
   color: var(--ink-2);
   cursor: pointer;
-  transition: color 160ms var(--ease), border-color 160ms var(--ease);
+  transition: color 160ms var(--ease);
 }
 
 .theme-toggle:hover {
   color: var(--ink);
-  border-color: var(--ink);
 }
 
 .theme-toggle svg {
@@ -574,7 +572,6 @@ html[data-theme="light"] .pane {
   margin: 1rem 0 0;
   font-size: 0.8rem;
   color: var(--dim);
-  max-width: 60rem;
 }
 
 /* ── the demo board itself (markup produced by /board-demo.js) ───────────── */
@@ -935,6 +932,15 @@ html[data-theme="light"] .pane {
   outline: none;
   padding: 0.1rem 0;
   caret-color: var(--accent);
+}
+
+/* Safari/Chrome zoom into focused fields under 16px. Keep the TUI small; only
+   the actual inputs grow on touch. Do not lock viewport zoom to paper over this. */
+@media (pointer: coarse) {
+  .board input.tsk-field,
+  .board textarea.tsk-field {
+    font-size: max(16px, 1em);
+  }
 }
 
 .tsk-field::placeholder {
