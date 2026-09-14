@@ -49,7 +49,9 @@ test("landing_agents_band_after_cli_copies_bootstrap_and_stays_on_palette", asyn
   expect(ids.indexOf("install")).toBeGreaterThan(ids.indexOf("agents"));
   const band = page.locator("#agents");
   await expect(page.locator("#cli #agents")).toHaveCount(1);
-  await expect(band.getByRole("heading")).toHaveCount(0);
+  await expect(
+    band.getByRole("heading", { name: "Paste this into your agent" }),
+  ).toBeVisible();
   await expect(band.locator(".agent-handoff")).toBeVisible();
   await expect(band).toContainText(
     "Everything an agent needs is one command or one URL",

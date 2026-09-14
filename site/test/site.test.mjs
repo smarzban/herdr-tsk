@@ -244,7 +244,17 @@ test("hero board pins reveal callout copy", async () => {
   const page = await read("../src/pages/index.astro");
   assert.match(page, /data-board-pins/);
   assert.match(page, /data-pin="7"/);
-  assert.match(page, /s-footrule[\s\S]*data-pin="6"[\s\S]*s-footrule[\s\S]*data-pin="7"/);
+  // One rule, then the scope line, then the verb bar: the footer the TUI paints.
+  assert.match(page, /s-footrule[\s\S]*<span class="l meta">desk<\/span>[\s\S]*data-pin="6"[\s\S]*data-pin="7"/);
+  assert.equal((page.match(/s-footrule/g) || []).length, 1);
+  assert.doesNotMatch(page, /<span class="l meta">2 done<\/span>/);
+  const verbBar = await read("../../tests/fixtures/queue_board/board.txt");
+  assert.ok(verbBar.includes("enter open · ctrl+d done · ctrl+n next · ctrl+o inbox · ctrl+b block · ? help"));
+  assert.match(page, /enter open · ctrl\+d done · ctrl\+n next · ctrl\+o inbox · ctrl\+b block · \? help/);
+  const css = await read("../src/styles/landing.css");
+  assert.match(css, /\.hero-side \.screen \{[^}]*white-space: pre-wrap/);
+  assert.match(css, /\.hero-side \.s-row \.l \{[^}]*text-overflow: clip/);
+  assert.doesNotMatch(css, /\.goto-label \{\s*display: none/);
   assert.match(page, /Persistent navigation/);
   assert.match(page, /aria-label=\{pinLabel\(1\)\}/);
   const js = await read("../public/landing.js");
@@ -262,6 +272,8 @@ test("landing agents section points at markdown twins", async () => {
   assert.match(page, /class="cli-side"[\s\S]*tsk setup grok/);
   assert.match(page, /class="cli-main"[\s\S]*id="agents"/);
   assert.doesNotMatch(page, /Hand it to your agent/);
+  assert.match(page, /id="agents" aria-labelledby="agents-heading"/);
+  assert.match(page, /<h3 class="side-title" id="agents-heading">Paste this into your agent<\/h3>/);
   assert.ok(page.indexOf("class=\"agent-handoff\"") < page.indexOf("Everything an agent needs"));
   assert.ok(page.indexOf('id="cli"') < page.indexOf('id="agents"'));
   assert.ok(page.indexOf('id="agents"') < page.indexOf('id="install"'));

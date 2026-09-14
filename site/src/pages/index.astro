@@ -46,8 +46,8 @@ const BOARD_PINS = [
   },
   {
     n: 6,
-    title: 'Done drawer.',
-    body: 'Finished work stays out of the way. <kbd>d</kbd> pulls the drawer open.',
+    title: 'Footer and done drawer.',
+    body: 'One rule, then the scope you are looking at: <code>desk</code>, or a project with its thread or archived filter. Finished work stays out of the way; <kbd>d</kbd> pulls the done drawer open above the rule.',
   },
   {
     n: 7,
@@ -283,12 +283,11 @@ const softwareApplication = {
               <div class="s-fill"></div>
               <div class="s-row s-footrule"><span class="rule"></span></div>
               <div class="s-row s-foot">
-                <span class="l meta">2 done</span>
+                <span class="l meta">desk</span>
                 <button type="button" class="pin" data-pin="6" aria-label={pinLabel(6)} aria-controls="pin-card" aria-expanded="false">6</button>
               </div>
-              <div class="s-row s-footrule"><span class="rule"></span></div>
               <div class="s-row s-foot">
-                <span class="l meta">enter open · ctrl+d done · ctrl+b block · : palette · ? help · + capture</span>
+                <span class="l meta">enter open · ctrl+d done · ctrl+n next · ctrl+o inbox · ctrl+b block · ? help</span>
                 <button type="button" class="pin" data-pin="7" aria-label={pinLabel(7)} aria-controls="pin-card" aria-expanded="false">7</button>
               </div>
             </div>
@@ -570,7 +569,8 @@ const softwareApplication = {
 <span class="prompt">$</span> cat plan.json | tsk add
 <span class="dim">&#123; "created": [...], "existing": [...], "failed": [] &#125;</span></pre>
 
-              <section class="agent-block" id="agents" aria-label="Agents">
+              <section class="agent-block" id="agents" aria-labelledby="agents-heading">
+                <h3 class="side-title" id="agents-heading">Paste this into your agent</h3>
                 <div class="agent-handoff">
                   <div class="shell-wrap">
                     <pre class="shell" data-copy-source>Use tsk for my task board. Run `tsk guide` and follow it; if tsk is not installed, read https://gettsk.sh/docs/agents.md and ask me before installing.</pre>

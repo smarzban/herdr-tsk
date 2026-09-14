@@ -1854,6 +1854,15 @@ html[data-theme="light"] .pane {
   min-height: 0;
   font-size: clamp(0.64rem, 0.92vw, 0.8rem);
   padding: 0.75rem 2.2rem 0.75rem 0.75rem;
+  /* The board wraps, never truncates; the hero mock has to keep that promise. */
+  white-space: pre-wrap;
+  overflow-x: visible;
+}
+
+.hero-side .s-row .l {
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
 }
 
 .hero-side .s-gap {
@@ -1862,26 +1871,6 @@ html[data-theme="light"] .pane {
 
 .hero-side .s-fill {
   min-height: 0.6em;
-}
-
-.hero-side .s-foot {
-  min-height: 2rem;
-}
-
-.hero-side .s-foot .pin {
-  top: 0.2rem;
-  transform: none;
-}
-
-.hero-side .s-foot:last-child .pin {
-  top: auto;
-  bottom: 0.2rem;
-}
-
-.hero-side .s-foot .pin:hover,
-.hero-side .s-foot .pin.is-on,
-.hero-side .s-foot .pin:focus-visible {
-  transform: scale(1.12);
 }
 
 .screen {
@@ -2637,12 +2626,6 @@ html[data-theme="light"] .pane {
 
   .foot-inner {
     flex-direction: column;
-  }
-}
-
-@media (max-width: 420px) {
-  .goto-label {
-    display: none;
   }
 }
 
