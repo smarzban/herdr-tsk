@@ -11,7 +11,7 @@ Double-click a task or select it and press `Enter`. A double-click follows the t
 
 At 110 usable columns or wider, click a task or press `→` to open details beside the board, keeping board focus. Use `→` and `←` to move between [board and task views](/docs/board/#wide-stage-slider). Press `Enter` from the board for full screen; `Esc` returns.
 
-Click the task's `T` number to copy it. The page shows its status, notes, steps, project, thread, and dates. Long text wraps.
+Click the task's `T` number to copy it. The page shows its status, notes, steps, project, thread, and dates. Its footer puts `#thread` before the project, then the created and updated dates. Long text wraps.
 
 ## Edit
 
@@ -29,7 +29,7 @@ Clicking Title, Notes, Scope, or Thread does not start an edit from view mode. S
 
 In view mode, `Tab` selects steps and **+ step**. It does not cycle task fields. Status shortcuts remain available on the task page; use `ctrl+e`, then `Tab` to reach Notes.
 
-During task editing, the order is Title → Notes → steps → **+ step** → Scope → Thread. A field click moves the cursor and retains staged changes.
+During task editing, the forward order is Title → Notes → steps → **+ step** → Thread → Scope → Title. `Shift+Tab` reverses the ring. A field click moves the cursor and retains staged changes.
 
 ## Scope and thread
 

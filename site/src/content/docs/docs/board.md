@@ -28,7 +28,7 @@ Press `p` to choose a project, or open **projects** for an overview.
 - Press `Esc` to clear and close search.
 - Check the footer for the selected project's full path.
 
-Counts show work needing attention, in progress, and ready. The project index's ready count excludes open tasks; project boards show both under ON DECK. A dim `·` means zero. `here` marks the launch project. At 100 columns or wider, the overview also lists threads.
+Projects Overview counts work in **NEEDS YOU**, **IN MOTION**, **ON DECK** (ready and open, including the inbox), and **DONE**. Archived tasks and archived projects are excluded. A dim `·` means zero. `here` marks the launch project. At 100 columns or wider, the overview also lists threads.
 
 At **110 usable columns** or wider, Overview can preview the cursored project beside the index:
 

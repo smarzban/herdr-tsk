@@ -1,6 +1,6 @@
 {
   "format_version": 4,
-  "next_task_number": 16,
+  "next_task_number": 23,
   "tasks": [
     {
       "id": "00000000-0000-4000-8000-000000000012",
@@ -110,6 +110,172 @@
       ],
       "updated_at": [
         1700000097,
+        0
+      ]
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000016",
+      "number": 16,
+      "revision": "10000000-0000-4000-8000-000000000016",
+      "title": "Plan the support handoff",
+      "notes": "",
+      "thread": "triage",
+      "status": "ready",
+      "scope": "global",
+      "provenance": "selection",
+      "history": [],
+      "steps": [],
+      "soft_deleted": false,
+      "created_at": [
+        1700000017,
+        0
+      ],
+      "updated_at": [
+        1700000017,
+        0
+      ]
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000017",
+      "number": 17,
+      "revision": "10000000-0000-4000-8000-000000000017",
+      "title": "Clean up stale local branches",
+      "notes": "",
+      "thread": null,
+      "status": "ready",
+      "scope": "global",
+      "provenance": "selection",
+      "history": [],
+      "steps": [],
+      "soft_deleted": false,
+      "created_at": [
+        1700000018,
+        0
+      ],
+      "updated_at": [
+        1700000018,
+        0
+      ]
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000018",
+      "number": 18,
+      "revision": "10000000-0000-4000-8000-000000000018",
+      "title": "Sort feedback from the pilot",
+      "notes": "",
+      "thread": "triage",
+      "status": "open",
+      "scope": "global",
+      "provenance": "selection",
+      "history": [],
+      "steps": [],
+      "soft_deleted": false,
+      "created_at": [
+        1700000019,
+        0
+      ],
+      "updated_at": [
+        1700000019,
+        0
+      ]
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000019",
+      "number": 19,
+      "revision": "10000000-0000-4000-8000-000000000019",
+      "title": "Record the retry runbook",
+      "notes": "",
+      "thread": null,
+      "status": "open",
+      "scope": "global",
+      "provenance": "selection",
+      "history": [],
+      "steps": [],
+      "soft_deleted": false,
+      "created_at": [
+        1700000020,
+        0
+      ],
+      "updated_at": [
+        1700000020,
+        0
+      ]
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000020",
+      "number": 20,
+      "revision": "10000000-0000-4000-8000-000000000020",
+      "title": "Add audit events for admin changes",
+      "notes": "",
+      "thread": null,
+      "status": "ready",
+      "scope": {
+        "project": {
+          "path": "/tmp/tsk-parity"
+        }
+      },
+      "provenance": "selection",
+      "history": [],
+      "steps": [],
+      "soft_deleted": false,
+      "created_at": [
+        1700000021,
+        0
+      ],
+      "updated_at": [
+        1700000021,
+        0
+      ]
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000021",
+      "number": 21,
+      "revision": "10000000-0000-4000-8000-000000000021",
+      "title": "Trace worker queue saturation",
+      "notes": "",
+      "thread": null,
+      "status": "open",
+      "scope": {
+        "project": {
+          "path": "/tmp/tsk-parity"
+        }
+      },
+      "provenance": "selection",
+      "history": [],
+      "steps": [],
+      "soft_deleted": false,
+      "created_at": [
+        1700000022,
+        0
+      ],
+      "updated_at": [
+        1700000022,
+        0
+      ]
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000022",
+      "number": 22,
+      "revision": "10000000-0000-4000-8000-000000000022",
+      "title": "Document regional failover checks",
+      "notes": "",
+      "thread": null,
+      "status": "open",
+      "scope": {
+        "project": {
+          "path": "/tmp/tsk-parity"
+        }
+      },
+      "provenance": "selection",
+      "history": [],
+      "steps": [],
+      "soft_deleted": false,
+      "created_at": [
+        1700000023,
+        0
+      ],
+      "updated_at": [
+        1700000023,
         0
       ]
     }

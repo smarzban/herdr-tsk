@@ -1168,6 +1168,7 @@ pub fn map_key(mode: BoardInputMode, key: KeyEvent) -> Option<BoardIntent> {
     match mode {
         BoardInputMode::Normal => map_normal(key),
         BoardInputMode::TaskPage => map_task_page(key),
+        BoardInputMode::CapturePage => map_capture_page(key),
         BoardInputMode::ProjectPicker => map_project_picker(key),
         BoardInputMode::ListPicker => map_list_picker(key),
         BoardInputMode::ProjectsSearch => map_projects_search(key),
@@ -1531,7 +1532,8 @@ pub fn map_edit_paste(mode: BoardInputMode, text: &str) -> Option<BoardIntent> {
         | BoardInputMode::EditScope
         | BoardInputMode::FormScopeDropdown
         | BoardInputMode::LaunchCard
-        | BoardInputMode::TaskPage => None,
+        | BoardInputMode::TaskPage
+        | BoardInputMode::CapturePage => None,
         BoardInputMode::ListPicker => {
             Some(BoardIntent::ListPickerQueryInsertText(text.to_string()))
         }
@@ -1724,6 +1726,27 @@ fn map_normal(key: KeyEvent) -> Option<BoardIntent> {
 ///
 /// The step verbs reuse this map's existing intents: Ctrl+S, Ctrl+E, and Ctrl+X act on a
 /// selected step, otherwise on the task. The reducer disambiguates using the model cursor.
+/// The expanded quick-add page owns a selected staged step or `+ step` target. It deliberately
+/// exposes no board status verbs, so an unseen board selection cannot be mutated behind it.
+fn map_capture_page(key: KeyEvent) -> Option<BoardIntent> {
+    let mods = key.modifiers;
+    let extra = mods.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER);
+    match key.code {
+        KeyCode::Char('c') if mods.contains(KeyModifiers::CONTROL) => Some(BoardIntent::Quit),
+        KeyCode::Esc if !extra => Some(BoardIntent::CancelEdit),
+        KeyCode::Enter if !extra => Some(BoardIntent::OpenTaskPage),
+        KeyCode::Char('a') if mods.contains(KeyModifiers::CONTROL) => {
+            Some(BoardIntent::BeginAddStep)
+        }
+        KeyCode::Tab if !extra => Some(BoardIntent::FormFocusNext),
+        KeyCode::BackTab if !extra => Some(BoardIntent::FormFocusPrev),
+        KeyCode::Up | KeyCode::Char('k') if !extra => Some(BoardIntent::PageScrollUp),
+        KeyCode::Down | KeyCode::Char('j') if !extra => Some(BoardIntent::PageScrollDown),
+        KeyCode::Char('?') if !extra => Some(BoardIntent::OpenHelp),
+        _ => None,
+    }
+}
+
 fn map_task_page(key: KeyEvent) -> Option<BoardIntent> {
     let mods = key.modifiers;
     if key.code == KeyCode::Char('c') && mods.contains(KeyModifiers::CONTROL) {

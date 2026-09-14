@@ -81,7 +81,12 @@ fn export_reference(text: &str, width: u16, name: &str) {
             let lines: Vec<_> = text
                 .lines()
                 .skip_while(|line| !line.contains("T13 "))
-                .take_while(|line| !line.trim().is_empty())
+                .take_while(|line| {
+                    let body = line.trim_start();
+                    !body.is_empty()
+                        && (line.contains("T13")
+                            || (!body.starts_with('○') && !body.starts_with('▸')))
+                })
                 .map(|line| {
                     line.chars()
                         .skip(8)

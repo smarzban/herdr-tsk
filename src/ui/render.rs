@@ -466,7 +466,7 @@ pub enum QueueOverlay<'a> {
         inline_step_editor: Option<InlineStepEditor<'a>>,
         /// The thread field still uses the shared bottom input slot.
         bottom_input: Option<BottomInputSlot<'a>>,
-        /// Footer: task number · scope · thread · created · updated.
+        /// Footer: thread · scope · created · updated (the task number remains in the header).
         meta: String,
         /// Display width before the scope inside `meta`. The number is chrome, not a scope hit.
         meta_scope_x: u16,
@@ -3147,7 +3147,7 @@ fn paint_task_page(
         );
     }
 
-    // Meta footer: scope · thread · created · updated. Inline step drafts leave this footer
+    // Meta footer: thread · scope · created · updated. Inline step drafts leave this footer
     // visible and do not claim its input slot.
     if let Some(y) = lay.meta_y {
         put_line(
@@ -3158,36 +3158,31 @@ fn paint_task_page(
             paint_bounded_line(&format!("  {meta}"), width, style_dim()),
         );
 
-        let scope_x = 2u16.saturating_add(meta_scope_x).min(width);
-        let thread_x = scope_x.saturating_add(meta_scope_width).min(width);
+        let thread_x = 2u16;
+        let scope_slot: String = meta.chars().skip(usize::from(meta_scope_x)).collect();
+        // The separator stays footer chrome. Scope begins after it, while a leading Thread
+        // slot starts at the footer inset and has no separator to exclude.
+        let scope_prefix = u16::from(scope_slot.starts_with(" · ")) * 3;
+        let scope_x = 2u16
+            .saturating_add(meta_scope_x)
+            .saturating_add(scope_prefix)
+            .min(width);
         let selected = match focus {
             Some(CaptureField::Scope) => Some((scope_x, meta_scope_width)),
-            // The separator belongs to footer chrome. Only the thread marker and name are
-            // the selected control, so ` · #auth` keeps its dot dim while `#auth` reverses.
-            Some(CaptureField::Thread) => thread_slot_width.map(|slot_width| {
-                // ` · #auth` inside a longer footer; a leading `#auth` when the thread opens it.
-                let slot: String = meta
-                    .chars()
-                    .skip(usize::from(meta_scope_x.saturating_add(meta_scope_width)))
-                    .collect();
-                let thread_prefix = if slot.starts_with(" · ") {
-                    3u16
-                } else {
-                    u16::from(slot.starts_with('#'))
-                };
-                (
-                    thread_x.saturating_add(thread_prefix),
-                    slot_width.saturating_sub(thread_prefix),
-                )
-            }),
+            Some(CaptureField::Thread) => {
+                thread_slot_width.map(|slot_width| (thread_x, slot_width))
+            }
             _ => None,
         };
         if let Some((selected_x, selected_width)) = selected {
             let selected_width = selected_width.min(width.saturating_sub(selected_x));
             let buffer = frame.buffer_mut();
             for x in selected_x..selected_x.saturating_add(selected_width) {
-                buffer[(surface.x.saturating_add(x), surface.y.saturating_add(y))]
-                    .set_style(style_reverse());
+                buffer[(surface.x.saturating_add(x), surface.y.saturating_add(y))].set_style(
+                    Style::default()
+                        .add_modifier(Modifier::REVERSED)
+                        .remove_modifier(Modifier::DIM),
+                );
             }
         }
         if footer_input_open {
@@ -3925,6 +3920,7 @@ fn build_list_rows(
                     geo.row_width,
                     model.archived_header_selected,
                     model.archived_collapsed,
+                    true,
                 ),
             });
             // The header pin must drive viewport follow exactly like a task row.
@@ -3959,12 +3955,12 @@ fn build_list_rows(
                     geo.row_width,
                     model.inbox_header_selected,
                     model.inbox_collapsed,
+                    false,
                 ),
             });
             if model.inbox_header_selected {
                 selected_idx = Some(out.len() - 1);
             }
-            out.push(ListRow::Blank);
             if model.inbox_collapsed {
                 continue;
             }
@@ -4015,7 +4011,7 @@ fn build_list_rows(
     (out, anchor_last_idx, selected_idx)
 }
 
-/// Column geometry of the projects index. The three count columns are anchored to the
+/// Column geometry of the projects index. The four count columns are anchored to the
 /// right edge, so the name column absorbs whatever width the frame has instead of
 /// truncating at a fixed cell. A THREADS column opens between name and counts once the
 /// frame is wide enough to give both a fair share.
@@ -4031,10 +4027,14 @@ pub(crate) struct IndexColumns {
     pub needs_end: usize,
     /// Exclusive right edge of IN MOTION.
     pub motion_end: usize,
-    /// Exclusive right edge of READY.
-    pub ready_end: usize,
-    /// Column legend words, shortened below 52 cells.
-    pub labels: (&'static str, &'static str, &'static str),
+    /// Exclusive right edge of ON DECK.
+    pub on_deck_end: usize,
+    /// Exclusive right edge of DONE, or the compact overflow marker when DONE is hidden.
+    pub done_end: usize,
+    /// Whether the DONE count lane is present (the narrow preview rail shows `…` instead).
+    pub done_visible: bool,
+    /// Column legend words, shortened where four full labels would crowd the name.
+    pub labels: (&'static str, &'static str, &'static str, &'static str),
 }
 
 /// Cells taken by the ` ▸ ` / `   ` row marker.
@@ -4043,22 +4043,30 @@ const INDEX_NAME_X: usize = 3;
 const INDEX_GAP: usize = 2;
 /// Narrowest frame that paints the THREADS column.
 pub(crate) const INDEX_THREADS_MIN_WIDTH: usize = 100;
-/// Narrowest frame that spells the count legend in full.
-const INDEX_FULL_LABELS_MIN_WIDTH: usize = 52;
+/// The name column's existing 24-cell floor needs short labels through 65 cells: four
+/// full labels, their gaps, and the right margin first fit beside it at 66.
+const INDEX_FULL_LABELS_MIN_WIDTH: usize = 66;
 
 pub(crate) fn index_columns(width: usize) -> IndexColumns {
-    let labels = if width < INDEX_FULL_LABELS_MIN_WIDTH {
-        ("NEED", "MOTION", "READY")
+    let compact = width < INDEX_FULL_LABELS_MIN_WIDTH;
+    // The 32-cell preview rail cannot carry four count lanes beside a readable PROJECT
+    // heading. Hide DONE there behind an overflow marker; 50-column full boards are unchanged.
+    let done_visible = width >= 34;
+    let labels = if !done_visible {
+        ("NEED", "MOTION", "DECK", "…")
+    } else if compact {
+        ("NEED", "MOTION", "DECK", "DONE")
     } else {
-        ("NEEDS YOU", "IN MOTION", "READY")
+        ("NEEDS YOU", "IN MOTION", "ON DECK", "DONE")
     };
-    let ready_end = width.saturating_sub(INDEX_GAP);
-    let motion_end = ready_end.saturating_sub(labels.2.len() + INDEX_GAP);
-    let needs_end = motion_end.saturating_sub(labels.1.len() + INDEX_GAP);
+    // One-cell compact gaps preserve the old 24-cell name floor at 50 columns.
+    let gap = if compact { 1 } else { INDEX_GAP };
+    let done_end = width.saturating_sub(gap);
+    let on_deck_end = done_end.saturating_sub(labels.3.len() + gap);
+    let motion_end = on_deck_end.saturating_sub(labels.2.len() + gap);
+    let needs_end = motion_end.saturating_sub(labels.1.len() + gap);
     let needs_start = needs_end.saturating_sub(labels.0.len());
-    let available = needs_start
-        .saturating_sub(INDEX_GAP)
-        .saturating_sub(INDEX_NAME_X);
+    let available = needs_start.saturating_sub(gap).saturating_sub(INDEX_NAME_X);
     let threads = (width >= INDEX_THREADS_MIN_WIDTH).then(|| {
         // Name keeps two fifths of the shared span, threads the rest.
         let name_w = (available * 2 / 5).max(24);
@@ -4074,7 +4082,9 @@ pub(crate) fn index_columns(width: usize) -> IndexColumns {
         threads: threads.map(|(_, x, w)| (x, w)),
         needs_end,
         motion_end,
-        ready_end,
+        on_deck_end,
+        done_end,
+        done_visible,
         labels,
     }
 }
@@ -4134,7 +4144,8 @@ fn paint_index_header(width: u16) -> Line<'static> {
     for (end, label) in [
         (columns.needs_end, columns.labels.0),
         (columns.motion_end, columns.labels.1),
-        (columns.ready_end, columns.labels.2),
+        (columns.on_deck_end, columns.labels.2),
+        (columns.done_end, columns.labels.3),
     ] {
         place_right(&mut spans, &mut x, end, label.to_string(), style_dim());
     }
@@ -4142,7 +4153,7 @@ fn paint_index_header(width: u16) -> Line<'static> {
 }
 
 /// A count cell: zero paints a dim `·` so the eye skips it; a live number takes the
-/// weight of its lane (NEEDS YOU bold, IN MOTION plain, READY dim).
+/// weight of its lane (NEEDS YOU bold, IN MOTION plain, ON DECK and DONE dim).
 fn index_count(value: usize, live_style: Style) -> (String, Style) {
     if value == 0 {
         ("\u{b7}".to_string(), style_dim())
@@ -4241,14 +4252,18 @@ fn paint_project_row(
             place_span(&mut spans, &mut x, threads_x, cell, style_dim());
         }
     }
-    for (end, (text, style)) in [
+    let mut counts = vec![
         (columns.needs_end, index_count(row.needs_you, style_bold())),
         (
             columns.motion_end,
             index_count(row.in_motion, style_plain()),
         ),
-        (columns.ready_end, index_count(row.ready, style_dim())),
-    ] {
+        (columns.on_deck_end, index_count(row.on_deck, style_dim())),
+    ];
+    if columns.done_visible {
+        counts.push((columns.done_end, index_count(row.done, style_dim())));
+    }
+    for (end, (text, style)) in counts {
         place_right(&mut spans, &mut x, end, text, style);
     }
     bound_line(Line::from(spans), width as usize)
@@ -4331,9 +4346,16 @@ fn paint_group_header(
     width: u16,
     selected: bool,
     collapsed: bool,
+    dim: bool,
 ) -> Line<'static> {
-    let word_style = if selected { style_bold() } else { style_dim() };
-    let rest_style = style_dim();
+    let word_style = if selected {
+        style_bold()
+    } else if dim {
+        style_dim()
+    } else {
+        style_plain()
+    };
+    let rest_style = if dim { style_dim() } else { style_plain() };
     let chevron = if collapsed { "\u{25b8}" } else { "\u{25be}" };
     bound_line(
         Line::from(vec![
@@ -5136,7 +5158,8 @@ mod tests {
                 path: unsafe_path.clone(),
                 needs_you: 0,
                 in_motion: 0,
-                ready: 1,
+                on_deck: 1,
+                done: 0,
                 threads: Vec::new(),
                 current: false,
             },
@@ -5144,7 +5167,8 @@ mod tests {
                 path: "/other/repo".into(),
                 needs_you: 0,
                 in_motion: 0,
-                ready: 1,
+                on_deck: 1,
+                done: 0,
                 threads: Vec::new(),
                 current: false,
             },

@@ -3246,8 +3246,8 @@ mod tests {
             .find(|row| row.path == "/repos/preview")
             .expect("outer project row after completion");
         assert_eq!(
-            outer_row.ready, 1,
-            "post-dispatch sync must refresh the outer project's count"
+            outer_row.on_deck, 1,
+            "post-dispatch sync must refresh the outer project's ON DECK count"
         );
         let right = model.right_seat().expect("right seat after completion");
         assert!(
@@ -5742,6 +5742,98 @@ mod tests {
             ),
             Some(BoardIntent::EditInsert('e'))
         );
+    }
+
+    #[test]
+    fn expanded_quick_add_tabs_past_the_selected_step_target() {
+        let mut domain = DomainState::new();
+        let mut model = BoardModel::from_domain(&domain, None);
+        apply_intent(&mut domain, &mut model, BoardIntent::OpenCapture, None)
+            .expect("open quick add");
+        apply_intent(&mut domain, &mut model, BoardIntent::ExpandQuickAdd, None)
+            .expect("expand quick add");
+        apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
+            .expect("Tab from Notes selects + step");
+        assert_eq!(model.input_mode(), BoardInputMode::CapturePage);
+
+        let intent = board_keyboard_intent(
+            &model,
+            model.input_mode(),
+            KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE),
+        );
+        assert_eq!(
+            intent,
+            Some(BoardIntent::FormFocusNext),
+            "Tab on expanded capture's + step must reach Thread"
+        );
+        apply_intent(&mut domain, &mut model, intent.expect("Tab intent"), None)
+            .expect("advance past + step");
+        assert_eq!(model.input_mode(), BoardInputMode::EditThread);
+    }
+
+    #[test]
+    fn expanded_quick_add_step_selection_cannot_reach_the_hidden_board() {
+        let mut domain = DomainState::new();
+        let id = domain
+            .create(
+                "behind the draft",
+                None,
+                TaskScope::Global,
+                ProvenanceOrigin::Manual,
+                None,
+            )
+            .expect("create hidden board task");
+        let mut model = BoardModel::from_domain(&domain, None);
+        apply_intent(&mut domain, &mut model, BoardIntent::OpenCapture, None)
+            .expect("open quick add");
+        apply_intent(&mut domain, &mut model, BoardIntent::ExpandQuickAdd, None)
+            .expect("expand quick add");
+        apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
+            .expect("select + step");
+        apply_intent(&mut domain, &mut model, BoardIntent::BeginAddStep, None)
+            .expect("open first step");
+        for text in ["first", "second"] {
+            for character in text.chars() {
+                apply_intent(
+                    &mut domain,
+                    &mut model,
+                    BoardIntent::EditInsert(character),
+                    None,
+                )
+                .expect("type step");
+            }
+            apply_intent(&mut domain, &mut model, BoardIntent::ConfirmEdit, None)
+                .expect("stage step and open next");
+        }
+        apply_intent(&mut domain, &mut model, BoardIntent::CancelEdit, None)
+            .expect("close empty next step");
+        apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
+            .expect("select first staged step");
+        assert_eq!(model.input_mode(), BoardInputMode::CapturePage);
+        for key in [
+            KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE),
+            KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL),
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+        ] {
+            let intent = board_keyboard_intent(&model, model.input_mode(), key);
+            if let Some(intent) = intent {
+                apply_intent(&mut domain, &mut model, intent, None).expect("capture owns key");
+            }
+            assert!(
+                model.capture_draft_open(),
+                "{key:?} keeps the capture draft"
+            );
+            assert_ne!(
+                domain
+                    .tasks()
+                    .iter()
+                    .find(|task| task.id == id)
+                    .expect("hidden task")
+                    .status,
+                HumanStatus::Done,
+                "{key:?} does not mutate hidden task"
+            );
+        }
     }
 
     /// A form can remain allocated while a popup or view owns the resolved input mode. The

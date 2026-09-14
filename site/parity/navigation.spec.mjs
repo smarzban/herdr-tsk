@@ -40,8 +40,8 @@ test("project navigation, counted views and selection match the app", async ({
   await expect(
     page.getByRole("dialog", { name: "thread filter" }),
   ).toBeVisible();
-  await page.getByText("Without a thread 1", { exact: false }).click();
-  await expect(page.locator("[data-task]")).toHaveCount(1);
+  await page.getByText("Without a thread 4", { exact: false }).click();
+  await expect(page.locator("[data-task]")).toHaveCount(4);
   await page.locator('[data-tab="projects"]').click();
   await expect(page.locator(".tsk-project-legend")).toContainText("NEEDS YOU");
   await expect(page.locator("[data-filter]")).toHaveText("Overview ▾");
@@ -93,6 +93,30 @@ for (const scope of ["project", "projects"])
     ).toHaveCount(0);
   });
 
+test("landing seeds keep ready picks and inbox rows visible on desk and launchpad", async ({
+  page,
+}) => {
+  await page.goto("http://127.0.0.1:4180/");
+  for (const title of [
+    "Plan the support handoff",
+    "Clean up stale local branches",
+    "Sort feedback from the pilot",
+    "Record the retry runbook",
+  ])
+    await expect(
+      page.locator("[data-task]").filter({ hasText: title }),
+    ).toHaveCount(1);
+  await page.locator('[data-tab="project"]').click();
+  for (const title of [
+    "Add audit events for admin changes",
+    "Trace worker queue saturation",
+    "Document regional failover checks",
+  ])
+    await expect(
+      page.locator("[data-task]").filter({ hasText: title }),
+    ).toHaveCount(1);
+});
+
 test("project counts, thread labels and counted menu order match the app", async ({
   page,
 }) => {
@@ -100,17 +124,21 @@ test("project counts, thread labels and counted menu order match the app", async
   await page.locator('[data-tab="projects"]').click();
   const project = page.locator('[data-project-row="launchpad"]');
   await expect(project.locator(":scope > span").nth(1)).toHaveText(
-    "#api #auth",
+    "#api #auth #ops",
   );
   await expect(project.locator(":scope > span").nth(2)).toHaveText("2");
   await expect(project.locator(":scope > span").nth(3)).toHaveText("1");
-  await expect(project.locator(":scope > span").nth(4)).toHaveText("1");
+  await expect(project.locator(":scope > span").nth(4)).toHaveText("5");
+  await expect(project.locator(":scope > span").nth(5)).toHaveText("1");
   await page.locator('[data-tab="project"]').click();
   await page.locator("[data-filter]").click();
   await expect(page.locator("[data-filter-option]").nth(1)).toContainText(
     "#auth  3",
   );
   await expect(page.locator("[data-filter-option]").nth(2)).toContainText(
+    "#ops  3",
+  );
+  await expect(page.locator("[data-filter-option]").nth(3)).toContainText(
     "#api  2",
   );
 });

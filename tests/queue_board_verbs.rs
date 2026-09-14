@@ -2201,7 +2201,10 @@ fn view_tab_selection_wraps_without_starting_task_edit_and_ctrl_e_opens_inline_s
         .expect("Tab reaches the trailing add target after the final step");
     assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
     apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
-        .expect("Tab leaves the add target for Scope");
+        .expect("Tab leaves the add target for Thread");
+    assert_eq!(model.input_mode(), BoardInputMode::SelectThread);
+    apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
+        .expect("Tab leaves Thread for Scope");
     assert_eq!(model.input_mode(), BoardInputMode::EditScope);
 }
 
@@ -2225,7 +2228,7 @@ fn plain_enter_parks_an_existing_step_rename_without_saving_the_task_session() {
 }
 
 #[test]
-fn task_edit_tab_cycles_every_step_between_notes_and_scope() {
+fn task_edit_tab_cycles_every_step_between_notes_and_thread_then_scope() {
     let (mut domain, mut model, _) = board_with_steps("Tab fields", None, &["first", "second"]);
     assert!(rendered_board(&model, 80, 24).contains("▸ ▪ first"));
 
@@ -2237,19 +2240,19 @@ fn task_edit_tab_cycles_every_step_between_notes_and_scope() {
         .expect("Tab reaches the add target after the final step");
     assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
     apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
-        .expect("Tab leaves the add target for Scope");
-    assert_eq!(model.input_mode(), BoardInputMode::EditScope);
-    apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
-        .expect("Tab reaches selected Thread");
+        .expect("Tab leaves the add target for Thread");
     assert_eq!(model.input_mode(), BoardInputMode::SelectThread);
     apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
-        .expect("Tab reaches Title");
+        .expect("Tab reaches Scope");
+    assert_eq!(model.input_mode(), BoardInputMode::EditScope);
+    apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
+        .expect("Tab wraps Scope to Title");
     assert_eq!(model.input_mode(), BoardInputMode::EditTitle);
     apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
-        .expect("Tab reaches Notes");
+        .expect("Tab advances Title to Notes");
     assert_eq!(model.input_mode(), BoardInputMode::EditNotes);
     apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
-        .expect("Tab returns to the first selected step");
+        .expect("Tab returns to the first selected step after Notes");
     assert_eq!(model.input_mode(), BoardInputMode::EditStep);
     assert!(rendered_board(&model, 80, 24).contains("▸ ▪ first"));
 
@@ -3009,9 +3012,9 @@ fn first_step_up_deactivates_before_inactive_up_scrolls_then_down_reactivates() 
 
     apply_intent(&mut domain, &mut model, BoardIntent::BeginEditScope, None)
         .expect("enter Scope on the task edit traversal");
-    for _ in 0..4 {
+    for _ in 0..3 {
         apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
-            .expect("Tab completes Scope → Thread → Title → Notes → first step");
+            .expect("Tab completes Scope → Title → Notes → first step");
     }
     let reactivated = rendered_board(&model, 80, 24);
     assert!(

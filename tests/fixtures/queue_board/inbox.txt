@@ -8,9 +8,9 @@
 │  ○ T51 Ready release check                                                     │
 │                                                                                │
 │ ▾ inbox · 2                                                                    │
-│                                                                                │
 │  ◌ T52 Inbox capture one                                                       │
 │  ◌ T53 Inbox capture two                                                       │
+│                                                                                │
 │                                                                                │
 │                                                                                │
 │                                                                                │

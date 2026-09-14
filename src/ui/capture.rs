@@ -2096,7 +2096,7 @@ mod tests {
         // Park the Notes cursor at its start; this must not disturb Title's own cursor.
         apply(&mut domain, &snap, &mut model, CaptureIntent::MoveLineStart);
 
-        // Back to Title the long way round (Notes → Thread → Scope → Title).
+        // The complete ring returns to Title after Thread and Scope.
         apply(&mut domain, &snap, &mut model, CaptureIntent::FocusNext);
         apply(&mut domain, &snap, &mut model, CaptureIntent::FocusNext);
         apply(&mut domain, &snap, &mut model, CaptureIntent::FocusNext);

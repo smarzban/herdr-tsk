@@ -805,7 +805,7 @@ fn click_and_wheel_match_keyboard_effects_for_each_control() {
 /// this rewrite (its `CaptureLayout`/`map_capture_mouse` route is separate from the board's
 /// hit-map, per the task's implementation boundary).
 #[test]
-fn empty_thread_target_follows_a_scope_name_containing_the_thread_label() {
+fn footer_thread_precedes_scope_and_each_control_focuses_its_field() {
     let scope_path = "/repos/foo · thread";
     let mut domain = DomainState::new();
     domain
@@ -838,10 +838,28 @@ fn empty_thread_target_follows_a_scope_name_containing_the_thread_label() {
         "the entire project basename remains the scope target, excluding number chrome"
     );
     assert_eq!(
-        thread_hit.area.x,
-        2 + expected_scope_width,
-        "thread follows the footer inset and scope target, with no number on this in-memory task"
+        thread_hit.area.x, 2,
+        "the leading thread target starts at the footer inset"
     );
+    assert_eq!(
+        scope_hit.area.x,
+        2 + thread_hit.area.width + 3,
+        "scope follows the thread and its separator"
+    );
+    assert_eq!(
+        scope_hit.area.width, expected_scope_width,
+        "the entire project basename remains the scope target"
+    );
+
+    let thread = click(thread_hit, &model, &hits).expect("thread click intent");
+    assert_eq!(thread, BoardIntent::FocusFormField(CaptureField::Thread));
+    apply_intent(&mut domain, &mut model, thread, None).expect("focus thread");
+    assert_eq!(model.form_focus(), Some(CaptureField::Thread));
+
+    let scope = click(scope_hit, &model, &hits).expect("scope click intent");
+    assert_eq!(scope, BoardIntent::OpenFormScopeDropdown);
+    apply_intent(&mut domain, &mut model, scope, None).expect("focus scope");
+    assert_eq!(model.form_focus(), Some(CaptureField::Scope));
 }
 
 #[test]

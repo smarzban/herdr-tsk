@@ -683,6 +683,11 @@ html[data-theme="light"] .pane {
   color: var(--ink);
 }
 
+/* Inbox is active queue chrome, while the archived group remains dim. */
+.tsk-inbox {
+  color: var(--ink);
+}
+
 .tsk-row {
   display: flex;
   justify-content: space-between;
@@ -2667,6 +2672,7 @@ html[data-theme="light"] .pane {
 .tsk-task-column .tsk-task-surface { min-height: 0; padding-top: 0; }
 .tsk-task-column .tsk-page-notes { margin: 0; padding-right: 2ch; overflow-wrap: anywhere; }
 .tsk-page-meta { flex: none; min-height: 1lh; white-space: pre-wrap; overflow-wrap: anywhere; }
+.tsk-page-meta .tsk-meta-selected { color: var(--bg); background: var(--ink); }
 .tsk-steps { margin-top: 2lh; }
 .tsk-step { display: flex; align-items: start; cursor: pointer; }
 .tsk-step-glyph { flex: none; white-space: pre; }
@@ -2704,8 +2710,8 @@ html[data-theme="light"] .pane {
 .tsk-tab-arrow { padding-left: 1ch; }
 .tsk-view-control { margin-left: auto; }
 .board .tsk-row.is-sel { background: transparent; color: var(--ink); }
-.tsk-project-row, .tsk-project-legend { display: grid; grid-template-columns: minmax(0,1fr) 10ch 11ch 7ch; align-items: baseline; padding: 0 2ch 0 1ch; gap: 0; text-align: right; font: inherit; line-height: inherit; }
-.tsk-project-table.with-threads .tsk-project-row, .tsk-project-table.with-threads .tsk-project-legend { grid-template-columns: minmax(0,1fr) var(--project-thread-width) 10ch 11ch 7ch; }
+.tsk-project-row, .tsk-project-legend { display: grid; grid-template-columns: minmax(0,1fr) 10ch 11ch 8ch 6ch; align-items: baseline; padding: 0 2ch 0 1ch; gap: 0; text-align: right; font: inherit; line-height: inherit; }
+.tsk-project-table.with-threads .tsk-project-row, .tsk-project-table.with-threads .tsk-project-legend { grid-template-columns: minmax(0,1fr) var(--project-thread-width) 10ch 11ch 8ch 6ch; }
 .tsk-project-row { appearance: none; border: 0; background: none; color: var(--ink); width: 100%; cursor: pointer; }
 .tsk-project-name, .tsk-project-legend > :first-child { text-align: left; white-space: pre; }
 .tsk-project-row.is-selected .tsk-project-name > span:first-child, .tsk-project-row .is-bold { font-weight: bold; }

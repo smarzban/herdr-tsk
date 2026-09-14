@@ -118,8 +118,10 @@ pub struct ProjectRow {
     pub needs_you: usize,
     /// Started count.
     pub in_motion: usize,
-    /// Ready count.
-    pub ready: usize,
+    /// Ready plus open tasks, matching the project's ON DECK section and inbox.
+    pub on_deck: usize,
+    /// Live completed tasks, excluding archived tasks and archived projects.
+    pub done: usize,
     /// Distinct thread names on this project's open tasks, ordered by the most
     /// recently status-changed task first. Painted as the wide-width THREADS column.
     pub threads: Vec<String>,
@@ -334,7 +336,8 @@ fn query_desk(
 struct ProjectCounts {
     needs_you: usize,
     in_motion: usize,
-    ready: usize,
+    on_deck: usize,
+    done: usize,
     threads: Vec<String>,
 }
 
@@ -402,9 +405,13 @@ fn query_projects_index(
                         .iter()
                         .filter(|task| task.status == HumanStatus::Started)
                         .count(),
-                    ready: owned_tasks
+                    on_deck: owned_tasks
                         .iter()
-                        .filter(|task| task.status == HumanStatus::Ready)
+                        .filter(|task| is_on_deck_status(task.status))
+                        .count(),
+                    done: owned_tasks
+                        .iter()
+                        .filter(|task| task.status == HumanStatus::Done)
                         .count(),
                     threads,
                 }
@@ -430,14 +437,16 @@ fn query_projects_index(
             let ProjectCounts {
                 needs_you,
                 in_motion,
-                ready,
+                on_deck,
+                done,
                 threads,
             } = counts[*index].clone();
             ProjectRow {
                 path: paths[*index].clone(),
                 needs_you,
                 in_motion,
-                ready,
+                on_deck,
+                done,
                 threads,
                 current: current_repo.is_some_and(|repo| {
                     identities.equivalent(&paths[*index], &repo.to_string_lossy())
@@ -1535,6 +1544,7 @@ mod tests {
             task(2, HumanStatus::Started, project("/w/launch"), false, 20),
             task(3, HumanStatus::Ready, project("/w/launch"), false, 30),
             task(4, HumanStatus::Ready, project("/w/launch"), false, 35),
+            task(9, HumanStatus::Open, project("/w/launch"), false, 36),
             task(5, HumanStatus::Review, project("/w/herdr"), false, 40),
             task(6, HumanStatus::Done, project("/w/herdr"), false, 50),
             task(7, HumanStatus::Ready, project("/x/site"), false, 60),
@@ -1562,7 +1572,14 @@ mod tests {
         let launch = &view.projects[1];
         assert_eq!(launch.needs_you, 1, "blocked counts as needs-you");
         assert_eq!(launch.in_motion, 1);
-        assert_eq!(launch.ready, 2, "done tasks never count");
+        assert_eq!(
+            launch.on_deck, 3,
+            "ready and open tasks share the project's ON DECK tally"
+        );
+        assert_eq!(
+            view.projects[0].done, 1,
+            "live done tasks have their own tally"
+        );
 
         assert!(
             view.sections.is_empty(),
@@ -1588,10 +1605,39 @@ mod tests {
             (
                 view.projects[0].needs_you,
                 view.projects[0].in_motion,
-                view.projects[0].ready
+                view.projects[0].on_deck,
+                view.projects[0].done
             ),
-            (0, 0, 0)
+            (0, 0, 0, 0)
         );
+    }
+
+    #[test]
+    fn projects_index_done_excludes_archived_tasks_and_archived_projects() {
+        let mut archived_task = task(2, HumanStatus::Done, project("/w/live"), false, 20);
+        archived_task.archived = true;
+        let tasks = vec![
+            task(1, HumanStatus::Done, project("/w/live"), false, 10),
+            archived_task,
+            task(3, HumanStatus::Done, project("/w/gone"), false, 30),
+        ];
+        let archived_projects = BTreeSet::from(["/w/gone".to_string()]);
+        let view = query_board(
+            &tasks,
+            &archived_projects,
+            None,
+            BoardLens::Projects,
+            false,
+            &ThreadFilter::All,
+        );
+
+        assert_eq!(
+            view.projects.len(),
+            1,
+            "archived projects paint no index row"
+        );
+        assert_eq!(view.projects[0].path, "/w/live");
+        assert_eq!(view.projects[0].done, 1, "only live done tasks count");
     }
 
     #[test]
