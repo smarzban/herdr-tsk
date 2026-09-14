@@ -49,11 +49,6 @@ const BOARD_PINS = [
     title: 'Footer and done drawer.',
     body: 'One rule, then the scope you are looking at: <code>desk</code>, or a project with its thread or archived filter. Finished work stays out of the way; <kbd>d</kbd> pulls the done drawer open above the rule.',
   },
-  {
-    n: 7,
-    title: 'Verb bar.',
-    body: 'The chords that apply right now. Below 78 columns it folds into a compact board that still works at 40×10.',
-  },
 ];
 const pinLabel = (n) => {
   const pin = BOARD_PINS.find((p) => p.n === n);
@@ -288,7 +283,6 @@ const softwareApplication = {
               </div>
               <div class="s-row s-foot">
                 <span class="l meta">enter open · ctrl+d done · ctrl+n next · ctrl+o inbox · ? help</span>
-                <button type="button" class="pin" data-pin="7" aria-label={pinLabel(7)} aria-controls="pin-card" aria-expanded="false">7</button>
               </div>
             </div>
             {BOARD_PINS.map((pin) => (

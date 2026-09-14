@@ -243,9 +243,11 @@ test("hero has the install one-liner and a jump to the demo", async () => {
 test("hero board pins reveal callout copy", async () => {
   const page = await read("../src/pages/index.astro");
   assert.match(page, /data-board-pins/);
-  assert.match(page, /data-pin="7"/);
+  assert.match(page, /data-pin="6"/);
+  assert.doesNotMatch(page, /data-pin="7"/);
+  assert.equal((page.match(/data-pin="\d"/g) || []).length, 6);
   // One rule, then the scope line, then the verb bar: the footer the TUI paints.
-  assert.match(page, /s-footrule[\s\S]*<span class="l meta">desk<\/span>[\s\S]*data-pin="6"[\s\S]*data-pin="7"/);
+  assert.match(page, /s-footrule[\s\S]*<span class="l meta">desk<\/span>[\s\S]*data-pin="6"/);
   assert.equal((page.match(/s-footrule/g) || []).length, 1);
   assert.doesNotMatch(page, /<span class="l meta">2 done<\/span>/);
   // The fixture's verb bar minus ctrl+b, so it sits on one line beside the pin gutter.
