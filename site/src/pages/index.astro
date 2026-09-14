@@ -44,11 +44,6 @@ const BOARD_PINS = [
     title: 'Your loose backlog.',
     body: "Desk's ON DECK contains only tasks without a project. Picked <code>ready</code> tasks lead, then the expandable <code>inbox</code> of <code>open</code> tasks. Project backlogs live on their own boards, with thread filters across every status.",
   },
-  {
-    n: 6,
-    title: 'Footer and done drawer.',
-    body: 'One rule, then the scope you are looking at: <code>desk</code>, or a project with its thread or archived filter. Finished work stays out of the way; <kbd>d</kbd> pulls the done drawer open above the rule.',
-  },
 ];
 const pinLabel = (n) => {
   const pin = BOARD_PINS.find((p) => p.n === n);
@@ -279,7 +274,6 @@ const softwareApplication = {
               <div class="s-row s-footrule"><span class="rule"></span></div>
               <div class="s-row s-foot">
                 <span class="l meta">desk</span>
-                <button type="button" class="pin" data-pin="6" aria-label={pinLabel(6)} aria-controls="pin-card" aria-expanded="false">6</button>
               </div>
               <div class="s-row s-foot">
                 <span class="l meta">enter open · ctrl+d done · ctrl+n next · ctrl+o inbox · ? help</span>

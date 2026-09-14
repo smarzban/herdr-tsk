@@ -136,7 +136,13 @@ test("demo matches the quick-add, peek, and group-toggle contracts", async () =>
   const landing = await read("../src/styles/landing.css");
   assert.match(demo, /if \(e\.key === "Enter" && !e\.ctrlKey && !e\.altKey && !e\.metaKey\)/);
   assert.match(demo, /saveDraft\(e\.shiftKey\)/);
-  assert.match(demo, /enter save · tab details · esc close/);
+  assert.match(demo, /id: "save", label: "enter save"/);
+  assert.match(demo, /id: "details", label: "tab details"/);
+  assert.match(demo, /id: "close", label: "esc close"/);
+  assert.match(demo, /if \(id === "close"\) \{\s*state\.overlay = null;\s*leaveTaskPage/);
+  assert.match(demo, /function runHint/);
+  assert.match(demo, /data-hint=/);
+  assert.match(demo, /"inbox"\}<\/span> · <span class="count">\$\{row\.count\}<\/span>/);
   assert.match(demo, /\["views & find", "z \/ D", "done drawer"/);
   assert.match(demo, /state\.helpQ/);
   assert.match(demo, /search keys or actions/);
@@ -218,8 +224,10 @@ test("landing header uses a goto menu plus docs and github", async () => {
   assert.match(page, /class="nav-text" href=\{REPO\}[^>]*>github</);
   assert.doesNotMatch(page, /class="nav-text" href="\/docs\/install\//);
   assert.match(page, /class="nav-dot"/);
+  assert.match(page, /class="theme-toggle"/);
   const css = await read("../src/styles/landing.css");
   assert.match(css, /\.goto-chip/);
+  assert.doesNotMatch(css, /\.theme-toggle \{[^}]*border-radius:\s*50%/);
   assert.doesNotMatch(css, /nav-demo/);
   assert.doesNotMatch(css, /\.nav-icon\b/);
   assert.doesNotMatch(css, /\.keygrid\b/);
@@ -243,11 +251,11 @@ test("hero has the install one-liner and a jump to the demo", async () => {
 test("hero board pins reveal callout copy", async () => {
   const page = await read("../src/pages/index.astro");
   assert.match(page, /data-board-pins/);
-  assert.match(page, /data-pin="6"/);
-  assert.doesNotMatch(page, /data-pin="7"/);
-  assert.equal((page.match(/data-pin="\d"/g) || []).length, 6);
+  assert.match(page, /data-pin="5"/);
+  assert.doesNotMatch(page, /data-pin="6"/);
+  assert.equal((page.match(/data-pin="\d"/g) || []).length, 5);
   // One rule, then the scope line, then the verb bar: the footer the TUI paints.
-  assert.match(page, /s-footrule[\s\S]*<span class="l meta">desk<\/span>[\s\S]*data-pin="6"/);
+  assert.match(page, /s-footrule[\s\S]*<span class="l meta">desk<\/span>/);
   assert.equal((page.match(/s-footrule/g) || []).length, 1);
   assert.doesNotMatch(page, /<span class="l meta">2 done<\/span>/);
   // The fixture's verb bar minus ctrl+b, so it sits on one line beside the pin gutter.
@@ -265,6 +273,23 @@ test("hero board pins reveal callout copy", async () => {
   const js = await read("../public/landing.js");
   assert.match(js, /data-board-pins/);
   assert.match(js, /focusout/);
+});
+
+test("the live-demo caption spans the board width", async () => {
+  const css = await read("../src/styles/landing.css");
+  assert.match(css, /\.stage-note \{/);
+  assert.doesNotMatch(css, /\.stage-note \{[^}]*max-width/);
+});
+
+test("demo fields stay 16px on touch so phones do not zoom", async () => {
+  const page = await read("../src/pages/index.astro");
+  const css = await read("../src/styles/landing.css");
+  assert.match(page, /<meta name="viewport" content="width=device-width, initial-scale=1" \/>/);
+  assert.doesNotMatch(page, /maximum-scale/);
+  assert.match(
+    css,
+    /@media \(pointer: coarse\) \{[\s\S]*?\.board input\.tsk-field,[\s\S]*?\.board textarea\.tsk-field \{[\s\S]*?font-size:\s*max\(16px,\s*1em\)/,
+  );
 });
 
 test("landing agents section points at markdown twins", async () => {

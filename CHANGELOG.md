@@ -11,17 +11,21 @@ the GitHub release notes verbatim.
 
 ### Changed
 
-- The landing header is a `: goto` menu instead of eight inline links, with docs and github as text beside it. Demo lives in the menu.
+- The landing header is a `: goto` menu instead of eight inline links, with docs and github as text beside it. Demo lives in the menu. The theme toggle is a bare icon.
 - The agent prompt sits under the CLI session, with the markdown-twin note beneath it; the skill command and markdown docs URL sit in the exit-contract sidebar.
 - The why section sits above the live demo, and the board section sits below it.
 - The landing keys grid is gone; the keys reference stays in the docs.
-- The hero shows the annotated board; numbered callouts reveal their detail on hover or click. Its footer is the one the board paints: one rule, the scope line, the verb bar, and rows wrap instead of truncating.
+- The hero shows the annotated board; numbered callouts cover tabs through ON DECK and reveal their detail on hover or click. Its footer is the one the board paints: one rule, the scope line, the verb bar, and rows wrap instead of truncating.
 - The hero has the install one-liner under the lede, with a copy button, a jump to the live board, and a link to the install guide.
+- The live-demo caption spans the board's width.
 - The hero callouts read as tabs and tasks: the first explains desk, selected project, and projects; the third is `A task`. Docs say task, not row, wherever they mean a task.
 
 ### Fixed
 
 - The web demo no longer indents inbox tasks under ON DECK; they sit flush with ready tasks, as on the board.
+- The web demo's capture footer actions are clickable: save, open details, or close. On a task page, **esc close** returns to the board.
+- The demo inbox heading separates its count with a space, as on the board.
+- On a phone, focusing a demo field no longer zooms the page.
 
 ## v0.9.0
 
