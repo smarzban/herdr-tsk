@@ -258,7 +258,9 @@ test("hero board pins reveal callout copy", async () => {
   assert.match(css, /\.hero-side \.screen \{[^}]*white-space: pre-wrap/);
   assert.match(css, /\.hero-side \.s-row \.l \{[^}]*text-overflow: clip/);
   assert.doesNotMatch(css, /\.goto-label \{\s*display: none/);
-  assert.match(page, /Persistent navigation/);
+  assert.match(page, /Three tabs, always on screen/);
+  assert.match(page, /title: 'A task\.'/);
+  assert.doesNotMatch(page, /title: 'A row\.'/);
   assert.match(page, /aria-label=\{pinLabel\(1\)\}/);
   const js = await read("../public/landing.js");
   assert.match(js, /data-board-pins/);
