@@ -278,6 +278,88 @@
     setLayout("full");
   }
 
+  // ── goto disclosure ──────────────────────────────────────────────────────
+  const goto = document.querySelector("[data-goto]");
+  const gotoSummary = goto && goto.querySelector(".goto-chip");
+  if (goto && gotoSummary) {
+    const close = () => {
+      goto.open = false;
+    };
+    goto.addEventListener("toggle", () => {
+      gotoSummary.setAttribute("aria-expanded", String(goto.open));
+    });
+    gotoSummary.setAttribute("aria-expanded", "false");
+    gotoSummary.setAttribute("aria-haspopup", "true");
+    goto.querySelector(".goto-menu")?.addEventListener("click", (e) => {
+      if (e.target.closest("a")) close();
+    });
+    document.addEventListener("click", (e) => {
+      if (!goto.open) return;
+      if (!(e.target instanceof Node) || !goto.contains(e.target)) close();
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && goto.open) {
+        close();
+        gotoSummary.focus();
+        return;
+      }
+      if (e.key !== ":") return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const t = e.target;
+      if (!(t instanceof Element)) return;
+      if (
+        t.closest(
+          "#board-demo, input, textarea, select, [contenteditable='true']",
+        )
+      ) {
+        return;
+      }
+      e.preventDefault();
+      goto.open = true;
+      const first = goto.querySelector(".goto-menu a");
+      if (first instanceof HTMLElement) first.focus();
+    });
+  }
+
+  // ── board pin callouts ───────────────────────────────────────────────────
+  const pinRoot = document.querySelector("[data-board-pins]");
+  if (pinRoot) {
+    const pins = [...pinRoot.querySelectorAll("[data-pin]")];
+    const nEl = pinRoot.querySelector("[data-pin-n]");
+    const bodyEl = pinRoot.querySelector("[data-pin-body]");
+    const copies = new Map();
+    pinRoot.querySelectorAll("[data-pin-copy]").forEach((tpl) => {
+      copies.set(tpl.dataset.pinCopy, tpl.innerHTML);
+    });
+    let sticky = "1";
+    const paint = (n) => {
+      const html = copies.get(n);
+      if (!html || !nEl || !bodyEl) return;
+      nEl.textContent = n;
+      bodyEl.innerHTML = html;
+      pins.forEach((btn) => {
+        const on = btn.dataset.pin === n;
+        btn.classList.toggle("is-on", on);
+        btn.setAttribute("aria-expanded", String(on));
+        btn.closest(".s-row")?.classList.toggle("is-on", on);
+      });
+    };
+    const show = (n, stick) => {
+      if (stick) sticky = n;
+      paint(n);
+    };
+    pins.forEach((btn) => {
+      btn.addEventListener("mouseenter", () => show(btn.dataset.pin, false));
+      btn.addEventListener("focus", () => show(btn.dataset.pin, false));
+      btn.addEventListener("click", () => show(btn.dataset.pin, true));
+    });
+    pinRoot.addEventListener("mouseleave", () => paint(sticky));
+    pinRoot.addEventListener("focusout", (e) => {
+      if (!pinRoot.contains(e.relatedTarget)) paint(sticky);
+    });
+    paint(sticky);
+  }
+
   // ── copy buttons ─────────────────────────────────────────────────────────
   document.querySelectorAll("[data-copy]").forEach((btn) => {
     btn.addEventListener("click", async () => {

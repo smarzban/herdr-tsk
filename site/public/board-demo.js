@@ -921,7 +921,7 @@ import { parseCapture } from "./capture.js";
           selectable: true,
           id: "nav:inbox",
         });
-        if (state.inboxOpen) v.inbox.forEach((t) => pushTask(t, 1));
+        if (state.inboxOpen) v.inbox.forEach((t) => pushTask(t));
       }
       if (state.drawer) {
         pushHeader("section", "DONE", v.done.length);
@@ -971,7 +971,7 @@ import { parseCapture } from "./capture.js";
           selectable: true,
           id: "nav:inbox",
         });
-        if (state.inboxOpen) v.inbox.forEach((t) => pushTask(t, 1));
+        if (state.inboxOpen) v.inbox.forEach((t) => pushTask(t));
       }
       if (state.drawer) {
         pushHeader("section", "DONE", v.done.length);
