@@ -248,9 +248,10 @@ test("hero board pins reveal callout copy", async () => {
   assert.match(page, /s-footrule[\s\S]*<span class="l meta">desk<\/span>[\s\S]*data-pin="6"[\s\S]*data-pin="7"/);
   assert.equal((page.match(/s-footrule/g) || []).length, 1);
   assert.doesNotMatch(page, /<span class="l meta">2 done<\/span>/);
+  // The fixture's verb bar minus ctrl+b, so it sits on one line beside the pin gutter.
   const verbBar = await read("../../tests/fixtures/queue_board/board.txt");
   assert.ok(verbBar.includes("enter open · ctrl+d done · ctrl+n next · ctrl+o inbox · ctrl+b block · ? help"));
-  assert.match(page, /enter open · ctrl\+d done · ctrl\+n next · ctrl\+o inbox · ctrl\+b block · \? help/);
+  assert.match(page, /enter open · ctrl\+d done · ctrl\+n next · ctrl\+o inbox · \? help/);
   const css = await read("../src/styles/landing.css");
   assert.match(css, /\.hero-side \.screen \{[^}]*white-space: pre-wrap/);
   assert.match(css, /\.hero-side \.s-row \.l \{[^}]*text-overflow: clip/);
