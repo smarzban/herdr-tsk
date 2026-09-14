@@ -9,6 +9,11 @@ the GitHub release notes verbatim.
 
 ## Unreleased
 
+### Changed
+
+- The upgrade notice (`What's new in tsk`) now arrives in `review` under NEEDS YOU, and the last starter guide seeds in the inbox as `open` so a fresh board shows both ON DECK groups.
+- The Homebrew caveat also points at `tsk setup agents`.
+
 ## v0.9.0
 
 ### Breaking

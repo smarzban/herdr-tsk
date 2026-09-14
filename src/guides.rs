@@ -116,7 +116,7 @@ pub const CATALOG: [Guide; 4] = [
                 - Something broke, or something is missing? Tell us at https://github.com/smarzban/herdr-tsk/issues\n\
                 - A star at https://github.com/smarzban/herdr-tsk helps other people find tsk.\n\
                 - Say hi at https://x.com/smarzbanX",
-        status: HumanStatus::Ready,
+        status: HumanStatus::Open,
         steps: &[
             ("Press ctrl+d on this task", false),
             ("Press d and find it in the drawer", false),
