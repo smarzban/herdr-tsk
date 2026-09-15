@@ -1,5 +1,5 @@
 #[test]
-fn skill_documents_retry_and_misfiling() {
+fn skill_documents_retry_and_project_scope_refusals() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let skill = std::fs::read_to_string(root.join("skills/tsk-cli/SKILL.md"))
         .expect("CLI skill should exist");
@@ -30,8 +30,9 @@ fn skill_documents_retry_and_misfiling() {
         "skill should describe indeterminate exit-3 recovery"
     );
     assert!(
-        skill.contains("typo") && skill.contains("scope"),
-        "skill should warn that a typo can create a new scope"
+        skill.contains("unknown or ambiguous names refuse")
+            && skill.contains("existing absolute directory"),
+        "skill should explain strict project destination resolution"
     );
     assert!(agents.contains("tsk add"));
     assert!(agents.contains("tsk list"));

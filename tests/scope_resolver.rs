@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use tsk_tui::context::InvocationSnapshot;
 use tsk_tui::domain::{DomainState, ProvenanceOrigin, TaskScope};
-use tsk_tui::scope::resolve_project_path;
+use tsk_tui::scope::{resolve_project_path, ProjectResolveError};
 use tsk_tui::ui::board::{apply_intent, BoardModel, IntentOutcome};
 use tsk_tui::ui::input::BoardIntent;
 
@@ -53,24 +53,32 @@ fn board_quick_add_scope(
 }
 
 #[test]
-fn outside_git_directory_candidate_does_not_ambiguate_a_stored_project_basename() {
+fn invocation_directory_candidate_participates_in_basename_resolution() {
+    let invocation = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let basename = invocation
+        .file_name()
+        .expect("manifest directory basename")
+        .to_string_lossy();
+    let stored = format!("/repos/{basename}");
     let mut domain = DomainState::new();
-    create_project(&mut domain, "/repos/api");
+    create_project(&mut domain, &stored);
     let snapshot = InvocationSnapshot {
         default_scope: TaskScope::Global,
-        this_repo: Some(PathBuf::from("/scratch/api")),
+        this_repo: Some(invocation.clone()),
         title_prefill: None,
         provenance: ProvenanceOrigin::Capture,
     };
 
+    let mut expected = vec![stored, invocation.to_string_lossy().into_owned()];
+    expected.sort();
     assert_eq!(
-        resolve_project_path("api", &domain, Some(&snapshot)),
-        "/repos/api"
+        resolve_project_path(&basename, &domain, Some(&snapshot)),
+        Err(ProjectResolveError::Ambiguous(expected))
     );
     assert_eq!(
-        resolve_project_path("/scratch/api", &domain, Some(&snapshot)),
-        "/scratch/api",
-        "the directory candidate remains addressable by its exact path"
+        resolve_project_path(&invocation.to_string_lossy(), &domain, Some(&snapshot)),
+        Ok(invocation.to_string_lossy().into_owned()),
+        "the invocation directory remains addressable by its exact path"
     );
 }
 
@@ -93,12 +101,10 @@ fn shared_resolver_and_board_quick_add_agree_on_fixtures() {
             "snapshot repo !p TSK-Board",
             "/repos/tsk-board",
         ),
-        ("missing", "missing !p missing", "missing"),
-        ("/abs/x", "verbatim !p /abs/x", "/abs/x"),
     ] {
         assert_eq!(
             resolve_project_path(token, &domain, Some(&snapshot)),
-            expected,
+            Ok(expected.into()),
             "shared resolver fixture {token:?}"
         );
         assert_eq!(

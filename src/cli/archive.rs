@@ -62,7 +62,10 @@ pub fn run_project(
     let store = TaskStore::new(state_dir.unwrap_or_else(default_state_dir));
     store
         .locked_transition_if_changed(|domain: &mut DomainState| {
-            let resolved = crate::scope::resolve_project_path(
+            // Project verbs keep the old permissive path contract so outside-Git invocation
+            // directories, removed directories, and legacy relative scopes do not alter how an
+            // existing project is addressed.
+            let resolved = crate::scope::resolve_permissive_project_path(
                 &name,
                 domain,
                 Some(&crate::context::snapshot_from_env()),

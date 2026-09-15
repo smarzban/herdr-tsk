@@ -17,6 +17,8 @@ use crate::store::{default_state_dir, TaskStore};
 pub enum AddError {
     EmptyTitle,
     InvalidTitle,
+    /// An explicit project token did not identify one valid destination.
+    UnknownProject(String),
     /// The resolved scope is an archived project (cwd default or explicit `-p`).
     ProjectArchived(String),
     Store(String),
@@ -27,6 +29,7 @@ impl AddError {
         match self {
             Self::EmptyTitle => "empty-title",
             Self::InvalidTitle => "invalid-title",
+            Self::UnknownProject(_) => "unknown-project",
             Self::ProjectArchived(_) => "project-archived",
             Self::Store(_) => "store-error",
         }
@@ -127,7 +130,17 @@ pub fn run(input: FlagAdd) -> Result<FlagAddResult, AddError> {
     let thread = input.thread;
     store
         .locked_transition_if_changed(|domain| {
-            let scope = resolve_flag_scope(project.as_deref(), global, domain, &snapshot);
+            let scope = match resolve_flag_scope(project.as_deref(), global, domain, &snapshot) {
+                Ok(scope) => scope,
+                Err(error) => {
+                    return Ok((
+                        Err(AddError::UnknownProject(error.message(
+                            project.as_deref().expect("only project flags can fail"),
+                        ))),
+                        false,
+                    ));
+                }
+            };
             if let TaskScope::Project { path } = &scope {
                 if domain.is_project_archived(path) {
                     let short = crate::ui::render::short_project(path).to_string();
@@ -199,7 +212,8 @@ pub fn run_plan(
     let snapshot = snapshot_from_env();
     store
         .locked_transition_if_changed(|domain| {
-            let resolved = resolve_plan_items(valid, domain, &snapshot);
+            let (resolved, resolution_failures) = resolve_plan_items(valid, domain, &snapshot);
+            failed.extend(resolution_failures);
             let mut created = Vec::with_capacity(resolved.len());
             let mut existing = Vec::new();
             for item in resolved {
@@ -249,8 +263,8 @@ pub fn run_plan(
                 });
             }
             let changed = !created.is_empty();
-            // Archived-project refusals join the parse failures inside the transaction, so
-            // restore item order before reporting.
+            // Resolution and archived-project refusals join parse failures inside the
+            // transaction, so restore item order before reporting.
             failed.sort_by_key(|failure| failure.i);
             Ok((
                 PlanResult {
@@ -268,23 +282,35 @@ fn resolve_plan_items(
     items: Vec<PlanItem>,
     domain: &DomainState,
     snapshot: &crate::context::InvocationSnapshot,
-) -> Vec<ResolvedPlanItem> {
-    items
-        .into_iter()
-        .map(|item| ResolvedPlanItem {
+) -> (Vec<ResolvedPlanItem>, Vec<Failed>) {
+    let mut resolved = Vec::with_capacity(items.len());
+    let mut failed = Vec::new();
+    for item in items {
+        let scope = match item.project.as_ref() {
+            Some(None) => TaskScope::Global,
+            Some(Some(project)) => match resolve_project_path(project, domain, Some(snapshot)) {
+                Ok(path) => TaskScope::Project { path },
+                Err(error) => {
+                    failed.push(fail_item(
+                        item.i,
+                        Some(item.title),
+                        "unknown-project",
+                        error.message(project),
+                    ));
+                    continue;
+                }
+            },
+            None => snapshot.default_scope.clone(),
+        };
+        resolved.push(ResolvedPlanItem {
             i: item.i,
             title: item.title,
             notes: item.notes,
-            scope: match item.project {
-                Some(None) => TaskScope::Global,
-                Some(Some(project)) => TaskScope::Project {
-                    path: resolve_project_path(&project, domain, Some(snapshot)),
-                },
-                None => snapshot.default_scope.clone(),
-            },
+            scope,
             thread: item.thread,
-        })
-        .collect()
+        });
+    }
+    (resolved, failed)
 }
 
 fn scope_project(scope: &TaskScope) -> Option<String> {
