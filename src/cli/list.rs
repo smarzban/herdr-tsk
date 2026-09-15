@@ -8,7 +8,7 @@ use uuid::Uuid;
 use crate::cli::parser::{parse_task_address, TaskAddress};
 use crate::context::snapshot_from_env;
 use crate::domain::{normalize_thread, thread_refusal_message, HumanStatus, TaskScope};
-use crate::scope::resolve_flag_scope;
+use crate::scope::resolve_permissive_project_path;
 use crate::store::{default_state_dir, TaskStore};
 
 /// Parsed `list` input.
@@ -251,22 +251,12 @@ pub fn run(input: ListInput) -> Result<ListResult, ListError> {
             }),
         });
     }
-    let scope = (!input.all).then(|| {
-        match resolve_flag_scope(
-            input.project.as_deref(),
-            input.global,
-            &domain,
-            &snapshot_from_env(),
-        ) {
-            Ok(scope) => scope,
-            // Reads remain permissive: an unknown `-p` selects an empty lexical scope.
-            Err(_) => TaskScope::Project {
-                path: input
-                    .project
-                    .clone()
-                    .expect("only an explicit project token can fail resolution"),
-            },
-        }
+    let scope = (!input.all).then(|| match input.project.as_deref() {
+        Some(project) => TaskScope::Project {
+            path: resolve_permissive_project_path(project, &domain, Some(&snapshot_from_env())),
+        },
+        None if input.global => TaskScope::Global,
+        None => snapshot_from_env().default_scope,
     });
     let view = if input.deleted {
         ListView::Deleted

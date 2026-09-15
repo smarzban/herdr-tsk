@@ -4,6 +4,7 @@
 use std::fs;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -240,6 +241,47 @@ fn project_archive_and_unarchive_resolve_basename_and_path_exit_0_and_are_idempo
         "{:?}",
         unknown.stderr
     );
+}
+
+#[test]
+fn project_archive_basename_ignores_an_outside_git_invocation_candidate() {
+    let dir = temp_state_dir("project-outside-invocation");
+    let _guard = TempDirGuard(dir.clone());
+    let outside = dir.join("outside").join("api");
+    std::fs::create_dir_all(&outside).expect("create outside-Git invocation directory");
+    let mut state = DomainState::new();
+    state
+        .create(
+            "stored api task",
+            None,
+            TaskScope::Project {
+                path: "/projects/api".into(),
+            },
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create stored project fixture");
+    TaskStore::new(&dir).save(&state).expect("save fixture");
+    let context = serde_json::json!({"focused_pane_cwd": outside}).to_string();
+    let binary = std::env::var("CARGO_BIN_EXE_tsk").expect("Cargo must provide the tsk binary");
+
+    let output = Command::new(binary)
+        .env("HERDR_PLUGIN_CONTEXT_JSON", context)
+        .args([
+            "project",
+            "archive",
+            "api",
+            "--state-dir",
+            &dir.to_string_lossy(),
+        ])
+        .output()
+        .expect("run project archive");
+
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert!(TaskStore::new(&dir)
+        .load()
+        .expect("load archived state")
+        .is_project_archived("/projects/api"));
 }
 
 #[test]
