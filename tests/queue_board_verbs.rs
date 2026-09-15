@@ -437,7 +437,7 @@ fn block_on_done_and_verbs_without_selection_leave_visible_notices() {
 }
 
 #[test]
-fn esc_closes_transient_then_detail_then_quit_and_q_quits_only_in_normal() {
+fn esc_closes_transient_then_detail_then_quits_at_the_root() {
     let (mut domain, mut model, id) = board_with_task("layered", HumanStatus::Ready);
 
     // Transient: help card
@@ -470,40 +470,170 @@ fn esc_closes_transient_then_detail_then_quit_and_q_quits_only_in_normal() {
     assert_eq!(outcome, IntentOutcome::None);
     assert_eq!(model.detail_open(), None);
 
-    // Nothing open → the board-level Esc is a no-op; quitting is explicit (ctrl+q).
+    // Nothing open: the board-level Esc quits without changing navigation state.
     let outcome =
-        apply_intent(&mut domain, &mut model, BoardIntent::CloseLayer, None).expect("esc no-op");
-    assert_eq!(outcome, IntentOutcome::None);
-    let outcome =
-        apply_intent(&mut domain, &mut model, BoardIntent::Quit, None).expect("ctrl+q quits");
+        apply_intent(&mut domain, &mut model, BoardIntent::CloseLayer, None).expect("esc quits");
     assert_eq!(outcome, IntentOutcome::Quit);
+}
 
-    // ctrl+q quits from normal only; bare q is dead
+#[test]
+fn t64_ctrl_q_quits_every_non_editor_mode_and_stays_inert_in_editors_and_recovery() {
+    let ctrl_q = ctrl(KeyCode::Char('q'));
+    for mode in [
+        BoardInputMode::Normal,
+        BoardInputMode::TaskPage,
+        BoardInputMode::CapturePage,
+        BoardInputMode::SelectThread,
+        BoardInputMode::EditScope,
+        BoardInputMode::FormScopeDropdown,
+        BoardInputMode::LaunchCard,
+        BoardInputMode::ProjectPicker,
+        BoardInputMode::ListPicker,
+        BoardInputMode::Help,
+    ] {
+        assert_eq!(
+            map_key(mode, ctrl_q),
+            Some(BoardIntent::Quit),
+            "{mode:?} is a non-editor surface"
+        );
+    }
+
+    for mode in [
+        BoardInputMode::EditTitle,
+        BoardInputMode::EditNotes,
+        BoardInputMode::EditStep,
+        BoardInputMode::EditThread,
+        BoardInputMode::ProjectsSearch,
+        BoardInputMode::QuickAdd,
+        BoardInputMode::Palette,
+        BoardInputMode::SaveRecovery,
+    ] {
+        assert_ne!(
+            map_key(mode, ctrl_q),
+            Some(BoardIntent::Quit),
+            "{mode:?} retains its existing editor or recovery behavior"
+        );
+    }
+
     assert_eq!(
         map_key(BoardInputMode::Normal, press(KeyCode::Char('q'))),
         None
     );
+}
+
+#[test]
+fn t64_ctrl_q_quits_instead_of_dismissing_help_or_pickers() {
+    let (mut domain, mut model, _) = board_with_task("quit surfaces", HumanStatus::Ready);
+
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenHelp, None).expect("open help");
     assert_eq!(
-        map_key(
-            BoardInputMode::Normal,
-            KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL),
-        ),
-        Some(BoardIntent::Quit)
+        apply_intent(&mut domain, &mut model, BoardIntent::Quit, None).expect("quit help"),
+        IntentOutcome::Quit
     );
-    assert_ne!(
-        map_key(BoardInputMode::Help, press(KeyCode::Char('q'))),
-        Some(BoardIntent::Quit),
-        "q must not quit while help is open"
+
+    apply_intent(&mut domain, &mut model, BoardIntent::CloseHelp, None).expect("close help");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenProjectSelector,
+        None,
+    )
+    .expect("open picker");
+    assert_eq!(model.input_mode(), BoardInputMode::ProjectPicker);
+    assert_eq!(
+        apply_intent(&mut domain, &mut model, BoardIntent::Quit, None).expect("quit picker"),
+        IntentOutcome::Quit
     );
-    assert_ne!(
-        map_key(BoardInputMode::Palette, press(KeyCode::Char('q'))),
-        Some(BoardIntent::Quit),
-        "q must not quit while palette is open"
+}
+
+#[test]
+fn t64_root_esc_quits_on_each_navigation_tab_without_resetting_it() {
+    for tab in [
+        tsk_tui::ui::queue::NavTab::Desk,
+        tsk_tui::ui::queue::NavTab::ProjectBoard,
+        tsk_tui::ui::queue::NavTab::Projects,
+    ] {
+        let mut domain = DomainState::new();
+        let id = domain
+            .create(
+                "tab task",
+                None,
+                project(THIS_REPO),
+                ProvenanceOrigin::Manual,
+                None,
+            )
+            .expect("project task");
+        domain
+            .set_status(id, HumanStatus::Ready)
+            .expect("put task on deck");
+        let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from(THIS_REPO)));
+        if tab == tsk_tui::ui::queue::NavTab::ProjectBoard {
+            model.set_selected_project(Some(PathBuf::from(THIS_REPO)));
+        } else {
+            apply_intent(
+                &mut domain,
+                &mut model,
+                BoardIntent::SelectNavTab(tab),
+                None,
+            )
+            .expect("select tab");
+        }
+
+        assert_eq!(model.wide_stage(), tier::WideStage::FullBoard);
+        assert_eq!(model.nav_tab(), tab);
+        assert_eq!(model.input_mode(), BoardInputMode::Normal, "{tab:?}");
+        assert_eq!(model.popup(), BoardPopup::None, "{tab:?}");
+        assert_eq!(model.command_surface(), CommandSurface::None, "{tab:?}");
+        assert_eq!(model.detail_open(), None, "{tab:?}");
+        assert_eq!(model.projects_query(), "", "{tab:?}");
+        assert!(!model.inbox_header_selected(), "{tab:?}");
+        assert!(!model.archived_header_selected(), "{tab:?}");
+        assert!(!model.focus_is_archived(), "{tab:?}");
+        assert_eq!(
+            apply_intent(&mut domain, &mut model, BoardIntent::CloseLayer, None).expect("root Esc"),
+            IntentOutcome::Quit,
+            "{tab:?}"
+        );
+        assert_eq!(model.nav_tab(), tab, "root Esc must not reset the tab");
+    }
+}
+
+#[test]
+fn t64_esc_does_not_quit_from_split_or_a_selected_group_header() {
+    let (mut domain, mut model, _) = board_with_task("split", HumanStatus::Ready);
+    apply_intent(&mut domain, &mut model, BoardIntent::StageRight, None).expect("open split");
+    assert_eq!(model.wide_stage(), tier::WideStage::Split);
+    assert_eq!(
+        apply_intent(&mut domain, &mut model, BoardIntent::CloseLayer, None).expect("split Esc"),
+        IntentOutcome::None
     );
-    assert_ne!(
-        map_key(BoardInputMode::EditTitle, press(KeyCode::Char('q'))),
-        Some(BoardIntent::Quit),
-        "q must not quit while editing"
+    assert_eq!(model.wide_stage(), tier::WideStage::Split);
+
+    let mut domain = DomainState::new();
+    let archived = domain
+        .create(
+            "header",
+            None,
+            TaskScope::Global,
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("archived task");
+    domain.archive_task(archived).expect("archive task");
+    let mut model = BoardModel::from_domain(&domain, None);
+    apply_intent(&mut domain, &mut model, BoardIntent::ToggleDoneDrawer, None)
+        .expect("open drawer");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ToggleArchivedGroup,
+        None,
+    )
+    .expect("select archived header");
+    assert!(model.archived_header_selected());
+    assert_eq!(
+        apply_intent(&mut domain, &mut model, BoardIntent::CloseLayer, None).expect("header Esc"),
+        IntentOutcome::None
     );
 }
 
@@ -969,7 +1099,7 @@ fn help_card_lists_every_binding_scrolls_and_closes_on_esc() {
         "wrapped rows must extend the scroll horizon"
     );
     assert!(
-        scrolled_help.contains("ctrl+q") && scrolled_help.contains("page"),
+        scrolled_help.contains("ctrl+q") && scrolled_help.contains("quit"),
         "the wrapped tail must remain reachable:\n{scrolled_help}"
     );
     assert!(
@@ -1586,19 +1716,25 @@ fn board_with_noted_task() -> (DomainState, BoardModel, uuid::Uuid) {
 }
 
 #[test]
-fn esc_and_q_close_the_task_page_from_view_mode() {
-    for (key, mods) in [
-        (KeyCode::Esc, KeyModifiers::NONE),
-        (KeyCode::Char('q'), KeyModifiers::CONTROL),
-    ] {
-        let (mut domain, mut model, _id) = board_with_noted_task();
-        apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
-        assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
-        let close = map_key(BoardInputMode::TaskPage, KeyEvent::new(key, mods)).expect("close key");
-        assert_eq!(close, BoardIntent::CloseLayer);
-        apply_intent(&mut domain, &mut model, close, None).expect("close page");
-        assert_eq!(model.input_mode(), BoardInputMode::Normal);
-    }
+fn esc_closes_the_task_page_while_ctrl_q_quits_from_it() {
+    let (mut domain, mut model, _id) = board_with_noted_task();
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
+    let close = map_key(BoardInputMode::TaskPage, press(KeyCode::Esc)).expect("Esc");
+    assert_eq!(close, BoardIntent::CloseLayer);
+    assert_eq!(
+        apply_intent(&mut domain, &mut model, close, None).expect("close page"),
+        IntentOutcome::None
+    );
+    assert_eq!(model.input_mode(), BoardInputMode::Normal);
+
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("reopen page");
+    let quit = map_key(BoardInputMode::TaskPage, ctrl(KeyCode::Char('q'))).expect("Ctrl+Q");
+    assert_eq!(quit, BoardIntent::Quit);
+    assert_eq!(
+        apply_intent(&mut domain, &mut model, quit, None).expect("quit page"),
+        IntentOutcome::Quit
+    );
+    assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
 }
 
 #[test]

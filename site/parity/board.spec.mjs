@@ -57,6 +57,25 @@ async function capture(page, testInfo, name) {
     animations: "disabled",
   });
 }
+for (const width of [78, 110]) {
+  test(`root Escape releases demo focus without switching tabs at ${width} columns`, async ({
+    page,
+  }) => {
+    for (const [tab, key] of [
+      ["desk", "1"],
+      ["project", "2"],
+      ["projects", "3"],
+    ]) {
+      await open(page, width);
+      await page.keyboard.press(key);
+      await expect(page.locator(`[data-tab="${tab}"]`)).toHaveClass(/is-on/);
+      await page.keyboard.press("Escape");
+      await expect(page.locator(`[data-tab="${tab}"]`)).toHaveClass(/is-on/);
+      await expect(page.locator("#board-demo")).not.toBeFocused();
+    }
+  });
+}
+
 for (const width of [40, 78, 109, 110]) {
   test(`desk start open back and wrapping at ${width} columns`, async ({
     page,

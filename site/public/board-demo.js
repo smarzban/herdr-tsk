@@ -3254,7 +3254,8 @@ import { parseCapture } from "./capture.js";
         state.overlay = null;
         leaveTaskPage();
       } else if (state.peekId) state.peekId = null;
-      else if (state.focusProject) goTab("desk");
+      // The terminal exits at the full-board root on any tab. A browser demo has no
+      // process to exit, so release keyboard focus without changing the selected tab.
       else frame.blur();
       render();
       return;

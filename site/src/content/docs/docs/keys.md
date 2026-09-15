@@ -35,8 +35,13 @@ Press `?` on the board, task page, or another non-text surface for a searchable 
 | Search projects | `/` on Projects |
 | Command palette | `:` |
 | All shortcuts | `?` |
-| Close a layer | `Esc` |
-| Quit from board view | `ctrl+q` or `ctrl+c` |
+| Close a layer; quit at the full-board root | `Esc` |
+| Quit outside text entry | `ctrl+q` |
+| Quit from board view | `ctrl+c` |
+
+`ctrl+q` quits from task views, Help, and pickers too, including the wide project preview. It does not quit while editing text, using Projects search, typing a quick-add line, or filtering the palette. Save or cancel any unsaved draft first. During save recovery, resolve the pending save instead.
+
+`Esc` closes the current layer first. At the full-board root on any tab, it quits without confirmation, rather than switching back to the desk. Wide Split is not the root; use `←` to return to the full board.
 
 Status shortcuts are absolute. `ctrl+s` starts open or ready tasks and leaves started, blocked, and review tasks unchanged. `ctrl+n` and `ctrl+o` can send a done task directly to ready or open.
 
@@ -55,6 +60,7 @@ These keys apply in **view mode**:
 | Mark/remove selected step; otherwise confirm/delete task | `ctrl+x` |
 | All shortcuts | `?` |
 | Close task | `Esc` |
+| Quit the board | `ctrl+q` |
 
 Click a step to select it. Click **+ step** to add. Field clicks become editable only after task editing starts.
 
@@ -116,7 +122,7 @@ At 110 usable columns or wider, arrows move through these views when you are not
 
 | View | `→` | `←` | `Esc` |
 | --- | --- | --- | --- |
-| Board | Split | No change | No change |
+| Board | Split | No change | Quit at root |
 | Split, board focused | Task with rail | Board | No change |
 | Task with rail | Full screen | Split | Split |
 | Full screen | No change | Task with rail | Return to the view remembered when opening |
@@ -127,7 +133,7 @@ On **Projects Overview** at 110+ columns, clicking a row or moving the index sel
 
 | Stage | `→` | `←` | `Esc` |
 | --- | --- | --- | --- |
-| Full board | Split preview | No change | No change |
+| Full board | Split preview | No change | Quit at root |
 | Split, index focused | Rail | Full board | No change |
 | Rail, right board focused | Narrow board keys | Return to index | Return to index |
 

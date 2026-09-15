@@ -19,6 +19,12 @@ In Herdr, `prefix+t` opens or focuses a board in the current workspace. If one i
 
 The middle tab remembers your selected project. Press `2` to open it; if none is selected, `2` opens the project picker.
 
+## Quit or go back
+
+Press `ctrl+q` to quit from the board or a task view, including Help, pickers, and the wide project preview. While a text editor, Projects search, quick-add line, or palette query owns input, `ctrl+q` keeps its editing behavior instead. Unsaved drafts must be saved or cancelled before quitting; save recovery must be resolved first.
+
+`Esc` closes the current layer. At the full-board root, with no page, peek, popup, search, or header selection left to dismiss, it quits without confirmation. This applies on every tab, not just the desk. Wide Split is not the root; `←` returns to the full board. Quick capture's popup-close behavior is unchanged.
+
 ## Projects
 
 Press `p` to choose a project, or open **projects** for an overview.

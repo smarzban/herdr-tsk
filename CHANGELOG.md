@@ -7,6 +7,12 @@ that makes it, written for a user, not a contributor: omit demo alignment, CI wi
 review history, and other maintainer-only work. On release the version's section becomes
 the GitHub release notes verbatim.
 
+## Unreleased
+
+### Changed
+
+- `ctrl+q` quits from every non-editor board surface, including task pages and the wide project preview. `Esc` closes layers, then quits without confirmation at the full-board root on any tab. Unsaved drafts still block quitting; text entry and save recovery keep their existing behavior.
+
 ## v0.9.0
 
 ### Breaking

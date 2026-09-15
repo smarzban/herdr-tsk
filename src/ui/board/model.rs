@@ -1492,6 +1492,34 @@ impl BoardModel {
         archived_path_contains(&self.archived_projects, &path)
     }
 
+    /// Whether a layered Escape has reached the visible main board root.
+    ///
+    /// A task form parked behind `FullBoard` does not stop this from being a root Escape: the
+    /// application quit guard sees that retained draft and refuses before the reducer can leave.
+    pub(crate) fn root_escape_requests_quit(&self) -> bool {
+        !self.preview_seat
+            && !self.focus_is_archived()
+            && self.input_mode_local() == BoardInputMode::Normal
+            && self.wide_stage == WideStage::FullBoard
+            && self.surface == CommandSurface::None
+            && self.popup == BoardPopup::None
+            && self.project_picker.is_none()
+            && self.list_picker.is_none()
+            && self.detail_open.is_none()
+            && self.projects_query.is_empty()
+            && !self.inbox_header_selected()
+            && !self.archived_header_selected()
+    }
+
+    /// Present the existing draft-preservation refusal when quitting would lose work.
+    pub(crate) fn refuse_quit_with_unsaved_work(&mut self) -> bool {
+        if !self.has_unsaved_work() {
+            return false;
+        }
+        self.set_message(DIRTY_TASK_SWITCH_REFUSAL);
+        true
+    }
+
     /// Whether changing invocation context would discard or hide an unsaved draft.
     /// Reopen requests defer while any editor or non-empty quick-add owns the user's text.
     pub fn has_unsaved_work(&self) -> bool {

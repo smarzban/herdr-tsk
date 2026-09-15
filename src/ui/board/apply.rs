@@ -367,14 +367,7 @@ fn apply_board_intent(
             };
             return apply_intent(domain, model, resolved, snapshot);
         }
-        BoardIntent::Quit => {
-            // Esc closes an open menu first; second Esc quits.
-            if model.popup != BoardPopup::None {
-                model.close_popup();
-                return Ok(IntentOutcome::None);
-            }
-            return Ok(IntentOutcome::Quit);
-        }
+        BoardIntent::Quit => return Ok(IntentOutcome::Quit),
         BoardIntent::OpenCapture => {
             model.close_popup();
             model.form = None;
@@ -1950,6 +1943,11 @@ fn apply_board_intent(
             // Progressive close: transient surface (palette/help/dropdown) →
             // open detail → quit. SaveRecovery is not dismissible here; the save-recovery
             // gate owns Retry/Cancel.
+            // A clean parked edit is not a visible layer. Check root before resetting it;
+            // the application boundary has already refused any dirty root quit.
+            if model.root_escape_requests_quit() {
+                return Ok(IntentOutcome::Quit);
+            }
             if model.surface != CommandSurface::None {
                 model.close_command_surface();
                 return Ok(IntentOutcome::None);
@@ -2034,8 +2032,7 @@ fn apply_board_intent(
                 model.leave_archived_focus();
                 return Ok(IntentOutcome::None);
             }
-            // A typed index search goes before anything else: the first Esc clears it,
-            // and the board-level Esc never quits (ctrl+q is the explicit quit).
+            // A typed index search goes before anything else: the first Esc clears it.
             if !model.projects_query.is_empty() {
                 model.projects_query.clear();
                 model.projects_selected = 0;

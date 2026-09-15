@@ -466,6 +466,14 @@ fn run_board_loop(
             sync_frame_presentation(event_area, &model);
             match next {
                 Event::Key(key) if key.kind == KeyEventKind::Press => {
+                    // The board's new Ctrl+Q routes do not change the capture popup's keys.
+                    // In particular, keep its existing Ctrl+C cancellation/exit routes intact.
+                    if quick_capture
+                        && key.code == KeyCode::Char('q')
+                        && key.modifiers == KeyModifiers::CONTROL
+                    {
+                        continue;
+                    }
                     // A key while the mouse button is held abandons the deferred click so
                     // Up does not fire a stale peek/select after the keyboard moved on.
                     drag_gesture.clear();
@@ -1074,6 +1082,13 @@ fn board_keyboard_intent(
     mode: BoardInputMode,
     key: crossterm::event::KeyEvent,
 ) -> Option<BoardIntent> {
+    // Ctrl+Q belongs to the resolved surface before an open form can redirect input to its
+    // retained field mapper. Text editors and save recovery remain inert because `map_key`
+    // deliberately returns no Quit intent for those modes.
+    if key.code == KeyCode::Char('q') && key.modifiers == KeyModifiers::CONTROL {
+        return map_key(mode, key);
+    }
+
     // Allowlist, not a denylist: the form mapper owns the keyboard ONLY while the resolved
     // mode is genuinely one of the form's own field/dropdown states. `input_mode()` lets a
     // popup or command surface OUTRANK the form's mode (see its `match self.popup`), so an
@@ -1173,9 +1188,9 @@ pub fn apply_board_intent_with_save_recovery(
     };
     if recovery.is_pending() {
         match intent {
-            // Leaving the board resolves nothing and persists nothing, but the user must never
-            // be held in the session by an unresolved save.
-            BoardIntent::Quit => return Ok(IntentOutcome::Quit),
+            // A failed save must be resolved through Retry or Cancel. Ctrl+Q is unmapped in
+            // SaveRecovery, and a Help card opened over recovery cannot bypass that gate.
+            BoardIntent::Quit => return Ok(IntentOutcome::None),
             BoardIntent::RetrySave => {
                 // The mouse hands this intent in already resolved, so close the surface here
                 // exactly as the keyboard's ConfirmCommand route does.
@@ -1927,6 +1942,13 @@ fn handle_board_intent(
 ) -> io::Result<bool> {
     if let BoardIntent::CopyTaskNumber(id) = intent {
         copy_task_number(domain, model, id);
+        return Ok(false);
+    }
+
+    let quit_requested = intent == BoardIntent::Quit
+        || (intent == BoardIntent::CloseLayer && model.root_escape_requests_quit());
+    // Quick capture retains its existing Ctrl+C exit; only board quits get the new guard.
+    if !quick_capture && quit_requested && model.refuse_quit_with_unsaved_work() {
         return Ok(false);
     }
 
@@ -4692,6 +4714,320 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.dir);
         }
+    }
+
+    #[test]
+    fn t64_dirty_capture_and_parked_task_drafts_refuse_quit_at_the_app_boundary() {
+        let temp = TempStore::new("t64-dirty-quit");
+        let mut domain = DomainState::new();
+        domain
+            .create(
+                "park me",
+                None,
+                TaskScope::Global,
+                ProvenanceOrigin::Manual,
+                None,
+            )
+            .expect("task");
+        temp.store.save(&domain).expect("seed store");
+        let mut recovery = SaveRecovery::new();
+
+        let mut capture = BoardModel::from_domain(&domain, None);
+        apply_intent(&mut domain, &mut capture, BoardIntent::OpenCapture, None)
+            .expect("open capture");
+        apply_intent(
+            &mut domain,
+            &mut capture,
+            BoardIntent::QuickAddInsertText("captured draft".into()),
+            None,
+        )
+        .expect("type capture");
+        apply_intent(&mut domain, &mut capture, BoardIntent::ExpandQuickAdd, None)
+            .expect("expand capture");
+        assert!(capture.has_unsaved_work());
+        assert!(!handle_board_intent(
+            &temp.store,
+            &mut domain,
+            &mut capture,
+            BoardIntent::Quit,
+            &mut recovery,
+            false,
+        )
+        .expect("refuse capture quit"));
+        assert!(capture.board_form_open());
+        assert_eq!(
+            capture.message(),
+            Some("save or cancel edits before switching tasks")
+        );
+
+        let mut task = BoardModel::from_domain(&domain, None);
+        apply_intent(&mut domain, &mut task, BoardIntent::OpenTaskPage, None)
+            .expect("open task page");
+        apply_intent(&mut domain, &mut task, BoardIntent::BeginEditTitle, None)
+            .expect("edit title");
+        apply_intent(&mut domain, &mut task, BoardIntent::EditInsert('!'), None)
+            .expect("dirty title");
+        for _ in 0..8 {
+            if task.input_mode() == BoardInputMode::TaskPage {
+                break;
+            }
+            apply_intent(&mut domain, &mut task, BoardIntent::FormFocusNext, None)
+                .expect("park editor inside task page");
+        }
+        assert_eq!(task.input_mode(), BoardInputMode::TaskPage);
+        assert!(task.task_editing());
+        for _ in 0..3 {
+            apply_intent(&mut domain, &mut task, BoardIntent::StageLeft, None)
+                .expect("park page toward board");
+        }
+        assert_eq!(task.wide_stage(), crate::ui::tier::WideStage::FullBoard);
+        assert_eq!(task.input_mode(), BoardInputMode::Normal);
+        assert!(task.has_unsaved_work());
+        assert!(!handle_board_intent(
+            &temp.store,
+            &mut domain,
+            &mut task,
+            BoardIntent::CloseLayer,
+            &mut recovery,
+            false,
+        )
+        .expect("refuse root Esc"));
+        assert!(task.has_unsaved_work());
+        assert_eq!(
+            task.message(),
+            Some("save or cancel edits before switching tasks")
+        );
+    }
+
+    #[test]
+    fn t64_clean_parked_edit_quits_on_the_first_root_escape() {
+        let temp = TempStore::new("t64-clean-parked-quit");
+        let (mut domain, mut model) = board_with_one_task();
+        temp.store.save(&domain).expect("seed store");
+        apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+            .expect("begin unchanged edit");
+        for _ in 0..8 {
+            if model.input_mode() == BoardInputMode::TaskPage {
+                break;
+            }
+            apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
+                .expect("park text editor");
+        }
+        for _ in 0..3 {
+            apply_intent(&mut domain, &mut model, BoardIntent::StageLeft, None)
+                .expect("return to full board");
+        }
+        assert!(model.task_editing());
+        assert!(model.root_escape_requests_quit());
+        assert!(!model.has_unsaved_work());
+        assert!(handle_board_intent(
+            &temp.store,
+            &mut domain,
+            &mut model,
+            BoardIntent::CloseLayer,
+            &mut SaveRecovery::new(),
+            false,
+        )
+        .expect("first root Esc quits"));
+    }
+
+    #[test]
+    fn t64_ctrl_q_uses_non_editor_form_modes_before_the_form_mapper() {
+        let (mut domain, mut model) = board_with_one_task();
+        apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+            .expect("open task form");
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::FocusFormField(CaptureField::Scope),
+            None,
+        )
+        .expect("focus scope");
+        let ctrl_q = KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL);
+        assert_eq!(model.input_mode(), BoardInputMode::EditScope);
+        assert_eq!(
+            board_keyboard_intent(&model, model.input_mode(), ctrl_q),
+            Some(BoardIntent::Quit)
+        );
+
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::OpenFormScopeDropdown,
+            None,
+        )
+        .expect("open scope picker");
+        assert_eq!(model.input_mode(), BoardInputMode::FormScopeDropdown);
+        assert_eq!(
+            board_keyboard_intent(&model, model.input_mode(), ctrl_q),
+            Some(BoardIntent::Quit)
+        );
+
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::CancelFormScopeDropdown,
+            None,
+        )
+        .expect("close scope picker");
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::FocusFormField(CaptureField::Title),
+            None,
+        )
+        .expect("focus title editor");
+        assert_eq!(model.input_mode(), BoardInputMode::EditTitle);
+        assert_eq!(
+            board_keyboard_intent(&model, model.input_mode(), ctrl_q),
+            None
+        );
+    }
+
+    #[test]
+    fn t64_ctrl_q_from_a_clean_nested_preview_quits_the_whole_board() {
+        let temp = TempStore::new("t64-nested-global-quit");
+        let (mut domain, mut model, _) = projects_preview_fixture();
+        temp.store.save(&domain).expect("seed preview store");
+        let area = Rect::new(0, 0, 110, 30);
+        let intent = preview_key_intent(
+            &mut model,
+            area,
+            KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL),
+        );
+        assert_eq!(intent, BoardIntent::Quit);
+        let routed = route_board_intent(&model, intent);
+        assert_eq!(routed.target, BoardIntentTarget::Focused);
+
+        let mut recovery = SaveRecovery::new();
+        assert!(dispatch_board_intent(
+            &temp.store,
+            &mut domain,
+            &mut model,
+            BoardDispatchRoute {
+                area,
+                target: routed.target,
+            },
+            routed.intent,
+            &mut recovery,
+            false,
+        )
+        .expect("nested global quit"));
+    }
+
+    #[test]
+    fn t64_dirty_nested_preview_refuses_global_quit_and_keeps_its_draft() {
+        let temp = TempStore::new("t64-nested-dirty-quit");
+        let (mut domain, mut model, _) = projects_preview_fixture();
+        temp.store.save(&domain).expect("seed preview store");
+        apply_intent(
+            &mut domain,
+            model.input_target_mut(),
+            BoardIntent::OpenCapture,
+            None,
+        )
+        .expect("open nested quick add");
+        apply_intent(
+            &mut domain,
+            model.input_target_mut(),
+            BoardIntent::QuickAddInsertText("nested draft".into()),
+            None,
+        )
+        .expect("type nested draft");
+        apply_intent(&mut domain, &mut model, BoardIntent::StageLeft, None)
+            .expect("park nested preview");
+        assert_eq!(model.wide_stage(), crate::ui::tier::WideStage::Split);
+
+        let mut recovery = SaveRecovery::new();
+        assert!(!handle_board_intent(
+            &temp.store,
+            &mut domain,
+            &mut model,
+            BoardIntent::Quit,
+            &mut recovery,
+            false,
+        )
+        .expect("refuse nested quit"));
+        assert_eq!(
+            model.right_seat().map(BoardModel::quick_add_title_value),
+            Some("nested draft")
+        );
+        assert_eq!(
+            model.message(),
+            Some("save or cancel edits before switching tasks")
+        );
+    }
+
+    #[test]
+    fn t64_save_recovery_refuses_quit_but_quick_capture_keeps_ctrl_c() {
+        let temp = TempStore::new("t64-recovery-capture-quit");
+        let mut domain = DomainState::new();
+        temp.store.save(&domain).expect("seed store");
+        let mut model = BoardModel::from_domain(&domain, None);
+        let mut recovery = SaveRecovery::new();
+        recovery.fail(DomainState::new(), DomainState::new(), "save failed");
+        model.begin_save_recovery("save failed");
+        apply_intent(&mut domain, &mut model, BoardIntent::OpenHelp, None)
+            .expect("open Help over recovery");
+        assert_eq!(model.input_mode(), BoardInputMode::Help);
+        assert_eq!(
+            apply_board_intent_with_save_recovery(
+                &mut domain,
+                &mut model,
+                &mut recovery,
+                BoardSaveContext {
+                    baseline: DomainState::new(),
+                    intent: BoardIntent::Quit,
+                    snapshot: None,
+                },
+                |_| Ok(()),
+            )
+            .expect("recovery quit is inert"),
+            IntentOutcome::None
+        );
+        assert!(recovery.is_pending());
+        assert_eq!(
+            model.input_mode(),
+            BoardInputMode::Help,
+            "Ctrl+Q remains inert without dismissing Help over recovery"
+        );
+        apply_intent(&mut domain, &mut model, BoardIntent::CloseLayer, None)
+            .expect("Esc closes Help");
+        assert_eq!(model.input_mode(), BoardInputMode::SaveRecovery);
+
+        let mut recovery = SaveRecovery::new();
+        let mut capture = BoardModel::from_domain(&domain, None);
+        apply_intent(&mut domain, &mut capture, BoardIntent::OpenCapture, None)
+            .expect("open capture");
+        apply_intent(
+            &mut domain,
+            &mut capture,
+            BoardIntent::QuickAddInsertText("unsaved popup draft".into()),
+            None,
+        )
+        .expect("type capture");
+        apply_intent(&mut domain, &mut capture, BoardIntent::ExpandQuickAdd, None)
+            .expect("expand capture");
+        apply_intent(&mut domain, &mut capture, BoardIntent::FormFocusNext, None)
+            .expect("focus non-editor step selection");
+        assert_eq!(capture.input_mode(), BoardInputMode::CapturePage);
+        let intent = board_keyboard_intent(
+            &capture,
+            capture.input_mode(),
+            KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+        )
+        .expect("existing Ctrl+C quit shortcut");
+        assert!(handle_board_intent(
+            &temp.store,
+            &mut domain,
+            &mut capture,
+            intent,
+            &mut recovery,
+            true,
+        )
+        .expect("quick capture retains Ctrl+C exit"));
+        assert!(capture.board_form_open());
+        assert_eq!(capture.message(), None);
     }
 
     #[test]
