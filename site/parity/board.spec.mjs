@@ -98,6 +98,23 @@ test("mark mode gates task marking and ctrl click stays ordinary", async ({
   );
 });
 
+test("mark mode preserves text input ownership and spends Escape first", async ({
+  page,
+}) => {
+  await open(page, 78);
+  await page.keyboard.press("Shift+M");
+  await page.keyboard.press("+");
+  const input = page.locator("#tsk-add");
+  await input.fill("");
+  await input.press("Shift+M");
+  await expect(input).toHaveValue("M");
+
+  await input.press("Escape");
+  await expect(input).toBeVisible();
+  await input.press("Escape");
+  await expect(input).toHaveCount(0);
+});
+
 test("marked task sets complete, delete, and undo as one demo action", async ({
   page,
 }) => {

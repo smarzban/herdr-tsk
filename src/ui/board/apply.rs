@@ -808,7 +808,7 @@ fn apply_board_intent(
             return Ok(IntentOutcome::None);
         }
         BoardIntent::ToggleMarkMode => {
-            if !model.task_list_owns_input() {
+            if !model.mark_mode_active() && !model.task_list_owns_input() {
                 return Ok(IntentOutcome::None);
             }
             model.toggle_mark_mode();

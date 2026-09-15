@@ -3163,7 +3163,23 @@ import { parseCapture } from "./capture.js";
     }
     const markOwner =
       projectsPreviewFocused() || projectsPreviewPage() ? preview : state;
+    const textEntryOwnsCapitalM =
+      [
+        "quick",
+        "help",
+        "palette",
+        "search",
+        "filter",
+        "preview-filter",
+      ].includes(state.overlay) ||
+      Boolean(
+        state.editField ||
+        preview.editField ||
+        steps.editor ||
+        previewSteps.editor,
+      );
     if (
+      !textEntryOwnsCapitalM &&
       e.key === "M" &&
       e.shiftKey &&
       !e.ctrlKey &&

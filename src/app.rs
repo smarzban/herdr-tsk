@@ -1085,14 +1085,31 @@ fn board_keyboard_intent(
     // Mark mode owns its exit keys even when a page or popup currently outranks the board.
     // This keeps progressive close behavior from leaving a latent marked set behind.
     if model.mark_mode_active() {
-        if key.code == KeyCode::Char('M')
+        let text_entry_owns_capital_m = matches!(
+            mode,
+            BoardInputMode::EditTitle
+                | BoardInputMode::EditNotes
+                | BoardInputMode::EditThread
+                | BoardInputMode::EditStep
+                | BoardInputMode::Palette
+                | BoardInputMode::Help
+                | BoardInputMode::ListPicker
+                | BoardInputMode::ProjectsSearch
+                | BoardInputMode::QuickAdd
+        );
+        if !text_entry_owns_capital_m
+            && mode != BoardInputMode::SaveRecovery
+            && key.code == KeyCode::Char('M')
             && !key
                 .modifiers
                 .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER)
         {
             return Some(BoardIntent::ToggleMarkMode);
         }
-        if key.code == KeyCode::Esc && key.modifiers.is_empty() {
+        if mode != BoardInputMode::SaveRecovery
+            && key.code == KeyCode::Esc
+            && key.modifiers.is_empty()
+        {
             return Some(BoardIntent::MarkClear);
         }
     }
@@ -1236,6 +1253,8 @@ pub fn apply_board_intent_with_save_recovery(
             // Navigation and presentation state mutate nothing.
             BoardIntent::SelectNext
             | BoardIntent::SelectPrev
+            | BoardIntent::ToggleMarkMode
+            | BoardIntent::MarkClear
             | BoardIntent::SelectIndex(_)
             | BoardIntent::FocusBoardAndSelectIndex(_)
             | BoardIntent::ListScrollTo(_)
@@ -6947,6 +6966,36 @@ mod tests {
                 "{mode:?} must not be swallowed by the open form"
             );
         }
+    }
+
+    #[test]
+    fn mark_mode_does_not_shadow_text_entry_or_save_recovery_keys() {
+        let (mut domain, mut model) = board_with_one_task();
+        apply_intent(&mut domain, &mut model, BoardIntent::ToggleMarkMode, None)
+            .expect("enter mark mode");
+        apply_intent(&mut domain, &mut model, BoardIntent::OpenCapture, None)
+            .expect("open quick add while marks remain available");
+        assert!(model.mark_mode_active());
+        assert_eq!(model.input_mode(), BoardInputMode::QuickAdd);
+        assert_eq!(
+            board_keyboard_intent(
+                &model,
+                model.input_mode(),
+                KeyEvent::new(KeyCode::Char('M'), KeyModifiers::SHIFT)
+            ),
+            Some(BoardIntent::QuickAddInsert('M'))
+        );
+
+        model.begin_save_recovery("injected save failure");
+        assert_eq!(
+            board_keyboard_intent(
+                &model,
+                model.input_mode(),
+                KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)
+            ),
+            Some(BoardIntent::CancelSave),
+            "save recovery must remain escapable while mark mode is retained"
+        );
     }
 
     /// SaveRecovery outranks an open form, so Retry and both Cancel keys must retain the only
