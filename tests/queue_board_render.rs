@@ -368,6 +368,7 @@ fn fixture_model_on_tab<'a>(
         tasks,
         view,
         selection_id: Some(Uuid::from_u128(1)),
+        marked_ids: std::collections::BTreeSet::new(),
         nav: NavPaint {
             active,
             slot2_label: "tsk".to_string(),
@@ -389,6 +390,7 @@ fn fixture_model_on_tab<'a>(
         has_update_notice: false,
         status_message: None,
         status_undo_offset: None,
+        status_undo_width: None,
         verb_items: fixture_verbs(),
         now: now(),
         overlay: QueueOverlay::None,
@@ -2857,7 +2859,24 @@ fn golden_scenes() -> Vec<GoldenScene> {
 
     let board_view = fixture_view(&tasks, false);
     let board_model = fixture_model(&tasks, &board_view);
-    let (board_rows, _) = paint(80, 24, &board_model);
+    let (base_rows, _) = paint(80, 24, &board_model);
+    let mut marked_model = base_board_model();
+    let mut marked_domain = DomainState::new();
+    apply_intent(
+        &mut marked_domain,
+        &mut marked_model,
+        BoardIntent::MarkExtend(tsk_tui::ui::input::MarkDirection::Down),
+        None,
+    )
+    .expect("mark selected row and move");
+    apply_intent(
+        &mut marked_domain,
+        &mut marked_model,
+        BoardIntent::MarkToggle,
+        None,
+    )
+    .expect("mark destination row");
+    let marked_rows = board_rows(&marked_model, 80, 24);
     let (default_split_rows, default_split_geo) = paint(78, 24, &board_model);
     assert_eq!(
         default_split_geo.tier,
@@ -2949,13 +2968,18 @@ fn golden_scenes() -> Vec<GoldenScene> {
     vec![
         GoldenScene {
             name: "board",
-            rows: board_rows,
+            rows: base_rows,
             width: 80,
         },
         GoldenScene {
             name: "board_default_split_78",
             rows: default_split_rows,
             width: 78,
+        },
+        GoldenScene {
+            name: "board_marked",
+            rows: marked_rows,
+            width: 80,
         },
         GoldenScene {
             name: "accordion",
@@ -3455,10 +3479,11 @@ fn all_golden_frames_pass_no_color_sgr_scan() {
         scanned += 1;
     }
     assert_eq!(
-        scanned, 12,
-        "expected the twelve board surface goldens (board, board_default_split_78, accordion, \
-         palette, help, done_drawer, inbox, done_drawer_archived, projects_index_50x20, \
-         projects_index_110x30, projects_preview_split_110x30, projects_preview_rail_110x30) \
+        scanned, 13,
+        "expected the thirteen board surface goldens (board, board_marked, \
+         board_default_split_78, accordion, palette, help, done_drawer, inbox, \
+         done_drawer_archived, projects_index_50x20, projects_index_110x30, \
+         projects_preview_split_110x30, projects_preview_rail_110x30) \
          in {dir:?}"
     );
 }

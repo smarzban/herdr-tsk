@@ -1,5 +1,6 @@
 //! Queue chrome, overlays, verb bar, and frame drawing hooks.
 
+use std::collections::BTreeSet;
 use std::path::Path;
 use std::time::SystemTime;
 
@@ -21,7 +22,7 @@ use crate::ui::render::{
 use crate::ui::tier;
 use crate::ui::{present_line, terminal_text};
 
-use super::chrome::{notice_framed, row_width, DELETE_NOTICE_UNDO};
+use super::chrome::{notice_framed, row_width, BULK_DELETE_NOTICE_UNDO, DELETE_NOTICE_UNDO};
 use super::commands::CommandSurface;
 use super::model::{
     project_option_label, project_scope_option_label, BoardForm, BoardInputMode, BoardLocation,
@@ -1055,25 +1056,36 @@ impl<'a> OverlayPayloads<'a> {
 /// Status row content: delete recovery notice (title + u undo hint) when armed; otherwise
 /// the last action message, otherwise counts. When both channels are set (stale undo
 /// refusal after delete), compose notice first then message so the refusal is visible.
-fn status_row_content(model: &BoardModel) -> (Option<String>, Option<usize>) {
+fn status_row_content(model: &BoardModel) -> (Option<String>, Option<usize>, Option<usize>) {
     let editing_on_page = model.open_field_edit().is_some() && model.form.is_some();
-    let status_owned = match (model.visible_delete_notice(), model.message()) {
-        (Some(title), Some(msg)) => Some(format!("{}  ·  {}", notice_framed(title, true), msg)),
-        (Some(title), None) => Some(notice_framed(title, true)),
+    let bulk_count = model.visible_delete_notice_count();
+    let notice = model.visible_delete_notice().map(|title| match bulk_count {
+        Some(count) => format!(
+            "deleted {count} {} · {BULK_DELETE_NOTICE_UNDO}",
+            if count == 1 { "task" } else { "tasks" }
+        ),
+        None => notice_framed(title, true),
+    });
+    let status_owned = match (notice.as_deref(), model.message()) {
+        (Some(notice), Some(msg)) => Some(format!("{notice}  ·  {msg}")),
+        (Some(notice), None) => Some(notice.to_string()),
         (None, Some(msg)) => Some(msg.to_string()),
         (None, None) if editing_on_page => Some("editing…".to_string()),
+        (None, None) if model.marked_count() > 0 => {
+            Some(format!("{} selected · esc clears", model.marked_count()))
+        }
         _ => None,
     };
-    // The Undo control's offset inside `status_owned`, computed from the notice's own
-    // composition rather than located by searching the composed row for the literal
-    // `u Undo` text -- a title containing that literal (e.g. a task titled `u Undo now`)
-    // would otherwise steal the region a `find` located. `notice_framed(title, true)`
-    // always ends in `DELETE_NOTICE_UNDO`, so the control's start is exactly that
-    // rendering's width less the control's own width.
-    let status_undo_offset = model.visible_delete_notice().map(|title| {
-        row_width(&notice_framed(title, true)).saturating_sub(row_width(DELETE_NOTICE_UNDO))
-    });
-    (status_owned, status_undo_offset)
+    // Compute the clickable control from the exact notice text, never by searching user text.
+    let undo_control = bulk_count
+        .map(|_| BULK_DELETE_NOTICE_UNDO)
+        .or_else(|| notice.as_ref().map(|_| DELETE_NOTICE_UNDO));
+    let status_undo_offset = notice
+        .as_deref()
+        .zip(undo_control)
+        .map(|(notice, control)| row_width(notice).saturating_sub(row_width(control)));
+    let status_undo_width = undo_control.map(row_width);
+    (status_owned, status_undo_offset, status_undo_width)
 }
 
 /// Field named in the task header's `editing <field>` state slot while an editor is active.
@@ -1170,7 +1182,7 @@ fn draw_board_hits(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap
     let queue_view = model.queue_view();
     let selection_id = model.saved_task.or(model.selection_id);
     let surface = board_surface(model);
-    let (status_owned, status_undo_offset) = status_row_content(model);
+    let (status_owned, status_undo_offset, status_undo_width) = status_row_content(model);
     // The verb bar entries: computed from the selection and the open surface so the label
     // is true for the row it describes, and drawn from this one function -- the same one
     // the goldens call -- so a later edit to either side cannot silently re-open wording
@@ -1193,6 +1205,7 @@ fn draw_board_hits(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap
         tasks: &model.tasks,
         view: &queue_view,
         selection_id,
+        marked_ids: model.marked_ids.clone(),
         nav: nav_paint(model),
         surface,
         thread_labels: surface == BoardSurface::Project
@@ -1208,6 +1221,7 @@ fn draw_board_hits(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap
         has_update_notice: model.update_notice().is_some(),
         status_message: status_owned.as_deref(),
         status_undo_offset,
+        status_undo_width,
         verb_items: &verbs,
         now: SystemTime::now(),
         overlay,
@@ -1280,7 +1294,7 @@ fn draw_wide_board(
     let selection_id = model.saved_task.or(model.selection_id);
     let selected_task = selection_id.and_then(|id| model.tasks.iter().find(|task| task.id == id));
     let surface = board_surface(model);
-    let (status_owned, status_undo_offset) = status_row_content(model);
+    let (status_owned, status_undo_offset, status_undo_width) = status_row_content(model);
     let verbs = board_verb_items(model);
     let payloads = OverlayPayloads::collect(model);
     let frame_geo = tier::resolve_density(area.width, area.height, density);
@@ -1371,6 +1385,7 @@ fn draw_wide_board(
         tasks: &model.tasks,
         view: &queue_view,
         selection_id,
+        marked_ids: model.marked_ids.clone(),
         nav: nav_paint(model),
         surface,
         thread_labels: surface == BoardSurface::Project
@@ -1386,6 +1401,7 @@ fn draw_wide_board(
         has_update_notice: model.update_notice().is_some(),
         status_message: status_owned.as_deref(),
         status_undo_offset,
+        status_undo_width,
         verb_items: &verbs,
         now: SystemTime::now(),
         overlay: if task_focus {
@@ -1617,6 +1633,7 @@ fn draw_projects_wide_board(
         tasks: &model.tasks,
         view: &outer_view,
         selection_id: None,
+        marked_ids: BTreeSet::new(),
         nav: nav_paint(model),
         surface: BoardSurface::Projects,
         thread_labels: false,
@@ -1630,6 +1647,7 @@ fn draw_projects_wide_board(
         has_update_notice: model.update_notice().is_some(),
         status_message: outer_status.0.as_deref(),
         status_undo_offset: outer_status.1,
+        status_undo_width: outer_status.2,
         verb_items: &outer_verbs,
         now: SystemTime::now(),
         overlay: outer_modal.clone().unwrap_or(QueueOverlay::None),
@@ -1651,6 +1669,7 @@ fn draw_projects_wide_board(
             tasks: &right.tasks,
             view,
             selection_id: right.saved_task.or(right.selection_id),
+            marked_ids: right.marked_ids.clone(),
             nav: nav_paint(right),
             surface: BoardSurface::Project,
             thread_labels: right.thread_filter() == &ThreadFilter::All,
@@ -1664,6 +1683,7 @@ fn draw_projects_wide_board(
             has_update_notice: right.update_notice().is_some(),
             status_message: status.0.as_deref(),
             status_undo_offset: status.1,
+            status_undo_width: status.2,
             verb_items: verbs,
             now: SystemTime::now(),
             overlay: right_overlay.clone().unwrap_or(QueueOverlay::None),

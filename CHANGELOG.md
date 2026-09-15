@@ -9,6 +9,14 @@ the GitHub release notes verbatim.
 
 ## Unreleased
 
+### Breaking
+
+- Store format 5 adds batch undo entries for marked task sets. Rolling back refuses the file; restore `tsk.json.v4`.
+
+### Added
+
+- Mark multiple tasks with `Space`, `Shift+↑`/`Shift+↓`, or `ctrl+click`, then change status, archive, or delete the set at once. One undo reverses a marked completion or deletion, and a stale batch refuses without changing any task.
+
 ### Changed
 
 - `ctrl+q` quits from every non-editor board surface, including task pages and the wide project preview. `Esc` closes layers and either wide split, then quits without confirmation at the full-board root on any tab, including after a narrow resize hides the right column. Unsaved drafts still block quitting, including drafts parked outside the focused preview; text entry and save recovery keep their existing behavior.

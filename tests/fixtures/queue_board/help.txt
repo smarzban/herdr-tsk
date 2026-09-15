@@ -11,8 +11,8 @@
 │         │ ────────────────────────────────────────────────────────── │         │
 │▸ ● T1 Sm│  NAVIGATION                                                │         │
 │  ● T2 Ed│  ↑↓ / jk            move                                   │         │
-│         │  enter              open                                   │         │
-│ ON DECK │  → / ←              peek                                   │───────1 │
+│         │  shift+↑↓           mark and move                          │         │
+│ ON DECK │  space              mark                                   │───────1 │
 │         │                                                            │         │
 │  ○ T7 Gl├────────────────────────────────────────────────────────────┤         │
 │         │ type search · ↑↓ scroll · esc clear/close                  │         │

@@ -322,9 +322,7 @@ const softwareApplication = {
             <article class="pillar">
               <h3>Nothing completes itself.</h3>
               <p>
-                Every mutating verb needs <kbd>Ctrl</kbd>. Bare letters do nothing, so a stray
-                keystroke in a focused board cannot finish or delete work. Undo is one chord
-                away.
+                Mark a task set with <kbd>Space</kbd> or <kbd>Shift+↑</kbd>/<kbd>Shift+↓</kbd>, then run one action across it. Every mutating verb needs <kbd>Ctrl</kbd>, so a stray bare letter cannot finish or delete work. One undo reverses the marked completion or deletion.
               </p>
               <pre class="mini" aria-label="Verb bar"><span class="dim">enter</span> open · <span class="dim">ctrl+d</span> done · <span class="dim">ctrl+n</span> ready · <span class="dim">ctrl+o</span> open · <span class="dim">:</span> palette
 <span class="dim">ctrl+x</span> delete · <span class="dim">ctrl+u</span> undo · <span class="dim">?</span> help · <span class="dim">+</span> capture</pre>
@@ -349,7 +347,7 @@ const softwareApplication = {
       <section class="stage" id="demo" aria-labelledby="demo-heading">
 
         <div class="stage-inner">
-          <div class="demo-invitation"><h2 id="demo-heading">Try it. This board is yours to play with.</h2><p>Double-click a task to open it, check off a step, or press + to add your own. Switch to Projects at a wide width, then move to a project to preview its board. Explore auth, API, and reliability work with threads and checklists. Changes stay in this demo; refresh to start over.</p></div>
+          <div class="demo-invitation"><h2 id="demo-heading">Try it. This board is yours to play with.</h2><p>Press Space or Shift+↑/↓ to mark tasks, double-click one to open it, check off a step, or press + to add your own. Switch to Projects at a wide width, then move to a project to preview its board. Explore auth, API, and reliability work with threads and checklists. Changes stay in this demo; refresh to start over.</p></div>
           <div
             class="pane"
             id="board-demo"
@@ -402,8 +400,7 @@ const softwareApplication = {
             because browsers keep the control chords. In the app, every mutating verb needs
             <kbd>Ctrl</kbd>. <kbd>Esc</kbd> closes either split after its editors and overlays.
             At the full-board root, <kbd>Esc</kbd> exits the terminal app;
-            here it only releases keyboard focus, keeping the current tab. This demo covers browsing, starting and opening tasks, plus adding, checking,
-            renaming and removing steps. Full task editing and save recovery remain unfinished.
+            here it only releases keyboard focus, keeping the current tab. This demo covers marking and updating task sets, browsing, opening tasks, plus adding, checking, renaming and removing steps. Full task editing and save recovery remain unfinished.
           </p>
         </div>
       </section>

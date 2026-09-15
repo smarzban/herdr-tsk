@@ -13,7 +13,7 @@ use crate::domain::{
 use crate::scope::paths_equivalent;
 use crate::ui::capture::{CaptureField, TITLE_REQUIRED_MESSAGE};
 use crate::ui::edit::{flatten_line_breaks, EditBuffer};
-use crate::ui::input::BoardIntent;
+use crate::ui::input::{BoardIntent, MarkDirection};
 use crate::ui::mouse::BoardPopup;
 use crate::ui::queue::{NavTab, ARCHIVED_HEADER_ROW_ID, INBOX_HEADER_ROW_ID};
 use crate::ui::tier::{FocusedSurface, WideStage};
@@ -28,6 +28,79 @@ use super::model::{
 /// What the row says when an action that aims at the selection is asked for on a board that
 /// has none. One wording, so the same refusal always reads the same way.
 const NO_SELECTION: &str = "select a task first";
+
+fn take_verb_targets(model: &mut BoardModel) -> (Vec<Uuid>, bool) {
+    let bulk = model.input_mode == BoardInputMode::Normal && model.marked_count() > 0;
+    let targets = model.verb_target_ids();
+    model.clear_marks();
+    (targets, bulk)
+}
+
+fn set_status_batch(
+    domain: &mut DomainState,
+    targets: &[Uuid],
+    status: HumanStatus,
+) -> Result<bool, DomainError> {
+    let baseline = domain.clone();
+    let mut changed = false;
+    for &id in targets {
+        if domain.get(id).is_some_and(|task| task.status == status) {
+            continue;
+        }
+        if let Err(error) = domain.set_status(id, status) {
+            *domain = baseline;
+            return Err(error);
+        }
+        changed = true;
+    }
+    Ok(changed)
+}
+
+fn reopen_batch(domain: &mut DomainState, targets: &[Uuid]) -> Result<bool, DomainError> {
+    let baseline = domain.clone();
+    let mut changed = false;
+    for &id in targets {
+        let Some(status) = domain.get(id).map(|task| task.status) else {
+            *domain = baseline;
+            return Err(DomainError::UnknownId(id));
+        };
+        let result = match status {
+            HumanStatus::Open => continue,
+            HumanStatus::Done => domain.reopen(id),
+            _ => domain.set_status(id, HumanStatus::Open),
+        };
+        if let Err(error) = result {
+            *domain = baseline;
+            return Err(error);
+        }
+        changed = true;
+    }
+    Ok(changed)
+}
+
+fn file_batch(domain: &mut DomainState, targets: &[Uuid]) -> Result<bool, DomainError> {
+    let baseline = domain.clone();
+    let mut changed = false;
+    for &id in targets {
+        let Some(archived) = domain.get(id).map(|task| task.archived) else {
+            *domain = baseline;
+            return Err(DomainError::UnknownId(id));
+        };
+        let result = if archived {
+            domain.unarchive_task(id)
+        } else {
+            domain.archive_task(id)
+        };
+        match result {
+            Ok(task_changed) => changed |= task_changed,
+            Err(error) => {
+                *domain = baseline;
+                return Err(error);
+            }
+        }
+    }
+    Ok(changed)
+}
 
 /// What the row says when an Undo is refused because its target moved on.
 ///
@@ -172,6 +245,7 @@ pub fn apply_intent(
         )
     {
         model.pending_delete = None;
+        model.pending_delete_bulk = false;
     }
     if model.empty_add_step_editor()
         && !matches!(
@@ -229,14 +303,18 @@ pub fn apply_intent(
         }
         return Ok(IntentOutcome::None);
     }
-    let notice_before = model.delete_notice().map(str::to_string);
+    let notice_before = (
+        model.delete_notice().map(str::to_string),
+        model.delete_notice_count,
+    );
     let mutating = board_intent_may_persist(&intent);
     let result = apply_board_intent(domain, model, intent, snapshot);
     // A command confirmation carries no lifetime of its own: it recurses with the command it
     // resolved to, and that intent is classified on the way through, so it is the recursion
     // that restores.
     if mutating && !matches!(result, Ok(IntentOutcome::Persist)) {
-        model.delete_notice = notice_before;
+        model.delete_notice = notice_before.0;
+        model.delete_notice_count = notice_before.1;
     }
     result
 }
@@ -729,6 +807,42 @@ fn apply_board_intent(
             model.select_prev();
             return Ok(IntentOutcome::None);
         }
+        BoardIntent::MarkToggle => {
+            if model.input_mode != BoardInputMode::Normal || model.projects_overview() {
+                return Ok(IntentOutcome::None);
+            }
+            model.toggle_selected_mark();
+            model.clear_message();
+            return Ok(IntentOutcome::None);
+        }
+        BoardIntent::MarkToggleAt(idx) => {
+            if model.input_mode != BoardInputMode::Normal || model.projects_overview() {
+                return Ok(IntentOutcome::None);
+            }
+            if model.select_index(idx) {
+                model.toggle_selected_mark();
+                model.last_row_click = None;
+                model.clear_message();
+            }
+            return Ok(IntentOutcome::None);
+        }
+        BoardIntent::MarkExtend(direction) => {
+            if model.input_mode != BoardInputMode::Normal || model.projects_overview() {
+                return Ok(IntentOutcome::None);
+            }
+            model.mark_selected();
+            match direction {
+                MarkDirection::Up => model.select_prev(),
+                MarkDirection::Down => model.select_next(),
+            };
+            model.clear_message();
+            return Ok(IntentOutcome::None);
+        }
+        BoardIntent::MarkClear => {
+            model.clear_marks();
+            model.clear_message();
+            return Ok(IntentOutcome::None);
+        }
         BoardIntent::SelectIndex(idx) => {
             if !model.select_index(idx) {
                 return Ok(IntentOutcome::None);
@@ -798,6 +912,7 @@ fn apply_board_intent(
         }
         BoardIntent::BeginEditTitle | BoardIntent::BeginEditNotes | BoardIntent::BeginEditScope => {
             model.close_popup();
+            model.clear_marks();
             // Ctrl+E on an already-open inline row keeps that row focused. Field traversal is
             // explicit through Tab or clicks, so this never discards or redirects its draft.
             if intent == BoardIntent::BeginEditTitle && model.input_mode == BoardInputMode::EditStep
@@ -1177,6 +1292,7 @@ fn apply_board_intent(
                     .as_ref()
                     .and_then(|picker| picker.archived.get(picker.archived_selected).cloned());
                 if let Some(path) = chosen {
+                    model.clear_marks();
                     model.project_picker = None;
                     model.open_archived_focus(path);
                     model.clear_message();
@@ -1187,6 +1303,7 @@ fn apply_board_intent(
                 return Ok(IntentOutcome::None);
             };
             let chosen = picker.options.get(picker.selected).cloned();
+            model.clear_marks();
             model.set_board_scope(chosen.unwrap_or(ProjectScopeOption::Home));
             model.clear_message();
             return Ok(IntentOutcome::None);
@@ -1216,6 +1333,7 @@ fn apply_board_intent(
                 model.project_picker = Some(picker);
                 return Ok(IntentOutcome::None);
             };
+            model.clear_marks();
             model.set_board_scope(chosen);
             model.clear_message();
             return Ok(IntentOutcome::None);
@@ -1242,6 +1360,9 @@ fn apply_board_intent(
                     BoardIntent::OpenProjectSelector,
                     snapshot,
                 );
+            }
+            if switched {
+                model.clear_marks();
             }
             model.clear_message();
             return Ok(IntentOutcome::None);
@@ -1321,6 +1442,7 @@ fn apply_board_intent(
                 return Ok(IntentOutcome::None);
             }
             if let Some(value) = model.confirm_list_picker() {
+                model.clear_marks();
                 let previous = model.selection_id;
                 let previous_visible = model.visible_ids();
                 model.reanchor_selection(previous, &previous_visible);
@@ -1480,6 +1602,7 @@ fn apply_board_intent(
             return Ok(IntentOutcome::None);
         }
         BoardIntent::ToggleAllGroups => {
+            model.clear_marks();
             let previous_visible = model.visible_ids();
             let previous = model.selection_id;
             if model.toggle_all_groups() {
@@ -1499,79 +1622,89 @@ fn apply_board_intent(
         }
         BoardIntent::PrimaryVerb => {
             model.close_popup();
-            // Status verbs always act on the task, even with a step selected: Enter is the
-            // step's own toggle.
-            let Some(id) = model.selected_id() else {
+            // Status verbs always act on tasks, even with a step selected: Enter owns steps.
+            let (targets, _) = take_verb_targets(model);
+            if targets.is_empty() {
                 model.set_message(NO_SELECTION);
                 return Ok(IntentOutcome::None);
-            };
-            let Some(task) = domain.get(id) else {
-                model.set_message("that task is no longer here");
-                return Ok(IntentOutcome::None);
-            };
-            match task.status {
-                HumanStatus::Open | HumanStatus::Ready => {
-                    domain.set_status(id, HumanStatus::Started)?;
-                }
-                HumanStatus::Started
-                | HumanStatus::Blocked
-                | HumanStatus::Review
-                | HumanStatus::Done => {
+            }
+            let baseline = domain.clone();
+            let mut changed = false;
+            for id in targets {
+                let Some(status) = domain.get(id).map(|task| task.status) else {
+                    *domain = baseline;
+                    model.set_message("that task is no longer here");
                     return Ok(IntentOutcome::None);
+                };
+                if matches!(status, HumanStatus::Open | HumanStatus::Ready) {
+                    if let Err(error) = domain.set_status(id, HumanStatus::Started) {
+                        *domain = baseline;
+                        return Err(error);
+                    }
+                    changed = true;
                 }
+            }
+            if !changed {
+                return Ok(IntentOutcome::None);
             }
         }
         BoardIntent::ToggleBlock => {
             model.close_popup();
-            let Some(id) = model.selected_id() else {
+            let (targets, bulk) = take_verb_targets(model);
+            if targets.is_empty() {
                 model.set_message(NO_SELECTION);
                 return Ok(IntentOutcome::None);
-            };
-            let Some(task) = domain.get(id) else {
-                model.set_message("that task is no longer here");
-                return Ok(IntentOutcome::None);
-            };
-            match task.status {
-                HumanStatus::Blocked => {
-                    domain.set_status(id, HumanStatus::Ready)?;
-                }
-                HumanStatus::Open
-                | HumanStatus::Ready
-                | HumanStatus::Started
-                | HumanStatus::Review => {
-                    domain.set_status(id, HumanStatus::Blocked)?;
-                }
-                HumanStatus::Done => {
-                    model.set_message("completed tasks cannot be blocked");
-                    return Ok(IntentOutcome::None);
-                }
             }
+            if !bulk
+                && targets.iter().any(|id| {
+                    domain
+                        .get(*id)
+                        .is_some_and(|task| task.status == HumanStatus::Done)
+                })
+            {
+                model.set_message("completed tasks cannot be blocked");
+                return Ok(IntentOutcome::None);
+            }
+            let all_blocked = targets.iter().all(|id| {
+                domain
+                    .get(*id)
+                    .is_some_and(|task| task.status == HumanStatus::Blocked)
+            });
+            let status = if all_blocked {
+                HumanStatus::Ready
+            } else {
+                HumanStatus::Blocked
+            };
+            set_status_batch(domain, &targets, status)?;
         }
         BoardIntent::ToggleReview => {
             model.close_popup();
-            let Some(id) = model.selected_id() else {
+            let (targets, bulk) = take_verb_targets(model);
+            if targets.is_empty() {
                 model.set_message(NO_SELECTION);
                 return Ok(IntentOutcome::None);
-            };
-            let Some(task) = domain.get(id) else {
-                model.set_message("that task is no longer here");
-                return Ok(IntentOutcome::None);
-            };
-            match task.status {
-                HumanStatus::Review => {
-                    domain.set_status(id, HumanStatus::Ready)?;
-                }
-                HumanStatus::Open
-                | HumanStatus::Ready
-                | HumanStatus::Started
-                | HumanStatus::Blocked => {
-                    domain.set_status(id, HumanStatus::Review)?;
-                }
-                HumanStatus::Done => {
-                    model.set_message("completed tasks cannot go to review");
-                    return Ok(IntentOutcome::None);
-                }
             }
+            if !bulk
+                && targets.iter().any(|id| {
+                    domain
+                        .get(*id)
+                        .is_some_and(|task| task.status == HumanStatus::Done)
+                })
+            {
+                model.set_message("completed tasks cannot go to review");
+                return Ok(IntentOutcome::None);
+            }
+            let all_review = targets.iter().all(|id| {
+                domain
+                    .get(*id)
+                    .is_some_and(|task| task.status == HumanStatus::Review)
+            });
+            let status = if all_review {
+                HumanStatus::Ready
+            } else {
+                HumanStatus::Review
+            };
+            set_status_batch(domain, &targets, status)?;
         }
         BoardIntent::StageRight => {
             stage_right(domain, model);
@@ -1858,6 +1991,7 @@ fn apply_board_intent(
             return Ok(IntentOutcome::None);
         }
         BoardIntent::ToggleDoneDrawer => {
+            model.clear_marks();
             let previous_visible = model.visible_ids();
             let previous = model.selection_id;
             model.drawer_open = !model.drawer_open;
@@ -1867,6 +2001,7 @@ fn apply_board_intent(
         BoardIntent::ToggleArchivedGroup => {
             // Enter or a click on the header: flip that one group. The drawer is already
             // open, because the header only paints inside it.
+            model.clear_marks();
             let previous_visible = model.visible_ids();
             model.toggle_archived_collapsed();
             model.select_archived_header();
@@ -1874,6 +2009,7 @@ fn apply_board_intent(
             return Ok(IntentOutcome::None);
         }
         BoardIntent::ToggleInboxGroup => {
+            model.clear_marks();
             let previous_visible = model.visible_ids();
             model.toggle_inbox_collapsed();
             model.select_inbox_header();
@@ -1940,6 +2076,12 @@ fn apply_board_intent(
             return Ok(IntentOutcome::None);
         }
         BoardIntent::CloseLayer => {
+            let had_marks = model.marked_count() > 0;
+            model.clear_marks();
+            if had_marks {
+                model.clear_message();
+                return Ok(IntentOutcome::None);
+            }
             // Progressive close: transient surface (palette/help/dropdown) →
             // open detail → quit. SaveRecovery is not dismissible here; the save-recovery
             // gate owns Retry/Cancel.
@@ -2058,42 +2200,47 @@ fn apply_board_intent(
         // says so rather than returning to a row that has just been cleared for an action
         // that then did nothing: a silent no-op is the failure the row exists to prevent.
         BoardIntent::SetStatus(status) => {
-            let Some(id) = model.selected_id() else {
+            let (targets, _) = take_verb_targets(model);
+            if targets.is_empty() {
                 model.set_message(NO_SELECTION);
                 return Ok(IntentOutcome::None);
-            };
-            if domain.get(id).is_some_and(|task| task.status == status) {
+            }
+            if !set_status_batch(domain, &targets, status)? {
                 model.close_popup();
                 return Ok(IntentOutcome::None);
             }
-            domain.set_status(id, status)?;
             model.close_popup();
         }
         BoardIntent::Complete => {
             model.close_popup();
             // Task-level, even with a step selected (Enter owns the step).
-            let Some(id) = model.selected_id() else {
+            let (targets, bulk) = take_verb_targets(model);
+            if targets.is_empty() {
                 model.set_message(NO_SELECTION);
                 return Ok(IntentOutcome::None);
-            };
-            domain.complete(id)?;
+            }
+            if targets.iter().all(|id| {
+                domain
+                    .get(*id)
+                    .is_some_and(|task| task.status == HumanStatus::Done)
+            }) {
+                return Ok(IntentOutcome::None);
+            }
+            if bulk {
+                domain.complete_batch(&targets)?;
+            } else {
+                domain.complete(targets[0])?;
+            }
         }
         BoardIntent::Reopen => {
             model.close_popup();
-            let Some(id) = model.selected_id() else {
+            let (targets, _) = take_verb_targets(model);
+            if targets.is_empty() {
                 model.set_message(NO_SELECTION);
                 return Ok(IntentOutcome::None);
-            };
-            let Some(status) = domain.get(id).map(|task| task.status) else {
-                return Ok(IntentOutcome::None);
-            };
-            if status == HumanStatus::Open {
-                return Ok(IntentOutcome::None);
             }
-            if status == HumanStatus::Done {
-                domain.reopen(id)?;
-            } else {
-                domain.set_status(id, HumanStatus::Open)?;
+            if !reopen_batch(domain, &targets)? {
+                return Ok(IntentOutcome::None);
             }
         }
         BoardIntent::SoftDelete => {
@@ -2103,36 +2250,73 @@ fn apply_board_intent(
             // highlighted step, a second press removes it, and the task-level soft
             // delete below never runs.
             match page_step_delete(domain, model)? {
-                PageStepDelete::Marked | PageStepDelete::Staged => return Ok(IntentOutcome::None),
-                PageStepDelete::Removed => {}
+                PageStepDelete::Marked | PageStepDelete::Staged => {
+                    model.clear_marks();
+                    return Ok(IntentOutcome::None);
+                }
+                PageStepDelete::Removed => {
+                    model.clear_marks();
+                }
                 PageStepDelete::NotApplicable => {
-                    let Some(id) = model.selected_id() else {
+                    let pending = model.pending_delete.clone();
+                    let bulk = if pending.is_some() {
+                        model.pending_delete_bulk
+                    } else {
+                        model.input_mode == BoardInputMode::Normal && model.marked_count() > 0
+                    };
+                    let targets = pending
+                        .as_ref()
+                        .map(|targets| targets.iter().copied().collect())
+                        .unwrap_or_else(|| model.verb_target_ids());
+                    if targets.is_empty() {
                         model.set_message(NO_SELECTION);
                         return Ok(IntentOutcome::None);
-                    };
-                    if model.pending_delete != Some(id) {
-                        model.pending_delete = Some(id);
-                        model.set_message("press ctrl+x again to delete");
+                    }
+                    if pending.is_none() {
+                        model.pending_delete = Some(targets.iter().copied().collect());
+                        model.pending_delete_bulk = bulk;
+                        model.clear_marks();
+                        if bulk {
+                            let noun = if targets.len() == 1 { "task" } else { "tasks" };
+                            model.set_message(format!(
+                                "press ctrl+x again to delete {} {noun}",
+                                targets.len()
+                            ));
+                        } else {
+                            model.set_message("press ctrl+x again to delete");
+                        }
                         return Ok(IntentOutcome::None);
                     }
                     model.pending_delete = None;
+                    model.pending_delete_bulk = false;
+                    model.clear_marks();
                     // Read the title before the delete, and only arm the notice once the delete
                     // itself succeeded: a refused delete has nothing to recover from.
-                    let title = domain.get(id).map(|task| task.title.clone());
-                    domain.soft_delete(id)?;
-                    if let Some(title) = title {
-                        model.arm_delete_notice(&title);
+                    let title = targets
+                        .first()
+                        .and_then(|id| domain.get(*id))
+                        .map(|task| task.title.clone());
+                    if bulk {
+                        domain.soft_delete_batch(&targets)?;
+                        model.arm_bulk_delete_notice(targets.len());
+                    } else {
+                        let id = targets[0];
+                        domain.soft_delete(id)?;
+                        if let Some(title) = title {
+                            model.arm_delete_notice(&title);
+                        }
                     }
                     // Deleting from the page deletes the page's own task: the surface closes and
                     // the undo route back to it lives on the board row, same as the notice says.
                     // A task-owned stage (G or F) hands the slider back to the board the same
                     // way `Esc` would, so the arrows keep answering on the row with the undo.
-                    if model
-                        .form
-                        .as_ref()
-                        .filter(|form| form.is_task())
-                        .and_then(BoardForm::task_id)
-                        == Some(id)
+                    if !bulk
+                        && model
+                            .form
+                            .as_ref()
+                            .filter(|form| form.is_task())
+                            .and_then(BoardForm::task_id)
+                            == Some(targets[0])
                     {
                         model.form = None;
                         model.input_mode = BoardInputMode::Normal;
@@ -2177,6 +2361,9 @@ fn apply_board_intent(
         BoardIntent::File => {
             // Picker open: archive the selected main-tab project, or unarchive the
             // selected archived-tab entry. The picker stays open either way.
+            if model.project_picker.is_some() {
+                model.clear_marks();
+            }
             if let Some(picker) = model.project_picker.as_ref() {
                 let tab = picker.tab;
                 let chosen = match tab {
@@ -2215,22 +2402,18 @@ fn apply_board_intent(
                 return Ok(IntentOutcome::Persist);
             }
             model.close_popup();
-            let Some(id) = model.selected_id() else {
+            let (targets, _) = take_verb_targets(model);
+            if targets.is_empty() {
                 model.set_message(NO_SELECTION);
                 return Ok(IntentOutcome::None);
-            };
-            let Some(task) = domain.get(id) else {
-                model.set_message("that task is no longer here");
-                return Ok(IntentOutcome::None);
-            };
-            if task.archived {
-                domain.unarchive_task(id)?;
-            } else {
-                domain.archive_task(id)?;
             }
-            // Success has no message: the row's disappearance (or return) is the feedback.
+            if !file_batch(domain, &targets)? {
+                return Ok(IntentOutcome::None);
+            }
+            // Success has no message: disappearing rows are the feedback.
         }
         BoardIntent::Undo => {
+            model.clear_marks();
             // Picker open: the archived tab's ctrl+u is the unarchive route; the main
             // tab stays inert (undo exactly as before the feature).
             if let Some(picker) = model.project_picker.as_ref() {

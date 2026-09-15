@@ -3,7 +3,7 @@ title: Keys
 description: Keyboard shortcuts by action and surface.
 ---
 
-Use the mouse, the keyboard, or both. Tabs, selectors, tasks, and footer actions are clickable; double-click a task to open it.
+Use the mouse, the keyboard, or both. Tabs, selectors, tasks, and footer actions are clickable; `ctrl+click` a task or its number to toggle its mark, double-click a task to open it.
 
 Press `?` on the board, task page, or another non-text surface for a searchable list of all shortcuts. Status and delete shortcuts use **Ctrl**; navigation uses bare keys. The website demo uses bare status keys because browsers reserve control chords.
 
@@ -12,6 +12,8 @@ Press `?` on the board, task page, or another non-text surface for a searchable 
 | Action | Key |
 | --- | --- |
 | Select previous / next task | `↑` / `↓` or `k` / `j` |
+| Mark current task, then move | `Shift+↑` / `Shift+↓` |
+| Mark / unmark cursored task | `Space` |
 | Open task full screen | `Enter` |
 | Peek / close peek below 110 columns | `→` / `←` |
 | Move through wide views | `→` / `←` |
@@ -41,9 +43,9 @@ Press `?` on the board, task page, or another non-text surface for a searchable 
 
 `ctrl+q` quits from task views, Help, and pickers too, including the wide project preview. It does not quit while editing text, using Projects search, typing a quick-add line, or filtering the palette. Save or cancel any unsaved draft first. During save recovery, resolve the pending save instead.
 
-`Esc` closes the current layer first. At the full-board root on any tab, it quits without confirmation, rather than switching back to the desk. In either wide split, `Esc` closes the right column after any editor or overlay is dismissed. A further `Esc` at the full-board root quits. A project preview with unsaved work refuses to close. If narrowing the terminal hides the right column, the visible board/index is already at the root: `Esc` quits without an extra collapse, unless a parked draft blocks quitting.
+`Esc` clears marked tasks first, then closes the current layer. At the full-board root on any tab, with no marks left to clear, it quits without confirmation rather than switching back to the desk. In either wide split, `Esc` closes the right column after any editor or overlay is dismissed. A further `Esc` at the full-board root quits. A project preview with unsaved work refuses to close. If narrowing the terminal hides the right column, the visible board/index is already at the root: `Esc` quits without an extra collapse, unless a parked draft blocks quitting.
 
-Status shortcuts are absolute. `ctrl+s` starts open or ready tasks and leaves started, blocked, and review tasks unchanged. `ctrl+n` and `ctrl+o` can send a done task directly to ready or open.
+When tasks are marked, the status, delete, and archive shortcuts act on that set; without marks they act on the cursor. `Enter` and `ctrl+e` remain cursor-only. `ctrl+s` starts each eligible open or ready task and leaves started, blocked, and review tasks unchanged. Bulk block and review toggles send every target to blocked or review unless all targets already have that status, in which case they all return to ready. `ctrl+n` and `ctrl+o` can send done tasks directly to ready or open. One `ctrl+u` reverses an entire marked completion or deletion.
 
 ## Task page
 
@@ -137,6 +139,6 @@ On **Projects Overview** at 110+ columns, clicking a row or moving the index sel
 | Split, index focused | Rail | Full board | Full board |
 | Rail, right board focused | Narrow board keys | Return to index | Return to index |
 
-The right seat keeps its own project-board selection and state. Its `→` / `←` are peek controls, and `Enter` opens a task page inside the column. `ctrl+d`, `d`, `g`, `+`, and the other board actions apply to the right seat while it is focused.
+The right seat keeps its own project-board cursor, marked set, and state. Its `→` / `←` are peek controls, and `Enter` opens a task page inside the column. `ctrl+d`, `d`, `g`, `+`, and the other board actions apply to the right seat while it is focused.
 
 [Board views and mouse behavior](/docs/board/#wide-stage-slider).

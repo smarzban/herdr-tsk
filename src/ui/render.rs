@@ -4,6 +4,7 @@
 //! `Modifier::{BOLD, DIM, UNDERLINED, REVERSED}`, plus [`draw_queue_frame`] for the
 //! the deck-only board skeleton.
 
+use std::collections::BTreeSet;
 use std::path::Path;
 use std::time::SystemTime;
 
@@ -103,6 +104,8 @@ pub struct TaskRowPaint<'a> {
     pub identifier: Option<&'a str>,
     pub title: &'a str,
     pub selected: bool,
+    /// Whether this task belongs to the session-only bulk selection.
+    pub marked: bool,
     /// Bold the title when unselected (e.g. attention emphasis).
     pub title_bold: bool,
     /// Dim every span (the archived group's rows). Glyph and identifier are kept.
@@ -204,7 +207,12 @@ fn paint_task_row_with_indent(
     let title_budget = row_w;
 
     let glyph = super::terminal_text(row.glyph);
-    let marker = if row.selected { "▸ " } else { "  " };
+    let marker = match (row.selected, row.marked) {
+        (true, true) => "▸▪",
+        (true, false) => "▸ ",
+        (false, true) => "▪ ",
+        (false, false) => "  ",
+    };
     let prefix = format!("{}{marker}{glyph} ", " ".repeat(leading_indent));
     let identifier = row.identifier.unwrap_or_default();
     let identifier_gap = if identifier.is_empty() { "" } else { " " };
@@ -498,6 +506,8 @@ pub struct QueueFrameModel<'a> {
     pub view: &'a QueueView,
     /// Selected task id, if any.
     pub selection_id: Option<Uuid>,
+    /// Session-only bulk selection, independent from the cursor.
+    pub marked_ids: BTreeSet<Uuid>,
     /// Persistent navigation paint: the three tabs, slot 2's label, and the
     /// destination's right-side control (thread filter / View selector).
     pub nav: NavPaint,
@@ -530,6 +540,8 @@ pub struct QueueFrameModel<'a> {
     /// `board.rs`'s `notice_framed`), so the hit region is never re-derived by searching
     /// `status_message` itself, which is partly user text (the deleted task's title).
     pub status_undo_offset: Option<usize>,
+    /// Display width of the exact Undo control named by `status_undo_offset`.
+    pub status_undo_width: Option<usize>,
     /// Verb-bar entries (trimmed to the geometry budget at paint time).
     pub verb_items: &'a [VerbEntry<'a>],
     /// Clock for age labels (tests inject a fixed instant).
@@ -1408,6 +1420,7 @@ fn paint_footer(
             let (line, undo_hit) = paint_status_line(
                 model.status_message,
                 model.status_undo_offset,
+                model.status_undo_width,
                 &idle,
                 width,
                 hint,
@@ -3802,11 +3815,19 @@ fn build_list_rows(
         );
         let selected = model.selection_id == Some(task.id)
             && !matches!(model.overlay, QueueOverlay::ScopeDropdown { .. });
+        let marked = model.marked_ids.contains(&task.id);
         // A long title wraps onto continuation lines indented under its own first
         // row; every painted line carries the task's hit target and selection.
         let identifier = task.board_identifier();
         let lines = if rail {
-            paint_rail_row_lines(task, identifier.as_deref(), selected, geo.row_width, 0)
+            paint_rail_row_lines(
+                task,
+                identifier.as_deref(),
+                selected,
+                marked,
+                geo.row_width,
+                0,
+            )
         } else {
             paint_task_row_lines(
                 &TaskRowPaint {
@@ -3814,6 +3835,7 @@ fn build_list_rows(
                     identifier: identifier.as_deref(),
                     title: &task.title,
                     selected,
+                    marked,
                     title_bold: false,
                     // AC-41: every row of a read-only archived focus paints dim.
                     dim: dim || model.rows_dim,
@@ -4273,11 +4295,17 @@ fn paint_rail_row_lines(
     task: &Task,
     identifier: Option<&str>,
     selected: bool,
+    marked: bool,
     row_width: u16,
     leading_indent: usize,
 ) -> Vec<TaskRowLine> {
     let row_w = row_width as usize;
-    let marker = if selected { "▸ " } else { "  " };
+    let marker = match (selected, marked) {
+        (true, true) => "▸▪",
+        (true, false) => "▸ ",
+        (false, true) => "▪ ",
+        (false, false) => "  ",
+    };
     let glyph = status_glyph(task.status);
     let prefix = format!("{}{marker}{glyph} ", " ".repeat(leading_indent));
     let identifier_width = identifier.map(display_width).unwrap_or(0);
@@ -4564,6 +4592,7 @@ fn index_selected_path(model: &QueueFrameModel<'_>) -> String {
 fn paint_status_line(
     message: Option<&str>,
     undo_offset: Option<usize>,
+    undo_width: Option<usize>,
     idle: &str,
     width: u16,
     hint: Option<StatusHint<'_>>,
@@ -4571,7 +4600,7 @@ fn paint_status_line(
     let (left, left_style, undo_hit) = if let Some(msg) = message {
         let text = format!(" {msg}");
         let shown = present_line(&text, width as usize);
-        let control_w = display_width(crate::ui::board::DELETE_NOTICE_UNDO);
+        let control_w = undo_width.unwrap_or_default();
         // The leading space `text` adds ahead of `message` shifts the offset by one column.
         let undo_hit = undo_offset.and_then(|offset| {
             let x = offset.saturating_add(1);
@@ -5001,6 +5030,7 @@ mod tests {
             tasks: &[],
             view: &view,
             selection_id: None,
+            marked_ids: BTreeSet::new(),
             nav: NavPaint {
                 active: NavTab::ProjectBoard,
                 slot2_label: "x".repeat(32),
@@ -5019,6 +5049,7 @@ mod tests {
             has_update_notice: false,
             status_message: None,
             status_undo_offset: None,
+            status_undo_width: None,
             verb_items: &[],
             now: SystemTime::UNIX_EPOCH,
             overlay: QueueOverlay::None,
@@ -5059,6 +5090,7 @@ mod tests {
             tasks: &[],
             view,
             selection_id: None,
+            marked_ids: BTreeSet::new(),
             nav: NavPaint {
                 active,
                 slot2_label: "tsk".to_string(),
@@ -5077,6 +5109,7 @@ mod tests {
             has_update_notice: false,
             status_message: None,
             status_undo_offset: None,
+            status_undo_width: None,
             verb_items: &[],
             now: SystemTime::UNIX_EPOCH,
             overlay: QueueOverlay::None,
@@ -5182,6 +5215,7 @@ mod tests {
             tasks: &[],
             view: &view,
             selection_id: None,
+            marked_ids: BTreeSet::new(),
             nav: NavPaint {
                 active: NavTab::Projects,
                 slot2_label: "select project".into(),
@@ -5200,6 +5234,7 @@ mod tests {
             has_update_notice: false,
             status_message: None,
             status_undo_offset: None,
+            status_undo_width: None,
             verb_items: &[],
             now: SystemTime::UNIX_EPOCH,
             overlay: QueueOverlay::None,
@@ -5214,7 +5249,7 @@ mod tests {
         };
         // The status row paints the selected path, escaped.
         let idle = idle_context(&model);
-        let (line, _) = paint_status_line(None, None, &idle, 200, None);
+        let (line, _) = paint_status_line(None, None, None, &idle, 200, None);
         let text = plain(&line);
         assert!(text.contains("\\u{001b}]52;clipboard\\u{0007}"), "{text}");
         assert!(!text.contains('\u{1b}'));
@@ -5256,6 +5291,7 @@ mod tests {
                 identifier: Some("T28"),
                 title: &title,
                 selected,
+                marked: false,
                 title_bold: false,
                 dim: false,
             };
@@ -5287,6 +5323,7 @@ mod tests {
                         identifier: None,
                         title: &title,
                         selected,
+                        marked: false,
                         title_bold: selected,
                         dim: false,
                     };
@@ -5314,8 +5351,8 @@ mod tests {
                 identifier: Some("T30"),
                 title: "copy this",
                 selected: false,
+                marked: false,
                 title_bold: false,
-
                 dim: false,
             },
             &geo,
@@ -5334,8 +5371,8 @@ mod tests {
                 identifier: Some("T30"),
                 title: "copy this",
                 selected: true,
+                marked: false,
                 title_bold: false,
-
                 dim: false,
             },
             &geo,
@@ -5383,8 +5420,8 @@ mod tests {
                 identifier: None,
                 title: "plain row",
                 selected: false,
+                marked: false,
                 title_bold: false,
-
                 dim: false,
             },
             TaskRowPaint {
@@ -5392,8 +5429,8 @@ mod tests {
                 identifier: None,
                 title: "bold title",
                 selected: false,
+                marked: false,
                 title_bold: true,
-
                 dim: false,
             },
             TaskRowPaint {
@@ -5401,8 +5438,8 @@ mod tests {
                 identifier: None,
                 title: "selected row",
                 selected: true,
+                marked: false,
                 title_bold: false,
-
                 dim: false,
             },
         ];

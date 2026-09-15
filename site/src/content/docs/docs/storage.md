@@ -3,7 +3,7 @@ title: Storage
 description: Task data, backups, deleted tasks, and update checks.
 ---
 
-The board, CLI, and Herdr plugin share `~/.tsk/tsk.json`. The current store format is v4.
+The board, CLI, and Herdr plugin share `~/.tsk/tsk.json`. The current store format is v5.
 
 ## Location
 
@@ -23,11 +23,11 @@ Herdr's plugin-specific state/config directories do not override these locations
 | --- | --- |
 | `tsk.json` | Current tasks and archived-project records |
 | `tsk.json.1` | Previous valid task document |
-| `tsk.json.v<N>` | Backup made when migrating an older store format, such as `tsk.json.v3` for the v3 → v4 migration |
+| `tsk.json.v<N>` | Backup made when migrating an older store format, such as `tsk.json.v4` for the v4 → v5 migration |
 | `walkthrough.json` | Whether onboarding was dismissed |
 | `delivery.json` | Which starter tasks this install has received or dismissed, and the newest release note it has seen |
 
-An older binary refuses a newer or unversioned store instead of rewriting it. Use a compatible tsk version to open it. On first save, v3 stores migrate to v4 and ready tasks become open, preserving their history; the original document is saved as `tsk.json.v3`.
+An older binary refuses a newer or unversioned store instead of rewriting it. Use a compatible tsk version to open it. On first save, v4 stores migrate to v5 so one undo entry can cover a marked completion or deletion; the original document is saved as `tsk.json.v4`. Earlier stores still run through each migration in order, including the v3 to v4 move from ready to open.
 
 Archived tasks stay in the task document with their existing status. [Archive and restore](/docs/board/#archive).
 

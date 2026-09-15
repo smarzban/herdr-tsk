@@ -376,6 +376,9 @@ import { parseCapture } from "./capture.js";
     filterI: 0,
     collapsed: new Set(),
     selectedId: "t1",
+    markedIds: new Set(),
+    pendingDelete: null,
+    message: "",
     peekId: null,
     flashId: null,
     copyNotice: "",
@@ -408,6 +411,8 @@ import { parseCapture } from "./capture.js";
   const preview = {
     project: null,
     selectedId: null,
+    markedIds: new Set(),
+    pendingDelete: null,
     threadFilter: null,
     peekId: null,
     drawer: false,
@@ -563,6 +568,29 @@ import { parseCapture } from "./capture.js";
     return taskById(state.selectedId) || null;
   }
 
+  function targetTasks(form = state) {
+    const marked = [...form.markedIds].map(taskById).filter(Boolean);
+    if (marked.length) return marked;
+    const selected = form === preview ? previewTask() : selectedTask();
+    return selected ? [selected] : [];
+  }
+
+  function clearMarks(form = state) {
+    form.markedIds.clear();
+  }
+
+  function markCurrent(form = state) {
+    const id = form.selectedId;
+    if (id && taskById(id)) form.markedIds.add(id);
+  }
+
+  function toggleMark(form = state) {
+    const id = form.selectedId;
+    if (!id || !taskById(id)) return;
+    if (form.markedIds.has(id)) form.markedIds.delete(id);
+    else form.markedIds.add(id);
+  }
+
   function previewTask() {
     if (state.quickExpanded && state.quickOwner === "preview")
       return state.capture;
@@ -696,6 +724,7 @@ import { parseCapture } from "./capture.js";
   function choosePreviewFilter(index) {
     const option = previewFilterOptions()[index];
     if (!option) return;
+    clearMarks(preview);
     preview.threadFilter = option.value;
     preview.peekId = null;
     ensurePreviewSelection();
@@ -817,6 +846,7 @@ import { parseCapture } from "./capture.js";
   function chooseFilter(index) {
     const option = filterOptions()[index];
     if (!option) return;
+    clearMarks();
     if (state.focusProject) state.threadFilter = option.value;
     else state.projectView = option.value;
     state.overlay = null;
@@ -1253,24 +1283,46 @@ import { parseCapture } from "./capture.js";
     return all.filter((c) => !q || c.label.includes(q) || c.id.includes(q));
   }
 
-  function setStatus(status) {
-    const task = selectedTask();
-    if (!task || task.status === status) return;
-    task.status = status;
-    task.updatedAt = clock();
-    task.statusAt = task.updatedAt;
-    if (status !== "done") state.drawer = state.drawer;
-    state.flashId = task.id;
+  function rememberUndo(form, tasks) {
+    form.undo = {
+      items: tasks.map((task) => ({
+        task: { ...task },
+        index: state.tasks.indexOf(task),
+      })),
+    };
+  }
+
+  function flashTasks(tasks) {
+    const last = tasks.at(-1);
+    if (!last) return;
+    state.flashId = last.id;
     setTimeout(() => {
-      if (state.flashId === task.id) {
+      if (state.flashId === last.id) {
         state.flashId = null;
         render();
       }
     }, 420);
   }
 
+  function setStatus(status) {
+    const tasks = targetTasks();
+    const changed = tasks.filter((task) => task.status !== status);
+    if (status === "done" && changed.length) rememberUndo(state, changed);
+    for (const task of changed) {
+      task.status = status;
+      task.updatedAt = clock();
+      task.statusAt = task.updatedAt;
+    }
+    clearMarks();
+    state.pendingDelete = null;
+    state.message = "";
+    flashTasks(changed);
+  }
+
   function goTab(tab) {
     if (steps.dirty || steps.editor || previewHasUnsavedWork()) return;
+    clearMarks();
+    clearMarks(preview);
     state.threadFilter = null;
     state.tab = tab;
     state.focusProject = tab === "project" ? state.selectedProject : null;
@@ -1285,6 +1337,8 @@ import { parseCapture } from "./capture.js";
 
   function openProject(name) {
     if (steps.dirty || steps.editor || previewHasUnsavedWork()) return;
+    clearMarks();
+    clearMarks(preview);
     if (!name || name === "desk") {
       goTab("desk");
       return;
@@ -1313,6 +1367,8 @@ import { parseCapture } from "./capture.js";
   function dropProjectPreview() {
     preview.project = null;
     preview.selectedId = null;
+    preview.markedIds.clear();
+    preview.pendingDelete = null;
     preview.threadFilter = null;
     preview.peekId = null;
     preview.drawer = false;
@@ -1394,6 +1450,7 @@ import { parseCapture } from "./capture.js";
   }
 
   function toggleAllGroups() {
+    clearMarks();
     if (!state.drawer && (state.focusProject || state.tab !== "projects")) {
       state.inboxOpen = !state.inboxOpen;
       return;
@@ -1422,6 +1479,9 @@ import { parseCapture } from "./capture.js";
     state.projectQuery = "";
     state.collapsed = new Set();
     state.selectedId = "t1";
+    state.markedIds = new Set();
+    state.pendingDelete = null;
+    state.message = "";
     state.peekId = null;
     state.drawer = false;
     state.archivedOpen = false;
@@ -1658,101 +1718,192 @@ import { parseCapture } from "./capture.js";
   }
 
   function fileSelected() {
-    const task = selectedTask();
-    if (!task) return;
-    task.archived = !task.archived;
+    const tasks = targetTasks();
+    for (const task of tasks) task.archived = !task.archived;
+    clearMarks();
+    state.pendingDelete = null;
+    state.message = "";
     state.peekId = null;
     // The file verb has no undo entry: ctrl+u never brings it back.
   }
 
   function deleteSelected() {
-    const task = selectedTask();
-    if (!task) return;
-    state.undo = { task: { ...task }, index: state.tasks.indexOf(task) };
-    state.tasks = state.tasks.filter((t) => t.id !== task.id);
+    const tasks = state.pendingDelete
+      ? state.pendingDelete.map(taskById).filter(Boolean)
+      : targetTasks();
+    if (!tasks.length) return;
+    const ids = tasks.map((task) => task.id).sort();
+    const signature = ids.join("\n");
+    if (
+      !state.pendingDelete ||
+      state.pendingDelete.slice().sort().join("\n") !== signature
+    ) {
+      state.pendingDelete = ids;
+      clearMarks();
+      state.message = `press x again to delete ${tasks.length} ${tasks.length === 1 ? "task" : "tasks"}`;
+      return;
+    }
+    rememberUndo(state, tasks);
+    const idSet = new Set(ids);
+    state.tasks = state.tasks.filter((task) => !idSet.has(task.id));
+    state.pendingDelete = null;
+    clearMarks();
+    state.message = `deleted ${tasks.length} ${tasks.length === 1 ? "task" : "tasks"} · u restores`;
     state.peekId = null;
   }
 
   function undoDelete() {
-    if (selectedRow()?.kind !== "task" || !state.undo) return;
-    const { task, index } = state.undo;
-    state.tasks.splice(Math.min(index, state.tasks.length), 0, task);
-    state.selectedId = task.id;
+    clearMarks();
+    state.pendingDelete = null;
+    if (!state.undo) return;
+    for (const { task, index } of state.undo.items
+      .slice()
+      .sort((a, b) => a.index - b.index)) {
+      const live = taskById(task.id);
+      if (live) Object.assign(live, task);
+      else state.tasks.splice(Math.min(index, state.tasks.length), 0, task);
+    }
+    state.selectedId = state.undo.items[0]?.task.id || state.selectedId;
     state.undo = null;
+    state.message = "";
   }
 
   function toggleBlock() {
-    const task = selectedTask();
-    if (!task || task.status === "done") return;
-    setStatus(task.status === "blocked" ? "ready" : "blocked");
+    const tasks = targetTasks();
+    if (!state.markedIds.size && tasks[0]?.status === "done") return;
+    const status =
+      tasks.length && tasks.every((task) => task.status === "blocked")
+        ? "ready"
+        : "blocked";
+    setStatus(status);
+  }
+
+  function toggleReview() {
+    const tasks = targetTasks();
+    if (!state.markedIds.size && tasks[0]?.status === "done") return;
+    const status =
+      tasks.length && tasks.every((task) => task.status === "review")
+        ? "ready"
+        : "review";
+    setStatus(status);
   }
 
   function primaryVerb() {
-    const task = selectedTask();
-    if (!task) return;
-    if (task.status === "open" || task.status === "ready") setStatus("started");
+    const tasks = targetTasks();
+    const changed = tasks.filter(
+      (task) => task.status === "open" || task.status === "ready",
+    );
+    for (const task of changed) {
+      task.status = "started";
+      task.updatedAt = clock();
+      task.statusAt = task.updatedAt;
+    }
+    clearMarks();
+    state.pendingDelete = null;
+    state.message = "";
+    flashTasks(changed);
   }
 
   function previewSetStatus(status) {
-    const task = previewTask();
-    if (!task) return;
-    task.status = status;
-    task.updatedAt = clock();
-    task.statusAt = task.updatedAt;
+    const tasks = targetTasks(preview);
+    const changed = tasks.filter((task) => task.status !== status);
+    if (status === "done" && changed.length) rememberUndo(preview, changed);
+    for (const task of changed) {
+      task.status = status;
+      task.updatedAt = clock();
+      task.statusAt = task.updatedAt;
+    }
+    clearMarks(preview);
+    preview.pendingDelete = null;
     preview.message = "";
-    state.flashId = task.id;
-    setTimeout(() => {
-      if (state.flashId === task.id) {
-        state.flashId = null;
-        render();
-      }
-    }, 420);
+    flashTasks(changed);
   }
 
   function previewToggleBlock() {
-    const task = previewTask();
-    if (!task || task.status === "done") return;
-    previewSetStatus(task.status === "blocked" ? "ready" : "blocked");
+    const tasks = targetTasks(preview);
+    if (!preview.markedIds.size && tasks[0]?.status === "done") return;
+    previewSetStatus(
+      tasks.length && tasks.every((task) => task.status === "blocked")
+        ? "ready"
+        : "blocked",
+    );
   }
 
   function previewToggleReview() {
-    const task = previewTask();
-    if (!task || task.status === "done") return;
-    previewSetStatus(task.status === "review" ? "ready" : "review");
+    const tasks = targetTasks(preview);
+    if (!preview.markedIds.size && tasks[0]?.status === "done") return;
+    previewSetStatus(
+      tasks.length && tasks.every((task) => task.status === "review")
+        ? "ready"
+        : "review",
+    );
   }
 
   function previewPrimaryVerb() {
-    const task = previewTask();
-    if (!task) return;
-    if (task.status === "ready") previewSetStatus("started");
-    else if (task.status === "done") previewSetStatus("ready");
+    const tasks = targetTasks(preview);
+    const changed = tasks.filter(
+      (task) => task.status === "open" || task.status === "ready",
+    );
+    for (const task of changed) {
+      task.status = "started";
+      task.updatedAt = clock();
+      task.statusAt = task.updatedAt;
+    }
+    clearMarks(preview);
+    preview.pendingDelete = null;
+    preview.message = "";
+    flashTasks(changed);
   }
 
   function previewFileSelected() {
-    const task = previewTask();
-    if (!task) return;
-    task.archived = !task.archived;
+    for (const task of targetTasks(preview)) task.archived = !task.archived;
+    clearMarks(preview);
+    preview.pendingDelete = null;
+    preview.message = "";
     preview.peekId = null;
   }
 
   function previewDeleteSelected() {
-    const task = previewTask();
-    if (!task) return;
-    preview.undo = { task: { ...task }, index: state.tasks.indexOf(task) };
-    state.tasks = state.tasks.filter((item) => item.id !== task.id);
+    const tasks = preview.pendingDelete
+      ? preview.pendingDelete.map(taskById).filter(Boolean)
+      : targetTasks(preview);
+    if (!tasks.length) return;
+    const ids = tasks.map((task) => task.id).sort();
+    if (!preview.pendingDelete) {
+      preview.pendingDelete = ids;
+      clearMarks(preview);
+      preview.message = `press x again to delete ${tasks.length} ${tasks.length === 1 ? "task" : "tasks"}`;
+      return;
+    }
+    rememberUndo(preview, tasks);
+    const idSet = new Set(ids);
+    state.tasks = state.tasks.filter((task) => !idSet.has(task.id));
+    preview.pendingDelete = null;
+    clearMarks(preview);
+    preview.message = `deleted ${tasks.length} ${tasks.length === 1 ? "task" : "tasks"} · u restores`;
     preview.peekId = null;
   }
 
   function previewUndoDelete() {
+    clearMarks(preview);
+    preview.pendingDelete = null;
     if (!preview.undo) return;
-    const { task, index } = preview.undo;
-    state.tasks.splice(Math.min(index, state.tasks.length), 0, task);
-    preview.selectedId = task.id;
+    for (const { task, index } of preview.undo.items
+      .slice()
+      .sort((a, b) => a.index - b.index)) {
+      const live = taskById(task.id);
+      if (live) Object.assign(live, task);
+      else state.tasks.splice(Math.min(index, state.tasks.length), 0, task);
+    }
+    preview.selectedId = preview.undo.items[0]?.task.id || preview.selectedId;
     preview.undo = null;
+    preview.message = "";
   }
 
   function movePreview(delta) {
     if (previewHasUnsavedWork()) return;
+    preview.pendingDelete = null;
+    preview.message = "";
     const ids = previewSelectableIds();
     if (!ids.length) return;
     let i = ids.indexOf(preview.selectedId);
@@ -1799,6 +1950,8 @@ import { parseCapture } from "./capture.js";
   function renderHelp() {
     const rows = [
       ["navigation", "↑↓ / jk", "move", "select"],
+      ["navigation", "shift+↑↓", "mark and move", "select multiple"],
+      ["navigation", "space", "mark", "select multiple"],
       ["navigation", "enter", "open task", "detail"],
       ["navigation", "→ / ←", "peek or slide", "wide view"],
       ["task actions", "s", "start", "status open or ready"],
@@ -1897,6 +2050,7 @@ import { parseCapture } from "./capture.js";
       leaveTaskPage();
       return;
     }
+    clearMarks();
     enterTaskStage();
     const task = selectedTask();
     if (!task) return;
@@ -1922,6 +2076,7 @@ import { parseCapture } from "./capture.js";
       leavePreviewTaskPage();
       return;
     }
+    clearMarks(preview);
     const task = previewTask();
     if (!task) return;
     if (
@@ -2107,6 +2262,14 @@ import { parseCapture } from "./capture.js";
         }
         const task = row.task;
         const selected = task.id === preview.selectedId;
+        const marked = preview.markedIds.has(task.id);
+        const rowMark = selected
+          ? marked
+            ? "▸▪"
+            : "▸ "
+          : marked
+            ? "▪ "
+            : "  ";
         const flash = task.id === state.flashId;
         const glyph = GLYPH[task.status] || "○";
         const titleLines = wrapText(
@@ -2141,7 +2304,7 @@ import { parseCapture } from "./capture.js";
                   : [`<div class="tsk-peek dim">    └</div>`]),
               ].join("")
             : "";
-        return `<button type="button" class="tsk-row ${row.dim ? "dim" : ""} ${selected ? "is-sel" : ""} ${flash ? "is-flash" : ""}" data-preview-task="${esc(task.id)}"><span class="tsk-row-main"><span class="tsk-row-prefix">${selected ? "▸ " : "  "}<span class="tsk-row-glyph">${glyph}</span> <span class="tsk-task-id" data-copy-task="${esc(task.id)}" title="copy T${task.number}">T${task.number}</span> </span><span class="tsk-row-title">${title}</span></span></button>${peek}`;
+        return `<button type="button" class="tsk-row ${row.dim ? "dim" : ""} ${selected ? "is-sel" : ""} ${flash ? "is-flash" : ""}" data-preview-task="${esc(task.id)}"><span class="tsk-row-main"><span class="tsk-row-prefix">${rowMark}<span class="tsk-row-glyph">${glyph}</span> <span class="tsk-task-id" data-copy-task="${esc(task.id)}" title="copy T${task.number}">T${task.number}</span> </span><span class="tsk-row-title">${title}</span></span></button>${peek}`;
       })
       .join("");
     const project = esc(preview.project || "project");
@@ -2267,11 +2430,19 @@ import { parseCapture } from "./capture.js";
         const task = row.task;
         if (rail && task.status === "done") return "";
         const selected = task.id === state.selectedId;
+        const marked = state.markedIds.has(task.id);
+        const rowMark = selected
+          ? marked
+            ? "▸▪"
+            : "▸ "
+          : marked
+            ? "▪ "
+            : "  ";
         const flash = task.id === state.flashId;
         const glyph = GLYPH[task.status] || "○";
         const indent = "  ".repeat(row.indent || 0);
         if (rail) {
-          const prefix = `${selected ? "▸ " : "  "}${glyph} `;
+          const prefix = `${rowMark}${glyph} `;
           const lines = wrapText(
             task.title,
             32 - 1 - 4 - `T${task.number} `.length,
@@ -2323,7 +2494,7 @@ import { parseCapture } from "./capture.js";
               ].join("")
             : "";
         const dimRow = row.dim ? "dim" : "";
-        return `<button type="button" class="tsk-row ${dimRow} ${selected ? "is-sel" : ""} ${flash ? "is-flash" : ""}" data-task="${task.id}"><span class="tsk-row-main"><span class="tsk-row-prefix">${indent}${selected ? "▸ " : "  "}<span class="tsk-row-glyph">${glyph}</span> <span class="tsk-task-id" data-copy-task="${esc(task.id)}" title="copy T${task.number}">T${task.number}</span> </span><span class="tsk-row-title">${title}</span></span></button>${peek}`;
+        return `<button type="button" class="tsk-row ${dimRow} ${selected ? "is-sel" : ""} ${flash ? "is-flash" : ""}" data-task="${task.id}"><span class="tsk-row-main"><span class="tsk-row-prefix">${indent}${rowMark}<span class="tsk-row-glyph">${glyph}</span> <span class="tsk-task-id" data-copy-task="${esc(task.id)}" title="copy T${task.number}">T${task.number}</span> </span><span class="tsk-row-title">${title}</span></span></button>${peek}`;
       })
       .join("");
 
@@ -2356,19 +2527,27 @@ import { parseCapture } from "./capture.js";
   // bar for whichever side owns focus. Wide stages paint it under both columns, as the app does.
   function renderFooter() {
     const previewOwnsFooter = projectsPreviewFocused() || projectsPreviewPage();
+    const selectedCount = previewOwnsFooter
+      ? preview.markedIds.size
+      : state.markedIds.size;
+    const selectionMessage = selectedCount
+      ? `${selectedCount} selected · esc clears`
+      : "";
     const context = previewOwnsFooter
-      ? preview.message || preview.project || "project"
-      : state.tab === "projects" && state.projectView === null
-        ? projectsPreviewActive() && preview.message
-          ? preview.message
-          : selectedRow()?.project
-            ? projectPath(selectedRow().project)
-            : "projects"
-        : state.tab === "desk"
-          ? "desk"
-          : state.focusProject
-            ? `${state.focusProject}${state.threadFilter ? ` · #${state.threadFilter}` : ""}`
-            : state.tab;
+      ? preview.message || selectionMessage || preview.project || "project"
+      : state.message ||
+        selectionMessage ||
+        (state.tab === "projects" && state.projectView === null
+          ? projectsPreviewActive() && preview.message
+            ? preview.message
+            : selectedRow()?.project
+              ? projectPath(selectedRow().project)
+              : "projects"
+          : state.tab === "desk"
+            ? "desk"
+            : state.focusProject
+              ? `${state.focusProject}${state.threadFilter ? ` · #${state.threadFilter}` : ""}`
+              : state.tab);
     const task = previewOwnsFooter ? previewTask() : selectedTask();
     const previewVerbs = task
       ? verbItems(task)
@@ -2539,6 +2718,8 @@ import { parseCapture } from "./capture.js";
   }
 
   function move(delta) {
+    state.pendingDelete = null;
+    state.message = "";
     if (projectsOverview()) {
       moveProjectCursor(delta);
       return;
@@ -2642,6 +2823,9 @@ import { parseCapture } from "./capture.js";
       return true;
     }
     if (!task) return true;
+    if (["s", "n", "o", "d", "b", "r", "x", "f"].includes(e.key)) {
+      clearMarks(preview);
+    }
     if (previewSteps.editor) {
       if (e.key === "Escape") {
         e.preventDefault();
@@ -2699,6 +2883,7 @@ import { parseCapture } from "./capture.js";
     }
     if (bare && e.key === "e") {
       e.preventDefault();
+      clearMarks(preview);
       if (previewSteps.selected && previewSteps.selected !== "add")
         previewSteps.begin(task, previewSteps.selected);
       else openPreviewTaskPage("title");
@@ -2770,19 +2955,25 @@ import { parseCapture } from "./capture.js";
     const bare = !e.ctrlKey && !e.metaKey && !e.altKey;
     if (e.key === "Escape") {
       e.preventDefault();
-      if (preview.peekId) preview.peekId = null;
+      if (preview.markedIds.size) {
+        clearMarks(preview);
+        preview.pendingDelete = null;
+        preview.message = "";
+      } else if (preview.peekId) preview.peekId = null;
       else state.stage = "split";
       render();
       return true;
     }
     if (bare && (e.key === "j" || e.key === "ArrowDown")) {
       e.preventDefault();
+      if (e.shiftKey) markCurrent(preview);
       movePreview(1);
       render();
       return true;
     }
     if (bare && (e.key === "k" || e.key === "ArrowUp")) {
       e.preventDefault();
+      if (e.shiftKey) markCurrent(preview);
       movePreview(-1);
       render();
       return true;
@@ -2797,6 +2988,12 @@ import { parseCapture } from "./capture.js";
       e.preventDefault();
       if (preview.peekId) preview.peekId = null;
       else state.stage = "split";
+      render();
+      return true;
+    }
+    if (bare && e.key === " ") {
+      e.preventDefault();
+      toggleMark(preview);
       render();
       return true;
     }
@@ -2838,7 +3035,7 @@ import { parseCapture } from "./capture.js";
     }
     if (bare && e.key === "o") {
       e.preventDefault();
-      if (previewTask()?.status === "done") previewSetStatus("ready");
+      previewSetStatus("open");
       render();
       return true;
     }
@@ -2862,6 +3059,7 @@ import { parseCapture } from "./capture.js";
     }
     if (bare && e.key === "z") {
       e.preventDefault();
+      clearMarks(preview);
       preview.drawer = !preview.drawer;
       ensurePreviewSelection();
       render();
@@ -2869,6 +3067,7 @@ import { parseCapture } from "./capture.js";
     }
     if (bare && e.key === "g") {
       e.preventDefault();
+      clearMarks(preview);
       preview.archivedOpen = !preview.archivedOpen;
       render();
       return true;
@@ -2881,7 +3080,7 @@ import { parseCapture } from "./capture.js";
     }
     if (bare && e.key === "n") {
       e.preventDefault();
-      if (previewTask()) openPreviewTaskPage("notes");
+      previewSetStatus("ready");
       render();
       return true;
     }
@@ -2911,6 +3110,10 @@ import { parseCapture } from "./capture.js";
     if (el !== frame) {
       if (el.closest(".pane-bar, .layout-toggle, [data-divider]")) return;
       if (state.overlay !== "quick" && el.closest("button")) return;
+    }
+    if (e.key.toLowerCase() !== "x") {
+      state.pendingDelete = null;
+      preview.pendingDelete = null;
     }
     if (el.id === "tsk-project-search") {
       if (e.key === "Escape") {
@@ -3276,7 +3479,11 @@ import { parseCapture } from "./capture.js";
     }
     if (e.key === "Escape") {
       e.preventDefault();
-      if (taskPageActive) {
+      if (state.markedIds.size) {
+        clearMarks();
+        state.pendingDelete = null;
+        state.message = "";
+      } else if (taskPageActive) {
         state.overlay = null;
         leaveTaskPage();
       } else if (state.peekId) state.peekId = null;
@@ -3336,6 +3543,7 @@ import { parseCapture } from "./capture.js";
     }
     if (e.key === "z" || e.key === "D") {
       e.preventDefault();
+      clearMarks();
       state.drawer = !state.drawer;
       render();
       return;
@@ -3348,12 +3556,14 @@ import { parseCapture } from "./capture.js";
     }
     if (e.key === "j" || e.key === "ArrowDown") {
       e.preventDefault();
+      if (e.shiftKey) markCurrent();
       move(1);
       render();
       return;
     }
     if (e.key === "k" || e.key === "ArrowUp") {
       e.preventDefault();
+      if (e.shiftKey) markCurrent();
       move(-1);
       render();
       return;
@@ -3376,20 +3586,41 @@ import { parseCapture } from "./capture.js";
       render();
       return;
     }
+    if (!taskPageActive && e.key === " ") {
+      e.preventDefault();
+      toggleMark();
+      render();
+      return;
+    }
     if (e.key === "Enter") {
       e.preventDefault();
       if (taskPageActive && state.stage === "page") leaveTaskPage();
       else {
         const row = selectedRow();
         if (row?.kind === "project") openProject(row.project);
-        else if (row?.kind === "inbox") state.inboxOpen = !state.inboxOpen;
-        else if (row?.kind === "archived")
+        else if (row?.kind === "inbox") {
+          clearMarks();
+          state.inboxOpen = !state.inboxOpen;
+        } else if (row?.kind === "archived") {
+          clearMarks();
           state.archivedOpen = !state.archivedOpen;
-        else openFullPage();
+        } else openFullPage();
       }
       render();
       return;
     }
+    if (
+      taskPageActive &&
+      ["s", "n", "o", "d", "b", "r", "x", "f"].includes(e.key)
+    ) {
+      clearMarks();
+    }
+    if (
+      !state.markedIds.size &&
+      ["s", "n", "o", "d", "b", "r", "x", "f"].includes(e.key) &&
+      selectedRow()?.kind !== "task"
+    )
+      return;
     if (e.key === "s") {
       e.preventDefault();
       primaryVerb();
@@ -3414,6 +3645,12 @@ import { parseCapture } from "./capture.js";
       render();
       return;
     }
+    if (e.key === "r") {
+      e.preventDefault();
+      toggleReview();
+      render();
+      return;
+    }
     if (e.key === "f") {
       e.preventDefault();
       fileSelected();
@@ -3434,6 +3671,8 @@ import { parseCapture } from "./capture.js";
     }
     if (e.key === "e") {
       e.preventDefault();
+      clearMarks();
+      state.pendingDelete = null;
       const task = selectedTask();
       if (task) {
         enterTaskStage();
@@ -3485,6 +3724,13 @@ import { parseCapture } from "./capture.js";
   window.addEventListener("scroll", cancelReflowClick, true);
 
   root.addEventListener("click", (e) => {
+    const deleteControl = e.target.closest(
+      '[data-verb="delete"], [data-page-verb="delete"], [data-preview-page-verb="delete"]',
+    );
+    if (!deleteControl) {
+      state.pendingDelete = null;
+      preview.pendingDelete = null;
+    }
     const previous = lastClick.reflow;
     cancelReflowClick();
     // Reflow must not turn the second click into a newly exposed task control.
@@ -3581,6 +3827,7 @@ import { parseCapture } from "./capture.js";
     }
     const previewArchivedHeader = e.target.closest("[data-preview-archived]");
     if (previewArchivedHeader && projectsPreviewActive()) {
+      clearMarks(preview);
       preview.archivedOpen = !preview.archivedOpen;
       ensurePreviewSelection();
       render();
@@ -3589,7 +3836,7 @@ import { parseCapture } from "./capture.js";
     const previewTaskRow = e.target.closest("[data-preview-task]");
     if (previewTaskRow && projectsPreviewActive()) {
       const copyTarget = e.target.closest("[data-copy-task]");
-      if (copyTarget) {
+      if (copyTarget && !e.ctrlKey && !e.metaKey) {
         const task = state.tasks.find(
           (item) => item.id === copyTarget.getAttribute("data-copy-task"),
         );
@@ -3601,13 +3848,21 @@ import { parseCapture } from "./capture.js";
       if (previewHasUnsavedWork() && id !== preview.selectedId) return;
       const now = Date.now();
       if (state.stage === "split") stageRight();
-      if (preview.selectedId === id && now - (preview.lastClick || 0) < 350) {
+      const markClick = e.ctrlKey || e.metaKey;
+      if (markClick) {
+        preview.selectedId = id;
+        toggleMark(preview);
+        preview.peekId = null;
+      } else if (
+        preview.selectedId === id &&
+        now - (preview.lastClick || 0) < 350
+      ) {
         openPreviewTaskPage();
       } else {
         preview.selectedId = id;
         preview.peekId = null;
       }
-      preview.lastClick = now;
+      preview.lastClick = markClick ? 0 : now;
       render();
       return;
     }
@@ -3630,7 +3885,7 @@ import { parseCapture } from "./capture.js";
       return;
     }
     const copy = e.target.closest("[data-copy-task]");
-    if (copy) {
+    if (copy && !e.ctrlKey && !e.metaKey) {
       const task = state.tasks.find(
         (item) => item.id === copy.getAttribute("data-copy-task"),
       );
@@ -3656,12 +3911,14 @@ import { parseCapture } from "./capture.js";
     }
     const inboxHeader = e.target.closest("[data-inbox-header]");
     if (inboxHeader) {
+      clearMarks();
       state.inboxOpen = !state.inboxOpen;
       render();
       return;
     }
     const archivedHeader = e.target.closest("[data-archived-header]");
     if (archivedHeader) {
+      clearMarks();
       state.archivedOpen = !state.archivedOpen;
       render();
       return;
@@ -3707,6 +3964,7 @@ import { parseCapture } from "./capture.js";
     }
     const group = e.target.closest("[data-collapse]");
     if (group) {
+      clearMarks();
       const now = Date.now();
       const key = group.getAttribute("data-collapse");
       const project = group.getAttribute("data-project");
@@ -3723,6 +3981,14 @@ import { parseCapture } from "./capture.js";
     if (row) {
       const id = row.getAttribute("data-task");
       if ((steps.dirty || steps.editor) && id !== state.selectedId) return;
+      if (e.ctrlKey || e.metaKey) {
+        state.selectedId = id;
+        toggleMark();
+        state.peekId = null;
+        lastClick = { id: null, at: 0 };
+        render();
+        return;
+      }
       const now = Date.now();
       const reflow =
         e.detail > 0 &&
@@ -3753,6 +4019,7 @@ import { parseCapture } from "./capture.js";
     }
     const previewDrawer = e.target.closest("[data-preview-drawer]");
     if (previewDrawer) {
+      clearMarks(preview);
       preview.drawer = !preview.drawer;
       ensurePreviewSelection();
       render();
@@ -3774,6 +4041,7 @@ import { parseCapture } from "./capture.js";
     }
     const drawer = e.target.closest("[data-drawer]");
     if (drawer) {
+      clearMarks();
       state.drawer = !state.drawer;
       render();
       return;

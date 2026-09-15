@@ -3065,6 +3065,38 @@ mod tests {
     }
 
     #[test]
+    fn projects_preview_escape_clears_right_marks_before_returning_to_the_index() {
+        let (mut domain, mut model, _) = projects_preview_fixture();
+        apply_intent(
+            &mut domain,
+            model.input_target_mut(),
+            BoardIntent::MarkToggle,
+            None,
+        )
+        .expect("mark right-seat task");
+        assert_eq!(model.right_seat().expect("right seat").marked_count(), 1);
+
+        let first = route_board_intent(&model, BoardIntent::CloseLayer);
+        assert_eq!(first.target, BoardIntentTarget::Focused);
+        assert!(
+            !first.return_to_index,
+            "the first Escape is spent only on marks"
+        );
+        apply_intent(
+            &mut domain,
+            board_intent_target_mut(&mut model, first.target),
+            first.intent,
+            None,
+        )
+        .expect("clear right-seat marks");
+        assert_eq!(model.right_seat().expect("right seat").marked_count(), 0);
+        assert!(model.project_right_seat_focused());
+
+        let second = route_board_intent(&model, BoardIntent::CloseLayer);
+        assert!(second.return_to_index, "the next Escape resumes closing");
+    }
+
+    #[test]
     fn projects_preview_keyboard_uses_right_seat_for_task_actions() {
         let (mut domain, mut model, id) = projects_preview_fixture();
         let area = Rect::new(0, 0, 110, 30);
@@ -3084,6 +3116,78 @@ mod tests {
             model.selected_id().is_none(),
             "the index has no task selection"
         );
+    }
+
+    #[test]
+    fn projects_preview_right_seat_builds_and_spends_its_own_marked_set() {
+        let (mut domain, mut model) = projects_preview_open_tasks_fixture();
+        let area = Rect::new(0, 0, 110, 30);
+        let header = crate::ui::queue::INBOX_HEADER_ROW_ID;
+        let tasks: Vec<_> = model
+            .right_seat()
+            .expect("projects rail has a right seat")
+            .visible_ids()
+            .into_iter()
+            .filter(|id| *id != header)
+            .take(2)
+            .collect();
+        assert_eq!(tasks.len(), 2);
+        while selected_row(model.right_seat().expect("right seat")) != Some(tasks[0]) {
+            apply_intent(
+                &mut domain,
+                model.input_target_mut(),
+                BoardIntent::SelectNext,
+                None,
+            )
+            .expect("select first project task");
+        }
+
+        let extend = preview_key_intent(
+            &mut model,
+            area,
+            KeyEvent::new(KeyCode::Down, KeyModifiers::SHIFT),
+        );
+        assert_eq!(
+            extend,
+            BoardIntent::MarkExtend(crate::ui::input::MarkDirection::Down)
+        );
+        apply_intent(&mut domain, model.input_target_mut(), extend, None)
+            .expect("mark and move in right seat");
+        assert!(model
+            .right_seat()
+            .expect("right seat")
+            .marked_ids()
+            .contains(&tasks[0]));
+
+        while selected_row(model.right_seat().expect("right seat")) != Some(tasks[1]) {
+            apply_intent(
+                &mut domain,
+                model.input_target_mut(),
+                BoardIntent::SelectNext,
+                None,
+            )
+            .expect("select second project task");
+        }
+        let toggle = preview_key_intent(
+            &mut model,
+            area,
+            KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE),
+        );
+        assert_eq!(toggle, BoardIntent::MarkToggle);
+        apply_intent(&mut domain, model.input_target_mut(), toggle, None)
+            .expect("mark second project task");
+
+        let complete = preview_key_intent(
+            &mut model,
+            area,
+            KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL),
+        );
+        apply_intent(&mut domain, model.input_target_mut(), complete, None)
+            .expect("complete right-seat marks");
+        assert!(tasks
+            .iter()
+            .all(|id| domain.get(*id).expect("task").status == HumanStatus::Done));
+        assert_eq!(model.right_seat().expect("right seat").marked_count(), 0);
     }
 
     #[test]

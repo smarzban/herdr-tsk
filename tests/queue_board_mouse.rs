@@ -1060,6 +1060,70 @@ fn click_a_task_row_selects_its_index_on_a_scrolled_list() {
     );
 }
 
+#[test]
+fn ctrl_click_moves_the_cursor_and_toggles_the_clicked_task_mark() {
+    let (mut domain, mut model) = deck_of(4);
+    let target = *model.visible_ids().last().expect("visible task");
+    let hits = board_hit_map(STANDARD, &model);
+    let region = hits
+        .regions
+        .iter()
+        .find(|hit| matches!(hit.target, QueueHitTarget::Task(id) if id == target))
+        .expect("target row hit");
+    let mouse = MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: region.area.x,
+        row: region.area.y,
+        modifiers: KeyModifiers::CONTROL,
+    };
+    let index = model
+        .visible_ids()
+        .iter()
+        .position(|&id| id == target)
+        .expect("target index");
+    assert_eq!(
+        map_board_mouse(&model, &hits, mouse),
+        Some(BoardIntent::MarkToggleAt(index))
+    );
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::MarkToggleAt(index),
+        None,
+    )
+    .expect("mark clicked row");
+    assert_eq!(model.selected_id(), Some(target));
+    assert!(model.marked_ids().contains(&target));
+
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::MarkToggleAt(index),
+        None,
+    )
+    .expect("unmark clicked row");
+    assert!(!model.marked_ids().contains(&target));
+
+    let number_hits = QueueHitMap {
+        regions: vec![QueueHit {
+            target: QueueHitTarget::TaskNumber(target),
+            area: Rect::new(1, 1, 1, 1),
+        }],
+        ..QueueHitMap::default()
+    };
+    let number_mouse = MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: 1,
+        row: 1,
+        modifiers: KeyModifiers::CONTROL,
+    };
+    assert_eq!(
+        map_board_mouse(&model, &number_hits, number_mouse),
+        Some(BoardIntent::MarkToggleAt(index)),
+        "ctrl+click on the identifier marks instead of copying"
+    );
+}
+
 /// G-2 (gate round 1, PR #11): the follow-selection scroll above only proves the click's
 /// row->index mapping once the *accordion's* anchor has forced a scroll. This is the
 /// keyboard-navigation form of the same defect the gate named: with nothing open at all
