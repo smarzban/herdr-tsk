@@ -725,6 +725,10 @@ pub struct BoardModel {
     pub(super) detail_open: Option<Uuid>,
     /// Id-pinned selection into the queue-visible row set.
     pub(super) selection_id: Option<Uuid>,
+    /// Whether explicit task marking controls own Space, shifted arrows, and row clicks.
+    mark_mode: bool,
+    /// Session-only tasks included in the next bulk verb. Every id remains visible in this lens.
+    pub(super) marked_ids: BTreeSet<Uuid>,
     /// The last task-row click (time + id), kept only to detect a double-click that opens
     /// the task page. Presentation-only, never persisted.
     pub(super) last_row_click: Option<(Instant, Uuid)>,
@@ -771,6 +775,8 @@ pub struct BoardModel {
     /// because by the time the row is painted the selection may have moved and the task
     /// itself may have been restored by the very Undo this notice offers.
     pub(super) delete_notice: Option<String>,
+    /// Number of tasks represented by a bulk delete notice. `None` keeps the single-title form.
+    pub(super) delete_notice_count: Option<usize>,
     /// A delete recovery notice a failed save took off the row, held until the failure is
     /// resolved.
     ///
@@ -778,8 +784,11 @@ pub struct BoardModel {
     /// it; but Retry can still make it durable, and then the way back has to come with it.
     /// See [`BoardModel::begin_save_recovery`] and [`BoardModel::end_save_recovery`].
     pub(super) suspended_delete_notice: Option<String>,
-    /// First ctrl+x on a task arms this id; a second press on the same task deletes it.
-    pub(super) pending_delete: Option<Uuid>,
+    pub(super) suspended_delete_notice_count: Option<usize>,
+    /// First ctrl+x arms this exact target set; a second press on the same set deletes it.
+    pub(super) pending_delete: Option<BTreeSet<Uuid>>,
+    /// Whether the armed delete originated from a non-empty marked set.
+    pub(super) pending_delete_bulk: bool,
     /// Open project-picker or save-recovery presentation.
     pub(super) popup: BoardPopup,
     /// Open session project selector; never persisted.
@@ -859,6 +868,8 @@ impl BoardModel {
             session_default_scope: None,
             detail_open: None,
             selection_id: None,
+            mark_mode: false,
+            marked_ids: BTreeSet::new(),
             last_row_click: None,
             last_project_header_click: None,
             last_project_row_click: None,
@@ -877,8 +888,11 @@ impl BoardModel {
             message: None,
             update_notice: None,
             delete_notice: None,
+            delete_notice_count: None,
             suspended_delete_notice: None,
+            suspended_delete_notice_count: None,
             pending_delete: None,
+            pending_delete_bulk: false,
             popup: BoardPopup::None,
             project_picker: None,
             surface: CommandSurface::None,
@@ -938,6 +952,7 @@ impl BoardModel {
         self.popup = BoardPopup::SaveRecovery;
         if let Some(notice) = self.delete_notice.take() {
             self.suspended_delete_notice = Some(notice);
+            self.suspended_delete_notice_count = self.delete_notice_count.take();
         }
         self.set_message(format!("save failed: {error} · Retry or Cancel"));
     }
@@ -962,14 +977,18 @@ impl BoardModel {
         if self.popup == BoardPopup::SaveRecovery {
             self.popup = BoardPopup::None;
         }
-        let armed = self.delete_notice.take();
-        self.delete_notice = match resolution {
-            SaveResolution::Retried => self.suspended_delete_notice.take().or(armed),
-            SaveResolution::Cancelled => {
-                self.suspended_delete_notice = None;
-                None
-            }
+        let armed = (self.delete_notice.take(), self.delete_notice_count.take());
+        let suspended = (
+            self.suspended_delete_notice.take(),
+            self.suspended_delete_notice_count.take(),
+        );
+        let restored = match resolution {
+            SaveResolution::Retried if suspended.0.is_some() => suspended,
+            SaveResolution::Retried => armed,
+            SaveResolution::Cancelled => (None, None),
         };
+        self.delete_notice = restored.0;
+        self.delete_notice_count = restored.1;
         let cancelled_quick_add = resolution == SaveResolution::Cancelled
             && self.quick_add_save.take().is_some()
             && self.quick_add.is_some();
@@ -1260,6 +1279,8 @@ impl BoardModel {
                 }
             }
         }
+        let visible: BTreeSet<Uuid> = self.visible_ids().into_iter().collect();
+        self.marked_ids.retain(|id| visible.contains(id));
     }
 
     /// Presenter / pane title string.
@@ -1432,8 +1453,12 @@ impl BoardModel {
         right.message_expires_at = None;
         right.message_restore = None;
         right.delete_notice = None;
+        right.delete_notice_count = None;
         right.suspended_delete_notice = None;
+        right.suspended_delete_notice_count = None;
         right.pending_delete = None;
+        right.pending_delete_bulk = false;
+        right.clear_marks();
         right.mouse_press = None;
         right.mouse_press_scroll = None;
         right.text_selection = None;
@@ -1572,6 +1597,7 @@ impl BoardModel {
         if let Some(right) = self.right_seat.as_mut() {
             right.dismiss_clean_surfaces_for_reopen();
         }
+        self.clear_marks();
         self.detail_open = None;
         self.wide_stage = WideStage::FullBoard;
         self.stage_origin = None;
@@ -1680,6 +1706,7 @@ impl BoardModel {
     /// Leave the read-only archived focus for the desk (AC-45).
     pub(super) fn leave_archived_focus(&mut self) {
         let previous_visible = self.visible_ids();
+        self.clear_marks();
         self.search_query.clear();
         self.search_pinned = false;
         self.board_location = BoardLocation::Desk;
@@ -2443,6 +2470,73 @@ impl BoardModel {
             None
         } else {
             self.selection_id
+        }
+    }
+
+    /// Whether the explicit task marking mode is active on this board surface.
+    pub fn mark_mode_active(&self) -> bool {
+        self.mark_mode
+    }
+
+    /// Session-only marked task ids in stable id order.
+    pub fn marked_ids(&self) -> &BTreeSet<Uuid> {
+        &self.marked_ids
+    }
+
+    /// Number of tasks the next bulk verb will target.
+    pub fn marked_count(&self) -> usize {
+        self.marked_ids.len()
+    }
+
+    pub(super) fn toggle_selected_mark(&mut self) -> bool {
+        let Some(id) = self.selected_id() else {
+            return false;
+        };
+        if !self.visible_ids().contains(&id) {
+            return false;
+        }
+        if !self.marked_ids.remove(&id) {
+            self.marked_ids.insert(id);
+        }
+        true
+    }
+
+    pub(super) fn mark_selected(&mut self) -> bool {
+        let Some(id) = self.selected_id() else {
+            return false;
+        };
+        if !self.visible_ids().contains(&id) {
+            return false;
+        }
+        self.marked_ids.insert(id)
+    }
+
+    pub(super) fn toggle_mark_mode(&mut self) {
+        if self.mark_mode {
+            self.clear_marks();
+        } else {
+            self.mark_mode = true;
+        }
+    }
+
+    pub(super) fn clear_marks(&mut self) -> bool {
+        let had_mark_state = self.mark_mode || !self.marked_ids.is_empty();
+        self.mark_mode = false;
+        self.marked_ids.clear();
+        had_mark_state
+    }
+
+    /// Whether this model's task list owns resolved input, including while a task page is parked.
+    pub(super) fn task_list_owns_input(&self) -> bool {
+        self.input_mode_local() == BoardInputMode::Normal && !self.projects_overview()
+    }
+
+    /// Mark targets when the task list owns input, otherwise the cursor target.
+    pub(super) fn verb_target_ids(&self) -> Vec<Uuid> {
+        if self.task_list_owns_input() && self.mark_mode && !self.marked_ids.is_empty() {
+            self.marked_ids.iter().copied().collect()
+        } else {
+            self.selected_id().into_iter().collect()
         }
     }
 
@@ -3269,6 +3363,18 @@ impl BoardModel {
     /// Arm the notice for a task that has just been soft-deleted.
     pub(super) fn arm_delete_notice(&mut self, title: &str) {
         self.delete_notice = Some(terminal_text(title));
+        self.delete_notice_count = None;
+    }
+
+    /// Arm the counted notice for a bulk delete transaction.
+    pub(super) fn arm_bulk_delete_notice(&mut self, count: usize) {
+        self.delete_notice = Some(format!("{count} tasks"));
+        self.delete_notice_count = Some(count);
+    }
+
+    pub(super) fn visible_delete_notice_count(&self) -> Option<usize> {
+        self.visible_delete_notice()?;
+        self.delete_notice_count
     }
 
     /// Take the notice down. See the chrome-row lifetime rule above [`apply_intent`].
@@ -3277,6 +3383,7 @@ impl BoardModel {
     /// clearing the notice on an event of its own is exactly the drift forbids.
     pub(super) fn clear_delete_notice(&mut self) {
         self.delete_notice = None;
+        self.delete_notice_count = None;
     }
 
     /// The notice as far as the chrome row is concerned: armed, and not hidden under a modal
@@ -4038,7 +4145,7 @@ mod tests {
         {
             let right = model.right_seat.as_deref_mut().expect("preview seat");
             right.list_scroll.set(3);
-            right.pending_delete = Some(id);
+            right.pending_delete = Some([id].into_iter().collect());
             right.delete_notice = Some("stale delete notice".into());
             right.set_message("stale preview message");
         }

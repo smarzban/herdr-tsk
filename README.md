@@ -98,13 +98,17 @@ the bug.”
 
 Mouse or keyboard, your choice. Click tabs to switch views, double-click a task
 to open it, and scroll through your board. The actions along the bottom are
-clickable too, including adding a task and changing its status.
+clickable too, including adding a task and changing its status. `Shift+M` marks
+several tasks so one action covers them all.
 
 Prefer the keyboard? A few keys for everyday use:
 
 | Key | Action |
 | --- | --- |
 | `↑` / `↓` or `j` / `k` | Move between tasks |
+| `Shift+M` | Enter or leave mark mode |
+| `Shift+↑` / `Shift+↓` | In mark mode, mark the current task, then move |
+| `Space` or click | In mark mode, mark or unmark a task |
 | `→` / `←` | Peek at a task and close the peek in narrow panes; move between board and task views in wide panes |
 | `+` | Add a task |
 | `Enter` | Open the selected task |

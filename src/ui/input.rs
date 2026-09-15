@@ -107,6 +107,13 @@ pub const PRIMARY_BOARD_ACTIONS: &[PrimaryBoardAction] = &[
     PrimaryBoardAction::Undo,
 ];
 
+/// Direction in which a mark-extension gesture moves the task cursor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MarkDirection {
+    Up,
+    Down,
+}
+
 /// Intents produced by the board key map and mouse map.
 ///
 /// Not `Copy`: [`BoardIntent::EditInsertText`] carries a pasted run, so one typed intent
@@ -116,6 +123,16 @@ pub enum BoardIntent {
     Quit,
     SelectNext,
     SelectPrev,
+    /// Enter or leave the session-only task marking mode.
+    ToggleMarkMode,
+    /// Toggle the cursor task in the session-only marked set.
+    MarkToggle,
+    /// Move the cursor to one clicked row and toggle its mark.
+    MarkToggleAt(usize),
+    /// Mark the cursor task, then move the cursor one visible row.
+    MarkExtend(MarkDirection),
+    /// Clear every session-only mark.
+    MarkClear,
     /// Select visible list row by index (mouse row click).
     SelectIndex(usize),
     /// Select a wide board row and show its task beside the board; double-click opens full.
@@ -346,7 +363,7 @@ pub enum BoardIntent {
 }
 
 /// Bottom chrome: compact key legend for primary board actions.
-pub const BOARD_HELP_LINE: &str = "↑↓/jk  ·  ctrl+s start  ·  ctrl+n next  ·  enter open  ·  → peek  ·  ctrl+d done  ·  ctrl+o inbox  ·  ctrl+b block  ·  ctrl+r review  ·  + add  ·  ctrl+e title  ·  ctrl+x del  ·  ctrl+u undo  ·  ctrl+f archive  ·  d drawer  ·  g inbox / archived  ·  p projects  ·  / search  ·  : palette  ·  ? help  ·  ctrl+q quit";
+pub const BOARD_HELP_LINE: &str = "↑↓/jk  ·  shift+M mark mode  ·  shift+↑↓/space mark  ·  ctrl+s start  ·  ctrl+n next  ·  enter open  ·  → peek  ·  ctrl+d done  ·  ctrl+o inbox  ·  ctrl+b block  ·  ctrl+r review  ·  + add  ·  ctrl+e title  ·  ctrl+x del  ·  ctrl+u undo  ·  ctrl+f archive  ·  d drawer  ·  g inbox / archived  ·  p projects  ·  / search  ·  : palette  ·  ? help  ·  ctrl+q quit";
 /// Compact legend shown while the action sheet or command palette is open.
 pub const COMMAND_SURFACE_HELP_LINE: &str = "↑↓ select · type to filter · enter run · esc close";
 /// Compact legend shown while the help card is open.
@@ -359,6 +376,13 @@ pub const SEARCH_HELP_LINE: &str = "/ search · type · enter pin · esc clear";
 /// Compact legend shown while the first-use walkthrough is open.
 pub const WALKTHROUGH_HELP_LINE: &str = "enter next · esc skip";
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NormalModifier {
+    Bare,
+    Shift,
+    Ctrl,
+}
+
 /// One normal-mode key → intent entry. Help text and `map_normal` share this table.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct NormalKeyEntry {
@@ -366,8 +390,7 @@ struct NormalKeyEntry {
     intent: BoardIntent,
     help_chord: &'static str,
     help_label: &'static str,
-    /// True when this binding requires Ctrl.
-    verb: bool,
+    modifier: NormalModifier,
 }
 
 /// Canonical the normal-mode map. Single source for keys and help.
@@ -377,133 +400,161 @@ const NORMAL_KEYMAP: &[NormalKeyEntry] = &[
         intent: BoardIntent::SelectNext,
         help_chord: "↑↓ / jk",
         help_label: "move",
-        verb: false,
+        modifier: NormalModifier::Bare,
     },
     NormalKeyEntry {
         code: KeyCode::Down,
         intent: BoardIntent::SelectNext,
         help_chord: "↑↓ / jk",
         help_label: "move",
-        verb: false,
+        modifier: NormalModifier::Bare,
     },
     NormalKeyEntry {
         code: KeyCode::Char('k'),
         intent: BoardIntent::SelectPrev,
         help_chord: "↑↓ / jk",
         help_label: "move",
-        verb: false,
+        modifier: NormalModifier::Bare,
     },
     NormalKeyEntry {
         code: KeyCode::Up,
         intent: BoardIntent::SelectPrev,
         help_chord: "↑↓ / jk",
         help_label: "move",
-        verb: false,
+        modifier: NormalModifier::Bare,
+    },
+    NormalKeyEntry {
+        code: KeyCode::Char('M'),
+        intent: BoardIntent::ToggleMarkMode,
+        help_chord: "shift+M",
+        help_label: "mark mode",
+        modifier: NormalModifier::Bare,
+    },
+    NormalKeyEntry {
+        code: KeyCode::Down,
+        intent: BoardIntent::MarkExtend(MarkDirection::Down),
+        help_chord: "shift+↑↓",
+        help_label: "mark and move (mark mode)",
+        modifier: NormalModifier::Shift,
+    },
+    NormalKeyEntry {
+        code: KeyCode::Up,
+        intent: BoardIntent::MarkExtend(MarkDirection::Up),
+        help_chord: "shift+↑↓",
+        help_label: "mark and move (mark mode)",
+        modifier: NormalModifier::Shift,
+    },
+    NormalKeyEntry {
+        code: KeyCode::Char(' '),
+        intent: BoardIntent::MarkToggle,
+        help_chord: "space",
+        help_label: "toggle mark (mark mode)",
+        modifier: NormalModifier::Bare,
     },
     NormalKeyEntry {
         code: KeyCode::Enter,
         intent: BoardIntent::OpenTaskPage,
         help_chord: "enter",
         help_label: "open",
-        verb: false,
+        modifier: NormalModifier::Bare,
     },
     NormalKeyEntry {
         code: KeyCode::Right,
         intent: BoardIntent::PeekDetail,
         help_chord: "→ / ←",
         help_label: "peek",
-        verb: false,
+        modifier: NormalModifier::Bare,
     },
     NormalKeyEntry {
         code: KeyCode::Left,
         intent: BoardIntent::CollapseDetail,
         help_chord: "→ / ←",
         help_label: "peek",
-        verb: false,
+        modifier: NormalModifier::Bare,
     },
     NormalKeyEntry {
         code: KeyCode::Esc,
         intent: BoardIntent::CloseLayer,
         help_chord: "esc",
         help_label: "close / quit at board root",
-        verb: false,
+        modifier: NormalModifier::Bare,
     },
     NormalKeyEntry {
         code: KeyCode::Char('s'),
         intent: BoardIntent::PrimaryVerb,
         help_chord: "s",
         help_label: "start",
-        verb: true,
+        modifier: NormalModifier::Ctrl,
     },
     NormalKeyEntry {
         code: KeyCode::Char('d'),
         intent: BoardIntent::Complete,
         help_chord: "d",
         help_label: "done",
-        verb: true,
+        modifier: NormalModifier::Ctrl,
     },
     NormalKeyEntry {
         code: KeyCode::Char('n'),
         intent: BoardIntent::SetStatus(HumanStatus::Ready),
         help_chord: "n",
         help_label: "next",
-        verb: true,
+        modifier: NormalModifier::Ctrl,
     },
     NormalKeyEntry {
         code: KeyCode::Char('o'),
         intent: BoardIntent::Reopen,
         help_chord: "o",
         help_label: "inbox",
-        verb: true,
+        modifier: NormalModifier::Ctrl,
     },
     NormalKeyEntry {
         code: KeyCode::Char('b'),
         intent: BoardIntent::ToggleBlock,
         help_chord: "b",
         help_label: "block",
-        verb: true,
+        modifier: NormalModifier::Ctrl,
     },
     NormalKeyEntry {
         code: KeyCode::Char('r'),
         intent: BoardIntent::ToggleReview,
         help_chord: "r",
         help_label: "review",
-        verb: true,
+        modifier: NormalModifier::Ctrl,
     },
     NormalKeyEntry {
         code: KeyCode::Char('e'),
         intent: BoardIntent::BeginEditTitle,
         help_chord: "e",
         help_label: "edit title",
-        verb: true,
+        modifier: NormalModifier::Ctrl,
     },
     NormalKeyEntry {
         code: KeyCode::Char('x'),
         intent: BoardIntent::SoftDelete,
         help_chord: "x / delete",
         help_label: "delete",
-        verb: true,
+        modifier: NormalModifier::Ctrl,
     },
     NormalKeyEntry {
         code: KeyCode::Delete,
         intent: BoardIntent::SoftDelete,
         help_chord: "x / delete",
         help_label: "delete",
-        verb: true,
+        modifier: NormalModifier::Ctrl,
     },
     NormalKeyEntry {
         code: KeyCode::Char('u'),
         intent: BoardIntent::Undo,
         help_chord: "u",
         help_label: "undo",
-        verb: true,
+        modifier: NormalModifier::Ctrl,
     },
     NormalKeyEntry {
         code: KeyCode::Char('f'),
         intent: BoardIntent::File,
         help_chord: "f",
         help_label: "archive",
-        verb: true,
+        modifier: NormalModifier::Ctrl,
     },
     // `+` opens an input surface, like bare `:` palette, `z` drawer, and `?` help. It is
     // not a task-mutating verb, so it does not take the configured verb modifier.
@@ -512,7 +563,7 @@ const NORMAL_KEYMAP: &[NormalKeyEntry] = &[
         intent: BoardIntent::OpenCapture,
         help_chord: "+",
         help_label: "add",
-        verb: false,
+        modifier: NormalModifier::Bare,
     },
     // Bare `d` opens the done drawer; the same letter with Ctrl is the done verb. The
     // map keys on (code, modifier class), so both live here.
@@ -521,7 +572,7 @@ const NORMAL_KEYMAP: &[NormalKeyEntry] = &[
         intent: BoardIntent::ToggleDoneDrawer,
         help_chord: "d",
         help_label: "done drawer",
-        verb: false,
+        modifier: NormalModifier::Bare,
     },
     // Bare `g` folds inbox, or archived while the drawer is open.
     NormalKeyEntry {
@@ -529,7 +580,7 @@ const NORMAL_KEYMAP: &[NormalKeyEntry] = &[
         intent: BoardIntent::ToggleAllGroups,
         help_chord: "g",
         help_label: "inbox / archived",
-        verb: false,
+        modifier: NormalModifier::Bare,
     },
     // The project slot is mouse-clickable; `p` gives the keyboard the same route.
     NormalKeyEntry {
@@ -537,7 +588,7 @@ const NORMAL_KEYMAP: &[NormalKeyEntry] = &[
         intent: BoardIntent::OpenProjectSelector,
         help_chord: "p",
         help_label: "projects",
-        verb: false,
+        modifier: NormalModifier::Bare,
     },
     // `t` opens the project board's thread filter; `v` the projects index's View
     // selector. Both are navigation (bare, not verbs); the reducer gates each to its
@@ -547,42 +598,42 @@ const NORMAL_KEYMAP: &[NormalKeyEntry] = &[
         intent: BoardIntent::OpenThreadFilterPicker,
         help_chord: "t",
         help_label: "threads",
-        verb: false,
+        modifier: NormalModifier::Bare,
     },
     NormalKeyEntry {
         code: KeyCode::Char('v'),
         intent: BoardIntent::OpenProjectsViewPicker,
         help_chord: "v",
         help_label: "views",
-        verb: false,
+        modifier: NormalModifier::Bare,
     },
     NormalKeyEntry {
         code: KeyCode::Char('/'),
         intent: BoardIntent::FocusSearch,
         help_chord: "/",
         help_label: "search",
-        verb: false,
+        modifier: NormalModifier::Bare,
     },
     NormalKeyEntry {
         code: KeyCode::Char(':'),
         intent: BoardIntent::OpenCommandPalette,
         help_chord: ":",
         help_label: "palette",
-        verb: false,
+        modifier: NormalModifier::Bare,
     },
     NormalKeyEntry {
         code: KeyCode::Char('?'),
         intent: BoardIntent::OpenHelp,
         help_chord: "?",
         help_label: "help",
-        verb: false,
+        modifier: NormalModifier::Bare,
     },
     NormalKeyEntry {
         code: KeyCode::Char('q'),
         intent: BoardIntent::Quit,
         help_chord: "q",
         help_label: "quit",
-        verb: true,
+        modifier: NormalModifier::Ctrl,
     },
 ];
 
@@ -689,6 +740,11 @@ fn board_help_group(intent: &BoardIntent) -> HelpGroup {
     match intent {
         BoardIntent::SelectNext
         | BoardIntent::SelectPrev
+        | BoardIntent::ToggleMarkMode
+        | BoardIntent::MarkToggle
+        | BoardIntent::MarkToggleAt(_)
+        | BoardIntent::MarkExtend(_)
+        | BoardIntent::MarkClear
         | BoardIntent::OpenTaskPage
         | BoardIntent::PeekDetail
         | BoardIntent::CollapseDetail => HelpGroup::Navigation,
@@ -721,7 +777,7 @@ fn board_help_group(intent: &BoardIntent) -> HelpGroup {
 fn help_bindings() -> Vec<HelpBinding> {
     let mut bindings = Vec::new();
     for entry in NORMAL_KEYMAP {
-        let chord = if entry.verb {
+        let chord = if entry.modifier == NormalModifier::Ctrl {
             entry
                 .help_chord
                 .split(" / ")
@@ -1579,6 +1635,11 @@ pub fn intent_primary_action(intent: &BoardIntent) -> Option<PrimaryBoardAction>
         BoardIntent::BeginEditTitle => Some(PrimaryBoardAction::EditTitle),
         BoardIntent::OpenCapture => Some(PrimaryBoardAction::OpenCapture),
         BoardIntent::SetStatus(_)
+        | BoardIntent::ToggleMarkMode
+        | BoardIntent::MarkToggle
+        | BoardIntent::MarkToggleAt(_)
+        | BoardIntent::MarkExtend(_)
+        | BoardIntent::MarkClear
         | BoardIntent::BeginEditNotes
         | BoardIntent::BeginEditScope
         | BoardIntent::BeginAddStep
@@ -1722,20 +1783,31 @@ fn map_normal(key: KeyEvent) -> Option<BoardIntent> {
     if key.code == KeyCode::Char('c') && mods.contains(KeyModifiers::CONTROL) {
         return Some(BoardIntent::Quit);
     }
-    // One letter can carry a bare route and a Ctrl verb (`d` drawer / `ctrl+d` done), so
-    // the lookup keys on the modifier class as well as the code.
-    let verb = verb_mod_held(mods);
+    // One key can carry bare, Shift, and Ctrl routes. Shift remains acceptable for
+    // punctuation characters such as `:` and `?`; only shifted arrows form their own class.
+    let modifier = if verb_mod_held(mods) {
+        NormalModifier::Ctrl
+    } else if mods.contains(KeyModifiers::SHIFT) && matches!(key.code, KeyCode::Up | KeyCode::Down)
+    {
+        NormalModifier::Shift
+    } else {
+        NormalModifier::Bare
+    };
     let entry = NORMAL_KEYMAP
         .iter()
-        .find(|entry| entry.code == key.code && entry.verb == verb)?;
-    if entry.verb {
-        return Some(entry.intent.clone());
+        .find(|entry| entry.code == key.code && entry.modifier == modifier)?;
+    match entry.modifier {
+        NormalModifier::Ctrl => Some(entry.intent.clone()),
+        NormalModifier::Shift if mods == KeyModifiers::SHIFT => Some(entry.intent.clone()),
+        NormalModifier::Shift => None,
+        NormalModifier::Bare
+            if !mods
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER) =>
+        {
+            Some(entry.intent.clone())
+        }
+        NormalModifier::Bare => None,
     }
-    // Bare navigation / chrome: reject extra modifiers. Shift is how `:` / `?` arrive.
-    if mods.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER) {
-        return None;
-    }
-    Some(entry.intent.clone())
 }
 
 /// Task page view mode: the page is a focused single-task surface. Ctrl verbs act on the

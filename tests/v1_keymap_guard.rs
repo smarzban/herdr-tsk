@@ -3,7 +3,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use tsk_tui::domain::{DomainState, ProvenanceOrigin, TaskScope};
 use tsk_tui::ui::board::{apply_intent, BoardInputMode, BoardModel};
-use tsk_tui::ui::input::{map_key, normal_mode_keymap, BoardIntent};
+use tsk_tui::ui::input::{map_key, normal_mode_keymap, BoardIntent, MarkDirection};
 
 fn normal(code: KeyCode) -> Option<BoardIntent> {
     map_key(
@@ -27,6 +27,8 @@ fn normal_mode_keymap_equals_the_readme_and_queue_board_v1_set() {
         (KeyCode::Down, BoardIntent::SelectNext, false),
         (KeyCode::Char('k'), BoardIntent::SelectPrev, false),
         (KeyCode::Up, BoardIntent::SelectPrev, false),
+        (KeyCode::Char('M'), BoardIntent::ToggleMarkMode, false),
+        (KeyCode::Char(' '), BoardIntent::MarkToggle, false),
         (KeyCode::Enter, BoardIntent::OpenTaskPage, false),
         (KeyCode::Right, BoardIntent::PeekDetail, false),
         (KeyCode::Left, BoardIntent::CollapseDetail, false),
@@ -65,10 +67,17 @@ fn normal_mode_keymap_equals_the_readme_and_queue_board_v1_set() {
         (KeyCode::Char('?'), BoardIntent::OpenHelp, false),
         (KeyCode::Char('q'), BoardIntent::Quit, true),
     ];
-    let table: Vec<(KeyCode, BoardIntent)> = documented
+    let mut table: Vec<(KeyCode, BoardIntent)> = documented
         .iter()
         .map(|(key, intent, _)| (*key, intent.clone()))
         .collect();
+    table.splice(
+        5..5,
+        [
+            (KeyCode::Down, BoardIntent::MarkExtend(MarkDirection::Down)),
+            (KeyCode::Up, BoardIntent::MarkExtend(MarkDirection::Up)),
+        ],
+    );
     assert_eq!(
         normal_mode_keymap(),
         table,
@@ -86,6 +95,28 @@ fn normal_mode_keymap_equals_the_readme_and_queue_board_v1_set() {
             assert_eq!(normal(key), Some(intent), "documented key {key:?}");
         }
     }
+    assert_eq!(
+        map_key(
+            BoardInputMode::Normal,
+            KeyEvent::new(KeyCode::Char('M'), KeyModifiers::SHIFT),
+        ),
+        Some(BoardIntent::ToggleMarkMode)
+    );
+    assert_eq!(normal(KeyCode::Char('m')), None);
+    assert_eq!(
+        map_key(
+            BoardInputMode::Normal,
+            KeyEvent::new(KeyCode::Down, KeyModifiers::SHIFT),
+        ),
+        Some(BoardIntent::MarkExtend(MarkDirection::Down))
+    );
+    assert_eq!(
+        map_key(
+            BoardInputMode::Normal,
+            KeyEvent::new(KeyCode::Up, KeyModifiers::SHIFT),
+        ),
+        Some(BoardIntent::MarkExtend(MarkDirection::Up))
+    );
     // The bare/ctrl split on one letter resolves by modifier, never by table order.
     assert_eq!(
         normal(KeyCode::Char('d')),

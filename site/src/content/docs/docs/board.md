@@ -3,7 +3,7 @@ title: Board
 description: Find tasks, switch projects, and keep work moving.
 ---
 
-Click to navigate, or use the keyboard. The footer shows actions for the current selection; those actions are clickable.
+Click to navigate, or use the keyboard. The footer shows actions for the cursor or your marked task set; those actions are clickable.
 
 ## Navigate
 
@@ -23,7 +23,7 @@ The middle tab remembers your selected project. Press `2` to open it; if none is
 
 Press `ctrl+q` to quit from the board or a task view, including Help, pickers, and the wide project preview. While a text editor, board search, quick-add line, or palette query owns input, `ctrl+q` keeps its editing behavior instead. Unsaved drafts must be saved or cancelled before quitting, including drafts parked in another view while a project preview has focus. Save recovery must be resolved first; quit attempts leave its failure message intact.
 
-`Esc` closes the current layer. At the full-board root, with no page, peek, popup, search, or header selection left to dismiss, it quits without confirmation. This applies on every tab, not just the desk. In either wide split, `Esc` closes the right column once any editor or overlay is dismissed, returning to the full-width board or projects index. Task drafts stay parked; a project preview with unsaved work refuses to close. After a narrow resize hides the right column, `Esc` treats the visible board/index as the root, with the same unsaved-draft protection. Quick capture's popup-close behavior is unchanged.
+`Esc` leaves mark mode and clears its marked tasks before it closes the current layer. At the full-board root, with mark mode inactive and no page, peek, popup, search, or header selection left to dismiss, it quits without confirmation. This applies on every tab, not just the desk. In either wide split, `Esc` closes the right column once any editor or overlay is dismissed, returning to the full-width board or projects index. Task drafts stay parked; a project preview with unsaved work refuses to close. After a narrow resize hides the right column, `Esc` treats the visible board/index as the root, with the same unsaved-draft protection. Quick capture's popup-close behavior is unchanged.
 
 ## Projects
 
@@ -79,7 +79,9 @@ On your desk, **ON DECK** contains only desk tasks. On a project board, it conta
 
 Sections hold their order while you work: NEEDS YOU, IN MOTION, DONE, and the drawer's ARCHIVED group keep the most recent status change on top, while ON DECK lists ready and inbox backlogs oldest first. (`N` tasks lead each group until you clear them.) Editing a task or ticking a step never moves it; setting a status moves it to the top of its new section.
 
-Select a task, then click a footer action or use:
+Move the cursor with `↑`/`↓` or `j`/`k`. Press `Shift+M` to enter mark mode. While it is active, press `Space` to toggle the cursored task, hold `Shift` with `↑`/`↓` to mark the current task before moving, or click a task to toggle it. Marked rows show `▪`; the cursor remains `▸`. Removing the last mark leaves the mode active. `Shift+M` again while the board owns input, a task action, `Esc`, or a view change such as folding a group or switching tabs, projects, threads, or the done drawer exits the mode and clears the session-only set. Text entry keeps `Shift+M` as a capital `M`; `Esc` leaves mark mode before cancelling that surface.
+
+On a task-board list, `ctrl+s`, `ctrl+n`, `ctrl+o`, `ctrl+d`, `ctrl+b`, `ctrl+r`, `ctrl+x`, and `ctrl+f` act on the marked set when it is non-empty. With no marks they act on the cursor. `Enter`, `ctrl+e`, and actions from the task page always use only the cursor.
 
 | Key | Action |
 | --- | --- |
@@ -90,7 +92,7 @@ Select a task, then click a footer action or use:
 | `ctrl+b` | Set blocked; press again to return to ready |
 | `ctrl+r` | Set review; press again to return to ready |
 
-`ctrl+s` leaves started, blocked, and review tasks unchanged. Status verbs are absolute, so repeating the current status does nothing. Done tasks can be sent directly to ready or open.
+`ctrl+s` starts each eligible open or ready task and leaves started, blocked, and review tasks unchanged. Bulk block and review toggles are all-or-nothing: if every target already has that status they all return to ready, otherwise they all move to that status. Other status verbs are absolute, so repeating the current status does nothing. Done tasks can be sent directly to ready or open.
 
 Agents can set any status with [the CLI](/docs/cli/#status). Task status does not change automatically when steps are checked or an agent stops.
 
@@ -103,7 +105,8 @@ Your first board open seeds four desk tasks with `N` ids (not `T`). They teach t
 | Action | Result |
 | --- | --- |
 | Click a tab or selector | Change view or open its choices |
-| Click a task | Peek in narrow panes; open or update details beside the board in wide panes |
+| Click a task outside mark mode | Peek in narrow panes; open or update details beside the board in wide panes |
+| Click a task or its `T`/`N` number in mark mode | Move the cursor there and toggle its mark |
 | Click the same task again in a narrow pane | Close its peek |
 | Double-click a task | Open it full screen |
 | Click its `T` or `N` number | Copy that id |
@@ -165,9 +168,9 @@ tsk asks whether to restore it. Choose `y` to restore, or `n`/`Esc` to keep it a
 
 ## Delete and undo
 
-Press `ctrl+x` twice to delete the selected task. `ctrl+Delete` is an alternative.
+Press `ctrl+x` twice to delete the marked tasks, or the cursored task when nothing is marked. The confirmation and recovery messages show the task count for a marked set. `ctrl+Delete` is an alternative.
 
-Press `ctrl+u` to undo a deletion or completion. Undo refuses if another writer has changed the task since that action. On an archived selection, `ctrl+u` restores it instead.
+One `ctrl+u` undoes the whole marked deletion or completion. If another writer has changed any task in that batch since the action, undo refuses without changing any of them and remains available to retry. On an archived cursor with no marks, `ctrl+u` restores that task instead.
 
 Deleted tasks remain available through [trash commands](/docs/cli/#trash) for a limited time. They do not appear on the board.
 

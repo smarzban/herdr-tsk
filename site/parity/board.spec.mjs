@@ -76,6 +76,124 @@ for (const width of [78, 110]) {
   });
 }
 
+test("mark mode gates task marking and ctrl click stays ordinary", async ({
+  page,
+}) => {
+  await open(page, 78);
+  await page.keyboard.press("Space");
+  await row(page, 12).dispatchEvent("click", { ctrlKey: true });
+  await expect(page.locator("#tsk-demo")).not.toContainText(
+    "selected · esc clears",
+  );
+
+  await page.keyboard.press("Shift+M");
+  await expect(page.locator("#tsk-demo")).toContainText("mark mode");
+  await row(page, 12).click();
+  await expect(page.locator("#tsk-demo")).toContainText(
+    "1 selected · esc clears",
+  );
+  await page.keyboard.press("Shift+M");
+  await expect(page.locator("#tsk-demo")).not.toContainText(
+    "selected · esc clears",
+  );
+});
+
+test("mark mode preserves text input ownership and spends Escape first", async ({
+  page,
+}) => {
+  await open(page, 78);
+  await page.keyboard.press("Shift+M");
+  await page.keyboard.press("+");
+  const input = page.locator("#tsk-add");
+  await input.fill("");
+  await input.press("Shift+M");
+  await expect(input).toHaveValue("M");
+
+  await input.press("Escape");
+  await expect(input).toBeVisible();
+  await input.press("Escape");
+  await expect(input).toHaveCount(0);
+});
+
+test("marked task sets complete, delete, and undo as one demo action", async ({
+  page,
+}) => {
+  await open(page, 78);
+  await page.keyboard.press("Shift+M");
+  await page.keyboard.press("Shift+ArrowDown");
+  await page.keyboard.press("Space");
+  await expect(page.locator("#tsk-demo")).toContainText(
+    "2 selected · esc clears",
+  );
+  await expect(row(page, 12).locator(".tsk-row-prefix")).toContainText("▪");
+  await expect(row(page, 13).locator(".tsk-row-prefix")).toContainText("▪");
+
+  await page.keyboard.press("d");
+  await expect(row(page, 12)).toHaveCount(0);
+  await expect(row(page, 13)).toHaveCount(0);
+  await page.keyboard.press("u");
+  await expect(row(page, 12)).toBeVisible();
+  await expect(row(page, 13)).toBeVisible();
+
+  await page.keyboard.press("Shift+M");
+  await page.keyboard.press("Shift+ArrowDown");
+  await page.keyboard.press("Space");
+  await page.keyboard.press("x");
+  await expect(page.locator("#tsk-demo")).toContainText(
+    "press x again to delete 2 tasks",
+  );
+  await page.keyboard.press("x");
+  await expect(page.locator("#tsk-demo")).toContainText(
+    "deleted 2 tasks · u restores",
+  );
+  await expect(row(page, 12)).toHaveCount(0);
+  await expect(row(page, 13)).toHaveCount(0);
+  await page.keyboard.press("u");
+  await expect(row(page, 12)).toBeVisible();
+  await expect(row(page, 13)).toBeVisible();
+
+  await page.keyboard.press("Shift+M");
+  await row(page, 12).click();
+  await expect(page.locator("#tsk-demo")).toContainText(
+    "1 selected · esc clears",
+  );
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("x");
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("x");
+  await expect(row(page, 12)).toBeVisible();
+  await expect(page.locator("#tsk-demo")).toContainText(
+    "press x again to delete",
+  );
+  await expect(page.locator("#tsk-demo")).not.toContainText("delete 1 task");
+  await page.keyboard.press("x");
+  await expect(row(page, 12)).toHaveCount(0);
+  await expect(page.locator("#tsk-demo")).toContainText(
+    'Deleted "Check the release notes" · u undo',
+  );
+  await page.keyboard.press("u");
+  await expect(row(page, 12)).toBeVisible();
+});
+
+test("task-page demo actions ignore board marks and use the open task", async ({
+  page,
+}) => {
+  await open(page, 78);
+  await page.keyboard.press("Shift+M");
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Space");
+  await page.keyboard.press("ArrowUp");
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("d");
+  await page.keyboard.press("Escape");
+  await expect(row(page, 12)).toHaveCount(0);
+  await expect(row(page, 13)).toBeVisible();
+  await expect(page.locator("#tsk-demo")).not.toContainText(
+    "selected · esc clears",
+  );
+});
+
 test("Escape closes Help then collapses both wide splits", async ({ page }) => {
   for (const projects of [false, true]) {
     await open(page, 110);

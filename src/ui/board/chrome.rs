@@ -14,7 +14,15 @@ impl BoardModel {
     /// visible; the route it names comes back with the row when the edit closes.
     pub(super) fn edit_chrome_row(&self, width: usize) -> String {
         let mut parts = Vec::new();
-        if let Some(title) = self.visible_delete_notice() {
+        let bulk_notice = self.visible_delete_notice_count().map(|count| {
+            format!(
+                "deleted {count} {}",
+                if count == 1 { "task" } else { "tasks" }
+            )
+        });
+        if let Some(notice) = bulk_notice.as_deref() {
+            parts.push(ChromeRowPart::Message(notice));
+        } else if let Some(title) = self.visible_delete_notice() {
             parts.push(ChromeRowPart::Notice { title, undo: false });
         }
         if let Some(message) = self.message.as_deref().filter(|msg| !msg.is_empty()) {
@@ -147,6 +155,8 @@ fn edit_chrome_line(mode: BoardInputMode, lead: &[ChromeRowPart<'_>], width: usi
 /// One string for the row and the hit region, so a click always lands on the words the
 /// board painted.
 pub const DELETE_NOTICE_UNDO: &str = "ctrl+u undo";
+/// Undo control text for a bulk delete notice.
+pub const BULK_DELETE_NOTICE_UNDO: &str = "ctrl+u restores";
 
 /// Columns between two things sharing the chrome row.
 const CHROME_ROW_SEPARATOR: &str = "  ·  ";

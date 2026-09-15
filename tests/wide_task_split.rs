@@ -1693,6 +1693,32 @@ fn board_row_click_opens_or_retargets_split_without_peeking() {
 }
 
 #[test]
+fn full_board_plain_click_marks_in_mark_mode_while_ctrl_click_keeps_the_wide_route() {
+    let (mut domain, mut model) = fixture();
+    let selected = model.selected_id();
+    let geometry = resolve_responsive(130, 24, WideStage::FullBoard);
+    let (_, hits) = render(&model, 130, 24);
+    let row = row_hit(&hits, geometry.board, |id| Some(id) != selected);
+
+    go(&mut domain, &mut model, BoardIntent::ToggleMarkMode);
+    let mark = click_map(&model, &hits, row.x, row.y).expect("mark-mode row click");
+    let BoardIntent::MarkToggleAt(index) = mark else {
+        panic!("plain click should mark in mark mode: {mark:?}");
+    };
+    let marked = model.visible_ids()[index];
+    go(&mut domain, &mut model, mark);
+    assert!(model.marked_ids().contains(&marked));
+    assert_eq!(model.wide_stage(), WideStage::FullBoard);
+
+    let mut ctrl_click = left_click(row.x, row.y);
+    ctrl_click.modifiers = KeyModifiers::CONTROL;
+    assert!(matches!(
+        map_responsive_board_mouse(&model, &hits, AREA_130, ctrl_click),
+        Some(BoardIntent::FocusBoardAndSelectIndex(_))
+    ));
+}
+
+#[test]
 fn full_board_click_on_selected_task_opens_split() {
     let (mut domain, mut model) = fixture();
     let selected = model.selected_id().expect("selected task");

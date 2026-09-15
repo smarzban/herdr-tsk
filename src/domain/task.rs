@@ -132,15 +132,18 @@ impl std::fmt::Display for DomainError {
 impl std::error::Error for DomainError {}
 
 fn record_mutation(task: &mut Task, kind: TaskEventKind) {
-    let now = SystemTime::now();
+    record_mutation_at(task, kind, SystemTime::now());
+}
+
+fn record_mutation_at(task: &mut Task, kind: TaskEventKind, at: SystemTime) {
     task.merge_base_revision = Some(task.revision);
     task.revision = Uuid::new_v4();
-    task.updated_at = now;
-    task.history.push(TaskEvent { kind, at: now });
+    task.updated_at = at;
+    task.history.push(TaskEvent { kind, at });
 }
 
 /// Document version written by this binary.
-pub const STORE_FORMAT_VERSION: u32 = 4;
+pub const STORE_FORMAT_VERSION: u32 = 5;
 
 fn default_next_notice_number() -> u64 {
     1
@@ -448,6 +451,35 @@ impl DomainState {
         Ok(())
     }
 
+    /// Complete an ordered set of tasks as one atomic, undoable action.
+    /// Duplicate ids keep their first position. Empty input is a no-op.
+    pub fn complete_batch(&mut self, ids: &[Uuid]) -> Result<(), DomainError> {
+        let ids: Vec<_> = self
+            .prevalidate_batch_ids(ids)?
+            .into_iter()
+            .filter(|id| {
+                self.get(*id)
+                    .is_some_and(|task| task.status != HumanStatus::Done)
+            })
+            .collect();
+        if ids.is_empty() {
+            return Ok(());
+        }
+        let at = SystemTime::now();
+        let mut entries = Vec::with_capacity(ids.len());
+        for id in ids {
+            let task = self.task_mut(id)?;
+            task.status = HumanStatus::Done;
+            record_mutation_at(task, TaskEventKind::Completed, at);
+            entries.push(UndoEntry::Complete {
+                id,
+                expected_revision: task.revision,
+            });
+        }
+        self.undo_stack.push(UndoEntry::Batch { entries });
+        Ok(())
+    }
+
     /// Reopen a `done` task to `open` (inbox).
     pub fn reopen(&mut self, id: Uuid) -> Result<(), DomainError> {
         self.apply_status(id, HumanStatus::Open, TaskEventKind::Reopened)
@@ -466,6 +498,32 @@ impl DomainState {
             id,
             expected_revision,
         });
+        Ok(())
+    }
+
+    /// Soft-delete an ordered set of tasks as one atomic, undoable action.
+    /// Duplicate ids keep their first position. Empty input is a no-op.
+    pub fn soft_delete_batch(&mut self, ids: &[Uuid]) -> Result<(), DomainError> {
+        let ids: Vec<_> = self
+            .prevalidate_batch_ids(ids)?
+            .into_iter()
+            .filter(|id| self.get(*id).is_some_and(|task| !task.soft_deleted))
+            .collect();
+        if ids.is_empty() {
+            return Ok(());
+        }
+        let at = SystemTime::now();
+        let mut entries = Vec::with_capacity(ids.len());
+        for id in ids {
+            let task = self.task_mut(id)?;
+            task.soft_deleted = true;
+            record_mutation_at(task, TaskEventKind::SoftDeleted, at);
+            entries.push(UndoEntry::SoftDelete {
+                id,
+                expected_revision: task.revision,
+            });
+        }
+        self.undo_stack.push(UndoEntry::Batch { entries });
         Ok(())
     }
 
@@ -714,6 +772,20 @@ impl DomainState {
         Ok(())
     }
 
+    fn prevalidate_batch_ids(&self, ids: &[Uuid]) -> Result<Vec<Uuid>, DomainError> {
+        let mut seen = BTreeSet::new();
+        let mut ordered = Vec::with_capacity(ids.len());
+        for id in ids.iter().copied() {
+            if seen.insert(id) {
+                if self.get(id).is_none() {
+                    return Err(DomainError::UnknownId(id));
+                }
+                ordered.push(id);
+            }
+        }
+        Ok(ordered)
+    }
+
     fn task_mut(&mut self, id: Uuid) -> Result<&mut Task, DomainError> {
         self.tasks
             .iter_mut()
@@ -794,8 +866,10 @@ impl DomainState {
         });
         if self.tasks.len() != before {
             self.undo_stack.retain(|entry| {
-                let (id, _) = entry.target();
-                self.tasks.iter().any(|task| task.id == id)
+                entry
+                    .targets()
+                    .into_iter()
+                    .all(|(id, _)| self.tasks.iter().any(|task| task.id == id))
             });
         }
     }
@@ -881,7 +955,16 @@ impl DomainState {
 
     fn merge_undo_entries(&mut self, other: &DomainState) {
         for incoming in &other.undo_stack {
-            if !self.undo_stack.contains(incoming) {
+            let incoming_leaves = incoming.leaf_entries();
+            let already_present = incoming_leaves.iter().all(|incoming_leaf| {
+                self.undo_stack.iter().any(|existing| {
+                    existing
+                        .leaf_entries()
+                        .into_iter()
+                        .any(|existing_leaf| existing_leaf == *incoming_leaf)
+                })
+            });
+            if !already_present {
                 self.undo_stack.push(incoming.clone());
             }
         }
@@ -903,18 +986,28 @@ impl DomainState {
             .undo_stack
             .iter()
             .filter_map(|entry| {
-                let (id, _) = entry.target();
-                let task = self.tasks.iter().find(|task| task.id == id)?;
-                match entry {
-                    UndoEntry::SoftDelete { .. } => task.soft_deleted_at(),
-                    UndoEntry::Complete { .. } => task.last_event_at(TaskEventKind::Completed),
-                }
+                entry
+                    .leaf_entries()
+                    .into_iter()
+                    .filter_map(|leaf| {
+                        let (id, _) = leaf.targets().into_iter().next()?;
+                        let task = self.tasks.iter().find(|task| task.id == id)?;
+                        match leaf {
+                            UndoEntry::SoftDelete { .. } => task.soft_deleted_at(),
+                            UndoEntry::Complete { .. } => {
+                                task.last_event_at(TaskEventKind::Completed)
+                            }
+                            UndoEntry::Batch { .. } => unreachable!("batches are flattened"),
+                        }
+                    })
+                    .max()
             })
             .collect();
         let targeted: BTreeSet<Uuid> = self
             .undo_stack
             .iter()
-            .map(|entry| entry.target().0)
+            .flat_map(UndoEntry::targets)
+            .map(|(id, _)| id)
             .collect();
         self.tasks
             .iter()
@@ -934,8 +1027,12 @@ impl DomainState {
     /// Remove the given tasks and every undo entry targeting one of them.
     pub(crate) fn remove_tasks(&mut self, ids: &BTreeSet<Uuid>) {
         self.tasks.retain(|task| !ids.contains(&task.id));
-        self.undo_stack
-            .retain(|entry| !ids.contains(&entry.target().0));
+        self.undo_stack.retain(|entry| {
+            entry
+                .targets()
+                .into_iter()
+                .all(|(id, _)| !ids.contains(&id))
+        });
     }
 
     /// Re-insert one task restored from trash: `soft_deleted` cleared, a `restored`
@@ -959,11 +1056,14 @@ impl DomainState {
     /// because pruning happens only at save.
     pub(crate) fn prune_undo_for_persistence(&mut self) {
         self.undo_stack.retain(|entry| {
-            let (id, expected_revision) = entry.target();
-            self.tasks
-                .iter()
-                .find(|task| task.id == id)
-                .is_some_and(|task| task.revision == expected_revision)
+            let targets = entry.targets();
+            !targets.is_empty()
+                && targets.into_iter().all(|(id, expected_revision)| {
+                    self.tasks
+                        .iter()
+                        .find(|task| task.id == id)
+                        .is_some_and(|task| task.revision == expected_revision)
+                })
         });
         if self.undo_stack.len() > UNDO_CAP {
             let excess = self.undo_stack.len() - UNDO_CAP;

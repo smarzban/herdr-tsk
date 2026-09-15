@@ -14,19 +14,55 @@ pub const UNDO_CAP: usize = 50;
 pub enum UndoEntry {
     SoftDelete { id: Uuid, expected_revision: Uuid },
     Complete { id: Uuid, expected_revision: Uuid },
+    Batch { entries: Vec<UndoEntry> },
 }
 
 impl UndoEntry {
-    pub(crate) fn target(&self) -> (Uuid, Uuid) {
-        match *self {
-            UndoEntry::SoftDelete {
-                id,
-                expected_revision,
+    /// Return the single-task entries in action order, flattening nested batches.
+    pub(crate) fn leaf_entries(&self) -> Vec<&UndoEntry> {
+        fn collect<'a>(entry: &'a UndoEntry, leaves: &mut Vec<&'a UndoEntry>) {
+            match entry {
+                UndoEntry::Batch { entries } => {
+                    for child in entries {
+                        collect(child, leaves);
+                    }
+                }
+                UndoEntry::SoftDelete { .. } | UndoEntry::Complete { .. } => leaves.push(entry),
             }
-            | UndoEntry::Complete {
-                id,
-                expected_revision,
-            } => (id, expected_revision),
+        }
+
+        let mut leaves = Vec::new();
+        collect(self, &mut leaves);
+        leaves
+    }
+
+    pub(crate) fn targets(&self) -> Vec<(Uuid, Uuid)> {
+        self.leaf_entries()
+            .into_iter()
+            .map(|entry| match *entry {
+                UndoEntry::SoftDelete {
+                    id,
+                    expected_revision,
+                }
+                | UndoEntry::Complete {
+                    id,
+                    expected_revision,
+                } => (id, expected_revision),
+                UndoEntry::Batch { .. } => unreachable!("batches are flattened"),
+            })
+            .collect()
+    }
+
+    fn reverse(self, state: &mut DomainState) -> Result<(), DomainError> {
+        match self {
+            UndoEntry::SoftDelete { id, .. } => state.restore(id),
+            UndoEntry::Complete { id, .. } => state.reopen(id),
+            UndoEntry::Batch { entries } => {
+                for entry in entries.into_iter().rev() {
+                    entry.reverse(state)?;
+                }
+                Ok(())
+            }
         }
     }
 }
@@ -40,19 +76,16 @@ impl DomainState {
         let Some(entry) = self.last_undo().cloned() else {
             return Ok(());
         };
-        let (id, expected_revision) = entry.target();
-        let current_revision = self.get(id).ok_or(DomainError::UnknownId(id))?.revision;
-        if current_revision != expected_revision {
-            return Err(DomainError::StaleUndo(id));
+        for (id, expected_revision) in entry.targets() {
+            let current_revision = self.get(id).ok_or(DomainError::UnknownId(id))?.revision;
+            if current_revision != expected_revision {
+                return Err(DomainError::StaleUndo(id));
+            }
         }
 
-        let entry = self
-            .pop_undo()
-            .expect("undo entry remains present after revision check");
-        match entry {
-            UndoEntry::SoftDelete { id, .. } => self.restore(id),
-            UndoEntry::Complete { id, .. } => self.reopen(id),
-        }
+        self.pop_undo()
+            .expect("undo entry remains present after revision checks")
+            .reverse(self)
     }
 }
 
@@ -294,6 +327,201 @@ mod tests {
             UNDO_CAP,
             "the union is capped after merging, not before"
         );
+    }
+
+    #[test]
+    fn bulk_complete_pushes_one_ordered_deduped_batch_and_one_undo_reopens_all() {
+        let mut state = DomainState::new();
+        let first = create_sample(&mut state);
+        let second = create_sample(&mut state);
+
+        state
+            .complete_batch(&[second, first, second])
+            .expect("bulk complete");
+
+        assert_eq!(state.get(first).expect("first").status, HumanStatus::Done);
+        assert_eq!(state.get(second).expect("second").status, HumanStatus::Done);
+        let undo = serde_json::to_value(state.last_undo().expect("one batch undo")).expect("json");
+        let entries = undo["batch"]["entries"].as_array().expect("batch entries");
+        assert_eq!(entries.len(), 2, "duplicate ids collapse");
+        assert_eq!(entries[0]["complete"]["id"], second.to_string());
+        assert_eq!(entries[1]["complete"]["id"], first.to_string());
+
+        state.undo().expect("undo whole batch");
+        assert_eq!(state.get(first).expect("first").status, HumanStatus::Open);
+        assert_eq!(state.get(second).expect("second").status, HumanStatus::Open);
+        assert!(state.last_undo().is_none(), "one undo consumes the batch");
+    }
+
+    #[test]
+    fn bulk_complete_undo_only_reopens_tasks_changed_by_the_batch() {
+        let mut state = DomainState::new();
+        let already_done = create_sample(&mut state);
+        let newly_done = create_sample(&mut state);
+        state.complete(already_done).expect("complete first task");
+
+        state
+            .complete_batch(&[already_done, newly_done])
+            .expect("complete mixed batch");
+        let undo = serde_json::to_value(state.last_undo().expect("batch undo")).expect("json");
+        assert_eq!(
+            undo["batch"]["entries"]
+                .as_array()
+                .expect("batch entries")
+                .len(),
+            1,
+            "the batch records only its changed task"
+        );
+
+        state.undo().expect("undo mixed batch");
+        assert_eq!(
+            state.get(already_done).expect("already done").status,
+            HumanStatus::Done
+        );
+        assert_eq!(
+            state.get(newly_done).expect("newly done").status,
+            HumanStatus::Open
+        );
+    }
+
+    #[test]
+    fn bulk_verbs_prevalidate_every_id_before_mutating() {
+        for complete in [false, true] {
+            let mut state = DomainState::new();
+            let first = create_sample(&mut state);
+            let missing = Uuid::new_v4();
+            let before = serde_json::to_value(&state).expect("snapshot");
+
+            let result = if complete {
+                state.complete_batch(&[first, missing])
+            } else {
+                state.soft_delete_batch(&[first, missing])
+            };
+            assert_eq!(result, Err(DomainError::UnknownId(missing)));
+            assert_eq!(serde_json::to_value(&state).expect("snapshot"), before);
+        }
+    }
+
+    #[test]
+    fn stale_batch_child_refuses_without_consuming_or_reversing_any_child() {
+        let mut state = DomainState::new();
+        let first = create_sample(&mut state);
+        let second = create_sample(&mut state);
+        state
+            .complete_batch(&[first, second])
+            .expect("bulk complete");
+        state
+            .edit(second, "changed", None, TaskScope::Global, None)
+            .expect("make the second child stale");
+        let before = serde_json::to_value(&state).expect("snapshot");
+
+        assert_eq!(state.undo(), Err(DomainError::StaleUndo(second)));
+        assert_eq!(
+            serde_json::to_value(&state).expect("snapshot"),
+            before,
+            "refused batch undo changes neither tasks nor stack"
+        );
+    }
+
+    #[test]
+    fn persistence_prunes_a_whole_batch_when_one_child_is_stale() {
+        let dir = temp_state_dir("stale-batch");
+        let _guard = TempDirGuard(dir.clone());
+        let store = crate::store::TaskStore::new(&dir);
+        let mut state = DomainState::new();
+        let first = create_sample(&mut state);
+        let second = create_sample(&mut state);
+        state
+            .complete_batch(&[first, second])
+            .expect("bulk complete");
+        state
+            .edit(second, "changed", None, TaskScope::Global, None)
+            .expect("make one child stale");
+
+        store.save(&state).expect("save prunes stale batch");
+        let loaded = store.load().expect("reload");
+        assert!(loaded.last_undo().is_none(), "the batch stays atomic");
+    }
+
+    #[test]
+    fn undo_merge_dedupes_single_entries_already_held_by_a_batch() {
+        let mut state = DomainState::new();
+        let first = create_sample(&mut state);
+        let second = create_sample(&mut state);
+        state
+            .complete_batch(&[first, second])
+            .expect("bulk complete");
+
+        let mut other_document = serde_json::to_value(&state).expect("state json");
+        let children = other_document["undo_stack"][0]["batch"]["entries"]
+            .as_array()
+            .expect("batch children")
+            .clone();
+        other_document["undo_stack"] = serde_json::Value::Array(children);
+        let other: DomainState = serde_json::from_value(other_document).expect("single stack");
+
+        state.merge_tasks_from_disk(&other);
+        let merged = serde_json::to_value(&state).expect("merged json");
+        assert_eq!(
+            merged["undo_stack"].as_array().expect("undo stack").len(),
+            1,
+            "leaf-equivalent entries are not duplicated across batch boundaries"
+        );
+    }
+
+    #[test]
+    fn bulk_soft_delete_remains_live_and_undoable_across_an_immediate_save() {
+        let dir = temp_state_dir("batch-trash-targets");
+        let _guard = TempDirGuard(dir.clone());
+        let store = crate::store::TaskStore::new(&dir);
+        let mut state = DomainState::new();
+        let first = create_sample(&mut state);
+        let second = create_sample(&mut state);
+        state
+            .soft_delete_batch(&[first, second])
+            .expect("bulk soft delete");
+
+        store.save(&state).expect("save");
+        assert!(
+            !dir.join("trash.jsonl").exists(),
+            "children of the same batch are not later actions"
+        );
+        let mut loaded = store.load().expect("reload");
+        assert!(loaded.get(first).expect("first").soft_deleted);
+        assert!(loaded.get(second).expect("second").soft_deleted);
+        loaded.undo().expect("undo bulk delete");
+        assert!(!loaded.get(first).expect("first").soft_deleted);
+        assert!(!loaded.get(second).expect("second").soft_deleted);
+    }
+
+    #[test]
+    fn old_single_entry_variants_still_deserialize() {
+        let id = Uuid::new_v4();
+        let expected_revision = Uuid::new_v4();
+        for (variant, expected) in [
+            (
+                "soft_delete",
+                UndoEntry::SoftDelete {
+                    id,
+                    expected_revision,
+                },
+            ),
+            (
+                "complete",
+                UndoEntry::Complete {
+                    id,
+                    expected_revision,
+                },
+            ),
+        ] {
+            let value = serde_json::json!({
+                (variant): { "id": id, "expected_revision": expected_revision }
+            });
+            assert_eq!(
+                serde_json::from_value::<UndoEntry>(value).expect("old variant"),
+                expected
+            );
+        }
     }
 
     #[test]

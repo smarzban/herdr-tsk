@@ -9,8 +9,13 @@ the GitHub release notes verbatim.
 
 ## Unreleased
 
+### Breaking
+
+- Store format 5 adds batch undo entries for marked task sets. Rolling back refuses the file; restore `tsk.json.v4`.
+
 ### Added
 
+- Press `Shift+M` to enter mark mode, use `Space`, `Shift+↑`/`Shift+↓`, or a plain click to select tasks, then change status, archive, or delete the set at once. One undo reverses a marked completion or deletion, and a stale batch refuses without changing any task.
 - `/` searches every board tab: task boards match title, notes, steps, thread, and task number, while Projects Overview matches project names and paths. `Enter` pins the filtered rows for normal board actions; `Esc` clears search first.
 
 ### Changed
