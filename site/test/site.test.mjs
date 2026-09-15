@@ -127,7 +127,9 @@ test("demo keeps project navigation, attribution, and search contracts", async (
   assert.match(demo, /selectedRow\(\)\?\.kind !== "task"/);
   assert.match(demo, /id="tsk-project-search"/);
   assert.ok(demo.includes('e.key === "/"'));
-  assert.match(demo, /state\.projectQuery/);
+  assert.match(demo, /state\.searchQuery/);
+  assert.match(demo, /taskMatchesSearch/);
+  assert.match(demo, /searchPinned/);
   assert.match(demo, /data-project-row=/);
 });
 

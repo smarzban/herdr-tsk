@@ -18,7 +18,7 @@ use crate::save_recovery::SaveRecovery;
 use crate::store::{default_state_dir, StoreError, StoreSignature, TaskStore};
 use crate::ui::board::{
     apply_intent, board_intent_may_persist, draw_board, resolve_board_command, BoardInputMode,
-    BoardModel, IntentOutcome, ProjectsView, SaveResolution, WalkthroughOutcome,
+    BoardModel, IntentOutcome, SaveResolution, WalkthroughOutcome,
 };
 use crate::ui::capture::{CaptureField, TITLE_REQUIRED_MESSAGE};
 use crate::ui::input::{
@@ -1153,12 +1153,6 @@ fn board_keyboard_intent(
             };
             if let Some(tab) = tab {
                 return Some(BoardIntent::SelectNavTab(tab));
-            }
-            if model.nav_tab() == NavTab::Projects
-                && matches!(model.projects_view(), ProjectsView::Overview)
-                && c == '/'
-            {
-                return Some(BoardIntent::FocusProjectsSearch);
             }
         }
     }
@@ -3087,6 +3081,60 @@ mod tests {
     }
 
     #[test]
+    fn projects_preview_search_uses_the_focused_right_seat() {
+        let (mut domain, mut model, _) = projects_preview_fixture();
+        let area = Rect::new(0, 0, 110, 30);
+        let search = preview_key_intent(
+            &mut model,
+            area,
+            KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE),
+        );
+        assert_eq!(search, BoardIntent::FocusSearch);
+        apply_intent(&mut domain, model.input_target_mut(), search, None)
+            .expect("focus right-seat search");
+        assert_eq!(model.input_mode(), BoardInputMode::Search);
+        assert_eq!(
+            model.right_seat().map(BoardModel::input_mode),
+            Some(BoardInputMode::Search)
+        );
+        apply_intent(
+            &mut domain,
+            model.input_target_mut(),
+            BoardIntent::SearchQueryInsertText("missing".into()),
+            None,
+        )
+        .expect("filter right-seat tasks");
+        assert!(model
+            .right_seat()
+            .expect("right seat")
+            .visible_ids()
+            .is_empty());
+        assert_eq!(
+            model.project_rows().len(),
+            1,
+            "left index remains unfiltered"
+        );
+
+        apply_intent(
+            &mut domain,
+            model.input_target_mut(),
+            BoardIntent::PinSearch,
+            None,
+        )
+        .expect("pin right-seat search");
+        let routed = route_board_intent(&model, BoardIntent::CloseLayer);
+        assert_eq!(routed.target, BoardIntentTarget::Focused);
+        assert!(
+            !routed.return_to_index,
+            "pinned search clears before leaving"
+        );
+        apply_intent(&mut domain, model.input_target_mut(), routed.intent, None)
+            .expect("clear right-seat search");
+        assert_eq!(model.wide_stage(), crate::ui::tier::WideStage::Rail);
+        assert_eq!(model.right_seat().map(BoardModel::search_query), Some(""));
+    }
+
+    #[test]
     fn projects_preview_right_seat_selection_stays_on_visible_task_after_sync() {
         let (mut domain, mut model) = projects_preview_open_tasks_fixture();
         let area = Rect::new(0, 0, 110, 30);
@@ -3668,17 +3716,13 @@ mod tests {
             &mut model,
             BoardIntent::SelectNavTab(NavTab::Desk),
         );
+        assert_refused(&mut domain, &mut model, BoardIntent::SearchQueryInsert('b'));
         assert_refused(
             &mut domain,
             &mut model,
-            BoardIntent::ProjectsQueryInsert('b'),
+            BoardIntent::SearchQueryInsertText("beta".into()),
         );
-        assert_refused(
-            &mut domain,
-            &mut model,
-            BoardIntent::ProjectsQueryInsertText("beta".into()),
-        );
-        assert_refused(&mut domain, &mut model, BoardIntent::ProjectsQueryBackspace);
+        assert_refused(&mut domain, &mut model, BoardIntent::SearchQueryBackspace);
         assert_refused(&mut domain, &mut model, BoardIntent::StageLeft);
 
         // A same-row second click is also a project-board jump once the double-click window is
@@ -6919,11 +6963,11 @@ mod tests {
         );
         assert_eq!(
             map_board_mouse(&model, &hits, click_at(search.area)),
-            Some(BoardIntent::FocusProjectsSearch)
+            Some(BoardIntent::FocusSearch)
         );
         assert_eq!(
             board_keyboard_intent(&model, BoardInputMode::Normal, key(KeyCode::Char('/'))),
-            Some(BoardIntent::FocusProjectsSearch)
+            Some(BoardIntent::FocusSearch)
         );
         // Normal mode does not own an implicit query. Bound and unbound letters
         // retain their ordinary routes or are inert until slash/footer search focus.
@@ -6947,18 +6991,13 @@ mod tests {
             board_keyboard_intent(&model, BoardInputMode::Normal, key(KeyCode::Char('3'))),
             Some(BoardIntent::SelectNavTab(NavTab::Projects))
         );
-        apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::FocusProjectsSearch,
-            None,
-        )
-        .expect("focus search");
+        apply_intent(&mut domain, &mut model, BoardIntent::FocusSearch, None)
+            .expect("focus search");
         let compact_hits = board_hit_map(Rect::new(0, 0, 40, 10), &model);
         let compact_search = compact_hits
             .regions
             .iter()
-            .find(|hit| hit.target == crate::ui::render::QueueHitTarget::ProjectsSearch)
+            .find(|hit| hit.target == crate::ui::render::QueueHitTarget::Search)
             .expect("compact footer search input");
         assert!(
             compact_search.area.y >= 7,
@@ -6966,34 +7005,30 @@ mod tests {
         );
         for c in ['b', 'e', 't', 'a', 'j', 'k', 'v', '1', '2', '3'] {
             assert_eq!(
-                board_keyboard_intent(
-                    &model,
-                    BoardInputMode::ProjectsSearch,
-                    key(KeyCode::Char(c))
-                ),
-                Some(BoardIntent::ProjectsQueryInsert(c)),
+                board_keyboard_intent(&model, BoardInputMode::Search, key(KeyCode::Char(c))),
+                Some(BoardIntent::SearchQueryInsert(c)),
                 "bound search character should be text: {c}"
             );
         }
         let intent = board_paste_intent(Rect::new(0, 0, 80, 24), &mut model, "beta")
             .expect("paste search query");
-        assert_eq!(intent, BoardIntent::ProjectsQueryInsertText("beta".into()));
+        assert_eq!(intent, BoardIntent::SearchQueryInsertText("beta".into()));
         apply_intent(&mut domain, &mut model, intent, None).expect("insert query");
-        assert_eq!(model.projects_query(), "beta");
+        assert_eq!(model.search_query(), "beta");
         assert_eq!(model.project_rows().len(), 1);
         assert_eq!(
-            board_keyboard_intent(
-                &model,
-                BoardInputMode::ProjectsSearch,
-                key(KeyCode::Backspace)
-            ),
-            Some(BoardIntent::ProjectsQueryBackspace)
+            board_keyboard_intent(&model, BoardInputMode::Search, key(KeyCode::Backspace)),
+            Some(BoardIntent::SearchQueryBackspace)
+        );
+        assert_eq!(
+            board_keyboard_intent(&model, BoardInputMode::Search, key(KeyCode::Enter)),
+            Some(BoardIntent::PinSearch)
         );
         let hits = board_hit_map(Rect::new(0, 0, 80, 24), &model);
         let search = hits
             .regions
             .iter()
-            .find(|hit| hit.target == crate::ui::render::QueueHitTarget::ProjectsSearch)
+            .find(|hit| hit.target == crate::ui::render::QueueHitTarget::Search)
             .expect("open footer search input");
         assert!(
             search.area.y >= 20,
@@ -7002,33 +7037,151 @@ mod tests {
         );
         assert_eq!(
             map_board_mouse(&model, &hits, click_at(search.area)),
-            Some(BoardIntent::FocusProjectsSearch)
+            Some(BoardIntent::FocusSearch)
         );
         apply_intent(&mut domain, &mut model, BoardIntent::CloseLayer, None).expect("clear search");
-        assert_eq!(model.projects_query(), "");
+        assert_eq!(model.search_query(), "");
         assert_eq!(model.input_mode(), BoardInputMode::Normal);
+        apply_intent(&mut domain, &mut model, BoardIntent::FocusSearch, None)
+            .expect("refocus search");
         apply_intent(
             &mut domain,
             &mut model,
-            BoardIntent::FocusProjectsSearch,
-            None,
-        )
-        .expect("refocus search");
-        apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::ProjectsQueryInsertText("beta".into()),
+            BoardIntent::SearchQueryInsertText("beta".into()),
             None,
         )
         .expect("restore query");
+        apply_intent(&mut domain, &mut model, BoardIntent::PinSearch, None)
+            .expect("pin selected search match");
+        assert_eq!(model.nav_tab(), NavTab::Projects);
+        assert_eq!(model.input_mode(), BoardInputMode::Normal);
+        assert!(model.search_pinned());
         apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None)
             .expect("open selected search match");
         assert_eq!(model.nav_tab(), NavTab::ProjectBoard);
         assert_eq!(model.input_mode(), BoardInputMode::Normal);
+        assert_eq!(model.search_query(), "");
         assert_eq!(
-            board_keyboard_intent(&model, BoardInputMode::ProjectsSearch, key(KeyCode::Esc)),
+            board_keyboard_intent(&model, BoardInputMode::Search, key(KeyCode::Esc)),
             Some(BoardIntent::CloseLayer)
         );
+    }
+
+    #[test]
+    fn search_filters_every_task_surface_and_enter_pins_the_query() {
+        use crate::ui::board::apply_intent;
+
+        let mut domain = DomainState::new();
+        let login = domain
+            .create(
+                "Ship login flow",
+                Some("wire the form".into()),
+                TaskScope::Project {
+                    path: "/repos/app".into(),
+                },
+                ProvenanceOrigin::Manual,
+                Some("auth".into()),
+            )
+            .expect("login task");
+        domain
+            .set_status(login, HumanStatus::Started)
+            .expect("start login task");
+        domain.add_step(login, "cover redirect").expect("step");
+        let other = domain
+            .create(
+                "Unrelated work",
+                None,
+                TaskScope::Global,
+                ProvenanceOrigin::Manual,
+                None,
+            )
+            .expect("other task");
+        domain
+            .set_status(other, HumanStatus::Started)
+            .expect("start other task");
+        let mut model = BoardModel::from_domain(&domain, None);
+
+        apply_intent(&mut domain, &mut model, BoardIntent::FocusSearch, None)
+            .expect("focus search from desk");
+        assert_eq!(model.input_mode(), BoardInputMode::Search);
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::SearchQueryInsertText("   \t".into()),
+            None,
+        )
+        .expect("type whitespace search");
+        apply_intent(&mut domain, &mut model, BoardIntent::PinSearch, None)
+            .expect("close whitespace search");
+        assert_eq!(model.search_query(), "");
+        assert!(model.root_escape_requests_quit());
+        apply_intent(&mut domain, &mut model, BoardIntent::FocusSearch, None)
+            .expect("refocus content search");
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::SearchQueryInsertText("login auth redirect".into()),
+            None,
+        )
+        .expect("type task search");
+        assert_eq!(model.visible_ids(), vec![login]);
+        assert_eq!(model.queue_view().counts.in_motion, 1);
+
+        apply_intent(&mut domain, &mut model, BoardIntent::PinSearch, None).expect("pin search");
+        assert_eq!(model.input_mode(), BoardInputMode::Normal);
+        assert!(model.search_pinned());
+        assert_eq!(model.search_query(), "login auth redirect");
+        assert_eq!(model.selected_id(), Some(login));
+
+        let arriving = domain
+            .create(
+                "Login follow-up",
+                Some("auth redirect".into()),
+                TaskScope::Global,
+                ProvenanceOrigin::Manual,
+                None,
+            )
+            .expect("arriving matching task");
+        domain
+            .set_status(arriving, HumanStatus::Started)
+            .expect("start arriving task");
+        model.sync_from_domain(&domain);
+        assert_eq!(model.selected_id(), Some(login));
+        assert!(model.visible_ids().contains(&arriving));
+
+        assert_eq!(
+            apply_intent(&mut domain, &mut model, BoardIntent::CloseLayer, None)
+                .expect("clear pinned search"),
+            IntentOutcome::None
+        );
+        assert_eq!(model.search_query(), "");
+        assert!(!model.search_pinned());
+        let restored = model.visible_ids();
+        assert_eq!(restored.len(), 3);
+        assert!(
+            restored.contains(&login) && restored.contains(&other) && restored.contains(&arriving)
+        );
+
+        apply_intent(&mut domain, &mut model, BoardIntent::FocusSearch, None)
+            .expect("search again");
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::SearchQueryInsertText("login".into()),
+            None,
+        )
+        .expect("restore task query");
+        apply_intent(&mut domain, &mut model, BoardIntent::PinSearch, None)
+            .expect("pin restored task query");
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::SelectNavTab(NavTab::Projects),
+            None,
+        )
+        .expect("switch tabs");
+        assert_eq!(model.search_query(), "");
+        assert!(!model.search_pinned());
     }
 
     #[test]

@@ -383,7 +383,8 @@ fn fixture_model_on_tab<'a>(
         projects: &[],
         projects_index: false,
         projects_cursor: 0,
-        projects_query: "",
+        search_query: "",
+        search_pinned: false,
         summary: None,
         context: " desk".to_string(),
         has_update_notice: false,
@@ -2855,6 +2856,50 @@ fn golden_scenes() -> Vec<GoldenScene> {
     .expect("enter projects rail for golden");
     let projects_rail_rows = board_rows(&projects_model, 110, 30);
 
+    let mut search_domain = DomainState::new();
+    let mut search_model = BoardModel::from_tasks(tasks.clone(), Some(PathBuf::from("/repos/tsk")));
+    apply_intent(
+        &mut search_domain,
+        &mut search_model,
+        BoardIntent::FocusSearch,
+        None,
+    )
+    .expect("focus board search for golden");
+    apply_intent(
+        &mut search_domain,
+        &mut search_model,
+        BoardIntent::SearchQueryInsertText("worktree".into()),
+        None,
+    )
+    .expect("type board search for golden");
+    let board_search_rows = board_rows(&search_model, 80, 24);
+    apply_intent(
+        &mut search_domain,
+        &mut search_model,
+        BoardIntent::PinSearch,
+        None,
+    )
+    .expect("pin board search for golden");
+    let board_search_pinned_rows = board_rows(&search_model, 80, 24);
+
+    let mut empty_search_model =
+        BoardModel::from_tasks(tasks.clone(), Some(PathBuf::from("/repos/tsk")));
+    apply_intent(
+        &mut search_domain,
+        &mut empty_search_model,
+        BoardIntent::FocusSearch,
+        None,
+    )
+    .expect("focus empty board search for golden");
+    apply_intent(
+        &mut search_domain,
+        &mut empty_search_model,
+        BoardIntent::SearchQueryInsertText("nothing-here".into()),
+        None,
+    )
+    .expect("type empty board search for golden");
+    let board_search_empty_rows = board_rows(&empty_search_model, 80, 24);
+
     let board_view = fixture_view(&tasks, false);
     let board_model = fixture_model(&tasks, &board_view);
     let (board_rows, _) = paint(80, 24, &board_model);
@@ -2956,6 +3001,21 @@ fn golden_scenes() -> Vec<GoldenScene> {
             name: "board_default_split_78",
             rows: default_split_rows,
             width: 78,
+        },
+        GoldenScene {
+            name: "board_search",
+            rows: board_search_rows,
+            width: 80,
+        },
+        GoldenScene {
+            name: "board_search_pinned",
+            rows: board_search_pinned_rows,
+            width: 80,
+        },
+        GoldenScene {
+            name: "board_search_empty",
+            rows: board_search_empty_rows,
+            width: 80,
         },
         GoldenScene {
             name: "accordion",
@@ -3455,9 +3515,10 @@ fn all_golden_frames_pass_no_color_sgr_scan() {
         scanned += 1;
     }
     assert_eq!(
-        scanned, 12,
-        "expected the twelve board surface goldens (board, board_default_split_78, accordion, \
-         palette, help, done_drawer, inbox, done_drawer_archived, projects_index_50x20, \
+        scanned, 15,
+        "expected the fifteen board surface goldens (board, board_default_split_78, \
+         board_search, board_search_pinned, board_search_empty, accordion, palette, help, \
+         done_drawer, inbox, done_drawer_archived, projects_index_50x20, \
          projects_index_110x30, projects_preview_split_110x30, projects_preview_rail_110x30) \
          in {dir:?}"
     );
@@ -5332,17 +5393,11 @@ fn projects_index_paints_aligned_counts_search_hint_and_selected_path() {
     );
 
     // Open search: the footer slot is the query, and the hint leaves the table.
+    apply_intent(&mut domain, &mut model, BoardIntent::FocusSearch, None).expect("focus search");
     apply_intent(
         &mut domain,
         &mut model,
-        BoardIntent::FocusProjectsSearch,
-        None,
-    )
-    .expect("focus search");
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::ProjectsQueryInsertText("alpha".into()),
+        BoardIntent::SearchQueryInsertText("alpha".into()),
         None,
     )
     .expect("type search");
