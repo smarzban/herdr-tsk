@@ -9,6 +9,8 @@ the GitHub release notes verbatim.
 
 ## Unreleased
 
+## v0.10.0
+
 ### Breaking
 
 - Store format 5: one undo entry can cover a marked set. Rolling back refuses the file; restore `tsk.json.v4`.
