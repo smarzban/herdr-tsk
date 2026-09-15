@@ -772,12 +772,6 @@ fn help_bindings() -> Vec<HelpBinding> {
             "open projects",
             "switch view navigate board",
         ),
-        help_binding(
-            HelpGroup::ViewsFind,
-            "/",
-            "search projects",
-            "find filter views",
-        ),
         help_binding(HelpGroup::AppControls, "ctrl+c", "quit", "exit close app"),
         help_binding(
             HelpGroup::CreateEdit,

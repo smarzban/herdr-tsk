@@ -743,6 +743,8 @@ pub struct BoardModel {
     pub(super) help_max_scroll: Cell<usize>,
     /// Underlying surface to restore after Help closes.
     pub(super) help_return_mode: BoardInputMode,
+    /// Underlying board mode to restore after the search input closes or pins.
+    pub(super) search_return_mode: BoardInputMode,
     pub(super) input_mode: BoardInputMode,
     /// The one active board form. It is present for expanded quick-add and task editing alike;
     /// task identity or invocation context are held inside it and never rebound after open.
@@ -864,6 +866,7 @@ impl BoardModel {
             help_scroll: 0,
             help_max_scroll: Cell::new(usize::MAX),
             help_return_mode: BoardInputMode::Normal,
+            search_return_mode: BoardInputMode::Normal,
             input_mode: BoardInputMode::Normal,
             form: None,
             quick_add: None,
@@ -1550,10 +1553,10 @@ impl BoardModel {
         {
             return true;
         }
-        let underlying_mode = if self.input_mode == BoardInputMode::Help {
-            self.help_return_mode
-        } else {
-            self.input_mode
+        let underlying_mode = match self.input_mode {
+            BoardInputMode::Help => self.help_return_mode,
+            BoardInputMode::Search => self.search_return_mode,
+            mode => mode,
         };
         if self.form.is_some() && underlying_mode != BoardInputMode::TaskPage {
             return true;
@@ -1581,6 +1584,7 @@ impl BoardModel {
         self.help_query.clear();
         self.help_scroll = 0;
         self.help_return_mode = BoardInputMode::Normal;
+        self.search_return_mode = BoardInputMode::Normal;
         self.search_query.clear();
         self.search_pinned = false;
         self.projects_selected = 0;
@@ -2519,18 +2523,31 @@ impl BoardModel {
             .map_or(self.wide_stage, |right| right.input_stage())
     }
 
-    /// Whether an otherwise-unhandled close on the nested project board should return focus to
-    /// the projects index instead of closing the outer board.
-    pub(crate) fn project_right_board_leave_requested(&self) -> bool {
+    fn project_right_board_at_root(&self) -> bool {
         self.project_right_seat_focused()
             && self.right_seat.as_ref().is_some_and(|right| {
                 matches!(right.wide_stage, WideStage::FullBoard | WideStage::Rail)
                     && right.input_mode() == BoardInputMode::Normal
-                    && !right.search_pinned
                     && right.surface == CommandSurface::None
                     && right.popup == BoardPopup::None
                     && right.detail_open.is_none()
             })
+    }
+
+    /// Whether an otherwise-unhandled Escape on the nested project board should return focus to
+    /// the projects index. A pinned search consumes Escape before the stage transition.
+    pub(crate) fn project_right_board_leave_requested(&self) -> bool {
+        self.project_right_board_at_root()
+            && self
+                .right_seat
+                .as_ref()
+                .is_some_and(|right| !right.search_pinned)
+    }
+
+    /// Whether the left stage arrow should return from the nested project board to its index.
+    /// Unlike Escape, stage arrows do not clear a pinned search first.
+    pub(crate) fn project_right_board_arrow_leave_requested(&self) -> bool {
+        self.project_right_board_at_root()
     }
 
     /// Stage the full task page returns to on `Esc`, while one is remembered.

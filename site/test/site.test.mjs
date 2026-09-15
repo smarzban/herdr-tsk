@@ -130,6 +130,11 @@ test("demo keeps project navigation, attribution, and search contracts", async (
   assert.match(demo, /state\.searchQuery/);
   assert.match(demo, /taskMatchesSearch/);
   assert.match(demo, /searchPinned/);
+  assert.match(
+    demo,
+    /if \(e\.key === "Escape"\) \{\s*e\.preventDefault\(\);\s*if \(state\.searchPinned\) \{[\s\S]*?\} else if \(taskPageActive\) \{/,
+    "pinned search must clear before normal task-page Escape behavior resumes",
+  );
   assert.match(demo, /data-project-row=/);
 });
 

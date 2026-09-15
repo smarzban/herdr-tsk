@@ -1403,14 +1403,15 @@ struct BoardDispatchRoute {
 /// The reducer still receives an ordinary board intent, but this helper keeps the outer/index
 /// target and the second Escape transition together and directly testable.
 fn route_board_intent(model: &BoardModel, intent: BoardIntent) -> RoutedBoardIntent {
-    let leave_requested = model.project_right_board_leave_requested();
-    let intent = if intent == BoardIntent::CollapseDetail && leave_requested {
+    let escape_leave_requested = model.project_right_board_leave_requested();
+    let arrow_leave_requested = model.project_right_board_arrow_leave_requested();
+    let intent = if intent == BoardIntent::CollapseDetail && arrow_leave_requested {
         BoardIntent::StageLeft
     } else {
         intent
     };
-    let return_to_index = intent == BoardIntent::CloseLayer && leave_requested;
-    let leave_from_arrow = intent == BoardIntent::StageLeft && leave_requested;
+    let return_to_index = intent == BoardIntent::CloseLayer && escape_leave_requested;
+    let leave_from_arrow = intent == BoardIntent::StageLeft && arrow_leave_requested;
     let global_navigation = model.project_right_seat_focused()
         && matches!(
             intent,
@@ -3122,6 +3123,13 @@ mod tests {
             None,
         )
         .expect("pin right-seat search");
+        let arrow = route_board_intent(&model, BoardIntent::CollapseDetail);
+        assert_eq!(arrow.intent, BoardIntent::StageLeft);
+        assert_eq!(arrow.target, BoardIntentTarget::Outer);
+        assert!(
+            !arrow.return_to_index,
+            "left arrow leaves Rail even while search is pinned"
+        );
         let routed = route_board_intent(&model, BoardIntent::CloseLayer);
         assert_eq!(routed.target, BoardIntentTarget::Focused);
         assert!(
@@ -4880,6 +4888,36 @@ mod tests {
         assert!(model.task_editing());
         assert!(model.root_escape_requests_quit());
         assert!(!model.has_unsaved_work());
+
+        apply_intent(&mut domain, &mut model, BoardIntent::FocusSearch, None)
+            .expect("search over parked page");
+        apply_intent(&mut domain, &mut model, BoardIntent::CloseLayer, None)
+            .expect("clear active search");
+        assert!(
+            !model.has_unsaved_work() && model.root_escape_requests_quit(),
+            "closing search must restore the clean parked task-page mode"
+        );
+        apply_intent(&mut domain, &mut model, BoardIntent::FocusSearch, None)
+            .expect("search over parked page again");
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::SearchQueryInsertText("behind".into()),
+            None,
+        )
+        .expect("type parked-page search");
+        apply_intent(&mut domain, &mut model, BoardIntent::PinSearch, None)
+            .expect("pin parked-page search");
+        assert!(
+            !model.has_unsaved_work(),
+            "pinning search must restore the clean parked task-page mode"
+        );
+        apply_intent(&mut domain, &mut model, BoardIntent::CloseLayer, None)
+            .expect("clear pinned search");
+        assert!(
+            model.root_escape_requests_quit(),
+            "clearing pinned search must restore root Escape"
+        );
         assert!(handle_board_intent(
             &temp.store,
             &mut domain,
@@ -7182,6 +7220,87 @@ mod tests {
         .expect("switch tabs");
         assert_eq!(model.search_query(), "");
         assert!(!model.search_pinned());
+    }
+
+    #[test]
+    fn pinned_search_clears_before_a_task_page_closes() {
+        use crate::ui::board::apply_intent;
+
+        let mut domain = DomainState::new();
+        let id = domain
+            .create(
+                "matching task",
+                None,
+                TaskScope::Global,
+                ProvenanceOrigin::Capture,
+                None,
+            )
+            .expect("create matching task");
+        domain
+            .set_status(id, HumanStatus::Ready)
+            .expect("ready matching task");
+        let mut model = BoardModel::from_domain(&domain, None);
+        apply_intent(&mut domain, &mut model, BoardIntent::FocusSearch, None)
+            .expect("focus search");
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::SearchQueryInsertText("matching".into()),
+            None,
+        )
+        .expect("filter task rows");
+        apply_intent(&mut domain, &mut model, BoardIntent::PinSearch, None).expect("pin search");
+        apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None)
+            .expect("open matching task");
+        assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+
+        apply_intent(&mut domain, &mut model, BoardIntent::CloseLayer, None)
+            .expect("clear pinned search from task page");
+        assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+        assert_eq!(model.search_query(), "");
+        assert!(!model.search_pinned());
+    }
+
+    #[test]
+    fn task_row_click_during_search_selects_without_clearing_the_query() {
+        use crate::ui::board::apply_intent;
+
+        let mut domain = DomainState::new();
+        let id = domain
+            .create(
+                "matching row",
+                None,
+                TaskScope::Global,
+                ProvenanceOrigin::Capture,
+                None,
+            )
+            .expect("create matching task");
+        domain
+            .set_status(id, HumanStatus::Ready)
+            .expect("ready matching task");
+        let mut model = BoardModel::from_domain(&domain, None);
+        apply_intent(&mut domain, &mut model, BoardIntent::FocusSearch, None)
+            .expect("focus search");
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::SearchQueryInsertText("matching".into()),
+            None,
+        )
+        .expect("filter task rows");
+        let hits = board_hit_map(Rect::new(0, 0, 80, 24), &model);
+        let task = hits
+            .regions
+            .iter()
+            .find(|hit| hit.target == crate::ui::render::QueueHitTarget::Task(id))
+            .expect("matching task hit");
+
+        assert_eq!(
+            map_board_mouse(&model, &hits, click_at(task.area)),
+            Some(BoardIntent::SelectIndex(0))
+        );
+        assert_eq!(model.search_query(), "matching");
+        assert_eq!(model.input_mode(), BoardInputMode::Search);
     }
 
     #[test]

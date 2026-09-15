@@ -934,6 +934,19 @@ fn help_card_lists_every_binding_scrolls_and_closes_on_esc() {
     assert_eq!(model.help_query(), "");
 
     let lines = tsk_tui::ui::input::help_card_lines();
+    assert_eq!(
+        lines
+            .iter()
+            .filter(|line| line.split_whitespace().next() == Some("/"))
+            .count(),
+        1,
+        "Help must list the board search binding exactly once:\n{}",
+        lines.join("\n")
+    );
+    assert!(
+        lines.iter().all(|line| !line.contains("search projects")),
+        "Help must not retain the Projects-only search label"
+    );
     let bindings = normal_help_bindings();
     assert!(
         !bindings.is_empty(),

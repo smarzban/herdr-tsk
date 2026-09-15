@@ -891,6 +891,12 @@ pub fn map_board_mouse(
         BoardInputMode::Search => match hit_at(hits, pos) {
             Some(QueueHitTarget::Search) => Some(BoardIntent::FocusSearch),
             Some(QueueHitTarget::ProjectRow(index)) => Some(BoardIntent::SelectProjectRow(index)),
+            Some(QueueHitTarget::TaskNumber(id)) => Some(BoardIntent::CopyTaskNumber(id)),
+            Some(QueueHitTarget::Task(id)) => model
+                .visible_ids()
+                .iter()
+                .position(|&visible| visible == id)
+                .map(BoardIntent::SelectIndex),
             // The painted `enter pin · esc clear` row dispatches like the keys.
             Some(QueueHitTarget::Verb(index)) => verb_intent(model, index),
             _ => Some(BoardIntent::CloseLayer),

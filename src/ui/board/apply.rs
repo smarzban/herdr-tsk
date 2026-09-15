@@ -1342,14 +1342,17 @@ fn apply_board_intent(
             return Ok(IntentOutcome::None);
         }
         BoardIntent::FocusSearch => {
-            model.input_mode = BoardInputMode::Search;
+            if model.input_mode != BoardInputMode::Search {
+                model.search_return_mode = model.input_mode;
+                model.input_mode = BoardInputMode::Search;
+            }
             model.search_pinned = false;
             model.clear_message();
             return Ok(IntentOutcome::None);
         }
         BoardIntent::PinSearch => {
             if model.input_mode == BoardInputMode::Search {
-                model.input_mode = BoardInputMode::Normal;
+                model.input_mode = model.search_return_mode;
                 if model.search_query.trim().is_empty() {
                     model.search_query.clear();
                     model.search_pinned = false;
@@ -1995,7 +1998,23 @@ fn apply_board_intent(
                 model.search_query.clear();
                 model.search_pinned = false;
                 model.projects_selected = 0;
-                model.input_mode = BoardInputMode::Normal;
+                model.input_mode = model.search_return_mode;
+                model.clear_message();
+                if model.projects_overview() {
+                    if model.projects_preview_active() {
+                        model.bind_project_preview();
+                    }
+                } else {
+                    model.reanchor_selection(previous, &previous_visible);
+                }
+                return Ok(IntentOutcome::None);
+            }
+            if model.search_pinned {
+                let previous_visible = model.visible_ids();
+                let previous = model.selection_id;
+                model.search_query.clear();
+                model.search_pinned = false;
+                model.projects_selected = 0;
                 model.clear_message();
                 if model.projects_overview() {
                     if model.projects_preview_active() {
@@ -2063,22 +2082,6 @@ fn apply_board_intent(
             let before = model.popup;
             model.close_popup();
             if model.popup != before {
-                return Ok(IntentOutcome::None);
-            }
-            if model.search_pinned {
-                let previous_visible = model.visible_ids();
-                let previous = model.selection_id;
-                model.search_query.clear();
-                model.search_pinned = false;
-                model.projects_selected = 0;
-                model.clear_message();
-                if model.projects_overview() {
-                    if model.projects_preview_active() {
-                        model.bind_project_preview();
-                    }
-                } else {
-                    model.reanchor_selection(previous, &previous_visible);
-                }
                 return Ok(IntentOutcome::None);
             }
             if model.detail_open.is_some() {
