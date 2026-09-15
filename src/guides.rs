@@ -107,7 +107,7 @@ pub const CATALOG: [Guide; 4] = [
                 **Clear these starter tasks**\n\
                 Any of these works. A cleared starter task never comes back.\n\
                 - `ctrl+d` marks it done. Done tasks wait in the drawer. `d` opens and closes it.\n\
-                - To clear several at once: `Shift+M`, `space` on each, then one `ctrl+d`.\n\
+                - To clear several at once: `Shift+M`, then `space` or `shift+↑`/`shift+↓` to select them, then one `ctrl+d`.\n\
                 - `ctrl+f` archives it. Archived tasks fold into a group at the end of the drawer.\n\
                 - `ctrl+x` twice deletes it. `ctrl+u` brings it back if you change your mind.\n\
                 \n\
