@@ -4901,6 +4901,146 @@ mod tests {
     }
 
     #[test]
+    fn t64_escape_closes_help_then_either_split_then_quits() {
+        for projects in [false, true] {
+            let temp = TempStore::new("t64-split-escape");
+            let (mut domain, mut model) = if projects {
+                projects_overview_fixture()
+            } else {
+                board_with_one_task()
+            };
+            temp.store.save(&domain).expect("seed store");
+            stage_right(&mut domain, &mut model, 1);
+            assert_eq!(model.wide_stage(), crate::ui::tier::WideStage::Split);
+            let tab = model.nav_tab();
+            apply_intent(&mut domain, &mut model, BoardIntent::OpenHelp, None)
+                .expect("Help above split");
+            let area = Rect::new(0, 0, 110, 30);
+            let mut recovery = SaveRecovery::new();
+            for press in 0..3 {
+                let mode = resolve_board_surface(area, &mut model);
+                let intent = board_keyboard_intent_for_area(
+                    &model,
+                    area,
+                    mode,
+                    KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+                )
+                .expect("Esc route");
+                let routed = route_board_intent(&model, intent);
+                let quit = dispatch_board_intent(
+                    &temp.store,
+                    &mut domain,
+                    &mut model,
+                    BoardDispatchRoute {
+                        area,
+                        target: routed.target,
+                    },
+                    routed.intent,
+                    &mut recovery,
+                    false,
+                )
+                .expect("dispatch Esc");
+                assert_eq!(quit, press == 2, "projects={projects}, press={press}");
+                assert_eq!(
+                    model.wide_stage(),
+                    if press == 0 {
+                        crate::ui::tier::WideStage::Split
+                    } else {
+                        crate::ui::tier::WideStage::FullBoard
+                    }
+                );
+                assert_eq!(model.nav_tab(), tab);
+                if projects && press == 1 {
+                    assert!(
+                        model.right_seat().is_none(),
+                        "collapsed preview stays closed after app sync"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn t64_split_escape_keeps_parked_drafts() {
+        let temp = TempStore::new("t64-split-drafts");
+        let (mut domain, mut model) = board_with_one_task();
+        temp.store.save(&domain).expect("seed store");
+        apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None).unwrap();
+        apply_intent(&mut domain, &mut model, BoardIntent::EditInsert('!'), None).unwrap();
+        for _ in 0..8 {
+            if model.input_mode() == BoardInputMode::TaskPage {
+                break;
+            }
+            apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None).unwrap();
+        }
+        for _ in 0..2 {
+            apply_intent(&mut domain, &mut model, BoardIntent::StageLeft, None).unwrap();
+        }
+        assert_eq!(model.wide_stage(), crate::ui::tier::WideStage::Split);
+        assert!(model.task_session_dirty());
+        assert!(!handle_board_intent(
+            &temp.store,
+            &mut domain,
+            &mut model,
+            BoardIntent::CloseLayer,
+            &mut SaveRecovery::new(),
+            false
+        )
+        .unwrap());
+        assert_eq!(model.wide_stage(), crate::ui::tier::WideStage::FullBoard);
+        assert!(
+            model.task_session_dirty(),
+            "collapsing a task split parks its draft"
+        );
+        assert!(!handle_board_intent(
+            &temp.store,
+            &mut domain,
+            &mut model,
+            BoardIntent::CloseLayer,
+            &mut SaveRecovery::new(),
+            false
+        )
+        .unwrap());
+        assert!(
+            model.task_session_dirty(),
+            "root Esc refuses the parked dirty draft"
+        );
+
+        let (mut domain, mut model, _) = projects_preview_fixture();
+        apply_intent(
+            &mut domain,
+            model.input_target_mut(),
+            BoardIntent::BeginEditTitle,
+            None,
+        )
+        .unwrap();
+        apply_intent(
+            &mut domain,
+            model.input_target_mut(),
+            BoardIntent::EditInsert('!'),
+            None,
+        )
+        .unwrap();
+        let draft = model.right_seat().unwrap().edit_buffer().to_owned();
+        apply_intent(&mut domain, &mut model, BoardIntent::StageLeft, None).unwrap();
+        assert_eq!(model.wide_stage(), crate::ui::tier::WideStage::Split);
+        assert_eq!(
+            apply_intent(&mut domain, &mut model, BoardIntent::CloseLayer, None).unwrap(),
+            IntentOutcome::None
+        );
+        assert_eq!(
+            model.wide_stage(),
+            crate::ui::tier::WideStage::Split,
+            "a project preview with unsaved work cannot be discarded"
+        );
+        assert_eq!(model.right_seat().unwrap().edit_buffer(), draft);
+        assert_eq!(
+            model.message(),
+            Some("save or cancel edits before switching tasks")
+        );
+    }
+
+    #[test]
     fn t64_ctrl_q_from_a_clean_nested_preview_quits_the_whole_board() {
         let temp = TempStore::new("t64-nested-global-quit");
         let (mut domain, mut model, _) = projects_preview_fixture();

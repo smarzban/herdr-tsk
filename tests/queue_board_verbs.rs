@@ -599,7 +599,7 @@ fn t64_root_esc_quits_on_each_navigation_tab_without_resetting_it() {
 }
 
 #[test]
-fn t64_esc_does_not_quit_from_split_or_a_selected_group_header() {
+fn t64_esc_collapses_split_without_quitting_and_keeps_header_exclusions() {
     let (mut domain, mut model, _) = board_with_task("split", HumanStatus::Ready);
     apply_intent(&mut domain, &mut model, BoardIntent::StageRight, None).expect("open split");
     assert_eq!(model.wide_stage(), tier::WideStage::Split);
@@ -607,7 +607,7 @@ fn t64_esc_does_not_quit_from_split_or_a_selected_group_header() {
         apply_intent(&mut domain, &mut model, BoardIntent::CloseLayer, None).expect("split Esc"),
         IntentOutcome::None
     );
-    assert_eq!(model.wide_stage(), tier::WideStage::Split);
+    assert_eq!(model.wide_stage(), tier::WideStage::FullBoard);
 
     let mut domain = DomainState::new();
     let archived = domain

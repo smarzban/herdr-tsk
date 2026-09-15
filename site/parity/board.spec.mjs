@@ -76,6 +76,27 @@ for (const width of [78, 110]) {
   });
 }
 
+test("Escape closes Help then collapses both wide splits", async ({ page }) => {
+  for (const projects of [false, true]) {
+    await open(page, 110);
+    if (projects) {
+      await page.keyboard.press("3");
+      await page.keyboard.press("ArrowDown");
+    } else {
+      await page.keyboard.press("ArrowRight");
+    }
+    await expect(page.locator(".tsk-wide-split.is-split")).toBeVisible();
+    await page.keyboard.press("?");
+    await page.keyboard.press("Escape");
+    await expect(page.locator(".tsk-wide-split.is-split")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.locator(".tsk-wide-split")).toHaveCount(0);
+    await expect(page.locator("#board-demo")).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(page.locator("#board-demo")).not.toBeFocused();
+  }
+});
+
 for (const width of [40, 78, 109, 110]) {
   test(`desk start open back and wrapping at ${width} columns`, async ({
     page,
@@ -283,6 +304,9 @@ test("projects preview keeps an unsaved page draft when the index retakes focus"
   await page.locator("#tsk-preview-edit").fill("Unsaved preview title");
   await page.locator("[data-project-row]").first().click();
   await expect(page.locator(".tsk-wide-split.is-split")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".tsk-wide-split.is-split")).toBeVisible();
+  await expect(page.locator("#board-demo")).toBeFocused();
   await page.keyboard.press("ArrowRight");
   await expect(page.locator("#tsk-preview-edit")).toHaveValue(
     "Unsaved preview title",
@@ -391,7 +415,9 @@ test("Tab does not persist an empty task title", async ({ page }) => {
   await page.locator("#tsk-edit").fill("");
   await page.keyboard.press("Tab");
   await page.keyboard.press("Escape");
-  await expect(page.locator(".tsk-task-header")).toHaveText(originalTitle || "");
+  await expect(page.locator(".tsk-task-header")).toHaveText(
+    originalTitle || "",
+  );
 });
 
 test("project preview expanded quick-add uses the same ring without saving", async ({

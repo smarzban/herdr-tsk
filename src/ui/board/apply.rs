@@ -1972,7 +1972,12 @@ fn apply_board_intent(
                 model.close_form_scope_dropdown(false);
                 return Ok(IntentOutcome::None);
             }
-            if model.task_editing() {
+            // Split's task session is parked, not the active editor. Collapsing the
+            // right column must keep that draft, just like the left arrow does.
+            if model.task_editing()
+                && !(model.wide_stage == WideStage::Split
+                    && model.focused_surface() == FocusedSurface::Board)
+            {
                 let saved = model
                     .form
                     .as_ref()
@@ -2024,6 +2029,12 @@ fn apply_board_intent(
             }
             if model.detail_open.is_some() {
                 model.detail_open = None;
+                return Ok(IntentOutcome::None);
+            }
+            // After visible layers, a split is the next layer to close. Use the shared
+            // transition so task drafts stay parked and dirty project previews refuse.
+            if model.wide_stage == WideStage::Split && model.projects_query.is_empty() {
+                stage_left(model);
                 return Ok(IntentOutcome::None);
             }
             // AC-45: with no layer above it, Esc leaves the read-only archived focus for
