@@ -96,7 +96,10 @@ the bug.”
 
 ## Usage
 
-Mouse or keyboard, your choice. Click tabs to switch views, press `Shift+M` to enter mark mode and click tasks to build a set, double-click a task outside mark mode to open it, and scroll through your board. The actions along the bottom are clickable too, including adding a task and changing the marked set's status.
+Mouse or keyboard, your choice. Click tabs to switch views, double-click a task
+to open it, and scroll through your board. The actions along the bottom are
+clickable too, including adding a task and changing its status. `Shift+M` marks
+several tasks so one action covers them all.
 
 Prefer the keyboard? A few keys for everyday use:
 
@@ -113,7 +116,7 @@ Prefer the keyboard? A few keys for everyday use:
 | `ctrl+n` | Pick a task, moving it to ready |
 | `ctrl+o` | Send a task to the open inbox |
 | `ctrl+r` | Move an open task to review, or back to ready |
-| `ctrl+d` | Mark the marked tasks done, or the cursored task when none are marked |
+| `ctrl+d` | Mark the selected task done |
 | `p` | Switch projects |
 | `d` | Show or hide completed tasks |
 | `?` | Show all shortcuts |
