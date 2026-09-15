@@ -63,7 +63,7 @@ If another writer deletes the task, saving refuses. If a save fails, use [retry 
 
 ## Status and steps
 
-In task view, status shortcuts act on the open task even when a step is selected. Mark mode and marks retained from the board are ignored and clear when an action runs. `ctrl+n` sets ready and `ctrl+o` sets open; `ctrl+s` starts an open or ready task. `Enter` toggles the selected step only.
+In task view, status shortcuts act on the open task even when a step is selected. Multi-select and marks retained from the board are ignored and clear when an action runs. `ctrl+n` sets ready and `ctrl+o` sets open; `ctrl+s` starts an open or ready task. `Enter` toggles the selected step only.
 
 While editing a field, use its edit keys. Save or cancel to return to the task's status actions.
 

@@ -76,7 +76,7 @@ for (const width of [78, 110]) {
   });
 }
 
-test("mark mode gates task marking and ctrl click stays ordinary", async ({
+test("multi-select gates task marking and ctrl click stays ordinary", async ({
   page,
 }) => {
   await open(page, 78);
@@ -87,7 +87,7 @@ test("mark mode gates task marking and ctrl click stays ordinary", async ({
   );
 
   await page.keyboard.press("Shift+M");
-  await expect(page.locator("#tsk-demo")).toContainText("mark mode");
+  await expect(page.locator("#tsk-demo")).toContainText("multi-select");
   await row(page, 12).click();
   await expect(page.locator("#tsk-demo")).toContainText(
     "1 selected · esc clears",
@@ -98,7 +98,7 @@ test("mark mode gates task marking and ctrl click stays ordinary", async ({
   );
 });
 
-test("mark mode preserves text input ownership and spends Escape first", async ({
+test("multi-select preserves text input ownership and spends Escape first", async ({
   page,
 }) => {
   await open(page, 78);
