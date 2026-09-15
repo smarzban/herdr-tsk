@@ -61,7 +61,7 @@ Each token takes one whitespace-separated argument. Put bare `!p` or `!t` at the
 
 Tokens are removed from the saved title. Remaining words are joined with single spaces. A title is required.
 
-A bare project name must match exactly one task scope, registered project, or invocation directory. A missing or ambiguous name leaves the draft open and names the problem.
+A bare project name must match exactly one project the board already knows: a project with tasks, an archived project, or the repository you launched from. A missing or ambiguous name leaves the draft open and names the problem, for example `project atlss is not on the board`.
 
 Use an absolute existing directory (`/…` or `~/…`) to create a new project destination. Relative paths and paths that are not directories leave the draft open; the destination row keeps showing the last valid destination.
 

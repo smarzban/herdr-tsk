@@ -76,7 +76,7 @@ Without a scope flag, `add` and filtered `list` use the launch repository inside
 | `-p /path` | Existing absolute directory, creating a project there if needed |
 | `--all` on list | All scopes |
 
-For adds, a bare project name must match exactly one task scope, registered project, or invocation directory. Missing and ambiguous names refuse. A new project destination requires an existing absolute directory (`/…` or `~/…`); relative and nonexistent paths refuse. Project-filtered reads remain permissive, so `tsk list -p typo` returns an empty list.
+For adds, a bare project name must match exactly one project the board already knows: a project with tasks, an archived project, or the repository you launched from. Missing and ambiguous names refuse with `unknown-project`, for example `tsk add: unknown-project: project atlss is not on the board`. A new project destination requires an existing absolute directory (`/…` or `~/…`); relative and nonexistent paths refuse. Project-filtered reads remain permissive, so `tsk list -p typo` returns an empty list.
 
 ## add
 
