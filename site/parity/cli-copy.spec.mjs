@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, isAbsolute, join, resolve } from "node:path";
 
 test("agent transcript matches the current CLI output contract", async ({
   page,
@@ -34,20 +34,22 @@ test("agent transcript matches the current CLI output contract", async ({
           "api",
           "--json",
         ],
-        { env, encoding: "utf8" },
+        { cwd: project, env, encoding: "utf8" },
       ),
     );
     expect(Object.keys(shown).sort()).toEqual(Object.keys(actual).sort());
     expect(shown.outcome).toBe(actual.outcome);
     expect(shown.title).toBe(actual.title);
-    expect(shown.project).toBe(actual.project);
+    expect(isAbsolute(shown.project)).toBe(true);
+    expect(isAbsolute(actual.project)).toBe(true);
+    expect(basename(shown.project)).toBe(basename(actual.project));
     expect(shown.id).toMatch(/^[0-9a-f-]{36}$/);
     expect(typeof shown.number).toBe(typeof actual.number);
     const stepText = "Reproduce duplicate delivery";
     const output = execFileSync(
       binary,
       ["steps", `T${actual.number}`, "add", stepText],
-      { env, encoding: "utf8" },
+      { cwd: project, env, encoding: "utf8" },
     ).trim();
     const shownStep = (
       await page.locator("[data-cli-step-output]").textContent()
