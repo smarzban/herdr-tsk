@@ -1415,7 +1415,11 @@ fn route_board_intent(model: &BoardModel, intent: BoardIntent) -> RoutedBoardInt
     } else {
         intent
     };
-    let return_to_index = intent == BoardIntent::CloseLayer && leave_requested;
+    let return_to_index = intent == BoardIntent::CloseLayer
+        && leave_requested
+        && model
+            .right_seat()
+            .is_some_and(|right| right.marked_count() == 0);
     let leave_from_arrow = intent == BoardIntent::StageLeft && leave_requested;
     let global_navigation = model.project_right_seat_focused()
         && matches!(
@@ -3075,6 +3079,10 @@ mod tests {
         )
         .expect("mark right-seat task");
         assert_eq!(model.right_seat().expect("right seat").marked_count(), 1);
+
+        let left = route_board_intent(&model, BoardIntent::CollapseDetail);
+        assert_eq!(left.intent, BoardIntent::StageLeft);
+        assert_eq!(left.target, BoardIntentTarget::Outer);
 
         let first = route_board_intent(&model, BoardIntent::CloseLayer);
         assert_eq!(first.target, BoardIntentTarget::Focused);

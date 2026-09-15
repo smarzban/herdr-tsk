@@ -429,7 +429,11 @@ fn board_reopen_switches_project_or_desk_and_clears_local_filter() {
         None,
     )
     .expect("filter");
+    apply_intent(&mut domain, &mut model, BoardIntent::MarkToggle, None)
+        .expect("mark current task");
+    assert_eq!(model.marked_count(), 1);
     assert!(model.apply_reopen_project(Some(PathBuf::from("/repo/b"))));
+    assert_eq!(model.marked_count(), 0, "reopen changes the board lens");
     assert_eq!(
         model.selected_project(),
         Some(std::path::Path::new("/repo/b"))

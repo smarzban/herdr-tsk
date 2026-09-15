@@ -378,6 +378,7 @@ import { parseCapture } from "./capture.js";
     selectedId: "t1",
     markedIds: new Set(),
     pendingDelete: null,
+    pendingDeleteBulk: false,
     message: "",
     peekId: null,
     flashId: null,
@@ -413,6 +414,7 @@ import { parseCapture } from "./capture.js";
     selectedId: null,
     markedIds: new Set(),
     pendingDelete: null,
+    pendingDeleteBulk: false,
     threadFilter: null,
     peekId: null,
     drawer: false,
@@ -1369,6 +1371,7 @@ import { parseCapture } from "./capture.js";
     preview.selectedId = null;
     preview.markedIds.clear();
     preview.pendingDelete = null;
+    preview.pendingDeleteBulk = false;
     preview.threadFilter = null;
     preview.peekId = null;
     preview.drawer = false;
@@ -1481,6 +1484,7 @@ import { parseCapture } from "./capture.js";
     state.selectedId = "t1";
     state.markedIds = new Set();
     state.pendingDelete = null;
+    state.pendingDeleteBulk = false;
     state.message = "";
     state.peekId = null;
     state.drawer = false;
@@ -1732,6 +1736,9 @@ import { parseCapture } from "./capture.js";
       ? state.pendingDelete.map(taskById).filter(Boolean)
       : targetTasks();
     if (!tasks.length) return;
+    const bulk = state.pendingDelete
+      ? state.pendingDeleteBulk
+      : state.markedIds.size > 0;
     const ids = tasks.map((task) => task.id).sort();
     const signature = ids.join("\n");
     if (
@@ -1739,16 +1746,22 @@ import { parseCapture } from "./capture.js";
       state.pendingDelete.slice().sort().join("\n") !== signature
     ) {
       state.pendingDelete = ids;
+      state.pendingDeleteBulk = bulk;
       clearMarks();
-      state.message = `press x again to delete ${tasks.length} ${tasks.length === 1 ? "task" : "tasks"}`;
+      state.message = bulk
+        ? `press x again to delete ${tasks.length} ${tasks.length === 1 ? "task" : "tasks"}`
+        : "press x again to delete";
       return;
     }
     rememberUndo(state, tasks);
     const idSet = new Set(ids);
     state.tasks = state.tasks.filter((task) => !idSet.has(task.id));
     state.pendingDelete = null;
+    state.pendingDeleteBulk = false;
     clearMarks();
-    state.message = `deleted ${tasks.length} ${tasks.length === 1 ? "task" : "tasks"} · u restores`;
+    state.message = bulk
+      ? `deleted ${tasks.length} ${tasks.length === 1 ? "task" : "tasks"} · u restores`
+      : `Deleted "${tasks[0].title}" · u undo`;
     state.peekId = null;
   }
 
@@ -1868,19 +1881,28 @@ import { parseCapture } from "./capture.js";
       ? preview.pendingDelete.map(taskById).filter(Boolean)
       : targetTasks(preview);
     if (!tasks.length) return;
+    const bulk = preview.pendingDelete
+      ? preview.pendingDeleteBulk
+      : preview.markedIds.size > 0;
     const ids = tasks.map((task) => task.id).sort();
     if (!preview.pendingDelete) {
       preview.pendingDelete = ids;
+      preview.pendingDeleteBulk = bulk;
       clearMarks(preview);
-      preview.message = `press x again to delete ${tasks.length} ${tasks.length === 1 ? "task" : "tasks"}`;
+      preview.message = bulk
+        ? `press x again to delete ${tasks.length} ${tasks.length === 1 ? "task" : "tasks"}`
+        : "press x again to delete";
       return;
     }
     rememberUndo(preview, tasks);
     const idSet = new Set(ids);
     state.tasks = state.tasks.filter((task) => !idSet.has(task.id));
     preview.pendingDelete = null;
+    preview.pendingDeleteBulk = false;
     clearMarks(preview);
-    preview.message = `deleted ${tasks.length} ${tasks.length === 1 ? "task" : "tasks"} · u restores`;
+    preview.message = bulk
+      ? `deleted ${tasks.length} ${tasks.length === 1 ? "task" : "tasks"} · u restores`
+      : `Deleted "${tasks[0].title}" · u undo`;
     preview.peekId = null;
   }
 

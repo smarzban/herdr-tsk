@@ -30,7 +30,7 @@ use super::model::{
 const NO_SELECTION: &str = "select a task first";
 
 fn take_verb_targets(model: &mut BoardModel) -> (Vec<Uuid>, bool) {
-    let bulk = model.input_mode == BoardInputMode::Normal && model.marked_count() > 0;
+    let bulk = model.task_list_owns_input() && model.marked_count() > 0;
     let targets = model.verb_target_ids();
     model.clear_marks();
     (targets, bulk)
@@ -808,7 +808,7 @@ fn apply_board_intent(
             return Ok(IntentOutcome::None);
         }
         BoardIntent::MarkToggle => {
-            if model.input_mode != BoardInputMode::Normal || model.projects_overview() {
+            if !model.task_list_owns_input() {
                 return Ok(IntentOutcome::None);
             }
             model.toggle_selected_mark();
@@ -816,7 +816,7 @@ fn apply_board_intent(
             return Ok(IntentOutcome::None);
         }
         BoardIntent::MarkToggleAt(idx) => {
-            if model.input_mode != BoardInputMode::Normal || model.projects_overview() {
+            if !model.task_list_owns_input() {
                 return Ok(IntentOutcome::None);
             }
             if model.select_index(idx) {
@@ -827,7 +827,7 @@ fn apply_board_intent(
             return Ok(IntentOutcome::None);
         }
         BoardIntent::MarkExtend(direction) => {
-            if model.input_mode != BoardInputMode::Normal || model.projects_overview() {
+            if !model.task_list_owns_input() {
                 return Ok(IntentOutcome::None);
             }
             model.mark_selected();
@@ -1736,12 +1736,14 @@ fn apply_board_intent(
             // Enter on a group header toggles that group instead of opening a page:
             // the header is chrome, never a task.
             if model.archived_header_selected() {
+                model.clear_marks();
                 let previous_visible = model.visible_ids();
                 model.toggle_archived_collapsed();
                 model.reanchor_selection(Some(ARCHIVED_HEADER_ROW_ID), &previous_visible);
                 return Ok(IntentOutcome::None);
             }
             if model.inbox_header_selected() {
+                model.clear_marks();
                 let previous_visible = model.visible_ids();
                 model.toggle_inbox_collapsed();
                 model.reanchor_selection(Some(INBOX_HEADER_ROW_ID), &previous_visible);
@@ -2262,7 +2264,7 @@ fn apply_board_intent(
                     let bulk = if pending.is_some() {
                         model.pending_delete_bulk
                     } else {
-                        model.input_mode == BoardInputMode::Normal && model.marked_count() > 0
+                        model.task_list_owns_input() && model.marked_count() > 0
                     };
                     let targets = pending
                         .as_ref()

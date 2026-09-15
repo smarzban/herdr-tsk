@@ -1581,6 +1581,7 @@ impl BoardModel {
         if let Some(right) = self.right_seat.as_mut() {
             right.dismiss_clean_surfaces_for_reopen();
         }
+        self.clear_marks();
         self.detail_open = None;
         self.wide_stage = WideStage::FullBoard;
         self.stage_origin = None;
@@ -1687,6 +1688,7 @@ impl BoardModel {
     /// Leave the read-only archived focus for the desk (AC-45).
     pub(super) fn leave_archived_focus(&mut self) {
         let previous_visible = self.visible_ids();
+        self.clear_marks();
         self.board_location = BoardLocation::Desk;
         self.reanchor_selection(None, &previous_visible);
         self.seed_selection();
@@ -2465,9 +2467,14 @@ impl BoardModel {
         had_marks
     }
 
+    /// Whether this model's task list owns resolved input, including while a task page is parked.
+    pub(super) fn task_list_owns_input(&self) -> bool {
+        self.input_mode_local() == BoardInputMode::Normal && !self.projects_overview()
+    }
+
     /// Mark targets when the task list owns input, otherwise the cursor target.
     pub(super) fn verb_target_ids(&self) -> Vec<Uuid> {
-        if self.input_mode == BoardInputMode::Normal && !self.marked_ids.is_empty() {
+        if self.task_list_owns_input() && !self.marked_ids.is_empty() {
             self.marked_ids.iter().copied().collect()
         } else {
             self.selected_id().into_iter().collect()
@@ -2561,7 +2568,6 @@ impl BoardModel {
                     && right.surface == CommandSurface::None
                     && right.popup == BoardPopup::None
                     && right.detail_open.is_none()
-                    && right.marked_count() == 0
             })
     }
 

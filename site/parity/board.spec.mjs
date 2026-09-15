@@ -122,8 +122,16 @@ test("marked task sets complete, delete, and undo as one demo action", async ({
   await page.keyboard.press("x");
   await expect(row(page, 12)).toBeVisible();
   await expect(page.locator("#tsk-demo")).toContainText(
-    "press x again to delete 1 task",
+    "press x again to delete",
   );
+  await expect(page.locator("#tsk-demo")).not.toContainText("delete 1 task");
+  await page.keyboard.press("x");
+  await expect(row(page, 12)).toHaveCount(0);
+  await expect(page.locator("#tsk-demo")).toContainText(
+    'Deleted "Check the release notes" · u undo',
+  );
+  await page.keyboard.press("u");
+  await expect(row(page, 12)).toBeVisible();
 });
 
 test("task-page demo actions ignore board marks and use the open task", async ({

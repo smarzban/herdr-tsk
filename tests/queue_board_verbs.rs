@@ -485,11 +485,25 @@ fn cursor_only_open_and_edit_ignore_marks_and_lens_boundaries_clear_marks() {
     apply_intent(&mut domain, &mut model, BoardIntent::ToggleDoneDrawer, None)
         .expect("open drawer");
     assert_eq!(model.marked_count(), 0, "drawer changes clear marks");
-    mark_tasks(&mut domain, &mut model, &[first]);
     apply_intent(&mut domain, &mut model, BoardIntent::ToggleInboxGroup, None).expect("fold inbox");
-    assert_eq!(model.marked_count(), 0, "group folds clear hidden marks");
     apply_intent(&mut domain, &mut model, BoardIntent::ToggleInboxGroup, None)
-        .expect("reopen inbox");
+        .expect("reopen inbox on its header");
+    apply_intent(&mut domain, &mut model, BoardIntent::SelectNext, None)
+        .expect("select an inbox task");
+    apply_intent(&mut domain, &mut model, BoardIntent::MarkToggle, None).expect("mark inbox task");
+    assert_eq!(model.marked_count(), 1);
+    apply_intent(&mut domain, &mut model, BoardIntent::SelectPrev, None)
+        .expect("return to inbox header");
+    assert!(model.inbox_header_selected());
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None)
+        .expect("fold inbox with Enter");
+    assert_eq!(
+        model.marked_count(),
+        0,
+        "Enter on a group header clears hidden marks"
+    );
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None)
+        .expect("reopen inbox with Enter");
     mark_tasks(&mut domain, &mut model, &[first]);
     apply_intent(
         &mut domain,
@@ -499,6 +513,46 @@ fn cursor_only_open_and_edit_ignore_marks_and_lens_boundaries_clear_marks() {
     )
     .expect("switch lens");
     assert_eq!(model.marked_count(), 0, "tab changes clear marks");
+}
+
+#[test]
+fn parked_task_page_still_allows_marking_and_bulk_verbs_on_the_board() {
+    let (mut domain, mut model, first) = board_with_task("first", HumanStatus::Open);
+    let second = domain
+        .create(
+            "second",
+            None,
+            project(THIS_REPO),
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create second");
+    model.sync_from_domain(&domain);
+    mark_tasks(&mut domain, &mut model, &[first, second]);
+
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None)
+        .expect("open marked cursor task");
+    for _ in 0..3 {
+        apply_intent(&mut domain, &mut model, BoardIntent::StageLeft, None)
+            .expect("return focus to the board");
+    }
+    assert_eq!(model.input_mode(), BoardInputMode::Normal);
+    assert_eq!(model.marked_count(), 2);
+
+    apply_intent(&mut domain, &mut model, BoardIntent::MarkToggle, None)
+        .expect("toggle a mark while the page is parked");
+    assert_eq!(model.marked_count(), 1);
+    apply_intent(&mut domain, &mut model, BoardIntent::MarkToggle, None)
+        .expect("restore the cursor mark");
+    assert_eq!(model.marked_count(), 2);
+
+    apply_intent(&mut domain, &mut model, BoardIntent::Complete, None)
+        .expect("complete marked set while the page is parked");
+    assert_eq!(domain.get(first).expect("first").status, HumanStatus::Done);
+    assert_eq!(
+        domain.get(second).expect("second").status,
+        HumanStatus::Done
+    );
 }
 
 #[test]
