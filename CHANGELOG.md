@@ -9,6 +9,10 @@ the GitHub release notes verbatim.
 
 ## Unreleased
 
+### Added
+
+- `/` searches every board tab: task boards match title, notes, steps, thread, and task number, while Projects Overview matches project names and paths. `Enter` pins the filtered rows for normal board actions; `Esc` clears search first.
+
 ### Changed
 
 - `!p name`, `tsk add -p name`, and JSON plan projects now refuse missing or ambiguous project names instead of creating stray scopes. Use an existing absolute directory (`/…` or `~/…`) to create a new project destination; relative and nonexistent paths refuse.

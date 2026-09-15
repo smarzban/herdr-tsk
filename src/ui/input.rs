@@ -224,8 +224,10 @@ pub enum BoardIntent {
     OpenThreadFilterPicker,
     /// Open the projects index's searchable View picker (bare `v`).
     OpenProjectsViewPicker,
-    /// Focus the visible projects-index search field (`/` or a click).
-    FocusProjectsSearch,
+    /// Focus the active board lens's search field (`/` or a click).
+    FocusSearch,
+    /// Pin the live query and return input to normal board keys.
+    PinSearch,
     /// Move the open list picker's selection.
     ListPickerNext,
     ListPickerPrev,
@@ -240,11 +242,11 @@ pub enum BoardIntent {
     /// Paste into the open list picker's search query.
     ListPickerQueryInsertText(String),
     ListPickerQueryBackspace,
-    /// Type into the projects index's search.
-    ProjectsQueryInsert(char),
-    /// Paste into the projects index's search.
-    ProjectsQueryInsertText(String),
-    ProjectsQueryBackspace,
+    /// Type into the active lens's search.
+    SearchQueryInsert(char),
+    /// Paste into the active lens's search.
+    SearchQueryInsertText(String),
+    SearchQueryBackspace,
     /// Mouse route onto a projects index row: select it and open its project in slot 2.
     SelectProjectRow(usize),
     /// Move the task page's step cursor onto one steps step by its painted absolute
@@ -344,7 +346,7 @@ pub enum BoardIntent {
 }
 
 /// Bottom chrome: compact key legend for primary board actions.
-pub const BOARD_HELP_LINE: &str = "↑↓/jk  ·  ctrl+s start  ·  ctrl+n next  ·  enter open  ·  → peek  ·  ctrl+d done  ·  ctrl+o inbox  ·  ctrl+b block  ·  ctrl+r review  ·  + add  ·  ctrl+e title  ·  ctrl+x del  ·  ctrl+u undo  ·  ctrl+f archive  ·  d drawer  ·  g inbox / archived  ·  p projects  ·  : palette  ·  ? help  ·  ctrl+q quit";
+pub const BOARD_HELP_LINE: &str = "↑↓/jk  ·  ctrl+s start  ·  ctrl+n next  ·  enter open  ·  → peek  ·  ctrl+d done  ·  ctrl+o inbox  ·  ctrl+b block  ·  ctrl+r review  ·  + add  ·  ctrl+e title  ·  ctrl+x del  ·  ctrl+u undo  ·  ctrl+f archive  ·  d drawer  ·  g inbox / archived  ·  p projects  ·  / search  ·  : palette  ·  ? help  ·  ctrl+q quit";
 /// Compact legend shown while the action sheet or command palette is open.
 pub const COMMAND_SURFACE_HELP_LINE: &str = "↑↓ select · type to filter · enter run · esc close";
 /// Compact legend shown while the help card is open.
@@ -352,8 +354,8 @@ pub const HELP_SURFACE_HELP_LINE: &str = "type search · ↑↓ scroll · esc cl
 /// Compact legend shown while a failed board save is unresolved.
 pub const LAUNCH_CARD_HELP_LINE: &str = "y unarchive · n keep archived";
 pub const SAVE_RECOVERY_HELP_LINE: &str = "↑↓ · r retry · c cancel";
-/// Compact legend while the projects index search field owns input.
-pub const PROJECTS_SEARCH_HELP_LINE: &str = "/ search · type · enter open · esc clear";
+/// Compact legend while the active board search field owns input.
+pub const SEARCH_HELP_LINE: &str = "/ search · type · enter pin · esc clear";
 /// Compact legend shown while the first-use walkthrough is open.
 pub const WALKTHROUGH_HELP_LINE: &str = "enter next · esc skip";
 
@@ -555,6 +557,13 @@ const NORMAL_KEYMAP: &[NormalKeyEntry] = &[
         verb: false,
     },
     NormalKeyEntry {
+        code: KeyCode::Char('/'),
+        intent: BoardIntent::FocusSearch,
+        help_chord: "/",
+        help_label: "search",
+        verb: false,
+    },
+    NormalKeyEntry {
         code: KeyCode::Char(':'),
         intent: BoardIntent::OpenCommandPalette,
         help_chord: ":",
@@ -697,6 +706,7 @@ fn board_help_group(intent: &BoardIntent) -> HelpGroup {
         | BoardIntent::ToggleAllGroups
         | BoardIntent::OpenProjectSelector
         | BoardIntent::OpenThreadFilterPicker
+        | BoardIntent::FocusSearch
         | BoardIntent::OpenProjectsViewPicker
         | BoardIntent::OpenCommandPalette => HelpGroup::ViewsFind,
         BoardIntent::CloseLayer | BoardIntent::OpenHelp | BoardIntent::Quit => {
@@ -761,12 +771,6 @@ fn help_bindings() -> Vec<HelpBinding> {
             "3",
             "open projects",
             "switch view navigate board",
-        ),
-        help_binding(
-            HelpGroup::ViewsFind,
-            "/",
-            "search projects",
-            "find filter views",
         ),
         help_binding(HelpGroup::AppControls, "ctrl+c", "quit", "exit close app"),
         help_binding(
@@ -1186,7 +1190,7 @@ pub fn map_key(mode: BoardInputMode, key: KeyEvent) -> Option<BoardIntent> {
         BoardInputMode::CapturePage => map_capture_page(key),
         BoardInputMode::ProjectPicker => map_project_picker(key),
         BoardInputMode::ListPicker => map_list_picker(key),
-        BoardInputMode::ProjectsSearch => map_projects_search(key),
+        BoardInputMode::Search => map_search(key),
         BoardInputMode::SaveRecovery => map_save_recovery(key),
         BoardInputMode::LaunchCard => map_launch_card(key),
         BoardInputMode::Palette => map_palette(key),
@@ -1514,7 +1518,7 @@ fn map_form_edit_key(
     }
 }
 
-fn map_projects_search(key: KeyEvent) -> Option<BoardIntent> {
+fn map_search(key: KeyEvent) -> Option<BoardIntent> {
     if key
         .modifiers
         .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER)
@@ -1523,10 +1527,10 @@ fn map_projects_search(key: KeyEvent) -> Option<BoardIntent> {
     }
     match key.code {
         KeyCode::Esc => Some(BoardIntent::CloseLayer),
-        KeyCode::Enter => Some(BoardIntent::OpenTaskPage),
-        KeyCode::Backspace => Some(BoardIntent::ProjectsQueryBackspace),
+        KeyCode::Enter => Some(BoardIntent::PinSearch),
+        KeyCode::Backspace => Some(BoardIntent::SearchQueryBackspace),
         KeyCode::Char(character) if !character.is_control() => {
-            Some(BoardIntent::ProjectsQueryInsert(character))
+            Some(BoardIntent::SearchQueryInsert(character))
         }
         _ => None,
     }
@@ -1535,7 +1539,7 @@ fn map_projects_search(key: KeyEvent) -> Option<BoardIntent> {
 /// Map a bracketed-paste payload to the intent that inserts it.
 ///
 /// A paste arrives as `Event::Paste`, never as a key press, so it cannot go through
-/// [`map_key`]. The two edit modes, the palette, and the projects search consume one.
+/// [`map_key`]. Text edit modes, the palette, and board search consume one.
 pub fn map_edit_paste(mode: BoardInputMode, text: &str) -> Option<BoardIntent> {
     match mode {
         BoardInputMode::QuickAdd => Some(BoardIntent::QuickAddInsertText(text.to_string())),
@@ -1552,9 +1556,7 @@ pub fn map_edit_paste(mode: BoardInputMode, text: &str) -> Option<BoardIntent> {
         BoardInputMode::ListPicker => {
             Some(BoardIntent::ListPickerQueryInsertText(text.to_string()))
         }
-        BoardInputMode::ProjectsSearch => {
-            Some(BoardIntent::ProjectsQueryInsertText(text.to_string()))
-        }
+        BoardInputMode::Search => Some(BoardIntent::SearchQueryInsertText(text.to_string())),
         BoardInputMode::Palette => Some(BoardIntent::CommandQueryInsertText(text.to_string())),
         BoardInputMode::Help => Some(BoardIntent::HelpQueryInsertText(text.to_string())),
         BoardInputMode::Normal | BoardInputMode::ProjectPicker | BoardInputMode::SaveRecovery => {
@@ -1642,10 +1644,11 @@ pub fn intent_primary_action(intent: &BoardIntent) -> Option<PrimaryBoardAction>
         | BoardIntent::ListPickerQueryInsert(_)
         | BoardIntent::ListPickerQueryInsertText(_)
         | BoardIntent::ListPickerQueryBackspace
-        | BoardIntent::ProjectsQueryInsert(_)
-        | BoardIntent::ProjectsQueryInsertText(_)
-        | BoardIntent::ProjectsQueryBackspace
-        | BoardIntent::FocusProjectsSearch
+        | BoardIntent::SearchQueryInsert(_)
+        | BoardIntent::SearchQueryInsertText(_)
+        | BoardIntent::SearchQueryBackspace
+        | BoardIntent::FocusSearch
+        | BoardIntent::PinSearch
         | BoardIntent::SelectProjectRow(_)
         | BoardIntent::SelectStep(_)
         | BoardIntent::RetrySave

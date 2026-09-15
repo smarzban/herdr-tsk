@@ -96,6 +96,38 @@ impl ThreadFilter {
     }
 }
 
+/// Normalized content-search terms. Every term must match, but each may match a
+/// different task field.
+pub fn search_words(query: &str) -> Vec<String> {
+    query.split_whitespace().map(str::to_lowercase).collect()
+}
+
+/// Whether a task matches every content-search term in its title, notes, steps,
+/// thread, or painted task number. Search is Unicode-case-insensitive substring.
+pub fn task_matches(task: &Task, words: &[String]) -> bool {
+    if words.is_empty() {
+        return true;
+    }
+    let mut searchable = task.title.to_lowercase();
+    if let Some(notes) = task.notes.as_deref() {
+        searchable.push('\n');
+        searchable.push_str(&notes.to_lowercase());
+    }
+    for step in &task.steps {
+        searchable.push('\n');
+        searchable.push_str(&step.text.to_lowercase());
+    }
+    if let Some(thread) = task.thread.as_deref() {
+        searchable.push('\n');
+        searchable.push_str(&thread.to_lowercase());
+    }
+    if let Some(identifier) = task.board_identifier() {
+        searchable.push('\n');
+        searchable.push_str(&identifier.to_lowercase());
+    }
+    words.iter().all(|word| searchable.contains(word))
+}
+
 /// How the board query is scoped for one paint/selection pass.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BoardLens<'a> {
@@ -188,9 +220,33 @@ pub fn query_board(
     drawer_open: bool,
     thread_filter: &ThreadFilter,
 ) -> QueueView {
+    query_board_search(
+        tasks,
+        archived_projects,
+        current_repo,
+        lens,
+        drawer_open,
+        thread_filter,
+        "",
+    )
+}
+
+/// Derive queue sections with the same lens rules as [`query_board`], then narrow
+/// every task pool by the content query. Project-index rows are filtered separately
+/// by the model because they match project names and paths, not task content.
+pub fn query_board_search(
+    tasks: &[Task],
+    archived_projects: &BTreeSet<String>,
+    current_repo: Option<&Path>,
+    lens: BoardLens<'_>,
+    drawer_open: bool,
+    thread_filter: &ThreadFilter,
+    query: &str,
+) -> QueueView {
     let identities = PathIdentityCache::default();
-    match lens {
-        BoardLens::Desk => query_desk(tasks, archived_projects, drawer_open, &identities),
+    let words = search_words(query);
+    let mut view = match lens {
+        BoardLens::Desk => query_desk(tasks, archived_projects, drawer_open, &identities, &words),
         BoardLens::Projects => {
             query_projects_index(tasks, archived_projects, current_repo, &identities)
         }
@@ -201,10 +257,16 @@ pub fn query_board(
             drawer_open,
             thread_filter,
             &identities,
+            &words,
         ),
-        BoardLens::ThreadView(name) => {
-            query_thread_view(tasks, archived_projects, name, drawer_open, &identities)
-        }
+        BoardLens::ThreadView(name) => query_thread_view(
+            tasks,
+            archived_projects,
+            name,
+            drawer_open,
+            &identities,
+            &words,
+        ),
         // AC-41/AC-45: the read-only focus is the only lens that paints an archived
         // project's tasks. It is the project focus computed as if the project were live.
         BoardLens::ArchivedProject(path) => query_project_focus(
@@ -214,8 +276,13 @@ pub fn query_board(
             drawer_open,
             &ThreadFilter::All,
             &identities,
+            &words,
         ),
+    };
+    if !words.is_empty() && !matches!(lens, BoardLens::Projects) {
+        view.sections.retain(|section| !section.empty_hint);
     }
+    view
 }
 
 /// A task survives the working-lens filter: not soft-deleted, not archived, and no
@@ -280,14 +347,22 @@ fn query_desk(
     archived_projects: &BTreeSet<String>,
     drawer_open: bool,
     identities: &PathIdentityCache,
+    search: &[String],
 ) -> QueueView {
     let live: Vec<&Task> = tasks
         .iter()
-        .filter(|task| is_live(task, archived_projects, identities))
+        .filter(|task| {
+            is_live(task, archived_projects, identities)
+                && (task_matches(task, search)
+                    || (!drawer_open && task.status == HumanStatus::Done))
+        })
         .collect();
     let archived_pool: Vec<&Task> = tasks
         .iter()
-        .filter(|task| !task_owned_by_archived_project(task, archived_projects, identities))
+        .filter(|task| {
+            !task_owned_by_archived_project(task, archived_projects, identities)
+                && (!drawer_open || task_matches(task, search))
+        })
         .collect();
 
     // NEEDS YOU is the global attention lane: blocked and review across every live
@@ -471,6 +546,7 @@ fn query_thread_view(
     name: &str,
     drawer_open: bool,
     identities: &PathIdentityCache,
+    search: &[String],
 ) -> QueueView {
     let matches_thread = |task: &Task| {
         task.thread
@@ -479,13 +555,19 @@ fn query_thread_view(
     };
     let live: Vec<&Task> = tasks
         .iter()
-        .filter(|task| is_live(task, archived_projects, identities) && matches_thread(task))
+        .filter(|task| {
+            is_live(task, archived_projects, identities)
+                && matches_thread(task)
+                && (task_matches(task, search)
+                    || (!drawer_open && task.status == HumanStatus::Done))
+        })
         .collect();
     let archived_pool: Vec<&Task> = tasks
         .iter()
         .filter(|task| {
             !task_owned_by_archived_project(task, archived_projects, identities)
                 && matches_thread(task)
+                && (!drawer_open || task_matches(task, search))
         })
         .collect();
 
@@ -531,12 +613,15 @@ fn query_project_focus(
     drawer_open: bool,
     thread_filter: &ThreadFilter,
     identities: &PathIdentityCache,
+    search: &[String],
 ) -> QueueView {
     let live: Vec<&Task> = tasks
         .iter()
         .filter(|task| {
             is_live(task, archived_projects, identities)
                 && task_matches_scope(task, path, identities)
+                && (task_matches(task, search)
+                    || (!drawer_open && task.status == HumanStatus::Done))
         })
         .collect();
     let admits = |task: &Task| thread_filter.admits(task);
@@ -584,7 +669,11 @@ fn query_project_focus(
         .iter()
         .filter(|task| task_matches_scope(task, path, identities))
         .filter(|task| !task_owned_by_archived_project(task, archived_projects, identities))
-        .filter(|task| admits(task))
+        .filter(|task| {
+            let belongs_to_closed_drawer = task.status == HumanStatus::Done || task.archived;
+            admits(task)
+                && (task_matches(task, search) || (!drawer_open && belongs_to_closed_drawer))
+        })
         .collect();
     append_archived(&mut sections, &in_scope, drawer_open);
 
@@ -806,7 +895,7 @@ mod tests {
     use super::*;
     use std::time::{Duration, SystemTime};
 
-    use crate::domain::{HumanStatus, ProvenanceOrigin, TaskEvent, TaskEventKind, TaskScope};
+    use crate::domain::{HumanStatus, ProvenanceOrigin, Step, TaskEvent, TaskEventKind, TaskScope};
 
     fn task(
         id: u128,
@@ -883,6 +972,135 @@ mod tests {
 
     fn ids(section: &QueueSection) -> Vec<Uuid> {
         section.task_ids.clone()
+    }
+
+    #[test]
+    fn task_search_requires_every_word_across_content_fields_and_number() {
+        let mut candidate = task_with_thread(
+            52,
+            HumanStatus::Started,
+            project("/repos/app"),
+            false,
+            10,
+            Some("auth"),
+        );
+        candidate.title = "Ship Login flow".into();
+        candidate.notes = Some("Handle OAuth callback".into());
+        candidate.steps = vec![Step {
+            id: Uuid::from_u128(99),
+            text: "Rotate TOKEN".into(),
+            done: false,
+        }];
+        candidate.number = Some(52);
+
+        let words = search_words("LOGIN callback token AUTH t52");
+        assert!(task_matches(&candidate, &words));
+        assert!(!task_matches(&candidate, &search_words("login billing")));
+    }
+
+    #[test]
+    fn task_search_combines_with_project_and_thread_lenses() {
+        let mut project_auth = task_with_thread(
+            1,
+            HumanStatus::Started,
+            project("/repos/app"),
+            false,
+            30,
+            Some("auth"),
+        );
+        project_auth.title = "login callback".into();
+        let mut project_api = task_with_thread(
+            2,
+            HumanStatus::Started,
+            project("/repos/app"),
+            false,
+            20,
+            Some("api"),
+        );
+        project_api.title = "login endpoint".into();
+        let mut other_auth = task_with_thread(
+            3,
+            HumanStatus::Started,
+            project("/repos/other"),
+            false,
+            10,
+            Some("auth"),
+        );
+        other_auth.title = "login session".into();
+        let tasks = vec![project_auth, project_api, other_auth];
+
+        let project_view = query_board_search(
+            &tasks,
+            &BTreeSet::new(),
+            None,
+            BoardLens::Project(Path::new("/repos/app")),
+            false,
+            &ThreadFilter::Named("auth".into()),
+            "login",
+        );
+        assert_eq!(project_view.sections[0].task_ids, vec![Uuid::from_u128(1)]);
+
+        let thread_view = query_board_search(
+            &tasks,
+            &BTreeSet::new(),
+            None,
+            BoardLens::ThreadView("auth"),
+            false,
+            &ThreadFilter::All,
+            "login",
+        );
+        assert_eq!(
+            thread_view.sections[0].task_ids,
+            vec![Uuid::from_u128(1), Uuid::from_u128(3)]
+        );
+    }
+
+    #[test]
+    fn task_search_prunes_empty_sections_and_recounts_hidden_done_work() {
+        let mut tasks = vec![
+            task(1, HumanStatus::Started, TaskScope::Global, false, 40),
+            task(2, HumanStatus::Started, TaskScope::Global, false, 30),
+            task(3, HumanStatus::Done, TaskScope::Global, false, 20),
+            task(4, HumanStatus::Done, TaskScope::Global, false, 10),
+        ];
+        tasks[0].title = "login motion".into();
+        tasks[1].title = "unrelated motion".into();
+        tasks[2].title = "login completed".into();
+        tasks[3].title = "unrelated completed".into();
+
+        let closed = query_board_search(
+            &tasks,
+            &BTreeSet::new(),
+            None,
+            BoardLens::Desk,
+            false,
+            &ThreadFilter::All,
+            "login",
+        );
+        assert_eq!(
+            section_ids(&closed, SectionKind::InMotion),
+            vec![Uuid::from_u128(1)]
+        );
+        assert_eq!(closed.counts.in_motion, 1);
+        assert_eq!(closed.counts.done, 2, "closed drawer is not searched");
+        assert!(
+            closed.sections.iter().all(|section| !section.empty_hint),
+            "content search hides empty section hints"
+        );
+
+        let open = query_board_search(
+            &tasks,
+            &BTreeSet::new(),
+            None,
+            BoardLens::Desk,
+            true,
+            &ThreadFilter::All,
+            "login",
+        );
+        assert_eq!(
+            section_ids(&open, SectionKind::Done),
+            vec![Uuid::from_u128(3)]
+        );
     }
 
     fn section_ids(view: &QueueView, kind: SectionKind) -> Vec<Uuid> {

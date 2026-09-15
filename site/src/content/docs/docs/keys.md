@@ -32,14 +32,14 @@ Press `?` on the board, task page, or another non-text surface for a searchable 
 | Project picker | `p` |
 | Project thread filter | `t` |
 | Cross-project view selector | `v` on Projects |
-| Search projects | `/` on Projects |
+| Search current board rows | `/` |
 | Command palette | `:` |
 | All shortcuts | `?` |
 | Close a layer; quit at the full-board root | `Esc` |
 | Quit outside text entry | `ctrl+q` |
 | Quit from board view | `ctrl+c` |
 
-`ctrl+q` quits from task views, Help, and pickers too, including the wide project preview. It does not quit while editing text, using Projects search, typing a quick-add line, or filtering the palette. Save or cancel any unsaved draft first. During save recovery, resolve the pending save instead.
+`ctrl+q` quits from task views, Help, and pickers too, including the wide project preview. It does not quit while editing text, using board search, typing a quick-add line, or filtering the palette. Save or cancel any unsaved draft first. During save recovery, resolve the pending save instead.
 
 `Esc` closes the current layer first. At the full-board root on any tab, it quits without confirmation, rather than switching back to the desk. In either wide split, `Esc` closes the right column after any editor or overlay is dismissed. A further `Esc` at the full-board root quits. A project preview with unsaved work refuses to close. If narrowing the terminal hides the right column, the visible board/index is already at the root: `Esc` quits without an extra collapse, unless a parked draft blocks quitting.
 
@@ -108,13 +108,13 @@ In Herdr quick capture, `Shift+Enter` saves and closes the popup. `Esc` closes a
 | Project archive | `ctrl+f` archives; on archived tab, `ctrl+f` or `ctrl+u` restores |
 | Archived project view | `ctrl+u` restores; `Esc`, `p`, or `1`–`3` leaves |
 | Thread/view selector | Type or paste to filter; arrows or `Tab` select; `Enter` chooses; `Esc` closes |
-| Projects search | Type or paste; `Backspace` edits; `Enter` opens result; `Esc` clears and closes |
+| Board search | Type or paste; `Backspace` edits; `Enter` pins; `Esc` clears and closes |
 | Palette | Type to filter; arrows or `Tab` select; `Enter` runs; `Esc` closes |
 | Help | Type or paste to filter by key or action; arrows, page keys, or wheel scroll; `Esc` clears the search, then closes |
 | Archived-project launch prompt | `y` restores; `n` or `Esc` keeps archived; `?` opens Help |
 | Failed save | `r` or `Enter` retries; `c` or `Esc` cancels |
 
-`j` and `k` are text in thread/view filters and Help search, not navigation. `?` is text in every input field, including Help search.
+`j` and `k` are text in board search, thread/view filters, and Help search, not navigation. `?` and `/` are text in every input field, including Help search.
 
 ## Wide stage slider
 

@@ -116,8 +116,8 @@ pub enum BoardInputMode {
     /// A searchable list picker owns input (project-board thread filter, projects
     /// index View selector). Query typing, movement, Enter applies, Esc cancels.
     ListPicker,
-    /// The projects index search field owns text input until Enter or Esc.
-    ProjectsSearch,
+    /// The active board lens's search field owns text input until Enter or Esc.
+    Search,
     /// Single-line status-row capture from board `+`.
     QuickAdd,
 }
@@ -701,8 +701,10 @@ pub struct BoardModel {
     pub(super) thread_filter: ThreadFilter,
     /// The projects index's View: the project overview, or one cross-project thread.
     pub(super) projects_view: ProjectsView,
-    /// The projects index's search query. Session-only.
-    pub(super) projects_query: String,
+    /// The active lens's content-search query. Session-only.
+    pub(super) search_query: String,
+    /// Whether Enter pinned the query and returned input to the board. Session-only.
+    pub(super) search_pinned: bool,
     /// The projects index's selected row cursor. Session-only.
     pub(super) projects_selected: usize,
     /// Open searchable list picker (thread filter / projects view). Session-only.
@@ -741,6 +743,8 @@ pub struct BoardModel {
     pub(super) help_max_scroll: Cell<usize>,
     /// Underlying surface to restore after Help closes.
     pub(super) help_return_mode: BoardInputMode,
+    /// Underlying board mode to restore after the search input closes or pins.
+    pub(super) search_return_mode: BoardInputMode,
     pub(super) input_mode: BoardInputMode,
     /// The one active board form. It is present for expanded quick-add and task editing alike;
     /// task identity or invocation context are held inside it and never rebound after open.
@@ -843,7 +847,8 @@ impl BoardModel {
             stage_origin: None,
             thread_filter: ThreadFilter::All,
             projects_view: ProjectsView::Overview,
-            projects_query: String::new(),
+            search_query: String::new(),
+            search_pinned: false,
             projects_selected: 0,
             list_picker: None,
             drawer_open: false,
@@ -861,6 +866,7 @@ impl BoardModel {
             help_scroll: 0,
             help_max_scroll: Cell::new(usize::MAX),
             help_return_mode: BoardInputMode::Normal,
+            search_return_mode: BoardInputMode::Normal,
             input_mode: BoardInputMode::Normal,
             form: None,
             quick_add: None,
@@ -1302,6 +1308,8 @@ impl BoardModel {
         // slot 2.)
         if self.focus_is_archived() {
             let previous_visible = self.visible_ids();
+            self.search_query.clear();
+            self.search_pinned = false;
             self.board_location = target;
             self.reanchor_selection(None, &previous_visible);
             self.seed_selection();
@@ -1448,6 +1456,11 @@ impl BoardModel {
         }
         let previous_visible = self.visible_ids();
         let previous = self.selection_id;
+        self.search_query.clear();
+        self.search_pinned = false;
+        if self.input_mode == BoardInputMode::Search {
+            self.input_mode = BoardInputMode::Normal;
+        }
         let same_project = matches!(
             (&self.board_location, &target),
             (BoardLocation::Project(a), BoardLocation::Project(b))
@@ -1510,7 +1523,7 @@ impl BoardModel {
             && self.project_picker.is_none()
             && self.list_picker.is_none()
             && self.detail_open.is_none()
-            && self.projects_query.is_empty()
+            && self.search_query.is_empty()
             && !self.inbox_header_selected()
             && !self.archived_header_selected()
     }
@@ -1540,10 +1553,10 @@ impl BoardModel {
         {
             return true;
         }
-        let underlying_mode = if self.input_mode == BoardInputMode::Help {
-            self.help_return_mode
-        } else {
-            self.input_mode
+        let underlying_mode = match self.input_mode {
+            BoardInputMode::Help => self.help_return_mode,
+            BoardInputMode::Search => self.search_return_mode,
+            mode => mode,
         };
         if self.form.is_some() && underlying_mode != BoardInputMode::TaskPage {
             return true;
@@ -1571,7 +1584,9 @@ impl BoardModel {
         self.help_query.clear();
         self.help_scroll = 0;
         self.help_return_mode = BoardInputMode::Normal;
-        self.projects_query.clear();
+        self.search_return_mode = BoardInputMode::Normal;
+        self.search_query.clear();
+        self.search_pinned = false;
         self.projects_selected = 0;
         self.quick_add = None;
         self.form = None;
@@ -1665,6 +1680,8 @@ impl BoardModel {
     /// Leave the read-only archived focus for the desk (AC-45).
     pub(super) fn leave_archived_focus(&mut self) {
         let previous_visible = self.visible_ids();
+        self.search_query.clear();
+        self.search_pinned = false;
         self.board_location = BoardLocation::Desk;
         self.reanchor_selection(None, &previous_visible);
         self.seed_selection();
@@ -1677,6 +1694,8 @@ impl BoardModel {
         self.selected_project = Some(path.clone());
         let previous_visible = self.visible_ids();
         let previous = self.selection_id;
+        self.search_query.clear();
+        self.search_pinned = false;
         self.board_location = BoardLocation::Project(path);
         self.reanchor_selection(previous, &previous_visible);
     }
@@ -1687,6 +1706,8 @@ impl BoardModel {
         self.close_popup();
         let previous_visible = self.visible_ids();
         let previous = self.selection_id;
+        self.search_query.clear();
+        self.search_pinned = false;
         self.board_location = BoardLocation::ArchivedProject(path);
         self.reanchor_selection(previous, &previous_visible);
         if self.selection_id.is_none() {
@@ -1972,23 +1993,35 @@ impl BoardModel {
 
     /// Queue sections + counts for the current session destination.
     pub fn queue_view(&self) -> QueueView {
-        let mut view = queue::query_board(
-            &self.tasks,
-            &self.archived_projects,
-            self.this_repo.as_deref(),
-            self.effective_lens(),
-            self.drawer_open,
-            &self.thread_filter,
-        );
-        if let BoardLocation::Projects = self.board_location {
-            // The index's search narrows its own rows; task sections are untouched.
-            let query = self.projects_query.trim().to_ascii_lowercase();
+        let mut view = if self.projects_overview() {
+            queue::query_board(
+                &self.tasks,
+                &self.archived_projects,
+                self.this_repo.as_deref(),
+                self.effective_lens(),
+                self.drawer_open,
+                &self.thread_filter,
+            )
+        } else {
+            queue::query_board_search(
+                &self.tasks,
+                &self.archived_projects,
+                self.this_repo.as_deref(),
+                self.effective_lens(),
+                self.drawer_open,
+                &self.thread_filter,
+                &self.search_query,
+            )
+        };
+        if self.projects_overview() {
+            // Overview rows retain their existing name-or-path substring search.
+            let query = self.search_query.trim().to_lowercase();
             if !query.is_empty() {
                 view.projects.retain(|row| {
                     queue::short_project_name(&row.path)
-                        .to_ascii_lowercase()
+                        .to_lowercase()
                         .contains(&query)
-                        || row.path.to_ascii_lowercase().contains(&query)
+                        || row.path.to_lowercase().contains(&query)
                 });
             }
         }
@@ -2023,9 +2056,14 @@ impl BoardModel {
         self.help_scroll
     }
 
-    /// The index's search query.
-    pub fn projects_query(&self) -> &str {
-        &self.projects_query
+    /// The active lens's search query.
+    pub fn search_query(&self) -> &str {
+        &self.search_query
+    }
+
+    /// Whether the current query is pinned while normal board keys own input.
+    pub fn search_pinned(&self) -> bool {
+        self.search_pinned
     }
 
     /// The index rows the current query leaves visible (owned copy: rows are small).
@@ -2271,11 +2309,15 @@ impl BoardModel {
             }
             (ListPickerKind::ProjectsView, ListPickerValue::ProjectsOverview) => {
                 self.projects_view = ProjectsView::Overview;
+                self.search_query.clear();
+                self.search_pinned = false;
                 self.projects_selected = 0;
                 true
             }
             (ListPickerKind::ProjectsView, ListPickerValue::ProjectsThread(name)) => {
                 self.projects_view = ProjectsView::Thread(name.clone());
+                self.search_query.clear();
+                self.search_pinned = false;
                 self.projects_selected = 0;
                 true
             }
@@ -2481,9 +2523,7 @@ impl BoardModel {
             .map_or(self.wide_stage, |right| right.input_stage())
     }
 
-    /// Whether an otherwise-unhandled close on the nested project board should return focus to
-    /// the projects index instead of closing the outer board.
-    pub(crate) fn project_right_board_leave_requested(&self) -> bool {
+    fn project_right_board_at_root(&self) -> bool {
         self.project_right_seat_focused()
             && self.right_seat.as_ref().is_some_and(|right| {
                 matches!(right.wide_stage, WideStage::FullBoard | WideStage::Rail)
@@ -2492,6 +2532,22 @@ impl BoardModel {
                     && right.popup == BoardPopup::None
                     && right.detail_open.is_none()
             })
+    }
+
+    /// Whether an otherwise-unhandled Escape on the nested project board should return focus to
+    /// the projects index. A pinned search consumes Escape before the stage transition.
+    pub(crate) fn project_right_board_leave_requested(&self) -> bool {
+        self.project_right_board_at_root()
+            && self
+                .right_seat
+                .as_ref()
+                .is_some_and(|right| !right.search_pinned)
+    }
+
+    /// Whether the left stage arrow should return from the nested project board to its index.
+    /// Unlike Escape, stage arrows do not clear a pinned search first.
+    pub(crate) fn project_right_board_arrow_leave_requested(&self) -> bool {
+        self.project_right_board_at_root()
     }
 
     /// Stage the full task page returns to on `Esc`, while one is remembered.
@@ -3128,7 +3184,7 @@ impl BoardModel {
             BoardInputMode::SaveRecovery => SAVE_RECOVERY_HELP_LINE,
             BoardInputMode::LaunchCard => LAUNCH_CARD_HELP_LINE,
             BoardInputMode::Help => HELP_SURFACE_HELP_LINE,
-            BoardInputMode::ProjectsSearch => crate::ui::input::PROJECTS_SEARCH_HELP_LINE,
+            BoardInputMode::Search => crate::ui::input::SEARCH_HELP_LINE,
             _ => BOARD_HELP_LINE,
         }
     }
@@ -3493,8 +3549,9 @@ impl BoardModel {
 
     pub(super) fn set_board_scope(&mut self, scope: ProjectScopeOption) {
         self.close_popup();
-        self.projects_query.clear();
-        if self.input_mode == BoardInputMode::ProjectsSearch {
+        self.search_query.clear();
+        self.search_pinned = false;
+        if self.input_mode == BoardInputMode::Search {
             self.input_mode = BoardInputMode::Normal;
         }
         match scope {
@@ -3691,14 +3748,14 @@ mod tests {
         assert_eq!(model.projects_cursor(), 1);
 
         // Search narrows the rows and the cursor clamps.
-        model.projects_query = "beta".to_string();
+        model.search_query = "beta".to_string();
         assert_eq!(model.project_rows().len(), 1);
         assert_eq!(model.projects_cursor(), 0);
         assert_eq!(
             model.selected_project_row().expect("row").path,
             "/repos/beta"
         );
-        model.projects_query = "zzz".to_string();
+        model.search_query = "zzz".to_string();
         assert!(model.project_rows().is_empty());
         assert!(model.selected_project_row().is_none());
     }
