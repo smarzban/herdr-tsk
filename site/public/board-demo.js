@@ -2089,14 +2089,14 @@ import { parseCapture } from "./capture.js";
   function renderHelp() {
     const rows = [
       ["navigation", "↑↓ / jk", "move", "select"],
-      ["navigation", "shift+M", "mark mode", "select multiple"],
+      ["navigation", "shift+M", "multi-select", "select multiple"],
       [
         "navigation",
         "shift+↑↓",
-        "mark and move (mark mode)",
+        "mark and move (multi-select)",
         "select multiple",
       ],
-      ["navigation", "space", "toggle mark (mark mode)", "select multiple"],
+      ["navigation", "space", "toggle mark (multi-select)", "select multiple"],
       ["navigation", "enter", "open task", "detail"],
       ["navigation", "→ / ←", "peek or slide", "wide view"],
       ["task actions", "s", "start", "status open or ready"],
@@ -2685,8 +2685,8 @@ import { parseCapture } from "./capture.js";
     const selectedCount = owner.markedIds.size;
     const selectionMessage = owner.markMode
       ? selectedCount
-        ? `mark mode · ${selectedCount} selected · esc clears`
-        : "mark mode · space/click marks · esc exits"
+        ? `multi-select · ${selectedCount} selected · esc clears`
+        : "multi-select · space/click marks · esc exits"
       : "";
     const baseContext = previewOwnsFooter
       ? preview.project || "project"

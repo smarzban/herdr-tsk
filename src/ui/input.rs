@@ -363,7 +363,7 @@ pub enum BoardIntent {
 }
 
 /// Bottom chrome: compact key legend for primary board actions.
-pub const BOARD_HELP_LINE: &str = "↑↓/jk  ·  shift+M mark mode  ·  shift+↑↓/space mark  ·  ctrl+s start  ·  ctrl+n next  ·  enter open  ·  → peek  ·  ctrl+d done  ·  ctrl+o inbox  ·  ctrl+b block  ·  ctrl+r review  ·  + add  ·  ctrl+e title  ·  ctrl+x del  ·  ctrl+u undo  ·  ctrl+f archive  ·  d drawer  ·  g inbox / archived  ·  p projects  ·  / search  ·  : palette  ·  ? help  ·  ctrl+q quit";
+pub const BOARD_HELP_LINE: &str = "↑↓/jk  ·  shift+M multi-select  ·  shift+↑↓/space mark  ·  ctrl+s start  ·  ctrl+n next  ·  enter open  ·  → peek  ·  ctrl+d done  ·  ctrl+o inbox  ·  ctrl+b block  ·  ctrl+r review  ·  + add  ·  ctrl+e title  ·  ctrl+x del  ·  ctrl+u undo  ·  ctrl+f archive  ·  d drawer  ·  g inbox / archived  ·  p projects  ·  / search  ·  : palette  ·  ? help  ·  ctrl+q quit";
 /// Compact legend shown while the action sheet or command palette is open.
 pub const COMMAND_SURFACE_HELP_LINE: &str = "↑↓ select · type to filter · enter run · esc close";
 /// Compact legend shown while the help card is open.
@@ -427,28 +427,28 @@ const NORMAL_KEYMAP: &[NormalKeyEntry] = &[
         code: KeyCode::Char('M'),
         intent: BoardIntent::ToggleMarkMode,
         help_chord: "shift+M",
-        help_label: "mark mode",
+        help_label: "multi-select",
         modifier: NormalModifier::Bare,
     },
     NormalKeyEntry {
         code: KeyCode::Down,
         intent: BoardIntent::MarkExtend(MarkDirection::Down),
         help_chord: "shift+↑↓",
-        help_label: "mark and move (mark mode)",
+        help_label: "mark and move (multi-select)",
         modifier: NormalModifier::Shift,
     },
     NormalKeyEntry {
         code: KeyCode::Up,
         intent: BoardIntent::MarkExtend(MarkDirection::Up),
         help_chord: "shift+↑↓",
-        help_label: "mark and move (mark mode)",
+        help_label: "mark and move (multi-select)",
         modifier: NormalModifier::Shift,
     },
     NormalKeyEntry {
         code: KeyCode::Char(' '),
         intent: BoardIntent::MarkToggle,
         help_chord: "space",
-        help_label: "toggle mark (mark mode)",
+        help_label: "toggle mark (multi-select)",
         modifier: NormalModifier::Bare,
     },
     NormalKeyEntry {

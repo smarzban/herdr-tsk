@@ -1077,11 +1077,11 @@ fn status_row_content(model: &BoardModel) -> (Option<String>, Option<usize>, Opt
         (None, Some(msg)) => Some(msg.to_string()),
         (None, None) if editing_on_page => Some("editing…".to_string()),
         (None, None) if model.mark_mode_active() && model.marked_count() > 0 => Some(format!(
-            "mark mode · {} selected · esc clears",
+            "multi-select · {} selected · esc clears",
             model.marked_count()
         )),
         (None, None) if model.mark_mode_active() => {
-            Some("mark mode · space/click marks · esc exits".to_string())
+            Some("multi-select · space/click marks · esc exits".to_string())
         }
         _ => None,
     };

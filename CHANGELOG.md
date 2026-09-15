@@ -11,17 +11,17 @@ the GitHub release notes verbatim.
 
 ### Breaking
 
-- Store format 5 adds batch undo entries for marked task sets. Rolling back refuses the file; restore `tsk.json.v4`.
+- Store format 5: one undo entry can cover a marked set. Rolling back refuses the file; restore `tsk.json.v4`.
 
 ### Added
 
-- Press `Shift+M` to enter mark mode, use `Space`, `Shift+↑`/`Shift+↓`, or a plain click to select tasks, then change status, archive, or delete the set at once. One undo reverses a marked completion or deletion, and a stale batch refuses without changing any task.
-- `/` searches every board tab: task boards match title, notes, steps, thread, and task number, while Projects Overview matches project names and paths. `Enter` pins the filtered rows for normal board actions; `Esc` clears search first.
+- Multi-select: `Shift+M`, then `space`, `Shift+↑`/`Shift+↓`, or a click marks tasks; status, archive, and delete act on the set. One `ctrl+u` undoes a marked done or delete.
+- `/` searches every board tab by title, notes, steps, thread, and task number (project names on the Projects overview). `Enter` pins the filter for normal keys; `Esc` clears it.
 
 ### Changed
 
-- `!p name`, `tsk add -p name`, and JSON plan projects now refuse missing or ambiguous project names instead of creating stray scopes. Use an existing absolute directory (`/…` or `~/…`) to create a new project destination; relative and nonexistent paths refuse.
-- `ctrl+q` quits from every non-editor board surface, including task pages and the wide project preview. `Esc` closes layers and either wide split, then quits without confirmation at the full-board root on any tab, including after a narrow resize hides the right column. Unsaved drafts still block quitting, including drafts parked outside the focused preview; text entry and save recovery keep their existing behavior.
+- `!p name`, `tsk add -p name`, and JSON plan projects refuse unknown or ambiguous names (`unknown-project`) instead of creating a stray project. A new project needs an existing absolute path (`/…` or `~/…`).
+- `ctrl+q` quits from every non-editor surface, including task pages and the wide project preview. `Esc` closes layers and wide splits, then quits at the full-board root on any tab. Unsaved drafts still block quitting.
 
 ## v0.9.0
 
