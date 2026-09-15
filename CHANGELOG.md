@@ -15,7 +15,7 @@ the GitHub release notes verbatim.
 
 ### Added
 
-- Mark multiple tasks with `Space`, `Shift+↑`/`Shift+↓`, or `ctrl+click`, then change status, archive, or delete the set at once. One undo reverses a marked completion or deletion, and a stale batch refuses without changing any task.
+- Press `Shift+M` to enter mark mode, use `Space`, `Shift+↑`/`Shift+↓`, or a plain click to select tasks, then change status, archive, or delete the set at once. One undo reverses a marked completion or deletion, and a stale batch refuses without changing any task.
 
 ### Changed
 

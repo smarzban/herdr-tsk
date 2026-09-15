@@ -1061,7 +1061,7 @@ fn click_a_task_row_selects_its_index_on_a_scrolled_list() {
 }
 
 #[test]
-fn ctrl_click_moves_the_cursor_and_toggles_the_clicked_task_mark() {
+fn plain_click_marks_only_in_mark_mode_and_ctrl_click_keeps_ordinary_behavior() {
     let (mut domain, mut model) = deck_of(4);
     let target = *model.visible_ids().last().expect("visible task");
     let hits = board_hit_map(STANDARD, &model);
@@ -1070,19 +1070,31 @@ fn ctrl_click_moves_the_cursor_and_toggles_the_clicked_task_mark() {
         .iter()
         .find(|hit| matches!(hit.target, QueueHitTarget::Task(id) if id == target))
         .expect("target row hit");
-    let mouse = MouseEvent {
-        kind: MouseEventKind::Down(MouseButton::Left),
-        column: region.area.x,
-        row: region.area.y,
-        modifiers: KeyModifiers::CONTROL,
-    };
     let index = model
         .visible_ids()
         .iter()
         .position(|&id| id == target)
         .expect("target index");
+    let row_mouse = |modifiers| MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: region.area.x,
+        row: region.area.y,
+        modifiers,
+    };
     assert_eq!(
-        map_board_mouse(&model, &hits, mouse),
+        map_board_mouse(&model, &hits, row_mouse(KeyModifiers::NONE)),
+        Some(BoardIntent::SelectIndex(index))
+    );
+    assert_eq!(
+        map_board_mouse(&model, &hits, row_mouse(KeyModifiers::CONTROL)),
+        Some(BoardIntent::SelectIndex(index)),
+        "ctrl+click no longer has marking behavior"
+    );
+
+    apply_intent(&mut domain, &mut model, BoardIntent::ToggleMarkMode, None)
+        .expect("enter mark mode");
+    assert_eq!(
+        map_board_mouse(&model, &hits, row_mouse(KeyModifiers::NONE)),
         Some(BoardIntent::MarkToggleAt(index))
     );
     apply_intent(
@@ -1094,15 +1106,11 @@ fn ctrl_click_moves_the_cursor_and_toggles_the_clicked_task_mark() {
     .expect("mark clicked row");
     assert_eq!(model.selected_id(), Some(target));
     assert!(model.marked_ids().contains(&target));
-
-    apply_intent(
-        &mut domain,
-        &mut model,
-        BoardIntent::MarkToggleAt(index),
-        None,
-    )
-    .expect("unmark clicked row");
-    assert!(!model.marked_ids().contains(&target));
+    assert_eq!(
+        map_board_mouse(&model, &hits, row_mouse(KeyModifiers::CONTROL)),
+        Some(BoardIntent::SelectIndex(index)),
+        "ctrl+click stays an ordinary row click in mark mode"
+    );
 
     let number_hits = QueueHitMap {
         regions: vec![QueueHit {
@@ -1111,16 +1119,19 @@ fn ctrl_click_moves_the_cursor_and_toggles_the_clicked_task_mark() {
         }],
         ..QueueHitMap::default()
     };
-    let number_mouse = MouseEvent {
+    let number_mouse = |modifiers| MouseEvent {
         kind: MouseEventKind::Down(MouseButton::Left),
         column: 1,
         row: 1,
-        modifiers: KeyModifiers::CONTROL,
+        modifiers,
     };
     assert_eq!(
-        map_board_mouse(&model, &number_hits, number_mouse),
-        Some(BoardIntent::MarkToggleAt(index)),
-        "ctrl+click on the identifier marks instead of copying"
+        map_board_mouse(&model, &number_hits, number_mouse(KeyModifiers::NONE)),
+        Some(BoardIntent::MarkToggleAt(index))
+    );
+    assert_eq!(
+        map_board_mouse(&model, &number_hits, number_mouse(KeyModifiers::CONTROL)),
+        Some(BoardIntent::CopyTaskNumber(target))
     );
 }
 

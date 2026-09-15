@@ -79,6 +79,9 @@ fn select_done_task(domain: &mut DomainState, model: &mut BoardModel, id: uuid::
 }
 
 fn mark_tasks(domain: &mut DomainState, model: &mut BoardModel, ids: &[uuid::Uuid]) {
+    if !model.mark_mode_active() {
+        apply_intent(domain, model, BoardIntent::ToggleMarkMode, None).expect("enter mark mode");
+    }
     for &id in ids {
         let index = model
             .visible_ids()
@@ -116,6 +119,19 @@ fn shift_arrows_and_space_build_a_session_only_marked_set() {
     )
     .expect("select first");
 
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::MarkExtend(MarkDirection::Down),
+        None,
+    )
+    .expect("marking is inert before mark mode");
+    assert_eq!(model.marked_count(), 0);
+    assert_eq!(model.selected_id(), Some(first));
+
+    apply_intent(&mut domain, &mut model, BoardIntent::ToggleMarkMode, None)
+        .expect("enter mark mode");
+    assert!(model.mark_mode_active());
     assert_eq!(
         map_key(BoardInputMode::Normal, shift(KeyCode::Down)),
         Some(BoardIntent::MarkExtend(MarkDirection::Down))
@@ -140,8 +156,16 @@ fn shift_arrows_and_space_build_a_session_only_marked_set() {
     assert_eq!(model.marked_count(), 2);
     assert!(model.marked_ids().contains(&second));
 
-    apply_intent(&mut domain, &mut model, BoardIntent::MarkClear, None).expect("clear marks");
+    apply_intent(&mut domain, &mut model, BoardIntent::ToggleMarkMode, None)
+        .expect("leave mark mode");
     assert_eq!(model.marked_count(), 0);
+    assert!(!model.mark_mode_active());
+
+    apply_intent(&mut domain, &mut model, BoardIntent::ToggleMarkMode, None)
+        .expect("re-enter empty mark mode");
+    apply_intent(&mut domain, &mut model, BoardIntent::CloseLayer, None)
+        .expect("escape empty mark mode");
+    assert!(!model.mark_mode_active());
 }
 
 #[test]
@@ -158,21 +182,7 @@ fn status_verbs_target_all_marks_once_then_clear_them() {
         .expect("create second");
     model.sync_from_domain(&domain);
 
-    for id in [first, second] {
-        let index = model
-            .visible_ids()
-            .iter()
-            .position(|&visible| visible == id)
-            .expect("task visible");
-        apply_intent(
-            &mut domain,
-            &mut model,
-            BoardIntent::SelectIndex(index),
-            None,
-        )
-        .expect("select task");
-        apply_intent(&mut domain, &mut model, BoardIntent::MarkToggle, None).expect("mark task");
-    }
+    mark_tasks(&mut domain, &mut model, &[first, second]);
 
     let outcome = apply_intent(
         &mut domain,
@@ -490,6 +500,8 @@ fn cursor_only_open_and_edit_ignore_marks_and_lens_boundaries_clear_marks() {
         .expect("reopen inbox on its header");
     apply_intent(&mut domain, &mut model, BoardIntent::SelectNext, None)
         .expect("select an inbox task");
+    apply_intent(&mut domain, &mut model, BoardIntent::ToggleMarkMode, None)
+        .expect("enter mark mode");
     apply_intent(&mut domain, &mut model, BoardIntent::MarkToggle, None).expect("mark inbox task");
     assert_eq!(model.marked_count(), 1);
     apply_intent(&mut domain, &mut model, BoardIntent::SelectPrev, None)

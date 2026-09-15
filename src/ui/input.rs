@@ -123,6 +123,8 @@ pub enum BoardIntent {
     Quit,
     SelectNext,
     SelectPrev,
+    /// Enter or leave the session-only task marking mode.
+    ToggleMarkMode,
     /// Toggle the cursor task in the session-only marked set.
     MarkToggle,
     /// Move the cursor to one clicked row and toggle its mark.
@@ -359,7 +361,7 @@ pub enum BoardIntent {
 }
 
 /// Bottom chrome: compact key legend for primary board actions.
-pub const BOARD_HELP_LINE: &str = "↑↓/jk  ·  shift+↑↓/space mark  ·  ctrl+s start  ·  ctrl+n next  ·  enter open  ·  → peek  ·  ctrl+d done  ·  ctrl+o inbox  ·  ctrl+b block  ·  ctrl+r review  ·  + add  ·  ctrl+e title  ·  ctrl+x del  ·  ctrl+u undo  ·  ctrl+f archive  ·  d drawer  ·  g inbox / archived  ·  p projects  ·  : palette  ·  ? help  ·  ctrl+q quit";
+pub const BOARD_HELP_LINE: &str = "↑↓/jk  ·  shift+M mark mode  ·  shift+↑↓/space mark  ·  ctrl+s start  ·  ctrl+n next  ·  enter open  ·  → peek  ·  ctrl+d done  ·  ctrl+o inbox  ·  ctrl+b block  ·  ctrl+r review  ·  + add  ·  ctrl+e title  ·  ctrl+x del  ·  ctrl+u undo  ·  ctrl+f archive  ·  d drawer  ·  g inbox / archived  ·  p projects  ·  : palette  ·  ? help  ·  ctrl+q quit";
 /// Compact legend shown while the action sheet or command palette is open.
 pub const COMMAND_SURFACE_HELP_LINE: &str = "↑↓ select · type to filter · enter run · esc close";
 /// Compact legend shown while the help card is open.
@@ -420,24 +422,31 @@ const NORMAL_KEYMAP: &[NormalKeyEntry] = &[
         modifier: NormalModifier::Bare,
     },
     NormalKeyEntry {
+        code: KeyCode::Char('M'),
+        intent: BoardIntent::ToggleMarkMode,
+        help_chord: "shift+M",
+        help_label: "mark mode",
+        modifier: NormalModifier::Bare,
+    },
+    NormalKeyEntry {
         code: KeyCode::Down,
         intent: BoardIntent::MarkExtend(MarkDirection::Down),
         help_chord: "shift+↑↓",
-        help_label: "mark and move",
+        help_label: "mark and move (mark mode)",
         modifier: NormalModifier::Shift,
     },
     NormalKeyEntry {
         code: KeyCode::Up,
         intent: BoardIntent::MarkExtend(MarkDirection::Up),
         help_chord: "shift+↑↓",
-        help_label: "mark and move",
+        help_label: "mark and move (mark mode)",
         modifier: NormalModifier::Shift,
     },
     NormalKeyEntry {
         code: KeyCode::Char(' '),
         intent: BoardIntent::MarkToggle,
         help_chord: "space",
-        help_label: "mark",
+        help_label: "toggle mark (mark mode)",
         modifier: NormalModifier::Bare,
     },
     NormalKeyEntry {
@@ -722,6 +731,7 @@ fn board_help_group(intent: &BoardIntent) -> HelpGroup {
     match intent {
         BoardIntent::SelectNext
         | BoardIntent::SelectPrev
+        | BoardIntent::ToggleMarkMode
         | BoardIntent::MarkToggle
         | BoardIntent::MarkToggleAt(_)
         | BoardIntent::MarkExtend(_)
@@ -1623,6 +1633,7 @@ pub fn intent_primary_action(intent: &BoardIntent) -> Option<PrimaryBoardAction>
         BoardIntent::BeginEditTitle => Some(PrimaryBoardAction::EditTitle),
         BoardIntent::OpenCapture => Some(PrimaryBoardAction::OpenCapture),
         BoardIntent::SetStatus(_)
+        | BoardIntent::ToggleMarkMode
         | BoardIntent::MarkToggle
         | BoardIntent::MarkToggleAt(_)
         | BoardIntent::MarkExtend(_)

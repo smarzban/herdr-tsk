@@ -429,6 +429,8 @@ fn board_reopen_switches_project_or_desk_and_clears_local_filter() {
         None,
     )
     .expect("filter");
+    apply_intent(&mut domain, &mut model, BoardIntent::ToggleMarkMode, None)
+        .expect("enter mark mode");
     apply_intent(&mut domain, &mut model, BoardIntent::MarkToggle, None)
         .expect("mark current task");
     assert_eq!(model.marked_count(), 1);

@@ -21,6 +21,6 @@
 │                                                                                │
 │                                                                                │
 │────────────────────────────────────────────────────────────────────────────────│
-│ 2 selected · esc clears                                                        │
+│ mark mode · 2 selected · esc clears                                            │
 │ enter open · ctrl+d done · ctrl+n next · ctrl+o inbox · ctrl+b block · ? help  │
 └────────────────────────────────────────────────────────────────────────────────┘

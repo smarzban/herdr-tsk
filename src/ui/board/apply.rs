@@ -30,7 +30,7 @@ use super::model::{
 const NO_SELECTION: &str = "select a task first";
 
 fn take_verb_targets(model: &mut BoardModel) -> (Vec<Uuid>, bool) {
-    let bulk = model.task_list_owns_input() && model.marked_count() > 0;
+    let bulk = model.task_list_owns_input() && model.mark_mode_active() && model.marked_count() > 0;
     let targets = model.verb_target_ids();
     model.clear_marks();
     (targets, bulk)
@@ -807,8 +807,16 @@ fn apply_board_intent(
             model.select_prev();
             return Ok(IntentOutcome::None);
         }
-        BoardIntent::MarkToggle => {
+        BoardIntent::ToggleMarkMode => {
             if !model.task_list_owns_input() {
+                return Ok(IntentOutcome::None);
+            }
+            model.toggle_mark_mode();
+            model.clear_message();
+            return Ok(IntentOutcome::None);
+        }
+        BoardIntent::MarkToggle => {
+            if !model.task_list_owns_input() || !model.mark_mode_active() {
                 return Ok(IntentOutcome::None);
             }
             model.toggle_selected_mark();
@@ -816,7 +824,7 @@ fn apply_board_intent(
             return Ok(IntentOutcome::None);
         }
         BoardIntent::MarkToggleAt(idx) => {
-            if !model.task_list_owns_input() {
+            if !model.task_list_owns_input() || !model.mark_mode_active() {
                 return Ok(IntentOutcome::None);
             }
             if model.select_index(idx) {
@@ -827,7 +835,7 @@ fn apply_board_intent(
             return Ok(IntentOutcome::None);
         }
         BoardIntent::MarkExtend(direction) => {
-            if !model.task_list_owns_input() {
+            if !model.task_list_owns_input() || !model.mark_mode_active() {
                 return Ok(IntentOutcome::None);
             }
             model.mark_selected();
@@ -2078,9 +2086,7 @@ fn apply_board_intent(
             return Ok(IntentOutcome::None);
         }
         BoardIntent::CloseLayer => {
-            let had_marks = model.marked_count() > 0;
-            model.clear_marks();
-            if had_marks {
+            if model.clear_marks() {
                 model.clear_message();
                 return Ok(IntentOutcome::None);
             }
@@ -2264,7 +2270,9 @@ fn apply_board_intent(
                     let bulk = if pending.is_some() {
                         model.pending_delete_bulk
                     } else {
-                        model.task_list_owns_input() && model.marked_count() > 0
+                        model.task_list_owns_input()
+                            && model.mark_mode_active()
+                            && model.marked_count() > 0
                     };
                     let targets = pending
                         .as_ref()

@@ -723,6 +723,8 @@ pub struct BoardModel {
     pub(super) detail_open: Option<Uuid>,
     /// Id-pinned selection into the queue-visible row set.
     pub(super) selection_id: Option<Uuid>,
+    /// Whether explicit task marking controls own Space, shifted arrows, and row clicks.
+    mark_mode: bool,
     /// Session-only tasks included in the next bulk verb. Every id remains visible in this lens.
     pub(super) marked_ids: BTreeSet<Uuid>,
     /// The last task-row click (time + id), kept only to detect a double-click that opens
@@ -861,6 +863,7 @@ impl BoardModel {
             session_default_scope: None,
             detail_open: None,
             selection_id: None,
+            mark_mode: false,
             marked_ids: BTreeSet::new(),
             last_row_click: None,
             last_project_header_click: None,
@@ -1447,7 +1450,7 @@ impl BoardModel {
         right.suspended_delete_notice_count = None;
         right.pending_delete = None;
         right.pending_delete_bulk = false;
-        right.marked_ids.clear();
+        right.clear_marks();
         right.mouse_press = None;
         right.mouse_press_scroll = None;
         right.text_selection = None;
@@ -2428,6 +2431,11 @@ impl BoardModel {
         }
     }
 
+    /// Whether the explicit task marking mode is active on this board surface.
+    pub fn mark_mode_active(&self) -> bool {
+        self.mark_mode
+    }
+
     /// Session-only marked task ids in stable id order.
     pub fn marked_ids(&self) -> &BTreeSet<Uuid> {
         &self.marked_ids
@@ -2461,10 +2469,19 @@ impl BoardModel {
         self.marked_ids.insert(id)
     }
 
+    pub(super) fn toggle_mark_mode(&mut self) {
+        if self.mark_mode {
+            self.clear_marks();
+        } else {
+            self.mark_mode = true;
+        }
+    }
+
     pub(super) fn clear_marks(&mut self) -> bool {
-        let had_marks = !self.marked_ids.is_empty();
+        let had_mark_state = self.mark_mode || !self.marked_ids.is_empty();
+        self.mark_mode = false;
         self.marked_ids.clear();
-        had_marks
+        had_mark_state
     }
 
     /// Whether this model's task list owns resolved input, including while a task page is parked.
@@ -2474,7 +2491,7 @@ impl BoardModel {
 
     /// Mark targets when the task list owns input, otherwise the cursor target.
     pub(super) fn verb_target_ids(&self) -> Vec<Uuid> {
-        if self.task_list_owns_input() && !self.marked_ids.is_empty() {
+        if self.task_list_owns_input() && self.mark_mode && !self.marked_ids.is_empty() {
             self.marked_ids.iter().copied().collect()
         } else {
             self.selected_id().into_iter().collect()

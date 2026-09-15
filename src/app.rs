@@ -1082,6 +1082,21 @@ fn board_keyboard_intent(
     mode: BoardInputMode,
     key: crossterm::event::KeyEvent,
 ) -> Option<BoardIntent> {
+    // Mark mode owns its exit keys even when a page or popup currently outranks the board.
+    // This keeps progressive close behavior from leaving a latent marked set behind.
+    if model.mark_mode_active() {
+        if key.code == KeyCode::Char('M')
+            && !key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER)
+        {
+            return Some(BoardIntent::ToggleMarkMode);
+        }
+        if key.code == KeyCode::Esc && key.modifiers.is_empty() {
+            return Some(BoardIntent::MarkClear);
+        }
+    }
+
     // Ctrl+Q belongs to the resolved surface before an open form can redirect input to its
     // retained field mapper. Text editors and save recovery remain inert because `map_key`
     // deliberately returns no Quit intent for those modes.
@@ -1419,7 +1434,7 @@ fn route_board_intent(model: &BoardModel, intent: BoardIntent) -> RoutedBoardInt
         && leave_requested
         && model
             .right_seat()
-            .is_some_and(|right| right.marked_count() == 0);
+            .is_some_and(|right| !right.mark_mode_active());
     let leave_from_arrow = intent == BoardIntent::StageLeft && leave_requested;
     let global_navigation = model.project_right_seat_focused()
         && matches!(
@@ -3074,6 +3089,13 @@ mod tests {
         apply_intent(
             &mut domain,
             model.input_target_mut(),
+            BoardIntent::ToggleMarkMode,
+            None,
+        )
+        .expect("enter right-seat mark mode");
+        apply_intent(
+            &mut domain,
+            model.input_target_mut(),
             BoardIntent::MarkToggle,
             None,
         )
@@ -3098,10 +3120,44 @@ mod tests {
         )
         .expect("clear right-seat marks");
         assert_eq!(model.right_seat().expect("right seat").marked_count(), 0);
+        assert!(!model.right_seat().expect("right seat").mark_mode_active());
         assert!(model.project_right_seat_focused());
 
         let second = route_board_intent(&model, BoardIntent::CloseLayer);
         assert!(second.return_to_index, "the next Escape resumes closing");
+    }
+
+    #[test]
+    fn empty_projects_preview_mark_mode_spends_escape_before_returning_to_index() {
+        let (mut domain, mut model, _) = projects_preview_fixture();
+        apply_intent(
+            &mut domain,
+            model.input_target_mut(),
+            BoardIntent::ToggleMarkMode,
+            None,
+        )
+        .expect("enter empty right-seat mark mode");
+        let area = Rect::new(0, 0, 110, 30);
+        assert_eq!(
+            preview_key_intent(
+                &mut model,
+                area,
+                KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+            ),
+            BoardIntent::MarkClear
+        );
+        assert_eq!(
+            preview_key_intent(
+                &mut model,
+                area,
+                KeyEvent::new(KeyCode::Char('M'), KeyModifiers::SHIFT),
+            ),
+            BoardIntent::ToggleMarkMode
+        );
+
+        let close = route_board_intent(&model, BoardIntent::CloseLayer);
+        assert_eq!(close.target, BoardIntentTarget::Focused);
+        assert!(!close.return_to_index);
     }
 
     #[test]
@@ -3140,6 +3196,14 @@ mod tests {
             .take(2)
             .collect();
         assert_eq!(tasks.len(), 2);
+        let activate = preview_key_intent(
+            &mut model,
+            area,
+            KeyEvent::new(KeyCode::Char('M'), KeyModifiers::SHIFT),
+        );
+        assert_eq!(activate, BoardIntent::ToggleMarkMode);
+        apply_intent(&mut domain, model.input_target_mut(), activate, None)
+            .expect("enter right-seat mark mode");
         while selected_row(model.right_seat().expect("right seat")) != Some(tasks[0]) {
             apply_intent(
                 &mut domain,

@@ -2865,6 +2865,13 @@ fn golden_scenes() -> Vec<GoldenScene> {
     apply_intent(
         &mut marked_domain,
         &mut marked_model,
+        BoardIntent::ToggleMarkMode,
+        None,
+    )
+    .expect("enter mark mode");
+    apply_intent(
+        &mut marked_domain,
+        &mut marked_model,
         BoardIntent::MarkExtend(tsk_tui::ui::input::MarkDirection::Down),
         None,
     )

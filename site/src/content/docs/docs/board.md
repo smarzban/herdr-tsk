@@ -23,7 +23,7 @@ The middle tab remembers your selected project. Press `2` to open it; if none is
 
 Press `ctrl+q` to quit from the board or a task view, including Help, pickers, and the wide project preview. While a text editor, Projects search, quick-add line, or palette query owns input, `ctrl+q` keeps its editing behavior instead. Unsaved drafts must be saved or cancelled before quitting, including drafts parked in another view while a project preview has focus. Save recovery must be resolved first; quit attempts leave its failure message intact.
 
-`Esc` clears marked tasks before it closes the current layer. At the full-board root, with no marks, page, peek, popup, search, or header selection left to dismiss, it quits without confirmation. This applies on every tab, not just the desk. In either wide split, `Esc` closes the right column once any editor or overlay is dismissed, returning to the full-width board or projects index. Task drafts stay parked; a project preview with unsaved work refuses to close. After a narrow resize hides the right column, `Esc` treats the visible board/index as the root, with the same unsaved-draft protection. Quick capture's popup-close behavior is unchanged.
+`Esc` leaves mark mode and clears its marked tasks before it closes the current layer. At the full-board root, with mark mode inactive and no page, peek, popup, search, or header selection left to dismiss, it quits without confirmation. This applies on every tab, not just the desk. In either wide split, `Esc` closes the right column once any editor or overlay is dismissed, returning to the full-width board or projects index. Task drafts stay parked; a project preview with unsaved work refuses to close. After a narrow resize hides the right column, `Esc` treats the visible board/index as the root, with the same unsaved-draft protection. Quick capture's popup-close behavior is unchanged.
 
 ## Projects
 
@@ -73,7 +73,7 @@ On your desk, **ON DECK** contains only desk tasks. On a project board, it conta
 
 Sections hold their order while you work: NEEDS YOU, IN MOTION, DONE, and the drawer's ARCHIVED group keep the most recent status change on top, while ON DECK lists ready and inbox backlogs oldest first. (`N` tasks lead each group until you clear them.) Editing a task or ticking a step never moves it; setting a status moves it to the top of its new section.
 
-Move the cursor with `↑`/`↓` or `j`/`k`. Press `Space` to mark or unmark the cursored task, or hold `Shift` with `↑`/`↓` to mark the current task before moving. Marked rows show `▪`; the cursor remains `▸`. Marks last only for the current session and clear after a task action, `Esc`, or a view change such as folding a group or switching tabs, projects, threads, or the done drawer.
+Move the cursor with `↑`/`↓` or `j`/`k`. Press `Shift+M` to enter mark mode. While it is active, press `Space` to toggle the cursored task, hold `Shift` with `↑`/`↓` to mark the current task before moving, or click a task to toggle it. Marked rows show `▪`; the cursor remains `▸`. Removing the last mark leaves the mode active. `Shift+M` again, a task action, `Esc`, or a view change such as folding a group or switching tabs, projects, threads, or the done drawer exits the mode and clears the session-only set.
 
 On a task-board list, `ctrl+s`, `ctrl+n`, `ctrl+o`, `ctrl+d`, `ctrl+b`, `ctrl+r`, `ctrl+x`, and `ctrl+f` act on the marked set when it is non-empty. With no marks they act on the cursor. `Enter`, `ctrl+e`, and actions from the task page always use only the cursor.
 
@@ -99,8 +99,8 @@ Your first board open seeds four desk tasks with `N` ids (not `T`). They teach t
 | Action | Result |
 | --- | --- |
 | Click a tab or selector | Change view or open its choices |
-| Click a task | Peek in narrow panes; open or update details beside the board in wide panes |
-| `ctrl+click` a task or its `T`/`N` number | Move the cursor there and toggle its mark |
+| Click a task outside mark mode | Peek in narrow panes; open or update details beside the board in wide panes |
+| Click a task or its `T`/`N` number in mark mode | Move the cursor there and toggle its mark |
 | Click the same task again in a narrow pane | Close its peek |
 | Double-click a task | Open it full screen |
 | Click its `T` or `N` number | Copy that id |

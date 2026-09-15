@@ -501,10 +501,11 @@ pub fn map_responsive_board_mouse(
                 | BoardInputMode::FormScopeDropdown
         );
     // A task-row click opens or retargets the task beside the board in A (the reducer
-    // moves the stage). Ctrl+click stays on the board and toggles the clicked task's mark.
+    // moves the stage). In mark mode, a plain click stays on the board and toggles that row.
     if responsive.board.contains(pos)
         && model.input_mode() == BoardInputMode::Normal
-        && mouse.modifiers == KeyModifiers::CONTROL
+        && model.mark_mode_active()
+        && mouse.modifiers.is_empty()
     {
         if let Some(QueueHitTarget::Task(id) | QueueHitTarget::TaskNumber(id)) = hit_at(hits, pos) {
             return model
@@ -923,7 +924,9 @@ pub fn map_board_mouse(
             Some(QueueHitTarget::Drawer) => Some(BoardIntent::ToggleDoneDrawer),
             Some(QueueHitTarget::ArchivedHeader) => Some(BoardIntent::ToggleArchivedGroup),
             Some(QueueHitTarget::InboxHeader) => Some(BoardIntent::ToggleInboxGroup),
-            Some(QueueHitTarget::TaskNumber(id)) if mouse.modifiers == KeyModifiers::CONTROL => {
+            Some(QueueHitTarget::TaskNumber(id))
+                if model.mark_mode_active() && mouse.modifiers.is_empty() =>
+            {
                 model
                     .visible_ids()
                     .iter()
@@ -931,15 +934,20 @@ pub fn map_board_mouse(
                     .map(BoardIntent::MarkToggleAt)
             }
             Some(QueueHitTarget::TaskNumber(id)) => Some(BoardIntent::CopyTaskNumber(id)),
+            Some(QueueHitTarget::Task(id))
+                if model.mark_mode_active() && mouse.modifiers.is_empty() =>
+            {
+                model
+                    .visible_ids()
+                    .iter()
+                    .position(|&visible| visible == id)
+                    .map(BoardIntent::MarkToggleAt)
+            }
             Some(QueueHitTarget::Task(id)) => model
                 .visible_ids()
                 .iter()
                 .position(|&visible| visible == id)
-                .map(if mouse.modifiers == KeyModifiers::CONTROL {
-                    BoardIntent::MarkToggleAt
-                } else {
-                    BoardIntent::SelectIndex
-                }),
+                .map(BoardIntent::SelectIndex),
             Some(QueueHitTarget::ListScroll(offset)) => Some(BoardIntent::ListScrollTo(offset)),
             Some(QueueHitTarget::Verb(index)) => verb_intent(model, index),
             Some(QueueHitTarget::DeleteNoticeUndo) => Some(BoardIntent::Undo),

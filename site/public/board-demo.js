@@ -376,6 +376,7 @@ import { parseCapture } from "./capture.js";
     filterI: 0,
     collapsed: new Set(),
     selectedId: "t1",
+    markMode: false,
     markedIds: new Set(),
     pendingDelete: null,
     pendingDeleteBulk: false,
@@ -412,6 +413,7 @@ import { parseCapture } from "./capture.js";
   const preview = {
     project: null,
     selectedId: null,
+    markMode: false,
     markedIds: new Set(),
     pendingDelete: null,
     pendingDeleteBulk: false,
@@ -571,14 +573,22 @@ import { parseCapture } from "./capture.js";
   }
 
   function targetTasks(form = state) {
-    const marked = [...form.markedIds].map(taskById).filter(Boolean);
+    const marked = form.markMode
+      ? [...form.markedIds].map(taskById).filter(Boolean)
+      : [];
     if (marked.length) return marked;
     const selected = form === preview ? previewTask() : selectedTask();
     return selected ? [selected] : [];
   }
 
   function clearMarks(form = state) {
+    form.markMode = false;
     form.markedIds.clear();
+  }
+
+  function toggleMarkMode(form = state) {
+    if (form.markMode) clearMarks(form);
+    else form.markMode = true;
   }
 
   function markCurrent(form = state) {
@@ -1369,6 +1379,7 @@ import { parseCapture } from "./capture.js";
   function dropProjectPreview() {
     preview.project = null;
     preview.selectedId = null;
+    preview.markMode = false;
     preview.markedIds.clear();
     preview.pendingDelete = null;
     preview.pendingDeleteBulk = false;
@@ -1482,6 +1493,7 @@ import { parseCapture } from "./capture.js";
     state.projectQuery = "";
     state.collapsed = new Set();
     state.selectedId = "t1";
+    state.markMode = false;
     state.markedIds = new Set();
     state.pendingDelete = null;
     state.pendingDeleteBulk = false;
@@ -1972,8 +1984,14 @@ import { parseCapture } from "./capture.js";
   function renderHelp() {
     const rows = [
       ["navigation", "↑↓ / jk", "move", "select"],
-      ["navigation", "shift+↑↓", "mark and move", "select multiple"],
-      ["navigation", "space", "mark", "select multiple"],
+      ["navigation", "shift+M", "mark mode", "select multiple"],
+      [
+        "navigation",
+        "shift+↑↓",
+        "mark and move (mark mode)",
+        "select multiple",
+      ],
+      ["navigation", "space", "toggle mark (mark mode)", "select multiple"],
       ["navigation", "enter", "open task", "detail"],
       ["navigation", "→ / ←", "peek or slide", "wide view"],
       ["task actions", "s", "start", "status open or ready"],
@@ -2549,11 +2567,12 @@ import { parseCapture } from "./capture.js";
   // bar for whichever side owns focus. Wide stages paint it under both columns, as the app does.
   function renderFooter() {
     const previewOwnsFooter = projectsPreviewFocused() || projectsPreviewPage();
-    const selectedCount = previewOwnsFooter
-      ? preview.markedIds.size
-      : state.markedIds.size;
-    const selectionMessage = selectedCount
-      ? `${selectedCount} selected · esc clears`
+    const markOwner = previewOwnsFooter ? preview : state;
+    const selectedCount = markOwner.markedIds.size;
+    const selectionMessage = markOwner.markMode
+      ? selectedCount
+        ? `mark mode · ${selectedCount} selected · esc clears`
+        : "mark mode · space/click marks · esc exits"
       : "";
     const context = previewOwnsFooter
       ? preview.message || selectionMessage || preview.project || "project"
@@ -2977,17 +2996,21 @@ import { parseCapture } from "./capture.js";
     const bare = !e.ctrlKey && !e.metaKey && !e.altKey;
     if (e.key === "Escape") {
       e.preventDefault();
-      if (preview.markedIds.size) {
-        clearMarks(preview);
-        preview.pendingDelete = null;
-        preview.message = "";
-      } else if (preview.peekId) preview.peekId = null;
+      if (preview.peekId) preview.peekId = null;
       else state.stage = "split";
+      render();
+      return true;
+    }
+    if (bare && e.shiftKey && e.key === "M") {
+      e.preventDefault();
+      toggleMarkMode(preview);
+      preview.message = "";
       render();
       return true;
     }
     if (bare && (e.key === "j" || e.key === "ArrowDown")) {
       e.preventDefault();
+      if (e.shiftKey && !preview.markMode) return true;
       if (e.shiftKey) markCurrent(preview);
       movePreview(1);
       render();
@@ -2995,6 +3018,7 @@ import { parseCapture } from "./capture.js";
     }
     if (bare && (e.key === "k" || e.key === "ArrowUp")) {
       e.preventDefault();
+      if (e.shiftKey && !preview.markMode) return true;
       if (e.shiftKey) markCurrent(preview);
       movePreview(-1);
       render();
@@ -3015,7 +3039,7 @@ import { parseCapture } from "./capture.js";
     }
     if (bare && e.key === " ") {
       e.preventDefault();
-      toggleMark(preview);
+      if (preview.markMode) toggleMark(preview);
       render();
       return true;
     }
@@ -3136,6 +3160,36 @@ import { parseCapture } from "./capture.js";
     if (e.key.toLowerCase() !== "x") {
       state.pendingDelete = null;
       preview.pendingDelete = null;
+    }
+    const markOwner =
+      projectsPreviewFocused() || projectsPreviewPage() ? preview : state;
+    if (
+      e.key === "M" &&
+      e.shiftKey &&
+      !e.ctrlKey &&
+      !e.altKey &&
+      !e.metaKey &&
+      markOwner.markMode
+    ) {
+      e.preventDefault();
+      clearMarks(markOwner);
+      markOwner.message = "";
+      render();
+      return;
+    }
+    if (
+      e.key === "Escape" &&
+      !e.shiftKey &&
+      !e.ctrlKey &&
+      !e.altKey &&
+      !e.metaKey &&
+      markOwner.markMode
+    ) {
+      e.preventDefault();
+      clearMarks(markOwner);
+      markOwner.message = "";
+      render();
+      return;
     }
     if (el.id === "tsk-project-search") {
       if (e.key === "Escape") {
@@ -3501,11 +3555,7 @@ import { parseCapture } from "./capture.js";
     }
     if (e.key === "Escape") {
       e.preventDefault();
-      if (state.markedIds.size) {
-        clearMarks();
-        state.pendingDelete = null;
-        state.message = "";
-      } else if (taskPageActive) {
+      if (taskPageActive) {
         state.overlay = null;
         leaveTaskPage();
       } else if (state.peekId) state.peekId = null;
@@ -3576,8 +3626,16 @@ import { parseCapture } from "./capture.js";
       render();
       return;
     }
+    if (!taskPageActive && !alt && e.shiftKey && e.key === "M") {
+      e.preventDefault();
+      toggleMarkMode();
+      state.message = "";
+      render();
+      return;
+    }
     if (e.key === "j" || e.key === "ArrowDown") {
       e.preventDefault();
+      if (e.shiftKey && !state.markMode) return;
       if (e.shiftKey) markCurrent();
       move(1);
       render();
@@ -3585,6 +3643,7 @@ import { parseCapture } from "./capture.js";
     }
     if (e.key === "k" || e.key === "ArrowUp") {
       e.preventDefault();
+      if (e.shiftKey && !state.markMode) return;
       if (e.shiftKey) markCurrent();
       move(-1);
       render();
@@ -3610,7 +3669,7 @@ import { parseCapture } from "./capture.js";
     }
     if (!taskPageActive && e.key === " ") {
       e.preventDefault();
-      toggleMark();
+      if (state.markMode) toggleMark();
       render();
       return;
     }
@@ -3641,8 +3700,10 @@ import { parseCapture } from "./capture.js";
       !state.markedIds.size &&
       ["s", "n", "o", "d", "b", "r", "x", "f"].includes(e.key) &&
       selectedRow()?.kind !== "task"
-    )
+    ) {
+      clearMarks();
       return;
+    }
     if (e.key === "s") {
       e.preventDefault();
       primaryVerb();
@@ -3858,7 +3919,10 @@ import { parseCapture } from "./capture.js";
     const previewTaskRow = e.target.closest("[data-preview-task]");
     if (previewTaskRow && projectsPreviewActive()) {
       const copyTarget = e.target.closest("[data-copy-task]");
-      if (copyTarget && !e.ctrlKey && !e.metaKey) {
+      if (
+        copyTarget &&
+        (!preview.markMode || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey)
+      ) {
         const task = state.tasks.find(
           (item) => item.id === copyTarget.getAttribute("data-copy-task"),
         );
@@ -3870,11 +3934,17 @@ import { parseCapture } from "./capture.js";
       if (previewHasUnsavedWork() && id !== preview.selectedId) return;
       const now = Date.now();
       if (state.stage === "split") stageRight();
-      const markClick = e.ctrlKey || e.metaKey;
+      const markClick =
+        preview.markMode &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey &&
+        !e.shiftKey;
       if (markClick) {
         preview.selectedId = id;
         toggleMark(preview);
         preview.peekId = null;
+        frame.focus({ preventScroll: true });
       } else if (
         preview.selectedId === id &&
         now - (preview.lastClick || 0) < 350
@@ -3907,7 +3977,10 @@ import { parseCapture } from "./capture.js";
       return;
     }
     const copy = e.target.closest("[data-copy-task]");
-    if (copy && !e.ctrlKey && !e.metaKey) {
+    if (
+      copy &&
+      (!state.markMode || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey)
+    ) {
       const task = state.tasks.find(
         (item) => item.id === copy.getAttribute("data-copy-task"),
       );
@@ -4003,11 +4076,18 @@ import { parseCapture } from "./capture.js";
     if (row) {
       const id = row.getAttribute("data-task");
       if ((steps.dirty || steps.editor) && id !== state.selectedId) return;
-      if (e.ctrlKey || e.metaKey) {
+      if (
+        state.markMode &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey &&
+        !e.shiftKey
+      ) {
         state.selectedId = id;
         toggleMark();
         state.peekId = null;
         lastClick = { id: null, at: 0 };
+        frame.focus({ preventScroll: true });
         render();
         return;
       }

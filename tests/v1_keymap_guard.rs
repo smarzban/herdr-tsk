@@ -27,6 +27,7 @@ fn normal_mode_keymap_equals_the_readme_and_queue_board_v1_set() {
         (KeyCode::Down, BoardIntent::SelectNext, false),
         (KeyCode::Char('k'), BoardIntent::SelectPrev, false),
         (KeyCode::Up, BoardIntent::SelectPrev, false),
+        (KeyCode::Char('M'), BoardIntent::ToggleMarkMode, false),
         (KeyCode::Char(' '), BoardIntent::MarkToggle, false),
         (KeyCode::Enter, BoardIntent::OpenTaskPage, false),
         (KeyCode::Right, BoardIntent::PeekDetail, false),
@@ -70,7 +71,7 @@ fn normal_mode_keymap_equals_the_readme_and_queue_board_v1_set() {
         .map(|(key, intent, _)| (*key, intent.clone()))
         .collect();
     table.splice(
-        4..4,
+        5..5,
         [
             (KeyCode::Down, BoardIntent::MarkExtend(MarkDirection::Down)),
             (KeyCode::Up, BoardIntent::MarkExtend(MarkDirection::Up)),
@@ -93,6 +94,14 @@ fn normal_mode_keymap_equals_the_readme_and_queue_board_v1_set() {
             assert_eq!(normal(key), Some(intent), "documented key {key:?}");
         }
     }
+    assert_eq!(
+        map_key(
+            BoardInputMode::Normal,
+            KeyEvent::new(KeyCode::Char('M'), KeyModifiers::SHIFT),
+        ),
+        Some(BoardIntent::ToggleMarkMode)
+    );
+    assert_eq!(normal(KeyCode::Char('m')), None);
     assert_eq!(
         map_key(
             BoardInputMode::Normal,

@@ -76,10 +76,33 @@ for (const width of [78, 110]) {
   });
 }
 
+test("mark mode gates task marking and ctrl click stays ordinary", async ({
+  page,
+}) => {
+  await open(page, 78);
+  await page.keyboard.press("Space");
+  await row(page, 12).dispatchEvent("click", { ctrlKey: true });
+  await expect(page.locator("#tsk-demo")).not.toContainText(
+    "selected · esc clears",
+  );
+
+  await page.keyboard.press("Shift+M");
+  await expect(page.locator("#tsk-demo")).toContainText("mark mode");
+  await row(page, 12).click();
+  await expect(page.locator("#tsk-demo")).toContainText(
+    "1 selected · esc clears",
+  );
+  await page.keyboard.press("Shift+M");
+  await expect(page.locator("#tsk-demo")).not.toContainText(
+    "selected · esc clears",
+  );
+});
+
 test("marked task sets complete, delete, and undo as one demo action", async ({
   page,
 }) => {
   await open(page, 78);
+  await page.keyboard.press("Shift+M");
   await page.keyboard.press("Shift+ArrowDown");
   await page.keyboard.press("Space");
   await expect(page.locator("#tsk-demo")).toContainText(
@@ -95,6 +118,7 @@ test("marked task sets complete, delete, and undo as one demo action", async ({
   await expect(row(page, 12)).toBeVisible();
   await expect(row(page, 13)).toBeVisible();
 
+  await page.keyboard.press("Shift+M");
   await page.keyboard.press("Shift+ArrowDown");
   await page.keyboard.press("Space");
   await page.keyboard.press("x");
@@ -111,7 +135,8 @@ test("marked task sets complete, delete, and undo as one demo action", async ({
   await expect(row(page, 12)).toBeVisible();
   await expect(row(page, 13)).toBeVisible();
 
-  await row(page, 12).dispatchEvent("click", { ctrlKey: true });
+  await page.keyboard.press("Shift+M");
+  await row(page, 12).click();
   await expect(page.locator("#tsk-demo")).toContainText(
     "1 selected · esc clears",
   );
@@ -138,6 +163,7 @@ test("task-page demo actions ignore board marks and use the open task", async ({
   page,
 }) => {
   await open(page, 78);
+  await page.keyboard.press("Shift+M");
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("Space");
   await page.keyboard.press("ArrowUp");
