@@ -51,7 +51,7 @@ pub const CATALOG: [Guide; 4] = [
                 - Press `+`, type a title, press `Enter`. It lands in the ON DECK inbox as `open`.\n\
                 - Press `ctrl+n` when you pick it for the ready queue.\n\
                 - Press `Tab` instead of `Enter` to open the full page first, where you can add notes, steps, a thread, and a project before you save.\n\
-                - Type `!p name` in the title to file it under a project the board already knows, by its folder name. A full path like `!p ~/code/widget` adds a new one. Bare `!p` keeps it on your desk.\n\
+                - Type `!p name` in the title to file it under a project the board already knows, by its folder name. A full path to an existing folder, like `!p ~/code/widget`, adds a new one. Bare `!p` keeps it on your desk.\n\
                 - Type `!t release` in the title to tag it with the thread `release`. Threads group related work inside one project, and the project board can filter by them.\n\
                 \n\
                 **Read one**\n\
