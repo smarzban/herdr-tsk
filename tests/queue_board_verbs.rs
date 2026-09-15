@@ -637,6 +637,34 @@ fn t64_esc_does_not_quit_from_split_or_a_selected_group_header() {
     );
 }
 
+#[test]
+fn t64_inbox_header_esc_does_not_quit() {
+    let (mut domain, mut model, _) = board_with_task("inbox", HumanStatus::Open);
+    apply_intent(&mut domain, &mut model, BoardIntent::ToggleInboxGroup, None)
+        .expect("select inbox header");
+    assert!(model.inbox_header_selected());
+    assert_eq!(model.wide_stage(), tier::WideStage::FullBoard);
+    assert_eq!(model.input_mode(), BoardInputMode::Normal);
+    assert_eq!(
+        apply_intent(&mut domain, &mut model, BoardIntent::CloseLayer, None)
+            .expect("inbox header Esc"),
+        IntentOutcome::None
+    );
+}
+
+#[test]
+fn t64_help_has_one_ctrl_q_quit_binding() {
+    for query in ["", "quit", "exit"] {
+        let lines = tsk_tui::ui::input::help_card_lines_for_query(query);
+        let quit_rows = lines
+            .iter()
+            .filter(|line| line.split_whitespace().next() == Some("ctrl+q"))
+            .collect::<Vec<_>>();
+        assert_eq!(quit_rows.len(), 1, "query={query:?}: {lines:?}");
+        assert!(quit_rows[0].contains("quit"));
+    }
+}
+
 fn rendered_board(model: &BoardModel, width: u16, height: u16) -> String {
     let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("test terminal");
     terminal

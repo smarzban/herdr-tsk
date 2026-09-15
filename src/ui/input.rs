@@ -729,6 +729,9 @@ fn help_bindings() -> Vec<HelpBinding> {
                 HelpGroup::TaskActions => "task status lifecycle complete finish",
                 HelpGroup::CreateEdit => "task capture create editing",
                 HelpGroup::ViewsFind => "board filter search open",
+                HelpGroup::AppControls if entry.intent == BoardIntent::Quit => {
+                    "exit close board page help picker non-editing surfaces"
+                }
                 _ => "board",
             },
         );
@@ -1095,12 +1098,6 @@ fn help_bindings() -> Vec<HelpBinding> {
             "esc",
             "clear search / close Help",
             "query cancel",
-        ),
-        help_binding(
-            HelpGroup::AppControls,
-            "ctrl+q",
-            "quit app",
-            "exit close board page help picker non-editing surfaces",
         ),
     ]);
     bindings

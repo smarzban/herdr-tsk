@@ -21,7 +21,7 @@ The middle tab remembers your selected project. Press `2` to open it; if none is
 
 ## Quit or go back
 
-Press `ctrl+q` to quit from the board or a task view, including Help, pickers, and the wide project preview. While a text editor, Projects search, quick-add line, or palette query owns input, `ctrl+q` keeps its editing behavior instead. Unsaved drafts must be saved or cancelled before quitting; save recovery must be resolved first.
+Press `ctrl+q` to quit from the board or a task view, including Help, pickers, and the wide project preview. While a text editor, Projects search, quick-add line, or palette query owns input, `ctrl+q` keeps its editing behavior instead. Unsaved drafts must be saved or cancelled before quitting, including drafts parked in another view while a project preview has focus. Save recovery must be resolved first; quit attempts leave its failure message intact.
 
 `Esc` closes the current layer. At the full-board root, with no page, peek, popup, search, or header selection left to dismiss, it quits without confirmation. This applies on every tab, not just the desk. Wide Split is not the root; `←` returns to the full board. Quick capture's popup-close behavior is unchanged.
 

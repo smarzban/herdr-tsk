@@ -1913,10 +1913,17 @@ fn dispatch_board_intent(
     quick_capture: bool,
 ) -> io::Result<bool> {
     let intent_for_preview = intent.clone();
+    // Quit belongs to the whole application, even when a focused preview supplied it.
+    // Its guard must see both the outer parked form and the nested preview's draft.
+    let target = if intent == BoardIntent::Quit {
+        BoardIntentTarget::Outer
+    } else {
+        route.target
+    };
     let quit = handle_board_intent(
         store,
         domain,
-        board_intent_target_mut(model, route.target),
+        board_intent_target_mut(model, target),
         intent,
         save_recovery,
         quick_capture,
@@ -1947,8 +1954,13 @@ fn handle_board_intent(
 
     let quit_requested = intent == BoardIntent::Quit
         || (intent == BoardIntent::CloseLayer && model.root_escape_requests_quit());
-    // Quick capture retains its existing Ctrl+C exit; only board quits get the new guard.
-    if !quick_capture && quit_requested && model.refuse_quit_with_unsaved_work() {
+    // Quick capture retains its existing Ctrl+C exit. Pending recovery owns refusals and
+    // its failure banner, so do not replace it with an ordinary dirty-edit message.
+    if !quick_capture
+        && !save_recovery.is_pending()
+        && quit_requested
+        && model.refuse_quit_with_unsaved_work()
+    {
         return Ok(false);
     }
 
@@ -3352,13 +3364,17 @@ mod tests {
         assert_eq!(routed.intent, BoardIntent::CloseLayer);
         assert_eq!(routed.target, BoardIntentTarget::Focused);
         assert!(routed.return_to_index);
-        apply_intent(
-            &mut domain,
-            board_intent_target_mut(&mut model, routed.target),
-            routed.intent,
-            None,
-        )
-        .expect("close the nested preview board");
+        assert_eq!(
+            apply_intent(
+                &mut domain,
+                board_intent_target_mut(&mut model, routed.target),
+                routed.intent,
+                None,
+            )
+            .expect("close the nested preview board"),
+            IntentOutcome::None,
+            "Esc leaves the preview, never the process"
+        );
         if routed.return_to_index {
             apply_intent(&mut domain, &mut model, BoardIntent::StageLeft, None)
                 .expect("return to index");
@@ -4913,6 +4929,175 @@ mod tests {
             false,
         )
         .expect("nested global quit"));
+    }
+
+    #[test]
+    fn t64_focused_preview_quit_preserves_a_dirty_outer_task() {
+        let temp = TempStore::new("t64-outer-dirty-quit");
+        let (mut domain, mut model) = board_with_one_task();
+        temp.store.save(&domain).expect("seed store");
+        apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+            .expect("edit outer task");
+        apply_intent(&mut domain, &mut model, BoardIntent::EditInsert('!'), None)
+            .expect("dirty outer title");
+        let draft = model.edit_buffer().to_owned();
+        for _ in 0..8 {
+            if model.input_mode() == BoardInputMode::TaskPage {
+                break;
+            }
+            apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
+                .expect("park editor");
+        }
+        assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+        for _ in 0..3 {
+            apply_intent(&mut domain, &mut model, BoardIntent::StageLeft, None)
+                .expect("park task page");
+        }
+        assert!(model.root_escape_requests_quit());
+        assert!(model.has_unsaved_work());
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::SelectNavTab(NavTab::Projects),
+            None,
+        )
+        .expect("switch to projects with outer draft parked");
+        stage_right(&mut domain, &mut model, 2);
+        let area = Rect::new(0, 0, 110, 30);
+        let intent = preview_key_intent(
+            &mut model,
+            area,
+            KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL),
+        );
+        assert_eq!(intent, BoardIntent::Quit);
+        assert!(model.project_right_seat_focused());
+        assert!(!model.right_seat().unwrap().has_unsaved_work());
+        let routed = route_board_intent(&model, intent);
+        assert_eq!(routed.target, BoardIntentTarget::Focused);
+        assert!(!dispatch_board_intent(
+            &temp.store,
+            &mut domain,
+            &mut model,
+            BoardDispatchRoute {
+                area,
+                target: routed.target
+            },
+            routed.intent,
+            &mut SaveRecovery::new(),
+            false,
+        )
+        .expect("outer draft refuses focused quit"));
+        assert!(model.task_session_dirty());
+        assert_eq!(
+            model.message(),
+            Some("save or cancel edits before switching tasks")
+        );
+        // Return to the parked task and inspect the actual title, not just a dirty flag.
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::SelectNavTab(NavTab::ProjectBoard),
+            None,
+        )
+        .expect("return to outer task");
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::FocusFormField(CaptureField::Title),
+            None,
+        )
+        .expect("inspect parked title");
+        assert_eq!(model.edit_buffer(), draft);
+    }
+
+    #[test]
+    fn t64_quit_over_failed_save_preserves_the_recovery_banner() {
+        for capture in [false, true] {
+            let temp = TempStore::new("t64-recovery-banner");
+            let (mut domain, mut model) = board_with_one_task();
+            temp.store.save(&domain).expect("seed store");
+            let baseline = domain.clone();
+            let save = if capture {
+                let snapshot = crate::context::build_snapshot(
+                    &crate::context::RawHostContext::default(),
+                    temp.dir.to_str().expect("scratch path"),
+                );
+                apply_intent(
+                    &mut domain,
+                    &mut model,
+                    BoardIntent::OpenCapture,
+                    Some(&snapshot),
+                )
+                .expect("open quick add");
+                apply_intent(
+                    &mut domain,
+                    &mut model,
+                    BoardIntent::QuickAddInsertText("unsaved capture".into()),
+                    None,
+                )
+                .expect("type quick add");
+                BoardIntent::QuickAddSave
+            } else {
+                apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+                    .expect("edit task");
+                apply_intent(&mut domain, &mut model, BoardIntent::EditInsert('!'), None)
+                    .expect("dirty task");
+                BoardIntent::ConfirmEdit
+            };
+            let mut recovery = SaveRecovery::new();
+            apply_board_intent_with_save_recovery(
+                &mut domain,
+                &mut model,
+                &mut recovery,
+                BoardSaveContext {
+                    baseline,
+                    intent: save,
+                    snapshot: None,
+                },
+                |_| Err("disk full".into()),
+            )
+            .expect("failed persistence enters recovery");
+            assert!(recovery.is_pending());
+            assert!(model.has_unsaved_work());
+            let banner = model.message().expect("failure banner").to_owned();
+            assert!(banner.contains("disk full"));
+            apply_intent(&mut domain, &mut model, BoardIntent::OpenHelp, None)
+                .expect("Help over failed save");
+            for key in ['q', 'c'] {
+                let intent = board_keyboard_intent(
+                    &model,
+                    model.input_mode(),
+                    KeyEvent::new(KeyCode::Char(key), KeyModifiers::CONTROL),
+                )
+                .expect("Help quit shortcut");
+                assert_eq!(intent, BoardIntent::Quit);
+                assert!(!dispatch_board_intent(
+                    &temp.store,
+                    &mut domain,
+                    &mut model,
+                    BoardDispatchRoute {
+                        area: Rect::new(0, 0, 78, 24),
+                        target: BoardIntentTarget::Focused
+                    },
+                    intent,
+                    &mut recovery,
+                    false,
+                )
+                .expect("recovery prevents quit"));
+                assert_eq!(
+                    model.message(),
+                    Some(banner.as_str()),
+                    "capture={capture}, key={key}"
+                );
+                assert_eq!(model.input_mode(), BoardInputMode::Help);
+                assert!(recovery.is_pending());
+                assert!(model.has_unsaved_work());
+            }
+            apply_intent(&mut domain, &mut model, BoardIntent::CloseLayer, None)
+                .expect("Esc closes Help");
+            assert_eq!(model.input_mode(), BoardInputMode::SaveRecovery);
+            assert_eq!(model.message(), Some(banner.as_str()));
+        }
     }
 
     #[test]
