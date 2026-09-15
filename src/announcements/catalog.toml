@@ -9,3 +9,8 @@
 id = 2
 title = "An inbox, a projects preview, and tsk help"
 notes = "New captures start in an open inbox below ON DECK. Pick work with ctrl+n, send it back with ctrl+o, and use tsk list --open or --ready to filter from the CLI.\n\nOn a wide terminal the projects tab previews the cursored project beside the list; press → to work in it. The projects index counts ON DECK and DONE.\n\ntsk --help is the CLI reference: tsk help <command> explains one command, tsk --version prints the version.\n\nAsk your agent to refine a task: \"refine T12\" or \"what is missing from T12\". It reads the task and the code, asks one question at a time, and proposes a rewrite before it edits, so the task is ready for an agent to pick up. Rerun tsk setup to update the skill.\n\nChangelog: https://github.com/smarzban/herdr-tsk/blob/main/CHANGELOG.md"
+
+[[announcement]]
+id = 3
+title = "Search, mark mode, and stricter project names"
+notes = "Press / on any tab to filter what it shows: title, notes, steps, thread, or task number. Enter pins the filter so the usual keys work on the matches; Esc clears it.\n\nPress Shift+M to mark several tasks, with space, Shift+↑/↓, or a click, then run one status, archive, or delete on the whole set. One ctrl+u undoes a marked done or delete.\n\n!p name and tsk add -p name now refuse a name the board does not know instead of creating a stray project. Use a full path to add a new one.\n\nChangelog: https://github.com/smarzban/herdr-tsk/blob/main/CHANGELOG.md"

@@ -32,6 +32,7 @@ pub const CATALOG: [Guide; 4] = [
                 \n\
                 **Moving around**\n\
                 - `j` and `k` or the arrows move the selection. `Enter` opens a task, `Esc` comes back.\n\
+                - `/` searches whatever the tab shows. `Enter` pins the filter, `Esc` clears it.\n\
                 - Status keys use Ctrl, so a stray letter never changes anything. `ctrl+s` starts, `ctrl+n` picks a task for ready, `ctrl+o` sends it to the inbox, `ctrl+b` blocks, `ctrl+r` marks review or takes it back to ready, and `ctrl+d` finishes.\n\
                 - `ctrl+u` undoes the last change.",
         status: HumanStatus::Review,
@@ -50,7 +51,7 @@ pub const CATALOG: [Guide; 4] = [
                 - Press `+`, type a title, press `Enter`. It lands in the ON DECK inbox as `open`.\n\
                 - Press `ctrl+n` when you pick it for the ready queue.\n\
                 - Press `Tab` instead of `Enter` to open the full page first, where you can add notes, steps, a thread, and a project before you save.\n\
-                - Type `!p widget` in the title to file it under the project named widget. Bare `!p` keeps it on your desk.\n\
+                - Type `!p name` in the title to file it under a project the board already knows, by its folder name. A full path like `!p ~/code/widget` adds a new one. Bare `!p` keeps it on your desk.\n\
                 - Type `!t release` in the title to tag it with the thread `release`. Threads group related work inside one project, and the project board can filter by them.\n\
                 \n\
                 **Read one**\n\
@@ -106,6 +107,7 @@ pub const CATALOG: [Guide; 4] = [
                 **Clear these starter tasks**\n\
                 Any of these works. A cleared starter task never comes back.\n\
                 - `ctrl+d` marks it done. Done tasks wait in the drawer. `d` opens and closes it.\n\
+                - To clear several at once: `Shift+M`, `space` on each, then one `ctrl+d`.\n\
                 - `ctrl+f` archives it. Archived tasks fold into a group at the end of the drawer.\n\
                 - `ctrl+x` twice deletes it. `ctrl+u` brings it back if you change your mind.\n\
                 \n\
