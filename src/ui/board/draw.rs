@@ -49,6 +49,19 @@ pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
         label: "open",
     };
 
+    if model.input_mode() == BoardInputMode::Search {
+        return vec![
+            VerbEntry {
+                key: "enter",
+                label: "pin",
+            },
+            VerbEntry {
+                key: "esc",
+                label: "clear",
+            },
+        ];
+    }
+
     // The inline step editor: Enter saves this step (and opens the next row on an add),
     // Shift+Enter saves the whole task session.
     if model.input_mode() == BoardInputMode::EditStep {
@@ -102,15 +115,6 @@ pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
     if model.nav_tab() == crate::ui::queue::NavTab::Projects
         && matches!(model.projects_view(), ProjectsView::Overview)
     {
-        if model.input_mode() == BoardInputMode::ProjectsSearch {
-            return vec![
-                OPEN,
-                VerbEntry {
-                    key: "esc",
-                    label: "close",
-                },
-            ];
-        }
         return vec![
             OPEN,
             VerbEntry {
@@ -919,20 +923,21 @@ impl<'a> OverlayPayloads<'a> {
         model: &'a BoardModel,
         geo: &tier::TierGeometry,
     ) -> Option<QueueOverlay<'a>> {
-        if model.input_mode() == BoardInputMode::ProjectsSearch {
+        if model.input_mode() == BoardInputMode::Search {
             let input_width = (geo.row_width as usize).saturating_sub(2);
-            let query = EditBuffer::new(
-                model.projects_query(),
-                model.projects_query().chars().count(),
-            );
+            let query = EditBuffer::new(model.search_query(), model.search_query().chars().count());
             let (text, cursor_col) = escaped_line_window(&query, input_width);
-            return Some(QueueOverlay::ProjectsSearch {
+            return Some(QueueOverlay::Search {
                 input: crate::ui::render::BottomInputSlot {
                     text,
                     cursor_col,
-                    placeholder: "search projects…",
+                    placeholder: if model.projects_overview() {
+                        "search projects…"
+                    } else {
+                        "search tasks…"
+                    },
                     refusal: None,
-                    message: None,
+                    message: model.message(),
                     above_rows: Vec::new(),
                     cursor_row_offset: 0,
                 },
@@ -1219,7 +1224,8 @@ fn draw_board_hits(frame: &mut Frame, model: &BoardModel) -> render::QueueHitMap
         projects_index: surface == BoardSurface::Projects
             && matches!(model.projects_view(), ProjectsView::Overview),
         projects_cursor: model.projects_cursor(),
-        projects_query: model.projects_query(),
+        search_query: model.search_query(),
+        search_pinned: model.search_pinned(),
         summary: None,
         context: status_idle(model, surface, status_owned.is_some()),
         has_update_notice: model.update_notice().is_some(),
@@ -1399,7 +1405,8 @@ fn draw_wide_board(
         projects_index: surface == BoardSurface::Projects
             && matches!(model.projects_view(), ProjectsView::Overview),
         projects_cursor: model.projects_cursor(),
-        projects_query: model.projects_query(),
+        search_query: model.search_query(),
+        search_pinned: model.search_pinned(),
         summary: None,
         context: status_idle(model, surface, status_owned.is_some()),
         has_update_notice: model.update_notice().is_some(),
@@ -1645,7 +1652,8 @@ fn draw_projects_wide_board(
         projects: &outer_view.projects,
         projects_index: true,
         projects_cursor: model.projects_cursor(),
-        projects_query: model.projects_query(),
+        search_query: model.search_query(),
+        search_pinned: model.search_pinned(),
         summary: None,
         context: status_idle(model, BoardSurface::Projects, outer_status.0.is_some()),
         has_update_notice: model.update_notice().is_some(),
@@ -1681,7 +1689,8 @@ fn draw_projects_wide_board(
             projects: &[],
             projects_index: false,
             projects_cursor: 0,
-            projects_query: "",
+            search_query: right.search_query(),
+            search_pinned: right.search_pinned(),
             summary: None,
             context: status_idle(right, BoardSurface::Project, status.0.is_some()),
             has_update_notice: right.update_notice().is_some(),

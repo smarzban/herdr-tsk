@@ -4,11 +4,12 @@
 use std::fs;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use tsk_tui::cli::{run_with, CliOutput};
-use tsk_tui::domain::TaskEventKind;
+use tsk_tui::domain::{DomainState, ProvenanceOrigin, TaskEventKind, TaskScope};
 use tsk_tui::store::TaskStore;
 
 static TEMP_SEQ: AtomicU64 = AtomicU64::new(0);
@@ -171,13 +172,16 @@ fn archive_and_unarchive_refusals_include_stable_codes_and_human_messages() {
 fn project_archive_and_unarchive_resolve_basename_and_path_exit_0_and_are_idempotent() {
     let dir = temp_state_dir("project-verbs");
     let _guard = TempDirGuard(dir.clone());
+    let project_path = dir.join("widget");
+    std::fs::create_dir(&project_path).expect("create project directory");
+    let project_text = project_path.to_string_lossy().into_owned();
     let added = cli(vec![
         "tsk".into(),
         "add".into(),
         "-t".into(),
         "widget task".into(),
         "-p".into(),
-        "/tmp/x/widget".into(),
+        project_text.clone(),
         "--state-dir".into(),
         dir.to_string_lossy().into_owned(),
     ]);
@@ -199,7 +203,7 @@ fn project_archive_and_unarchive_resolve_basename_and_path_exit_0_and_are_idempo
     let out = project("archive", "widget");
     assert_eq!(out.code, 0, "{:?}", out.stderr);
     assert_eq!(out.stdout, "archived project widget\n");
-    assert!(store().is_project_archived("/tmp/x/widget"));
+    assert!(store().is_project_archived(&project_text));
 
     // Idempotent repeat.
     let again = project("archive", "widget");
@@ -212,8 +216,8 @@ fn project_archive_and_unarchive_resolve_basename_and_path_exit_0_and_are_idempo
     assert_eq!(upper.code, 0, "{:?}", upper.stderr);
     assert_eq!(store().projects().len(), 1);
 
-    // Verbatim path addresses the same project.
-    let verbatim = project("archive", "/tmp/x/widget");
+    // Absolute path addresses the same project.
+    let verbatim = project("archive", &project_text);
     assert_eq!(verbatim.code, 0, "{:?}", verbatim.stderr);
     assert_eq!(store().projects().len(), 1);
 
@@ -222,7 +226,7 @@ fn project_archive_and_unarchive_resolve_basename_and_path_exit_0_and_are_idempo
     assert_eq!(un.code, 0, "{:?}", un.stderr);
     assert_eq!(un.stdout, "unarchived project widget\n");
     assert!(
-        !store().is_project_archived("/tmp/x/widget"),
+        !store().is_project_archived(&project_text),
         "the record is gone"
     );
     assert_eq!(store().projects().len(), 0);
@@ -237,6 +241,88 @@ fn project_archive_and_unarchive_resolve_basename_and_path_exit_0_and_are_idempo
         "{:?}",
         unknown.stderr
     );
+}
+
+#[test]
+fn project_archive_basename_ignores_an_outside_git_invocation_candidate() {
+    let dir = temp_state_dir("project-outside-invocation");
+    let _guard = TempDirGuard(dir.clone());
+    let outside = dir.join("outside").join("api");
+    std::fs::create_dir_all(&outside).expect("create outside-Git invocation directory");
+    let mut state = DomainState::new();
+    state
+        .create(
+            "stored api task",
+            None,
+            TaskScope::Project {
+                path: "/projects/api".into(),
+            },
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create stored project fixture");
+    TaskStore::new(&dir).save(&state).expect("save fixture");
+    let context = serde_json::json!({"focused_pane_cwd": outside}).to_string();
+    let binary = std::env::var("CARGO_BIN_EXE_tsk").expect("Cargo must provide the tsk binary");
+
+    let output = Command::new(binary)
+        .env("HERDR_PLUGIN_CONTEXT_JSON", context)
+        .args([
+            "project",
+            "archive",
+            "api",
+            "--state-dir",
+            &dir.to_string_lossy(),
+        ])
+        .output()
+        .expect("run project archive");
+
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert!(TaskStore::new(&dir)
+        .load()
+        .expect("load archived state")
+        .is_project_archived("/projects/api"));
+}
+
+#[test]
+fn project_verbs_keep_addressing_removed_and_legacy_relative_project_paths() {
+    let dir = temp_state_dir("project-legacy-paths");
+    let _guard = TempDirGuard(dir.clone());
+    let removed = dir.join("removed-project").to_string_lossy().into_owned();
+    let relative = "legacy/relative-project".to_string();
+    let mut state = DomainState::new();
+    for (title, path) in [
+        ("removed", removed.as_str()),
+        ("relative", relative.as_str()),
+    ] {
+        state
+            .create(
+                title,
+                None,
+                TaskScope::Project { path: path.into() },
+                ProvenanceOrigin::Manual,
+                None,
+            )
+            .expect("create project fixture");
+    }
+    TaskStore::new(&dir).save(&state).expect("save fixtures");
+
+    let project = |verb: &str, name: &str| {
+        cli(vec![
+            "tsk".into(),
+            "project".into(),
+            verb.into(),
+            name.into(),
+            "--state-dir".into(),
+            dir.to_string_lossy().into_owned(),
+        ])
+    };
+    for path in [&removed, &relative] {
+        let archived = project("archive", path);
+        assert_eq!(archived.code, 0, "{archived:?}");
+        let unarchived = project("unarchive", path);
+        assert_eq!(unarchived.code, 0, "{unarchived:?}");
+    }
 }
 
 #[test]

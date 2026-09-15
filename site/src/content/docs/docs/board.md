@@ -21,7 +21,7 @@ The middle tab remembers your selected project. Press `2` to open it; if none is
 
 ## Quit or go back
 
-Press `ctrl+q` to quit from the board or a task view, including Help, pickers, and the wide project preview. While a text editor, Projects search, quick-add line, or palette query owns input, `ctrl+q` keeps its editing behavior instead. Unsaved drafts must be saved or cancelled before quitting, including drafts parked in another view while a project preview has focus. Save recovery must be resolved first; quit attempts leave its failure message intact.
+Press `ctrl+q` to quit from the board or a task view, including Help, pickers, and the wide project preview. While a text editor, board search, quick-add line, or palette query owns input, `ctrl+q` keeps its editing behavior instead. Unsaved drafts must be saved or cancelled before quitting, including drafts parked in another view while a project preview has focus. Save recovery must be resolved first; quit attempts leave its failure message intact.
 
 `Esc` leaves mark mode and clears its marked tasks before it closes the current layer. At the full-board root, with mark mode inactive and no page, peek, popup, search, or header selection left to dismiss, it quits without confirmation. This applies on every tab, not just the desk. In either wide split, `Esc` closes the right column once any editor or overlay is dismissed, returning to the full-width board or projects index. Task drafts stay parked; a project preview with unsaved work refuses to close. After a narrow resize hides the right column, `Esc` treats the visible board/index as the root, with the same unsaved-draft protection. Quick capture's popup-close behavior is unchanged.
 
@@ -30,8 +30,6 @@ Press `ctrl+q` to quit from the board or a task view, including Help, pickers, a
 Press `p` to choose a project, or open **projects** for an overview.
 
 - Click a project to select it; double-click or press `Enter` to open it.
-- Press `/` to search. Type or paste, then press `Enter` to open the result.
-- Press `Esc` to clear and close search.
 - Check the footer for the selected project's full path.
 
 Projects Overview counts work in **NEEDS YOU**, **IN MOTION**, **ON DECK** (ready and open, including the inbox), and **DONE**. Archived tasks and archived projects are excluded. A dim `·` means zero. `here` marks the launch project. At 100 columns or wider, the overview also lists threads.
@@ -45,6 +43,14 @@ At **110 usable columns** or wider, Overview can preview the cursored project be
 | Rail | Narrow index and a live project board; the right column owns input |
 
 The right preview names the selected project in its top row, in the space used by navigation tabs on the index. Clicking or moving the index selection opens Split automatically; press `→` to move from Split to Rail, and `←` to walk back. The project tab never opens a full-screen task stage. `Enter` on an index row still opens that project in tab 2, and choosing a thread with `v` drops back to the full-width index. The right column has its own selection, drawer, filters, task page, quick-add, and status actions; `Esc` from its board returns focus to the index.
+
+## Search
+
+Press `/` on any board tab to search the rows that tab currently shows. On the Projects overview it matches project names or paths. On the desk, a project board, or a cross-project thread view it matches tasks by title, notes, step text, thread, or task number such as `T12`, case-insensitively. Every whitespace-separated word must match somewhere in the same task.
+
+Typing or pasting filters immediately. Empty sections disappear and section counts show only matches. Search combines with a project thread filter; the done drawer is searched only while it is open. In the wide Projects preview, `/` searches the right project board when that seat has focus.
+
+Press `Enter` to pin the query and return to board keys. Navigation, task actions, the done drawer, and a second `Enter` then act on the filtered rows; the query remains in the footer. Press `Esc` while typing to clear and close search, or press it once on a pinned board to clear the query before normal `Esc` behavior resumes. Changing tab, project, or Projects view also clears it.
 
 ## Threads
 

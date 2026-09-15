@@ -307,6 +307,7 @@ fn verb_intent(model: &BoardModel, index: usize) -> Option<BoardIntent> {
     match entry.key {
         "shift+enter" => Some(BoardIntent::ConfirmEditNext),
         "enter" if model.input_mode() == BoardInputMode::EditStep => Some(BoardIntent::ConfirmEdit),
+        "enter" if model.input_mode() == BoardInputMode::Search => Some(BoardIntent::PinSearch),
         "s" => Some(BoardIntent::PrimaryVerb),
         "enter" => Some(BoardIntent::OpenTaskPage),
         "d" => Some(BoardIntent::Complete),
@@ -323,7 +324,7 @@ fn verb_intent(model: &BoardModel, index: usize) -> Option<BoardIntent> {
         "esc" => Some(BoardIntent::CloseLayer),
         ":" => Some(BoardIntent::OpenCommandPalette),
         "?" => Some(BoardIntent::OpenHelp),
-        "/" => Some(BoardIntent::FocusProjectsSearch),
+        "/" => Some(BoardIntent::FocusSearch),
         "+" => Some(BoardIntent::OpenCapture),
         _ => None,
     }
@@ -901,10 +902,16 @@ pub fn map_board_mouse(
             Some(QueueHitTarget::ModalClose) => Some(BoardIntent::CancelListPicker),
             _ => Some(BoardIntent::CancelListPicker),
         },
-        BoardInputMode::ProjectsSearch => match hit_at(hits, pos) {
-            Some(QueueHitTarget::ProjectsSearch) => Some(BoardIntent::FocusProjectsSearch),
+        BoardInputMode::Search => match hit_at(hits, pos) {
+            Some(QueueHitTarget::Search) => Some(BoardIntent::FocusSearch),
             Some(QueueHitTarget::ProjectRow(index)) => Some(BoardIntent::SelectProjectRow(index)),
-            // The painted `enter open · esc close` row dispatches like the keys.
+            Some(QueueHitTarget::TaskNumber(id)) => Some(BoardIntent::CopyTaskNumber(id)),
+            Some(QueueHitTarget::Task(id)) => model
+                .visible_ids()
+                .iter()
+                .position(|&visible| visible == id)
+                .map(BoardIntent::SelectIndex),
+            // The painted `enter pin · esc clear` row dispatches like the keys.
             Some(QueueHitTarget::Verb(index)) => verb_intent(model, index),
             _ => Some(BoardIntent::CloseLayer),
         },
@@ -919,7 +926,7 @@ pub fn map_board_mouse(
                 }
                 None => None,
             },
-            Some(QueueHitTarget::ProjectsSearch) => Some(BoardIntent::FocusProjectsSearch),
+            Some(QueueHitTarget::Search) => Some(BoardIntent::FocusSearch),
             Some(QueueHitTarget::ProjectRow(index)) => Some(BoardIntent::SelectProjectRow(index)),
             Some(QueueHitTarget::Drawer) => Some(BoardIntent::ToggleDoneDrawer),
             Some(QueueHitTarget::ArchivedHeader) => Some(BoardIntent::ToggleArchivedGroup),

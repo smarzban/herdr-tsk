@@ -370,7 +370,8 @@ import { parseCapture } from "./capture.js";
     // The focused scope is transient, while this is the project selected by tab 2.
     selectedProject: launchProject(),
     focusProject: null,
-    projectQuery: "",
+    searchQuery: "",
+    searchPinned: false,
     threadFilter: null,
     projectView: null,
     filterI: 0,
@@ -427,6 +428,8 @@ import { parseCapture } from "./capture.js";
     undo: null,
     lastClick: 0,
     message: "",
+    searchQuery: "",
+    searchPinned: false,
   };
 
   function projectsOverview() {
@@ -560,10 +563,45 @@ import { parseCapture } from "./capture.js";
     );
   }
   function matchingProjectNames() {
-    const query = state.projectQuery.trim().toLowerCase();
+    const query = state.searchQuery.trim().toLowerCase();
     return projectNames().filter(
-      (name) => !query || name.toLowerCase().includes(query),
+      (name) =>
+        !query ||
+        name.toLowerCase().includes(query) ||
+        projectPath(name).toLowerCase().includes(query),
     );
+  }
+
+  function taskMatchesSearch(task, query) {
+    const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    if (!words.length) return true;
+    const content = [
+      task.title,
+      task.notes,
+      ...(task.steps || []).map((step) => step.text),
+      task.thread,
+      `T${task.number}`,
+    ]
+      .filter(Boolean)
+      .join("\n")
+      .toLowerCase();
+    return words.every((word) => content.includes(word));
+  }
+
+  function searchOwner() {
+    return projectsPreviewFocused() ? preview : state;
+  }
+
+  function updateSearchQuery(owner, value) {
+    const previousRows = owner === preview ? previewRows() : buildRows();
+    owner.searchQuery = value;
+    if (owner === preview) ensurePreviewSelection(previewRows(), previousRows);
+    else ensureSelection(buildRows(), previousRows);
+  }
+
+  function pinSearch(owner) {
+    if (!owner.searchQuery.trim()) updateSearchQuery(owner, "");
+    owner.searchPinned = Boolean(owner.searchQuery);
   }
 
   function selectedTask() {
@@ -625,18 +663,22 @@ import { parseCapture } from "./capture.js";
 
   function previewVisibleTasks() {
     const scoped = previewProjectTasks().filter(previewMatchesThread);
+    const live = scoped.filter((task) => taskMatchesSearch(task, preview.searchQuery));
+    const done = preview.drawer
+      ? scoped.filter((task) => taskMatchesSearch(task, preview.searchQuery))
+      : scoped;
     return {
-      started: scoped
+      started: live
         .filter((task) => task.status === "started")
         .sort(byStatusChange),
-      review: scoped
+      review: live
         .filter((task) => task.status === "review")
         .sort(byStatusChange),
-      blocked: scoped
+      blocked: live
         .filter((task) => task.status === "blocked")
         .sort(byStatusChange),
-      ready: scoped.filter((task) => task.status === "ready").sort(byCreated),
-      done: scoped
+      ready: live.filter((task) => task.status === "ready").sort(byCreated),
+      done: done
         .filter((task) => task.status === "done")
         .sort(byStatusChange),
     };
@@ -658,17 +700,19 @@ import { parseCapture } from "./capture.js";
       pushHeader("IN MOTION", v.started.length);
       v.started.forEach((task) => pushTask(task));
     }
-    pushHeader("ON DECK", v.ready.length);
+    if (v.ready.length || !preview.searchQuery.trim())
+      pushHeader("ON DECK", v.ready.length);
     v.ready.forEach((task) => pushTask(task));
     if (preview.drawer) {
-      pushHeader("DONE", v.done.length);
+      if (v.done.length) pushHeader("DONE", v.done.length);
       v.done.forEach((task) => pushTask(task));
       const archived = state.tasks
         .filter(
           (task) =>
             task.project === preview.project &&
             task.archived &&
-            previewMatchesThread(task),
+            previewMatchesThread(task) &&
+            taskMatchesSearch(task, preview.searchQuery),
         )
         .sort(byStatusChange);
       if (archived.length) {
@@ -758,13 +802,19 @@ import { parseCapture } from "./capture.js";
     return rows.filter((row) => row.selectable).map((row) => row.id);
   }
 
-  function ensurePreviewSelection(rows = previewRows()) {
+  function ensurePreviewSelection(rows = previewRows(), previousRows = null) {
     const ids = previewSelectableIds(rows);
     if (!ids.length) {
       preview.selectedId = null;
       return;
     }
-    if (!ids.includes(preview.selectedId)) preview.selectedId = ids[0];
+    if (!ids.includes(preview.selectedId)) {
+      preview.selectedId = nearestVisibleId(
+        preview.selectedId,
+        previousRows ? previewSelectableIds(previousRows) : [],
+        ids,
+      );
+    }
   }
 
   function previewHasUnsavedWork() {
@@ -801,7 +851,12 @@ import { parseCapture } from "./capture.js";
 
   function archivedInScope() {
     const archived = state.tasks
-      .filter((t) => t.archived && matchesThread(t))
+      .filter(
+        (t) =>
+          t.archived &&
+          matchesThread(t) &&
+          (!state.drawer || taskMatchesSearch(t, state.searchQuery)),
+      )
       .sort(byStatusChange);
     if (state.focusProject || isProjectsThreadView()) {
       const inP = (t) =>
@@ -860,7 +915,11 @@ import { parseCapture } from "./capture.js";
     if (!option) return;
     clearMarks();
     if (state.focusProject) state.threadFilter = option.value;
-    else state.projectView = option.value;
+    else {
+      state.projectView = option.value;
+      state.searchQuery = "";
+      state.searchPinned = false;
+    }
     state.overlay = null;
     state.peekId = null;
     state.stage = "board";
@@ -884,13 +943,23 @@ import { parseCapture } from "./capture.js";
         state.projectView === null ||
         t.thread === state.projectView;
   function visibleTasks() {
-    // Hidden (archived) tasks leave every working view.
-
+    // Hidden (archived) tasks leave every working view. The closed drawer keeps
+    // its unfiltered count; opening it brings done tasks into content search.
     const open = state.tasks.filter(
-      (t) => t.status !== "done" && !t.archived && matchesThread(t),
+      (t) =>
+        t.status !== "done" &&
+        !t.archived &&
+        matchesThread(t) &&
+        taskMatchesSearch(t, state.searchQuery),
     );
     const done = state.tasks
-      .filter((t) => t.status === "done" && !t.archived && matchesThread(t))
+      .filter(
+        (t) =>
+          t.status === "done" &&
+          !t.archived &&
+          matchesThread(t) &&
+          (!state.drawer || taskMatchesSearch(t, state.searchQuery)),
+      )
       .sort(byStatusChange);
     if (state.focusProject || isProjectsThreadView()) {
       const inP = (t) =>
@@ -955,7 +1024,11 @@ import { parseCapture } from "./capture.js";
       if (v.started.length)
         pushHeader("section", "IN MOTION", v.started.length);
       v.started.forEach((t) => pushTask(t));
-      if (v.desk.length || v.inbox.length || !v.need.length)
+      if (
+        v.desk.length ||
+        v.inbox.length ||
+        (!v.need.length && !state.searchQuery.trim())
+      )
         pushHeader("section", "ON DECK · desk", v.desk.length + v.inbox.length);
       v.desk.forEach((t) => pushTask(t));
       if (v.inbox.length) {
@@ -969,7 +1042,7 @@ import { parseCapture } from "./capture.js";
         if (state.inboxOpen) v.inbox.forEach((t) => pushTask(t));
       }
       if (state.drawer) {
-        pushHeader("section", "DONE", v.done.length);
+        if (v.done.length) pushHeader("section", "DONE", v.done.length);
         v.done.forEach((t) => pushTask(t));
         const archived = archivedInScope();
         if (archived.length) {
@@ -1006,7 +1079,8 @@ import { parseCapture } from "./capture.js";
       if (v.started.length)
         pushHeader("section", "IN MOTION", v.started.length);
       v.started.forEach((t) => pushTask(t));
-      pushHeader("section", "ON DECK", v.ready.length + v.inbox.length);
+      if (v.ready.length || v.inbox.length || !state.searchQuery.trim())
+        pushHeader("section", "ON DECK", v.ready.length + v.inbox.length);
       v.ready.forEach((t) => pushTask(t));
       if (v.inbox.length) {
         rows.push({
@@ -1019,7 +1093,7 @@ import { parseCapture } from "./capture.js";
         if (state.inboxOpen) v.inbox.forEach((t) => pushTask(t));
       }
       if (state.drawer) {
-        pushHeader("section", "DONE", v.done.length);
+        if (v.done.length) pushHeader("section", "DONE", v.done.length);
         v.done.forEach((t) => pushTask(t));
         const archived = archivedInScope();
         if (archived.length) {
@@ -1144,13 +1218,34 @@ import { parseCapture } from "./capture.js";
     return rows.filter((r) => r.selectable).map((r) => r.id);
   }
 
-  function ensureSelection(rows) {
+  function nearestVisibleId(previous, previousIds, nextIds) {
+    if (!nextIds.length) return null;
+    if (nextIds.includes(previous)) return previous;
+    const index = previousIds.indexOf(previous);
+    if (index < 0) return nextIds[0];
+    const horizon = Math.max(index, previousIds.length - index - 1);
+    for (let distance = 1; distance <= horizon; distance += 1) {
+      const before = previousIds[index - distance];
+      if (before && nextIds.includes(before)) return before;
+      const after = previousIds[index + distance];
+      if (after && nextIds.includes(after)) return after;
+    }
+    return nextIds[Math.min(index, nextIds.length - 1)];
+  }
+
+  function ensureSelection(rows, previousRows = null) {
     const ids = selectableIds(rows);
     if (!ids.length) {
       state.selectedId = null;
       return;
     }
-    if (!ids.includes(state.selectedId)) state.selectedId = ids[0];
+    if (!ids.includes(state.selectedId)) {
+      state.selectedId = nearestVisibleId(
+        state.selectedId,
+        previousRows ? selectableIds(previousRows) : [],
+        ids,
+      );
+    }
   }
 
   function metaFor(task) {
@@ -1218,7 +1313,10 @@ import { parseCapture } from "./capture.js";
   }
 
   function runVerb(id) {
-    if (id === "search") state.overlay = "search";
+    if (id === "search") {
+      searchOwner().searchPinned = false;
+      state.overlay = "search";
+    }
     if (id === "open" && state.selectedId) {
       const row = selectedRow();
       if (row?.kind === "project") openProject(row.project);
@@ -1338,7 +1436,8 @@ import { parseCapture } from "./capture.js";
     state.threadFilter = null;
     state.tab = tab;
     state.focusProject = tab === "project" ? state.selectedProject : null;
-    state.projectQuery = "";
+    state.searchQuery = "";
+    state.searchPinned = false;
     state.peekId = null;
     state.overlay = null;
     state.quickOwner = "outer";
@@ -1359,7 +1458,8 @@ import { parseCapture } from "./capture.js";
     state.selectedProject = name;
     state.focusProject = name;
     state.tab = "project";
-    state.projectQuery = "";
+    state.searchQuery = "";
+    state.searchPinned = false;
     state.peekId = null;
     state.overlay = null;
     state.quickOwner = "outer";
@@ -1393,6 +1493,8 @@ import { parseCapture } from "./capture.js";
     preview.undo = null;
     preview.lastClick = 0;
     preview.message = "";
+    preview.searchQuery = "";
+    preview.searchPinned = false;
     previewSteps.reset();
   }
 
@@ -1490,7 +1592,8 @@ import { parseCapture } from "./capture.js";
     state.tab = "desk";
     state.selectedProject = "launchpad";
     state.focusProject = null;
-    state.projectQuery = "";
+    state.searchQuery = "";
+    state.searchPinned = false;
     state.collapsed = new Set();
     state.selectedId = "t1";
     state.markMode = false;
@@ -1677,11 +1780,13 @@ import { parseCapture } from "./capture.js";
       return true;
     }
     if (state.overlay === "search") {
-      if (id === "open") {
-        openProjectSearchMatch();
+      const owner = searchOwner();
+      if (id === "pin") {
+        pinSearch(owner);
         state.overlay = null;
       } else if (id === "close") {
-        state.projectQuery = "";
+        updateSearchQuery(owner, "");
+        owner.searchPinned = false;
         state.overlay = null;
       } else return false;
       return true;
@@ -2012,7 +2117,7 @@ import { parseCapture } from "./capture.js";
       ["views & find", "p", "project picker", "switch find"],
       ["views & find", "z / D", "done drawer", "completed tasks"],
       ["views & find", "g", "toggle inbox / groups", "collapse expand"],
-      ["views & find", "/", "search projects", "find filter"],
+      ["views & find", "/", "search board", "find filter tasks projects"],
       ["views & find", ":", "command palette", "find actions"],
       ["app controls", "?", "help", "shortcuts keys"],
       ["app controls", "esc", "clear / close", "cancel"],
@@ -2291,7 +2396,8 @@ import { parseCapture } from "./capture.js";
   function renderPreviewBoard(rail) {
     ensurePreviewSelection();
     const width = previewBoardWidth();
-    const body = previewRows()
+    const previewRowsNow = previewRows();
+    const body = previewRowsNow
       .map((row) => {
         if (row.kind === "section")
           return `<div class="tsk-sec"><span class="sec">${esc(row.label)}</span><span class="rule" aria-hidden="true"></span><span class="count">${row.count}</span></div>`;
@@ -2349,7 +2455,10 @@ import { parseCapture } from "./capture.js";
       .join("");
     const project = esc(preview.project || "project");
     const filter = `<button type="button" class="tsk-view-control dim" data-preview-filter="1">${esc(previewFilterLabel())} ▾</button>`;
-    return `<div class="tsk-project-preview tsk-surface ${rail ? "is-live" : "is-preview"}" aria-label="${project} project preview"><div class="tsk-project-preview-header ${rail ? "is-bold" : "dim"}"><span class="sec">${project}</span>${rail ? filter : ""}</div><div class="tsk-task-rule" aria-hidden="true"></div><div class="tsk-list">${body || `<div class="dim">  nothing here</div>`}</div></div>`;
+    const empty = preview.searchQuery.trim()
+      ? `no tasks match &quot;${esc(preview.searchQuery.trim())}&quot;`
+      : "nothing here";
+    return `<div class="tsk-project-preview tsk-surface ${rail ? "is-live" : "is-preview"}" aria-label="${project} project preview"><div class="tsk-project-preview-header ${rail ? "is-bold" : "dim"}"><span class="sec">${project}</span>${rail ? filter : ""}</div><div class="tsk-task-rule" aria-hidden="true"></div><div class="tsk-list">${body || `<div class="dim">  ${empty}</div>`}</div></div>`;
   }
 
   function stageHint() {
@@ -2538,9 +2647,14 @@ import { parseCapture } from "./capture.js";
       })
       .join("");
 
+    const empty = index
+      ? "no projects match"
+      : state.searchQuery.trim()
+        ? `no tasks match &quot;${esc(state.searchQuery.trim())}&quot;`
+        : "nothing here";
     const column = `
       <div class="tsk-tabs">${tabs}${control}</div>
-      <div class="tsk-list ${index ? "tsk-project-table" : ""} ${showThreads ? "with-threads" : ""}" style="--project-name-width:${nameWidth + 2}ch;--project-thread-width:${threadWidth + 2}ch">${index ? `<div class="tsk-project-legend"><span>  PROJECT</span>${showThreads ? "<span>THREADS</span>" : ""}<span>NEEDS YOU</span><span>IN MOTION</span><span>ON DECK</span><span>DONE</span></div>` : ""}${body || `<div class="dim">  nothing here</div>`}</div>`;
+      <div class="tsk-list ${index ? "tsk-project-table" : ""} ${showThreads ? "with-threads" : ""}" style="--project-name-width:${nameWidth + 2}ch;--project-thread-width:${threadWidth + 2}ch">${index ? `<div class="tsk-project-legend"><span>  PROJECT</span>${showThreads ? "<span>THREADS</span>" : ""}<span>NEEDS YOU</span><span>IN MOTION</span><span>ON DECK</span><span>DONE</span></div>` : ""}${body || `<div class="dim">  ${empty}</div>`}</div>`;
     // Wide stages paint one shared footer under both columns, so a column omits its own.
     return rail || bare ? column : column + renderFooter();
   }
@@ -2567,28 +2681,31 @@ import { parseCapture } from "./capture.js";
   // bar for whichever side owns focus. Wide stages paint it under both columns, as the app does.
   function renderFooter() {
     const previewOwnsFooter = projectsPreviewFocused() || projectsPreviewPage();
-    const markOwner = previewOwnsFooter ? preview : state;
-    const selectedCount = markOwner.markedIds.size;
-    const selectionMessage = markOwner.markMode
+    const owner = previewOwnsFooter ? preview : state;
+    const selectedCount = owner.markedIds.size;
+    const selectionMessage = owner.markMode
       ? selectedCount
         ? `mark mode · ${selectedCount} selected · esc clears`
         : "mark mode · space/click marks · esc exits"
       : "";
-    const context = previewOwnsFooter
-      ? preview.message || selectionMessage || preview.project || "project"
-      : state.message ||
-        selectionMessage ||
-        (state.tab === "projects" && state.projectView === null
-          ? projectsPreviewActive() && preview.message
-            ? preview.message
-            : selectedRow()?.project
-              ? projectPath(selectedRow().project)
-              : "projects"
-          : state.tab === "desk"
-            ? "desk"
-            : state.focusProject
-              ? `${state.focusProject}${state.threadFilter ? ` · #${state.threadFilter}` : ""}`
-              : state.tab);
+    const baseContext = previewOwnsFooter
+      ? preview.project || "project"
+      : state.tab === "projects" && state.projectView === null
+        ? projectsPreviewActive() && preview.message
+          ? preview.message
+          : selectedRow()?.project
+            ? projectPath(selectedRow().project)
+            : "projects"
+        : state.tab === "desk"
+          ? "desk"
+          : state.focusProject
+            ? `${state.focusProject}${state.threadFilter ? ` · #${state.threadFilter}` : ""}`
+            : state.tab;
+    const scopedContext =
+      owner.searchPinned && owner.searchQuery.trim()
+        ? `${baseContext} · /${owner.searchQuery.trim()}`
+        : baseContext;
+    const context = owner.message || selectionMessage || scopedContext;
     const task = previewOwnsFooter ? previewTask() : selectedTask();
     const previewVerbs = task
       ? verbItems(task)
@@ -2629,10 +2746,10 @@ import { parseCapture } from "./capture.js";
                   ])
             }</div>`
           : state.overlay === "search"
-            ? `<div class="tsk-input-row"><span class="tsk-prompt">/</span><input class="tsk-field" id="tsk-project-search" value="${esc(state.projectQuery)}" placeholder="search projects" autocomplete="off" /><span class="cursor">█</span></div>
+            ? `<div class="tsk-input-row"><span class="tsk-prompt">/</span><input class="tsk-field" id="tsk-project-search" value="${esc(searchOwner().searchQuery)}" placeholder="${projectsOverview() && !projectsPreviewFocused() ? "search projects" : "search tasks"}" autocomplete="off" /><span class="cursor">█</span></div>
              <div class="foot dim tsk-verbs">${hintBar([
-               { id: "open", label: "enter open" },
-               { id: "close", label: "esc close" },
+               { id: "pin", label: "enter pin" },
+               { id: "close", label: "esc clear" },
              ])}</div>`
             : `<div class="tsk-status-row"><button type="button" class="tsk-done-count foot" data-${previewOwnsFooter ? "preview-" : ""}drawer="1">${esc(context)}</button><span class="foot dim tsk-stage-hint">${esc(stageHint())}</span></div>
            <div class="foot dim tsk-verbs">${verbs}</div>
@@ -2718,7 +2835,8 @@ import { parseCapture } from "./capture.js";
       const search = document.getElementById("tsk-project-search");
       if (search) {
         search.addEventListener("input", () => {
-          state.projectQuery = search.value;
+          const owner = searchOwner();
+          updateSearchQuery(owner, search.value);
           render();
         });
       }
@@ -2774,13 +2892,6 @@ import { parseCapture } from "./capture.js";
     state.selectedId = ids[i];
     state.peekId =
       state.peekId && state.peekId === state.selectedId ? state.peekId : null;
-  }
-
-  function openProjectSearchMatch() {
-    const row = selectedRow();
-    const match =
-      row?.kind === "project" ? row.project : matchingProjectNames()[0];
-    if (match) openProject(match);
   }
 
   function commitEdit() {
@@ -2996,7 +3107,11 @@ import { parseCapture } from "./capture.js";
     const bare = !e.ctrlKey && !e.metaKey && !e.altKey;
     if (e.key === "Escape") {
       e.preventDefault();
-      if (preview.peekId) preview.peekId = null;
+      if (preview.searchPinned) {
+        preview.searchQuery = "";
+        preview.searchPinned = false;
+        ensurePreviewSelection();
+      } else if (preview.peekId) preview.peekId = null;
       else state.stage = "split";
       render();
       return true;
@@ -3208,17 +3323,22 @@ import { parseCapture } from "./capture.js";
       return;
     }
     if (el.id === "tsk-project-search") {
+      const owner = searchOwner();
       if (e.key === "Escape") {
         e.preventDefault();
-        state.projectQuery = "";
+        updateSearchQuery(owner, "");
+        owner.searchPinned = false;
+        state.overlay = null;
         render();
         frame.focus({ preventScroll: true });
         return;
       }
       if (e.key === "Enter" && !e.ctrlKey && !e.altKey && !e.metaKey) {
         e.preventDefault();
-        openProjectSearchMatch();
+        pinSearch(owner);
+        state.overlay = null;
         render();
+        frame.focus({ preventScroll: true });
         return;
       }
       return;
@@ -3452,29 +3572,31 @@ import { parseCapture } from "./capture.js";
     }
 
     if (state.overlay === "search") {
+      const owner = searchOwner();
       if (e.key === "Escape") {
         e.preventDefault();
-        state.projectQuery = "";
+        updateSearchQuery(owner, "");
+        owner.searchPinned = false;
         state.overlay = null;
         render();
         return;
       }
       if (e.key === "Enter") {
         e.preventDefault();
-        openProjectSearchMatch();
+        pinSearch(owner);
         state.overlay = null;
         render();
         return;
       }
       if (e.key === "Backspace") {
         e.preventDefault();
-        state.projectQuery = state.projectQuery.slice(0, -1);
+        updateSearchQuery(owner, owner.searchQuery.slice(0, -1));
         render();
         return;
       }
       if (e.key.length === 1 && !e.altKey && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
-        state.projectQuery += e.key;
+        updateSearchQuery(owner, owner.searchQuery + e.key);
         render();
       }
       return;
@@ -3571,7 +3693,11 @@ import { parseCapture } from "./capture.js";
     }
     if (e.key === "Escape") {
       e.preventDefault();
-      if (taskPageActive) {
+      if (state.searchPinned) {
+        state.searchQuery = "";
+        state.searchPinned = false;
+        ensureSelection(buildRows());
+      } else if (taskPageActive) {
         state.overlay = null;
         leaveTaskPage();
       } else if (state.peekId) state.peekId = null;
@@ -3586,8 +3712,9 @@ import { parseCapture } from "./capture.js";
       render();
       return;
     }
-    if (e.key === "/" && state.tab === "projects" && !state.focusProject) {
+    if (e.key === "/" && !taskPageActive) {
       e.preventDefault();
+      searchOwner().searchPinned = false;
       state.overlay = "search";
       render();
       return;

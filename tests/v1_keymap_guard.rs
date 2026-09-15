@@ -62,6 +62,7 @@ fn normal_mode_keymap_equals_the_readme_and_queue_board_v1_set() {
             BoardIntent::OpenProjectsViewPicker,
             false,
         ),
+        (KeyCode::Char('/'), BoardIntent::FocusSearch, false),
         (KeyCode::Char(':'), BoardIntent::OpenCommandPalette, false),
         (KeyCode::Char('?'), BoardIntent::OpenHelp, false),
         (KeyCode::Char('q'), BoardIntent::Quit, true),

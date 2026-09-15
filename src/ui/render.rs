@@ -432,8 +432,8 @@ pub enum QueueOverlay<'a> {
         destination: String,
         recovery: bool,
     },
-    /// Projects Overview search, painted in the same shared footer slot as quick-add.
-    ProjectsSearch { input: BottomInputSlot<'a> },
+    /// Active-lens search, painted in the same shared footer slot as quick-add.
+    Search { input: BottomInputSlot<'a> },
     /// The task page: a full-height, view-first takeover for one bound task. `focus` is
     /// `None` in view mode; field edits focus the same drafts the board form carries.
     TaskPage {
@@ -523,8 +523,10 @@ pub struct QueueFrameModel<'a> {
     pub projects_index: bool,
     /// The index row the cursor rests on.
     pub projects_cursor: usize,
-    /// The projects-index search query used by the shared footer input.
-    pub projects_query: &'a str,
+    /// The active lens's search query used by the shared footer input and empty state.
+    pub search_query: &'a str,
+    /// Whether the query is pinned while normal board keys own input.
+    pub search_pinned: bool,
     /// Context summary painted above a filtered or cross-project task list.
     pub summary: Option<String>,
     /// Current board lens painted on the idle status row (for example `desk` or
@@ -620,8 +622,8 @@ pub enum QueueHitTarget {
     NavTab(NavTab),
     /// The active destination's right-side control (thread filter / View selector).
     NavChip,
-    /// The visible projects-index search field.
-    ProjectsSearch,
+    /// The visible board search field.
+    Search,
     /// One painted row of the projects index, indexed into `QueueView::projects`.
     ProjectRow(usize),
     /// The quick-add input row. Clicking it keeps the already-focused line focused.
@@ -1386,7 +1388,9 @@ fn paint_footer(
                     // it: the selected project's path under a search, the destination of a
                     // quick-add draft. Keys stay on the verb row.
                     let context = match &model.overlay {
-                        QueueOverlay::ProjectsSearch { .. } => Some(index_selected_path(model)),
+                        QueueOverlay::Search { .. } if model.projects_index => {
+                            Some(index_selected_path(model))
+                        }
                         QueueOverlay::QuickAdd {
                             destination,
                             recovery: false,
@@ -1410,8 +1414,8 @@ fn paint_footer(
                 QueueOverlay::QuickAdd { .. } => {
                     hits.push(QueueHitTarget::QuickAddInput, Rect::new(0, row, width, 1));
                 }
-                QueueOverlay::ProjectsSearch { .. } => {
-                    hits.push(QueueHitTarget::ProjectsSearch, Rect::new(0, row, width, 1));
+                QueueOverlay::Search { .. } => {
+                    hits.push(QueueHitTarget::Search, Rect::new(0, row, width, 1));
                 }
                 _ => {}
             }
@@ -1448,7 +1452,7 @@ fn paint_footer(
             | QueueOverlay::ScopeDropdown { .. } => &[],
             QueueOverlay::QuickAdd { recovery, .. } if *recovery => &[],
             QueueOverlay::QuickAdd { .. } => QUICK_ADD_VERBS,
-            QueueOverlay::ProjectsSearch { .. } => model.verb_items,
+            QueueOverlay::Search { .. } => model.verb_items,
             // The page's field edits keep the form legends; its view mode reads the
             // model-computed page verbs (status-dependent, like the board row's own).
             QueueOverlay::TaskPage {
@@ -1527,9 +1531,7 @@ pub(crate) fn bottom_input_geometry(mut geo: TierGeometry, active: bool) -> Tier
 /// accidentally reserving rows differently from the line it paints.
 fn bottom_input_slot<'a>(overlay: &'a QueueOverlay<'a>) -> Option<&'a BottomInputSlot<'a>> {
     match overlay {
-        QueueOverlay::QuickAdd { input, .. } | QueueOverlay::ProjectsSearch { input } => {
-            Some(input)
-        }
+        QueueOverlay::QuickAdd { input, .. } | QueueOverlay::Search { input } => Some(input),
         QueueOverlay::TaskPage { bottom_input, .. } => bottom_input.as_ref(),
         _ => None,
     }
@@ -1713,7 +1715,7 @@ fn paint_overlay(
         } => {
             paint_edit_notes_overlay(frame, geo, surface, rows, *cursor_row, *cursor_col);
         }
-        QueueOverlay::QuickAdd { .. } | QueueOverlay::ProjectsSearch { .. } => {}
+        QueueOverlay::QuickAdd { .. } | QueueOverlay::Search { .. } => {}
         QueueOverlay::TaskPage {
             ref header_rows,
             ref header_identifier,
@@ -3918,6 +3920,16 @@ fn build_list_rows(
         return (out, anchor_last_idx, selected_idx);
     }
 
+    if model.view.sections.is_empty() && !model.search_query.trim().is_empty() {
+        let message = format!("    no tasks match \"{}\"", model.search_query.trim());
+        out.push(ListRow::Hint(paint_bounded_line(
+            &message,
+            geo.row_width,
+            style_dim(),
+        )));
+        return (out, anchor_last_idx, selected_idx);
+    }
+
     if let Some(summary) = model.summary.as_deref() {
         out.push(ListRow::Hint(paint_bounded_line(
             &format!("    {summary}"),
@@ -4570,13 +4582,18 @@ fn paint_bottom_input_message(
 }
 
 fn idle_context(model: &QueueFrameModel<'_>) -> String {
-    if model.projects_index && !model.has_update_notice {
+    let mut context = if model.projects_index && !model.has_update_notice {
         // The index's status row names the selected project's full path; rows carry
         // only the basename. A release notice owns the idle slot on every surface.
         index_selected_path(model)
     } else {
         model.context.clone()
+    };
+    if model.search_pinned && !model.search_query.trim().is_empty() {
+        context.push_str(" · /");
+        context.push_str(model.search_query.trim());
     }
+    context
 }
 
 /// The projects index's idle status: the selected row's stored path, so same-named
@@ -5043,7 +5060,8 @@ mod tests {
             projects: &[],
             projects_index: false,
             projects_cursor: 0,
-            projects_query: "",
+            search_query: "",
+            search_pinned: false,
             summary: None,
             context: " projects".to_string(),
             has_update_notice: false,
@@ -5103,7 +5121,8 @@ mod tests {
             projects: &[],
             projects_index: false,
             projects_cursor: 0,
-            projects_query: "",
+            search_query: "",
+            search_pinned: false,
             summary: None,
             context: " desk".to_string(),
             has_update_notice: false,
@@ -5228,7 +5247,8 @@ mod tests {
             projects: &projects,
             projects_index: true,
             projects_cursor: 0,
-            projects_query: "",
+            search_query: "",
+            search_pinned: false,
             summary: None,
             context: " projects".to_string(),
             has_update_notice: false,

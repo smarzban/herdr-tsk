@@ -16,9 +16,11 @@ the GitHub release notes verbatim.
 ### Added
 
 - Press `Shift+M` to enter mark mode, use `Space`, `Shift+↑`/`Shift+↓`, or a plain click to select tasks, then change status, archive, or delete the set at once. One undo reverses a marked completion or deletion, and a stale batch refuses without changing any task.
+- `/` searches every board tab: task boards match title, notes, steps, thread, and task number, while Projects Overview matches project names and paths. `Enter` pins the filtered rows for normal board actions; `Esc` clears search first.
 
 ### Changed
 
+- `!p name`, `tsk add -p name`, and JSON plan projects now refuse missing or ambiguous project names instead of creating stray scopes. Use an existing absolute directory (`/…` or `~/…`) to create a new project destination; relative and nonexistent paths refuse.
 - `ctrl+q` quits from every non-editor board surface, including task pages and the wide project preview. `Esc` closes layers and either wide split, then quits without confirmation at the full-board root on any tab, including after a narrow resize hides the right column. Unsaved drafts still block quitting, including drafts parked outside the focused preview; text entry and save recovery keep their existing behavior.
 
 ## v0.9.0

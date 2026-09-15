@@ -1471,55 +1471,29 @@ fn apply_board_intent(
             model.input_mode = BoardInputMode::Normal;
             return Ok(IntentOutcome::None);
         }
-        BoardIntent::FocusProjectsSearch => {
-            if model.nav_tab() == NavTab::Projects
-                && matches!(model.projects_view, ProjectsView::Overview)
-            {
-                model.input_mode = BoardInputMode::ProjectsSearch;
+        BoardIntent::FocusSearch => {
+            if model.input_mode != BoardInputMode::Search {
+                model.search_return_mode = model.input_mode;
+                model.input_mode = BoardInputMode::Search;
+            }
+            model.search_pinned = false;
+            model.clear_message();
+            return Ok(IntentOutcome::None);
+        }
+        BoardIntent::PinSearch => {
+            if model.input_mode == BoardInputMode::Search {
+                model.input_mode = model.search_return_mode;
+                if model.search_query.trim().is_empty() {
+                    model.search_query.clear();
+                    model.search_pinned = false;
+                } else {
+                    model.search_pinned = true;
+                }
+                model.clear_message();
             }
             return Ok(IntentOutcome::None);
         }
-        BoardIntent::ProjectsQueryInsert(character) => {
-            if model.nav_tab() == NavTab::Projects
-                && matches!(model.projects_view, ProjectsView::Overview)
-            {
-                if model.projects_preview_active()
-                    && model
-                        .right_seat()
-                        .is_some_and(|right| right.has_unsaved_work())
-                {
-                    model.set_message(DIRTY_TASK_SWITCH_REFUSAL);
-                    return Ok(IntentOutcome::None);
-                }
-                model.projects_query.push(character);
-                model.projects_selected = 0;
-                if model.projects_preview_active() {
-                    model.bind_project_preview();
-                }
-            }
-            return Ok(IntentOutcome::None);
-        }
-        BoardIntent::ProjectsQueryInsertText(text) => {
-            if model.nav_tab() == NavTab::Projects
-                && matches!(model.projects_view, ProjectsView::Overview)
-            {
-                if model.projects_preview_active()
-                    && model
-                        .right_seat()
-                        .is_some_and(|right| right.has_unsaved_work())
-                {
-                    model.set_message(DIRTY_TASK_SWITCH_REFUSAL);
-                    return Ok(IntentOutcome::None);
-                }
-                model.projects_query.push_str(&text);
-                model.projects_selected = 0;
-                if model.projects_preview_active() {
-                    model.bind_project_preview();
-                }
-            }
-            return Ok(IntentOutcome::None);
-        }
-        BoardIntent::ProjectsQueryBackspace => {
+        BoardIntent::SearchQueryInsert(character) => {
             if model.projects_preview_active()
                 && model
                     .right_seat()
@@ -1528,10 +1502,66 @@ fn apply_board_intent(
                 model.set_message(DIRTY_TASK_SWITCH_REFUSAL);
                 return Ok(IntentOutcome::None);
             }
-            model.projects_query.pop();
-            model.projects_selected = 0;
-            if model.projects_preview_active() {
-                model.bind_project_preview();
+            let previous_visible = model.visible_ids();
+            let previous = model.selection_id;
+            model.search_query.push(character);
+            model.search_pinned = false;
+            model.clear_message();
+            if model.projects_overview() {
+                model.projects_selected = 0;
+                if model.projects_preview_active() {
+                    model.bind_project_preview();
+                }
+            } else {
+                model.reanchor_selection(previous, &previous_visible);
+            }
+            return Ok(IntentOutcome::None);
+        }
+        BoardIntent::SearchQueryInsertText(text) => {
+            if model.projects_preview_active()
+                && model
+                    .right_seat()
+                    .is_some_and(|right| right.has_unsaved_work())
+            {
+                model.set_message(DIRTY_TASK_SWITCH_REFUSAL);
+                return Ok(IntentOutcome::None);
+            }
+            let previous_visible = model.visible_ids();
+            let previous = model.selection_id;
+            model.search_query.push_str(&text);
+            model.search_pinned = false;
+            model.clear_message();
+            if model.projects_overview() {
+                model.projects_selected = 0;
+                if model.projects_preview_active() {
+                    model.bind_project_preview();
+                }
+            } else {
+                model.reanchor_selection(previous, &previous_visible);
+            }
+            return Ok(IntentOutcome::None);
+        }
+        BoardIntent::SearchQueryBackspace => {
+            if model.projects_preview_active()
+                && model
+                    .right_seat()
+                    .is_some_and(|right| right.has_unsaved_work())
+            {
+                model.set_message(DIRTY_TASK_SWITCH_REFUSAL);
+                return Ok(IntentOutcome::None);
+            }
+            let previous_visible = model.visible_ids();
+            let previous = model.selection_id;
+            model.search_query.pop();
+            model.search_pinned = false;
+            model.clear_message();
+            if model.projects_overview() {
+                model.projects_selected = 0;
+                if model.projects_preview_active() {
+                    model.bind_project_preview();
+                }
+            } else {
+                model.reanchor_selection(previous, &previous_visible);
             }
             return Ok(IntentOutcome::None);
         }
@@ -2112,10 +2142,37 @@ fn apply_board_intent(
                 }
                 return Ok(IntentOutcome::None);
             }
-            if model.input_mode == BoardInputMode::ProjectsSearch {
-                model.projects_query.clear();
+            if model.input_mode == BoardInputMode::Search {
+                let previous_visible = model.visible_ids();
+                let previous = model.selection_id;
+                model.search_query.clear();
+                model.search_pinned = false;
                 model.projects_selected = 0;
-                model.input_mode = BoardInputMode::Normal;
+                model.input_mode = model.search_return_mode;
+                model.clear_message();
+                if model.projects_overview() {
+                    if model.projects_preview_active() {
+                        model.bind_project_preview();
+                    }
+                } else {
+                    model.reanchor_selection(previous, &previous_visible);
+                }
+                return Ok(IntentOutcome::None);
+            }
+            if model.search_pinned {
+                let previous_visible = model.visible_ids();
+                let previous = model.selection_id;
+                model.search_query.clear();
+                model.search_pinned = false;
+                model.projects_selected = 0;
+                model.clear_message();
+                if model.projects_overview() {
+                    if model.projects_preview_active() {
+                        model.bind_project_preview();
+                    }
+                } else {
+                    model.reanchor_selection(previous, &previous_visible);
+                }
                 return Ok(IntentOutcome::None);
             }
             if model.input_mode == BoardInputMode::FormScopeDropdown {
@@ -2183,10 +2240,7 @@ fn apply_board_intent(
             }
             // After visible layers, a split is the next layer to close. Use the shared
             // transition so task drafts stay parked and dirty project previews refuse.
-            if model.frame_wide()
-                && model.wide_stage == WideStage::Split
-                && model.projects_query.is_empty()
-            {
+            if model.frame_wide() && model.wide_stage == WideStage::Split {
                 stage_left(model);
                 return Ok(IntentOutcome::None);
             }
@@ -2194,12 +2248,6 @@ fn apply_board_intent(
             // the desk, which hides that project's tasks again. It never quits from there.
             if model.focus_is_archived() {
                 model.leave_archived_focus();
-                return Ok(IntentOutcome::None);
-            }
-            // A typed index search goes before anything else: the first Esc clears it.
-            if !model.projects_query.is_empty() {
-                model.projects_query.clear();
-                model.projects_selected = 0;
                 return Ok(IntentOutcome::None);
             }
             return Ok(IntentOutcome::None);
@@ -2720,8 +2768,8 @@ pub(super) const ROW_DOUBLE_CLICK_WINDOW: std::time::Duration =
 ///
 /// The row names where Enter will save (`Add to desk` / `Add to <project>`), so every
 /// buffer change re-lifts the tokens: an override applies the moment it is typed and
-/// reverts the moment it is deleted. A malformed `!p` (an archived project) leaves the
-/// last good destination painted; the save itself refuses with the same words.
+/// reverts the moment it is deleted. An invalid `!p` leaves the last good destination
+/// painted; the save itself refuses with the same words.
 fn refresh_quick_add_scope(model: &mut BoardModel, domain: &DomainState) {
     let Some(quick_add) = model.quick_add.as_ref() else {
         return;
@@ -2731,10 +2779,12 @@ fn refresh_quick_add_scope(model: &mut BoardModel, domain: &DomainState) {
         quick_add.title.value(),
         domain,
         quick_add.snapshot.as_ref().as_ref(),
-    )
-    .ok();
+    );
+    let Ok(lifted) = lifted else {
+        return;
+    };
     if let Some(quick_add) = model.quick_add.as_mut() {
-        quick_add.scope = lifted.and_then(|lifted| lifted.scope).unwrap_or(default);
+        quick_add.scope = lifted.scope.unwrap_or(default);
     }
 }
 
@@ -2821,7 +2871,8 @@ fn lift_quick_add_tokens(
                 let argument = quick_add_token_argument(&words, index);
                 scope = Some(match argument {
                     Some(path) => {
-                        let resolved = crate::scope::resolve_project_path(path, domain, snapshot);
+                        let resolved = crate::scope::resolve_project_path(path, domain, snapshot)
+                            .map_err(|error| error.message(path))?;
                         if domain.is_project_archived(&resolved) {
                             return Err(format!(
                                 "project {} is archived",

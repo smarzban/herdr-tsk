@@ -118,6 +118,211 @@ mod tests {
         );
         let _ = fs::remove_dir_all(root);
     }
+
+    #[test]
+    fn bare_project_names_resolve_once_or_refuse_unknown_and_ambiguous() {
+        let mut domain = DomainState::new();
+        for path in ["/a/Atlas", "/b/atlas"] {
+            domain
+                .create(
+                    "fixture",
+                    None,
+                    TaskScope::Project { path: path.into() },
+                    crate::domain::ProvenanceOrigin::Manual,
+                    None,
+                )
+                .expect("create project fixture");
+        }
+
+        assert_eq!(
+            resolve_project_path("missing", &domain, None),
+            Err(ProjectResolveError::Unknown)
+        );
+        assert_eq!(
+            resolve_project_path("ATLAS", &domain, None),
+            Err(ProjectResolveError::Ambiguous(vec![
+                "/a/Atlas".into(),
+                "/b/atlas".into()
+            ]))
+        );
+        let snapshot = InvocationSnapshot {
+            default_scope: TaskScope::Global,
+            this_repo: Some(PathBuf::from("/0/atlas")),
+            title_prefill: None,
+            provenance: crate::domain::ProvenanceOrigin::Capture,
+        };
+        assert_eq!(
+            resolve_project_path("atlas", &domain, Some(&snapshot)),
+            Err(ProjectResolveError::Ambiguous(vec![
+                "/0/atlas".into(),
+                "/a/Atlas".into(),
+                "/b/atlas".into()
+            ])),
+            "ambiguous candidates stay sorted across stored and invocation sources"
+        );
+    }
+
+    #[test]
+    fn path_tokens_require_an_absolute_existing_directory() {
+        let root = std::env::temp_dir().join(format!(
+            "tsk-project-resolution-{}-{}",
+            std::process::id(),
+            TEMP_SEQ.fetch_add(1, Ordering::Relaxed)
+        ));
+        let project = root.join("project");
+        fs::create_dir_all(&project).expect("project directory");
+        let missing = root.join("missing").to_string_lossy().into_owned();
+        let domain = DomainState::new();
+
+        assert_eq!(
+            resolve_project_path("relative/project", &domain, None),
+            Err(ProjectResolveError::NoDirectory("relative/project".into()))
+        );
+        assert_eq!(
+            resolve_project_path(&missing, &domain, None),
+            Err(ProjectResolveError::NoDirectory(missing))
+        );
+        assert_eq!(
+            resolve_project_path(&project.to_string_lossy(), &domain, None),
+            Ok(project.to_string_lossy().into_owned())
+        );
+        assert_eq!(
+            expand_home_from("~/repo", Some(std::ffi::OsStr::new("/home/example"))),
+            "/home/example/repo"
+        );
+        assert_eq!(
+            expand_home_from("~//repo", Some(std::ffi::OsStr::new("/home/example"))),
+            "/home/example/repo",
+            "redundant separators must not replace the HOME prefix"
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn equivalent_absolute_path_keeps_the_stored_project_spelling() {
+        let root = std::env::temp_dir().join(format!(
+            "tsk-project-alias-{}-{}",
+            std::process::id(),
+            TEMP_SEQ.fetch_add(1, Ordering::Relaxed)
+        ));
+        let project = root.join("project");
+        let stored_alias = root.join("z-alias");
+        let invocation_alias = root.join("a-alias");
+        fs::create_dir_all(&project).expect("project directory");
+        symlink(&project, &stored_alias).expect("stored project alias");
+        symlink(&project, &invocation_alias).expect("invocation project alias");
+        let stored = stored_alias.to_string_lossy().into_owned();
+        let invocation = invocation_alias.to_string_lossy().into_owned();
+        let mut domain = DomainState::new();
+        domain
+            .create(
+                "stored fixture",
+                None,
+                TaskScope::Project {
+                    path: stored.clone(),
+                },
+                crate::domain::ProvenanceOrigin::Manual,
+                None,
+            )
+            .expect("create stored project fixture");
+        let snapshot = InvocationSnapshot {
+            default_scope: TaskScope::Global,
+            this_repo: Some(invocation_alias),
+            title_prefill: None,
+            provenance: crate::domain::ProvenanceOrigin::Capture,
+        };
+
+        assert_eq!(
+            resolve_project_path(&project.to_string_lossy(), &domain, Some(&snapshot)),
+            Ok(stored.clone()),
+            "a stored identity wins over an equivalent invocation candidate"
+        );
+
+        domain
+            .create(
+                "second stored fixture",
+                None,
+                TaskScope::Project { path: invocation },
+                crate::domain::ProvenanceOrigin::Manual,
+                None,
+            )
+            .expect("create second stored project fixture");
+        assert_eq!(
+            resolve_project_path(&stored, &domain, Some(&snapshot)),
+            Ok(stored),
+            "an exact stored spelling wins among equivalent stored aliases"
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn bare_project_name_dedupes_equivalent_stored_and_invocation_aliases() {
+        let root = std::env::temp_dir().join(format!(
+            "tsk-project-bare-alias-{}-{}",
+            std::process::id(),
+            TEMP_SEQ.fetch_add(1, Ordering::Relaxed)
+        ));
+        let project = root.join("project");
+        let stored_parent = root.join("stored");
+        let invocation_parent = root.join("invocation");
+        fs::create_dir_all(&project).expect("project directory");
+        fs::create_dir(&stored_parent).expect("stored parent");
+        fs::create_dir(&invocation_parent).expect("invocation parent");
+        let stored_alias = stored_parent.join("widget");
+        let invocation_alias = invocation_parent.join("widget");
+        symlink(&project, &stored_alias).expect("stored project alias");
+        symlink(&project, &invocation_alias).expect("invocation project alias");
+        let stored = stored_alias.to_string_lossy().into_owned();
+        let mut domain = DomainState::new();
+        domain
+            .create(
+                "stored fixture",
+                None,
+                TaskScope::Project {
+                    path: stored.clone(),
+                },
+                crate::domain::ProvenanceOrigin::Manual,
+                None,
+            )
+            .expect("create stored project fixture");
+        let snapshot = InvocationSnapshot {
+            default_scope: TaskScope::Global,
+            this_repo: Some(invocation_alias),
+            title_prefill: None,
+            provenance: crate::domain::ProvenanceOrigin::Capture,
+        };
+
+        assert_eq!(
+            resolve_project_path("widget", &domain, Some(&snapshot)),
+            Ok(stored),
+            "equivalent aliases are one project identity"
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+}
+
+/// Why a user-supplied project token cannot identify a capture destination.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProjectResolveError {
+    /// A bare basename matches no known project.
+    Unknown,
+    /// A bare basename matches more than one known project, in sorted path order.
+    Ambiguous(Vec<String>),
+    /// A path token is relative or does not name an existing directory.
+    NoDirectory(String),
+}
+
+impl ProjectResolveError {
+    /// Human-facing refusal text. CLI callers add the stable `unknown-project` code.
+    pub fn message(&self, token: &str) -> String {
+        match self {
+            Self::Unknown => format!("project {token} is not on the board"),
+            Self::Ambiguous(paths) => {
+                format!("project {token} is ambiguous: {}", paths.join(", "))
+            }
+            Self::NoDirectory(path) => format!("no directory at {path}"),
+        }
+    }
 }
 
 /// Resolve command-line project/global scope flags with the same default and basename
@@ -127,21 +332,48 @@ pub fn resolve_flag_scope(
     global: bool,
     domain: &DomainState,
     snapshot: &InvocationSnapshot,
-) -> TaskScope {
+) -> Result<TaskScope, ProjectResolveError> {
     match project {
-        Some(project) => TaskScope::Project {
-            path: resolve_project_path(project, domain, Some(snapshot)),
-        },
-        None if global => TaskScope::Global,
-        None => snapshot.default_scope.clone(),
+        Some(project) => resolve_project_path(project, domain, Some(snapshot))
+            .map(|path| TaskScope::Project { path }),
+        None if global => Ok(TaskScope::Global),
+        None => Ok(snapshot.default_scope.clone()),
     }
 }
 
-/// Resolve a project token against task and invocation project paths.
+/// Resolve a project token against task, registered-project, and invocation paths.
 ///
-/// A token containing a slash remains verbatim. Otherwise, a unique ASCII-case-insensitive
-/// basename match wins; missing or ambiguous matches remain verbatim.
+/// Bare tokens must have one ASCII-case-insensitive basename match. Path tokens must be
+/// absolute existing directories; `~/…` expands through `HOME`. An equivalent stored path
+/// wins over a new spelling so capture never rewrites an existing project identity.
 pub fn resolve_project_path(
+    token: &str,
+    domain: &DomainState,
+    snapshot: Option<&InvocationSnapshot>,
+) -> Result<String, ProjectResolveError> {
+    let candidates = project_candidates(domain, snapshot);
+    if token.contains('/') || token == "~" {
+        let expanded = expand_home(token);
+        let path = Path::new(&expanded);
+        if !path.is_absolute() || !path.is_dir() {
+            return Err(ProjectResolveError::NoDirectory(expanded));
+        }
+        return Ok(candidates
+            .preferred_equivalent(&expanded)
+            .unwrap_or(expanded));
+    }
+
+    let matches = candidates.basename_matches(token);
+    match matches.as_slice() {
+        [path] => Ok(path.clone()),
+        [] => Err(ProjectResolveError::Unknown),
+        _ => Err(ProjectResolveError::Ambiguous(matches)),
+    }
+}
+
+/// Resolve with the pre-T82 permissive rules used by read and project archive verbs.
+/// Slash paths stay literal, and missing or ambiguous bare names stay literal.
+pub(crate) fn resolve_permissive_project_path(
     token: &str,
     domain: &DomainState,
     snapshot: Option<&InvocationSnapshot>,
@@ -149,22 +381,9 @@ pub fn resolve_project_path(
     if token.contains('/') {
         return token.to_string();
     }
-
-    let mut candidates = BTreeSet::new();
-    for task in domain.tasks() {
-        if let TaskScope::Project { path } = &task.scope {
-            candidates.insert(path.clone());
-        }
-    }
-    // Archived projects keep resolvable names even when every task of theirs is
-    // hidden, so `!p name` can address them for refusals and unarchive flows.
-    for path in domain.projects().keys() {
-        candidates.insert(path.clone());
-    }
+    let mut candidates = stored_project_paths(domain);
     if let Some(snapshot) = snapshot {
-        // An outside-Git candidate fills board slot 2 but is not a basename alias. Adding
-        // it here could make an existing stored project ambiguous and persist the bare token.
-        // Its exact path remains addressable because slash-containing tokens stay verbatim.
+        // Outside Git, the invocation directory was not historically a basename alias.
         if let TaskScope::Project { path } = &snapshot.default_scope {
             candidates.insert(path.clone());
             if let Some(this_repo) = snapshot.this_repo.as_deref() {
@@ -172,15 +391,114 @@ pub fn resolve_project_path(
             }
         }
     }
-
-    let mut matches = candidates.into_iter().filter(|path| {
-        path.trim_end_matches('/')
-            .rsplit('/')
-            .find(|component| !component.is_empty())
-            .is_some_and(|basename| basename.eq_ignore_ascii_case(token))
-    });
+    let mut matches = candidates
+        .into_iter()
+        .filter(|path| basename_matches(path, token));
     match (matches.next(), matches.next()) {
         (Some(path), None) => path,
         _ => token.to_string(),
     }
+}
+
+struct ProjectCandidates {
+    stored: BTreeSet<String>,
+    invocation: BTreeSet<String>,
+}
+
+impl ProjectCandidates {
+    fn preferred_equivalent(&self, path: &str) -> Option<String> {
+        // Existing persisted identity wins over transient invocation spellings. Within each
+        // source, honor an exact spelling before considering canonical aliases.
+        for candidates in [&self.stored, &self.invocation] {
+            if let Some(exact) = candidates
+                .iter()
+                .find(|candidate| trim(candidate) == trim(path))
+            {
+                return Some(exact.clone());
+            }
+            if let Some(equivalent) = candidates
+                .iter()
+                .find(|candidate| paths_equivalent(candidate, path))
+            {
+                return Some(equivalent.clone());
+            }
+        }
+        None
+    }
+
+    fn basename_matches(&self, token: &str) -> Vec<String> {
+        let mut matches = Vec::<String>::new();
+        for candidate in self.stored.iter().chain(&self.invocation) {
+            if basename_matches(candidate, token)
+                && !matches
+                    .iter()
+                    .any(|matched| paths_equivalent(matched, candidate))
+            {
+                matches.push(candidate.clone());
+            }
+        }
+        matches.sort();
+        matches
+    }
+}
+
+fn project_candidates(
+    domain: &DomainState,
+    snapshot: Option<&InvocationSnapshot>,
+) -> ProjectCandidates {
+    let stored = stored_project_paths(domain);
+    let mut invocation = BTreeSet::new();
+    if let Some(snapshot) = snapshot {
+        if let TaskScope::Project { path } = &snapshot.default_scope {
+            invocation.insert(path.clone());
+        }
+        if let Some(this_repo) = snapshot.this_repo.as_deref() {
+            invocation.insert(this_repo.to_string_lossy().into_owned());
+        }
+    }
+    ProjectCandidates { stored, invocation }
+}
+
+fn stored_project_paths(domain: &DomainState) -> BTreeSet<String> {
+    let mut paths = BTreeSet::new();
+    for task in domain.tasks() {
+        if let TaskScope::Project { path } = &task.scope {
+            paths.insert(path.clone());
+        }
+    }
+    // Archived projects keep resolvable names even when every task of theirs is hidden.
+    paths.extend(domain.projects().keys().cloned());
+    paths
+}
+
+fn basename_matches(path: &str, token: &str) -> bool {
+    path.trim_end_matches('/')
+        .rsplit('/')
+        .find(|component| !component.is_empty())
+        .is_some_and(|basename| basename.eq_ignore_ascii_case(token))
+}
+
+fn expand_home(token: &str) -> String {
+    let home = std::env::var_os("HOME");
+    expand_home_from(token, home.as_deref())
+}
+
+fn expand_home_from(token: &str, home: Option<&std::ffi::OsStr>) -> String {
+    let remainder = if token == "~" {
+        Some("")
+    } else {
+        token.strip_prefix("~/")
+    };
+    let Some(remainder) = remainder else {
+        return token.to_string();
+    };
+    let Some(home) = home else {
+        return token.to_string();
+    };
+    let mut expanded = PathBuf::from(home);
+    let remainder = remainder.trim_start_matches('/');
+    if !remainder.is_empty() {
+        expanded.push(remainder);
+    }
+    expanded.to_string_lossy().into_owned()
 }

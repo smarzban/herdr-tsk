@@ -1040,7 +1040,7 @@ fn t64_ctrl_q_quits_every_non_editor_mode_and_stays_inert_in_editors_and_recover
         BoardInputMode::EditNotes,
         BoardInputMode::EditStep,
         BoardInputMode::EditThread,
-        BoardInputMode::ProjectsSearch,
+        BoardInputMode::Search,
         BoardInputMode::QuickAdd,
         BoardInputMode::Palette,
         BoardInputMode::SaveRecovery,
@@ -1122,7 +1122,7 @@ fn t64_root_esc_quits_on_each_navigation_tab_without_resetting_it() {
         assert_eq!(model.popup(), BoardPopup::None, "{tab:?}");
         assert_eq!(model.command_surface(), CommandSurface::None, "{tab:?}");
         assert_eq!(model.detail_open(), None, "{tab:?}");
-        assert_eq!(model.projects_query(), "", "{tab:?}");
+        assert_eq!(model.search_query(), "", "{tab:?}");
         assert!(!model.inbox_header_selected(), "{tab:?}");
         assert!(!model.archived_header_selected(), "{tab:?}");
         assert!(!model.focus_is_archived(), "{tab:?}");
@@ -1471,6 +1471,19 @@ fn help_card_lists_every_binding_scrolls_and_closes_on_esc() {
     assert_eq!(model.help_query(), "");
 
     let lines = tsk_tui::ui::input::help_card_lines();
+    assert_eq!(
+        lines
+            .iter()
+            .filter(|line| line.split_whitespace().next() == Some("/"))
+            .count(),
+        1,
+        "Help must list the board search binding exactly once:\n{}",
+        lines.join("\n")
+    );
+    assert!(
+        lines.iter().all(|line| !line.contains("search projects")),
+        "Help must not retain the Projects-only search label"
+    );
     let bindings = normal_help_bindings();
     assert!(
         !bindings.is_empty(),
@@ -1729,10 +1742,7 @@ fn help_card_lists_every_binding_scrolls_and_closes_on_esc() {
             BoardInputMode::ListPicker,
             BoardIntent::ListPickerQueryInsert('?'),
         ),
-        (
-            BoardInputMode::ProjectsSearch,
-            BoardIntent::ProjectsQueryInsert('?'),
-        ),
+        (BoardInputMode::Search, BoardIntent::SearchQueryInsert('?')),
     ] {
         assert_eq!(
             map_key(mode, press(KeyCode::Char('?'))),
