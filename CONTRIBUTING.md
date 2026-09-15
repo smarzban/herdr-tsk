@@ -47,7 +47,8 @@ Run one suite with `cargo test --test integration cli_edit::`. Add new root-leve
 files to that harness; automatic target discovery is disabled and a layout test checks
 that no suite is omitted. Suites that mutate the process environment or working directory
 keep separate targets to preserve isolation. The ignored frame-time benchmark also keeps
-its `queue_board_bench` target.
+its `queue_board_bench` target. The site's `demo_parity` reference generator has a dedicated
+target too, so `npm run parity:reference` does not compile unrelated integration suites.
 
 Regenerate board goldens with:
 

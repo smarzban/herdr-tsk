@@ -78,7 +78,8 @@ same PR, never leave them apart.
   `target/` lock. Wait, do not kill a process you did not start.
 - Integration suites share `tests/integration.rs`; run one with
   `cargo test --test integration <module>::`. Six process-state-mutating suites retain
-  dedicated targets, as does `queue_board_bench`. `autotests = false` prevents duplicate
+  dedicated targets, as do `queue_board_bench` and the site's `demo_parity` reference
+  generator (so parity jobs do not compile unrelated suites). `autotests = false` prevents duplicate
   binaries: register new suites in the shared harness (or an explicit `[[test]]` when
   isolation is necessary). The layout regression test checks every root suite is registered.
 - For a targeted run use `--lib` or `--test <name>`; `cargo test <filter>` still compiles

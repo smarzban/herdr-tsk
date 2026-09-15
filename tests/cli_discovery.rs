@@ -57,7 +57,7 @@ fn integration_suites_are_registered_once_with_bounded_binary_count() {
     );
     let targets = manifest["test"].as_array_of_tables().unwrap();
     assert!(
-        targets.len() <= 8,
+        targets.len() <= 9,
         "keep the integration binary count bounded"
     );
     let mut registered = BTreeSet::new();
@@ -78,6 +78,19 @@ fn integration_suites_are_registered_once_with_bounded_binary_count() {
             "{suite} mutates process state and needs its own executable"
         );
     }
+    assert!(
+        registered.contains("tests/demo_parity.rs"),
+        "parity references must not compile the aggregate integration harness"
+    );
+    let package: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(root.join("site/package.json")).unwrap()).unwrap();
+    assert!(
+        package["scripts"]["parity:reference"]
+            .as_str()
+            .unwrap()
+            .contains("--test demo_parity -- --ignored"),
+        "the parity workflow must use the dedicated generator target"
+    );
     let harness = fs::read_to_string(root.join("tests/integration.rs")).unwrap();
     for line in harness.lines() {
         if let Some(module) = line.strip_prefix("mod ").and_then(|s| s.strip_suffix(';')) {

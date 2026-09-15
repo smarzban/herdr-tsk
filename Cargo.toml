@@ -41,6 +41,11 @@ path = "tests/starter_guides.rs"
 name = "update_notice"
 path = "tests/update_notice.rs"
 
+# The site generates references without compiling unrelated integration suites.
+[[test]]
+name = "demo_parity"
+path = "tests/demo_parity.rs"
+
 [[test]]
 name = "queue_board_bench"
 path = "tests/queue_board_bench.rs"
