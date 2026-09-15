@@ -252,12 +252,21 @@ pub fn run(input: ListInput) -> Result<ListResult, ListError> {
         });
     }
     let scope = (!input.all).then(|| {
-        resolve_flag_scope(
+        match resolve_flag_scope(
             input.project.as_deref(),
             input.global,
             &domain,
             &snapshot_from_env(),
-        )
+        ) {
+            Ok(scope) => scope,
+            // Reads remain permissive: an unknown `-p` selects an empty lexical scope.
+            Err(_) => TaskScope::Project {
+                path: input
+                    .project
+                    .clone()
+                    .expect("only an explicit project token can fail resolution"),
+            },
+        }
     });
     let view = if input.deleted {
         ListView::Deleted

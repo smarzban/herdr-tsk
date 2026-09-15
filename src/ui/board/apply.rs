@@ -2527,8 +2527,8 @@ pub(super) const ROW_DOUBLE_CLICK_WINDOW: std::time::Duration =
 ///
 /// The row names where Enter will save (`Add to desk` / `Add to <project>`), so every
 /// buffer change re-lifts the tokens: an override applies the moment it is typed and
-/// reverts the moment it is deleted. A malformed `!p` (an archived project) leaves the
-/// last good destination painted; the save itself refuses with the same words.
+/// reverts the moment it is deleted. An invalid `!p` leaves the last good destination
+/// painted; the save itself refuses with the same words.
 fn refresh_quick_add_scope(model: &mut BoardModel, domain: &DomainState) {
     let Some(quick_add) = model.quick_add.as_ref() else {
         return;
@@ -2538,10 +2538,12 @@ fn refresh_quick_add_scope(model: &mut BoardModel, domain: &DomainState) {
         quick_add.title.value(),
         domain,
         quick_add.snapshot.as_ref().as_ref(),
-    )
-    .ok();
+    );
+    let Ok(lifted) = lifted else {
+        return;
+    };
     if let Some(quick_add) = model.quick_add.as_mut() {
-        quick_add.scope = lifted.and_then(|lifted| lifted.scope).unwrap_or(default);
+        quick_add.scope = lifted.scope.unwrap_or(default);
     }
 }
 
@@ -2628,7 +2630,8 @@ fn lift_quick_add_tokens(
                 let argument = quick_add_token_argument(&words, index);
                 scope = Some(match argument {
                     Some(path) => {
-                        let resolved = crate::scope::resolve_project_path(path, domain, snapshot);
+                        let resolved = crate::scope::resolve_project_path(path, domain, snapshot)
+                            .map_err(|error| error.message(path))?;
                         if domain.is_project_archived(&resolved) {
                             return Err(format!(
                                 "project {} is archived",

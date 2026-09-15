@@ -52,8 +52,8 @@ Buy coffee !p
 | Token | Destination or thread |
 | --- | --- |
 | `!p` | Desk |
-| `!p name` | Project matching that basename, ignoring case |
-| `!p /path` | Project at that path |
+| `!p name` | Existing project uniquely matching that basename, ignoring case |
+| `!p /path` | Existing absolute directory, creating a project there if needed |
 | `!t` | No thread |
 | `!t name` | Named thread |
 
@@ -61,7 +61,9 @@ Each token takes one whitespace-separated argument. Put bare `!p` or `!t` at the
 
 Tokens are removed from the saved title. Remaining words are joined with single spaces. A title is required.
 
-A missing or ambiguous project name is kept as typed. Check spelling; use `tsk list --all --json` to find tasks filed under an unexpected project.
+A bare project name must match exactly one task scope, registered project, or invocation directory. A missing or ambiguous name leaves the draft open and names the problem.
+
+Use an absolute existing directory (`/…` or `~/…`) to create a new project destination. Relative paths and paths that are not directories leave the draft open; the destination row keeps showing the last valid destination.
 
 ## Thread names
 

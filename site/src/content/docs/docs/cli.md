@@ -72,11 +72,11 @@ Without a scope flag, `add` and filtered `list` use the launch repository inside
 | Flag | Scope |
 | --- | --- |
 | `--desk` | Desk |
-| `-p name` / `--project name` | Project matching that basename, ignoring case |
-| `-p /path` | Project path |
+| `-p name` / `--project name` | Existing project uniquely matching that basename, ignoring case |
+| `-p /path` | Existing absolute directory, creating a project there if needed |
 | `--all` on list | All scopes |
 
-A missing or ambiguous basename stays as typed. A typo can create a separate scope. Check with `tsk list --all --json`.
+For adds, a bare project name must match exactly one task scope, registered project, or invocation directory. Missing and ambiguous names refuse. A new project destination requires an existing absolute directory (`/…` or `~/…`); relative and nonexistent paths refuse. Project-filtered reads remain permissive, so `tsk list -p typo` returns an empty list.
 
 ## add
 
@@ -347,7 +347,7 @@ After an uncertain add, inspect `tsk list --all --json`. Also check `--done` and
 
 | Command | Refusal codes |
 | --- | --- |
-| Add | `empty-title`, `invalid-title`, `invalid-thread`, `invalid-item`, `project-archived` |
+| Add | `empty-title`, `invalid-title`, `invalid-thread`, `invalid-item`, `unknown-project`, `project-archived` |
 | Steps | `empty-step-text`, `invalid-step-text`, `unknown-task`, `soft-deleted-task`, `unknown-step`, `ambiguous-step` |
 | Status | `unknown-task`, `soft-deleted-task` |
 | Edit | `unknown-task`, `soft-deleted-task`, `empty-title`, `invalid-title` |
@@ -355,7 +355,7 @@ After an uncertain add, inspect `tsk list --all --json`. Also check `--done` and
 
 A refusal prints as `tsk <command>: <code>: <message>` on stderr, for example `tsk status: unknown-task: T99 is not on the board`. Branch on the code; the message is for people and may change.
 
-Invalid thread flags fail argument parsing with exit 2; an invalid thread in a JSON plan is an item refusal with exit 1. An archived-project refusal saves nothing for that item; other valid plan items can still save.
+Invalid thread flags fail argument parsing with exit 2; an invalid thread in a JSON plan is an item refusal with exit 1. Unknown or archived project refusals save nothing for that item; other valid plan items can still save.
 
 Human-readable output escapes stored terminal control characters. JSON retains the underlying text.
 

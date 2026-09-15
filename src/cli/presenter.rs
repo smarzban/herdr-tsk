@@ -171,6 +171,7 @@ pub fn add_help() -> CliOutput {
             "invalid-title".into(),
             "invalid-thread (JSON plan)".into(),
             "invalid-item (JSON plan)".into(),
+            "unknown-project".into(),
             "project-archived".into(),
         ],
         exit: exit_line("every item was created or already existed", Some("one or more items refused, retry failed only"), true),
@@ -1253,6 +1254,9 @@ pub fn list_rejected(error: ListError, terminal_width: Option<usize>) -> CliOutp
 
 pub fn rejected(error: AddError) -> CliOutput {
     let (detail, code) = match &error {
+        AddError::UnknownProject(detail) => {
+            (format!("unknown-project: {}", terminal_text(detail)), 1)
+        }
         AddError::ProjectArchived(name) => {
             let name = terminal_text(name);
             (
