@@ -1,7 +1,7 @@
 ---
 name: tsk-cli
 description: Work the user's tsk task board from the command line. Use when asked to add, update, edit, start, block, finish, archive, or restore a task on the board (or "tsk", "the tsk board", "the desk"), to add or tick steps, to answer "what's on the board", "what's next", "what's on deck", "what needs me", or to refine a task ("refine T12", "let's discuss T12", "what's missing from T12", "improve / rewrite this task"). Always `tsk add|list|status|edit|steps|archive|trash`, never the TUI.
-version: 1.2.0
+version: 1.3.0
 ---
 
 # tsk: the user's task board
@@ -40,9 +40,10 @@ New tasks start `open` in the inbox; `ready` means the user picked it.
 1. **Human status is the user's.** When your work on a task is finished, set `review`. Set
    `done` only when the user says the task is done or told you to close it. Never mark tasks
    done from your own progress.
-2. **Check the scope before `-p name`.** A typo silently files the task under a new project.
-   Confirm with `tsk list --all --json` (the `project` field) when unsure. `tsk edit` cannot
-   move a task: re-add in the right scope and archive the stray.
+2. **Use a known project name or a full path.** A bare `-p name` must resolve to one existing
+   project; unknown or ambiguous names refuse. An existing absolute directory is the only way to
+   create a new project destination. `tsk edit` cannot move a task: re-add in the right scope and
+   archive the stray.
 3. **Read JSON, not presentation.** Always add `--json` to `tsk list`. Human output is for showing
    the user or troubleshooting interactively. Mutation acknowledgements may be human-only: trust
    the exit and refusal codes, then verify state with `tsk list … --json`.

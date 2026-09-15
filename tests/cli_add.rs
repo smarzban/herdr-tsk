@@ -725,6 +725,38 @@ fn flag_add_keeps_non_whitespace_notes_and_drops_whitespace_notes() {
 }
 
 #[test]
+fn flag_add_refuses_an_unknown_project_without_persisting() {
+    let _env = env_lock();
+    let dir = temp_state_dir("unknown-project");
+    let output = add(
+        &[
+            "tsk".into(),
+            "add".into(),
+            "--state-dir".into(),
+            state_dir_arg(&dir),
+            "-t".into(),
+            "misfiled task".into(),
+            "-p".into(),
+            "atlss".into(),
+        ],
+        true,
+    );
+
+    assert_eq!(output.code, 1, "{output:?}");
+    assert!(output.stdout.is_empty());
+    assert_eq!(
+        output.stderr,
+        "tsk add: unknown-project: project atlss is not on the board\n"
+    );
+    assert!(task_store(&dir)
+        .load()
+        .expect("load state")
+        .tasks()
+        .is_empty());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn flag_add_resolves_global_and_project_basename_scopes() {
     let _env = env_lock();
     let global_dir = temp_state_dir("global");
@@ -1278,6 +1310,12 @@ fn mixed_plan_exit_1_preserves_created_and_existing_rows_for_failed_only_retry()
 fn plan_marks_earlier_accepted_duplicate_as_existing_and_keeps_scopes_distinct() {
     let _env = env_lock();
     let dir = temp_state_dir("plan-duplicate");
+    let project = dir.join("widget");
+    std::fs::create_dir(&project).expect("create project directory");
+    let plan = format!(
+        r#"[{{"title":"same task","project":null}},{{"title":" same task ","project":null}},{{"title":"same task","project":{}}}]"#,
+        serde_json::to_string(&project).expect("serialize project path")
+    );
     let output = run_with(
         [
             "tsk",
@@ -1287,9 +1325,7 @@ fn plan_marks_earlier_accepted_duplicate_as_existing_and_keeps_scopes_distinct()
             "--file",
             "-",
         ],
-        Cursor::new(
-            r#"[{"title":"same task","project":null},{"title":" same task ","project":null},{"title":"same task","project":"/projects/widget"}]"#,
-        ),
+        Cursor::new(plan),
         true,
     );
 
@@ -1308,7 +1344,7 @@ fn plan_marks_earlier_accepted_duplicate_as_existing_and_keeps_scopes_distinct()
     assert_eq!(
         state.tasks()[1].scope,
         TaskScope::Project {
-            path: "/projects/widget".into()
+            path: project.to_string_lossy().into_owned()
         }
     );
 
@@ -1515,6 +1551,44 @@ fn plan_projects_and_item_validation_follow_the_contract() {
 }
 
 #[test]
+fn plan_unknown_project_refuses_only_that_item_and_persists_valid_siblings() {
+    let _env = env_lock();
+    let dir = temp_state_dir("plan-unknown-project");
+    let output = run_with(
+        [
+            "tsk",
+            "add",
+            "--state-dir",
+            &state_dir_arg(&dir),
+            "--file",
+            "-",
+        ],
+        Cursor::new(
+            r#"[{"title":"typo","project":"atlss"},{"title":"desk sibling","project":null}]"#,
+        ),
+        true,
+    );
+
+    assert_eq!(output.code, 1, "{output:?}");
+    let report: serde_json::Value = serde_json::from_str(&output.stdout).expect("plan report JSON");
+    assert_eq!(report["failed"].as_array().expect("failed").len(), 1);
+    assert_eq!(report["failed"][0]["i"], 0);
+    assert_eq!(report["failed"][0]["title"], "typo");
+    assert_eq!(report["failed"][0]["code"], "unknown-project");
+    assert_eq!(
+        report["failed"][0]["error"],
+        "project atlss is not on the board"
+    );
+    assert_eq!(report["created"].as_array().expect("created").len(), 1);
+    assert_eq!(report["created"][0]["title"], "desk sibling");
+    let state = task_store(&dir).load().expect("load state");
+    assert_eq!(state.tasks().len(), 1);
+    assert_eq!(state.tasks()[0].title, "desk sibling");
+    assert_eq!(state.tasks()[0].scope, TaskScope::Global);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn plan_project_string_uses_the_shared_basename_resolver() {
     let _env = env_lock();
     let dir = temp_state_dir("plan-project");
@@ -1561,6 +1635,12 @@ fn plan_project_string_uses_the_shared_basename_resolver() {
 fn plan_project_resolution_is_independent_of_item_order() {
     let _env = env_lock();
     let forward_dir = temp_state_dir("plan-project-order-forward");
+    let forward_project = forward_dir.join("new-widget");
+    std::fs::create_dir(&forward_project).expect("create forward project");
+    let forward_plan = format!(
+        r#"[{{"title":"explicit first","project":{}}},{{"title":"bare second","project":"new-widget"}}]"#,
+        serde_json::to_string(&forward_project).expect("serialize forward project")
+    );
     let forward = run_with(
         [
             "tsk",
@@ -1570,27 +1650,31 @@ fn plan_project_resolution_is_independent_of_item_order() {
             "--file",
             "-",
         ],
-        Cursor::new(
-            r#"[{"title":"explicit first","project":"/repos/Widget"},{"title":"bare second","project":"widget"}]"#,
-        ),
+        Cursor::new(forward_plan),
         true,
     );
-    assert_eq!(forward.code, 0);
+    assert_eq!(forward.code, 1, "{forward:?}");
+    let forward_report: serde_json::Value =
+        serde_json::from_str(&forward.stdout).expect("forward report");
+    assert_eq!(forward_report["created"][0]["i"], 0);
+    assert_eq!(forward_report["failed"][0]["i"], 1);
+    assert_eq!(forward_report["failed"][0]["code"], "unknown-project");
     let forward_state = task_store(&forward_dir).load().expect("load forward state");
+    assert_eq!(forward_state.tasks().len(), 1);
     assert_eq!(
         forward_state.tasks()[0].scope,
         TaskScope::Project {
-            path: "/repos/Widget".into()
-        }
-    );
-    assert_eq!(
-        forward_state.tasks()[1].scope,
-        TaskScope::Project {
-            path: "widget".into()
+            path: forward_project.to_string_lossy().into_owned()
         }
     );
 
     let reverse_dir = temp_state_dir("plan-project-order-reverse");
+    let reverse_project = reverse_dir.join("new-widget");
+    std::fs::create_dir(&reverse_project).expect("create reverse project");
+    let reverse_plan = format!(
+        r#"[{{"title":"bare first","project":"new-widget"}},{{"title":"explicit second","project":{}}}]"#,
+        serde_json::to_string(&reverse_project).expect("serialize reverse project")
+    );
     let reverse = run_with(
         [
             "tsk",
@@ -1600,23 +1684,21 @@ fn plan_project_resolution_is_independent_of_item_order() {
             "--file",
             "-",
         ],
-        Cursor::new(
-            r#"[{"title":"bare first","project":"widget"},{"title":"explicit second","project":"/repos/Widget"}]"#,
-        ),
+        Cursor::new(reverse_plan),
         true,
     );
-    assert_eq!(reverse.code, 0);
+    assert_eq!(reverse.code, 1, "{reverse:?}");
+    let reverse_report: serde_json::Value =
+        serde_json::from_str(&reverse.stdout).expect("reverse report");
+    assert_eq!(reverse_report["failed"][0]["i"], 0);
+    assert_eq!(reverse_report["failed"][0]["code"], "unknown-project");
+    assert_eq!(reverse_report["created"][0]["i"], 1);
     let reverse_state = task_store(&reverse_dir).load().expect("load reverse state");
+    assert_eq!(reverse_state.tasks().len(), 1);
     assert_eq!(
         reverse_state.tasks()[0].scope,
         TaskScope::Project {
-            path: "widget".into()
-        }
-    );
-    assert_eq!(
-        reverse_state.tasks()[1].scope,
-        TaskScope::Project {
-            path: "/repos/Widget".into()
+            path: reverse_project.to_string_lossy().into_owned()
         }
     );
 
@@ -1666,6 +1748,19 @@ fn flag_add_rejects_flag_like_item_values_without_persisting() {
 fn flag_add_equals_forms_allow_dash_leading_values() {
     let _env = env_lock();
     let dir = temp_state_dir("dash-leading-values");
+    let mut seeded = DomainState::new();
+    seeded
+        .create(
+            "project anchor",
+            None,
+            TaskScope::Project {
+                path: "/projects/-maintenance".into(),
+            },
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("create project anchor");
+    task_store(&dir).save(&seeded).expect("save project anchor");
     let output = add(
         &[
             "tsk".into(),
@@ -1682,13 +1777,13 @@ fn flag_add_equals_forms_allow_dash_leading_values() {
     assert_eq!(output.code, 0);
     assert_eq!(output.stdout, "added -fix parser\n");
     let state = task_store(&dir).load().expect("load state");
-    let task = &state.tasks()[0];
+    let task = &state.tasks()[1];
     assert_eq!(task.title, "-fix parser");
     assert_eq!(task.notes.as_deref(), Some("-5 degrees"));
     assert_eq!(
         task.scope,
         TaskScope::Project {
-            path: "-maintenance".into()
+            path: "/projects/-maintenance".into()
         }
     );
 
@@ -1768,6 +1863,9 @@ fn flag_add_rejects_flag_like_state_dir_and_file_values_without_mutating() {
 fn flag_add_json_reports_created_and_existing_resolved_tasks() {
     let _env = env_lock();
     let dir = temp_state_dir("json");
+    let project = dir.join("project");
+    std::fs::create_dir(&project).expect("create project directory");
+    let project_text = project.to_string_lossy().into_owned();
     let args = [
         "tsk".into(),
         "add".into(),
@@ -1777,7 +1875,7 @@ fn flag_add_json_reports_created_and_existing_resolved_tasks() {
         "-t".into(),
         "  json task  ".into(),
         "-p".into(),
-        "/projects/json".into(),
+        project_text.clone(),
     ];
 
     let created = add(&args, true);
@@ -1786,7 +1884,7 @@ fn flag_add_json_reports_created_and_existing_resolved_tasks() {
     let created: serde_json::Value = serde_json::from_str(&created.stdout).expect("created JSON");
     assert_eq!(created["outcome"], "created");
     assert_eq!(created["title"], "json task");
-    assert_eq!(created["project"], "/projects/json");
+    assert_eq!(created["project"], project_text);
     let id = created["id"].as_str().expect("created id").to_owned();
     assert_eq!(created.as_object().expect("created object").len(), 5);
 
@@ -1798,7 +1896,7 @@ fn flag_add_json_reports_created_and_existing_resolved_tasks() {
     assert_eq!(existing["outcome"], "existing");
     assert_eq!(existing["id"], id);
     assert_eq!(existing["title"], "json task");
-    assert_eq!(existing["project"], "/projects/json");
+    assert_eq!(existing["project"], project.to_string_lossy().as_ref());
     assert_eq!(existing.as_object().expect("existing object").len(), 5);
 
     let global = add(

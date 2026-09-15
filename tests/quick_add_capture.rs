@@ -242,6 +242,7 @@ fn non_git_desk_quick_add_stays_on_desk_until_the_directory_project_is_opened() 
 fn quick_add_project_token_overrides_the_selected_project() {
     let mut domain = DomainState::new();
     create_project_fixture(&mut domain, "/repos/project-x");
+    create_project_fixture(&mut domain, "/repos/project-z");
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/project-y")));
     model.set_selected_project(Some(PathBuf::from("/repos/project-x")));
     let mut snap = snapshot();
@@ -250,7 +251,7 @@ fn quick_add_project_token_overrides_the_selected_project() {
     };
 
     open(&mut domain, &mut model, &snap);
-    type_title(&mut domain, &mut model, "token wins !p /repos/project-z");
+    type_title(&mut domain, &mut model, "token wins !p project-z");
     assert_eq!(
         apply(&mut domain, &mut model, BoardIntent::QuickAddSave, None),
         IntentOutcome::Persist
@@ -452,48 +453,65 @@ fn invocation_default_scope_and_this_repo_are_project_candidates() {
 }
 
 #[test]
-fn unmatched_project_basename_stays_verbatim() {
+fn unmatched_project_basename_refuses_and_keeps_the_last_good_destination() {
     let mut domain = DomainState::new();
     let mut model = BoardModel::from_domain(&domain, None);
+    let snap = snapshot();
 
-    save_quick_add(&mut domain, &mut model, "unmatched task !p missing");
-    assert_eq!(
-        domain.tasks().last().expect("saved task").scope,
-        TaskScope::Project {
-            path: "missing".into()
-        }
+    open(&mut domain, &mut model, &snap);
+    apply(
+        &mut domain,
+        &mut model,
+        BoardIntent::QuickAddInsertText("unmatched task !p missing".into()),
+        None,
     );
+    let rows = render_rows(&model, 80, 24).join("\n");
+    assert!(rows.contains("add to invocation"), "{rows}");
+    assert!(!rows.contains("add to missing"), "{rows}");
+
+    assert_eq!(
+        apply(&mut domain, &mut model, BoardIntent::QuickAddSave, None),
+        IntentOutcome::None
+    );
+    assert_eq!(model.input_mode(), BoardInputMode::QuickAdd);
+    assert_eq!(model.quick_add_title_value(), "unmatched task !p missing");
+    assert_eq!(model.message(), Some("project missing is not on the board"));
+    assert!(domain.tasks().is_empty());
 }
 
 #[test]
-fn ambiguous_project_basename_stays_verbatim() {
+fn ambiguous_project_basename_refuses_and_names_sorted_candidates() {
     let mut domain = DomainState::new();
     create_project_fixture(&mut domain, "/work/one/shared");
     create_project_fixture(&mut domain, "/work/two/shared");
     let mut model = BoardModel::from_domain(&domain, None);
 
-    save_quick_add(&mut domain, &mut model, "ambiguous task !p shared");
+    open(&mut domain, &mut model, &snapshot());
+    type_title(&mut domain, &mut model, "ambiguous task !p shared");
     assert_eq!(
-        domain.tasks().last().expect("saved task").scope,
-        TaskScope::Project {
-            path: "shared".into()
-        }
+        apply(&mut domain, &mut model, BoardIntent::QuickAddSave, None),
+        IntentOutcome::None
     );
+    assert_eq!(
+        model.message(),
+        Some("project shared is ambiguous: /work/one/shared, /work/two/shared")
+    );
+    assert_eq!(domain.tasks().len(), 2, "the draft was not saved");
 }
 
 #[test]
-fn project_token_with_a_slash_stays_verbatim() {
+fn relative_project_path_refuses_without_saving() {
     let mut domain = DomainState::new();
-    create_project_fixture(&mut domain, "/work/tsk");
     let mut model = BoardModel::from_domain(&domain, None);
 
-    save_quick_add(&mut domain, &mut model, "explicit task !p elsewhere/tsk");
+    open(&mut domain, &mut model, &snapshot());
+    type_title(&mut domain, &mut model, "explicit task !p elsewhere/tsk");
     assert_eq!(
-        domain.tasks().last().expect("saved task").scope,
-        TaskScope::Project {
-            path: "elsewhere/tsk".into()
-        }
+        apply(&mut domain, &mut model, BoardIntent::QuickAddSave, None),
+        IntentOutcome::None
     );
+    assert_eq!(model.message(), Some("no directory at elsewhere/tsk"));
+    assert!(domain.tasks().is_empty());
 }
 
 #[test]
@@ -538,15 +556,20 @@ fn capture_bar_strips_bare_project_token_as_global_and_project_scope_tokens() {
     assert_eq!(domain.tasks()[0].title, "global task");
     assert_eq!(domain.tasks()[0].scope, TaskScope::Global);
 
+    let project_path = env!("CARGO_MANIFEST_DIR");
     open(&mut domain, &mut model, &snap);
-    type_title(&mut domain, &mut model, "project task !p /repos/other");
+    type_title(
+        &mut domain,
+        &mut model,
+        &format!("project task !p {project_path}"),
+    );
     apply(&mut domain, &mut model, BoardIntent::QuickAddSave, None);
     model.sync_from_domain(&domain);
     assert_eq!(domain.tasks()[1].title, "project task");
     assert_eq!(
         domain.tasks()[1].scope,
         TaskScope::Project {
-            path: "/repos/other".into()
+            path: project_path.into()
         }
     );
 
@@ -769,9 +792,10 @@ fn t_token_threads_while_hash_words_stay_title_text() {
 #[test]
 fn p_token_consumes_one_argument_and_leaves_later_words_in_the_title() {
     let mut domain = DomainState::new();
+    create_project_fixture(&mut domain, "/repos/one");
     let mut model = BoardModel::from_domain(&domain, None);
 
-    save_quick_add(&mut domain, &mut model, "ship !p /repos/one now");
+    save_quick_add(&mut domain, &mut model, "ship !p one now");
 
     let task = domain.tasks().last().expect("saved task");
     assert_eq!(task.title, "ship now");
@@ -805,18 +829,16 @@ fn bare_t_token_saves_unthreaded_and_strips() {
 #[test]
 fn t_and_p_tokens_combine_in_either_order() {
     let mut domain = DomainState::new();
+    create_project_fixture(&mut domain, "/repos/one");
+    create_project_fixture(&mut domain, "/repos/two");
     let mut model = BoardModel::from_domain(&domain, None);
 
-    save_quick_add(
-        &mut domain,
-        &mut model,
-        "first !p /repos/one !t Release-2026",
-    );
-    save_quick_add(&mut domain, &mut model, "second !t Other !p /repos/two");
+    save_quick_add(&mut domain, &mut model, "first !p one !t Release-2026");
+    save_quick_add(&mut domain, &mut model, "second !t Other !p two");
 
     for (task, title, path, thread) in [
-        (&domain.tasks()[0], "first", "/repos/one", "release-2026"),
-        (&domain.tasks()[1], "second", "/repos/two", "other"),
+        (&domain.tasks()[2], "first", "/repos/one", "release-2026"),
+        (&domain.tasks()[3], "second", "/repos/two", "other"),
     ] {
         assert_eq!(task.title, title);
         assert_eq!(task.scope, TaskScope::Project { path: path.into() });
@@ -909,6 +931,7 @@ fn malformed_t_token_keeps_quick_add_open_when_expanding() {
 #[test]
 fn draft_stash_round_trips_thread_through_tab_and_esc() {
     let mut domain = DomainState::new();
+    create_project_fixture(&mut domain, "/repos/draft");
     let mut model = BoardModel::from_domain(&domain, None);
     let snap = snapshot();
 
@@ -916,7 +939,7 @@ fn draft_stash_round_trips_thread_through_tab_and_esc() {
     type_title(
         &mut domain,
         &mut model,
-        "threaded details !p /repos/draft !t Release-2026",
+        "threaded details !p draft !t Release-2026",
     );
     apply(&mut domain, &mut model, BoardIntent::ExpandQuickAdd, None);
     for character in "preserved note".chars() {
@@ -931,7 +954,7 @@ fn draft_stash_round_trips_thread_through_tab_and_esc() {
     assert_eq!(model.input_mode(), BoardInputMode::QuickAdd);
     assert_eq!(
         model.quick_add_title_value(),
-        "threaded details !p /repos/draft !t Release-2026"
+        "threaded details !p draft !t Release-2026"
     );
 
     apply(&mut domain, &mut model, BoardIntent::ExpandQuickAdd, None);
@@ -1174,24 +1197,34 @@ fn capture_bar_renders_spaced_three_row_block_and_stays_bounded_without_color_sg
 
 #[test]
 fn p_token_naming_an_archived_project_refuses_on_the_open_line_and_clears_on_close() {
+    let archived_path = env!("CARGO_MANIFEST_DIR");
+    let archived_name = PathBuf::from(archived_path)
+        .file_name()
+        .expect("project basename")
+        .to_string_lossy()
+        .into_owned();
     let mut domain = DomainState::new();
     domain
         .create(
             "anchor",
             None,
             TaskScope::Project {
-                path: "/repos/other".into(),
+                path: archived_path.into(),
             },
             ProvenanceOrigin::Manual,
             None,
         )
         .expect("create anchor");
-    domain.archive_project("/repos/other").expect("archive");
+    domain.archive_project(archived_path).expect("archive");
     let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/invocation")));
     let snap = snapshot();
 
     open(&mut domain, &mut model, &snap);
-    type_title(&mut domain, &mut model, "ship it !p other");
+    type_title(
+        &mut domain,
+        &mut model,
+        &format!("ship it !p {archived_name}"),
+    );
     let tasks_before = domain.tasks().len();
 
     assert_eq!(
@@ -1206,7 +1239,7 @@ fn p_token_naming_an_archived_project_refuses_on_the_open_line_and_clears_on_clo
     );
     let message = model.message().expect("a refusal paints");
     assert!(
-        message.contains("other"),
+        message.contains(&archived_name),
         "the refusal names the project: {message:?}"
     );
     assert!(
@@ -1219,9 +1252,13 @@ fn p_token_naming_an_archived_project_refuses_on_the_open_line_and_clears_on_clo
     apply(&mut domain, &mut model, BoardIntent::CancelQuickAdd, None);
     assert_eq!(model.message(), None, "cancel clears the status slot");
 
-    // A verbatim path to the archived project behaves the same.
+    // An absolute path to the archived project behaves the same.
     open(&mut domain, &mut model, &snap);
-    type_title(&mut domain, &mut model, "ship it !p /repos/other");
+    type_title(
+        &mut domain,
+        &mut model,
+        &format!("ship it !p {archived_path}"),
+    );
     assert_eq!(
         apply(&mut domain, &mut model, BoardIntent::QuickAddSave, None),
         IntentOutcome::None
@@ -1230,7 +1267,7 @@ fn p_token_naming_an_archived_project_refuses_on_the_open_line_and_clears_on_clo
         .message()
         .expect("a refusal paints for the verbatim path");
     assert!(
-        message.contains("other") && message.contains("archived"),
+        message.contains(&archived_name) && message.contains("archived"),
         "{message:?}"
     );
     apply(&mut domain, &mut model, BoardIntent::CancelQuickAdd, None);
