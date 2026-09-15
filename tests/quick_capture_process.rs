@@ -12,6 +12,25 @@ use tsk_tui::reopen::ReopenRequest;
 use tsk_tui::store::TaskStore;
 
 #[test]
+fn t64_capture_ctrl_q_stays_inert_and_ctrl_c_still_exits_with_a_draft() {
+    let root = pty::scratch_root("t64-capture-quit-keys");
+    let cwd = root.join("outside");
+    fs::create_dir_all(&cwd).unwrap();
+    let store = TaskStore::new(root.join("state"));
+    let mut session = pty::Session::spawn(root, &cwd, &["capture"], &[], 24, 78);
+    session.output_until("cancel");
+    session.send(b"unsaved popup draft\t\t");
+    std::thread::sleep(Duration::from_millis(100));
+    // Step selection is CapturePage, not a text editor. Ctrl+Q must still do nothing.
+    session.send(b"\x11?");
+    session.output_until("search");
+    // The pre-existing Ctrl+C route from Help must still exit without saving the draft.
+    session.send(b"\x03");
+    assert!(session.wait_exit(Duration::from_secs(5)).success());
+    assert!(store.load().unwrap().tasks().is_empty());
+}
+
+#[test]
 fn capture_entrypoint_skips_launch_card_preserves_reopen_and_exits_on_escape() {
     let root = pty::scratch_root("capture");
     fs::create_dir_all(root.join("repo/.git")).unwrap();

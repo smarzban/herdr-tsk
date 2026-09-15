@@ -461,7 +461,10 @@ import { parseCapture } from "./capture.js";
   function stageLeft() {
     if (projectsOverview()) {
       if (state.stage === "rail") state.stage = "split";
-      else if (state.stage === "split") state.stage = "board";
+      else if (state.stage === "split") {
+        if (!previewHasUnsavedWork()) dropProjectPreview();
+        state.stage = "board";
+      }
       return;
     }
     if (state.stage === "split") state.stage = "board";
@@ -2356,9 +2359,11 @@ import { parseCapture } from "./capture.js";
     const context = previewOwnsFooter
       ? preview.message || preview.project || "project"
       : state.tab === "projects" && state.projectView === null
-        ? selectedRow()?.project
-          ? projectPath(selectedRow().project)
-          : "projects"
+        ? projectsPreviewActive() && preview.message
+          ? preview.message
+          : selectedRow()?.project
+            ? projectPath(selectedRow().project)
+            : "projects"
         : state.tab === "desk"
           ? "desk"
           : state.focusProject
@@ -2384,12 +2389,31 @@ import { parseCapture } from "./capture.js";
     const footer =
       state.overlay === "quick" && !state.quickExpanded
         ? `<div class="tsk-input-row"><span class="tsk-prompt">+</span><input class="tsk-field" id="tsk-add" value="${esc(state.draft)}" placeholder="title  ·  !p project  ·  !t thread" autocomplete="off" /><span class="cursor">█</span></div>
-           <div class="foot dim tsk-verbs">${state.refuse ? esc(state.refuse) : hintBar([{ id: "save", label: "enter save" }, { id: "details", label: "tab details" }, { id: "close", label: "esc close" }])}</div>`
+           <div class="foot dim tsk-verbs">${
+             state.refuse
+               ? esc(state.refuse)
+               : hintBar([
+                   { id: "save", label: "enter save" },
+                   { id: "details", label: "tab details" },
+                   { id: "close", label: "esc close" },
+                 ])
+           }</div>`
         : state.overlay === "quick"
-          ? `<div class="tsk-status-row"><span class="foot">expanded quick-add</span></div><div class="foot dim tsk-verbs">${state.refuse ? esc(state.refuse) : hintBar([{ id: "save-expanded", label: "ctrl+enter save" }, { id: "next-field", label: "tab next field" }, { id: "collapse", label: "esc one-line draft" }])}</div>`
+          ? `<div class="tsk-status-row"><span class="foot">expanded quick-add</span></div><div class="foot dim tsk-verbs">${
+              state.refuse
+                ? esc(state.refuse)
+                : hintBar([
+                    { id: "save-expanded", label: "ctrl+enter save" },
+                    { id: "next-field", label: "tab next field" },
+                    { id: "collapse", label: "esc one-line draft" },
+                  ])
+            }</div>`
           : state.overlay === "search"
             ? `<div class="tsk-input-row"><span class="tsk-prompt">/</span><input class="tsk-field" id="tsk-project-search" value="${esc(state.projectQuery)}" placeholder="search projects" autocomplete="off" /><span class="cursor">█</span></div>
-             <div class="foot dim tsk-verbs">${hintBar([{ id: "open", label: "enter open" }, { id: "close", label: "esc close" }])}</div>`
+             <div class="foot dim tsk-verbs">${hintBar([
+               { id: "open", label: "enter open" },
+               { id: "close", label: "esc close" },
+             ])}</div>`
             : `<div class="tsk-status-row"><button type="button" class="tsk-done-count foot" data-${previewOwnsFooter ? "preview-" : ""}drawer="1">${esc(context)}</button><span class="foot dim tsk-stage-hint">${esc(stageHint())}</span></div>
            <div class="foot dim tsk-verbs">${verbs}</div>
            ${state.copyNotice ? `<div class="foot dim">${esc(state.copyNotice)}</div>` : ""}`;
@@ -2405,6 +2429,8 @@ import { parseCapture } from "./capture.js";
     try {
       const rows = buildRows();
       ensureSelection(rows);
+      // Preview refusals belong to unresolved work, not the retained seat.
+      if (!previewHasUnsavedWork()) preview.message = "";
       const wide = isWideSplit();
       let html;
       if (wide && projectsOverview() && state.stage === "split") {
@@ -3254,7 +3280,13 @@ import { parseCapture } from "./capture.js";
         state.overlay = null;
         leaveTaskPage();
       } else if (state.peekId) state.peekId = null;
-      else if (state.focusProject) goTab("desk");
+      else if (wide && state.stage === "split") {
+        if (projectsOverview() && previewHasUnsavedWork())
+          preview.message = "save or cancel edits before switching tasks";
+        else stageLeft();
+      }
+      // The terminal exits at the full-board root on any tab. A browser demo has no
+      // process to exit, so release keyboard focus without changing the selected tab.
       else frame.blur();
       render();
       return;

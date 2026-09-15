@@ -466,6 +466,14 @@ fn run_board_loop(
             sync_frame_presentation(event_area, &model);
             match next {
                 Event::Key(key) if key.kind == KeyEventKind::Press => {
+                    // The board's new Ctrl+Q routes do not change the capture popup's keys.
+                    // In particular, keep its existing Ctrl+C cancellation/exit routes intact.
+                    if quick_capture
+                        && key.code == KeyCode::Char('q')
+                        && key.modifiers == KeyModifiers::CONTROL
+                    {
+                        continue;
+                    }
                     // A key while the mouse button is held abandons the deferred click so
                     // Up does not fire a stale peek/select after the keyboard moved on.
                     drag_gesture.clear();
@@ -1074,6 +1082,13 @@ fn board_keyboard_intent(
     mode: BoardInputMode,
     key: crossterm::event::KeyEvent,
 ) -> Option<BoardIntent> {
+    // Ctrl+Q belongs to the resolved surface before an open form can redirect input to its
+    // retained field mapper. Text editors and save recovery remain inert because `map_key`
+    // deliberately returns no Quit intent for those modes.
+    if key.code == KeyCode::Char('q') && key.modifiers == KeyModifiers::CONTROL {
+        return map_key(mode, key);
+    }
+
     // Allowlist, not a denylist: the form mapper owns the keyboard ONLY while the resolved
     // mode is genuinely one of the form's own field/dropdown states. `input_mode()` lets a
     // popup or command surface OUTRANK the form's mode (see its `match self.popup`), so an
@@ -1173,9 +1188,9 @@ pub fn apply_board_intent_with_save_recovery(
     };
     if recovery.is_pending() {
         match intent {
-            // Leaving the board resolves nothing and persists nothing, but the user must never
-            // be held in the session by an unresolved save.
-            BoardIntent::Quit => return Ok(IntentOutcome::Quit),
+            // A failed save must be resolved through Retry or Cancel. Ctrl+Q is unmapped in
+            // SaveRecovery, and a Help card opened over recovery cannot bypass that gate.
+            BoardIntent::Quit => return Ok(IntentOutcome::None),
             BoardIntent::RetrySave => {
                 // The mouse hands this intent in already resolved, so close the surface here
                 // exactly as the keyboard's ConfirmCommand route does.
@@ -1898,10 +1913,17 @@ fn dispatch_board_intent(
     quick_capture: bool,
 ) -> io::Result<bool> {
     let intent_for_preview = intent.clone();
+    // Quit belongs to the whole application, even when a focused preview supplied it.
+    // Its guard must see both the outer parked form and the nested preview's draft.
+    let target = if intent == BoardIntent::Quit {
+        BoardIntentTarget::Outer
+    } else {
+        route.target
+    };
     let quit = handle_board_intent(
         store,
         domain,
-        board_intent_target_mut(model, route.target),
+        board_intent_target_mut(model, target),
         intent,
         save_recovery,
         quick_capture,
@@ -1927,6 +1949,18 @@ fn handle_board_intent(
 ) -> io::Result<bool> {
     if let BoardIntent::CopyTaskNumber(id) = intent {
         copy_task_number(domain, model, id);
+        return Ok(false);
+    }
+
+    let quit_requested = intent == BoardIntent::Quit
+        || (intent == BoardIntent::CloseLayer && model.root_escape_requests_quit());
+    // Quick capture retains its existing Ctrl+C exit. Pending recovery owns refusals and
+    // its failure banner, so do not replace it with an ordinary dirty-edit message.
+    if !quick_capture
+        && !save_recovery.is_pending()
+        && quit_requested
+        && model.refuse_quit_with_unsaved_work()
+    {
         return Ok(false);
     }
 
@@ -3330,13 +3364,17 @@ mod tests {
         assert_eq!(routed.intent, BoardIntent::CloseLayer);
         assert_eq!(routed.target, BoardIntentTarget::Focused);
         assert!(routed.return_to_index);
-        apply_intent(
-            &mut domain,
-            board_intent_target_mut(&mut model, routed.target),
-            routed.intent,
-            None,
-        )
-        .expect("close the nested preview board");
+        assert_eq!(
+            apply_intent(
+                &mut domain,
+                board_intent_target_mut(&mut model, routed.target),
+                routed.intent,
+                None,
+            )
+            .expect("close the nested preview board"),
+            IntentOutcome::None,
+            "Esc leaves the preview, never the process"
+        );
         if routed.return_to_index {
             apply_intent(&mut domain, &mut model, BoardIntent::StageLeft, None)
                 .expect("return to index");
@@ -4692,6 +4730,809 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.dir);
         }
+    }
+
+    #[test]
+    fn t64_dirty_capture_and_parked_task_drafts_refuse_quit_at_the_app_boundary() {
+        let temp = TempStore::new("t64-dirty-quit");
+        let mut domain = DomainState::new();
+        domain
+            .create(
+                "park me",
+                None,
+                TaskScope::Global,
+                ProvenanceOrigin::Manual,
+                None,
+            )
+            .expect("task");
+        temp.store.save(&domain).expect("seed store");
+        let mut recovery = SaveRecovery::new();
+
+        let mut capture = BoardModel::from_domain(&domain, None);
+        apply_intent(&mut domain, &mut capture, BoardIntent::OpenCapture, None)
+            .expect("open capture");
+        apply_intent(
+            &mut domain,
+            &mut capture,
+            BoardIntent::QuickAddInsertText("captured draft".into()),
+            None,
+        )
+        .expect("type capture");
+        apply_intent(&mut domain, &mut capture, BoardIntent::ExpandQuickAdd, None)
+            .expect("expand capture");
+        assert!(capture.has_unsaved_work());
+        assert!(!handle_board_intent(
+            &temp.store,
+            &mut domain,
+            &mut capture,
+            BoardIntent::Quit,
+            &mut recovery,
+            false,
+        )
+        .expect("refuse capture quit"));
+        assert!(capture.board_form_open());
+        assert_eq!(
+            capture.message(),
+            Some("save or cancel edits before switching tasks")
+        );
+
+        let mut task = BoardModel::from_domain(&domain, None);
+        apply_intent(&mut domain, &mut task, BoardIntent::OpenTaskPage, None)
+            .expect("open task page");
+        apply_intent(&mut domain, &mut task, BoardIntent::BeginEditTitle, None)
+            .expect("edit title");
+        apply_intent(&mut domain, &mut task, BoardIntent::EditInsert('!'), None)
+            .expect("dirty title");
+        for _ in 0..8 {
+            if task.input_mode() == BoardInputMode::TaskPage {
+                break;
+            }
+            apply_intent(&mut domain, &mut task, BoardIntent::FormFocusNext, None)
+                .expect("park editor inside task page");
+        }
+        assert_eq!(task.input_mode(), BoardInputMode::TaskPage);
+        assert!(task.task_editing());
+        for _ in 0..3 {
+            apply_intent(&mut domain, &mut task, BoardIntent::StageLeft, None)
+                .expect("park page toward board");
+        }
+        assert_eq!(task.wide_stage(), crate::ui::tier::WideStage::FullBoard);
+        assert_eq!(task.input_mode(), BoardInputMode::Normal);
+        assert!(task.has_unsaved_work());
+        assert!(!handle_board_intent(
+            &temp.store,
+            &mut domain,
+            &mut task,
+            BoardIntent::CloseLayer,
+            &mut recovery,
+            false,
+        )
+        .expect("refuse root Esc"));
+        assert!(task.has_unsaved_work());
+        assert_eq!(
+            task.message(),
+            Some("save or cancel edits before switching tasks")
+        );
+    }
+
+    #[test]
+    fn t64_clean_parked_edit_quits_on_the_first_root_escape() {
+        let temp = TempStore::new("t64-clean-parked-quit");
+        let (mut domain, mut model) = board_with_one_task();
+        temp.store.save(&domain).expect("seed store");
+        apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+            .expect("begin unchanged edit");
+        for _ in 0..8 {
+            if model.input_mode() == BoardInputMode::TaskPage {
+                break;
+            }
+            apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
+                .expect("park text editor");
+        }
+        for _ in 0..3 {
+            apply_intent(&mut domain, &mut model, BoardIntent::StageLeft, None)
+                .expect("return to full board");
+        }
+        assert!(model.task_editing());
+        assert!(model.root_escape_requests_quit());
+        assert!(!model.has_unsaved_work());
+        assert!(handle_board_intent(
+            &temp.store,
+            &mut domain,
+            &mut model,
+            BoardIntent::CloseLayer,
+            &mut SaveRecovery::new(),
+            false,
+        )
+        .expect("first root Esc quits"));
+    }
+
+    #[test]
+    fn t64_ctrl_q_uses_non_editor_form_modes_before_the_form_mapper() {
+        let (mut domain, mut model) = board_with_one_task();
+        apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+            .expect("open task form");
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::FocusFormField(CaptureField::Scope),
+            None,
+        )
+        .expect("focus scope");
+        let ctrl_q = KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL);
+        assert_eq!(model.input_mode(), BoardInputMode::EditScope);
+        assert_eq!(
+            board_keyboard_intent(&model, model.input_mode(), ctrl_q),
+            Some(BoardIntent::Quit)
+        );
+
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::OpenFormScopeDropdown,
+            None,
+        )
+        .expect("open scope picker");
+        assert_eq!(model.input_mode(), BoardInputMode::FormScopeDropdown);
+        assert_eq!(
+            board_keyboard_intent(&model, model.input_mode(), ctrl_q),
+            Some(BoardIntent::Quit)
+        );
+
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::CancelFormScopeDropdown,
+            None,
+        )
+        .expect("close scope picker");
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::FocusFormField(CaptureField::Title),
+            None,
+        )
+        .expect("focus title editor");
+        assert_eq!(model.input_mode(), BoardInputMode::EditTitle);
+        assert_eq!(
+            board_keyboard_intent(&model, model.input_mode(), ctrl_q),
+            None
+        );
+    }
+
+    #[test]
+    fn t64_escape_closes_help_then_either_split_then_quits() {
+        for projects in [false, true] {
+            let temp = TempStore::new("t64-split-escape");
+            let (mut domain, mut model) = if projects {
+                projects_overview_fixture()
+            } else {
+                board_with_one_task()
+            };
+            temp.store.save(&domain).expect("seed store");
+            stage_right(&mut domain, &mut model, 1);
+            assert_eq!(model.wide_stage(), crate::ui::tier::WideStage::Split);
+            let tab = model.nav_tab();
+            apply_intent(&mut domain, &mut model, BoardIntent::OpenHelp, None)
+                .expect("Help above split");
+            let area = Rect::new(0, 0, 110, 30);
+            let mut recovery = SaveRecovery::new();
+            for press in 0..3 {
+                let mode = resolve_board_surface(area, &mut model);
+                let intent = board_keyboard_intent_for_area(
+                    &model,
+                    area,
+                    mode,
+                    KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+                )
+                .expect("Esc route");
+                let routed = route_board_intent(&model, intent);
+                let quit = dispatch_board_intent(
+                    &temp.store,
+                    &mut domain,
+                    &mut model,
+                    BoardDispatchRoute {
+                        area,
+                        target: routed.target,
+                    },
+                    routed.intent,
+                    &mut recovery,
+                    false,
+                )
+                .expect("dispatch Esc");
+                assert_eq!(quit, press == 2, "projects={projects}, press={press}");
+                assert_eq!(
+                    model.wide_stage(),
+                    if press == 0 {
+                        crate::ui::tier::WideStage::Split
+                    } else {
+                        crate::ui::tier::WideStage::FullBoard
+                    }
+                );
+                assert_eq!(model.nav_tab(), tab);
+                if projects && press == 1 {
+                    assert!(
+                        model.right_seat().is_none(),
+                        "collapsed preview stays closed after app sync"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn t64_narrowed_split_root_quits_without_collapsing_hidden_state() {
+        for projects in [false, true] {
+            for stages in 1..=if projects { 2 } else { 1 } {
+                for width in [78, 109] {
+                    for help in [false, true] {
+                        let temp = TempStore::new("t64-narrow-root");
+                        let (mut domain, mut model) = if projects {
+                            projects_overview_fixture()
+                        } else {
+                            board_with_one_task()
+                        };
+                        temp.store.save(&domain).unwrap();
+                        stage_right(&mut domain, &mut model, stages);
+                        sync_frame_presentation(Rect::new(0, 0, 110, 30), &model);
+                        assert!(model.frame_wide());
+                        let parked_stage = model.wide_stage();
+                        let tab = model.nav_tab();
+                        let area = Rect::new(0, 0, width, 30);
+                        sync_frame_presentation(area, &model);
+                        assert!(!model.frame_wide());
+                        assert_eq!(model.input_mode(), BoardInputMode::Normal);
+                        if help {
+                            apply_intent(&mut domain, &mut model, BoardIntent::OpenHelp, None)
+                                .unwrap();
+                        }
+                        for press in 0..=usize::from(help) {
+                            let mode = resolve_board_surface(area, &mut model);
+                            let intent = board_keyboard_intent_for_area(
+                                &model,
+                                area,
+                                mode,
+                                KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+                            )
+                            .unwrap();
+                            let routed = route_board_intent(&model, intent);
+                            let quit = dispatch_board_intent(
+                                &temp.store,
+                                &mut domain,
+                                &mut model,
+                                BoardDispatchRoute {
+                                    area,
+                                    target: routed.target,
+                                },
+                                routed.intent,
+                                &mut SaveRecovery::new(),
+                                false,
+                            )
+                            .unwrap();
+                            assert_eq!(quit, press == usize::from(help), "projects={projects}, stages={stages}, width={width}, help={help}, press={press}");
+                            assert_eq!(
+                                model.wide_stage(),
+                                parked_stage,
+                                "Esc does not mutate an unpainted stage"
+                            );
+                            assert_eq!(model.nav_tab(), tab);
+                            assert_eq!(model.right_seat().is_some(), projects);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn t64_narrow_task_page_is_not_a_board_root() {
+        let temp = TempStore::new("t64-narrow-page");
+        let (mut domain, mut model) = board_with_one_task();
+        temp.store.save(&domain).unwrap();
+        stage_right(&mut domain, &mut model, 2);
+        sync_frame_presentation(Rect::new(0, 0, 78, 30), &model);
+        assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+        assert!(!model.root_escape_requests_quit());
+        assert!(!handle_board_intent(
+            &temp.store,
+            &mut domain,
+            &mut model,
+            BoardIntent::CloseLayer,
+            &mut SaveRecovery::new(),
+            false,
+        )
+        .unwrap());
+        assert_eq!(model.wide_stage(), crate::ui::tier::WideStage::Split);
+    }
+
+    #[test]
+    fn t64_narrow_header_escape_preserves_the_parked_split() {
+        let (mut domain, mut model) = board_with_one_task();
+        stage_right(&mut domain, &mut model, 1);
+        sync_frame_presentation(Rect::new(0, 0, 110, 30), &model);
+        apply_intent(&mut domain, &mut model, BoardIntent::ToggleInboxGroup, None).unwrap();
+        assert!(model.inbox_header_selected());
+        sync_frame_presentation(Rect::new(0, 0, 78, 30), &model);
+        assert_eq!(
+            apply_intent(&mut domain, &mut model, BoardIntent::CloseLayer, None).unwrap(),
+            IntentOutcome::None
+        );
+        assert_eq!(
+            model.wide_stage(),
+            crate::ui::tier::WideStage::Split,
+            "a hidden split is not an Escape layer"
+        );
+        sync_frame_presentation(Rect::new(0, 0, 110, 30), &model);
+        assert!(model.frame_wide());
+        assert_eq!(model.wide_stage(), crate::ui::tier::WideStage::Split);
+    }
+
+    #[test]
+    fn t64_narrow_root_refuses_hidden_drafts_and_widening_restores_them() {
+        for projects in [false, true] {
+            let temp = TempStore::new("t64-narrow-draft");
+            let (mut domain, mut model) = if projects {
+                projects_overview_fixture()
+            } else {
+                board_with_one_task()
+            };
+            temp.store.save(&domain).unwrap();
+            stage_right(&mut domain, &mut model, 2);
+            sync_frame_presentation(Rect::new(0, 0, 110, 30), &model);
+            apply_intent(
+                &mut domain,
+                model.input_target_mut(),
+                BoardIntent::BeginEditTitle,
+                None,
+            )
+            .unwrap();
+            apply_intent(
+                &mut domain,
+                model.input_target_mut(),
+                BoardIntent::EditInsert('!'),
+                None,
+            )
+            .unwrap();
+            let draft = model.input_target_mut().edit_buffer().to_owned();
+            for _ in 0..8 {
+                if model.input_mode() == BoardInputMode::TaskPage {
+                    break;
+                }
+                apply_intent(
+                    &mut domain,
+                    model.input_target_mut(),
+                    BoardIntent::FormFocusNext,
+                    None,
+                )
+                .unwrap();
+            }
+            assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+            apply_intent(&mut domain, &mut model, BoardIntent::StageLeft, None).unwrap();
+            assert_eq!(model.wide_stage(), crate::ui::tier::WideStage::Split);
+            sync_frame_presentation(Rect::new(0, 0, 78, 30), &model);
+            assert_eq!(model.input_mode(), BoardInputMode::Normal);
+            assert!(model.has_unsaved_work());
+            assert!(!handle_board_intent(
+                &temp.store,
+                &mut domain,
+                &mut model,
+                BoardIntent::CloseLayer,
+                &mut SaveRecovery::new(),
+                false
+            )
+            .unwrap());
+            assert_eq!(model.wide_stage(), crate::ui::tier::WideStage::Split);
+            assert!(model.has_unsaved_work());
+            assert_eq!(
+                model.message(),
+                Some("save or cancel edits before switching tasks")
+            );
+            sync_frame_presentation(Rect::new(0, 0, 110, 30), &model);
+            stage_right(&mut domain, &mut model, 1);
+            apply_intent(
+                &mut domain,
+                model.input_target_mut(),
+                BoardIntent::FocusFormField(CaptureField::Title),
+                None,
+            )
+            .unwrap();
+            assert_eq!(model.input_target_mut().edit_buffer(), draft);
+        }
+    }
+
+    #[test]
+    fn t64_split_escape_keeps_parked_drafts() {
+        let temp = TempStore::new("t64-split-drafts");
+        let (mut domain, mut model) = board_with_one_task();
+        temp.store.save(&domain).expect("seed store");
+        apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None).unwrap();
+        apply_intent(&mut domain, &mut model, BoardIntent::EditInsert('!'), None).unwrap();
+        for _ in 0..8 {
+            if model.input_mode() == BoardInputMode::TaskPage {
+                break;
+            }
+            apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None).unwrap();
+        }
+        for _ in 0..2 {
+            apply_intent(&mut domain, &mut model, BoardIntent::StageLeft, None).unwrap();
+        }
+        assert_eq!(model.wide_stage(), crate::ui::tier::WideStage::Split);
+        assert!(model.task_session_dirty());
+        assert!(!handle_board_intent(
+            &temp.store,
+            &mut domain,
+            &mut model,
+            BoardIntent::CloseLayer,
+            &mut SaveRecovery::new(),
+            false
+        )
+        .unwrap());
+        assert_eq!(model.wide_stage(), crate::ui::tier::WideStage::FullBoard);
+        assert!(
+            model.task_session_dirty(),
+            "collapsing a task split parks its draft"
+        );
+        assert!(!handle_board_intent(
+            &temp.store,
+            &mut domain,
+            &mut model,
+            BoardIntent::CloseLayer,
+            &mut SaveRecovery::new(),
+            false
+        )
+        .unwrap());
+        assert!(
+            model.task_session_dirty(),
+            "root Esc refuses the parked dirty draft"
+        );
+
+        let (mut domain, mut model, _) = projects_preview_fixture();
+        apply_intent(
+            &mut domain,
+            model.input_target_mut(),
+            BoardIntent::BeginEditTitle,
+            None,
+        )
+        .unwrap();
+        apply_intent(
+            &mut domain,
+            model.input_target_mut(),
+            BoardIntent::EditInsert('!'),
+            None,
+        )
+        .unwrap();
+        let draft = model.right_seat().unwrap().edit_buffer().to_owned();
+        apply_intent(&mut domain, &mut model, BoardIntent::StageLeft, None).unwrap();
+        assert_eq!(model.wide_stage(), crate::ui::tier::WideStage::Split);
+        assert_eq!(
+            apply_intent(&mut domain, &mut model, BoardIntent::CloseLayer, None).unwrap(),
+            IntentOutcome::None
+        );
+        assert_eq!(
+            model.wide_stage(),
+            crate::ui::tier::WideStage::Split,
+            "a project preview with unsaved work cannot be discarded"
+        );
+        assert_eq!(model.right_seat().unwrap().edit_buffer(), draft);
+        assert_eq!(
+            model.message(),
+            Some("save or cancel edits before switching tasks")
+        );
+    }
+
+    #[test]
+    fn t64_ctrl_q_from_a_clean_nested_preview_quits_the_whole_board() {
+        let temp = TempStore::new("t64-nested-global-quit");
+        let (mut domain, mut model, _) = projects_preview_fixture();
+        temp.store.save(&domain).expect("seed preview store");
+        let area = Rect::new(0, 0, 110, 30);
+        let intent = preview_key_intent(
+            &mut model,
+            area,
+            KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL),
+        );
+        assert_eq!(intent, BoardIntent::Quit);
+        let routed = route_board_intent(&model, intent);
+        assert_eq!(routed.target, BoardIntentTarget::Focused);
+
+        let mut recovery = SaveRecovery::new();
+        assert!(dispatch_board_intent(
+            &temp.store,
+            &mut domain,
+            &mut model,
+            BoardDispatchRoute {
+                area,
+                target: routed.target,
+            },
+            routed.intent,
+            &mut recovery,
+            false,
+        )
+        .expect("nested global quit"));
+    }
+
+    #[test]
+    fn t64_focused_preview_quit_preserves_a_dirty_outer_task() {
+        let temp = TempStore::new("t64-outer-dirty-quit");
+        let (mut domain, mut model) = board_with_one_task();
+        temp.store.save(&domain).expect("seed store");
+        apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+            .expect("edit outer task");
+        apply_intent(&mut domain, &mut model, BoardIntent::EditInsert('!'), None)
+            .expect("dirty outer title");
+        let draft = model.edit_buffer().to_owned();
+        for _ in 0..8 {
+            if model.input_mode() == BoardInputMode::TaskPage {
+                break;
+            }
+            apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
+                .expect("park editor");
+        }
+        assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+        for _ in 0..3 {
+            apply_intent(&mut domain, &mut model, BoardIntent::StageLeft, None)
+                .expect("park task page");
+        }
+        assert!(model.root_escape_requests_quit());
+        assert!(model.has_unsaved_work());
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::SelectNavTab(NavTab::Projects),
+            None,
+        )
+        .expect("switch to projects with outer draft parked");
+        stage_right(&mut domain, &mut model, 2);
+        let area = Rect::new(0, 0, 110, 30);
+        let intent = preview_key_intent(
+            &mut model,
+            area,
+            KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL),
+        );
+        assert_eq!(intent, BoardIntent::Quit);
+        assert!(model.project_right_seat_focused());
+        assert!(!model.right_seat().unwrap().has_unsaved_work());
+        let routed = route_board_intent(&model, intent);
+        assert_eq!(routed.target, BoardIntentTarget::Focused);
+        assert!(!dispatch_board_intent(
+            &temp.store,
+            &mut domain,
+            &mut model,
+            BoardDispatchRoute {
+                area,
+                target: routed.target
+            },
+            routed.intent,
+            &mut SaveRecovery::new(),
+            false,
+        )
+        .expect("outer draft refuses focused quit"));
+        assert!(model.task_session_dirty());
+        assert_eq!(
+            model.message(),
+            Some("save or cancel edits before switching tasks")
+        );
+        // Return to the parked task and inspect the actual title, not just a dirty flag.
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::SelectNavTab(NavTab::ProjectBoard),
+            None,
+        )
+        .expect("return to outer task");
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::FocusFormField(CaptureField::Title),
+            None,
+        )
+        .expect("inspect parked title");
+        assert_eq!(model.edit_buffer(), draft);
+    }
+
+    #[test]
+    fn t64_quit_over_failed_save_preserves_the_recovery_banner() {
+        for capture in [false, true] {
+            let temp = TempStore::new("t64-recovery-banner");
+            let (mut domain, mut model) = board_with_one_task();
+            temp.store.save(&domain).expect("seed store");
+            let baseline = domain.clone();
+            let save = if capture {
+                let snapshot = crate::context::build_snapshot(
+                    &crate::context::RawHostContext::default(),
+                    temp.dir.to_str().expect("scratch path"),
+                );
+                apply_intent(
+                    &mut domain,
+                    &mut model,
+                    BoardIntent::OpenCapture,
+                    Some(&snapshot),
+                )
+                .expect("open quick add");
+                apply_intent(
+                    &mut domain,
+                    &mut model,
+                    BoardIntent::QuickAddInsertText("unsaved capture".into()),
+                    None,
+                )
+                .expect("type quick add");
+                BoardIntent::QuickAddSave
+            } else {
+                apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
+                    .expect("edit task");
+                apply_intent(&mut domain, &mut model, BoardIntent::EditInsert('!'), None)
+                    .expect("dirty task");
+                BoardIntent::ConfirmEdit
+            };
+            let mut recovery = SaveRecovery::new();
+            apply_board_intent_with_save_recovery(
+                &mut domain,
+                &mut model,
+                &mut recovery,
+                BoardSaveContext {
+                    baseline,
+                    intent: save,
+                    snapshot: None,
+                },
+                |_| Err("disk full".into()),
+            )
+            .expect("failed persistence enters recovery");
+            assert!(recovery.is_pending());
+            assert!(model.has_unsaved_work());
+            let banner = model.message().expect("failure banner").to_owned();
+            assert!(banner.contains("disk full"));
+            apply_intent(&mut domain, &mut model, BoardIntent::OpenHelp, None)
+                .expect("Help over failed save");
+            for key in ['q', 'c'] {
+                let intent = board_keyboard_intent(
+                    &model,
+                    model.input_mode(),
+                    KeyEvent::new(KeyCode::Char(key), KeyModifiers::CONTROL),
+                )
+                .expect("Help quit shortcut");
+                assert_eq!(intent, BoardIntent::Quit);
+                assert!(!dispatch_board_intent(
+                    &temp.store,
+                    &mut domain,
+                    &mut model,
+                    BoardDispatchRoute {
+                        area: Rect::new(0, 0, 78, 24),
+                        target: BoardIntentTarget::Focused
+                    },
+                    intent,
+                    &mut recovery,
+                    false,
+                )
+                .expect("recovery prevents quit"));
+                assert_eq!(
+                    model.message(),
+                    Some(banner.as_str()),
+                    "capture={capture}, key={key}"
+                );
+                assert_eq!(model.input_mode(), BoardInputMode::Help);
+                assert!(recovery.is_pending());
+                assert!(model.has_unsaved_work());
+            }
+            apply_intent(&mut domain, &mut model, BoardIntent::CloseLayer, None)
+                .expect("Esc closes Help");
+            assert_eq!(model.input_mode(), BoardInputMode::SaveRecovery);
+            assert_eq!(model.message(), Some(banner.as_str()));
+        }
+    }
+
+    #[test]
+    fn t64_dirty_nested_preview_refuses_global_quit_and_keeps_its_draft() {
+        let temp = TempStore::new("t64-nested-dirty-quit");
+        let (mut domain, mut model, _) = projects_preview_fixture();
+        temp.store.save(&domain).expect("seed preview store");
+        apply_intent(
+            &mut domain,
+            model.input_target_mut(),
+            BoardIntent::OpenCapture,
+            None,
+        )
+        .expect("open nested quick add");
+        apply_intent(
+            &mut domain,
+            model.input_target_mut(),
+            BoardIntent::QuickAddInsertText("nested draft".into()),
+            None,
+        )
+        .expect("type nested draft");
+        apply_intent(&mut domain, &mut model, BoardIntent::StageLeft, None)
+            .expect("park nested preview");
+        assert_eq!(model.wide_stage(), crate::ui::tier::WideStage::Split);
+
+        let mut recovery = SaveRecovery::new();
+        assert!(!handle_board_intent(
+            &temp.store,
+            &mut domain,
+            &mut model,
+            BoardIntent::Quit,
+            &mut recovery,
+            false,
+        )
+        .expect("refuse nested quit"));
+        assert_eq!(
+            model.right_seat().map(BoardModel::quick_add_title_value),
+            Some("nested draft")
+        );
+        assert_eq!(
+            model.message(),
+            Some("save or cancel edits before switching tasks")
+        );
+    }
+
+    #[test]
+    fn t64_save_recovery_refuses_quit_but_quick_capture_keeps_ctrl_c() {
+        let temp = TempStore::new("t64-recovery-capture-quit");
+        let mut domain = DomainState::new();
+        temp.store.save(&domain).expect("seed store");
+        let mut model = BoardModel::from_domain(&domain, None);
+        let mut recovery = SaveRecovery::new();
+        recovery.fail(DomainState::new(), DomainState::new(), "save failed");
+        model.begin_save_recovery("save failed");
+        apply_intent(&mut domain, &mut model, BoardIntent::OpenHelp, None)
+            .expect("open Help over recovery");
+        assert_eq!(model.input_mode(), BoardInputMode::Help);
+        assert_eq!(
+            apply_board_intent_with_save_recovery(
+                &mut domain,
+                &mut model,
+                &mut recovery,
+                BoardSaveContext {
+                    baseline: DomainState::new(),
+                    intent: BoardIntent::Quit,
+                    snapshot: None,
+                },
+                |_| Ok(()),
+            )
+            .expect("recovery quit is inert"),
+            IntentOutcome::None
+        );
+        assert!(recovery.is_pending());
+        assert_eq!(
+            model.input_mode(),
+            BoardInputMode::Help,
+            "Ctrl+Q remains inert without dismissing Help over recovery"
+        );
+        apply_intent(&mut domain, &mut model, BoardIntent::CloseLayer, None)
+            .expect("Esc closes Help");
+        assert_eq!(model.input_mode(), BoardInputMode::SaveRecovery);
+
+        let mut recovery = SaveRecovery::new();
+        let mut capture = BoardModel::from_domain(&domain, None);
+        apply_intent(&mut domain, &mut capture, BoardIntent::OpenCapture, None)
+            .expect("open capture");
+        apply_intent(
+            &mut domain,
+            &mut capture,
+            BoardIntent::QuickAddInsertText("unsaved popup draft".into()),
+            None,
+        )
+        .expect("type capture");
+        apply_intent(&mut domain, &mut capture, BoardIntent::ExpandQuickAdd, None)
+            .expect("expand capture");
+        apply_intent(&mut domain, &mut capture, BoardIntent::FormFocusNext, None)
+            .expect("focus non-editor step selection");
+        assert_eq!(capture.input_mode(), BoardInputMode::CapturePage);
+        let intent = board_keyboard_intent(
+            &capture,
+            capture.input_mode(),
+            KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+        )
+        .expect("existing Ctrl+C quit shortcut");
+        assert!(handle_board_intent(
+            &temp.store,
+            &mut domain,
+            &mut capture,
+            intent,
+            &mut recovery,
+            true,
+        )
+        .expect("quick capture retains Ctrl+C exit"));
+        assert!(capture.board_form_open());
+        assert_eq!(capture.message(), None);
     }
 
     #[test]

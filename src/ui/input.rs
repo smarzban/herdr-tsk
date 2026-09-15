@@ -423,7 +423,7 @@ const NORMAL_KEYMAP: &[NormalKeyEntry] = &[
         code: KeyCode::Esc,
         intent: BoardIntent::CloseLayer,
         help_chord: "esc",
-        help_label: "close",
+        help_label: "close / quit at board root",
         verb: false,
     },
     NormalKeyEntry {
@@ -729,6 +729,9 @@ fn help_bindings() -> Vec<HelpBinding> {
                 HelpGroup::TaskActions => "task status lifecycle complete finish",
                 HelpGroup::CreateEdit => "task capture create editing",
                 HelpGroup::ViewsFind => "board filter search open",
+                HelpGroup::AppControls if entry.intent == BoardIntent::Quit => {
+                    "exit close board page help picker non-editing surfaces"
+                }
                 _ => "board",
             },
         );
@@ -1096,12 +1099,6 @@ fn help_bindings() -> Vec<HelpBinding> {
             "clear search / close Help",
             "query cancel",
         ),
-        help_binding(
-            HelpGroup::AppControls,
-            "ctrl+q",
-            "close task page",
-            "exit back",
-        ),
     ]);
     bindings
 }
@@ -1164,6 +1161,24 @@ pub fn help_card_lines() -> Vec<String> {
 pub fn map_key(mode: BoardInputMode, key: KeyEvent) -> Option<BoardIntent> {
     if !matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
         return None;
+    }
+    if key.code == KeyCode::Char('q')
+        && key.modifiers == KeyModifiers::CONTROL
+        && matches!(
+            mode,
+            BoardInputMode::Normal
+                | BoardInputMode::TaskPage
+                | BoardInputMode::CapturePage
+                | BoardInputMode::SelectThread
+                | BoardInputMode::EditScope
+                | BoardInputMode::FormScopeDropdown
+                | BoardInputMode::LaunchCard
+                | BoardInputMode::ProjectPicker
+                | BoardInputMode::ListPicker
+                | BoardInputMode::Help
+        )
+    {
+        return Some(BoardIntent::Quit);
     }
     match mode {
         BoardInputMode::Normal => map_normal(key),
@@ -1756,7 +1771,7 @@ fn map_task_page(key: KeyEvent) -> Option<BoardIntent> {
     let extra = mods.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER);
     match key.code {
         KeyCode::Esc if !extra => Some(BoardIntent::CloseLayer),
-        KeyCode::Char('q') if verb => Some(BoardIntent::CloseLayer),
+        KeyCode::Char('q') if verb => Some(BoardIntent::Quit),
         KeyCode::Enter if !extra => Some(BoardIntent::OpenTaskPage),
         KeyCode::Char('s') if verb => Some(BoardIntent::PrimaryVerb),
         KeyCode::Char('a') if verb => Some(BoardIntent::BeginAddStep),

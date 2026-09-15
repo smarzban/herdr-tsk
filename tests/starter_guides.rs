@@ -229,6 +229,105 @@ fn drop_delivery_record(state_dir: &std::path::Path) {
     fs::remove_file(state_dir.join(delivery::DELIVERY_FILE)).unwrap();
 }
 
+fn seed_pty_task(root: &std::path::Path, cwd: &std::path::Path, title: &str) {
+    let store = TaskStore::new(root.join("state"));
+    let mut state = DomainState::new();
+    state
+        .create(
+            title,
+            None,
+            TaskScope::Global,
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("seed PTY desk task");
+    let project_id = state
+        .create(
+            "T64 project tab task",
+            None,
+            TaskScope::Project {
+                path: cwd.to_string_lossy().into_owned(),
+            },
+            ProvenanceOrigin::Manual,
+            None,
+        )
+        .expect("seed PTY project task");
+    state
+        .set_status(project_id, HumanStatus::Ready)
+        .expect("put PTY project task on deck");
+    store.save(&state).expect("save PTY task");
+}
+
+#[test]
+fn t64_real_board_ctrl_q_exits_from_a_stored_task_page() {
+    let root = pty::scratch_root("t64-task-page-quit");
+    let cwd = root.join("project");
+    fs::create_dir_all(&cwd).expect("project directory");
+    seed_pty_task(&root, &cwd, "T64 stored page target");
+
+    let mut session = pty::Session::spawn(root, &cwd, &[], &[], 24, 78);
+    session.output_until("target");
+    session.send(b"k");
+    std::thread::sleep(Duration::from_millis(100));
+    session.send(b"\r");
+    session.output_until("target");
+    session.send(b"\x11");
+    assert!(session.wait_exit(Duration::from_secs(5)).success());
+}
+
+fn assert_real_root_esc_exits(label: &str, tab_key: u8) {
+    let root = pty::scratch_root(&format!("t64-root-esc-{label}"));
+    let cwd = root.join("project");
+    fs::create_dir_all(&cwd).expect("project directory");
+    seed_pty_task(&root, &cwd, &format!("T64 {label} root"));
+
+    let mut session = pty::Session::spawn(root, &cwd, &[], &[], 24, 78);
+    session.output_until("root");
+    session.send(&[tab_key]);
+    std::thread::sleep(Duration::from_millis(100));
+    session.send(b"\x1b[27u");
+    assert!(session.wait_exit(Duration::from_secs(5)).success());
+}
+
+#[test]
+fn t64_real_board_root_esc_exits_from_desk() {
+    assert_real_root_esc_exits("desk", b'1');
+}
+
+#[test]
+fn t64_real_board_root_esc_exits_from_project_board() {
+    assert_real_root_esc_exits("project", b'2');
+}
+
+#[test]
+fn t64_real_board_root_esc_exits_from_projects_index() {
+    assert_real_root_esc_exits("projects", b'3');
+}
+
+#[test]
+fn t64_real_board_editor_ctrl_q_stays_live_then_task_page_ctrl_q_exits() {
+    let root = pty::scratch_root("t64-editor-quit");
+    let cwd = root.join("project");
+    fs::create_dir_all(&cwd).expect("project directory");
+    seed_pty_task(&root, &cwd, "T64 editor target");
+
+    let mut session = pty::Session::spawn(root, &cwd, &[], &[], 24, 78);
+    session.output_until("target");
+    session.send(b"k");
+    std::thread::sleep(Duration::from_millis(100));
+    session.send(b"\r");
+    std::thread::sleep(Duration::from_millis(100));
+    session.send(b"\x05");
+    session.output_until("editing…");
+    session.send(b"\x11");
+    session.send(b"ZXQMARK");
+    session.output_until("\x1b[1mK");
+    session.send(b"\x1b");
+    std::thread::sleep(Duration::from_millis(100));
+    session.send(b"\x11");
+    assert!(session.wait_exit(Duration::from_secs(5)).success());
+}
+
 #[test]
 fn completing_a_guide_on_the_real_board_records_its_dismissal() {
     let root = pty::scratch_root("dismiss");
