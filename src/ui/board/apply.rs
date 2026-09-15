@@ -2033,7 +2033,10 @@ fn apply_board_intent(
             }
             // After visible layers, a split is the next layer to close. Use the shared
             // transition so task drafts stay parked and dirty project previews refuse.
-            if model.wide_stage == WideStage::Split && model.projects_query.is_empty() {
+            if model.frame_wide()
+                && model.wide_stage == WideStage::Split
+                && model.projects_query.is_empty()
+            {
                 stage_left(model);
                 return Ok(IntentOutcome::None);
             }

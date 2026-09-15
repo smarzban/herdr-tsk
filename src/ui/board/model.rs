@@ -1497,10 +1497,14 @@ impl BoardModel {
     /// A task form parked behind `FullBoard` does not stop this from being a root Escape: the
     /// application quit guard sees that retained draft and refuses before the reducer can leave.
     pub(crate) fn root_escape_requests_quit(&self) -> bool {
+        // Resizing parks the slider session without painting its right column. A narrow
+        // board (or projects index) is already at its visible root, not one Esc away.
+        let parked_board =
+            !self.frame_wide() && (self.wide_stage == WideStage::Split || self.projects_overview());
         !self.preview_seat
             && !self.focus_is_archived()
             && self.input_mode_local() == BoardInputMode::Normal
-            && self.wide_stage == WideStage::FullBoard
+            && (self.wide_stage == WideStage::FullBoard || parked_board)
             && self.surface == CommandSurface::None
             && self.popup == BoardPopup::None
             && self.project_picker.is_none()

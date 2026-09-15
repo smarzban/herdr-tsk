@@ -313,6 +313,49 @@ test("projects preview keeps an unsaved page draft when the index retakes focus"
   );
 });
 
+for (const resolution of ["cancel", "save"]) {
+  test(`projects preview refusal expires after ${resolution} and stays cleared on reopen`, async ({
+    page,
+  }) => {
+    await open(page, 110);
+    await page.keyboard.press("3");
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("ArrowRight");
+    await page.keyboard.press("Enter");
+    await page.keyboard.press("e");
+    const editor = page.locator("#tsk-preview-edit");
+    const originalDraft = await editor.inputValue();
+    await editor.fill("Resolved preview title");
+    await page.locator("[data-project-row]").first().click();
+    await page.keyboard.press("Escape");
+    const status = page.locator(".tsk-status-row");
+    const refusal = "save or cancel edits before switching tasks";
+    await expect(page.locator(".tsk-wide-split.is-split")).toBeVisible();
+    await expect(status).toContainText(refusal);
+    await page.keyboard.press("ArrowRight");
+    await expect(editor).toHaveValue("Resolved preview title");
+    await expect(status).toContainText(refusal);
+    await page.keyboard.press(resolution === "cancel" ? "Escape" : "Enter");
+    await expect(editor).toHaveCount(0);
+    await expect.soft(status).not.toContainText(refusal);
+    await page.keyboard.press("ArrowLeft");
+    await expect(page.locator(".tsk-project-preview.is-live")).toBeVisible();
+    await page.keyboard.press("ArrowLeft");
+    await expect(page.locator(".tsk-wide-split.is-split")).toBeVisible();
+    await expect.soft(status).not.toContainText(refusal);
+    await page.keyboard.press("Escape");
+    await expect(page.locator(".tsk-wide-split")).toHaveCount(0);
+    await page.keyboard.press("ArrowRight");
+    await expect(page.locator(".tsk-wide-split.is-split")).toBeVisible();
+    await expect.soft(status).not.toContainText(refusal);
+    await page.keyboard.press("ArrowRight");
+    await page.keyboard.press("e");
+    await expect(editor).toHaveValue(
+      resolution === "cancel" ? originalDraft : "Resolved preview title",
+    );
+  });
+}
+
 async function expectFormRing(
   page,
   { preview = false, title, notes, start = "title" },

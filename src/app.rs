@@ -4961,6 +4961,186 @@ mod tests {
     }
 
     #[test]
+    fn t64_narrowed_split_root_quits_without_collapsing_hidden_state() {
+        for projects in [false, true] {
+            for stages in 1..=if projects { 2 } else { 1 } {
+                for width in [78, 109] {
+                    for help in [false, true] {
+                        let temp = TempStore::new("t64-narrow-root");
+                        let (mut domain, mut model) = if projects {
+                            projects_overview_fixture()
+                        } else {
+                            board_with_one_task()
+                        };
+                        temp.store.save(&domain).unwrap();
+                        stage_right(&mut domain, &mut model, stages);
+                        sync_frame_presentation(Rect::new(0, 0, 110, 30), &model);
+                        assert!(model.frame_wide());
+                        let parked_stage = model.wide_stage();
+                        let tab = model.nav_tab();
+                        let area = Rect::new(0, 0, width, 30);
+                        sync_frame_presentation(area, &model);
+                        assert!(!model.frame_wide());
+                        assert_eq!(model.input_mode(), BoardInputMode::Normal);
+                        if help {
+                            apply_intent(&mut domain, &mut model, BoardIntent::OpenHelp, None)
+                                .unwrap();
+                        }
+                        for press in 0..=usize::from(help) {
+                            let mode = resolve_board_surface(area, &mut model);
+                            let intent = board_keyboard_intent_for_area(
+                                &model,
+                                area,
+                                mode,
+                                KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+                            )
+                            .unwrap();
+                            let routed = route_board_intent(&model, intent);
+                            let quit = dispatch_board_intent(
+                                &temp.store,
+                                &mut domain,
+                                &mut model,
+                                BoardDispatchRoute {
+                                    area,
+                                    target: routed.target,
+                                },
+                                routed.intent,
+                                &mut SaveRecovery::new(),
+                                false,
+                            )
+                            .unwrap();
+                            assert_eq!(quit, press == usize::from(help), "projects={projects}, stages={stages}, width={width}, help={help}, press={press}");
+                            assert_eq!(
+                                model.wide_stage(),
+                                parked_stage,
+                                "Esc does not mutate an unpainted stage"
+                            );
+                            assert_eq!(model.nav_tab(), tab);
+                            assert_eq!(model.right_seat().is_some(), projects);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn t64_narrow_task_page_is_not_a_board_root() {
+        let temp = TempStore::new("t64-narrow-page");
+        let (mut domain, mut model) = board_with_one_task();
+        temp.store.save(&domain).unwrap();
+        stage_right(&mut domain, &mut model, 2);
+        sync_frame_presentation(Rect::new(0, 0, 78, 30), &model);
+        assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+        assert!(!model.root_escape_requests_quit());
+        assert!(!handle_board_intent(
+            &temp.store,
+            &mut domain,
+            &mut model,
+            BoardIntent::CloseLayer,
+            &mut SaveRecovery::new(),
+            false,
+        )
+        .unwrap());
+        assert_eq!(model.wide_stage(), crate::ui::tier::WideStage::Split);
+    }
+
+    #[test]
+    fn t64_narrow_header_escape_preserves_the_parked_split() {
+        let (mut domain, mut model) = board_with_one_task();
+        stage_right(&mut domain, &mut model, 1);
+        sync_frame_presentation(Rect::new(0, 0, 110, 30), &model);
+        apply_intent(&mut domain, &mut model, BoardIntent::ToggleInboxGroup, None).unwrap();
+        assert!(model.inbox_header_selected());
+        sync_frame_presentation(Rect::new(0, 0, 78, 30), &model);
+        assert_eq!(
+            apply_intent(&mut domain, &mut model, BoardIntent::CloseLayer, None).unwrap(),
+            IntentOutcome::None
+        );
+        assert_eq!(
+            model.wide_stage(),
+            crate::ui::tier::WideStage::Split,
+            "a hidden split is not an Escape layer"
+        );
+        sync_frame_presentation(Rect::new(0, 0, 110, 30), &model);
+        assert!(model.frame_wide());
+        assert_eq!(model.wide_stage(), crate::ui::tier::WideStage::Split);
+    }
+
+    #[test]
+    fn t64_narrow_root_refuses_hidden_drafts_and_widening_restores_them() {
+        for projects in [false, true] {
+            let temp = TempStore::new("t64-narrow-draft");
+            let (mut domain, mut model) = if projects {
+                projects_overview_fixture()
+            } else {
+                board_with_one_task()
+            };
+            temp.store.save(&domain).unwrap();
+            stage_right(&mut domain, &mut model, 2);
+            sync_frame_presentation(Rect::new(0, 0, 110, 30), &model);
+            apply_intent(
+                &mut domain,
+                model.input_target_mut(),
+                BoardIntent::BeginEditTitle,
+                None,
+            )
+            .unwrap();
+            apply_intent(
+                &mut domain,
+                model.input_target_mut(),
+                BoardIntent::EditInsert('!'),
+                None,
+            )
+            .unwrap();
+            let draft = model.input_target_mut().edit_buffer().to_owned();
+            for _ in 0..8 {
+                if model.input_mode() == BoardInputMode::TaskPage {
+                    break;
+                }
+                apply_intent(
+                    &mut domain,
+                    model.input_target_mut(),
+                    BoardIntent::FormFocusNext,
+                    None,
+                )
+                .unwrap();
+            }
+            assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
+            apply_intent(&mut domain, &mut model, BoardIntent::StageLeft, None).unwrap();
+            assert_eq!(model.wide_stage(), crate::ui::tier::WideStage::Split);
+            sync_frame_presentation(Rect::new(0, 0, 78, 30), &model);
+            assert_eq!(model.input_mode(), BoardInputMode::Normal);
+            assert!(model.has_unsaved_work());
+            assert!(!handle_board_intent(
+                &temp.store,
+                &mut domain,
+                &mut model,
+                BoardIntent::CloseLayer,
+                &mut SaveRecovery::new(),
+                false
+            )
+            .unwrap());
+            assert_eq!(model.wide_stage(), crate::ui::tier::WideStage::Split);
+            assert!(model.has_unsaved_work());
+            assert_eq!(
+                model.message(),
+                Some("save or cancel edits before switching tasks")
+            );
+            sync_frame_presentation(Rect::new(0, 0, 110, 30), &model);
+            stage_right(&mut domain, &mut model, 1);
+            apply_intent(
+                &mut domain,
+                model.input_target_mut(),
+                BoardIntent::FocusFormField(CaptureField::Title),
+                None,
+            )
+            .unwrap();
+            assert_eq!(model.input_target_mut().edit_buffer(), draft);
+        }
+    }
+
+    #[test]
     fn t64_split_escape_keeps_parked_drafts() {
         let temp = TempStore::new("t64-split-drafts");
         let (mut domain, mut model) = board_with_one_task();

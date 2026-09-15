@@ -461,7 +461,10 @@ import { parseCapture } from "./capture.js";
   function stageLeft() {
     if (projectsOverview()) {
       if (state.stage === "rail") state.stage = "split";
-      else if (state.stage === "split") state.stage = "board";
+      else if (state.stage === "split") {
+        if (!previewHasUnsavedWork()) dropProjectPreview();
+        state.stage = "board";
+      }
       return;
     }
     if (state.stage === "split") state.stage = "board";
@@ -2426,6 +2429,8 @@ import { parseCapture } from "./capture.js";
     try {
       const rows = buildRows();
       ensureSelection(rows);
+      // Preview refusals belong to unresolved work, not the retained seat.
+      if (!previewHasUnsavedWork()) preview.message = "";
       const wide = isWideSplit();
       let html;
       if (wide && projectsOverview() && state.stage === "split") {

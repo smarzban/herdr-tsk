@@ -11,7 +11,7 @@ the GitHub release notes verbatim.
 
 ### Changed
 
-- `ctrl+q` quits from every non-editor board surface, including task pages and the wide project preview. `Esc` closes layers and either wide split, then quits without confirmation at the full-board root on any tab. Unsaved drafts still block quitting, including drafts parked outside the focused preview; text entry and save recovery keep their existing behavior.
+- `ctrl+q` quits from every non-editor board surface, including task pages and the wide project preview. `Esc` closes layers and either wide split, then quits without confirmation at the full-board root on any tab, including after a narrow resize hides the right column. Unsaved drafts still block quitting, including drafts parked outside the focused preview; text entry and save recovery keep their existing behavior.
 
 ## v0.9.0
 

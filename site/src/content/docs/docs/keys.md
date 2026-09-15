@@ -41,7 +41,7 @@ Press `?` on the board, task page, or another non-text surface for a searchable 
 
 `ctrl+q` quits from task views, Help, and pickers too, including the wide project preview. It does not quit while editing text, using Projects search, typing a quick-add line, or filtering the palette. Save or cancel any unsaved draft first. During save recovery, resolve the pending save instead.
 
-`Esc` closes the current layer first. At the full-board root on any tab, it quits without confirmation, rather than switching back to the desk. In either wide split, `Esc` closes the right column after any editor or overlay is dismissed. A further `Esc` at the full-board root quits. A project preview with unsaved work refuses to close.
+`Esc` closes the current layer first. At the full-board root on any tab, it quits without confirmation, rather than switching back to the desk. In either wide split, `Esc` closes the right column after any editor or overlay is dismissed. A further `Esc` at the full-board root quits. A project preview with unsaved work refuses to close. If narrowing the terminal hides the right column, the visible board/index is already at the root: `Esc` quits without an extra collapse, unless a parked draft blocks quitting.
 
 Status shortcuts are absolute. `ctrl+s` starts open or ready tasks and leaves started, blocked, and review tasks unchanged. `ctrl+n` and `ctrl+o` can send a done task directly to ready or open.
 
