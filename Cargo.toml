@@ -5,10 +5,50 @@ edition = "2021"
 description = "tsk: a task board for your terminal"
 license = "MIT"
 publish = false
+# Root test files are modules unless explicitly registered below.
+autotests = false
 
 [[bin]]
 name = "tsk"
 path = "src/main.rs"
+
+# Shared suites link once; process-global environment/cwd tests stay isolated.
+[[test]]
+name = "integration"
+path = "tests/integration.rs"
+
+[[test]]
+name = "cli_add"
+path = "tests/cli_add.rs"
+
+[[test]]
+name = "cli_list"
+path = "tests/cli_list.rs"
+
+[[test]]
+name = "cli_setup_agent"
+path = "tests/cli_setup_agent.rs"
+
+[[test]]
+name = "queue_board_loop"
+path = "tests/queue_board_loop.rs"
+
+[[test]]
+name = "starter_guides"
+path = "tests/starter_guides.rs"
+
+[[test]]
+name = "update_notice"
+path = "tests/update_notice.rs"
+
+# The site generates references without compiling unrelated integration suites.
+[[test]]
+name = "demo_parity"
+path = "tests/demo_parity.rs"
+
+[[test]]
+name = "queue_board_bench"
+path = "tests/queue_board_bench.rs"
 
 [dependencies]
 crossterm = "0.29.0"
