@@ -42,6 +42,19 @@ Run the Rust green bar:
 cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && cargo build --release
 ```
 
+Most integration suites are modules in `tests/integration.rs`, not separate binaries.
+Run one suite with `cargo test --test integration cli_edit::`. Add new root-level test
+files to that harness; automatic target discovery is disabled and a layout test checks
+that no suite is omitted. Suites that mutate the process environment or working directory
+keep separate targets to preserve isolation. The ignored frame-time benchmark also keeps
+its `queue_board_bench` target.
+
+Regenerate board goldens with:
+
+```bash
+cargo test --test integration queue_board_render::regenerate_golden_fixtures -- --ignored
+```
+
 For site changes:
 
 ```bash

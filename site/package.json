@@ -14,7 +14,7 @@
     "generate-apple-touch": "node scripts/generate-apple-touch.mjs",
     "test": "node --test test/*.test.mjs",
     "test:parity": "cargo build --release --manifest-path ../Cargo.toml --bin tsk && npm run build && npm run parity:reference && playwright test",
-    "parity:reference": "TSK_PARITY_OUTPUT=\"$PWD/parity-reference\" cargo test --manifest-path ../Cargo.toml --test demo_parity -- --ignored",
+    "parity:reference": "TSK_PARITY_OUTPUT=\"$PWD/parity-reference\" cargo test --manifest-path ../Cargo.toml --test integration demo_parity:: -- --ignored",
     "format": "prettier --write public/board-demo.js public/task-steps.js public/board-wrap.js public/landing.js \"parity/*.mjs\" playwright.config.mjs"
   },
   "dependencies": {

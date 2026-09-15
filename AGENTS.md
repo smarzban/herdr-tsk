@@ -76,6 +76,11 @@ same PR, never leave them apart.
   live smoke or packaging work.
 - Before starting it, `pgrep -lx 'cargo|rustc'` must print nothing; a second cargo holds the
   `target/` lock. Wait, do not kill a process you did not start.
+- Integration suites share `tests/integration.rs`; run one with
+  `cargo test --test integration <module>::`. Six process-state-mutating suites retain
+  dedicated targets, as does `queue_board_bench`. `autotests = false` prevents duplicate
+  binaries: register new suites in the shared harness (or an explicit `[[test]]` when
+  isolation is necessary). The layout regression test checks every root suite is registered.
 - For a targeted run use `--lib` or `--test <name>`; `cargo test <filter>` still compiles
   every test binary.
 - macOS: if the bar takes tens of minutes with idle CPU, Gatekeeper is scanning each freshly
@@ -95,7 +100,7 @@ same PR, never leave them apart.
   hunk by hand, never `git checkout <file>`, which discards every other edit in that file.
 - Temp state dirs need a per-binary atomic counter, not just `SystemTime::now()`.
 - Golden fixtures regenerate via
-  `cargo test --test queue_board_render regenerate_golden_fixtures -- --ignored`;
+  `cargo test --test integration queue_board_render::regenerate_golden_fixtures -- --ignored`;
   never hand-edit the `.txt` files.
 - Packaging tests: `python3 -m unittest discover -s tests/packaging` (Python 3.11+); set
   `TSK_TEST_BINARY` to a built binary to include the installer and setup PTY smoke.
