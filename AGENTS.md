@@ -117,8 +117,8 @@ same PR, never leave them apart.
 ### Isolated state
 
 Anything that writes tasks or touches herdr config runs against isolated roots:
-`TSK_STATE_DIR` and `TSK_CONFIG_DIR` for tsk; additionally `XDG_CONFIG_HOME`,
-`XDG_STATE_HOME` **and** `HERDR_SOCKET_PATH` for `tsk setup herdr` (config override
+`TSK_STATE_DIR` for tsk; additionally `XDG_CONFIG_HOME`, `XDG_STATE_HOME` **and**
+`HERDR_SOCKET_PATH` for `tsk setup herdr` (the state override
 alone does not isolate Herdr's plugin registry). Never smoke setup against, or relink,
 a daily plugin.
 
@@ -277,7 +277,7 @@ draft cannot serve the curl one-liner. Exercise the real user flow with isolated
 
 ```
 TSK_VERSION=vX.Y.Z TSK_INSTALL_DIR=/tmp/tsk-rc/bin sh -c "$(curl -fsSL https://gettsk.sh/install.sh)"
-TSK_STATE_DIR=/tmp/tsk-rc/state TSK_CONFIG_DIR=/tmp/tsk-rc/cfg /tmp/tsk-rc/bin/tsk
+TSK_STATE_DIR=/tmp/tsk-rc/state /tmp/tsk-rc/bin/tsk
 gh release download vX.Y.Z -p tsk.rb -D /tmp/tsk-rc && HOMEBREW_DEVELOPER=1 brew install --formula /tmp/tsk-rc/tsk.rb
 ```
 
@@ -294,7 +294,7 @@ Rehearsal traps, learned the hard way:
   `releases/latest`, which is still the previous stable, so it downgrades the binary,
   and the downgraded binary then refuses the store the pre-release migrated.
 - Never point a candidate binary at a store you did not create for the rehearsal. Pass
-  state overrides as `env TSK_STATE_DIR=… TSK_CONFIG_DIR=… /path/tsk`, and in a Herdr pane
+  the state override as `env TSK_STATE_DIR=… /path/tsk`, and in a Herdr pane
   read until an idle prompt first: a pending shell prompt can eat the first character of a
   `VAR=value` prefix, and the candidate then opens and migrates the real `~/.tsk`.
 - `brew install --formula tsk.rb` on a machine with the tap's `tsk` installed replaces the

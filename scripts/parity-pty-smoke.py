@@ -29,8 +29,6 @@ for width in (40, 78, 109, 110):
         scratch = pathlib.Path(scratch)
         state = scratch / 'state'
         state.mkdir()
-        config = scratch / 'config'
-        config.mkdir()
         project = scratch / 'tsk-parity'
         (project / '.git').mkdir(parents=True)
         document = json.loads(fixture.read_text())
@@ -50,7 +48,7 @@ for width in (40, 78, 109, 110):
         master, slave = pty.openpty()
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', 24, width, 0, 0))
         env = {k: v for k, v in os.environ.items() if not k.startswith(('HERDR_', 'TSK_'))}
-        env.update(TSK_STATE_DIR=str(state), TSK_CONFIG_DIR=str(config), TERM='xterm-256color')
+        env.update(TSK_STATE_DIR=str(state), TERM='xterm-256color')
         child = subprocess.Popen(
             [str(binary)], stdin=slave, stdout=slave, stderr=slave, cwd=project,
             env=env, start_new_session=True,

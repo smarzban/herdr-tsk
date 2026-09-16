@@ -11,6 +11,7 @@ the GitHub release notes verbatim.
 
 ### Changed
 
+- `walkthrough.json` and `TSK_CONFIG_DIR` are gone: the retired onboarding card is replaced by the seeded tour tasks, and an existing file is simply ignored.
 - `tsk update` downloads the installer completely before running it, ignores a `TSK_VERSION` set in your shell, refuses to replace a newer copy with an older release, and prints the reason when a Herdr or skill refresh fails.
 - The board's release check uses the same HTTPS-only curl as `tsk update`, including `TSK_UPDATE_CURL`.
 - Agent skill installs replace `SKILL.md` atomically, so an interrupted `tsk setup` leaves the previous skill intact.

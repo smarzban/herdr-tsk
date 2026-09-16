@@ -10,15 +10,13 @@ use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::layout::{Position, Rect};
 use ratatui::DefaultTerminal;
 
-use crate::config::{default_config_dir, WalkthroughRecord};
 use crate::context::{build_snapshot, InvocationSnapshot, RawHostContext};
 use crate::domain::{DomainError, DomainState};
-use crate::reopen::ReopenWatch;
 use crate::save_recovery::SaveRecovery;
-use crate::store::{default_state_dir, StoreError, StoreSignature, TaskStore};
+use crate::store::{default_state_dir, StoreSignature, TaskStore};
 use crate::ui::board::{
     apply_intent, board_intent_may_persist, draw_board, resolve_board_command, BoardInputMode,
-    BoardModel, IntentOutcome, SaveResolution, WalkthroughOutcome,
+    BoardModel, IntentOutcome, SaveResolution,
 };
 use crate::ui::capture::{CaptureField, TITLE_REQUIRED_MESSAGE};
 use crate::ui::input::{
@@ -125,71 +123,6 @@ fn record_notice_dismissals_without_blocking_persist(store: &TaskStore, domain: 
     let _ = crate::delivery::record_dismissed_notices(store, domain.tasks());
 }
 
-/// The one walkthrough read on the open path: no record means the card opens.
-///
-/// the board loop never calls this on the launch path; it remains for the
-/// tests that drive it directly. A record present means no card at all.
-///
-/// Reading has no error channel by construction (see [`WalkthroughRecord::is_dismissed`]): an
-/// unreadable record reads as not dismissed, so the worst a broken config location can do is
-/// show the walkthrough again, never keep the board shut.
-///
-/// The open goes through [`BoardIntent::OpenWalkthrough`] -- the same intent the palette's
-/// replay command dispatches -- so launch and replay are one route with one state guard, and
-/// the reducer's refusal to cover a state that owns its own controls applies to both.
-pub fn open_walkthrough_for_launch(
-    domain: &mut DomainState,
-    model: &mut BoardModel,
-    record: &WalkthroughRecord,
-) {
-    if record.is_dismissed() {
-        return;
-    }
-    // The reducer's `OpenWalkthrough` arm has no failure mode, and a board that could not
-    // raise its onboarding card is still a usable board: nothing here fails the launch.
-    let _ = apply_intent(domain, model, BoardIntent::OpenWalkthrough, None);
-}
-
-/// Record the dismissal an open walkthrough just reported, at most once per close.
-///
-/// Call once per board loop iteration, which is the hand-off contract
-/// [`BoardModel::take_walkthrough_outcome`] states. Two of the four outcomes are the user
-/// dismissing the card and each records; `Unpresentable` and `Interrupted` are the board
-/// taking the card away with nothing answered, so they record nothing and the walkthrough
-/// returns at the next launch. Taking the outcome is what makes one close one write: a second
-/// close of an already-closed card reports nothing to take.
-///
-/// One *dismissal* is one write, which is not the same as one write per install: a card
-/// replayed from the palette and dismissed again reports again and writes again, over an
-/// already-dismissed record. That is harmless (the payload is the same constant and the write
-/// is atomic) and it is the honest reading of the criterion -- what must never happen is a
-/// second write for a single dismissal, or a retry on a keystroke that dismissed nothing.
-///
-/// `write` is a closure rather than the record itself so a test can count the attempts:
-/// "exactly once per dismissal, never retried per keystroke" is a property of this function,
-/// not of whatever the file ends up holding.
-///
-/// A failed write is **presented, never propagated**: the board keeps running with the
-/// failure on the chrome row. The outcome has already been taken, so no later keystroke
-/// retries it -- one attempt per dismissal is the whole retry policy, and the only cost of the
-/// lost record is that the walkthrough appears once more.
-pub fn record_walkthrough_dismissal(
-    model: &mut BoardModel,
-    write: impl FnOnce() -> Result<(), StoreError>,
-) {
-    let Some(outcome) = model.take_walkthrough_outcome() else {
-        return;
-    };
-    match outcome {
-        WalkthroughOutcome::Completed | WalkthroughOutcome::Skipped => {
-            if let Err(error) = write() {
-                model.set_message(format!("walkthrough dismissal save failed: {error}"));
-            }
-        }
-        WalkthroughOutcome::Unpresentable | WalkthroughOutcome::Interrupted => {}
-    }
-}
-
 /// What the board's wait for input answered.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FramePoll {
@@ -243,12 +176,10 @@ pub fn take_pending_after_paint<E>(
 /// fixed constant of its own -- the only way to change the wait is to change this function.
 pub fn board_frame(
     model: &mut BoardModel,
-    write: impl FnOnce() -> Result<(), StoreError>,
     paint: impl FnOnce(&BoardModel) -> io::Result<()>,
     wait: impl FnOnce(Duration) -> io::Result<bool>,
     active_animations: bool,
 ) -> io::Result<FramePoll> {
-    record_walkthrough_dismissal(model, write);
     paint(model)?;
     if wait(board_poll_duration(active_animations))? {
         Ok(FramePoll::Event)
@@ -269,7 +200,6 @@ pub fn board_frame(
 #[allow(clippy::too_many_arguments)]
 pub fn board_idle_tick(
     model: &mut BoardModel,
-    write: impl FnOnce() -> Result<(), StoreError>,
     paint: impl FnOnce(&BoardModel) -> io::Result<()>,
     wait: impl FnOnce(Duration) -> io::Result<bool>,
     store: &TaskStore,
@@ -279,7 +209,7 @@ pub fn board_idle_tick(
     active_animations: bool,
 ) -> io::Result<FramePoll> {
     model.expire_ephemeral_message();
-    let poll = board_frame(model, write, paint, wait, active_animations)?;
+    let poll = board_frame(model, paint, wait, active_animations)?;
     if poll == FramePoll::Idle {
         revalidate_board_from_store(store, domain, model, watch, save_recovery);
     }
@@ -355,19 +285,10 @@ fn run_board_loop(
     mut model: BoardModel,
     quick_capture: bool,
 ) -> Result<(), Box<dyn Error>> {
-    let walkthrough = WalkthroughRecord::new(default_config_dir());
     // `load_board` just read the store, so seed the watch from that snapshot: the first idle
     // tick must not immediately re-merge what is already loaded.
     let mut store_watch = StoreWatch::seeded(&store);
-    // Focusing an existing plugin pane cannot refresh its inherited host environment. The
-    // launcher publishes a one-shot request in the state dir, consumed only on idle ticks.
-    let mut reopen_watch = (!quick_capture).then(|| ReopenWatch::seeded(&store));
-    // the board frame path does no host polling and does not
-    // auto-open the walkthrough on launch. `load_board` is the whole open path; the first
-    // paint below is of that model, unrefreshed. attention polling (removed),
-    // `run_board_open_refresh`, and `open_walkthrough_for_launch` remain for the tests that
-    // drive them directly -- this loop simply stops calling them.
-    //
+
     // Every idle tick revalidates the store -- a `stat` on tsk.json, and only when its
     // mtime/size changed does it pay for `store.load()` + `merge_tasks_from_disk` +
     // `sync_from_domain` (see [`revalidate_board_from_store`]) -- so a quick-capture popup
@@ -398,11 +319,9 @@ fn run_board_loop(
         // after one settled-size paint so a key typed mid-drag is not dropped.
         let mut pending_event: Option<Event> = None;
         loop {
-            // Settle, paint, then wait. The board frame path does no host polling, so the
-            // wait is only the Frame Scheduler's idle floor. All three are one call because
-            // the order is the correctness property: the walkthrough's report from the
-            // previous iteration is written before this frame is painted and before the wait
-            // can time out into the `continue` below.
+            // Settle, paint, then wait. The wait is only the Frame Scheduler's idle floor.
+            // All three are one call so the frame is painted before the wait can time out into
+            // the `continue` below.
             let next = if let Some(event) = take_pending_after_paint(&mut pending_event, || {
                 let area = terminal_area(terminal)?;
                 sync_frame_presentation(area, &model);
@@ -418,7 +337,6 @@ fn run_board_loop(
             } else {
                 let poll = board_idle_tick(
                     &mut model,
-                    || walkthrough.record_dismissed(),
                     |model: &BoardModel| {
                         let area = terminal_area(terminal)?;
                         sync_frame_presentation(area, model);
@@ -439,9 +357,6 @@ fn run_board_loop(
                     drag_gesture.has_autoscroll(),
                 )?;
                 if poll == FramePoll::Idle {
-                    if let Some(watch) = reopen_watch.as_mut() {
-                        apply_reopen_request(&mut model, watch, &save_recovery);
-                    }
                     if let Some(auto) = drag_gesture.autoscroll() {
                         let area = terminal_area(terminal)?;
                         let content = drag_content_area(&model, area);
@@ -917,32 +832,6 @@ pub fn tick_drag_autoscroll(
     }
 }
 
-/// Apply a pending explicit launcher context once the board is not in save recovery.
-/// Returning `false` leaves a dirty editor's request pending for a later idle tick.
-pub fn apply_reopen_request(
-    model: &mut BoardModel,
-    watch: &mut ReopenWatch,
-    recovery: &SaveRecovery<DomainState>,
-) -> bool {
-    if recovery.is_pending() {
-        return false;
-    }
-    let Some(request) = watch.poll() else {
-        return false;
-    };
-    if model.has_unsaved_work() {
-        if watch.mark_deferred_notice() {
-            model.set_message("save or cancel edits before reopening tsk");
-        }
-        return false;
-    }
-    if !model.apply_reopen_context(request.project.clone(), request.open_project) {
-        return false;
-    }
-    watch.acknowledge();
-    true
-}
-
 /// Whether save recovery permits the board to apply background state changes.
 fn board_background_work_allowed(recovery: &SaveRecovery<DomainState>) -> bool {
     !recovery.is_pending()
@@ -1354,8 +1243,8 @@ fn board_input_mode_for_area(_area: Rect, mode: BoardInputMode) -> BoardInputMod
 
 /// Resolve the surface this area actually paints, before any input is mapped against it.
 ///
-/// the legacy Resize band (<50x18) used to force-close popup/help/detail/command-surface
-/// /walkthrough here and swallow every mutating intent in [`board_intent_for_area`] below it,
+/// the legacy Resize band (<50x18) used to force-close popup/help/detail/command surfaces
+/// here and swallow every mutating intent in [`board_intent_for_area`] below it,
 /// which left's compact-tier controls dead down to 40x10. `BoardMode` still classifies
 /// the painted layout (`board_input_mode_for_area`, `board_layout*`), but no longer gates or
 /// force-closes anything: every surface is routed the same way at every supported size.
@@ -2067,7 +1956,7 @@ fn handle_board_intent(
 
 #[cfg(test)]
 mod save_recovery_tests {
-    use super::{apply_reopen_request, board_background_work_allowed};
+    use super::board_background_work_allowed;
     use crate::domain::DomainState;
     use crate::save_recovery::SaveRecovery;
 
@@ -2079,144 +1968,6 @@ mod save_recovery_tests {
         assert!(!board_background_work_allowed(&recovery));
         let _ = recovery.cancel();
         assert!(board_background_work_allowed(&recovery));
-    }
-
-    #[test]
-    fn reopen_deferred_request_does_not_overwrite_new_editor_feedback() {
-        use crate::domain::{ProvenanceOrigin, TaskScope};
-        use crate::reopen::{ReopenRequest, ReopenWatch};
-        use crate::store::TaskStore;
-        use crate::ui::board::BoardModel;
-        use crate::ui::input::BoardIntent;
-        use std::fs;
-        use std::path::PathBuf;
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static SEQ: AtomicU64 = AtomicU64::new(0);
-        let dir = std::env::temp_dir().join(format!(
-            "tsk-reopen-dirty-{}-{}",
-            std::process::id(),
-            SEQ.fetch_add(1, Ordering::Relaxed)
-        ));
-        fs::create_dir_all(&dir).expect("state dir");
-        let store = TaskStore::new(&dir);
-        let mut domain = DomainState::new();
-        domain
-            .create(
-                "draft",
-                None,
-                TaskScope::Global,
-                ProvenanceOrigin::Manual,
-                None,
-            )
-            .expect("task");
-        let mut model = BoardModel::from_domain(&domain, None);
-        crate::ui::board::apply_intent(&mut domain, &mut model, BoardIntent::BeginEditTitle, None)
-            .expect("edit");
-        crate::ui::board::apply_intent(&mut domain, &mut model, BoardIntent::EditInsert('x'), None)
-            .expect("type");
-        let mut watch = ReopenWatch::seeded(&store);
-        ReopenRequest::new(Some(PathBuf::from("/repo/deferred")))
-            .write(&dir)
-            .expect("request");
-        let recovery = SaveRecovery::new();
-        assert!(!apply_reopen_request(&mut model, &mut watch, &recovery));
-        assert!(model
-            .message()
-            .is_some_and(|message| message.contains("save or cancel")));
-        model.set_message("title is required");
-        assert!(!apply_reopen_request(&mut model, &mut watch, &recovery));
-        assert_eq!(model.message(), Some("title is required"));
-        let _ = fs::remove_dir_all(dir);
-    }
-
-    #[test]
-    fn reopen_idle_bridge_applies_and_acknowledges_or_defers_behind_recovery() {
-        use crate::reopen::{ReopenRequest, ReopenWatch};
-        use crate::store::TaskStore;
-        use crate::ui::board::BoardModel;
-        use std::fs;
-        use std::path::PathBuf;
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static SEQ: AtomicU64 = AtomicU64::new(0);
-        let dir = std::env::temp_dir().join(format!(
-            "tsk-reopen-app-{}-{}",
-            std::process::id(),
-            SEQ.fetch_add(1, Ordering::Relaxed)
-        ));
-        fs::create_dir_all(&dir).expect("state dir");
-        let store = TaskStore::new(&dir);
-        let mut watch = ReopenWatch::seeded(&store);
-        let mut model = BoardModel::from_domain(&DomainState::new(), None);
-        let recovery = SaveRecovery::new();
-        ReopenRequest::new(Some(PathBuf::from("/repo/new")))
-            .write(&dir)
-            .expect("request");
-        assert!(apply_reopen_request(&mut model, &mut watch, &recovery));
-        assert_eq!(
-            model.selected_project(),
-            Some(std::path::Path::new("/repo/new"))
-        );
-        assert!(!dir.join("reopen.json").exists());
-
-        let outside = PathBuf::from("/work/outside-git");
-        let outside_snapshot = crate::context::InvocationSnapshot {
-            default_scope: crate::domain::TaskScope::Global,
-            this_repo: Some(outside.clone()),
-            title_prefill: None,
-            provenance: crate::domain::ProvenanceOrigin::Capture,
-        };
-        ReopenRequest::from_snapshot(&outside_snapshot)
-            .write(&dir)
-            .expect("outside-Git request");
-        assert!(apply_reopen_request(&mut model, &mut watch, &recovery));
-        assert_eq!(model.nav_tab(), crate::ui::queue::NavTab::Desk);
-        assert_eq!(model.selected_project(), Some(outside.as_path()));
-
-        let mut domain = DomainState::new();
-        crate::ui::board::apply_intent(
-            &mut domain,
-            &mut model,
-            crate::ui::input::BoardIntent::OpenCapture,
-            Some(&outside_snapshot),
-        )
-        .expect("open desk capture");
-        crate::ui::board::apply_intent(
-            &mut domain,
-            &mut model,
-            crate::ui::input::BoardIntent::QuickAddInsertText("desk task".into()),
-            None,
-        )
-        .expect("type desk task");
-        crate::ui::board::apply_intent(
-            &mut domain,
-            &mut model,
-            crate::ui::input::BoardIntent::QuickAddSave,
-            None,
-        )
-        .expect("save desk task");
-        assert_eq!(domain.tasks()[0].scope, crate::domain::TaskScope::Global);
-        model.sync_from_domain(&domain);
-
-        let mut pending = SaveRecovery::new();
-        pending.fail(DomainState::new(), DomainState::new(), "save failed");
-        ReopenRequest::new(Some(PathBuf::from("/repo/deferred")))
-            .write(&dir)
-            .expect("request");
-        assert!(!apply_reopen_request(&mut model, &mut watch, &pending));
-        assert!(
-            dir.join("reopen.json").exists(),
-            "deferred request remains pending"
-        );
-        model.set_message("editor feedback");
-        assert!(!apply_reopen_request(&mut model, &mut watch, &pending));
-        assert_eq!(model.message(), Some("editor feedback"));
-        let _ = pending.cancel();
-        assert!(apply_reopen_request(&mut model, &mut watch, &pending));
-        assert_eq!(
-            model.selected_project(),
-            Some(std::path::Path::new("/repo/deferred"))
-        );
-        let _ = fs::remove_dir_all(dir);
     }
 }
 
@@ -2687,7 +2438,6 @@ mod idle_store_revalidation_tests {
     #[test]
     fn board_idle_tick_reports_idle_and_merges_a_separate_writers_task_in_one_call() {
         use super::{board_idle_tick, FramePoll};
-        use crate::store::StoreError;
 
         let dir = temp_store_dir("real-idle-path");
         let store = TaskStore::new(&dir);
@@ -2711,13 +2461,11 @@ mod idle_store_revalidation_tests {
             .unwrap();
         writer_store.save(&writer_domain).unwrap();
 
-        let write = || -> Result<(), StoreError> { Ok(()) };
         let paint = |_model: &BoardModel| -> std::io::Result<()> { Ok(()) };
         // Never sees an event, matching the real Idle branch.
         let wait = |_duration: std::time::Duration| -> std::io::Result<bool> { Ok(false) };
         let poll = board_idle_tick(
             &mut model,
-            write,
             paint,
             wait,
             &store,
@@ -7179,8 +6927,15 @@ mod tests {
 
     #[test]
     fn navigation_digits_route_from_project_focus_and_preserve_input_interception() {
-        let (mut domain, mut model) = board_fixture("digits", None);
-        model.apply_reopen_project(Some(PathBuf::from("/repos/alpha")));
+        let (mut domain, _) = board_fixture("digits", None);
+        let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/alpha")));
+        apply_intent(
+            &mut domain,
+            &mut model,
+            BoardIntent::SelectNavTab(NavTab::ProjectBoard),
+            None,
+        )
+        .expect("project board");
         let key = |code| KeyEvent::new(code, KeyModifiers::NONE);
         assert_eq!(
             board_keyboard_intent(&model, BoardInputMode::Normal, key(KeyCode::Char('1'))),
@@ -7203,8 +6958,8 @@ mod tests {
 
     #[test]
     fn projects_search_owns_bound_keys_paste_and_mouse_focus() {
-        let (mut domain, mut model) = board_fixture("search", None);
-        model.apply_reopen_project(Some(PathBuf::from("/repos/beta")));
+        let (mut domain, _) = board_fixture("search", None);
+        let mut model = BoardModel::from_domain(&domain, Some(PathBuf::from("/repos/beta")));
         apply_intent(
             &mut domain,
             &mut model,

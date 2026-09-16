@@ -2224,7 +2224,7 @@ fn failed_save_during_thread_edit_holds_form_until_retry_or_cancel() {
 fn input_surface_help_lines_use_the_shared_lowercase_verb_grammar() {
     use tsk_tui::ui::input::{
         COMMAND_SURFACE_HELP_LINE, HELP_SURFACE_HELP_LINE, LAUNCH_CARD_HELP_LINE,
-        SAVE_RECOVERY_HELP_LINE, SEARCH_HELP_LINE, WALKTHROUGH_HELP_LINE,
+        SAVE_RECOVERY_HELP_LINE, SEARCH_HELP_LINE,
     };
 
     assert_eq!(
@@ -2238,5 +2238,4 @@ fn input_surface_help_lines_use_the_shared_lowercase_verb_grammar() {
     assert_eq!(LAUNCH_CARD_HELP_LINE, "y unarchive · n keep archived");
     assert_eq!(SAVE_RECOVERY_HELP_LINE, "↑↓ · r retry · c cancel");
     assert_eq!(SEARCH_HELP_LINE, "/ search · type · enter pin · esc clear");
-    assert_eq!(WALKTHROUGH_HELP_LINE, "enter next · esc skip");
 }

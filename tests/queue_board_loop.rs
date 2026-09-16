@@ -116,7 +116,6 @@ fn instrumented_loop_idle_wait_never_sustained_below_25ms_without_animation() {
     for _ in 0..50 {
         let poll = board_frame(
             &mut model,
-            || panic!("no walkthrough was opened; nothing should report a dismissal to record"),
             |model| {
                 // `TestBackend`'s draw error is `Infallible`; `expect` collapses it to the
                 // `io::Result<()>` `board_frame` requires without inventing a fake error path.
@@ -169,7 +168,6 @@ fn autoscroll_shortens_the_board_frame_wait() {
     let mut recorded = None;
     let poll = board_frame(
         &mut model,
-        || panic!("no walkthrough"),
         |model| {
             terminal
                 .draw(|frame| {
@@ -288,7 +286,6 @@ fn repeated_threshold_resizes_keep_board_loop_live() {
         let mut terminal = Terminal::new(TestBackend::new(width, 24)).expect("test terminal");
         let poll = board_frame(
             &mut model,
-            || panic!("no walkthrough"),
             |model| {
                 terminal
                     .draw(|frame| {
@@ -336,7 +333,6 @@ fn threshold_crossings_without_task_verbs_leave_domain_unchanged() {
         let mut terminal = Terminal::new(TestBackend::new(width, 24)).expect("test terminal");
         let poll = board_frame(
             &mut model,
-            || panic!("no walkthrough"),
             |model| {
                 terminal
                     .draw(|frame| {

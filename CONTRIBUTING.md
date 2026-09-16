@@ -20,7 +20,7 @@ cargo build
 Run the binary with isolated state while developing changes that write tasks:
 
 ```bash
-TSK_STATE_DIR=/tmp/tsk-dev-state TSK_CONFIG_DIR=/tmp/tsk-dev-config cargo run
+TSK_STATE_DIR=/tmp/tsk-dev-state cargo run
 ```
 
 Do not point development builds at a board containing data you care about.
@@ -62,7 +62,7 @@ For site changes:
 cd site && npm ci && npm test && npm run build
 ```
 
-Changes affecting the board, host integration, or panes should also be exercised through the real herdr flow. Use isolated `TSK_STATE_DIR` and `TSK_CONFIG_DIR` values when the smoke test mutates tasks. A `tsk setup herdr` smoke additionally needs `XDG_CONFIG_HOME`, `XDG_STATE_HOME` and `HERDR_SOCKET_PATH` pointed at throwaway paths: the config override alone does not isolate Herdr's plugin registry, and setup would relink your daily plugin.
+Changes affecting the board, host integration, or panes should also be exercised through the real herdr flow. Use an isolated `TSK_STATE_DIR` when the smoke test mutates tasks. A `tsk setup herdr` smoke additionally needs `XDG_CONFIG_HOME`, `XDG_STATE_HOME` and `HERDR_SOCKET_PATH` pointed at throwaway paths: the state override alone does not isolate Herdr's plugin registry, and setup would relink your daily plugin.
 
 ## Pull requests
 

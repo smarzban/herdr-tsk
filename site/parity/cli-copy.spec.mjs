@@ -14,7 +14,6 @@ test("agent transcript matches the current CLI output contract", async ({
   const env = {
     ...process.env,
     TSK_STATE_DIR: join(scratch, "state"),
-    TSK_CONFIG_DIR: join(scratch, "config"),
   };
   try {
     await page.goto("http://127.0.0.1:4180/");

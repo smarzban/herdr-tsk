@@ -127,7 +127,6 @@ def assemble(tag, out):
         "", "  def install", '    bin.install "tsk"', "  end", "",
         "  def caveats", '    <<~EOS', "      Homebrew installs are noninteractive. To register the shared tsk binary and shortcuts in Herdr, run:", "        tsk setup herdr", "      To add the tsk skill to your coding agents, run:", "        tsk setup agents", "    EOS", "  end", "",
         "  test do", '    ENV["TSK_STATE_DIR"] = (testpath/"state").to_s',
-        '    ENV["TSK_CONFIG_DIR"] = (testpath/"config").to_s',
         '    assert_match "usage: tsk", shell_output("#{bin}/tsk --help")',
         '    system bin/"tsk", "add", "--desk", "-t", "Homebrew smoke"',
         '    assert_match "Homebrew smoke", shell_output("#{bin}/tsk list --desk")',
