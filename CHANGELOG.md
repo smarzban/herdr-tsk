@@ -23,7 +23,6 @@ the GitHub release notes verbatim.
 
 - `tsk update` prints the version it replaces and the one it installs, re-registers an already set-up Herdr plugin without asking, and updates outdated installed agent skills (one `[Y/n]` ask on a terminal, unattended otherwise). It never installs a skill for an agent that had none; with nothing installed it offers the first-install ask.
 - `tsk setup herdr` leaves a plugin command you bound to another key alone instead of adding the default chord beside it.
-- Agent skill 1.3.0 (`unknown-project` refusal, search and multi-select); rerun `tsk setup` to update installed copies, or let `tsk update` do it.
 
 ## v0.10.0
 
@@ -40,6 +39,7 @@ the GitHub release notes verbatim.
 
 - `!p name`, `tsk add -p name`, and JSON plan projects refuse unknown or ambiguous names (`unknown-project`) instead of creating a stray project. A new project needs an existing absolute path (`/…` or `~/…`).
 - `ctrl+q` quits from every non-editor surface, including task pages and the wide project preview. `Esc` closes layers and wide splits, then quits at the full-board root on any tab. Unsaved drafts still block quitting.
+- Agent skill 1.3.0 (`unknown-project` refusal, search and multi-select); rerun `tsk setup` to update installed copies.
 
 ## v0.9.0
 

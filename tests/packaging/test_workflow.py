@@ -17,7 +17,7 @@ WORKFLOW = ROOT / ".github/workflows/release.yml"
 
 class WorkflowTests(unittest.TestCase):
     def test_public_pr_validation_is_read_only_and_secret_free(self):
-        for name in ["ci", "site"]:
+        for name in ["ci", "site", "installer"]:
             with self.subTest(workflow=name):
                 source = (ROOT / f".github/workflows/{name}.yml").read_text()
                 triggers = source.split("on:\n", 1)[1].split("\npermissions:", 1)[0]

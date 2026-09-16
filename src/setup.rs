@@ -369,7 +369,8 @@ fn managed_assets(binary: &Path, version: &str) -> io::Result<Vec<(&'static str,
         .parse::<DocumentMut>()
         .map_err(|e| error(e.to_string()))?;
     manifest.remove("build");
-    manifest["min_herdr_version"] = value("0.9.0");
+    let (major, minor, patch) = MIN_HERDR_VERSION;
+    manifest["min_herdr_version"] = value(format!("{major}.{minor}.{patch}"));
     manifest["version"] = value(version);
     let mut command = Array::new();
     command.push(path);
