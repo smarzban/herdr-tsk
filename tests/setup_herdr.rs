@@ -201,3 +201,35 @@ fn whitespace_in_chord_is_detected_but_shifted_uppercase_is_not_replaced() {
     let updated = edit_bindings("[keys]\nnew_tab='prefix+T'\n", false, |_, _| panic!()).unwrap();
     assert!(updated.contains("new_tab='prefix+T'"));
 }
+
+#[test]
+fn an_action_bound_on_a_custom_key_is_kept_and_no_default_chord_is_added() {
+    // The user moved the board to prefix+b; a rerun (or `tsk update`) must not add prefix+t.
+    let source = "[[keys.command]]\nkey = 'prefix+b'\ntype = 'plugin_action'\ncommand = 'herdr-tsk.open-board'\n";
+    let edited = edit_bindings(source, false, |_, _| panic!("no conflicts")).unwrap();
+    let doc = edited.parse::<toml_edit::DocumentMut>().unwrap();
+    let commands = doc["keys"]["command"].as_array_of_tables().unwrap();
+    let boards: Vec<_> = commands
+        .iter()
+        .filter(|t| t["command"].as_str() == Some("herdr-tsk.open-board"))
+        .collect();
+    assert_eq!(boards.len(), 1, "{edited}");
+    assert_eq!(boards[0]["key"].as_str(), Some("prefix+b"));
+    assert!(edited.contains("herdr-tsk.quick-capture"), "{edited}");
+    assert!(!edited.contains("'prefix+t'"), "{edited}");
+}
+
+#[test]
+fn commands_bound_matches_both_plugin_commands_on_any_key() {
+    use tsk_tui::setup::commands_bound;
+    let both = "[[keys.command]]\nkey = 'prefix+b'\ntype = 'plugin_action'\ncommand = 'herdr-tsk.open-board'\n[[keys.command]]\nkey = 'prefix+q'\ntype = 'plugin_action'\ncommand = 'herdr-tsk.quick-capture'\n";
+    assert!(commands_bound(both));
+    let inline = "[keys]\ncommand = [{key = 'prefix+t', type = 'plugin_action', command = 'herdr-tsk.open-board'}, {key = 'prefix+a', type = 'plugin_action', command = 'herdr-tsk.quick-capture'}]\n";
+    assert!(commands_bound(inline));
+    let one = "[[keys.command]]\nkey = 'prefix+t'\ntype = 'plugin_action'\ncommand = 'herdr-tsk.open-board'\n";
+    assert!(!commands_bound(one));
+    let wrong_type = "[[keys.command]]\nkey = 'prefix+t'\ntype = 'shell'\ncommand = 'herdr-tsk.open-board'\n[[keys.command]]\nkey = 'prefix+a'\ntype = 'plugin_action'\ncommand = 'herdr-tsk.quick-capture'\n";
+    assert!(!commands_bound(wrong_type));
+    assert!(!commands_bound(""));
+    assert!(!commands_bound("not = [toml"));
+}

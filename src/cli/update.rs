@@ -75,6 +75,11 @@ fn run_installer(install_dir: &Path, curl: &Path, shell: &Path) -> Result<(), St
     let mut installer = match Command::new(shell)
         .env("TSK_INSTALL_DIR", install_dir)
         .env("TSK_UPDATE", "1")
+        // The installer cannot know what it is replacing; the running binary can.
+        .env(
+            "TSK_CURRENT_VERSION",
+            concat!("v", env!("CARGO_PKG_VERSION")),
+        )
         .stdin(Stdio::from(stdout))
         .spawn()
     {

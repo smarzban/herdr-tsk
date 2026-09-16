@@ -1278,9 +1278,9 @@ pub fn rejected(error: AddError) -> CliOutput {
 
 pub fn setup_help() -> CliOutput {
     help(HelpDoc {
-        usage: vec!["tsk setup [herdr | agents | claude | pi | omp | cursor | grok | codex | opencode | --skill-dir <path>] [--yes] [--force] [--json]".into(), "tsk setup --detected-ids".into()],
+        usage: vec!["tsk setup [herdr | agents | claude | pi | omp | cursor | grok | codex | opencode | --skill-dir <path>] [--yes] [--force] [--json]".into(), "tsk setup --detected-ids | --skill-states".into(), "tsk setup herdr --check".into()],
         purpose: "Register Herdr, or install the bundled agent workflow skill.".into(),
-        groups: vec![group("Output", &[("--json", "print machine-readable agent detection or install output"), ("--detected-ids", "print space-separated detected agent ids")]), group("Values", &[("herdr", "register plugin assets and keyboard shortcuts"), ("agents --yes", "install or update every detected agent skill; add --force to rewrite matching versions"), ("<agent>, --skill-dir <path>", "install one named agent skill"), ("--force", "overwrite a matching skill version")])],
+        groups: vec![group("Output", &[("--json", "print machine-readable agent detection or install output"), ("--detected-ids", "print space-separated detected agent ids"), ("--skill-states", "print one tab-separated line per detected agent: id, state, installed version, path (for installers)"), ("herdr --check", "print bound when both plugin commands are already in the Herdr config, otherwise unbound")]), group("Values", &[("herdr", "register plugin assets and keyboard shortcuts"), ("agents --yes", "install or update every detected agent skill; add --force to rewrite matching versions"), ("<agent>, --skill-dir <path>", "install one named agent skill"), ("--force", "overwrite a matching skill version")])],
         examples: vec!["tsk setup herdr".into(), "tsk setup agents --yes".into(), "tsk setup pi".into()],
         refusals: vec!["skill-exists".into(), "setup failure".into(), "blocked skill root".into()],
         exit: exit_line("setup completed or help listed", Some("setup refusal or failure"), false),
@@ -1332,6 +1332,15 @@ pub fn setup_agent_listed(json: bool) -> CliOutput {
 }
 
 pub fn setup_agent_detected_json(text: String) -> CliOutput {
+    CliOutput {
+        stdout: text,
+        stderr: String::new(),
+        code: 0,
+    }
+}
+
+/// Plain probe output for installers (`--skill-states`, `herdr --check`).
+pub fn setup_probe(text: String) -> CliOutput {
     CliOutput {
         stdout: text,
         stderr: String::new(),

@@ -277,7 +277,7 @@ Use top-level help to find a command, then use either one-command form for its f
 tsk update
 ```
 
-For an installer-managed copy, immediately downloads and runs the official installer to install the latest published release. For a Homebrew copy, it prints `brew update && brew upgrade tsk`; Homebrew remains responsible for its own upgrades. Reopen a running board after an upgrade.
+For an installer-managed copy, immediately downloads and runs the official installer to install the latest published release, then refreshes an already registered Herdr plugin and any outdated installed agent skills ([details](/docs/install/#upgrade)). For a Homebrew copy, it prints `brew update && brew upgrade tsk`; Homebrew remains responsible for its own upgrades. Reopen a running board after an upgrade.
 
 ## setup
 
@@ -288,13 +288,15 @@ tsk setup agents --yes
 tsk setup pi
 tsk setup --skill-dir /path/to/skills
 tsk setup --detected-ids
+tsk setup --skill-states
+tsk setup herdr --check
 ```
 
-On a TTY, bare `tsk setup` detects global agent skill roots and asks once to install or update the embedded skill for every detected agent. Without a TTY it prints guidance (and the list of named targets) and does not hang. `tsk setup --json` prints a detection report. `tsk setup --detected-ids` prints space-separated detected agent ids for installers.
+On a TTY, bare `tsk setup` detects global agent skill roots and asks once to install or update the embedded skill for every detected agent. Without a TTY it prints guidance (and the list of named targets) and does not hang. `tsk setup --json` prints a detection report. Two plain probes exist for installers: `tsk setup --detected-ids` prints space-separated detected agent ids, and `tsk setup --skill-states` prints an `embedded <version>` line followed by one tab-separated `id state version path` line per detected agent (`missing`, `current`, `outdated`, `blocked-symlink`).
 
 ### Herdr
 
-Requires Herdr 0.9+ on PATH. Registers the installed binary and adds **prefix+t** and **prefix+a**. Shortcut conflicts require confirmation; noninteractive conflicts stop before writes. It uses `HERDR_CONFIG_PATH`, then `XDG_CONFIG_HOME/herdr/config.toml`, then `~/.config/herdr/config.toml`.
+Requires Herdr 0.9+ on PATH. Registers the installed binary and adds **prefix+t** and **prefix+a**. A plugin command you already bound to another key is left alone; setup never adds the default chord beside it. Shortcut conflicts require confirmation; noninteractive conflicts stop before writes. `tsk setup herdr --check` prints `bound` when both plugin commands are already in the config (on any keys), otherwise `unbound`, and changes nothing. It uses `HERDR_CONFIG_PATH`, then `XDG_CONFIG_HOME/herdr/config.toml`, then `~/.config/herdr/config.toml`.
 
 [Reload, upgrades, and removal](/docs/install/#herdr-setup-with-an-installed-binary).
 
@@ -319,6 +321,7 @@ Setup writes `tsk-cli/SKILL.md` under the selected directory. OMP follows `OMP_P
 | `--force` | Replace an existing skill even when versions match |
 | `--json` | Machine-readable outcome |
 | `--detected-ids` | Print detected agent ids (installer use) |
+| `--skill-states` | Print each detected agent's skill state (installer use) |
 
 Symlinks at the skills root, skill directory, or file are refused. Herdr setup does not accept these agent options.
 

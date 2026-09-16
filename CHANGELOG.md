@@ -9,6 +9,11 @@ the GitHub release notes verbatim.
 
 ## Unreleased
 
+### Changed
+
+- `tsk update` prints the version it replaces and the one it installs, re-registers an already set-up Herdr plugin without asking, and updates outdated installed agent skills (one `[Y/n]` ask on a terminal, unattended otherwise). It never installs a skill for an agent that had none; with nothing installed it offers the first-install ask.
+- `tsk setup herdr` leaves a plugin command you bound to another key alone instead of adding the default chord beside it.
+
 ## v0.10.0
 
 ### Breaking

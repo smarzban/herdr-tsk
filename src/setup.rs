@@ -76,6 +76,12 @@ pub fn edit_bindings(
         return Err(error("keys.command must be an array of tables"));
     }
     for (key, action) in BINDINGS {
+        // An action the user already bound, on whatever key, is satisfied: setup never adds
+        // a second chord beside a custom one. `tsk update` relies on this to refresh a
+        // registration without touching remapped shortcuts.
+        if action_bound(keys, action) {
+            continue;
+        }
         let builtin: Vec<String> = keys
             .iter()
             .filter(|(name, item)| *name != "prefix" && *name != "command" && has(item, key))
@@ -133,6 +139,55 @@ pub fn edit_bindings(
         commands.push(command);
     }
     Ok(doc.to_string())
+}
+
+/// Whether `keys.command` already carries a `plugin_action` entry for `action`, on any key.
+fn action_bound(keys: &Table, action: &str) -> bool {
+    let correct = |t: &Table| {
+        t.get("type").and_then(Item::as_str) == Some("plugin_action")
+            && t.get("command").and_then(Item::as_str) == Some(action)
+    };
+    match keys.get("command") {
+        Some(Item::ArrayOfTables(commands)) => commands.iter().any(correct),
+        Some(Item::Value(value)) => value.as_array().is_some_and(|array| {
+            array.iter().any(|entry| {
+                entry
+                    .as_inline_table()
+                    .is_some_and(|t| correct(&t.clone().into_table()))
+            })
+        }),
+        _ => false,
+    }
+}
+
+/// Whether the Herdr config at `source` binds both plugin commands, on any keys.
+/// Malformed TOML reads as not bound; `tsk setup herdr` reports the parse error itself.
+pub fn commands_bound(source: &str) -> bool {
+    let Ok(doc) = source.parse::<DocumentMut>() else {
+        return false;
+    };
+    let keys = match doc.get("keys") {
+        Some(Item::Table(table)) => table.clone(),
+        Some(Item::Value(value)) => match value.as_inline_table() {
+            Some(inline) => inline.clone().into_table(),
+            None => return false,
+        },
+        _ => return false,
+    };
+    BINDINGS
+        .iter()
+        .all(|(_, action)| action_bound(&keys, action))
+}
+
+/// `tsk setup herdr --check`: is the plugin already wired into the resolved Herdr config?
+/// A missing config is simply not bound.
+pub fn herdr_setup_present() -> io::Result<bool> {
+    let path = config_path()?;
+    match fs::read_to_string(&path) {
+        Ok(source) => Ok(commands_bound(&source)),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(e),
+    }
 }
 
 fn absolute(path: PathBuf) -> io::Result<PathBuf> {

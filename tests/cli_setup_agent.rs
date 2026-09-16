@@ -1067,3 +1067,91 @@ fn bare_setup_non_tty_with_detected_agents_prints_guidance_without_writing() {
     );
     let _ = fs::remove_dir_all(root);
 }
+
+#[test]
+fn skill_states_probe_lists_each_detected_agent_with_state_version_and_path() {
+    let _lock = env_lock();
+    let _omp_env = OmpEnvGuard::cleared();
+    let root = temp_dir("skill-states");
+    let home = root.join("home");
+    fs::create_dir_all(home.join(".claude")).expect("Claude marker");
+    fs::create_dir_all(home.join(".codex")).expect("Codex marker");
+    fs::create_dir_all(home.join(".agents/skills/tsk-cli")).expect("Codex skill folder");
+    fs::write(
+        home.join(".agents/skills/tsk-cli/SKILL.md"),
+        "---\nname: tsk-cli\nversion: 0.0.1\n---\nold\n",
+    )
+    .expect("stale codex skill");
+    let previous_home = std::env::var_os("HOME");
+    std::env::set_var("HOME", &home);
+
+    let probe = cli_non_tty(&["tsk", "setup", "--skill-states"]);
+    assert_eq!(probe.code, 0, "{probe:?}");
+    let lines: Vec<Vec<&str>> = probe
+        .stdout
+        .lines()
+        .map(|line| line.split('\t').collect())
+        .collect();
+    assert_eq!(lines[0][0], "embedded");
+    assert_eq!(lines[0][1], tsk_tui::setup_agent::embedded_skill_version());
+    let claude = lines.iter().find(|l| l[0] == "claude").expect("claude row");
+    assert_eq!(claude[1], "missing");
+    assert_eq!(claude[2], "-");
+    assert!(
+        claude[3].ends_with(".claude/skills/tsk-cli/SKILL.md"),
+        "{claude:?}"
+    );
+    let codex = lines.iter().find(|l| l[0] == "codex").expect("codex row");
+    assert_eq!(codex[1], "outdated");
+    assert_eq!(codex[2], "0.0.1");
+
+    let both = cli_non_tty(&["tsk", "setup", "--skill-states", "--detected-ids"]);
+    assert_eq!(both.code, 2, "{both:?}");
+    let stray_check = cli_non_tty(&["tsk", "setup", "--check"]);
+    assert_eq!(stray_check.code, 2, "{stray_check:?}");
+
+    match previous_home {
+        Some(value) => std::env::set_var("HOME", value),
+        None => std::env::remove_var("HOME"),
+    }
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn herdr_check_reports_bound_only_when_both_commands_are_in_the_config() {
+    let _lock = env_lock();
+    let root = temp_dir("herdr-check");
+    let config = root.join("herdr/config.toml");
+    fs::create_dir_all(config.parent().unwrap()).expect("config dir");
+    let previous = std::env::var_os("HERDR_CONFIG_PATH");
+    std::env::set_var("HERDR_CONFIG_PATH", &config);
+
+    let missing = cli_non_tty(&["tsk", "setup", "herdr", "--check"]);
+    assert_eq!(
+        (missing.code, missing.stdout.trim()),
+        (0, "unbound"),
+        "{missing:?}"
+    );
+
+    fs::write(
+        &config,
+        "[[keys.command]]\nkey = 'prefix+b'\ntype = 'plugin_action'\ncommand = 'herdr-tsk.open-board'\n[[keys.command]]\nkey = 'prefix+a'\ntype = 'plugin_action'\ncommand = 'herdr-tsk.quick-capture'\n",
+    )
+    .expect("write config");
+    let bound = cli_non_tty(&["tsk", "setup", "herdr", "--check"]);
+    assert_eq!((bound.code, bound.stdout.trim()), (0, "bound"), "{bound:?}");
+
+    fs::write(&config, "[keys]\nprefix = 'ctrl+b'\n").expect("write config");
+    let unbound = cli_non_tty(&["tsk", "setup", "herdr", "--check"]);
+    assert_eq!(
+        (unbound.code, unbound.stdout.trim()),
+        (0, "unbound"),
+        "{unbound:?}"
+    );
+
+    match previous {
+        Some(value) => std::env::set_var("HERDR_CONFIG_PATH", value),
+        None => std::env::remove_var("HERDR_CONFIG_PATH"),
+    }
+    let _ = fs::remove_dir_all(root);
+}
