@@ -131,7 +131,11 @@ fn bare_path_install_materializes_capture_and_version_without_printing_the_root(
         assert_eq!(command.get(1).unwrap().as_str(), Some(script));
     }
     assert_eq!(doc["version"].as_str(), Some(env!("CARGO_PKG_VERSION")));
-    assert_eq!(doc["min_herdr_version"].as_str(), Some("0.9.0"));
+    let (major, minor, patch) = tsk_tui::setup::MIN_HERDR_VERSION;
+    assert_eq!(
+        doc["min_herdr_version"].as_str(),
+        Some(format!("{major}.{minor}.{patch}").as_str())
+    );
     assert_eq!(
         doc["panes"].as_array_of_tables().unwrap().get(0).unwrap()["command"][0].as_str(),
         h.bin.join("tsk").to_str()

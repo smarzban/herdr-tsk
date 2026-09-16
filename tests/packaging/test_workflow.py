@@ -17,7 +17,7 @@ WORKFLOW = ROOT / ".github/workflows/release.yml"
 
 class WorkflowTests(unittest.TestCase):
     def test_public_pr_validation_is_read_only_and_secret_free(self):
-        for name in ["ci", "site"]:
+        for name in ["ci", "site", "installer"]:
             with self.subTest(workflow=name):
                 source = (ROOT / f".github/workflows/{name}.yml").read_text()
                 triggers = source.split("on:\n", 1)[1].split("\npermissions:", 1)[0]
@@ -48,9 +48,12 @@ class WorkflowTests(unittest.TestCase):
             self.assertNotIn(token, site)
             self.assertIn(token, ci)
             self.assertIn(token, installer)
-        self.assertIn("branches: [main]", installer)
+        # The installer must be gated before merge, not only after: the site serves it from main.
+        triggers = installer.split("on:\n", 1)[1].split("\npermissions:", 1)[0]
+        self.assertEqual(re.findall(r"^  ([a-z_]+):", triggers, re.M), ["push", "pull_request"])
+        self.assertEqual(triggers.count("branches: [main]"), 2)
         for path in ["site/public/install.sh", "scripts/release.py", "tests/packaging/**"]:
-            self.assertIn(f'- "{path}"', installer)
+            self.assertEqual(triggers.count(f'- "{path}"'), 2, path)
         self.assertIn("shellcheck site/public/install.sh", installer)
         self.assertIn("TSK_TEST_BINARY: ${{ github.workspace }}/target/release/tsk", ci)
         self.assertLess(ci.index("name: Verify"), ci.index("name: Packaging contract tests"))

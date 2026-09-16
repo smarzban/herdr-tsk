@@ -169,6 +169,6 @@ cargo build --release
 export PATH="$PWD/target/release:$PATH"
 ```
 
-For plugin development from a checkout, Herdr 0.7.5+ supports `herdr plugin link "$PWD"`. Rebuild after pulling changes.
+For plugin development from a checkout, Herdr 0.9.0+ supports `herdr plugin link "$PWD"`. Rebuild after pulling changes.
 
 [Contributing](https://github.com/smarzban/herdr-tsk/blob/main/CONTRIBUTING.md) · [Storage and configuration](/docs/storage/)

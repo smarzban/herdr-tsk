@@ -15,6 +15,7 @@ the GitHub release notes verbatim.
 - The board's release check uses the same HTTPS-only curl as `tsk update`, including `TSK_UPDATE_CURL`.
 - Agent skill installs replace `SKILL.md` atomically, so an interrupted `tsk setup` leaves the previous skill intact.
 - With neither `HOME` nor `TSK_STATE_DIR` set, tsk refuses to run instead of creating a board in the working directory.
+- The plugin manifest declares `min_herdr_version = "0.9.0"`, matching what setup and the launchers already require.
 
 ## v0.10.1
 
@@ -38,6 +39,7 @@ the GitHub release notes verbatim.
 
 - `!p name`, `tsk add -p name`, and JSON plan projects refuse unknown or ambiguous names (`unknown-project`) instead of creating a stray project. A new project needs an existing absolute path (`/…` or `~/…`).
 - `ctrl+q` quits from every non-editor surface, including task pages and the wide project preview. `Esc` closes layers and wide splits, then quits at the full-board root on any tab. Unsaved drafts still block quitting.
+- Agent skill 1.3.0 (`unknown-project` refusal, search and multi-select); rerun `tsk setup` to update installed copies.
 
 ## v0.9.0
 
