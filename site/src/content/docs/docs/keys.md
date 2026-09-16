@@ -92,7 +92,7 @@ Click a step to select it. Click **+ step** to add. Field clicks become editable
 
 `ctrl+e` moves to line end in text editors. `ctrl+a` moves to line start in quick-add; on the task page it adds a step instead. Paste preserves line breaks in Notes and converts them to spaces in single-line fields.
 
-Editing keys take precedence over view-mode status shortcuts. In the step editor, `ctrl+d`, `ctrl+n`, and `ctrl+o` still address the task. Notes are reached with `ctrl+e`, then `Tab`. `Alt+Enter` does not save the task edit.
+Editing keys take precedence over view-mode status shortcuts. In the step editor, `ctrl+d` and `ctrl+o` still address the task; `ctrl+x` removes the step being edited, staged until the task edit is saved; `ctrl+a` adds another step. Notes are reached with `ctrl+e`, then `Tab`. `Alt+Enter` does not save the task edit.
 
 ## Quick-add
 

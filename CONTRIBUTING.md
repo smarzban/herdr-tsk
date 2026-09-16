@@ -62,7 +62,7 @@ For site changes:
 cd site && npm ci && npm test && npm run build
 ```
 
-Changes affecting the board, host integration, or panes should also be exercised through the real herdr flow. Use isolated `TSK_STATE_DIR` and `TSK_CONFIG_DIR` values when the smoke test mutates tasks.
+Changes affecting the board, host integration, or panes should also be exercised through the real herdr flow. Use isolated `TSK_STATE_DIR` and `TSK_CONFIG_DIR` values when the smoke test mutates tasks. A `tsk setup herdr` smoke additionally needs `XDG_CONFIG_HOME`, `XDG_STATE_HOME` and `HERDR_SOCKET_PATH` pointed at throwaway paths: the config override alone does not isolate Herdr's plugin registry, and setup would relink your daily plugin.
 
 ## Pull requests
 

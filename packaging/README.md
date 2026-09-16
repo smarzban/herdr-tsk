@@ -85,8 +85,9 @@ and [`persist_plugin_offline`](https://github.com/herdrdev/herdr/blob/v0.9.0/src
 
 Setup retains the invoked binary path, including the unversioned Homebrew symlink,
 not its canonical Cellar target. Board and capture share it. Reopen boards after a
-binary upgrade and rerun setup to update the manifest and launchers. No installer
-runs setup automatically. Explicit setup replaces an existing `herdr-tsk` link.
+binary upgrade. `tsk update` reruns setup for a registration that already binds both
+plugin commands; otherwise rerun `tsk setup herdr` to update the manifest and launchers.
+Explicit setup replaces an existing `herdr-tsk` link.
 
 The shortcut planner preserves the configured prefix and unrelated settings.
 It asks before replacing each conflicting prefix+t / prefix+a binding. Declining

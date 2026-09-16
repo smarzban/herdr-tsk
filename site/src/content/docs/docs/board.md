@@ -182,7 +182,6 @@ Press `:` and type to find an action. Use arrows or `Tab` to select, `Enter` to 
 | --- | --- |
 | New task, undo, done drawer, help, quit | Always |
 | Set open/ready/started/blocked/review, edit notes, change scope, delete | A task is selected |
-| Set done | A task is selected |
 | Retry save, cancel save | A save has failed |
 
 Search matches letters in order: `ssr` finds `set status: review`.
