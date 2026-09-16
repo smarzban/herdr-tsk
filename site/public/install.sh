@@ -172,8 +172,9 @@ fi
 refresh_herdr() {
     [ "$("$tsk_bin" setup herdr --check 2>/dev/null)" = bound ] || return 1
     if "$tsk_bin" setup herdr </dev/null >/dev/null 2>&1; then
+        # The user's own keys stay; the closing line must not claim prefix+t.
         printf '\nHerdr plugin refreshed.\n'
-        herdr_wrap=board_prefix
+        herdr_wrap=board
     else
         printf '\ntsk setup herdr failed; install succeeded.\n' >&2
         herdr_wrap=board_setup
@@ -293,14 +294,18 @@ maybe_setup_agent_skills() {
     [ "$post_install_setup" = 1 ] || return 0
     [ -x "$tsk_bin" ] || return 0
     detected_ids=
+    legacy_detection=1
     if [ -n "$update_mode" ]; then
         refresh_status=0
         refresh_agent_skills || refresh_status=$?
         case $refresh_status in
             0|1) return 0 ;;
-            3) skills_wrap=nudge; return 0 ;;
+            2) legacy_detection= ;;
+            # 3: the installed release predates the probe. Detect the way a first install
+            # does, so a machine without agents stays quiet and one with agents gets the ask.
         esac
-    else
+    fi
+    if [ -n "$legacy_detection" ]; then
         detected_ids=$("$tsk_bin" setup --detected-ids 2>/dev/null) || detected_ids=
         detected_ids=$(printf '%s' "$detected_ids" | tr -s '[:space:]' ' ' | sed 's/^ *//;s/ *$//')
     fi

@@ -1515,7 +1515,9 @@ pub fn setup(result: crate::setup::SetupResult) -> CliOutput {
         .iter()
         .map(|(keys, label)| format!("{} {label}", terminal_text(keys)))
         .collect();
-    if !shortcuts.is_empty() {
+    if shortcuts.is_empty() {
+        stdout.push_str("    Shortcuts:      none bound\n");
+    } else {
         stdout.push_str(&format!("    Shortcuts:      {}\n", shortcuts.join(", ")));
     }
     if result.declined_conflicts {
@@ -1684,6 +1686,20 @@ mod tests {
         assert!(output
             .stdout
             .contains("    Shortcuts:      prefix+b / prefix+t board, prefix+a quick capture\n"));
+    }
+
+    #[test]
+    fn setup_with_nothing_bound_says_so_instead_of_dropping_the_row() {
+        let output = setup(crate::setup::SetupResult {
+            binary: PathBuf::from("/home/box/.local/bin/tsk"),
+            root: PathBuf::from("/home/box/.config/herdr/tsk-plugins/c578550bfb36dea8"),
+            backup: None,
+            declined_conflicts: true,
+            shortcuts: Vec::new(),
+        });
+        assert!(output
+            .stdout
+            .contains("    Shortcuts:      none bound\nDeclined conflicts were left unchanged.\n"));
     }
 
     #[test]

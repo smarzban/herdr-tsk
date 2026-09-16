@@ -540,7 +540,9 @@ echo installed-fixture
         self.assertIn("setup herdr", self.setup_calls())
         self.assertNotIn("[y/N]", result.stdout + result.stderr)
         self.assertNotIn("    Herdr plugin:", result.stdout)
-        self.assertIn("or press prefix+t in Herdr.", result.stdout)
+        # The user's keys are kept, so the closing line must not promise prefix+t.
+        self.assertNotIn("prefix+t", result.stdout)
+        self.assertIn("Done. Run tsk in a project directory to open the board.", result.stdout)
 
     def test_update_with_unbound_herdr_falls_back_to_the_install_nudge(self):
         self.archive(record_setup=True)
@@ -642,6 +644,15 @@ echo installed-fixture
         self.assertNotIn("[Y/n]", combined)
         self.assertIn("    Herdr plugin:  tsk setup herdr", result.stdout)
         self.assertIn("    Agent skills:  tsk setup", result.stdout)
+        self.assertEqual(self.setup_calls(), [])
+
+    def test_update_onto_a_release_without_the_probes_stays_quiet_without_agents(self):
+        self.archive(legacy=True)
+        result = self.run_update()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        combined = result.stdout + result.stderr
+        self.assertNotIn("    Agent skills:", combined)
+        self.assertNotIn("Agents detected", combined)
         self.assertEqual(self.setup_calls(), [])
 
     def test_update_failed_herdr_refresh_keeps_the_binary_and_the_nudge(self):
