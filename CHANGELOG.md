@@ -19,7 +19,7 @@ the GitHub release notes verbatim.
 
 ### Fixed
 
-- Docs: the palette table no longer lists a `Set done` action (use `ctrl+d`); the step editor's task shortcuts are `ctrl+d`, `ctrl+o`, `ctrl+x`; `ctrl+r` works from any non-done status; a trashed task is found with `tsk list --deleted`, not a task address.
+- Docs: the palette table no longer lists a `Set done` action (use `ctrl+d`); the step editor's task shortcuts are `ctrl+d` and `ctrl+o` (`ctrl+x` removes the step); `ctrl+r` works from any non-done status; a trashed task is found with `tsk list --deleted`, not a task address.
 
 ## v0.10.1
 
