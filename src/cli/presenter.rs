@@ -1370,7 +1370,7 @@ pub fn setup_agent_written(
         return setup_agent_json(outcome.kind(), Some(target.name()), Some(path), 0);
     }
     CliOutput {
-        stdout: format!("{}\n", path.display()),
+        stdout: format!("{}\n", terminal_text(&path.display().to_string())),
         stderr: String::new(),
         code: 0,
     }
@@ -1700,6 +1700,17 @@ mod tests {
         assert!(output
             .stdout
             .contains("    Shortcuts:      none bound\nDeclined conflicts were left unchanged.\n"));
+    }
+
+    #[test]
+    fn setup_agent_written_escapes_the_printed_path() {
+        let outcome = crate::setup_agent::InstallOutcome::Written(PathBuf::from(
+            "/home/box/.claude/skills/tsk-cli\u{001b}]0;x\u{0007}/SKILL.md",
+        ));
+        let output = setup_agent_written(&crate::setup_agent::Target::Claude, &outcome, false);
+        assert!(!output.stdout.contains('\u{001b}'), "{:?}", output.stdout);
+        assert!(!output.stdout.contains('\u{0007}'), "{:?}", output.stdout);
+        assert!(output.stdout.ends_with("/SKILL.md\n"));
     }
 
     #[test]

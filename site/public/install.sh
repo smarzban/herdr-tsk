@@ -63,8 +63,15 @@ actual=$(checksum "$work/$archive")
 [ "$actual" = "$expected" ] || fail 'checksum mismatch; existing installation unchanged'
 printf 'Verifying checksum... ok\n\n'
 # `tsk update` names the copy it is replacing; a first install has nothing to compare.
+# An update never moves backwards: `releases/latest` can lag a copy built from a newer tag.
 if [ -n "${TSK_UPDATE:-}" ] && [ -n "${TSK_CURRENT_VERSION:-}" ]; then
     printf 'Current version %s\n' "$TSK_CURRENT_VERSION"
+    if printf '%s\n' "$TSK_CURRENT_VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+        newest=$(printf '%s\n%s\n' "${TSK_CURRENT_VERSION#v}" "${version#v}" | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1)
+        if [ "$newest" = "${TSK_CURRENT_VERSION#v}" ] && [ "${version#v}" != "${TSK_CURRENT_VERSION#v}" ]; then
+            fail "latest published release is $version, older than the installed $TSK_CURRENT_VERSION; nothing changed"
+        fi
+    fi
 fi
 printf 'Installing tsk %s...\n\n' "$version"
 # Extract only the executable to stdout, never archive paths into the filesystem.
@@ -171,12 +178,13 @@ fi
 # unbound Herdr falls through to the first-install ask.
 refresh_herdr() {
     [ "$("$tsk_bin" setup herdr --check 2>/dev/null)" = bound ] || return 1
-    if "$tsk_bin" setup herdr </dev/null >/dev/null 2>&1; then
+    if setup_error=$("$tsk_bin" setup herdr </dev/null 2>&1 >/dev/null); then
         # The user's own keys stay; the closing line must not claim prefix+t.
         printf '\nHerdr plugin refreshed.\n'
         herdr_wrap=board
     else
         printf '\ntsk setup herdr failed; install succeeded.\n' >&2
+        [ -z "$setup_error" ] || printf '%s\n' "$setup_error" | sed 's/^/    /' >&2
         herdr_wrap=board_setup
     fi
     return 0
@@ -267,10 +275,11 @@ refresh_agent_skills() {
             *)
                 updated=
                 for id in $outdated; do
-                    if "$tsk_bin" setup "$id" </dev/null >/dev/null 2>&1; then
+                    if setup_error=$("$tsk_bin" setup "$id" </dev/null 2>&1 >/dev/null); then
                         updated="$updated${updated:+ }$id"
                     else
                         printf '\ntsk setup %s failed; install succeeded.\n' "$id" >&2
+                        [ -z "$setup_error" ] || printf '%s\n' "$setup_error" | sed 's/^/    /' >&2
                         skills_wrap=nudge
                     fi
                 done

@@ -394,7 +394,7 @@ pub fn install(target: &Target, force: bool) -> Result<InstallOutcome, Error> {
     refuse_symlink(&root)?;
     refuse_symlink(&folder)?;
     refuse_symlink(&dest)?;
-    fs::write(&dest, SKILL_MD).map_err(io_error)?;
+    write_replace(&folder, &dest, SKILL_MD)?;
     if had_file {
         Ok(InstallOutcome::Updated {
             path: dest,
@@ -946,6 +946,48 @@ fn omp_skill_display_path() -> String {
         Err(Error::Home) => "$HOME/.omp/agent/skills/tsk-cli/SKILL.md".to_owned(),
         Err(error) => format!("<{}>", error),
     }
+}
+
+/// Write `contents` to a fresh sibling file and rename it over `dest`, so an interrupted
+/// install leaves the agent's previous skill intact rather than a truncated one.
+fn write_replace(folder: &Path, dest: &Path, contents: &str) -> Result<(), Error> {
+    let staged = folder.join(format!(".{SKILL_FILE}.tmp.{}", std::process::id()));
+    // `create_new` is O_CREAT|O_EXCL: it refuses an existing entry of any kind, so a
+    // planted symlink at the staging name is an error rather than a write through it.
+    // A stale regular file from a killed run is removed once (never a symlink), then retried.
+    let open = || {
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o644);
+        }
+        options.open(&staged)
+    };
+    let mut file = match open() {
+        Ok(file) => file,
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+            let stale = fs::symlink_metadata(&staged).map_err(io_error)?;
+            if !stale.file_type().is_file() {
+                // Not ours: leave it in place and say so.
+                return Err(Error::Symlink(staged));
+            }
+            fs::remove_file(&staged).map_err(io_error)?;
+            open().map_err(io_error)?
+        }
+        Err(error) => return Err(io_error(error)),
+    };
+    // From here the staging file is ours; remove it on any failure.
+    let result = (|| {
+        io::Write::write_all(&mut file, contents.as_bytes()).map_err(io_error)?;
+        file.sync_all().map_err(io_error)?;
+        fs::rename(&staged, dest).map_err(io_error)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&staged);
+    }
+    result
 }
 
 fn refuse_symlink(path: &Path) -> Result<(), Error> {

@@ -3,7 +3,6 @@
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -182,8 +181,15 @@ fn spawn_fetch(dir: PathBuf) {
 }
 
 fn fetch_latest() -> Option<String> {
-    let output = Command::new("curl")
-        .args(["-fsSL", "--max-time", "15", RELEASES_URL])
+    let curl = crate::cli::update::curl_path().ok()?;
+    fetch_latest_with(&curl)
+}
+
+/// The release check's one network call, with the curl binary injected so a test can
+/// stand one in: same hardened policy as `tsk update`, 15 s budget.
+pub fn fetch_latest_with(curl: &Path) -> Option<String> {
+    let output = crate::cli::update::hardened_curl(curl, 15)
+        .arg(RELEASES_URL)
         .output()
         .ok()?;
     if !output.status.success() {
@@ -242,5 +248,48 @@ mod tests {
             !is_stale(now + 60, now),
             "a future last_check stays eligible"
         );
+    }
+
+    #[test]
+    fn release_check_uses_the_shared_hardened_curl_policy() {
+        let dir = std::env::temp_dir().join(format!(
+            "tsk-release-check-{}-{}",
+            std::process::id(),
+            unix_now()
+        ));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let argv = dir.join("argv");
+        let curl = dir.join("curl");
+        std::fs::write(
+            &curl,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\nprintf '{{\"tag_name\": \"v9.9.9\"}}'\n",
+                argv.display()
+            ),
+        )
+        .expect("fake curl");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&curl, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+        }
+        assert_eq!(fetch_latest_with(&curl), Some("v9.9.9".to_string()));
+        let argv = std::fs::read_to_string(&argv).expect("argv");
+        let args: Vec<&str> = argv.lines().collect();
+        assert_eq!(
+            args,
+            vec![
+                "--proto",
+                "=https",
+                "--proto-redir",
+                "=https",
+                "--tlsv1.2",
+                "-fsSL",
+                "--max-time",
+                "15",
+                RELEASES_URL
+            ]
+        );
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

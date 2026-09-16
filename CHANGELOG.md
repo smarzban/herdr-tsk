@@ -9,6 +9,13 @@ the GitHub release notes verbatim.
 
 ## Unreleased
 
+### Changed
+
+- `tsk update` downloads the installer completely before running it, ignores a `TSK_VERSION` set in your shell, refuses to replace a newer copy with an older release, and prints the reason when a Herdr or skill refresh fails.
+- The board's release check uses the same HTTPS-only curl as `tsk update`, including `TSK_UPDATE_CURL`.
+- Agent skill installs replace `SKILL.md` atomically, so an interrupted `tsk setup` leaves the previous skill intact.
+- With neither `HOME` nor `TSK_STATE_DIR` set, tsk refuses to run instead of creating a board in the working directory.
+
 ## v0.10.1
 
 ### Changed
