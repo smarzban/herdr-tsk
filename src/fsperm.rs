@@ -1,9 +1,8 @@
 //! User-private file modes for on-disk state.
 //!
 //! State files hold the user's tasks; they are nobody else's business. On Unix
-//! the state/config directories are `0700` and the files `0600` (`tsk.json`,
-//! `trash.jsonl`, backups, the lock file, temp files, `walkthrough.json`,
-//! `update.json`), both
+//! the state directories are `0700` and the files `0600` (`tsk.json`,
+//! `trash.jsonl`, backups, the lock file, temp files, `update.json`), both
 //! for fresh creation and tightened after the fact for paths an older version
 //! or a looser umask left readable. Tightening only ever strips bits: an
 //! existing stricter mode (a file an admin locked to `0400`, a read-only
@@ -39,20 +38,6 @@ pub fn ensure_private_dir(path: &Path) -> io::Result<()> {
     Ok(())
 }
 
-/// Tighten an existing state/config directory without creating it. This is
-/// best effort for read paths, which must remain usable when config is absent
-/// or permissions cannot be repaired.
-pub fn tighten_dir(path: &Path) {
-    #[cfg(unix)]
-    {
-        let _ = tighten_private_dir(path);
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = path;
-    }
-}
-
 #[cfg(unix)]
 fn tighten_private_dir(path: &Path) -> io::Result<()> {
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
@@ -61,7 +46,7 @@ fn tighten_private_dir(path: &Path) -> io::Result<()> {
     if !path_metadata.file_type().is_dir() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "state/config directory must be a directory, not a symlink",
+            "state directory must be a directory, not a symlink",
         ));
     }
 
@@ -74,7 +59,7 @@ fn tighten_private_dir(path: &Path) -> io::Result<()> {
     {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "state/config directory changed while permissions were checked",
+            "state directory changed while permissions were checked",
         ));
     }
     let mode = opened_metadata.permissions().mode();
@@ -313,7 +298,7 @@ mod tests {
         fs::set_permissions(&target, fs::Permissions::from_mode(0o500)).expect("chmod target");
         symlink(&target, &link).expect("symlink state dir");
 
-        ensure_private_dir(&link).expect_err("a state/config directory symlink must be rejected");
+        ensure_private_dir(&link).expect_err("a state directory symlink must be rejected");
 
         assert_eq!(
             fs::metadata(&target)

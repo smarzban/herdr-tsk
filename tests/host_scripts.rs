@@ -104,7 +104,6 @@ fi
             .env("HERDR_BIN_PATH", self.root.join("herdr"))
             .env("TSK_BIN", env!("CARGO_BIN_EXE_tsk"))
             .env("TSK_STATE_DIR", self.root.join("state"))
-            .env("TSK_CONFIG_DIR", self.root.join("state"))
             .env("STUB_ROOT", &self.root)
             .env("STUB_MODE", mode)
             .env_remove("HERDR_PANE_ID")
@@ -145,10 +144,6 @@ fn open_board_focuses_current_workspace_board_even_in_another_tab() {
     assert_eq!(
         launcher.calls(),
         "pane list --workspace w0\ntab focus w0:t2\nplugin pane focus w0:p2\n"
-    );
-    assert!(
-        !launcher.root.join("state/reopen.json").exists(),
-        "focusing must preserve the board view, not publish shared context"
     );
 }
 

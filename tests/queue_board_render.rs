@@ -493,13 +493,19 @@ fn project_rows_show_full_thread_metadata_without_relative_age() {
     let mut tasks = fixture_tasks();
     tasks[0].thread = Some("a".repeat(32));
     let mut model = BoardModel::from_tasks(tasks, Some(PathBuf::from("/repos/tsk")));
-    model.apply_reopen_project(Some(PathBuf::from("/repos/tsk")));
+    let mut domain = DomainState::new();
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::SelectNavTab(NavTab::ProjectBoard),
+        None,
+    )
+    .unwrap();
     let index = model
         .visible_ids()
         .iter()
         .position(|id| *id == Uuid::from_u128(1))
         .unwrap();
-    let mut domain = DomainState::new();
     apply_intent(
         &mut domain,
         &mut model,

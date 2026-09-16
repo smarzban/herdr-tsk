@@ -299,8 +299,6 @@ pub enum BoardIntent {
     /// The query is one search line, so the reducer folds each pasted break to a space.
     CommandQueryInsertText(String),
     CommandQueryBackspace,
-    /// Retained no-op seam for the non-live launch walkthrough helper.
-    OpenWalkthrough,
     /// `ctrl+s` — state-mapped primary verb. Reducer lands in.
     PrimaryVerb,
     /// `ctrl+b` — toggle blocked ↔ ready. Reducer lands in.
@@ -373,9 +371,6 @@ pub const LAUNCH_CARD_HELP_LINE: &str = "y unarchive · n keep archived";
 pub const SAVE_RECOVERY_HELP_LINE: &str = "↑↓ · r retry · c cancel";
 /// Compact legend while the active board search field owns input.
 pub const SEARCH_HELP_LINE: &str = "/ search · type · enter pin · esc clear";
-/// Compact legend shown while the first-use walkthrough is open.
-pub const WALKTHROUGH_HELP_LINE: &str = "enter next · esc skip";
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum NormalModifier {
     Bare,
@@ -1723,7 +1718,6 @@ pub fn intent_primary_action(intent: &BoardIntent) -> Option<PrimaryBoardAction>
         | BoardIntent::CommandQueryInsert(_)
         | BoardIntent::CommandQueryInsertText(_)
         | BoardIntent::CommandQueryBackspace
-        | BoardIntent::OpenWalkthrough
         | BoardIntent::PrimaryVerb
         | BoardIntent::ToggleBlock
         | BoardIntent::ToggleReview

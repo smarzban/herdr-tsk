@@ -36,8 +36,7 @@ if [ -n "$pane_id" ]; then
   if ! "$herdr_bin" tab focus "$tab_id"; then
     exit 1
   fi
-  # Focus preserves the board's view and edits. Do not publish a shared reopen
-  # request: another workspace's board could consume it.
+  # Focusing the existing pane preserves the board's current view and edits.
   if "$herdr_bin" plugin pane focus "$pane_id"; then
     exit 0
   fi

@@ -200,7 +200,7 @@ echo installed-fixture
         result = self.run_install(MOCK_OS=system, MOCK_ARCH=arch)
         self.assertEqual(result.returncode, 0, result.stderr)
         installed = self.root / "home/.local/bin/tsk"
-        isolated = dict(self.env, TSK_STATE_DIR=str(self.root / "state"), TSK_CONFIG_DIR=str(self.root / "config"))
+        isolated = dict(self.env, TSK_STATE_DIR=str(self.root / "state"))
         subprocess.run([str(installed), "add", "--desk", "-t", "Installed smoke"], env=isolated, check=True, capture_output=True)
         listed = subprocess.run([str(installed), "list", "--desk"], env=isolated, check=True, text=True, capture_output=True)
         self.assertIn("Installed smoke", listed.stdout)

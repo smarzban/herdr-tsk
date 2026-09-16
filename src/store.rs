@@ -763,16 +763,39 @@ impl TaskStore {
     }
 
     /// Remove leftover temp files. Safe only under the exclusive lock.
+    /// The store's own temps are safe to remove outright: this runs under the exclusive lock,
+    /// so none is mid-write. The release-check and delivery temps are written by code that
+    /// does not take the lock (the check runs on a background thread), so only a stale one,
+    /// older than a minute, is treated as an orphan.
     fn sweep_orphan_temps(&self) {
         let Ok(entries) = fs::read_dir(&self.path) else {
             return;
         };
-        let prefixes = [format!(".{STATE_FILE}.tmp."), format!(".{TRASH_FILE}.tmp.")];
+        let own = [
+            format!(".{STATE_FILE}.tmp."),
+            format!(".{TRASH_FILE}.tmp."),
+            format!(".{BACKUP_FILE}.tmp."),
+        ];
+        let unlocked = [
+            crate::update::UPDATE_TEMP_PREFIX,
+            crate::delivery::DELIVERY_TEMP_PREFIX,
+        ];
+        let stale_after = Duration::from_secs(60);
         for entry in entries.flatten() {
             let name = entry.file_name();
             let name = name.to_string_lossy();
-            if prefixes.iter().any(|prefix| name.starts_with(prefix)) {
+            if own.iter().any(|prefix| name.starts_with(prefix)) {
                 let _ = fs::remove_file(entry.path());
+            } else if unlocked.iter().any(|prefix| name.starts_with(prefix)) {
+                let stale = entry
+                    .metadata()
+                    .and_then(|meta| meta.modified())
+                    .ok()
+                    .and_then(|modified| SystemTime::now().duration_since(modified).ok())
+                    .is_some_and(|age| age > stale_after);
+                if stale {
+                    let _ = fs::remove_file(entry.path());
+                }
             }
         }
     }
@@ -816,7 +839,8 @@ fn is_private_state_name(name: &str) -> bool {
         || name.starts_with(&format!("{STATE_FILE}.v"))
         || name.starts_with(&format!(".{STATE_FILE}.tmp."))
         || name.starts_with(&format!(".{TRASH_FILE}.tmp."))
-        || name.starts_with(".update.json.tmp.")
+        || name.starts_with(&format!(".{BACKUP_FILE}.tmp."))
+        || name.starts_with(crate::update::UPDATE_TEMP_PREFIX)
         || name.starts_with(crate::delivery::DELIVERY_TEMP_PREFIX)
 }
 
@@ -910,17 +934,35 @@ fn retain_version_backup(live: &Path, version: u32) -> Result<(), StoreError> {
 
 /// Keep the previous live document under `tsk.json.1` via hard-link so a crash
 /// between link and rename leaves the backup identical to the still-live file.
+///
+/// The new link is made under a staging name and renamed over the old backup, so there
+/// is no instant at which `tsk.json.1` is missing: a crash leaves either the old backup
+/// or the new one, never neither.
 fn retain_last_good(live: &Path) -> Result<(), StoreError> {
+    retain_last_good_with(live, |from, to| fs::rename(from, to))
+}
+
+/// [`retain_last_good`] with the final rename injectable, so a test can fail it and check
+/// the old backup is still in place: the one property the staging order exists for.
+fn retain_last_good_with(
+    live: &Path,
+    rename: impl Fn(&Path, &Path) -> io::Result<()>,
+) -> Result<(), StoreError> {
     let backup = live.with_file_name(BACKUP_FILE);
-    match fs::remove_file(&backup) {
+    let staged = live.with_file_name(format!(".{BACKUP_FILE}.tmp.{}", std::process::id()));
+    match fs::remove_file(&staged) {
         Ok(()) => {}
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
         Err(error) => return Err(error.into()),
     }
-    fs::hard_link(live, &backup)?;
+    fs::hard_link(live, &staged)?;
     // The link shares the old live file's inode (and its mode); tighten both
     // sides of the link before the rename replaces the live path.
-    fsperm::tighten_file(&backup);
+    fsperm::tighten_file(&staged);
+    if let Err(error) = rename(&staged, &backup) {
+        let _ = fs::remove_file(&staged);
+        return Err(error.into());
+    }
     Ok(())
 }
 
@@ -1732,6 +1774,118 @@ mod tests {
             !orphan.exists(),
             "a locked save must remove leftover temp files"
         );
+    }
+
+    #[test]
+    fn save_sweeps_only_stale_temps_of_the_unlocked_writers() {
+        let dir = temp_dir("orphan-sweep-unlocked");
+        let _guard = TempDirGuard(dir.clone());
+        fs::create_dir_all(&dir).expect("mkdir");
+        let two_minutes_ago = SystemTime::now() - Duration::from_secs(120);
+        let mut seeded = Vec::new();
+        // Both unlocked writers, each with one stale and one fresh temp.
+        for prefix in [
+            crate::update::UPDATE_TEMP_PREFIX,
+            crate::delivery::DELIVERY_TEMP_PREFIX,
+        ] {
+            let stale = dir.join(format!("{prefix}1.1"));
+            let fresh = dir.join(format!("{prefix}2.2"));
+            fs::write(&stale, b"stale").expect("seed stale");
+            fs::write(&fresh, b"in flight").expect("seed fresh");
+            fs::File::open(&stale)
+                .expect("open stale")
+                .set_modified(two_minutes_ago)
+                .expect("age the stale temp");
+            seeded.push((prefix, stale, fresh));
+        }
+
+        TaskStore::new(&dir)
+            .save(&DomainState::new())
+            .expect("save");
+
+        for (prefix, stale, fresh) in seeded {
+            assert!(!stale.exists(), "{prefix}: a minute-old temp is an orphan");
+            assert!(
+                fresh.exists(),
+                "{prefix}: a fresh temp may belong to a writer that does not hold the store lock"
+            );
+        }
+    }
+
+    #[test]
+    fn last_good_backup_survives_a_failed_replacement() {
+        // The property the staging order buys: with remove-then-link, a failure after the
+        // remove left no tsk.json.1 at all. Here the final rename fails and the old backup
+        // must still be readable, with the staging link cleaned up.
+        let dir = temp_dir("last-good-failed-rename");
+        let _guard = TempDirGuard(dir.clone());
+        fs::create_dir_all(&dir).expect("mkdir");
+        let live = dir.join(STATE_FILE);
+        let backup = dir.join(BACKUP_FILE);
+        fs::write(&live, b"new live").expect("live");
+        fs::write(&backup, b"old backup").expect("backup");
+
+        let failed = retain_last_good_with(&live, |_, _| Err(io::Error::other("disk full")));
+        assert!(failed.is_err());
+        assert_eq!(
+            fs::read(&backup).expect("old backup still present"),
+            b"old backup"
+        );
+        let leftovers: Vec<_> = fs::read_dir(&dir)
+            .expect("dir")
+            .filter_map(Result::ok)
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.starts_with(&format!(".{BACKUP_FILE}.tmp.")))
+            .collect();
+        assert!(leftovers.is_empty(), "{leftovers:?}");
+
+        // And the real rename replaces it in one step.
+        retain_last_good(&live).expect("replace");
+        assert_eq!(fs::read(&backup).expect("new backup"), b"new live");
+    }
+
+    #[test]
+    fn last_good_backup_is_never_absent_while_it_is_replaced() {
+        let dir = temp_dir("last-good-order");
+        let _guard = TempDirGuard(dir.clone());
+        let store = TaskStore::new(&dir);
+        let mut state = DomainState::new();
+        store.save(&state).expect("first save");
+        state
+            .create(
+                "second",
+                None,
+                TaskScope::Global,
+                ProvenanceOrigin::Manual,
+                None,
+            )
+            .expect("task");
+        store.save(&state).expect("second save creates the backup");
+        let backup = dir.join(BACKUP_FILE);
+        let first_backup = fs::read(&backup).expect("backup after second save");
+
+        // The staging link is a private temp with a fixed name; a leftover from an
+        // interrupted run must not block the next backup.
+        let staged = dir.join(format!(".{BACKUP_FILE}.tmp.{}", std::process::id()));
+        fs::write(&staged, b"leftover").expect("seed leftover");
+        state
+            .create(
+                "third",
+                None,
+                TaskScope::Global,
+                ProvenanceOrigin::Manual,
+                None,
+            )
+            .expect("task");
+        store.save(&state).expect("third save replaces the backup");
+        assert!(!staged.exists(), "staging link is renamed away");
+        let second_backup = fs::read(&backup).expect("backup after third save");
+        assert_ne!(first_backup, second_backup);
+        assert!(
+            String::from_utf8_lossy(&second_backup).contains("second"),
+            "backup is the previous live document"
+        );
+        assert!(is_private_state_name(&format!(".{BACKUP_FILE}.tmp.1")));
     }
 
     #[test]

@@ -25,7 +25,6 @@ mod queue_board_render;
 mod queue_board_verbs;
 mod quick_add_capture;
 mod quick_capture_process;
-mod reopen;
 mod scope_resolver;
 mod setup_herdr;
 mod setup_safety;

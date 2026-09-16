@@ -59,7 +59,6 @@ pub fn run_with_tty_stdin_and_piped_output(
         .args(args)
         .current_dir(cwd)
         .env("TSK_STATE_DIR", root.join("state"))
-        .env("TSK_CONFIG_DIR", root.join("config"))
         .env("TSK_NO_UPDATE_CHECK", "1")
         .env_remove("TSK_MODE")
         .env("TERM", "xterm-256color")
@@ -88,8 +87,7 @@ impl Drop for Session {
 
 impl Session {
     /// Spawn `tsk args...` in `cwd` on a `cols`×`rows` PTY with `TSK_STATE_DIR` under
-    /// `root/state`, `TSK_CONFIG_DIR` under `root/config`, and the update check off. The
-    /// session owns `root` and removes it on drop.
+    /// `root/state` and the update check off. The session owns `root` and removes it on drop.
     pub fn spawn(
         root: PathBuf,
         cwd: &Path,
@@ -132,7 +130,6 @@ impl Session {
             .args(args)
             .current_dir(cwd)
             .env("TSK_STATE_DIR", root.join("state"))
-            .env("TSK_CONFIG_DIR", root.join("config"))
             .env("TSK_NO_UPDATE_CHECK", "1")
             .env_remove("TSK_MODE")
             .env("TERM", "xterm-256color")

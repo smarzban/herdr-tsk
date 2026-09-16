@@ -10,7 +10,6 @@ The board, CLI, and Herdr plugin share `~/.tsk/tsk.json`. The current store form
 | Setting | Default | Purpose |
 | --- | --- | --- |
 | `TSK_STATE_DIR` | `~/.tsk` | Task data, backups, trash, and release-check cache. With neither this nor `HOME` set, tsk refuses to run rather than pick a directory |
-| `TSK_CONFIG_DIR` | `~/.tsk` | Walkthrough preferences |
 | `--state-dir <dir>` | State directory | Override storage for a data command |
 
 Use a local disk. NFS and synced folders such as Dropbox or iCloud Drive are unsupported. Directory roots must be real directories, not symlinks.
@@ -24,7 +23,6 @@ Herdr's plugin-specific state/config directories do not override these locations
 | `tsk.json` | Current tasks and archived-project records |
 | `tsk.json.1` | Previous valid task document |
 | `tsk.json.v<N>` | Backup made when migrating an older store format, such as `tsk.json.v4` for the v4 → v5 migration |
-| `walkthrough.json` | Whether onboarding was dismissed |
 | `delivery.json` | Which starter tasks this install has received or dismissed, and the newest release note it has seen |
 
 An older binary refuses a newer or unversioned store instead of rewriting it. Use a compatible tsk version to open it. On first save, v4 stores migrate to v5 so one undo entry can cover a marked completion or deletion; the original document is saved as `tsk.json.v4`. Earlier stores still run through each migration in order, including the v3 to v4 move from ready to open.

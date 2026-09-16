@@ -306,13 +306,9 @@ fn a_missing_home_refuses_instead_of_creating_a_board_in_the_working_directory()
     assert_eq!(output.status.code(), Some(0), "{output:?}");
     let _ = std::fs::remove_dir_all(&explicit);
 
-    // The board, quick capture and the launcher's context resolver open the store too;
-    // each refuses before any terminal or file is touched.
-    for args in [
-        vec!["--resolve-context"],
-        vec![] as Vec<&str>,
-        vec!["capture"],
-    ] {
+    // The board and quick capture open the store too; each refuses before any terminal or
+    // file is touched.
+    for args in [vec![] as Vec<&str>, vec!["capture"]] {
         let mut child = Command::new(binary())
             .args(&args)
             .current_dir(&cwd)

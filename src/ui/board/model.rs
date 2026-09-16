@@ -135,15 +135,6 @@ pub enum IntentOutcome {
     Quit,
 }
 
-/// Retained outcome vocabulary for the no-op walkthrough seam.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum WalkthroughOutcome {
-    Completed,
-    Skipped,
-    Unpresentable,
-    Interrupted,
-}
-
 /// Open session project selector. Options are derived from the snapshot at open time.
 #[derive(Debug, Clone)]
 pub(super) struct ProjectPickerState {
@@ -1493,8 +1484,8 @@ impl BoardModel {
         );
         if same_project {
             // Equivalent spellings are the same stored project identity. Do not rewrite the
-            // selected path merely because a host supplied an alias, but an explicit reopen
-            // still clears its local thread filter.
+            // selected path merely because a host supplied an alias. The transition still
+            // clears its local thread filter.
             self.thread_filter = ThreadFilter::All;
             return;
         }
@@ -1562,8 +1553,7 @@ impl BoardModel {
         true
     }
 
-    /// Whether changing invocation context would discard or hide an unsaved draft.
-    /// Reopen requests defer while any editor or non-empty quick-add owns the user's text.
+    /// Whether leaving the current surface would discard or hide an unsaved draft.
     pub fn has_unsaved_work(&self) -> bool {
         if self
             .right_seat
@@ -1589,95 +1579,6 @@ impl BoardModel {
         self.quick_add
             .as_ref()
             .is_some_and(|quick_add| !quick_add.title.value().is_empty())
-    }
-
-    /// Clear non-dirty presentation layers so a context switch lands on the target board,
-    /// rather than leaving a clean task page, picker, search, or empty quick-add in front of it.
-    fn dismiss_clean_surfaces_for_reopen(&mut self) {
-        if let Some(right) = self.right_seat.as_mut() {
-            right.dismiss_clean_surfaces_for_reopen();
-        }
-        self.clear_marks();
-        self.detail_open = None;
-        self.wide_stage = WideStage::FullBoard;
-        self.stage_origin = None;
-        self.list_picker = None;
-        self.project_picker = None;
-        self.popup = BoardPopup::None;
-        self.surface = CommandSurface::None;
-        self.command_query.clear();
-        self.command_selected = 0;
-        self.help_query.clear();
-        self.help_scroll = 0;
-        self.help_return_mode = BoardInputMode::Normal;
-        self.search_return_mode = BoardInputMode::Normal;
-        self.search_query.clear();
-        self.search_pinned = false;
-        self.projects_selected = 0;
-        self.quick_add = None;
-        self.form = None;
-        self.input_mode = BoardInputMode::Normal;
-        self.drawer_open = false;
-        self.text_selection = None;
-        self.last_row_click = None;
-        self.last_project_header_click = None;
-        self.last_project_row_click = None;
-        self.right_seat = None;
-    }
-
-    /// Apply a reopen that opens a supplied project, or Desk when none was supplied.
-    pub fn apply_reopen_project(&mut self, project: Option<PathBuf>) -> bool {
-        let open_project = project.is_some();
-        self.apply_reopen_context(project, open_project)
-    }
-
-    /// Apply an explicit reopen context without changing task ownership. The project
-    /// candidate can fill slot 2 while `open_project` keeps the active destination on Desk.
-    /// A dirty editor is left untouched for the caller to retry after save/cancel.
-    pub fn apply_reopen_context(&mut self, project: Option<PathBuf>, open_project: bool) -> bool {
-        if self.has_unsaved_work() {
-            self.set_message("save or cancel edits before reopening tsk");
-            return false;
-        }
-        self.dismiss_clean_surfaces_for_reopen();
-        let Some(project) = project else {
-            self.this_repo = None;
-            self.selected_project = None;
-            self.session_default_scope = Some(TaskScope::Global);
-            self.switch_location(BoardLocation::Desk);
-            self.clear_message();
-            return true;
-        };
-        let project_text = project.to_string_lossy();
-        if self.is_archived_project_path(&project) {
-            let name = crate::ui::render::short_project(&project_text).to_string();
-            self.this_repo = None;
-            self.selected_project = None;
-            self.session_default_scope = Some(TaskScope::Global);
-            self.switch_location(BoardLocation::Desk);
-            self.set_message(format!("project {name} is archived"));
-            return true;
-        }
-        let same = open_project
-            && matches!(&self.board_location, BoardLocation::Project(current) if paths_equivalent(&current.to_string_lossy(), &project_text));
-        self.this_repo = Some(project.clone());
-        self.selected_project = Some(project.clone());
-        self.session_default_scope = Some(if open_project {
-            TaskScope::Project {
-                path: project.to_string_lossy().into_owned(),
-            }
-        } else {
-            TaskScope::Global
-        });
-        if same {
-            self.thread_filter = ThreadFilter::All;
-        } else if open_project {
-            self.switch_location(BoardLocation::Project(project));
-        } else {
-            self.switch_location(BoardLocation::Desk);
-        }
-        self.clear_message();
-        true
     }
 
     /// True while the board is in the read-only focus on an archived project (AC-41).
@@ -2683,13 +2584,6 @@ impl BoardModel {
 }
 
 impl BoardModel {
-    /// the retains this launch helper as a no-op seam for tests and later wiring.
-    pub fn open_walkthrough(&mut self) {}
-
-    /// The retired walkthrough has no presentation outcome to record.
-    pub fn take_walkthrough_outcome(&mut self) -> Option<WalkthroughOutcome> {
-        None
-    }
     /// Current input mode (normal vs edit field).
     pub fn input_mode(&self) -> BoardInputMode {
         if let Some(right) = self

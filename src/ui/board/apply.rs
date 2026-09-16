@@ -432,7 +432,6 @@ fn apply_board_intent(
         BoardIntent::CloseCommandSurface => return Ok(IntentOutcome::None),
         // The app loop performs the OSC 52 write so pure reducer tests stay terminal-free.
         BoardIntent::CopyTaskNumber(_) => return Ok(IntentOutcome::None),
-        BoardIntent::OpenWalkthrough => return Ok(IntentOutcome::None),
         BoardIntent::ConfirmCommand | BoardIntent::SelectCommand(_) => {
             // Resolve to the existing intent, then run that exact route. `SelectCommand`
             // reaches here only defensively: every real caller -- the key, paste and

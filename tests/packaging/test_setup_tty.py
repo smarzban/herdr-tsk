@@ -38,7 +38,7 @@ if args[:2] == ["plugin", "list"]:
     print(registry.read_text() if registry.exists() else '{"result":{"plugins":[]}}')
 ''')
                 host.chmod(0o755)
-                environment = dict(os.environ, PATH=f"{root / 'bin'}:{os.environ['PATH']}", SETUP_FIXTURE=str(root), HERDR_CONFIG_PATH=str(config), HOME=str(root / "home"), XDG_CONFIG_HOME=str(root / "xdg"), XDG_STATE_HOME=str(root / "state"), HERDR_SOCKET_PATH=str(root / "absent.sock"), TSK_STATE_DIR=str(root / "tasks"), TSK_CONFIG_DIR=str(root / "task-config"))
+                environment = dict(os.environ, PATH=f"{root / 'bin'}:{os.environ['PATH']}", SETUP_FIXTURE=str(root), HERDR_CONFIG_PATH=str(config), HOME=str(root / "home"), XDG_CONFIG_HOME=str(root / "xdg"), XDG_STATE_HOME=str(root / "state"), HERDR_SOCKET_PATH=str(root / "absent.sock"), TSK_STATE_DIR=str(root / "tasks"))
                 master, slave = pty.openpty()
                 process = None
                 transcript = b""

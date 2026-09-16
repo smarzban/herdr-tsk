@@ -19,7 +19,6 @@ pub enum Surface {
     Guide,
     FindBoardPane,
     FindBoardTab,
-    ResolveContext,
     GlobalHelp,
     Help,
     Version,
@@ -45,7 +44,6 @@ pub fn route<S: AsRef<str>>(
             let surface = match arg {
                 "--find-board-pane" => Surface::FindBoardPane,
                 "--find-board-tab" => Surface::FindBoardTab,
-                "--resolve-context" => Surface::ResolveContext,
                 "--help" => Surface::GlobalHelp,
                 "--version" | "-V" => Surface::Version,
                 _ => return Surface::Usage,
@@ -133,18 +131,6 @@ mod tests {
         );
         assert_eq!(
             route(["tsk", "--find-board-tab", "extra"], None),
-            Surface::Usage
-        );
-    }
-
-    #[test]
-    fn resolve_context_is_a_hidden_global_surface() {
-        assert_eq!(
-            route(["tsk", "--resolve-context"], None),
-            Surface::ResolveContext
-        );
-        assert_eq!(
-            route(["tsk", "--resolve-context", "extra"], None),
             Surface::Usage
         );
     }

@@ -1,6 +1,6 @@
 //! tsk binary entry.
 
-use std::io::{self, IsTerminal, Read, Write};
+use std::io::{self, IsTerminal, Write};
 use std::process::ExitCode;
 
 use tsk_tui::cli::router::{route, Surface};
@@ -10,13 +10,6 @@ fn main() -> ExitCode {
     match route(&args, std::env::var(tsk_tui::app::MODE_ENV).ok().as_deref()) {
         Surface::FindBoardPane => find_board_main(false),
         Surface::FindBoardTab => find_board_main(true),
-        Surface::ResolveContext => match tsk_tui::store::require_home_or_override(&args) {
-            Ok(()) => resolve_context_main(),
-            Err(message) => {
-                eprintln!("tsk: {message}");
-                ExitCode::from(1)
-            }
-        },
         Surface::GlobalHelp => {
             print!("{}", tsk_tui::cli::presenter::top_level_help());
             ExitCode::SUCCESS
@@ -62,49 +55,10 @@ fn usage_exit() -> ExitCode {
     ExitCode::from(2)
 }
 
-/// Internal launcher helper: turn the host's invocation JSON into a one-shot
-/// request for an already-running board, then print the resolved repository.
-fn resolve_context_main() -> ExitCode {
-    const MAX_CONTEXT_BYTES: usize = 64 * 1024;
-    let mut json = String::new();
-    if io::stdin()
-        .take((MAX_CONTEXT_BYTES + 1) as u64)
-        .read_to_string(&mut json)
-        .is_err()
-        || json.len() > MAX_CONTEXT_BYTES
-    {
-        eprintln!("tsk --resolve-context: invalid context payload");
-        return ExitCode::from(1);
-    }
-    let raw = match serde_json::from_str::<tsk_tui::context::RawHostContext>(&json) {
-        Ok(raw) => raw,
-        Err(error) => {
-            eprintln!("tsk --resolve-context: invalid context JSON: {error}");
-            return ExitCode::from(1);
-        }
-    };
-    let snapshot = tsk_tui::context::build_snapshot(&raw, std::path::PathBuf::new());
-    let project = snapshot.this_repo.clone();
-    if let Err(error) = tsk_tui::reopen::ReopenRequest::from_snapshot(&snapshot)
-        .write(&tsk_tui::store::default_state_dir())
-    {
-        eprintln!("tsk --resolve-context: {error}");
-        return ExitCode::from(1);
-    }
-    if let Some(project) = project {
-        println!(
-            "{}",
-            tsk_tui::ui::terminal_text(&project.display().to_string())
-        );
-    }
-    ExitCode::SUCCESS
-}
-
 fn update_main(args: &[String]) -> ExitCode {
+    // `update --help` is reference text like every other verb's: the headless runner owns it.
     if args.len() == 3 && args[2] == "--help" {
-        let output = tsk_tui::cli::presenter::update_help();
-        print!("{}", output.stdout);
-        return ExitCode::SUCCESS;
+        return headless_main(args.to_vec());
     }
     if args.len() != 2 {
         eprintln!("usage: tsk update");

@@ -8,7 +8,6 @@ use std::fs;
 use std::time::Duration;
 
 use tsk_tui::domain::{DomainState, ProvenanceOrigin, TaskScope};
-use tsk_tui::reopen::ReopenRequest;
 use tsk_tui::store::TaskStore;
 
 #[test]
@@ -31,7 +30,7 @@ fn t64_capture_ctrl_q_stays_inert_and_ctrl_c_still_exits_with_a_draft() {
 }
 
 #[test]
-fn capture_entrypoint_skips_launch_card_preserves_reopen_and_exits_on_escape() {
+fn capture_entrypoint_skips_launch_card_and_exits_on_escape() {
     let root = pty::scratch_root("capture");
     fs::create_dir_all(root.join("repo/.git")).unwrap();
     let repo = root.join("repo");
@@ -50,8 +49,6 @@ fn capture_entrypoint_skips_launch_card_preserves_reopen_and_exits_on_escape() {
         .unwrap();
     state.archive_project(repo.to_str().unwrap()).unwrap();
     store.save(&state).unwrap();
-    ReopenRequest::new(None).write(store.path()).unwrap();
-    let request = fs::read(store.path().join("reopen.json")).unwrap();
     let context = OsString::from(
         serde_json::json!({"focused_pane_cwd":repo,"selected_text":"PTY capture"}).to_string(),
     );
@@ -73,15 +70,6 @@ fn capture_entrypoint_skips_launch_card_preserves_reopen_and_exits_on_escape() {
         "archived launch falls back to desk: {output}"
     );
     assert!(!output.contains("would you like to unarchive"));
-    assert_eq!(
-        fs::read(store.path().join("reopen.json")).unwrap(),
-        request,
-        "popup must not retire board requests"
-    );
-    ReopenRequest::new(None).write(store.path()).unwrap();
-    let fresh = fs::read(store.path().join("reopen.json")).unwrap();
-    std::thread::sleep(Duration::from_millis(350));
-    assert_eq!(fs::read(store.path().join("reopen.json")).unwrap(), fresh);
     session.send(b"\x1b[27u");
     assert!(
         session.wait_exit(Duration::from_secs(5)).success(),
