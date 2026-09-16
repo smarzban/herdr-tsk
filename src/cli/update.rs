@@ -96,6 +96,10 @@ fn is_homebrew_install(executable: &Path) -> bool {
 /// Download the installer to a private file, and only once curl has finished successfully
 /// hand that file to the shell. Streaming `curl | sh` would let a connection that drops
 /// mid-script execute the prefix that arrived.
+///
+/// The shell receives an open descriptor on its stdin, not a path: after curl exits nothing
+/// reopens the script by name, so whoever controls `TMPDIR` cannot swap it in between.
+/// `install.sh` already reads its prompts from `/dev/tty` when stdin is not a terminal.
 fn run_installer(
     install_dir: &Path,
     curl: &Path,
@@ -121,16 +125,9 @@ fn run_installer(
             exit_label(download.code())
         ));
     }
-    let length = fs::metadata(&script.path)
-        .map(|meta| meta.len())
-        .map_err(|error| format!("could not read the downloaded installer: {error}"))?;
-    if length == 0 {
-        return Err(format!(
-            "downloaded installer from {INSTALLER_URL} is empty"
-        ));
-    }
+    let file = script.open_downloaded()?;
     let installer_status = Command::new(shell)
-        .arg(&script.path)
+        .stdin(Stdio::from(file))
         .env("TSK_INSTALL_DIR", install_dir)
         .env("TSK_UPDATE", "1")
         // The installer cannot know what it is replacing; the running binary can.
@@ -197,6 +194,43 @@ impl InstallerFile {
             "could not create a unique installer directory in {}",
             scratch.display()
         ))
+    }
+}
+
+impl InstallerFile {
+    /// Open the script curl wrote, without following a symlink, and check it is a regular,
+    /// non-empty file owned by this user before it is handed to the shell.
+    fn open_downloaded(&self) -> Result<fs::File, String> {
+        let mut options = fs::OpenOptions::new();
+        options.read(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.custom_flags(libc::O_NOFOLLOW);
+        }
+        let file = options
+            .open(&self.path)
+            .map_err(|error| format!("could not read the downloaded installer: {error}"))?;
+        let meta = file
+            .metadata()
+            .map_err(|error| format!("could not read the downloaded installer: {error}"))?;
+        if !meta.file_type().is_file() {
+            return Err("downloaded installer is not a regular file".to_string());
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            // SAFETY: getuid has no preconditions and cannot fail.
+            if meta.uid() != unsafe { libc::getuid() } {
+                return Err("downloaded installer is not owned by this user".to_string());
+            }
+        }
+        if meta.len() == 0 {
+            return Err(format!(
+                "downloaded installer from {INSTALLER_URL} is empty"
+            ));
+        }
+        Ok(file)
     }
 }
 
@@ -279,16 +313,16 @@ mod tests {
             dir,
             "curl",
             &format!(
-                "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\nout=\nwhile [ $# -gt 0 ]; do if [ \"$1\" = -o ]; then out=$2; shift; fi; shift; done\nstat -f '%Lp' \"$(dirname \"$out\")\" > '{}' 2>/dev/null || stat -c '%a' \"$(dirname \"$out\")\" > '{}'\nprintf '%s' '{payload}' > \"$out\"\nexit {exit}\n",
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\nout=\nwhile [ $# -gt 0 ]; do if [ \"$1\" = -o ]; then out=$2; shift; fi; shift; done\nls -ld \"$(dirname \"$out\")\" | cut -c1-10 > '{}'\nprintf '%s' '{payload}' > \"$out\"\nexit {exit}\n",
                 argv.display(),
-                dir.join("curl-dir-mode").display(),
                 dir.join("curl-dir-mode").display()
             ),
         );
         (curl, argv)
     }
 
-    /// A shell stand-in that records the script it was handed and the environment.
+    /// A shell stand-in that records the script it receives on stdin (a path argument is
+    /// a failure: the handoff must be by descriptor) and the environment.
     fn fake_sh(dir: &Path) -> (PathBuf, PathBuf, PathBuf) {
         let script_copy = dir.join("installer-input");
         let env_log = dir.join("installer-env");
@@ -296,7 +330,7 @@ mod tests {
             dir,
             "sh",
             &format!(
-                "#!/bin/sh\ncat \"$1\" > '{}'\nprintf '%s|%s|%s|%s' \"$TSK_INSTALL_DIR\" \"$TSK_UPDATE\" \"$TSK_CURRENT_VERSION\" \"${{TSK_VERSION-unset}}\" > '{}'\n",
+                "#!/bin/sh\n[ $# -eq 0 ] || exit 99\ncat > '{}'\nprintf '%s|%s|%s|%s' \"$TSK_INSTALL_DIR\" \"$TSK_UPDATE\" \"$TSK_CURRENT_VERSION\" \"${{TSK_VERSION-unset}}\" > '{}'\n",
                 script_copy.display(),
                 env_log.display()
             ),
@@ -380,7 +414,7 @@ mod tests {
             fs::read_to_string(dir.join("curl-dir-mode"))
                 .expect("directory mode")
                 .trim(),
-            "700",
+            "drwx------",
             "the installer directory is private while curl writes into it"
         );
         assert!(
@@ -412,6 +446,35 @@ mod tests {
         assert!(error.contains("is empty"), "{error}");
         assert!(!script_copy.exists(), "shell ran on an empty download");
 
+        assert!(installer_files(&dir).is_empty());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_script_swapped_for_a_symlink_after_download_is_refused() {
+        let dir = temp_dir("installer-swapped");
+        let executable = dir.join("custom/bin/tsk");
+        fs::create_dir_all(executable.parent().expect("executable parent"))
+            .expect("create custom install directory");
+        let target = dir.join("elsewhere.sh");
+        fs::write(&target, "#!/bin/sh\nexit 0\n").expect("symlink target");
+        // curl "succeeds" but what sits at the path afterwards is a symlink.
+        let curl = command(
+            &dir,
+            "curl",
+            &format!(
+                "#!/bin/sh\nout=\nwhile [ $# -gt 0 ]; do if [ \"$1\" = -o ]; then out=$2; shift; fi; shift; done\nln -s '{}' \"$out\"\nexit 0\n",
+                target.display()
+            ),
+        );
+        let (shell, script_copy, _) = fake_sh(&dir);
+        let error = run_for(&executable, &curl, &shell, &dir).expect_err("symlink refused");
+        assert!(
+            error.contains("could not read the downloaded installer")
+                || error.contains("not a regular file"),
+            "{error}"
+        );
+        assert!(!script_copy.exists(), "shell ran on a swapped script");
         assert!(installer_files(&dir).is_empty());
         let _ = fs::remove_dir_all(dir);
     }
