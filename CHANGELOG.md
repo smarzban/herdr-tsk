@@ -17,6 +17,10 @@ the GitHub release notes verbatim.
 - With neither `HOME` nor `TSK_STATE_DIR` set, tsk refuses to run instead of creating a board in the working directory.
 - The plugin manifest declares `min_herdr_version = "0.9.0"`, matching what setup and the launchers already require.
 
+### Fixed
+
+- Docs: the palette table no longer lists a `Set done` action (use `ctrl+d`); the step editor's task shortcuts are `ctrl+d`, `ctrl+o`, `ctrl+x`; `ctrl+r` works from any non-done status; a trashed task is found with `tsk list --deleted`, not a task address.
+
 ## v0.10.1
 
 ### Changed
