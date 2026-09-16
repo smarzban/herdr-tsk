@@ -111,7 +111,7 @@ if [ "${1:-}" = setup ] && [ -n "${2:-}" ]; then
     if [ -n "${TSK_SETUP_LOG:-}" ]; then
         printf '%s\\n' "$*" >> "$TSK_SETUP_LOG"
     fi
-    if [ -n "${TSK_SETUP_FAIL:-}" ] && [ "$2" = "$TSK_SETUP_FAIL" ]; then exit 7; fi
+    if [ -n "${TSK_SETUP_FAIL:-}" ] && [ "$2" = "$TSK_SETUP_FAIL" ]; then echo "tsk setup: skill dir is a symlink" >&2; exit 7; fi
     exit 0
 fi
 echo installed-fixture
@@ -655,6 +655,23 @@ echo installed-fixture
         self.assertNotIn("Agents detected", combined)
         self.assertEqual(self.setup_calls(), [])
 
+    def test_update_refuses_to_move_backwards(self):
+        # releases/latest resolves to v1.2.3 in this rig; a copy built from a newer tag stays.
+        self.archive(record_setup=True)
+        result = self.run_update(TSK_CURRENT_VERSION="v1.3.0")
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("Current version v1.3.0", result.stdout)
+        self.assertIn("latest published release is v1.2.3, older than the installed v1.3.0; nothing changed", result.stderr)
+        self.assertFalse((self.root / "managed-bin/tsk").exists())
+        self.assertEqual(self.setup_calls(), [])
+
+    def test_update_from_an_older_or_equal_copy_proceeds(self):
+        self.archive(record_setup=True)
+        for current in ("v1.2.3", "v1.2.2", "v0.10.9", "v1.10.0-dev"):
+            result = self.run_update(TSK_CURRENT_VERSION=current)
+            self.assertEqual(result.returncode, 0, (current, result.stderr))
+            self.assertIn("Installing tsk v1.2.3...", result.stdout)
+
     def test_update_failed_herdr_refresh_keeps_the_binary_and_the_nudge(self):
         self.archive(record_setup=True)
         self.command("herdr", "#!/bin/sh\nexit 0\n")
@@ -696,7 +713,7 @@ echo installed-fixture
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("tsk skill for pi not refreshed: /h/.pi/skills/tsk-cli/SKILL.md is a symlink", result.stderr)
-        self.assertIn("tsk setup codex failed; install succeeded.", result.stderr)
+        self.assertIn("tsk setup codex failed; install succeeded.\n    tsk setup: skill dir is a symlink", result.stderr)
         self.assertIn("Updated the tsk skill for claude.", result.stdout)
         self.assertIn("    Agent skills:  tsk setup", result.stdout)
         self.assertTrue((self.root / "managed-bin/tsk").exists())

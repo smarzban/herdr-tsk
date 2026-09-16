@@ -21,6 +21,7 @@ fn main() -> ExitCode {
         }
         Surface::Usage => usage_exit(),
         Surface::Update => update_main(&args),
+        // Verbs that open the store need a home for it; setup, guide and help do not.
         Surface::Add
         | Surface::Steps
         | Surface::List
@@ -29,11 +30,18 @@ fn main() -> ExitCode {
         | Surface::Trash
         | Surface::Archive
         | Surface::Unarchive
-        | Surface::Project
-        | Surface::Setup
-        | Surface::Guide
-        | Surface::Help => headless_main(args),
-        Surface::Board | Surface::Capture => match tsk_tui::run(args) {
+        | Surface::Project => match tsk_tui::store::require_home_or_override(&args) {
+            Ok(()) => headless_main(args),
+            Err(message) => {
+                eprintln!("tsk: {message}");
+                ExitCode::from(1)
+            }
+        },
+        Surface::Setup | Surface::Guide | Surface::Help => headless_main(args),
+        Surface::Board | Surface::Capture => match tsk_tui::store::require_home_or_override(&args)
+            .map_err(|message| message.into())
+            .and_then(|()| tsk_tui::run(args))
+        {
             Ok(()) => ExitCode::SUCCESS,
             Err(err) => {
                 eprintln!("tsk: {err}");

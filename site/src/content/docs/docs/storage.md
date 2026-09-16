@@ -9,7 +9,7 @@ The board, CLI, and Herdr plugin share `~/.tsk/tsk.json`. The current store form
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
-| `TSK_STATE_DIR` | `~/.tsk` | Task data, backups, trash, and release-check cache |
+| `TSK_STATE_DIR` | `~/.tsk` | Task data, backups, trash, and release-check cache. With neither this nor `HOME` set, tsk refuses to run rather than pick a directory |
 | `TSK_CONFIG_DIR` | `~/.tsk` | Walkthrough preferences |
 | `--state-dir <dir>` | State directory | Override storage for a data command |
 
@@ -55,9 +55,9 @@ On launch, tsk checks for a newer release if its cached check is older than 24 h
 | Setting or file | Purpose |
 | --- | --- |
 | `TSK_NO_UPDATE_CHECK` | Set to disable the check and notice |
-| `TSK_UPDATE_CURL=/absolute/path/to/curl` | Use a nonstandard, explicit curl path for `tsk update` |
+| `TSK_UPDATE_CURL=/absolute/path/to/curl` | Use a nonstandard, explicit curl path for the check and for `tsk update` (default `/usr/bin/curl`) |
 | `update.json` | Cached release check in the state directory |
 
-The check requests the latest release tag from GitHub. It does not upload task data. Failures are silent.
+The check requests the latest release tag from GitHub over HTTPS only. It does not upload task data. Failures are silent.
 
 [Upgrade tsk](/docs/install/#upgrade).

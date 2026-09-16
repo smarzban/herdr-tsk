@@ -394,7 +394,7 @@ pub fn install(target: &Target, force: bool) -> Result<InstallOutcome, Error> {
     refuse_symlink(&root)?;
     refuse_symlink(&folder)?;
     refuse_symlink(&dest)?;
-    fs::write(&dest, SKILL_MD).map_err(io_error)?;
+    write_replace(&folder, &dest, SKILL_MD)?;
     if had_file {
         Ok(InstallOutcome::Updated {
             path: dest,
@@ -946,6 +946,29 @@ fn omp_skill_display_path() -> String {
         Err(Error::Home) => "$HOME/.omp/agent/skills/tsk-cli/SKILL.md".to_owned(),
         Err(error) => format!("<{}>", error),
     }
+}
+
+/// Write `contents` to a fresh sibling file and rename it over `dest`, so an interrupted
+/// install leaves the agent's previous skill intact rather than a truncated one.
+fn write_replace(folder: &Path, dest: &Path, contents: &str) -> Result<(), Error> {
+    let staged = folder.join(format!(".{SKILL_FILE}.tmp.{}", std::process::id()));
+    let result = (|| {
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o644);
+        }
+        let mut file = options.open(&staged).map_err(io_error)?;
+        io::Write::write_all(&mut file, contents.as_bytes()).map_err(io_error)?;
+        file.sync_all().map_err(io_error)?;
+        fs::rename(&staged, dest).map_err(io_error)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&staged);
+    }
+    result
 }
 
 fn refuse_symlink(path: &Path) -> Result<(), Error> {

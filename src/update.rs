@@ -3,7 +3,6 @@
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -182,8 +181,9 @@ fn spawn_fetch(dir: PathBuf) {
 }
 
 fn fetch_latest() -> Option<String> {
-    let output = Command::new("curl")
-        .args(["-fsSL", "--max-time", "15", RELEASES_URL])
+    let curl = crate::cli::update::curl_path().ok()?;
+    let output = crate::cli::update::hardened_curl(&curl, 15)
+        .arg(RELEASES_URL)
         .output()
         .ok()?;
     if !output.status.success() {

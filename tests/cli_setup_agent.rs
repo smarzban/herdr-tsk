@@ -1117,6 +1117,13 @@ fn skill_states_probe_lists_each_detected_agent_with_state_version_and_path() {
         claude[3].ends_with(".claude/skills/tsk-cli/SKILL.md"),
         "{claude:?}"
     );
+    // The staging file never lingers beside a live skill.
+    let leftovers: Vec<_> = fs::read_dir(home.join(".cursor/skills/tsk-cli"))
+        .expect("cursor skill folder")
+        .filter_map(Result::ok)
+        .filter(|e| e.file_name().to_string_lossy().starts_with('.'))
+        .collect();
+    assert!(leftovers.is_empty(), "{leftovers:?}");
     let codex = lines.iter().find(|l| l[0] == "codex").expect("codex row");
     assert_eq!(codex[1], "outdated");
     assert_eq!(codex[2], "0.0.1");

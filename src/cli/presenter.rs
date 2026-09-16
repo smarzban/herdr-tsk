@@ -1370,7 +1370,7 @@ pub fn setup_agent_written(
         return setup_agent_json(outcome.kind(), Some(target.name()), Some(path), 0);
     }
     CliOutput {
-        stdout: format!("{}\n", path.display()),
+        stdout: format!("{}\n", terminal_text(&path.display().to_string())),
         stderr: String::new(),
         code: 0,
     }
