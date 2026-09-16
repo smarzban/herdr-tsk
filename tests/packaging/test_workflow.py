@@ -60,7 +60,9 @@ class WorkflowTests(unittest.TestCase):
         commands = re.findall(r"^        run: (gh release create[^\n]+)$", source, re.M)
         self.assertEqual(len(commands), 1, "release creation must use the reviewed handoff")
         # Do not execute arbitrary future workflow shell in the test environment.
-        self.assertEqual(commands[0], 'gh release create "$TAG" dist-release/* --verify-tag --draft --notes-file packaging/RELEASE-NOTES.md')
+        # An unnamed release is titled by GitHub with the tagged commit's subject
+        # ("release: v0.10.0 (#102)"), so the draft must carry the tag as its name.
+        self.assertEqual(commands[0], 'gh release create "$TAG" dist-release/* --verify-tag --draft --title "$TAG" --notes-file packaging/RELEASE-NOTES.md')
         self.assertEqual(source.count("gh release "), 1)
         triggers = source.split("on:\n", 1)[1].split("\npermissions:", 1)[0]
         self.assertEqual(re.findall(r"^  ([a-z_]+):", triggers, re.M), ["workflow_dispatch"])
@@ -86,7 +88,7 @@ class WorkflowTests(unittest.TestCase):
             arguments = json.loads(capture.read_text())
             self.assertEqual(arguments[:3], ["release", "create", "v1.2.3"])
             self.assertEqual(set(arguments[3:3 + len(names)]), {f"dist-release/{name}" for name in names})
-            self.assertEqual(arguments[3 + len(names):], ["--verify-tag", "--draft", "--notes-file", "packaging/RELEASE-NOTES.md"])
+            self.assertEqual(arguments[3 + len(names):], ["--verify-tag", "--draft", "--title", "v1.2.3", "--notes-file", "packaging/RELEASE-NOTES.md"])
 
 
 if __name__ == "__main__":
