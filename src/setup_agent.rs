@@ -459,12 +459,20 @@ pub fn skill_states_text() -> Result<String, Error> {
             SkillState::Outdated => "outdated",
             SkillState::Blocked => "blocked-symlink",
         };
+        // The path is display-only; a tab or newline inside it would forge a row.
+        let path: String = agent
+            .skill_path
+            .display()
+            .to_string()
+            .chars()
+            .map(|c| if c.is_control() { '?' } else { c })
+            .collect();
         out.push_str(&format!(
             "{}\t{}\t{}\t{}\n",
             agent.id,
             state,
             agent.installed_version.as_deref().unwrap_or("-"),
-            agent.skill_path.display()
+            path
         ));
     }
     Ok(out)

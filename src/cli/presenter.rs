@@ -1510,7 +1510,14 @@ pub fn setup(result: crate::setup::SetupResult) -> CliOutput {
     }
     // The content-addressed plugin root is not something users act on; it stays in
     // error messages, where `plugin unlink` or a manual look needs it.
-    stdout.push_str("    Shortcuts:      prefix+t board, prefix+a quick capture\n");
+    let shortcuts: Vec<String> = result
+        .shortcuts
+        .iter()
+        .map(|(keys, label)| format!("{} {label}", terminal_text(keys)))
+        .collect();
+    if !shortcuts.is_empty() {
+        stdout.push_str(&format!("    Shortcuts:      {}\n", shortcuts.join(", ")));
+    }
     if result.declined_conflicts {
         stdout.push_str("Declined conflicts were left unchanged.\n");
     }
@@ -1630,6 +1637,10 @@ mod tests {
                 "/home/box/.config/herdr/config.toml.tsk-backup-20260912-143022",
             )),
             declined_conflicts: false,
+            shortcuts: vec![
+                ("prefix+t".to_string(), "board"),
+                ("prefix+a".to_string(), "quick capture"),
+            ],
         });
         assert_eq!(
             output.stdout,
@@ -1645,6 +1656,10 @@ mod tests {
             root: PathBuf::from("/home/box/.config/herdr/tsk-plugins/c578550bfb36dea8"),
             backup: None,
             declined_conflicts: true,
+            shortcuts: vec![
+                ("prefix+t".to_string(), "board"),
+                ("prefix+a".to_string(), "quick capture"),
+            ],
         });
         assert!(!output.stdout.contains("Config backup:"));
         assert!(output
@@ -1652,6 +1667,23 @@ mod tests {
             .contains(
                 "    Shortcuts:      prefix+t board, prefix+a quick capture\nDeclined conflicts were left unchanged.\n"
             ));
+    }
+
+    #[test]
+    fn setup_reports_the_keys_the_commands_are_actually_on() {
+        let output = setup(crate::setup::SetupResult {
+            binary: PathBuf::from("/home/box/.local/bin/tsk"),
+            root: PathBuf::from("/home/box/.config/herdr/tsk-plugins/c578550bfb36dea8"),
+            backup: None,
+            declined_conflicts: false,
+            shortcuts: vec![
+                ("prefix+b / prefix+t".to_string(), "board"),
+                ("prefix+a".to_string(), "quick capture"),
+            ],
+        });
+        assert!(output
+            .stdout
+            .contains("    Shortcuts:      prefix+b / prefix+t board, prefix+a quick capture\n"));
     }
 
     #[test]

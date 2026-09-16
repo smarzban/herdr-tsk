@@ -187,9 +187,10 @@ mod tests {
             &dir,
             "sh",
             &format!(
-                "#!/bin/sh\ncat > '{}'\nprintf '%s' \"$TSK_INSTALL_DIR\" > '{}'\n",
+                "#!/bin/sh\ncat > '{}'\nprintf '%s' \"$TSK_INSTALL_DIR\" > '{}'\nprintf '%s|%s' \"$TSK_UPDATE\" \"$TSK_CURRENT_VERSION\" > '{}'\n",
                 log.display(),
-                installed_to.display()
+                installed_to.display(),
+                dir.join("installer-mode").display()
             ),
         );
         let executable = dir.join("custom/bin/tsk");
@@ -211,6 +212,11 @@ mod tests {
                 .expect("executable parent")
                 .display()
                 .to_string()
+        );
+        // The installer prints "Current version" only from this handoff.
+        assert_eq!(
+            fs::read_to_string(dir.join("installer-mode")).expect("installer mode"),
+            format!("1|v{}", env!("CARGO_PKG_VERSION"))
         );
         let _ = fs::remove_dir_all(dir);
     }

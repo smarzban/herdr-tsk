@@ -76,10 +76,12 @@ pub fn edit_bindings(
         return Err(error("keys.command must be an array of tables"));
     }
     for (key, action) in BINDINGS {
-        // An action the user already bound, on whatever key, is satisfied: setup never adds
-        // a second chord beside a custom one. `tsk update` relies on this to refresh a
-        // registration without touching remapped shortcuts.
-        if action_bound(keys, action) {
+        // An action the user already bound on a different key is satisfied: setup never adds
+        // the default chord beside a custom one. `tsk update` relies on this to refresh a
+        // registration without touching remapped shortcuts. A binding on the default key
+        // itself still goes through conflict detection below, so a builtin shadowing it can
+        // be repaired.
+        if action_bound_elsewhere(keys, key, action) {
             continue;
         }
         let builtin: Vec<String> = keys
@@ -141,38 +143,102 @@ pub fn edit_bindings(
     Ok(doc.to_string())
 }
 
-/// Whether `keys.command` already carries a `plugin_action` entry for `action`, on any key.
-fn action_bound(keys: &Table, action: &str) -> bool {
+/// The keys each reachable `plugin_action` entry for `action` is bound to. An entry with no
+/// key, an empty key, or an empty key array is unreachable and does not count.
+fn action_keys(keys: &Table, action: &str) -> Vec<String> {
+    fn keys_of(t: &Table) -> Vec<String> {
+        match t.get("key") {
+            Some(Item::Value(v)) if v.as_str().is_some() => v
+                .as_str()
+                .map(str::trim)
+                .filter(|k| !k.is_empty())
+                .map(|k| vec![k.to_string()])
+                .unwrap_or_default(),
+            Some(Item::Value(v)) if v.as_array().is_some() => v
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter_map(|k| k.as_str().map(str::trim))
+                .filter(|k| !k.is_empty())
+                .map(str::to_string)
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
     let correct = |t: &Table| {
         t.get("type").and_then(Item::as_str) == Some("plugin_action")
             && t.get("command").and_then(Item::as_str) == Some(action)
     };
-    match keys.get("command") {
-        Some(Item::ArrayOfTables(commands)) => commands.iter().any(correct),
-        Some(Item::Value(value)) => value.as_array().is_some_and(|array| {
-            array.iter().any(|entry| {
-                entry
-                    .as_inline_table()
-                    .is_some_and(|t| correct(&t.clone().into_table()))
+    let tables: Vec<Table> = match keys.get("command") {
+        Some(Item::ArrayOfTables(commands)) => commands.iter().cloned().collect(),
+        Some(Item::Value(value)) => value
+            .as_array()
+            .map(|array| {
+                array
+                    .iter()
+                    .filter_map(|entry| entry.as_inline_table().map(|t| t.clone().into_table()))
+                    .collect()
             })
-        }),
-        _ => false,
+            .unwrap_or_default(),
+        _ => Vec::new(),
+    };
+    tables
+        .iter()
+        .filter(|t| correct(t))
+        .flat_map(keys_of)
+        .collect()
+}
+
+/// Whether `action` is reachable on some key other than its default chord.
+fn action_bound_elsewhere(keys: &Table, default_key: &str, action: &str) -> bool {
+    action_keys(keys, action)
+        .iter()
+        .any(|bound| !same(bound, default_key))
+}
+
+/// Whether `keys.command` already carries a reachable `plugin_action` entry for `action`.
+fn action_bound(keys: &Table, action: &str) -> bool {
+    !action_keys(keys, action).is_empty()
+}
+
+/// The shortcut each plugin command ends up on in `source`, in `BINDINGS` order, as
+/// `(keys joined by " / ", label)`. Unbound commands are omitted.
+pub fn bound_shortcuts(source: &str) -> Vec<(String, &'static str)> {
+    let Some(keys) = keys_table(source) else {
+        return Vec::new();
+    };
+    BINDINGS
+        .iter()
+        .filter_map(|(_, action)| {
+            let bound = action_keys(&keys, action);
+            if bound.is_empty() {
+                return None;
+            }
+            let label = match *action {
+                "herdr-tsk.open-board" => "board",
+                _ => "quick capture",
+            };
+            Some((bound.join(" / "), label))
+        })
+        .collect()
+}
+
+fn keys_table(source: &str) -> Option<Table> {
+    let doc = source.parse::<DocumentMut>().ok()?;
+    match doc.get("keys") {
+        Some(Item::Table(table)) => Some(table.clone()),
+        Some(Item::Value(value)) => value
+            .as_inline_table()
+            .map(|inline| inline.clone().into_table()),
+        _ => None,
     }
 }
 
 /// Whether the Herdr config at `source` binds both plugin commands, on any keys.
 /// Malformed TOML reads as not bound; `tsk setup herdr` reports the parse error itself.
 pub fn commands_bound(source: &str) -> bool {
-    let Ok(doc) = source.parse::<DocumentMut>() else {
+    let Some(keys) = keys_table(source) else {
         return false;
-    };
-    let keys = match doc.get("keys") {
-        Some(Item::Table(table)) => table.clone(),
-        Some(Item::Value(value)) => match value.as_inline_table() {
-            Some(inline) => inline.clone().into_table(),
-            None => return false,
-        },
-        _ => return false,
     };
     BINDINGS
         .iter()
@@ -452,6 +518,8 @@ pub struct SetupResult {
     pub root: PathBuf,
     pub backup: Option<PathBuf>,
     pub declined_conflicts: bool,
+    /// The shortcut each plugin command is actually on after setup, `(keys, label)`.
+    pub shortcuts: Vec<(String, &'static str)>,
 }
 
 pub fn run(
@@ -695,6 +763,7 @@ fn run_at(
         root: root.path.clone(),
         backup,
         declined_conflicts: declined_conflicts.get(),
+        shortcuts: bound_shortcuts(&edited),
     })
 }
 

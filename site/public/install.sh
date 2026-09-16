@@ -233,27 +233,29 @@ maybe_setup_herdr() {
 # otherwise) and named afterwards. Missing skills get the first-install ask only when no
 # skill is installed at all: an update never adds an agent the user did not opt into.
 # Returns 1 when nothing about the update path applies (no agents detected).
+# Returns 3 when the installed binary predates the probe (no `embedded` line): the caller
+# keeps the plain nudge rather than staying silent about a skill it could not inspect.
 refresh_agent_skills() {
     states=$("$tsk_bin" setup --skill-states 2>/dev/null) || states=
     embedded=$(printf '%s\n' "$states" | awk -F'\t' '$1 == "embedded" {print $2; exit}')
+    [ -n "$embedded" ] || return 3
     outdated=$(printf '%s\n' "$states" | awk -F'\t' '$2 == "outdated" {printf "%s%s", sep, $1; sep=" "}')
+    outdated_list=$(printf '%s\n' "$states" | awk -F'\t' '$2 == "outdated" {printf "%s%s (%s)", sep, $1, ($3 == "-" ? "unknown version" : "v" $3); sep=", "}')
     missing=$(printf '%s\n' "$states" | awk -F'\t' '$2 == "missing" {printf "%s%s", sep, $1; sep=" "}')
     installed=$(printf '%s\n' "$states" | awk -F'\t' '$2 == "current" || $2 == "outdated" {printf "%s%s", sep, $1; sep=" "}')
-    installed_version=$(printf '%s\n' "$states" | awk -F'\t' '$2 == "outdated" {print $3; exit}')
     printf '%s\n' "$states" | awk -F'\t' '$2 == "blocked-symlink" {printf "tsk skill for %s not refreshed: %s is a symlink\n", $1, $4}' >&2
     [ -n "$outdated$missing$installed" ] || return 1
 
     if [ -n "$outdated" ]; then
-        id_list=$(printf '%s' "$outdated" | sed 's/ /, /g')
         answer=y
         if [ -z "${CI:-}" ]; then
             if [ -t 0 ]; then
                 printf '\n' >&2
-                printf 'tsk skill v%s installed for %s; update to v%s? [Y/n] ' "$installed_version" "$id_list" "$embedded" >&2
+                printf 'tsk skill installed for %s; update to v%s? [Y/n] ' "$outdated_list" "$embedded" >&2
                 read -r answer || true
             elif sh -c 'exec <>/dev/tty' 2>/dev/null; then
                 printf '\n' >&2
-                printf 'tsk skill v%s installed for %s; update to v%s? [Y/n] ' "$installed_version" "$id_list" "$embedded" >&2
+                printf 'tsk skill installed for %s; update to v%s? [Y/n] ' "$outdated_list" "$embedded" >&2
                 read -r answer </dev/tty || true
             fi
         fi
@@ -295,8 +297,8 @@ maybe_setup_agent_skills() {
         refresh_status=0
         refresh_agent_skills || refresh_status=$?
         case $refresh_status in
-            0) return 0 ;;
-            1) return 0 ;;
+            0|1) return 0 ;;
+            3) skills_wrap=nudge; return 0 ;;
         esac
     else
         detected_ids=$("$tsk_bin" setup --detected-ids 2>/dev/null) || detected_ids=

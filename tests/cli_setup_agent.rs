@@ -1082,6 +1082,22 @@ fn skill_states_probe_lists_each_detected_agent_with_state_version_and_path() {
         "---\nname: tsk-cli\nversion: 0.0.1\n---\nold\n",
     )
     .expect("stale codex skill");
+    fs::create_dir_all(home.join(".cursor/skills/tsk-cli")).expect("Cursor skill folder");
+    fs::write(
+        home.join(".cursor/skills/tsk-cli/SKILL.md"),
+        format!(
+            "---\nname: tsk-cli\nversion: {}\n---\ncurrent\n",
+            tsk_tui::setup_agent::embedded_skill_version()
+        ),
+    )
+    .expect("current cursor skill");
+    fs::create_dir_all(home.join(".grok/skills")).expect("Grok skills root");
+    fs::create_dir_all(root.join("elsewhere\ttab")).expect("symlink target with a tab");
+    std::os::unix::fs::symlink(
+        root.join("elsewhere\ttab"),
+        home.join(".grok/skills/tsk-cli"),
+    )
+    .expect("blocked grok skill folder");
     let previous_home = std::env::var_os("HOME");
     std::env::set_var("HOME", &home);
 
@@ -1104,6 +1120,20 @@ fn skill_states_probe_lists_each_detected_agent_with_state_version_and_path() {
     let codex = lines.iter().find(|l| l[0] == "codex").expect("codex row");
     assert_eq!(codex[1], "outdated");
     assert_eq!(codex[2], "0.0.1");
+    let cursor = lines.iter().find(|l| l[0] == "cursor").expect("cursor row");
+    assert_eq!(cursor[1], "current");
+    assert_eq!(cursor[2], tsk_tui::setup_agent::embedded_skill_version());
+    let grok = lines.iter().find(|l| l[0] == "grok").expect("grok row");
+    assert_eq!(grok[1], "blocked-symlink");
+    assert_eq!(
+        grok.len(),
+        4,
+        "a control character in a path must not add a field"
+    );
+    assert!(
+        lines.iter().all(|l| l.len() == 2 || l.len() == 4),
+        "{lines:?}"
+    );
 
     let both = cli_non_tty(&["tsk", "setup", "--skill-states", "--detected-ids"]);
     assert_eq!(both.code, 2, "{both:?}");

@@ -73,8 +73,8 @@ Run `tsk update` to upgrade an installer-managed copy. It immediately downloads 
 After the binary is replaced, `tsk update` refreshes what is already set up:
 
 - A registered Herdr plugin (both plugin commands bound, on any keys) is re-registered without asking and reported as `Herdr plugin refreshed.` Reload Herdr's config afterwards. If Herdr is on PATH but not set up, it asks as on a first install.
-- Installed agent skills at an older version are updated. On a terminal it asks once (`tsk skill v1.2.0 installed for claude, codex; update to v1.3.0? [Y/n]`, Enter means yes); without one it updates unattended. It then lists the agents it updated. Skills that are already current print nothing. An update never installs a skill for an agent that did not have one; if no skill is installed anywhere, it offers the first-install ask for the detected agents.
-- A refresh that fails leaves the binary in place and prints the matching `tsk setup` row.
+- Installed agent skills at an older version are updated. On a terminal it asks once (`tsk skill installed for claude (v1.2.0), codex (v1.2.0); update to v1.3.0? [Y/n]`, Enter means yes); without one it updates unattended. It then lists the agents it updated. Skills that are already current print nothing. An update never installs a skill for an agent that did not have one; if no skill is installed anywhere, it offers the first-install ask for the detected agents.
+- A refresh that fails leaves the binary in place and prints the matching `tsk setup` row. Updating onto a release older than this behaviour prints the plain `tsk setup` rows instead.
 
 Close and reopen running boards to use the new binary.
 

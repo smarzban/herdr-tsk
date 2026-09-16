@@ -233,3 +233,55 @@ fn commands_bound_matches_both_plugin_commands_on_any_key() {
     assert!(!commands_bound(""));
     assert!(!commands_bound("not = [toml"));
 }
+
+#[test]
+fn a_keyless_or_empty_key_plugin_action_does_not_count_as_bound() {
+    use tsk_tui::setup::commands_bound;
+    let keyless = "[[keys.command]]\ntype = 'plugin_action'\ncommand = 'herdr-tsk.open-board'\n[[keys.command]]\nkey = []\ntype = 'plugin_action'\ncommand = 'herdr-tsk.quick-capture'\n";
+    assert!(!commands_bound(keyless));
+    let edited = edit_bindings(keyless, false, |_, _| panic!("no conflicts")).unwrap();
+    let doc = edited.parse::<toml_edit::DocumentMut>().unwrap();
+    let keys: Vec<Option<&str>> = doc["keys"]["command"]
+        .as_array_of_tables()
+        .unwrap()
+        .iter()
+        .map(|t| t.get("key").and_then(|k| k.as_str()))
+        .collect();
+    assert!(keys.contains(&Some("prefix+t")), "{edited}");
+    assert!(keys.contains(&Some("prefix+a")), "{edited}");
+}
+
+#[test]
+fn a_builtin_shadowing_the_default_chord_is_still_offered_for_repair() {
+    // The plugin action sits on prefix+t, but a builtin also claims prefix+t: the action is
+    // bound on its default key, so the custom-key skip must not hide the conflict.
+    let source = "[keys]\nnew_tab = ['prefix+t']\n[[keys.command]]\nkey = 'prefix+t'\ntype = 'plugin_action'\ncommand = 'herdr-tsk.open-board'\n";
+    assert!(edit_bindings(source, false, |_, _| panic!("must not prompt")).is_err());
+    let mut asked = Vec::new();
+    let repaired = edit_bindings(source, true, |key, _| {
+        asked.push(key.to_string());
+        Ok(true)
+    })
+    .unwrap();
+    assert_eq!(asked, vec!["prefix+t".to_string()]);
+    assert!(!repaired.contains("new_tab"), "{repaired}");
+}
+
+#[test]
+fn bound_shortcuts_report_the_keys_each_command_is_on() {
+    use tsk_tui::setup::bound_shortcuts;
+    let source = "[[keys.command]]\nkey = ['prefix+b', 'prefix+t']\ntype = 'plugin_action'\ncommand = 'herdr-tsk.open-board'\n";
+    assert_eq!(
+        bound_shortcuts(source),
+        vec![("prefix+b / prefix+t".to_string(), "board")]
+    );
+    let edited = edit_bindings(source, false, |_, _| panic!("no conflicts")).unwrap();
+    assert_eq!(
+        bound_shortcuts(&edited),
+        vec![
+            ("prefix+b / prefix+t".to_string(), "board"),
+            ("prefix+a".to_string(), "quick capture"),
+        ]
+    );
+    assert!(bound_shortcuts("").is_empty());
+}
