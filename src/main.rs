@@ -56,10 +56,9 @@ fn usage_exit() -> ExitCode {
 }
 
 fn update_main(args: &[String]) -> ExitCode {
+    // `update --help` is reference text like every other verb's: the headless runner owns it.
     if args.len() == 3 && args[2] == "--help" {
-        let output = tsk_tui::cli::presenter::update_help();
-        print!("{}", output.stdout);
-        return ExitCode::SUCCESS;
+        return headless_main(args.to_vec());
     }
     if args.len() != 2 {
         eprintln!("usage: tsk update");
