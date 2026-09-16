@@ -15,6 +15,7 @@ the GitHub release notes verbatim.
 - The board's release check uses the same HTTPS-only curl as `tsk update`, including `TSK_UPDATE_CURL`.
 - Agent skill installs replace `SKILL.md` atomically, so an interrupted `tsk setup` leaves the previous skill intact.
 - With neither `HOME` nor `TSK_STATE_DIR` set, tsk refuses to run instead of creating a board in the working directory.
+- The plugin manifest declares `min_herdr_version = "0.9.0"`, matching what setup and the launchers already require.
 
 ## v0.10.1
 
@@ -22,6 +23,7 @@ the GitHub release notes verbatim.
 
 - `tsk update` prints the version it replaces and the one it installs, re-registers an already set-up Herdr plugin without asking, and updates outdated installed agent skills (one `[Y/n]` ask on a terminal, unattended otherwise). It never installs a skill for an agent that had none; with nothing installed it offers the first-install ask.
 - `tsk setup herdr` leaves a plugin command you bound to another key alone instead of adding the default chord beside it.
+- Agent skill 1.3.0 (`unknown-project` refusal, search and multi-select); rerun `tsk setup` to update installed copies, or let `tsk update` do it.
 
 ## v0.10.0
 

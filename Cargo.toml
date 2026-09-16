@@ -60,4 +60,6 @@ unicode-width = "0.2"
 uuid = { version = "1.24", features = ["v4", "serde"] }
 
 [target.'cfg(unix)'.dependencies]
-libc = "=0.2.189"
+# Cargo.lock pins the resolved version; a caret range here keeps another crate's newer
+# libc requirement resolvable instead of failing the build.
+libc = "0.2.189"

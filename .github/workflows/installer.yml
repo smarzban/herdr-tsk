@@ -1,7 +1,16 @@
 name: Installer
 
+# ci.yml ignores site/**, so the installer would otherwise reach main (and gettsk.sh, which
+# serves it from main) untested. Run the contract suite on the PR as well as on the push.
 on:
   push:
+    branches: [main]
+    paths:
+      - "site/public/install.sh"
+      - "scripts/release.py"
+      - "tests/packaging/**"
+      - ".github/workflows/installer.yml"
+  pull_request:
     branches: [main]
     paths:
       - "site/public/install.sh"

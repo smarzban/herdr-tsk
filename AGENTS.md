@@ -110,8 +110,9 @@ same PR, never leave them apart.
   `site/vercel.json` with Vercel's own route parser; never edit that file without it, a
   bad pattern fails every production deploy silently.
 - CI runs on pushes to `main` and PRs targeting `main`. Site-only changes skip the Rust
-  matrix; installer-only changes run packaging tests and ShellCheck. Vercel production
-  deploys only on pushes to `main`.
+  matrix; installer-only changes run the `Installer` workflow (packaging tests and ShellCheck)
+  on the PR and again on the push, since gettsk.sh serves `install.sh` straight from `main`.
+  Vercel production deploys only on pushes to `main`.
 
 ### Isolated state
 

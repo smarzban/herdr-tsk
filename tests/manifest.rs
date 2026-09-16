@@ -33,11 +33,13 @@ fn id_is_the_herdr_tsk_plugin_id() {
 }
 
 #[test]
-fn min_herdr_version_is_0_7_5() {
+fn min_herdr_version_matches_what_setup_requires() {
     let text = read_manifest();
+    let (major, minor, patch) = tsk_tui::setup::MIN_HERDR_VERSION;
+    let expected = format!(r#"min_herdr_version = "{major}.{minor}.{patch}""#);
     assert!(
-        text.contains(r#"min_herdr_version = "0.7.5""#),
-        "min_herdr_version must be exactly 0.7.5"
+        text.contains(&expected),
+        "checked-in manifest must declare {expected}: setup rewrites the registered copy to it"
     );
 }
 
