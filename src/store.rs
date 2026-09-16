@@ -939,6 +939,15 @@ fn retain_version_backup(live: &Path, version: u32) -> Result<(), StoreError> {
 /// is no instant at which `tsk.json.1` is missing: a crash leaves either the old backup
 /// or the new one, never neither.
 fn retain_last_good(live: &Path) -> Result<(), StoreError> {
+    retain_last_good_with(live, |from, to| fs::rename(from, to))
+}
+
+/// [`retain_last_good`] with the final rename injectable, so a test can fail it and check
+/// the old backup is still in place: the one property the staging order exists for.
+fn retain_last_good_with(
+    live: &Path,
+    rename: impl Fn(&Path, &Path) -> io::Result<()>,
+) -> Result<(), StoreError> {
     let backup = live.with_file_name(BACKUP_FILE);
     let staged = live.with_file_name(format!(".{BACKUP_FILE}.tmp.{}", std::process::id()));
     match fs::remove_file(&staged) {
@@ -950,7 +959,7 @@ fn retain_last_good(live: &Path) -> Result<(), StoreError> {
     // The link shares the old live file's inode (and its mode); tighten both
     // sides of the link before the rename replaces the live path.
     fsperm::tighten_file(&staged);
-    if let Err(error) = fs::rename(&staged, &backup) {
+    if let Err(error) = rename(&staged, &backup) {
         let _ = fs::remove_file(&staged);
         return Err(error.into());
     }
@@ -1772,28 +1781,67 @@ mod tests {
         let dir = temp_dir("orphan-sweep-unlocked");
         let _guard = TempDirGuard(dir.clone());
         fs::create_dir_all(&dir).expect("mkdir");
-        let stale = dir.join(format!("{}1.1", crate::update::UPDATE_TEMP_PREFIX));
-        let fresh = dir.join(format!("{}2.2", crate::delivery::DELIVERY_TEMP_PREFIX));
-        fs::write(&stale, b"stale").expect("seed stale");
-        fs::write(&fresh, b"in flight").expect("seed fresh");
         let two_minutes_ago = SystemTime::now() - Duration::from_secs(120);
-        fs::File::open(&stale)
-            .expect("open stale")
-            .set_modified(two_minutes_ago)
-            .expect("age the stale temp");
+        let mut seeded = Vec::new();
+        // Both unlocked writers, each with one stale and one fresh temp.
+        for prefix in [
+            crate::update::UPDATE_TEMP_PREFIX,
+            crate::delivery::DELIVERY_TEMP_PREFIX,
+        ] {
+            let stale = dir.join(format!("{prefix}1.1"));
+            let fresh = dir.join(format!("{prefix}2.2"));
+            fs::write(&stale, b"stale").expect("seed stale");
+            fs::write(&fresh, b"in flight").expect("seed fresh");
+            fs::File::open(&stale)
+                .expect("open stale")
+                .set_modified(two_minutes_ago)
+                .expect("age the stale temp");
+            seeded.push((prefix, stale, fresh));
+        }
 
         TaskStore::new(&dir)
             .save(&DomainState::new())
             .expect("save");
 
-        assert!(
-            !stale.exists(),
-            "a minute-old release-check temp is an orphan"
+        for (prefix, stale, fresh) in seeded {
+            assert!(!stale.exists(), "{prefix}: a minute-old temp is an orphan");
+            assert!(
+                fresh.exists(),
+                "{prefix}: a fresh temp may belong to a writer that does not hold the store lock"
+            );
+        }
+    }
+
+    #[test]
+    fn last_good_backup_survives_a_failed_replacement() {
+        // The property the staging order buys: with remove-then-link, a failure after the
+        // remove left no tsk.json.1 at all. Here the final rename fails and the old backup
+        // must still be readable, with the staging link cleaned up.
+        let dir = temp_dir("last-good-failed-rename");
+        let _guard = TempDirGuard(dir.clone());
+        fs::create_dir_all(&dir).expect("mkdir");
+        let live = dir.join(STATE_FILE);
+        let backup = dir.join(BACKUP_FILE);
+        fs::write(&live, b"new live").expect("live");
+        fs::write(&backup, b"old backup").expect("backup");
+
+        let failed = retain_last_good_with(&live, |_, _| Err(io::Error::other("disk full")));
+        assert!(failed.is_err());
+        assert_eq!(
+            fs::read(&backup).expect("old backup still present"),
+            b"old backup"
         );
-        assert!(
-            fresh.exists(),
-            "a fresh temp may belong to a writer that does not hold the store lock"
-        );
+        let leftovers: Vec<_> = fs::read_dir(&dir)
+            .expect("dir")
+            .filter_map(Result::ok)
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.starts_with(&format!(".{BACKUP_FILE}.tmp.")))
+            .collect();
+        assert!(leftovers.is_empty(), "{leftovers:?}");
+
+        // And the real rename replaces it in one step.
+        retain_last_good(&live).expect("replace");
+        assert_eq!(fs::read(&backup).expect("new backup"), b"new live");
     }
 
     #[test]
