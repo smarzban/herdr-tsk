@@ -1278,9 +1278,9 @@ pub fn rejected(error: AddError) -> CliOutput {
 
 pub fn setup_help() -> CliOutput {
     help(HelpDoc {
-        usage: vec!["tsk setup [herdr | agents | claude | pi | omp | cursor | grok | codex | opencode | --skill-dir <path>] [--yes] [--force] [--json]".into(), "tsk setup --detected-ids".into()],
+        usage: vec!["tsk setup [herdr | agents | claude | pi | omp | cursor | grok | codex | opencode | --skill-dir <path>] [--yes] [--force] [--json]".into(), "tsk setup --detected-ids | --skill-states".into(), "tsk setup herdr --check".into()],
         purpose: "Register Herdr, or install the bundled agent workflow skill.".into(),
-        groups: vec![group("Output", &[("--json", "print machine-readable agent detection or install output"), ("--detected-ids", "print space-separated detected agent ids")]), group("Values", &[("herdr", "register plugin assets and keyboard shortcuts"), ("agents --yes", "install or update every detected agent skill; add --force to rewrite matching versions"), ("<agent>, --skill-dir <path>", "install one named agent skill"), ("--force", "overwrite a matching skill version")])],
+        groups: vec![group("Output", &[("--json", "print machine-readable agent detection or install output"), ("--detected-ids", "print space-separated detected agent ids"), ("--skill-states", "print one tab-separated line per detected agent: id, state, installed version, path (for installers)"), ("herdr --check", "print bound when both plugin commands are already in the Herdr config, otherwise unbound")]), group("Values", &[("herdr", "register plugin assets and keyboard shortcuts"), ("agents --yes", "install or update every detected agent skill; add --force to rewrite matching versions"), ("<agent>, --skill-dir <path>", "install one named agent skill"), ("--force", "overwrite a matching skill version")])],
         examples: vec!["tsk setup herdr".into(), "tsk setup agents --yes".into(), "tsk setup pi".into()],
         refusals: vec!["skill-exists".into(), "setup failure".into(), "blocked skill root".into()],
         exit: exit_line("setup completed or help listed", Some("setup refusal or failure"), false),
@@ -1332,6 +1332,15 @@ pub fn setup_agent_listed(json: bool) -> CliOutput {
 }
 
 pub fn setup_agent_detected_json(text: String) -> CliOutput {
+    CliOutput {
+        stdout: text,
+        stderr: String::new(),
+        code: 0,
+    }
+}
+
+/// Plain probe output for installers (`--skill-states`, `herdr --check`).
+pub fn setup_probe(text: String) -> CliOutput {
     CliOutput {
         stdout: text,
         stderr: String::new(),
@@ -1501,7 +1510,16 @@ pub fn setup(result: crate::setup::SetupResult) -> CliOutput {
     }
     // The content-addressed plugin root is not something users act on; it stays in
     // error messages, where `plugin unlink` or a manual look needs it.
-    stdout.push_str("    Shortcuts:      prefix+t board, prefix+a quick capture\n");
+    let shortcuts: Vec<String> = result
+        .shortcuts
+        .iter()
+        .map(|(keys, label)| format!("{} {label}", terminal_text(keys)))
+        .collect();
+    if shortcuts.is_empty() {
+        stdout.push_str("    Shortcuts:      none bound\n");
+    } else {
+        stdout.push_str(&format!("    Shortcuts:      {}\n", shortcuts.join(", ")));
+    }
     if result.declined_conflicts {
         stdout.push_str("Declined conflicts were left unchanged.\n");
     }
@@ -1621,6 +1639,10 @@ mod tests {
                 "/home/box/.config/herdr/config.toml.tsk-backup-20260912-143022",
             )),
             declined_conflicts: false,
+            shortcuts: vec![
+                ("prefix+t".to_string(), "board"),
+                ("prefix+a".to_string(), "quick capture"),
+            ],
         });
         assert_eq!(
             output.stdout,
@@ -1636,6 +1658,10 @@ mod tests {
             root: PathBuf::from("/home/box/.config/herdr/tsk-plugins/c578550bfb36dea8"),
             backup: None,
             declined_conflicts: true,
+            shortcuts: vec![
+                ("prefix+t".to_string(), "board"),
+                ("prefix+a".to_string(), "quick capture"),
+            ],
         });
         assert!(!output.stdout.contains("Config backup:"));
         assert!(output
@@ -1643,6 +1669,37 @@ mod tests {
             .contains(
                 "    Shortcuts:      prefix+t board, prefix+a quick capture\nDeclined conflicts were left unchanged.\n"
             ));
+    }
+
+    #[test]
+    fn setup_reports_the_keys_the_commands_are_actually_on() {
+        let output = setup(crate::setup::SetupResult {
+            binary: PathBuf::from("/home/box/.local/bin/tsk"),
+            root: PathBuf::from("/home/box/.config/herdr/tsk-plugins/c578550bfb36dea8"),
+            backup: None,
+            declined_conflicts: false,
+            shortcuts: vec![
+                ("prefix+b / prefix+t".to_string(), "board"),
+                ("prefix+a".to_string(), "quick capture"),
+            ],
+        });
+        assert!(output
+            .stdout
+            .contains("    Shortcuts:      prefix+b / prefix+t board, prefix+a quick capture\n"));
+    }
+
+    #[test]
+    fn setup_with_nothing_bound_says_so_instead_of_dropping_the_row() {
+        let output = setup(crate::setup::SetupResult {
+            binary: PathBuf::from("/home/box/.local/bin/tsk"),
+            root: PathBuf::from("/home/box/.config/herdr/tsk-plugins/c578550bfb36dea8"),
+            backup: None,
+            declined_conflicts: true,
+            shortcuts: Vec::new(),
+        });
+        assert!(output
+            .stdout
+            .contains("    Shortcuts:      none bound\nDeclined conflicts were left unchanged.\n"));
     }
 
     #[test]

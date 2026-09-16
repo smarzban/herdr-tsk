@@ -328,6 +328,17 @@ fn run_setup<R: Read>(args: Vec<String>, stdin: &mut R, stdin_is_tty: bool) -> C
             Ok(ids) => presenter::setup_agent_detected_ids(ids),
             Err(error) => presenter::setup_error(&error.to_string(), 1),
         },
+        Ok(crate::setup_agent::Command::SkillStates) => {
+            match crate::setup_agent::skill_states_text() {
+                Ok(text) => presenter::setup_probe(text),
+                Err(error) => presenter::setup_error(&error.to_string(), 1),
+            }
+        }
+        Ok(crate::setup_agent::Command::HerdrCheck) => match crate::setup::herdr_setup_present() {
+            Ok(true) => presenter::setup_probe("bound\n".to_string()),
+            Ok(false) => presenter::setup_probe("unbound\n".to_string()),
+            Err(error) => presenter::setup_herdr_error(&error.to_string(), 1),
+        },
         Ok(crate::setup_agent::Command::Interactive { json }) => {
             let mut reader = std::io::BufReader::new(stdin);
             let mut stderr = std::io::stderr();

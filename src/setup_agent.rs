@@ -11,7 +11,7 @@ use crate::cli::guide::SKILL_MD;
 const SKILL_FOLDER: &str = "tsk-cli";
 const SKILL_FILE: &str = "SKILL.md";
 
-pub const USAGE: &str = "usage: tsk setup [herdr | agents | claude | pi | omp | cursor | grok | codex | opencode | --skill-dir <path>] [--yes] [--force] [--json]\n       tsk setup --detected-ids";
+pub const USAGE: &str = "usage: tsk setup [herdr | agents | claude | pi | omp | cursor | grok | codex | opencode | --skill-dir <path>] [--yes] [--force] [--json]\n       tsk setup --detected-ids | --skill-states\n       tsk setup herdr --check";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Target {
@@ -130,6 +130,10 @@ pub enum Command {
         json: bool,
     },
     DetectedIds,
+    /// Installer probe: one tab-separated line per detected agent with its skill state.
+    SkillStates,
+    /// Installer probe: whether both plugin commands are already bound in the Herdr config.
+    HerdrCheck,
     Interactive {
         json: bool,
     },
@@ -185,6 +189,8 @@ pub fn parse(args: &[String]) -> Result<Command, Error> {
     let mut force = false;
     let mut json = false;
     let mut detected_ids = false;
+    let mut skill_states = false;
+    let mut check = false;
     let mut agents: Vec<Target> = Vec::new();
     let mut skill_dir: Option<PathBuf> = None;
     let mut index = 0;
@@ -214,6 +220,8 @@ pub fn parse(args: &[String]) -> Result<Command, Error> {
             "--force" => force = true,
             "--json" => json = true,
             "--detected-ids" => detected_ids = true,
+            "--skill-states" => skill_states = true,
+            "--check" => check = true,
             "--skill-dir" => {
                 index += 1;
                 let Some(value) = tail.get(index) else {
@@ -236,12 +244,24 @@ pub fn parse(args: &[String]) -> Result<Command, Error> {
         index += 1;
     }
 
-    if detected_ids {
-        if herdr || agents_cmd || yes || force || json || !agents.is_empty() || skill_dir.is_some()
+    if detected_ids || skill_states {
+        if herdr
+            || agents_cmd
+            || yes
+            || force
+            || json
+            || check
+            || !agents.is_empty()
+            || skill_dir.is_some()
+            || (detected_ids && skill_states)
         {
             return Err(usage());
         }
-        return Ok(Command::DetectedIds);
+        return Ok(if detected_ids {
+            Command::DetectedIds
+        } else {
+            Command::SkillStates
+        });
     }
 
     let named = agents.len() + usize::from(skill_dir.is_some());
@@ -249,7 +269,14 @@ pub fn parse(args: &[String]) -> Result<Command, Error> {
         if named > 0 || force || json || yes || agents_cmd {
             return Err(usage());
         }
-        return Ok(Command::Herdr);
+        return Ok(if check {
+            Command::HerdrCheck
+        } else {
+            Command::Herdr
+        });
+    }
+    if check {
+        return Err(usage());
     }
     if agents_cmd {
         if named > 0 {
@@ -417,6 +444,38 @@ pub fn detect() -> Result<Vec<AgentStatus>, Error> {
 
 pub fn detected_ids() -> Result<Vec<String>, Error> {
     Ok(detect()?.into_iter().map(|agent| agent.id).collect())
+}
+
+/// Installer probe for `tsk update`: a tab-separated table a POSIX shell can read with
+/// `awk -F'\t'`. The first line is `embedded\t<version>`; each following line is
+/// `<id>\t<state>\t<installed version or ->\t<skill path>`. States are `missing`,
+/// `current`, `outdated`, and `blocked-symlink`, the same words as `--json`.
+pub fn skill_states_text() -> Result<String, Error> {
+    let mut out = format!("embedded\t{}\n", embedded_skill_version());
+    for agent in detect()? {
+        let state = match agent.state {
+            SkillState::Missing => "missing",
+            SkillState::Current => "current",
+            SkillState::Outdated => "outdated",
+            SkillState::Blocked => "blocked-symlink",
+        };
+        // The path is display-only; a tab or newline inside it would forge a row.
+        let path: String = agent
+            .skill_path
+            .display()
+            .to_string()
+            .chars()
+            .map(|c| if c.is_control() { '?' } else { c })
+            .collect();
+        out.push_str(&format!(
+            "{}\t{}\t{}\t{}\n",
+            agent.id,
+            state,
+            agent.installed_version.as_deref().unwrap_or("-"),
+            path
+        ));
+    }
+    Ok(out)
 }
 
 pub fn install_detected(force: bool) -> Result<BatchResult, Error> {

@@ -61,7 +61,12 @@ printf '%s\n' "$expected" | grep -Eq '^[0-9a-f]{64}$' || fail 'missing or malfor
 [ "$(printf '%s\n' "$expected" | awk 'END {print NR}')" = 1 ] || fail 'duplicate checksum'
 actual=$(checksum "$work/$archive")
 [ "$actual" = "$expected" ] || fail 'checksum mismatch; existing installation unchanged'
-printf 'Verifying checksum... ok\n\nInstalling tsk...\n\n'
+printf 'Verifying checksum... ok\n\n'
+# `tsk update` names the copy it is replacing; a first install has nothing to compare.
+if [ -n "${TSK_UPDATE:-}" ] && [ -n "${TSK_CURRENT_VERSION:-}" ]; then
+    printf 'Current version %s\n' "$TSK_CURRENT_VERSION"
+fi
+printf 'Installing tsk %s...\n\n' "$version"
 # Extract only the executable to stdout, never archive paths into the filesystem.
 tar -xOzf "$work/$archive" tsk > "$work/tsk" || fail 'release archive does not contain tsk'
 [ -s "$work/tsk" ] || fail 'release executable is empty'
@@ -149,15 +154,41 @@ skills_wrap=
 tsk_bin=$install_dir/tsk
 # An overridden destination can be a shared directory. Do not execute a newly
 # published path there: the user can run `tsk setup` after choosing the directory.
+# `tsk update` also passes TSK_INSTALL_DIR, but only to overwrite the copy it runs from:
+# that directory is already trusted, so the update path keeps post-install setup and
+# refreshes what is installed instead of nudging.
+update_mode=
+if [ -n "${TSK_UPDATE:-}" ]; then
+    update_mode=1
+fi
 post_install_setup=1
-if [ -n "${TSK_INSTALL_DIR:-}" ]; then
+if [ -n "${TSK_INSTALL_DIR:-}" ] && [ -z "$update_mode" ]; then
     post_install_setup=0
 fi
+
+# Update path: a registration that already binds both plugin commands (on any key) is
+# refreshed without asking, so its manifest and launchers follow the new binary. An
+# unbound Herdr falls through to the first-install ask.
+refresh_herdr() {
+    [ "$("$tsk_bin" setup herdr --check 2>/dev/null)" = bound ] || return 1
+    if "$tsk_bin" setup herdr </dev/null >/dev/null 2>&1; then
+        # The user's own keys stay; the closing line must not claim prefix+t.
+        printf '\nHerdr plugin refreshed.\n'
+        herdr_wrap=board
+    else
+        printf '\ntsk setup herdr failed; install succeeded.\n' >&2
+        herdr_wrap=board_setup
+    fi
+    return 0
+}
 
 maybe_setup_herdr() {
     command -v herdr >/dev/null 2>&1 || return 0
     [ "$post_install_setup" = 1 ] || { herdr_wrap=board_setup; return 0; }
     [ -x "$tsk_bin" ] || return 0
+    if [ -n "$update_mode" ] && refresh_herdr; then
+        return 0
+    fi
     if [ -n "${CI:-}" ]; then
         herdr_wrap=board_setup
         return 0
@@ -199,12 +230,85 @@ maybe_setup_herdr() {
     esac
 }
 
+# Update path. Outdated skills are refreshed (asked on a TTY, default yes; unattended
+# otherwise) and named afterwards. Missing skills get the first-install ask only when no
+# skill is installed at all: an update never adds an agent the user did not opt into.
+# Returns 1 when nothing about the update path applies (no agents detected).
+# Returns 3 when the installed binary predates the probe (no `embedded` line): the caller
+# keeps the plain nudge rather than staying silent about a skill it could not inspect.
+refresh_agent_skills() {
+    states=$("$tsk_bin" setup --skill-states 2>/dev/null) || states=
+    embedded=$(printf '%s\n' "$states" | awk -F'\t' '$1 == "embedded" {print $2; exit}')
+    [ -n "$embedded" ] || return 3
+    outdated=$(printf '%s\n' "$states" | awk -F'\t' '$2 == "outdated" {printf "%s%s", sep, $1; sep=" "}')
+    outdated_list=$(printf '%s\n' "$states" | awk -F'\t' '$2 == "outdated" {printf "%s%s (%s)", sep, $1, ($3 == "-" ? "unknown version" : "v" $3); sep=", "}')
+    missing=$(printf '%s\n' "$states" | awk -F'\t' '$2 == "missing" {printf "%s%s", sep, $1; sep=" "}')
+    installed=$(printf '%s\n' "$states" | awk -F'\t' '$2 == "current" || $2 == "outdated" {printf "%s%s", sep, $1; sep=" "}')
+    printf '%s\n' "$states" | awk -F'\t' '$2 == "blocked-symlink" {printf "tsk skill for %s not refreshed: %s is a symlink\n", $1, $4}' >&2
+    [ -n "$outdated$missing$installed" ] || return 1
+
+    if [ -n "$outdated" ]; then
+        answer=y
+        if [ -z "${CI:-}" ]; then
+            if [ -t 0 ]; then
+                printf '\n' >&2
+                printf 'tsk skill installed for %s; update to v%s? [Y/n] ' "$outdated_list" "$embedded" >&2
+                read -r answer || true
+            elif sh -c 'exec <>/dev/tty' 2>/dev/null; then
+                printf '\n' >&2
+                printf 'tsk skill installed for %s; update to v%s? [Y/n] ' "$outdated_list" "$embedded" >&2
+                read -r answer </dev/tty || true
+            fi
+        fi
+        case ${answer:-y} in
+            n|N|no|NO)
+                skills_wrap=nudge
+                ;;
+            *)
+                updated=
+                for id in $outdated; do
+                    if "$tsk_bin" setup "$id" </dev/null >/dev/null 2>&1; then
+                        updated="$updated${updated:+ }$id"
+                    else
+                        printf '\ntsk setup %s failed; install succeeded.\n' "$id" >&2
+                        skills_wrap=nudge
+                    fi
+                done
+                if [ -n "$updated" ]; then
+                    printf '\nUpdated the tsk skill for %s.\n' "$(printf '%s' "$updated" | sed 's/ /, /g')"
+                fi
+                ;;
+        esac
+        return 0
+    fi
+    if [ -n "$installed" ]; then
+        # Every installed skill is current, and an update never adds agents. Quiet.
+        return 0
+    fi
+    # Nothing installed anywhere: the first-install ask applies to the missing agents.
+    detected_ids=$missing
+    return 2
+}
+
 maybe_setup_agent_skills() {
     [ "$post_install_setup" = 1 ] || return 0
     [ -x "$tsk_bin" ] || return 0
     detected_ids=
-    detected_ids=$("$tsk_bin" setup --detected-ids 2>/dev/null) || detected_ids=
-    detected_ids=$(printf '%s' "$detected_ids" | tr -s '[:space:]' ' ' | sed 's/^ *//;s/ *$//')
+    legacy_detection=1
+    if [ -n "$update_mode" ]; then
+        refresh_status=0
+        refresh_agent_skills || refresh_status=$?
+        case $refresh_status in
+            0|1) return 0 ;;
+            2) legacy_detection= ;;
+            # 3: the installed release predates the probe. Detect the way a first install
+            # does, so a machine without agents stays quiet and one with agents gets the ask.
+        esac
+    fi
+    if [ -n "$legacy_detection" ]; then
+        detected_ids=$("$tsk_bin" setup --detected-ids 2>/dev/null) || detected_ids=
+        detected_ids=$(printf '%s' "$detected_ids" | tr -s '[:space:]' ' ' | sed 's/^ *//;s/ *$//')
+    fi
     [ -n "$detected_ids" ] || return 0
 
     if [ -n "${CI:-}" ]; then
@@ -266,14 +370,6 @@ if [ "$post_install_setup" = 1 ]; then
     if [ "$skills_wrap" = nudge ]; then
         agent_row='    Agent skills:  tsk setup'
     fi
-elif [ -n "${TSK_UPDATE:-}" ]; then
-    # Invoked by `tsk update`: the binary was replaced in place. A registered Herdr plugin
-    # embeds the old version in its manifest, and installed agent skills may be stale.
-    printf '\nUpdated in place. Refresh what you use:\n'
-    if [ "$herdr_wrap" = board_setup ]; then
-        herdr_row='    Herdr plugin:  tsk setup herdr'
-    fi
-    agent_row='    Agent skills:  tsk setup'
 else
     # Custom TSK_INSTALL_DIR: the installer never ran setup, so say why and name the
     # full binary path, which may not be on PATH. The agent row is unconditional here:

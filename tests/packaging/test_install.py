@@ -54,15 +54,44 @@ else:
         path.write_text(source)
         path.chmod(0o755)
 
-    def archive(self, target="x86_64-unknown-linux-musl", bad_checksum=False, member="tsk", record_setup=False):
+    def archive(self, target="x86_64-unknown-linux-musl", bad_checksum=False, member="tsk", record_setup=False, legacy=False):
         archive = self.assets / f"tsk-v1.2.3-{target}.tar.gz"
         with tarfile.open(archive, "w:gz") as out:
-            if record_setup:
+            if legacy:
+                # A release from before the probes existed: `setup --skill-states` and
+                # `setup herdr --check` are usage errors (exit 2, nothing on stdout).
+                data = b"""#!/bin/sh
+if [ "${1:-}" = setup ] && [ "${2:-}" = --detected-ids ]; then
+    if [ -n "${TSK_DETECT_AGENTS:-}" ]; then printf '%s\\n' "$TSK_DETECT_AGENTS"; fi
+    exit 0
+fi
+if [ "${1:-}" = setup ] && { [ "${2:-}" = --skill-states ] || [ "${3:-}" = --check ]; }; then
+    echo usage >&2
+    exit 2
+fi
+if [ "${1:-}" = setup ]; then
+    if [ -n "${TSK_SETUP_LOG:-}" ]; then printf '%s\\n' "$*" >> "$TSK_SETUP_LOG"; fi
+    exit 0
+fi
+echo installed-fixture
+"""
+            elif record_setup:
                 data = b"""#!/bin/sh
 if [ "${1:-}" = setup ] && [ "${2:-}" = --detected-ids ]; then
     if [ -n "${TSK_DETECT_AGENTS:-}" ]; then
         printf '%s\\n' "$TSK_DETECT_AGENTS"
     fi
+    exit 0
+fi
+if [ "${1:-}" = setup ] && [ "${2:-}" = --skill-states ]; then
+    printf 'embedded\\t1.3.0\\n'
+    if [ -n "${TSK_SKILL_STATES:-}" ]; then
+        printf '%s\\n' "$TSK_SKILL_STATES"
+    fi
+    exit 0
+fi
+if [ "${1:-}" = setup ] && [ "${2:-}" = herdr ] && [ "${3:-}" = --check ]; then
+    if [ -n "${TSK_HERDR_BOUND:-}" ]; then echo bound; else echo unbound; fi
     exit 0
 fi
 if [ "${1:-}" = setup ] && [ "${2:-}" = agents ] && [ "${3:-}" = --yes ]; then
@@ -75,6 +104,14 @@ if [ "${1:-}" = setup ] && [ "${2:-}" = herdr ]; then
     if [ -n "${TSK_SETUP_LOG:-}" ]; then
         printf '%s\\n' "$*" >> "$TSK_SETUP_LOG"
     fi
+    if [ "${TSK_SETUP_FAIL:-}" = herdr ]; then exit 7; fi
+    exit 0
+fi
+if [ "${1:-}" = setup ] && [ -n "${2:-}" ]; then
+    if [ -n "${TSK_SETUP_LOG:-}" ]; then
+        printf '%s\\n' "$*" >> "$TSK_SETUP_LOG"
+    fi
+    if [ -n "${TSK_SETUP_FAIL:-}" ] && [ "$2" = "$TSK_SETUP_FAIL" ]; then exit 7; fi
     exit 0
 fi
 echo installed-fixture
@@ -133,7 +170,7 @@ echo installed-fixture
                 if not chunk:
                     break
                 transcript += chunk
-                seen = transcript.count(b"[y/N]")
+                seen = transcript.count(b"[y/N]") + transcript.count(b"[Y/n]")
                 while answered < seen:
                     reply = answers[answered] if answered < len(answers) else answers[-1]
                     os.write(master, reply)
@@ -469,23 +506,200 @@ echo installed-fixture
         self.assertIn(f"    Agent skills:  {dest}/tsk setup", result.stdout)
         self.assertNotIn("[y/N]", result.stdout + result.stderr)
 
-    def test_update_invocation_explains_the_in_place_upgrade(self):
-        # `tsk update` runs the installer with TSK_INSTALL_DIR and TSK_UPDATE set: the
-        # binary was replaced in place, so the block asks to refresh setup, not to run it.
+    def run_update(self, **env):
+        env.setdefault("PATH", f"{self.bin}:/usr/bin:/bin")
+        env.setdefault("TSK_INSTALL_DIR", str(self.root / "managed-bin"))
+        env.setdefault("TSK_UPDATE", "1")
+        env.setdefault("TSK_SETUP_LOG", str(self.setup_log))
+        return self.run_install(**env)
+
+    def setup_calls(self):
+        return self.setup_log.read_text().splitlines() if self.setup_log.exists() else []
+
+    def test_update_names_both_versions(self):
+        self.archive(record_setup=True)
+        result = self.run_update(TSK_CURRENT_VERSION="v1.0.0")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Verifying checksum... ok\n\nCurrent version v1.0.0\nInstalling tsk v1.2.3...", result.stdout)
+        self.assertNotIn("Custom install directory", result.stdout)
+        self.assertNotIn("Updated in place", result.stdout)
+
+    def test_first_install_names_the_installed_version_only(self):
+        self.archive()
+        result = self.run_install()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Installing tsk v1.2.3...", result.stdout)
+        self.assertNotIn("Current version", result.stdout)
+
+    def test_update_refreshes_a_bound_herdr_plugin_without_asking(self):
         self.archive(record_setup=True)
         self.command("herdr", "#!/bin/sh\nexit 0\n")
-        dest = self.root / "managed-bin"
-        result = self.run_install(
-            TSK_INSTALL_DIR=str(dest),
+        result = self.run_update(TSK_HERDR_BOUND="1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Herdr plugin refreshed.", result.stdout)
+        self.assertIn("setup herdr", self.setup_calls())
+        self.assertNotIn("[y/N]", result.stdout + result.stderr)
+        self.assertNotIn("    Herdr plugin:", result.stdout)
+        # The user's keys are kept, so the closing line must not promise prefix+t.
+        self.assertNotIn("prefix+t", result.stdout)
+        self.assertIn("Done. Run tsk in a project directory to open the board.", result.stdout)
+
+    def test_update_with_unbound_herdr_falls_back_to_the_install_nudge(self):
+        self.archive(record_setup=True)
+        self.command("herdr", "#!/bin/sh\nexit 0\n")
+        result = self.run_update()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("Herdr plugin refreshed", result.stdout)
+        self.assertNotIn("setup herdr\n", self.setup_log.read_text() + "\n" if self.setup_log.exists() else "")
+        self.assertIn("    Herdr plugin:  tsk setup herdr", result.stdout)
+
+    @unittest.skipUnless(os.name == "posix", "PTY prompt requires POSIX")
+    def test_update_with_unbound_herdr_asks_on_a_tty(self):
+        self.archive(record_setup=True)
+        self.command("herdr", "#!/bin/sh\nexit 0\n")
+        result = self.run_install_with_answer(
+            b"y\n",
+            TSK_INSTALL_DIR=str(self.root / "managed-bin"),
             TSK_UPDATE="1",
             TSK_SETUP_LOG=str(self.setup_log),
         )
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("Herdr detected. Set up the Herdr plugin now? [y/N]", result.stdout)
+        self.assertIn("setup herdr", self.setup_calls())
+
+    def test_update_refreshes_outdated_skills_unattended(self):
+        self.archive(record_setup=True)
+        result = self.run_update(TSK_SKILL_STATES="claude\toutdated\t1.2.0\t/h/.claude/skills/tsk-cli/SKILL.md\ncodex\toutdated\t1.2.0\t/h/.codex/skills/tsk-cli/SKILL.md\npi\tcurrent\t1.3.0\t/h/.pi/skills/tsk-cli/SKILL.md")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertFalse(self.setup_log.exists())
-        self.assertIn("Updated in place. Refresh what you use:", result.stdout)
+        self.assertNotIn("[Y/n]", result.stdout + result.stderr)
+        self.assertEqual(self.setup_calls(), ["setup claude", "setup codex"])
+        self.assertIn("Updated the tsk skill for claude, codex.", result.stdout)
+        self.assertNotIn("    Agent skills:", result.stdout)
+
+    @unittest.skipUnless(os.name == "posix", "PTY prompt requires POSIX")
+    def test_update_asks_before_refreshing_outdated_skills_and_enter_means_yes(self):
+        self.archive(record_setup=True)
+        result = self.run_install_with_answer(
+            b"\n",
+            TSK_INSTALL_DIR=str(self.root / "managed-bin"),
+            TSK_UPDATE="1",
+            TSK_SETUP_LOG=str(self.setup_log),
+            TSK_SKILL_STATES="claude\toutdated\t1.2.0\t/h/.claude/skills/tsk-cli/SKILL.md",
+        )
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("tsk skill installed for claude (v1.2.0); update to v1.3.0? [Y/n]", result.stdout)
+        self.assertEqual(self.setup_calls(), ["setup claude"])
+        self.assertIn("Updated the tsk skill for claude.", result.stdout)
+
+    @unittest.skipUnless(os.name == "posix", "PTY prompt requires POSIX")
+    def test_update_declined_skill_refresh_leaves_the_nudge(self):
+        self.archive(record_setup=True)
+        result = self.run_install_with_answer(
+            b"n\n",
+            TSK_INSTALL_DIR=str(self.root / "managed-bin"),
+            TSK_UPDATE="1",
+            TSK_SETUP_LOG=str(self.setup_log),
+            TSK_SKILL_STATES="claude\toutdated\t1.2.0\t/h/.claude/skills/tsk-cli/SKILL.md",
+        )
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("[Y/n]", result.stdout)
+        self.assertEqual(self.setup_calls(), [])
+        self.assertIn("    Agent skills:  tsk setup", result.stdout)
+
+    def test_update_with_current_skills_stays_quiet_and_never_adds_agents(self):
+        self.archive(record_setup=True)
+        result = self.run_update(TSK_SKILL_STATES="claude\tcurrent\t1.3.0\t/h/.claude/skills/tsk-cli/SKILL.md\ncursor\tmissing\t-\t/h/.cursor/skills/tsk-cli/SKILL.md")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        combined = result.stdout + result.stderr
+        self.assertEqual(self.setup_calls(), [])
+        self.assertNotIn("Agents detected", combined)
+        self.assertNotIn("Updated the tsk skill", combined)
+        self.assertNotIn("    Agent skills:", combined)
+
+    @unittest.skipUnless(os.name == "posix", "PTY prompt requires POSIX")
+    def test_update_with_no_skill_installed_offers_the_first_install_ask(self):
+        self.archive(record_setup=True)
+        result = self.run_install_with_answer(
+            b"y\n",
+            TSK_INSTALL_DIR=str(self.root / "managed-bin"),
+            TSK_UPDATE="1",
+            TSK_SETUP_LOG=str(self.setup_log),
+            TSK_SKILL_STATES="cursor\tmissing\t-\t/h/.cursor/skills/tsk-cli/SKILL.md\ncodex\tmissing\t-\t/h/.codex/skills/tsk-cli/SKILL.md",
+            PATH=f"{self.bin}:/usr/bin:/bin",
+        )
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("Agents detected: cursor, codex. Install the tsk skill for them? [y/N]", result.stdout)
+        self.assertEqual(self.setup_calls(), ["setup agents --yes"])
+
+    def test_update_onto_a_release_without_the_probes_keeps_the_plain_nudges(self):
+        # The site serves the newest installer to every `tsk update`, including ones that
+        # land on a release predating the probes. Nothing may go silent there.
+        self.archive(legacy=True)
+        self.command("herdr", "#!/bin/sh\nexit 0\n")
+        result = self.run_update(TSK_DETECT_AGENTS="cursor claude")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        combined = result.stdout + result.stderr
+        self.assertNotIn("Herdr plugin refreshed", combined)
+        self.assertNotIn("Updated the tsk skill", combined)
+        self.assertNotIn("[Y/n]", combined)
         self.assertIn("    Herdr plugin:  tsk setup herdr", result.stdout)
         self.assertIn("    Agent skills:  tsk setup", result.stdout)
-        self.assertNotIn("Custom install directory", result.stdout)
+        self.assertEqual(self.setup_calls(), [])
+
+    def test_update_onto_a_release_without_the_probes_stays_quiet_without_agents(self):
+        self.archive(legacy=True)
+        result = self.run_update()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        combined = result.stdout + result.stderr
+        self.assertNotIn("    Agent skills:", combined)
+        self.assertNotIn("Agents detected", combined)
+        self.assertEqual(self.setup_calls(), [])
+
+    def test_update_failed_herdr_refresh_keeps_the_binary_and_the_nudge(self):
+        self.archive(record_setup=True)
+        self.command("herdr", "#!/bin/sh\nexit 0\n")
+        result = self.run_update(TSK_HERDR_BOUND="1", TSK_SETUP_FAIL="herdr")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("tsk setup herdr failed; install succeeded.", result.stderr)
+        self.assertNotIn("Herdr plugin refreshed", result.stdout)
+        self.assertIn("    Herdr plugin:  tsk setup herdr", result.stdout)
+        self.assertNotIn("prefix+t", result.stdout)
+        self.assertTrue((self.root / "managed-bin/tsk").exists())
+
+    def test_update_prompt_names_each_agent_with_its_own_version(self):
+        self.archive(record_setup=True)
+        result = self.run_update(TSK_SKILL_STATES="claude\toutdated\t1.1.0\t/h/a\ncodex\toutdated\t-\t/h/b")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        # Unattended: no prompt, but the refresh still runs and names both.
+        self.assertEqual(self.setup_calls(), ["setup claude", "setup codex"])
+        self.assertIn("Updated the tsk skill for claude, codex.", result.stdout)
+
+    @unittest.skipUnless(os.name == "posix", "PTY prompt requires POSIX")
+    def test_update_prompt_lists_mixed_versions_per_agent(self):
+        self.archive(record_setup=True)
+        result = self.run_install_with_answer(
+            b"n\n",
+            TSK_INSTALL_DIR=str(self.root / "managed-bin"),
+            TSK_UPDATE="1",
+            TSK_SETUP_LOG=str(self.setup_log),
+            TSK_SKILL_STATES="claude\toutdated\t1.1.0\t/h/a\ncodex\toutdated\t-\t/h/b",
+            PATH=f"{self.bin}:/usr/bin:/bin",
+        )
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("tsk skill installed for claude (v1.1.0), codex (unknown version); update to v1.3.0? [Y/n]", result.stdout)
+
+    def test_update_reports_a_blocked_skill_and_a_failed_refresh(self):
+        self.archive(record_setup=True)
+        result = self.run_update(
+            TSK_SKILL_STATES="claude\toutdated\t1.2.0\t/h/.claude/skills/tsk-cli/SKILL.md\ncodex\toutdated\t1.2.0\t/h/.codex/skills/tsk-cli/SKILL.md\npi\tblocked-symlink\t-\t/h/.pi/skills/tsk-cli/SKILL.md",
+            TSK_SETUP_FAIL="codex",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("tsk skill for pi not refreshed: /h/.pi/skills/tsk-cli/SKILL.md is a symlink", result.stderr)
+        self.assertIn("tsk setup codex failed; install succeeded.", result.stderr)
+        self.assertIn("Updated the tsk skill for claude.", result.stdout)
+        self.assertIn("    Agent skills:  tsk setup", result.stdout)
+        self.assertTrue((self.root / "managed-bin/tsk").exists())
 
     def test_herdr_present_without_tty_skips_with_guidance(self):
         self.archive(record_setup=True)
