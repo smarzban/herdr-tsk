@@ -177,6 +177,9 @@ migration or design work they imply. What the behaviour *is* lives in the docs
   fields. Migrated loads write `tsk.json.v<N>` beside the live file on first save.
 - Trash (`trash.jsonl`) is durable before the live document loses a task, is rewritten
   atomically, and readers dedupe by id and skip torn lines. Nothing on the board reads it.
+- A bulk verb on a marked set is one domain transaction, one save, and one undo entry
+  (`UndoEntry::Batch`, store v5). Never persist it as per-task entries: one `ctrl+u`
+  reverses the whole set, and a stale batch refuses without touching any task.
 - The state dir must be a real directory on a local disk (flock plus rename replace);
   permission hardening refuses a symlink rather than chmodding its target. Host-injected
   `HERDR_PLUGIN_*` dirs are ignored on purpose.
@@ -214,7 +217,13 @@ migration or design work they imply. What the behaviour *is* lives in the docs
   there owns its own refusals and clears them on close, or the message is invisible and
   then leaks onto the board afterwards.
 - Selection may only rest on a row the current lens paints. `seed_selection` and
-  reanchor fallbacks must never pin an invisible task.
+  reanchor fallbacks must never pin an invisible task. The same holds for marks: the
+  multi-select set is session-only, lives beside the cursor, and clears at every verb and
+  lens boundary rather than pinning hidden rows. Status verbs act on the set when it is
+  non-empty; `Enter`, `ctrl+e`, and task-page actions stay cursor-only.
+- Board search is a per-lens filter applied in `queue_view` after `queue::query_board`,
+  never a second row source. Overview rows filter by project name; everything else by task
+  content. `Enter` pins the query and hands keys back to the board; `Esc` clears it first.
 - `sync_from_domain` never moves the user's tab or selection for tasks merged from disk;
   the one exception is an otherwise-empty view surfacing the first arriving task. A
   pinned save pins the selection only when the current lens renders the saved task.
@@ -232,6 +241,13 @@ migration or design work they imply. What the behaviour *is* lives in the docs
   alone is not visible-navigation evidence, confirm the displayed tab.
 - Pane label matching is exact against `board_pane::BOARD_PANE_LABEL`; the manifest pane
   title must equal it.
+- `tsk setup --skill-states` and `tsk setup herdr --check` are installer probes: the site
+  serves the newest `install.sh` to every `tsk update`, and its `TSK_UPDATE` path parses
+  them with `awk -F'\t'`. Keep their output shape stable, and keep the installer's fallback
+  for a binary that lacks them (empty probe output means "old binary", never "no agents").
+- `tsk setup herdr` never adds the default chord for a plugin command the user bound on
+  another key; a binding on the default key still goes through conflict repair. `tsk update`
+  refreshes a bound plugin noninteractively and relies on both.
 
 ## Cutting a release
 
@@ -248,7 +264,8 @@ approval. Tags are `v[0-9]+.[0-9]+.[0-9]+` only: the workflow, `release.py`, and
 **Build (owner-run).** Dispatch `Prepare release` with the existing tag. It pins the tag
 to one commit, tests and builds four targets from it, and creates a **draft** with the
 archives, `SHA256SUMS`, `install.sh`, and a version-pinned `tsk.rb`. It refuses a moved
-tag or an existing release; it never publishes or updates the tap.
+tag or an existing release; it never publishes or updates the tap. The draft is named with
+`--title "$TAG"`: an unnamed GitHub release displays the tagged commit's subject instead.
 
 **Test release (pre-release).** Flip the draft rather than publishing:
 `gh release edit vX.Y.Z --draft=false --prerelease`. GitHub excludes pre-releases from
@@ -265,7 +282,9 @@ gh release download vX.Y.Z -p tsk.rb -D /tmp/tsk-rc && HOMEBREW_DEVELOPER=1 brew
 
 The site serves `install.sh` from `main`; if the installer changed in this release fetch
 `releases/download/vX.Y.Z/install.sh` instead. Smoke `tsk setup herdr` under isolated
-roots. A failed rehearsal burns the tag: fix forward with the next patch version and leave
+roots. Rehearse the update path too, against a throwaway `HOME` holding an outdated skill
+and a Herdr config on a custom key:
+`env HOME=/tmp/x/home XDG_CONFIG_HOME=/tmp/x/home/.config HERDR_SOCKET_PATH=/tmp/x/none.sock TSK_VERSION=vX.Y.Z TSK_UPDATE=1 TSK_CURRENT_VERSION=vPREV TSK_INSTALL_DIR=/tmp/x/bin sh /tmp/x/install.sh`. A failed rehearsal burns the tag: fix forward with the next patch version and leave
 (or, with approval, delete) the bad pre-release.
 
 Rehearsal traps, learned the hard way:
@@ -273,6 +292,10 @@ Rehearsal traps, learned the hard way:
 - Never run `tsk update` on a pre-release copy before promotion. It follows
   `releases/latest`, which is still the previous stable, so it downgrades the binary,
   and the downgraded binary then refuses the store the pre-release migrated.
+- Never point a candidate binary at a store you did not create for the rehearsal. Pass
+  state overrides as `env TSK_STATE_DIR=… TSK_CONFIG_DIR=… /path/tsk`, and in a Herdr pane
+  read until an idle prompt first: a pending shell prompt can eat the first character of a
+  `VAR=value` prefix, and the candidate then opens and migrates the real `~/.tsk`.
 - `brew install --formula tsk.rb` on a machine with the tap's `tsk` installed replaces the
   daily copy (same formula name) and removes the old keg. Use a throwaway machine or
   `brew unlink` first and expect to `brew reinstall smarzban/tap/tsk` afterwards.
