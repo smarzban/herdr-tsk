@@ -293,7 +293,46 @@ fn a_missing_home_refuses_instead_of_creating_a_board_in_the_working_directory()
         .output()
         .expect("run tsk with --state-dir only");
     assert_eq!(output.status.code(), Some(0), "{output:?}");
-    let _ = std::fs::remove_dir_all(explicit);
+
+    // The equals spelling counts too.
+    let output = Command::new(binary())
+        .args(["list", "--all"])
+        .arg(format!("--state-dir={}", explicit.display()))
+        .current_dir(&cwd)
+        .env_remove("HOME")
+        .env_remove("TSK_STATE_DIR")
+        .output()
+        .expect("run tsk with --state-dir= only");
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    let _ = std::fs::remove_dir_all(&explicit);
+
+    // The board, quick capture and the launcher's context resolver open the store too;
+    // each refuses before any terminal or file is touched.
+    for args in [
+        vec!["--resolve-context"],
+        vec![] as Vec<&str>,
+        vec!["capture"],
+    ] {
+        let mut child = Command::new(binary())
+            .args(&args)
+            .current_dir(&cwd)
+            .env_remove("HOME")
+            .env_remove("TSK_STATE_DIR")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn tsk without HOME");
+        drop(child.stdin.take());
+        let output = wait_with_output_before_deadline(child, &format!("tsk {args:?} without HOME"));
+        assert_eq!(output.status.code(), Some(1), "{args:?}: {output:?}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("HOME is not set"), "{args:?}: {stderr}");
+        assert!(
+            !cwd.join(".tsk-state").exists(),
+            "{args:?} created a cwd store"
+        );
+    }
 
     // So is `tsk setup herdr --help`, which never opens the store.
     let output = Command::new(binary())

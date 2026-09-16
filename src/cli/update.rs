@@ -150,48 +150,59 @@ fn run_installer(
     Ok(())
 }
 
-/// A 0600 file under the temp dir that is removed on drop, success or failure.
+/// A private scratch directory (`0700`, created with the atomic `mkdir` that fails when the
+/// name exists) holding the downloaded installer, removed on drop, success or failure.
+///
+/// curl and the shell both open the script by name, so the file alone would leave a window
+/// between curl's close and the shell's open in which another party writing to the same
+/// temp dir could swap it. Only the owner can create or replace entries in this directory,
+/// which closes that window regardless of what `TMPDIR` points at.
 struct InstallerFile {
+    dir: PathBuf,
     path: PathBuf,
 }
 
 impl InstallerFile {
-    fn create(dir: &Path) -> Result<Self, String> {
+    fn create(scratch: &Path) -> Result<Self, String> {
         static SEQ: AtomicU64 = AtomicU64::new(0);
         for _ in 0..64 {
-            let path = dir.join(format!(
-                ".tsk-installer.{}.{}.sh",
+            let dir = scratch.join(format!(
+                ".tsk-installer.{}.{}",
                 std::process::id(),
                 SEQ.fetch_add(1, Ordering::Relaxed)
             ));
-            let mut options = fs::OpenOptions::new();
-            options.write(true).create_new(true);
+            let mut builder = fs::DirBuilder::new();
             #[cfg(unix)]
             {
-                use std::os::unix::fs::OpenOptionsExt;
-                options.mode(0o600);
+                use std::os::unix::fs::DirBuilderExt;
+                builder.mode(0o700);
             }
-            match options.open(&path) {
-                Ok(_) => return Ok(Self { path }),
+            match builder.create(&dir) {
+                Ok(()) => {
+                    return Ok(Self {
+                        path: dir.join("install.sh"),
+                        dir,
+                    })
+                }
                 Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
                 Err(error) => {
                     return Err(format!(
-                        "could not create the installer file in {}: {error}",
-                        dir.display()
+                        "could not create the installer directory in {}: {error}",
+                        scratch.display()
                     ))
                 }
             }
         }
         Err(format!(
-            "could not create a unique installer file in {}",
-            dir.display()
+            "could not create a unique installer directory in {}",
+            scratch.display()
         ))
     }
 }
 
 impl Drop for InstallerFile {
     fn drop(&mut self) {
-        let _ = fs::remove_file(&self.path);
+        let _ = fs::remove_dir_all(&self.dir);
     }
 }
 
@@ -268,8 +279,10 @@ mod tests {
             dir,
             "curl",
             &format!(
-                "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\nout=\nwhile [ $# -gt 0 ]; do if [ \"$1\" = -o ]; then out=$2; shift; fi; shift; done\nprintf '%s' '{payload}' > \"$out\"\nexit {exit}\n",
-                argv.display()
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\nout=\nwhile [ $# -gt 0 ]; do if [ \"$1\" = -o ]; then out=$2; shift; fi; shift; done\nstat -f '%Lp' \"$(dirname \"$out\")\" > '{}' 2>/dev/null || stat -c '%a' \"$(dirname \"$out\")\" > '{}'\nprintf '%s' '{payload}' > \"$out\"\nexit {exit}\n",
+                argv.display(),
+                dir.join("curl-dir-mode").display(),
+                dir.join("curl-dir-mode").display()
             ),
         );
         (curl, argv)
@@ -358,6 +371,18 @@ mod tests {
         );
         assert_eq!(args[8], "-o");
         assert_eq!(args[10], "https://gettsk.sh/install.sh");
+        assert!(
+            args[9].starts_with(&dir.join(".tsk-installer.").display().to_string()),
+            "script lives in a private directory under the scratch dir: {}",
+            args[9]
+        );
+        assert_eq!(
+            fs::read_to_string(dir.join("curl-dir-mode"))
+                .expect("directory mode")
+                .trim(),
+            "700",
+            "the installer directory is private while curl writes into it"
+        );
         assert!(
             installer_files(&dir).is_empty(),
             "the downloaded script is removed after the run"

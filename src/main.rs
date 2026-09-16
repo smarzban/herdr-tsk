@@ -10,7 +10,13 @@ fn main() -> ExitCode {
     match route(&args, std::env::var(tsk_tui::app::MODE_ENV).ok().as_deref()) {
         Surface::FindBoardPane => find_board_main(false),
         Surface::FindBoardTab => find_board_main(true),
-        Surface::ResolveContext => resolve_context_main(),
+        Surface::ResolveContext => match tsk_tui::store::require_home_or_override(&args) {
+            Ok(()) => resolve_context_main(),
+            Err(message) => {
+                eprintln!("tsk: {message}");
+                ExitCode::from(1)
+            }
+        },
         Surface::GlobalHelp => {
             print!("{}", tsk_tui::cli::presenter::top_level_help());
             ExitCode::SUCCESS

@@ -1117,13 +1117,6 @@ fn skill_states_probe_lists_each_detected_agent_with_state_version_and_path() {
         claude[3].ends_with(".claude/skills/tsk-cli/SKILL.md"),
         "{claude:?}"
     );
-    // The staging file never lingers beside a live skill.
-    let leftovers: Vec<_> = fs::read_dir(home.join(".cursor/skills/tsk-cli"))
-        .expect("cursor skill folder")
-        .filter_map(Result::ok)
-        .filter(|e| e.file_name().to_string_lossy().starts_with('.'))
-        .collect();
-    assert!(leftovers.is_empty(), "{leftovers:?}");
     let codex = lines.iter().find(|l| l[0] == "codex").expect("codex row");
     assert_eq!(codex[1], "outdated");
     assert_eq!(codex[2], "0.0.1");
@@ -1190,5 +1183,71 @@ fn herdr_check_reports_bound_only_when_both_commands_are_in_the_config() {
         Some(value) => std::env::set_var("HERDR_CONFIG_PATH", value),
         None => std::env::remove_var("HERDR_CONFIG_PATH"),
     }
+    let _ = fs::remove_dir_all(root);
+}
+
+/// The skill is replaced by staging beside it and renaming: an update leaves no staging
+/// file behind, a stale staging file from a killed run is cleared, and a symlink planted at
+/// the staging name is refused rather than written through.
+#[test]
+fn skill_updates_stage_and_rename_without_following_a_planted_symlink() {
+    let _lock = env_lock();
+    let root = temp_dir("stage-replace");
+    let skills = root.join("skills");
+    let folder = skills.join("tsk-cli");
+    fs::create_dir_all(&folder).expect("skill folder");
+    fs::write(
+        folder.join("SKILL.md"),
+        "---\nname: tsk-cli\nversion: 0.0.1\n---\nold\n",
+    )
+    .expect("stale skill");
+    // A leftover from an interrupted earlier run, at the exact name this pid would pick.
+    let stale = folder.join(format!(".SKILL.md.tmp.{}", std::process::id()));
+    fs::write(&stale, "half-written").expect("stale staging file");
+
+    let updated = cli(&["tsk", "setup", "--skill-dir", skills.to_str().unwrap()]);
+    assert_eq!(updated.code, 0, "{updated:?}");
+    let installed = fs::read_to_string(folder.join("SKILL.md")).expect("installed skill");
+    assert!(
+        installed.contains(&format!(
+            "version: {}",
+            tsk_tui::setup_agent::embedded_skill_version()
+        )),
+        "{installed}"
+    );
+    let leftovers: Vec<_> = fs::read_dir(&folder)
+        .expect("skill folder")
+        .filter_map(Result::ok)
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|name| name.starts_with('.'))
+        .collect();
+    assert!(leftovers.is_empty(), "{leftovers:?}");
+
+    // Now plant a symlink at the next staging name: the write must refuse, and the live
+    // skill and the symlink's target must both be untouched.
+    let target = root.join("elsewhere");
+    fs::write(&target, "do not touch").expect("symlink target");
+    let planted = folder.join(format!(".SKILL.md.tmp.{}", std::process::id()));
+    std::os::unix::fs::symlink(&target, &planted).expect("planted symlink");
+    let before = fs::read_to_string(folder.join("SKILL.md")).expect("live skill");
+    let refused = cli(&[
+        "tsk",
+        "setup",
+        "--skill-dir",
+        skills.to_str().unwrap(),
+        "--force",
+    ]);
+    assert_ne!(refused.code, 0, "{refused:?}");
+    assert!(refused.stderr.contains("symlink"), "{refused:?}");
+    assert_eq!(
+        fs::read_to_string(&target).expect("target"),
+        "do not touch",
+        "the write went through the planted symlink"
+    );
+    assert_eq!(fs::read_to_string(folder.join("SKILL.md")).unwrap(), before);
+    assert!(
+        planted.symlink_metadata().is_ok(),
+        "the planted link is not ours to delete"
+    );
     let _ = fs::remove_dir_all(root);
 }

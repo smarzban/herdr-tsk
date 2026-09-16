@@ -104,7 +104,7 @@ if [ "${1:-}" = setup ] && [ "${2:-}" = herdr ]; then
     if [ -n "${TSK_SETUP_LOG:-}" ]; then
         printf '%s\\n' "$*" >> "$TSK_SETUP_LOG"
     fi
-    if [ "${TSK_SETUP_FAIL:-}" = herdr ]; then exit 7; fi
+    if [ "${TSK_SETUP_FAIL:-}" = herdr ]; then echo "tsk setup: config.toml is not writable" >&2; exit 7; fi
     exit 0
 fi
 if [ "${1:-}" = setup ] && [ -n "${2:-}" ]; then
@@ -657,17 +657,20 @@ echo installed-fixture
 
     def test_update_refuses_to_move_backwards(self):
         # releases/latest resolves to v1.2.3 in this rig; a copy built from a newer tag stays.
+        # v1.10.0 and v1.2.10 sort before v1.2.3 lexically: the compare must be numeric.
         self.archive(record_setup=True)
-        result = self.run_update(TSK_CURRENT_VERSION="v1.3.0")
-        self.assertEqual(result.returncode, 1, result.stdout)
-        self.assertIn("Current version v1.3.0", result.stdout)
-        self.assertIn("latest published release is v1.2.3, older than the installed v1.3.0; nothing changed", result.stderr)
-        self.assertFalse((self.root / "managed-bin/tsk").exists())
+        for current in ("v1.3.0", "v1.10.0", "v1.2.10", "v2.0.0", "v10.0.0"):
+            result = self.run_update(TSK_CURRENT_VERSION=current)
+            self.assertEqual(result.returncode, 1, (current, result.stdout))
+            self.assertIn(f"Current version {current}", result.stdout)
+            self.assertIn(f"latest published release is v1.2.3, older than the installed {current}; nothing changed", result.stderr)
+            self.assertFalse((self.root / "managed-bin/tsk").exists())
         self.assertEqual(self.setup_calls(), [])
 
     def test_update_from_an_older_or_equal_copy_proceeds(self):
+        # v0.10.9 and v1.1.10 sort after v1.2.3 lexically; a non-release string skips the compare.
         self.archive(record_setup=True)
-        for current in ("v1.2.3", "v1.2.2", "v0.10.9", "v1.10.0-dev"):
+        for current in ("v1.2.3", "v1.2.2", "v0.10.9", "v1.1.10", "v1.10.0-dev"):
             result = self.run_update(TSK_CURRENT_VERSION=current)
             self.assertEqual(result.returncode, 0, (current, result.stderr))
             self.assertIn("Installing tsk v1.2.3...", result.stdout)
@@ -677,7 +680,9 @@ echo installed-fixture
         self.command("herdr", "#!/bin/sh\nexit 0\n")
         result = self.run_update(TSK_HERDR_BOUND="1", TSK_SETUP_FAIL="herdr")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("tsk setup herdr failed; install succeeded.", result.stderr)
+        self.assertIn("tsk setup herdr failed; install succeeded.\n    tsk setup: config.toml is not writable", result.stderr)
+        # The reason is tsk's own stderr, not something the installer invented.
+        self.assertEqual(result.stderr.count("config.toml is not writable"), 1)
         self.assertNotIn("Herdr plugin refreshed", result.stdout)
         self.assertIn("    Herdr plugin:  tsk setup herdr", result.stdout)
         self.assertNotIn("prefix+t", result.stdout)

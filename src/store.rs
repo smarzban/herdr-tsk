@@ -831,6 +831,22 @@ impl Drop for StoreLockGuard {
     }
 }
 
+/// Refuse to run a verb that would land the store in a working-directory-relative
+/// `.tsk-state`: that is one board per directory, silently. `TSK_STATE_DIR` or a non-empty
+/// `HOME` must name the place, or the verb must carry `--state-dir` (either spelling).
+/// Checked once at the binary entry; the resolvers below keep their relative last resort so
+/// nothing ever falls back to a shared world path.
+pub fn require_home_or_override(args: &[String]) -> Result<(), String> {
+    let set = |name: &str| env::var_os(name).is_some_and(|value| !value.is_empty());
+    let explicit = args
+        .iter()
+        .any(|arg| arg == "--state-dir" || arg.starts_with("--state-dir="));
+    if set("TSK_STATE_DIR") || set("HOME") || explicit {
+        return Ok(());
+    }
+    Err("HOME is not set; set HOME or TSK_STATE_DIR to say where the board lives".to_string())
+}
+
 /// State dir from `TSK_STATE_DIR`, else `~/.tsk`.
 ///
 /// One store everywhere: the herdr plugin pane and a bare terminal run resolve to the same
@@ -839,19 +855,6 @@ impl Drop for StoreLockGuard {
 /// plugin-owned ("it does not validate, sync, or delete their contents") and only recommends
 /// the injected location. Empty values fall through. Never falls back to a shared world path
 /// under `std::env::temp_dir()`.
-/// Refuse to run a verb that would land the store in a working-directory-relative
-/// `.tsk-state`: that is one board per directory, silently. `TSK_STATE_DIR` or a non-empty
-/// `HOME` must name the place, or the verb must carry `--state-dir`. Checked once at the
-/// binary entry; the resolvers below keep their relative last resort so nothing ever falls
-/// back to a shared world path.
-pub fn require_home_or_override(args: &[String]) -> Result<(), String> {
-    let set = |name: &str| env::var_os(name).is_some_and(|value| !value.is_empty());
-    if set("TSK_STATE_DIR") || set("HOME") || args.iter().any(|arg| arg == "--state-dir") {
-        return Ok(());
-    }
-    Err("HOME is not set; set HOME or TSK_STATE_DIR to say where the board lives".to_string())
-}
-
 pub fn default_state_dir() -> PathBuf {
     if let Some(dir) = env::var_os("TSK_STATE_DIR") {
         if !dir.is_empty() {

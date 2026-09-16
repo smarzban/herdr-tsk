@@ -1703,6 +1703,17 @@ mod tests {
     }
 
     #[test]
+    fn setup_agent_written_escapes_the_printed_path() {
+        let outcome = crate::setup_agent::InstallOutcome::Written(PathBuf::from(
+            "/home/box/.claude/skills/tsk-cli\u{001b}]0;x\u{0007}/SKILL.md",
+        ));
+        let output = setup_agent_written(&crate::setup_agent::Target::Claude, &outcome, false);
+        assert!(!output.stdout.contains('\u{001b}'), "{:?}", output.stdout);
+        assert!(!output.stdout.contains('\u{0007}'), "{:?}", output.stdout);
+        assert!(output.stdout.ends_with("/SKILL.md\n"));
+    }
+
+    #[test]
     fn setup_agent_batch_prints_padded_rows_for_each_outcome() {
         let result = crate::setup_agent::BatchResult {
             applied: vec![(
