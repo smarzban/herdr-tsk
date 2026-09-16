@@ -242,12 +242,13 @@ fn keys_md_board_table_matches_the_normal_mode_keymap() {
 }
 
 /// keys.md's editing prose: in the step editor `ctrl+d` and `ctrl+o` address the task,
-/// `ctrl+x` is the step's delete and `ctrl+a` adds a step.
+/// `ctrl+x` stages the step's removal (no confirm press inside the editor) and `ctrl+a`
+/// adds a step.
 #[test]
 fn keys_md_step_editor_chords_match_the_edit_step_keymap() {
     let doc = read_doc("keys.md");
     assert!(
-        doc.contains("In the step editor, `ctrl+d` and `ctrl+o` still address the task; `ctrl+x` marks and then removes the step being edited; `ctrl+a` adds another step."),
+        doc.contains("In the step editor, `ctrl+d` and `ctrl+o` still address the task; `ctrl+x` removes the step being edited, staged until the task edit is saved; `ctrl+a` adds another step."),
         "keys.md step-editor sentence changed; update this test with the code it now claims"
     );
     let chord = |letter: char| {
