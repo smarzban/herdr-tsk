@@ -27,7 +27,7 @@ case "$(uname -s)/$(uname -m)" in
     *) fail 'supported platforms: macOS and Linux, ARM64 or x86-64' ;;
 esac
 
-repo=https://github.com/smarzban/herdr-tsk
+repo=https://github.com/smarzban/tsk
 version=${TSK_VERSION:-}
 if [ -z "$version" ]; then
     latest=$(curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSL -o /dev/null -w '%{url_effective}' "$repo/releases/latest") || fail 'could not resolve latest published release'

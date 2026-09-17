@@ -20,7 +20,7 @@ export const SIDEBAR_SLUGS = [
   "cli",
   "storage",
 ];
-export const SOURCE_REPO_BASE = "https://github.com/smarzban/herdr-tsk/blob/main";
+export const SOURCE_REPO_BASE = "https://github.com/smarzban/tsk/blob/main";
 export const AGENTS_SKILL_REPO_PATH = "skills/tsk-cli/SKILL.md";
 export function agentsSkillFsPath() {
   return resolve(process.cwd(), "../skills/tsk-cli/SKILL.md");

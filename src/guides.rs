@@ -115,8 +115,8 @@ pub const CATALOG: [Guide; 4] = [
                 Press `?`. Every key of every screen is on one card. The full guide is at https://gettsk.sh/docs\n\
                 \n\
                 **Say hello**\n\
-                - Something broke, or something is missing? Tell us at https://github.com/smarzban/herdr-tsk/issues\n\
-                - A star at https://github.com/smarzban/herdr-tsk helps other people find tsk.\n\
+                - Something broke, or something is missing? Tell us at https://github.com/smarzban/tsk/issues\n\
+                - A star at https://github.com/smarzban/tsk helps other people find tsk.\n\
                 - Say hi at https://x.com/smarzbanX",
         status: HumanStatus::Open,
         steps: &[

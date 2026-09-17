@@ -43,4 +43,4 @@ Storage, backups, and release-check settings: https://gettsk.sh/docs/storage.md
 
 ## Source
 
-https://github.com/smarzban/herdr-tsk
+https://github.com/smarzban/tsk

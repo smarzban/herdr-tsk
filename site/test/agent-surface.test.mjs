@@ -54,7 +54,7 @@ test("markdown_twin_formatter_prefixes_title_html_source_and_updated", () => {
       "# CLI",
       "",
       "- html: https://gettsk.sh/docs/cli/",
-      "- source: https://github.com/smarzban/herdr-tsk/blob/main/site/src/content/docs/docs/cli.md",
+      "- source: https://github.com/smarzban/tsk/blob/main/site/src/content/docs/docs/cli.md",
       "- updated: 2026-09-09T00:00:00.000Z",
       "",
       "The same store backs the board.",
@@ -107,8 +107,8 @@ test("dist_has_a_markdown_twin_for_every_docs_entry_with_matching_body", async (
     assert.match(twin, /- html: https:\/\/gettsk\.sh\/docs\//);
     const sourceLine =
       slug === "agents"
-        ? "- source: https://github.com/smarzban/herdr-tsk/blob/main/skills/tsk-cli/SKILL.md"
-        : `- source: https://github.com/smarzban/herdr-tsk/blob/main/site/src/content/docs/docs/${fileName}`;
+        ? "- source: https://github.com/smarzban/tsk/blob/main/skills/tsk-cli/SKILL.md"
+        : `- source: https://github.com/smarzban/tsk/blob/main/site/src/content/docs/docs/${fileName}`;
     assert.match(twin, new RegExp(sourceLine.replaceAll(".", "\\.")));
     assert.match(twin, /- updated: \d{4}-\d{2}-\d{2}T/);
   }
@@ -272,7 +272,7 @@ test("landing_jsonld_is_software_application_with_required_fields", async () => 
   assert.match(String(app.operatingSystem), /macOS/);
   assert.match(String(app.operatingSystem), /Linux/);
   assert.match(String(app.license), /MIT/i);
-  assert.equal(app.codeRepository, "https://github.com/smarzban/herdr-tsk");
+  assert.equal(app.codeRepository, "https://github.com/smarzban/tsk");
   const version = (await read(join(siteRoot, "src/version.mjs"))).match(/VERSION = '([^']+)'/)?.[1];
   assert.equal(app.softwareVersion, version);
   assert.equal(String(app.offers?.price), "0");
@@ -369,7 +369,7 @@ test("agents_markdown_twin_points_source_and_updated_at_the_skill", async () => 
   const twin = await read(join(distDir, "docs/agents.md"));
   assert.match(
     twin,
-    /- source: https:\/\/github.com\/smarzban\/herdr-tsk\/blob\/main\/skills\/tsk-cli\/SKILL.md/,
+    /- source: https:\/\/github.com\/smarzban\/tsk\/blob\/main\/skills\/tsk-cli\/SKILL.md/,
   );
   const expected = newestCommitIso(join(repoRoot, "skills/tsk-cli/SKILL.md"));
   assert.match(twin, new RegExp(`- updated: ${expected.replaceAll(".", "\\.")}`));

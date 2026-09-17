@@ -214,7 +214,7 @@ mod tests {
             assert!(
                 entry
                     .notes
-                    .contains("Changelog: https://github.com/smarzban/herdr-tsk/"),
+                    .contains("Changelog: https://github.com/smarzban/tsk/"),
                 "{}",
                 entry.id
             );
