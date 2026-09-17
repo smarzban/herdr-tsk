@@ -13,7 +13,7 @@ import tarfile
 import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
-REPO = "https://github.com/smarzban/herdr-tsk"
+REPO = "https://github.com/smarzban/tsk"
 TARGETS = (
     "aarch64-apple-darwin",
     "x86_64-apple-darwin",

@@ -13,7 +13,7 @@ use crate::fsperm;
 const UPDATE_FILE: &str = "update.json";
 pub const UPDATE_TEMP_PREFIX: &str = ".update.json.tmp.";
 pub const STALE_AFTER_SECS: u64 = 24 * 60 * 60;
-const RELEASES_URL: &str = "https://api.github.com/repos/smarzban/herdr-tsk/releases/latest";
+const RELEASES_URL: &str = "https://api.github.com/repos/smarzban/tsk/releases/latest";
 static BACKGROUND_FETCH: AtomicBool = AtomicBool::new(true);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

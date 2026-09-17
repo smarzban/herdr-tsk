@@ -46,11 +46,11 @@ export default defineConfig({
         {
           icon: 'github',
           label: 'GitHub',
-          href: 'https://github.com/smarzban/herdr-tsk',
+          href: 'https://github.com/smarzban/tsk',
         },
       ],
       editLink: {
-        baseUrl: 'https://github.com/smarzban/herdr-tsk/edit/main/site/',
+        baseUrl: 'https://github.com/smarzban/tsk/edit/main/site/',
       },
       lastUpdated: true,
       customCss: ['./src/styles/starlight.css'],

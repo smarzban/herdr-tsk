@@ -91,7 +91,7 @@ class ReleaseTests(unittest.TestCase):
                     self.assertEqual(len(blocks), 1)
                     archive = self.out / f"tsk-v1.2.3-{target}.tar.gz"
                     digest = hashlib.sha256(archive.read_bytes()).hexdigest()
-                    self.assertEqual(re.findall(r'url "([^"\n]+)"', blocks[0]), [f"https://github.com/smarzban/herdr-tsk/releases/download/v1.2.3/{archive.name}"])
+                    self.assertEqual(re.findall(r'url "([^"\n]+)"', blocks[0]), [f"https://github.com/smarzban/tsk/releases/download/v1.2.3/{archive.name}"])
                     self.assertEqual(re.findall(r'sha256 "([^"\n]+)"', blocks[0]), [digest])
 
     def test_installer_asset_is_exact_and_has_one_matching_checksum(self):

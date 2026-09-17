@@ -308,7 +308,7 @@ Rehearsal traps, learned the hard way:
 **Official release.** Replace the draft's skeleton and checklist with the version's
 `CHANGELOG.md` section verbatim (keep the one-line Install section), then promote the tested
 assets, no rebuild: `gh release edit vX.Y.Z --prerelease=false --latest`. Confirm
-`https://github.com/smarzban/herdr-tsk/releases/latest` redirects to the new tag. Then,
+`https://github.com/smarzban/tsk/releases/latest` redirects to the new tag. Then,
 and only then, copy the generated `tsk.rb` to `Formula/tsk.rb` in `smarzban/homebrew-tap`
 and push; a release alone never updates Homebrew. Finish with a smoke of the public
 one-liner and the tap on a clean machine.

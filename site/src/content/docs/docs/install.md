@@ -143,11 +143,11 @@ Setup registers bundled plugin files using the installed executable. No source c
 - Rerunning setup updates the registration without duplicating bindings.
 - Use the stable command on PATH, not a versioned Homebrew Cellar path.
 
-Installation alone does not update an existing plugin registration unless you answer yes to the curl installer's Herdr prompt. [Setup recovery and configuration](https://github.com/smarzban/herdr-tsk/blob/main/packaging/README.md#herdr-setup-and-upgrades).
+Installation alone does not update an existing plugin registration unless you answer yes to the curl installer's Herdr prompt. [Setup recovery and configuration](https://github.com/smarzban/tsk/blob/main/packaging/README.md#herdr-setup-and-upgrades).
 
 ## Manual archives
 
-Download the archive for your platform and `SHA256SUMS` from the same [release](https://github.com/smarzban/herdr-tsk/releases).
+Download the archive for your platform and `SHA256SUMS` from the same [release](https://github.com/smarzban/tsk/releases).
 
 | Platform | Archive target |
 | --- | --- |
@@ -163,12 +163,12 @@ Archives are named `tsk-vX.Y.Z-<target>.tar.gz`. Verify with `shasum -a 256` on 
 Requires Rust 1.96.0:
 
 ```sh
-git clone https://github.com/smarzban/herdr-tsk.git
-cd herdr-tsk
+git clone https://github.com/smarzban/tsk.git
+cd tsk
 cargo build --release
 export PATH="$PWD/target/release:$PATH"
 ```
 
 For plugin development from a checkout, Herdr 0.9.0+ supports `herdr plugin link "$PWD"`. Rebuild after pulling changes.
 
-[Contributing](https://github.com/smarzban/herdr-tsk/blob/main/CONTRIBUTING.md) · [Storage and configuration](/docs/storage/)
+[Contributing](https://github.com/smarzban/tsk/blob/main/CONTRIBUTING.md) · [Storage and configuration](/docs/storage/)

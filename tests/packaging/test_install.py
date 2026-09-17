@@ -41,7 +41,7 @@ with open(os.environ["CURL_ARGS"], "a") as out: out.write(json.dumps(args) + "\\
 with open(os.environ["REQUESTS"], "a") as out: out.write(url + "\\n")
 if os.environ.get("FAIL_DOWNLOAD"): sys.exit(22)
 if url.endswith("/releases/latest"):
-    print("https://github.com/smarzban/herdr-tsk/releases/tag/v1.2.3", end="")
+    print("https://github.com/smarzban/tsk/releases/tag/v1.2.3", end="")
 else:
     assert "/releases/download/v1.2.3/" in url, url
     path = pathlib.Path(os.environ["ASSETS"]) / url.rsplit("/", 1)[-1]

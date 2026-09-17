@@ -12,8 +12,8 @@ Requirements:
 - herdr 0.9.0 or newer, both to link the checkout as a plugin (the manifest declares it) and to smoke `tsk setup herdr`
 
 ```bash
-git clone https://github.com/smarzban/herdr-tsk.git
-cd herdr-tsk
+git clone https://github.com/smarzban/tsk.git
+cd tsk
 cargo build
 ```
 
