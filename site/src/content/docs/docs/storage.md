@@ -9,12 +9,29 @@ The board, CLI, and Herdr plugin share `~/.tsk/tsk.json`. The current store form
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
-| `TSK_STATE_DIR` | `~/.tsk` | Task data, backups, trash, and release-check cache. With neither this nor `HOME` set, tsk refuses to run rather than pick a directory |
+| `TSK_STATE_DIR` | `~/.tsk` | Task data, agent profiles, backups, trash, and release-check cache. With neither this nor `HOME` set, tsk refuses to run rather than pick a directory |
 | `--state-dir <dir>` | State directory | Override storage for a data command |
 
 Use a local disk. NFS and synced folders such as Dropbox or iCloud Drive are unsupported. Directory roots must be real directories, not symlinks.
 
 Herdr's plugin-specific state/config directories do not override these locations. Removing tsk leaves its task data intact.
+
+## Agent profiles
+
+Agent profiles are read from `agents.toml` in the state directory, beside `tsk.json`. A missing file defines no profiles. Each profile name must already be lowercase and use the same shape as a thread name: start with a letter or number, then use only letters, numbers, hyphens, and dots, up to 32 characters. Quote a name that contains dots, for example `[agent."review.strict"]`.
+
+```toml
+[agent.implementer]
+command = ["pi", "{prompt}"]
+prompt = "Work on T{number}: {title}\n\n{notes}\n\n{steps}"
+
+[agent.implementer.env]
+PI_PROVIDER = "anthropic"
+```
+
+`command` is a required, non-empty argv template. `prompt` is optional; without it, tsk supplies a prompt that points the agent to `tsk guide` and the task, then asks it to set the task to review or blocked. `env` is an optional table of string values passed through unchanged.
+
+The command and prompt templates support `{number}`, `{title}`, `{notes}`, `{steps}`, `{worktree}`, `{branch}`, and `{prompt}`. tsk replaces only these placeholders. It quotes every argument and renders one command line as `$SHELL -lc '…'`; it never chains commands. Profiles are read-only in tsk, edit the file to change them.
 
 ## Backups
 
