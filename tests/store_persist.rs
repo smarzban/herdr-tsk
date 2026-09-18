@@ -52,6 +52,7 @@ fn assert_store_document_refused_without_rewrite(document: serde_json::Value) {
 }
 
 #[test]
+#[cfg(unix)] // nanosecond timestamps in fixtures lose precision on Windows FILETIME
 fn literal_current_v1_fixture_pins_the_complete_store_wire_shape() {
     let dir = temp_state_dir();
     let _guard = TempDirGuard(dir.clone());
@@ -155,6 +156,7 @@ fn v1_document_loads_through_the_chain_and_first_save_leaves_tsk_json_v1_beside_
 }
 
 #[test]
+#[cfg(unix)] // nanosecond timestamps in fixtures lose precision on Windows FILETIME
 fn v2_document_loads_with_notice_counter_one_and_first_save_leaves_tsk_json_v2_beside_the_live_file(
 ) {
     let dir = temp_state_dir();
@@ -230,6 +232,7 @@ fn v3_document_loads_ready_as_open_and_first_save_leaves_tsk_json_v3_beside_the_
 }
 
 #[test]
+#[cfg(unix)] // nanosecond timestamps in fixtures lose precision on Windows FILETIME
 fn v3_document_loads_through_the_chain_and_first_save_leaves_tsk_json_v3_beside_the_live_file() {
     let dir = temp_state_dir();
     let _guard = TempDirGuard(dir.clone());
@@ -263,6 +266,7 @@ fn v3_document_loads_through_the_chain_and_first_save_leaves_tsk_json_v3_beside_
 }
 
 #[test]
+#[cfg(unix)] // nanosecond timestamps in fixtures lose precision on Windows FILETIME
 fn v4_document_migrates_to_v5_and_keeps_its_original_backup() {
     let dir = temp_state_dir();
     let _guard = TempDirGuard(dir.clone());
@@ -292,6 +296,7 @@ fn v4_document_migrates_to_v5_and_keeps_its_original_backup() {
 }
 
 #[test]
+#[cfg(unix)] // nanosecond timestamps in fixtures lose precision on Windows FILETIME
 fn literal_current_v5_fixture_round_trips_byte_identical() {
     let dir = temp_state_dir();
     let _guard = TempDirGuard(dir.clone());

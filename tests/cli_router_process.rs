@@ -91,6 +91,7 @@ fn update_help_explains_installer_and_homebrew_behavior_without_updating() {
     assert!(stdout.contains("installer"));
 }
 
+#[cfg(unix)]
 #[test]
 fn update_directs_a_homebrew_binary_to_brew_without_a_path_lookup() {
     let dir = temp_state_dir("update-homebrew");
@@ -261,11 +262,13 @@ fn a_missing_home_refuses_instead_of_creating_a_board_in_the_working_directory()
         .current_dir(&cwd)
         .env_remove("HOME")
         .env_remove("TSK_STATE_DIR")
+        .env_remove("USERPROFILE")
+        .env_remove("LOCALAPPDATA")
         .output()
         .expect("run tsk without HOME");
     assert_eq!(output.status.code(), Some(1), "{output:?}");
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("HOME is not set"), "{stderr}");
+    assert!(stderr.contains("is not set"), "{stderr}");
     assert!(stderr.contains("TSK_STATE_DIR"), "{stderr}");
     assert!(
         !cwd.join(".tsk-state").exists(),
@@ -278,6 +281,8 @@ fn a_missing_home_refuses_instead_of_creating_a_board_in_the_working_directory()
         .current_dir(&cwd)
         .env("HOME", "")
         .env_remove("TSK_STATE_DIR")
+        .env_remove("USERPROFILE")
+        .env_remove("LOCALAPPDATA")
         .output()
         .expect("run tsk with empty HOME");
     assert_eq!(output.status.code(), Some(1), "{output:?}");
@@ -290,6 +295,8 @@ fn a_missing_home_refuses_instead_of_creating_a_board_in_the_working_directory()
         .current_dir(&cwd)
         .env_remove("HOME")
         .env_remove("TSK_STATE_DIR")
+        .env_remove("USERPROFILE")
+        .env_remove("LOCALAPPDATA")
         .output()
         .expect("run tsk with --state-dir only");
     assert_eq!(output.status.code(), Some(0), "{output:?}");
@@ -301,6 +308,8 @@ fn a_missing_home_refuses_instead_of_creating_a_board_in_the_working_directory()
         .current_dir(&cwd)
         .env_remove("HOME")
         .env_remove("TSK_STATE_DIR")
+        .env_remove("USERPROFILE")
+        .env_remove("LOCALAPPDATA")
         .output()
         .expect("run tsk with --state-dir= only");
     assert_eq!(output.status.code(), Some(0), "{output:?}");
@@ -314,6 +323,8 @@ fn a_missing_home_refuses_instead_of_creating_a_board_in_the_working_directory()
             .current_dir(&cwd)
             .env_remove("HOME")
             .env_remove("TSK_STATE_DIR")
+            .env_remove("USERPROFILE")
+            .env_remove("LOCALAPPDATA")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -323,7 +334,7 @@ fn a_missing_home_refuses_instead_of_creating_a_board_in_the_working_directory()
         let output = wait_with_output_before_deadline(child, &format!("tsk {args:?} without HOME"));
         assert_eq!(output.status.code(), Some(1), "{args:?}: {output:?}");
         let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(stderr.contains("HOME is not set"), "{args:?}: {stderr}");
+        assert!(stderr.contains("is not set"), "{args:?}: {stderr}");
         assert!(
             !cwd.join(".tsk-state").exists(),
             "{args:?} created a cwd store"
@@ -336,6 +347,8 @@ fn a_missing_home_refuses_instead_of_creating_a_board_in_the_working_directory()
         .current_dir(&cwd)
         .env_remove("HOME")
         .env_remove("TSK_STATE_DIR")
+        .env_remove("USERPROFILE")
+        .env_remove("LOCALAPPDATA")
         .output()
         .expect("run tsk setup without HOME");
     assert_eq!(output.status.code(), Some(0), "{output:?}");

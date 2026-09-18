@@ -250,6 +250,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn release_check_uses_the_shared_hardened_curl_policy() {
         let dir = std::env::temp_dir().join(format!(

@@ -885,7 +885,8 @@ fn section_from(kind: SectionKind, project_label: Option<String>, tasks: &[&Task
 /// Basename of a project path, for labels and search.
 pub fn short_project_name(path: &str) -> &str {
     path.trim_end_matches('/')
-        .rsplit('/')
+        .trim_end_matches('\\')
+        .rsplit(['/', '\\'])
         .find(|component| !component.is_empty())
         .unwrap_or(path)
 }
@@ -1858,6 +1859,7 @@ mod tests {
         assert_eq!(view.projects[0].done, 1, "only live done tasks count");
     }
 
+    #[cfg(unix)]
     #[test]
     fn project_board_matches_tasks_across_path_spellings() {
         use std::fs;
@@ -1884,14 +1886,7 @@ mod tests {
                 .as_nanos()
         ));
         let _ = fs::remove_file(&link);
-        #[cfg(unix)]
         std::os::unix::fs::symlink(&dir, &link).expect("symlink");
-        #[cfg(not(unix))]
-        {
-            let _ = &link;
-            fs::remove_dir_all(&dir).expect("cleanup");
-            return;
-        }
 
         let stored = dir.to_string_lossy().into_owned();
         let invoked = link.to_string_lossy().into_owned();
