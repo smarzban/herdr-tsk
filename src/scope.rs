@@ -64,8 +64,8 @@ impl PathIdentityCache {
 }
 
 fn trim(path: &str) -> &str {
-    let trimmed = path.trim_end_matches('/');
-    if trimmed.is_empty() && path.starts_with('/') {
+    let trimmed = path.trim_end_matches(['/', '\\']);
+    if trimmed.is_empty() && (path.starts_with('/') || path.starts_with('\\')) {
         "/"
     } else {
         trimmed
@@ -352,7 +352,7 @@ pub fn resolve_project_path(
     snapshot: Option<&InvocationSnapshot>,
 ) -> Result<String, ProjectResolveError> {
     let candidates = project_candidates(domain, snapshot);
-    if token.contains('/') || token == "~" {
+    if token.contains('/') || token.contains('\\') || token == "~" {
         let expanded = expand_home(token);
         let path = Path::new(&expanded);
         if !path.is_absolute() || !path.is_dir() {
@@ -472,8 +472,8 @@ fn stored_project_paths(domain: &DomainState) -> BTreeSet<String> {
 }
 
 fn basename_matches(path: &str, token: &str) -> bool {
-    path.trim_end_matches('/')
-        .rsplit('/')
+    path.trim_end_matches(['/', '\\'])
+        .rsplit(['/', '\\'])
         .find(|component| !component.is_empty())
         .is_some_and(|basename| basename.eq_ignore_ascii_case(token))
 }

@@ -631,7 +631,14 @@ pub fn run_interactive_batch(
 pub fn list_text() -> String {
     let home = env::var("HOME").ok().filter(|value| !value.is_empty());
     let display = |suffix: &str| match &home {
-        Some(home) => format!("{home}/{suffix}/tsk-cli/SKILL.md"),
+        Some(home) => {
+            // Join each component so the separator is native to the platform.
+            let mut path = PathBuf::from(home);
+            for component in suffix.split('/').chain(["tsk-cli", "SKILL.md"]) {
+                path.push(component);
+            }
+            path.display().to_string()
+        }
         None => format!("$HOME/{suffix}/tsk-cli/SKILL.md"),
     };
     format!(
@@ -811,10 +818,25 @@ fn path_present(path: &Path) -> Result<bool, Error> {
 }
 
 fn home_dir() -> Result<PathBuf, Error> {
-    env::var_os("HOME")
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-        .ok_or(Error::Home)
+    #[cfg(unix)]
+    {
+        if let Some(home) = env::var_os("HOME").filter(|value| !value.is_empty()) {
+            return Ok(PathBuf::from(home));
+        }
+    }
+    #[cfg(windows)]
+    {
+        // Agent skill paths (.claude/skills, .pi/agent/skills, etc.) live in the user's
+        // home directory. HOME is checked first (tests and Unix-derived tools set it);
+        // USERPROFILE is the Windows home, not LOCALAPPDATA (app data).
+        if let Some(home) = env::var_os("HOME").filter(|value| !value.is_empty()) {
+            return Ok(PathBuf::from(home));
+        }
+        if let Some(userprofile) = env::var_os("USERPROFILE").filter(|value| !value.is_empty()) {
+            return Ok(PathBuf::from(userprofile));
+        }
+    }
+    Err(Error::Home)
 }
 
 /// Resolve OMP's active user agent directory. Named profiles are rooted under
@@ -1114,8 +1136,10 @@ mod tests {
         fs::create_dir_all(root.join("home/.cursor")).expect("cursor");
         fs::create_dir_all(root.join("empty-bin")).expect("bin");
         let previous_home = std::env::var_os("HOME");
+        let previous_userprofile = std::env::var_os("USERPROFILE");
         let previous_path = std::env::var_os("PATH");
         std::env::set_var("HOME", root.join("home"));
+        std::env::set_var("USERPROFILE", root.join("home"));
         std::env::set_var("PATH", root.join("empty-bin"));
         let mut reader = Cursor::new(b"y\n".to_vec());
         let mut writer = Vec::new();
@@ -1123,6 +1147,10 @@ mod tests {
         match previous_home {
             Some(value) => std::env::set_var("HOME", value),
             None => std::env::remove_var("HOME"),
+        }
+        match previous_userprofile {
+            Some(value) => std::env::set_var("USERPROFILE", value),
+            None => std::env::remove_var("USERPROFILE"),
         }
         match previous_path {
             Some(value) => std::env::set_var("PATH", value),
@@ -1152,8 +1180,10 @@ mod tests {
         fs::create_dir_all(root.join("home/.cursor")).expect("cursor");
         fs::create_dir_all(root.join("empty-bin")).expect("bin");
         let previous_home = std::env::var_os("HOME");
+        let previous_userprofile = std::env::var_os("USERPROFILE");
         let previous_path = std::env::var_os("PATH");
         std::env::set_var("HOME", root.join("home"));
+        std::env::set_var("USERPROFILE", root.join("home"));
         std::env::set_var("PATH", root.join("empty-bin"));
         let mut reader = Cursor::new(b"n\n".to_vec());
         let mut writer = Vec::new();
@@ -1161,6 +1191,10 @@ mod tests {
         match previous_home {
             Some(value) => std::env::set_var("HOME", value),
             None => std::env::remove_var("HOME"),
+        }
+        match previous_userprofile {
+            Some(value) => std::env::set_var("USERPROFILE", value),
+            None => std::env::remove_var("USERPROFILE"),
         }
         match previous_path {
             Some(value) => std::env::set_var("PATH", value),

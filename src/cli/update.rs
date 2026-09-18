@@ -1,17 +1,28 @@
 //! Installer-aware binary upgrades.
 
+#[cfg(unix)]
 use std::fs;
+#[cfg(unix)]
 use std::io;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Command;
+#[cfg(unix)]
+use std::process::Stdio;
+#[cfg(unix)]
 use std::sync::atomic::{AtomicU64, Ordering};
 
-const INSTALLER_URL: &str = "https://gettsk.sh/install.sh";
-const CURL_PATH: &str = "/usr/bin/curl";
 const CURL_ENV: &str = "TSK_UPDATE_CURL";
+#[cfg(unix)]
+const CURL_PATH: &str = "/usr/bin/curl";
+#[cfg(windows)]
+const CURL_PATH: &str = "curl";
+#[cfg(unix)]
+const INSTALLER_URL: &str = "https://gettsk.sh/install.sh";
+#[cfg(unix)]
 const SH_PATH: &str = "/bin/sh";
 /// The installer's own pin. `tsk update` always follows the latest published release; an
 /// inherited export must not pin or downgrade it.
+#[cfg(unix)]
 const INSTALLER_VERSION_ENV: &str = "TSK_VERSION";
 
 /// One curl policy for every fetch the binary makes: HTTPS only (also across redirects),
@@ -45,6 +56,7 @@ pub enum UpdateOutcome {
 
 /// Update the running installation. Homebrew owns its formula upgrades; all other
 /// installations use the same published-release installer shown in the docs.
+#[cfg(unix)]
 pub fn run() -> Result<UpdateOutcome, String> {
     let executable = std::env::current_exe()
         .map_err(|error| format!("could not locate the running tsk executable: {error}"))?;
@@ -57,6 +69,16 @@ pub fn run() -> Result<UpdateOutcome, String> {
     )
 }
 
+/// On Windows the self-updater is not yet available; use `cargo install` or a package
+/// manager (scoop/winget) to update.
+#[cfg(windows)]
+pub fn run() -> Result<UpdateOutcome, String> {
+    Err(
+        "tsk update is not supported on Windows; use cargo install or a package manager to update"
+            .to_string(),
+    )
+}
+
 fn configured_curl_path(configured: Option<PathBuf>) -> Result<PathBuf, String> {
     match configured {
         Some(path) if path.is_absolute() => Ok(path),
@@ -65,6 +87,7 @@ fn configured_curl_path(configured: Option<PathBuf>) -> Result<PathBuf, String> 
     }
 }
 
+#[cfg(unix)]
 fn run_for(
     executable: &Path,
     curl: &Path,
@@ -82,6 +105,7 @@ fn run_for(
     Ok(UpdateOutcome::Installed)
 }
 
+#[cfg(unix)]
 fn is_homebrew_install(executable: &Path) -> bool {
     let executable = normalized(executable);
     executable.ancestors().any(|path| {
@@ -100,6 +124,7 @@ fn is_homebrew_install(executable: &Path) -> bool {
 /// The shell receives an open descriptor on its stdin, not a path: after curl exits nothing
 /// reopens the script by name, so whoever controls `TMPDIR` cannot swap it in between.
 /// `install.sh` already reads its prompts from `/dev/tty` when stdin is not a terminal.
+#[cfg(unix)]
 fn run_installer(
     install_dir: &Path,
     curl: &Path,
@@ -154,13 +179,16 @@ fn run_installer(
 /// between curl's close and the shell's open in which another party writing to the same
 /// temp dir could swap it. Only the owner can create or replace entries in this directory,
 /// which closes that window regardless of what `TMPDIR` points at.
+#[cfg(unix)]
 struct InstallerFile {
     dir: PathBuf,
     path: PathBuf,
 }
 
+#[cfg(unix)]
 impl InstallerFile {
     fn create(scratch: &Path) -> Result<Self, String> {
+        #[cfg(unix)]
         static SEQ: AtomicU64 = AtomicU64::new(0);
         for _ in 0..64 {
             let dir = scratch.join(format!(
@@ -168,7 +196,7 @@ impl InstallerFile {
                 std::process::id(),
                 SEQ.fetch_add(1, Ordering::Relaxed)
             ));
-            let mut builder = fs::DirBuilder::new();
+            let builder = fs::DirBuilder::new();
             #[cfg(unix)]
             {
                 use std::os::unix::fs::DirBuilderExt;
@@ -197,6 +225,7 @@ impl InstallerFile {
     }
 }
 
+#[cfg(unix)]
 impl InstallerFile {
     /// Open the script curl wrote, without following a symlink, and check it is a regular,
     /// non-empty file owned by this user before it is handed to the shell.
@@ -234,30 +263,39 @@ impl InstallerFile {
     }
 }
 
+#[cfg(unix)]
 impl Drop for InstallerFile {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.dir);
     }
 }
 
+#[cfg(unix)]
 fn exit_label(code: Option<i32>) -> String {
     code.map_or_else(|| "signal".to_string(), |code| code.to_string())
 }
 
+#[cfg(unix)]
 fn normalized(path: &Path) -> PathBuf {
     path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
 }
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
     use std::fs;
+    #[cfg(unix)]
     use std::path::{Path, PathBuf};
+    #[cfg(unix)]
     use std::sync::atomic::{AtomicU64, Ordering};
 
+    #[cfg(unix)]
     use super::{configured_curl_path, is_homebrew_install, run_for, UpdateOutcome};
 
+    #[cfg(unix)]
     static SEQ: AtomicU64 = AtomicU64::new(0);
 
+    #[cfg(unix)]
     fn temp_dir(label: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
             "tsk-update-{label}-{}-{}",
@@ -268,6 +306,7 @@ mod tests {
         dir
     }
 
+    #[cfg(unix)]
     fn command(dir: &Path, name: &str, source: &str) -> PathBuf {
         let path = dir.join(name);
         fs::write(&path, source).expect("write test command");
@@ -280,6 +319,7 @@ mod tests {
         path
     }
 
+    #[cfg(unix)]
     #[test]
     fn homebrew_install_is_identified_without_brew_on_path() {
         assert!(is_homebrew_install(Path::new(
@@ -293,6 +333,7 @@ mod tests {
         )));
     }
 
+    #[cfg(unix)]
     #[test]
     fn nonstandard_curl_path_must_be_explicit_and_absolute() {
         assert_eq!(
@@ -307,6 +348,7 @@ mod tests {
 
     /// A curl stand-in that records its argv, then writes `payload` to the `-o` target
     /// and exits with `exit`.
+    #[cfg(unix)]
     fn fake_curl(dir: &Path, payload: &str, exit: u8) -> (PathBuf, PathBuf) {
         let argv = dir.join("curl-argv");
         let curl = command(
@@ -323,6 +365,7 @@ mod tests {
 
     /// A shell stand-in that records the script it receives on stdin (a path argument is
     /// a failure: the handoff must be by descriptor) and the environment.
+    #[cfg(unix)]
     fn fake_sh(dir: &Path) -> (PathBuf, PathBuf, PathBuf) {
         let script_copy = dir.join("installer-input");
         let env_log = dir.join("installer-env");
@@ -338,6 +381,7 @@ mod tests {
         (shell, script_copy, env_log)
     }
 
+    #[cfg(unix)]
     fn installer_files(dir: &Path) -> Vec<PathBuf> {
         fs::read_dir(dir)
             .expect("scratch dir")
@@ -351,6 +395,7 @@ mod tests {
             .collect()
     }
 
+    #[cfg(unix)]
     #[test]
     fn installer_is_downloaded_whole_then_run_with_pinned_tools_and_a_clean_environment() {
         let dir = temp_dir("installer");
@@ -424,6 +469,7 @@ mod tests {
         let _ = fs::remove_dir_all(dir);
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_failed_or_empty_download_never_reaches_the_shell() {
         let dir = temp_dir("installer-truncated");
@@ -450,6 +496,7 @@ mod tests {
         let _ = fs::remove_dir_all(dir);
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_script_swapped_for_a_symlink_after_download_is_refused() {
         let dir = temp_dir("installer-swapped");
@@ -479,6 +526,7 @@ mod tests {
         let _ = fs::remove_dir_all(dir);
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_missing_curl_names_the_override() {
         let dir = temp_dir("installer-nocurl");

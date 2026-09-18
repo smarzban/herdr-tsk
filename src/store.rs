@@ -865,10 +865,18 @@ pub fn require_home_or_override(args: &[String]) -> Result<(), String> {
     let explicit = args
         .iter()
         .any(|arg| arg == "--state-dir" || arg.starts_with("--state-dir="));
-    if set("TSK_STATE_DIR") || set("HOME") || explicit {
+    if set("TSK_STATE_DIR") || explicit {
         return Ok(());
     }
-    Err("HOME is not set; set HOME or TSK_STATE_DIR to say where the board lives".to_string())
+    #[cfg(unix)]
+    if set("HOME") {
+        return Ok(());
+    }
+    #[cfg(windows)]
+    if set("LOCALAPPDATA") || set("USERPROFILE") {
+        return Ok(());
+    }
+    Err("HOME or USERPROFILE is not set; set HOME, USERPROFILE, or TSK_STATE_DIR to say where the board lives".to_string())
 }
 
 /// State dir from `TSK_STATE_DIR`, else `~/.tsk`.
@@ -885,9 +893,25 @@ pub fn default_state_dir() -> PathBuf {
             return PathBuf::from(dir);
         }
     }
-    if let Some(home) = env::var_os("HOME") {
-        if !home.is_empty() {
-            return PathBuf::from(home).join(".tsk");
+    #[cfg(unix)]
+    {
+        if let Some(home) = env::var_os("HOME") {
+            if !home.is_empty() {
+                return PathBuf::from(home).join(".tsk");
+            }
+        }
+    }
+    #[cfg(windows)]
+    {
+        if let Some(local) = env::var_os("LOCALAPPDATA") {
+            if !local.is_empty() {
+                return PathBuf::from(local).join("tsk");
+            }
+        }
+        if let Some(userprofile) = env::var_os("USERPROFILE") {
+            if !userprofile.is_empty() {
+                return PathBuf::from(userprofile).join(".tsk");
+            }
         }
     }
     // Last resort: relative per-process dir (still not shared /tmp/tsk-state).
@@ -1776,6 +1800,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn save_sweeps_only_stale_temps_of_the_unlocked_writers() {
         let dir = temp_dir("orphan-sweep-unlocked");

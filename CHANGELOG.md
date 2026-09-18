@@ -9,6 +9,11 @@ the GitHub release notes verbatim.
 
 ## Unreleased
 
+### Added
+
+- Windows support: `tsk` builds and runs natively on Windows. State lives in `%LOCALAPPDATA%\tsk`, agent skills resolve from `%USERPROFILE%`, and `tsk setup herdr` registers the plugin with PowerShell launchers.
+- `tsk update` is not yet available on Windows; use `cargo install` or a package manager to update.
+
 ### Changed
 
 - `walkthrough.json` and `TSK_CONFIG_DIR` are gone: the retired onboarding card is replaced by the seeded tour tasks, and an existing file is simply ignored.

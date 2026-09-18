@@ -3,7 +3,7 @@ title: Install
 description: Install tsk, connect Herdr, and give your agent the skill.
 ---
 
-Available for macOS and Linux, on ARM64 and x86-64.
+Available for macOS, Linux, and Windows, on ARM64 and x86-64.
 
 ## Install
 

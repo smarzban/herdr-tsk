@@ -765,7 +765,7 @@ impl ScopeLabel {
 }
 
 fn path_segments(path: &str) -> Vec<String> {
-    path.split('/')
+    path.split(['/', '\\'])
         .filter(|segment| !segment.is_empty())
         .map(str::to_owned)
         .collect()
