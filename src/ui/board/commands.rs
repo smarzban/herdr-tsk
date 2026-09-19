@@ -119,7 +119,7 @@ impl BoardModel {
             command("help", BoardIntent::OpenHelp),
             command("quit", BoardIntent::Quit),
         ]);
-        // Park / resume / link / dispatch stay out of the palette.
+        // Park / resume / link stay out of the palette.
         commands
     }
 

@@ -631,6 +631,30 @@ fn assert_verb_parity(title: &str, status: HumanStatus, chord: &str, key: KeyCod
 }
 
 #[test]
+fn dispatch_chip_clicks_route_to_dispatch_on_board_and_task_page() {
+    let (mut domain, mut model, id) = board_with_task("send it", HumanStatus::Ready);
+    domain
+        .assign(id, Some("implementer".into()))
+        .expect("assign task");
+    model.sync_from_domain(&domain);
+
+    for mode in [BoardInputMode::Normal, BoardInputMode::TaskPage] {
+        if mode == BoardInputMode::TaskPage {
+            apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None)
+                .expect("open task page");
+        }
+        assert_eq!(model.input_mode(), mode);
+        let hits = board_hit_map(STANDARD, &model);
+        let dispatch = verb_hit_for_chord(&model, &hits, "g");
+        assert_eq!(
+            click(dispatch, &model, &hits),
+            Some(BoardIntent::Dispatch),
+            "dispatch chip must match ctrl+g in {mode:?}"
+        );
+    }
+}
+
+#[test]
 fn click_and_wheel_match_keyboard_effects_for_each_control() {
     // Verb bar: every chord a ready task shows, plus a block chord from IN MOTION and the
     // Done-only inbox chord.

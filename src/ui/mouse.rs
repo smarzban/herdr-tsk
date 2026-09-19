@@ -309,6 +309,7 @@ fn verb_intent(model: &BoardModel, index: usize) -> Option<BoardIntent> {
         "enter" if model.input_mode() == BoardInputMode::EditStep => Some(BoardIntent::ConfirmEdit),
         "enter" if model.input_mode() == BoardInputMode::Search => Some(BoardIntent::PinSearch),
         "s" => Some(BoardIntent::PrimaryVerb),
+        "g" => Some(BoardIntent::Dispatch),
         "enter" => Some(BoardIntent::OpenTaskPage),
         "d" => Some(BoardIntent::Complete),
         "n" => Some(BoardIntent::SetStatus(HumanStatus::Ready)),

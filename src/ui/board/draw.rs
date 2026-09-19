@@ -597,22 +597,24 @@ fn build_task_page_overlay<'a>(
             form.notes_scroll,
         )
     };
-    if let Some(dispatch) = bound_task.and_then(|task| task.dispatch.as_ref()) {
-        if !notes_rows.is_empty() {
-            notes_rows.push(String::new());
-        }
-        let when = render::format_age(SystemTime::now(), dispatch.at);
-        for line in [
-            "dispatch".to_string(),
-            format!("worktree {}", terminal_text(&dispatch.worktree)),
-            format!("branch {}", terminal_text(&dispatch.branch)),
-            format!("when {when} ago"),
-        ] {
-            notes_rows.extend(
-                wrap_text(&line, notes_width)
-                    .into_iter()
-                    .map(|row| row.text),
-            );
+    if !editing_notes {
+        if let Some(dispatch) = bound_task.and_then(|task| task.dispatch.as_ref()) {
+            if !notes_rows.is_empty() {
+                notes_rows.push(String::new());
+            }
+            let when = render::format_age(SystemTime::now(), dispatch.at);
+            for line in [
+                "dispatch".to_string(),
+                format!("worktree {}", terminal_text(&dispatch.worktree)),
+                format!("branch {}", terminal_text(&dispatch.branch)),
+                format!("when {when} ago"),
+            ] {
+                notes_rows.extend(
+                    wrap_text(&line, notes_width)
+                        .into_iter()
+                        .map(|row| row.text),
+                );
+            }
         }
     }
     let step_rows: usize = step_views.iter().map(|step| step.rows.len().max(1)).sum();

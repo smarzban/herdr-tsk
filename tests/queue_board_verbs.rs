@@ -192,6 +192,50 @@ fn dispatched_task_page_renders_the_record_and_assigned_legend() {
 }
 
 #[test]
+fn dispatched_task_page_hides_record_during_notes_edit_and_restores_it_in_view_mode() {
+    let (mut domain, mut model, id) = board_with_task("edit dispatched notes", HumanStatus::Ready);
+    domain
+        .assign(id, Some("implementer".into()))
+        .expect("assign task");
+    domain
+        .record_dispatch(
+            id,
+            Dispatch {
+                argv: vec!["runner".into()],
+                worktree: "/tmp/notes-edit-dispatch-worktree".into(),
+                branch: "tsk/t1-notes-edit-dispatch".into(),
+                herdr_workspace_id: "w9".into(),
+                at: SystemTime::now(),
+            },
+        )
+        .expect("record dispatch");
+    model.sync_from_domain(&domain);
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
+
+    let view = rendered_board(&model, 100, 30);
+    assert!(
+        view.contains("worktree /tmp/notes-edit-dispatch-worktree"),
+        "view mode should paint the dispatch record: {view}"
+    );
+
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditNotes, None).expect("edit notes");
+    let editing = rendered_board(&model, 100, 30);
+    assert!(
+        !editing.contains("notes-edit-dispatch-worktree")
+            && !editing.contains("tsk/t1-notes-edit-dispatch"),
+        "notes edit must not paint uneditable dispatch rows: {editing}"
+    );
+
+    apply_intent(&mut domain, &mut model, BoardIntent::CancelEdit, None).expect("exit notes edit");
+    let restored = rendered_board(&model, 100, 30);
+    assert!(
+        restored.contains("worktree /tmp/notes-edit-dispatch-worktree")
+            && restored.contains("branch tsk/t1-notes-edit-dispatch"),
+        "view mode should restore the dispatch record: {restored}"
+    );
+}
+
+#[test]
 fn palette_assignment_applies_to_marked_tasks_as_one_undoable_batch() {
     let (mut domain, mut model, first) = board_with_task("first", HumanStatus::Started);
     let second = domain
