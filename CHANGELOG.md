@@ -11,7 +11,7 @@ the GitHub release notes verbatim.
 
 ### Added
 
-- Agent launch profiles can be defined in `<state dir>/agents.toml` with a command template, optional prompt template, and environment values.
+- Agent launch profiles can be defined in `<state dir>/agents.toml` with a command template, an always-appended default or custom prompt, and environment values; the first full board open seeds a commented starter file when none exists.
 
 ### Changed
 

@@ -3,15 +3,90 @@
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt;
-use std::fs;
-use std::io;
+use std::fs::{self, OpenOptions};
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use toml_edit::{DocumentMut, TableLike};
 
 use crate::domain::{normalize_thread, thread_refusal_message};
 
 const AGENTS_FILE: &str = "agents.toml";
+const AGENTS_TEMP_PREFIX: &str = ".agents.toml.tmp.";
+static AGENTS_TEMP_SEQ: AtomicU64 = AtomicU64::new(0);
+
+const STARTER_AGENTS: &str = "# tsk agent profiles. Assign with `!a name`, dispatch with ctrl+g.\n\
+# Placeholders in command and prompt: {number} {title} {notes} {steps} {worktree} {branch}\n\
+# The prompt is appended to the command as its last argument. Omit `prompt` for the default:\n\
+#   You were dispatched to T{number} in this worktree. Run `tsk guide`, then `tsk list {number}`.\n\
+#   Set the task to review when done, or blocked when a human is needed.\n\
+\n\
+# [agent.grok]\n\
+# command = [\"pi\", \"--model\", \"xai/grok-4.6\", \"--thinking\", \"high\"]\n\
+\n\
+# [agent.opus]\n\
+# command = [\"claude\", \"--model\", \"opus\", \"--effort\", \"high\"]\n\
+# prompt = \"Review the branch for T{number}: {title}. Leave findings as steps on the task, then set review.\"\n\
+\n\
+# [agent.fable]\n\
+# command = [\"fable\"]\n";
+
+/// Seed the commented profile examples on a full board open.
+///
+/// The temporary file is complete and synced before one atomic hard-link creates the target.
+/// A target that already exists wins without being changed, including an empty file.
+pub fn seed_on_open(state_dir: &Path) -> io::Result<bool> {
+    crate::fsperm::ensure_private_dir(state_dir)?;
+    let target = state_dir.join(AGENTS_FILE);
+    let tmp = unique_tmp_path(state_dir);
+    let write_result = (|| -> io::Result<bool> {
+        let mut temp_file = create_private_temp(&tmp)?;
+        temp_file.write_all(STARTER_AGENTS.as_bytes())?;
+        temp_file.sync_all()?;
+        drop(temp_file);
+        match fs::hard_link(&tmp, &target) {
+            Ok(()) => {
+                fs::remove_file(&tmp)?;
+                fs::File::open(state_dir)?.sync_all()?;
+                Ok(true)
+            }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                fs::remove_file(&tmp)?;
+                Ok(false)
+            }
+            Err(error) => Err(error),
+        }
+    })();
+    if write_result.is_err() {
+        let _ = fs::remove_file(&tmp);
+    }
+    write_result
+}
+
+fn create_private_temp(path: &Path) -> io::Result<fs::File> {
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    options.open(path)
+}
+
+fn unique_tmp_path(dir: &Path) -> PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    let sequence = AGENTS_TEMP_SEQ.fetch_add(1, Ordering::Relaxed);
+    dir.join(format!(
+        "{AGENTS_TEMP_PREFIX}{}.{nanos}.{sequence}",
+        std::process::id()
+    ))
+}
 
 /// Prompt used by a profile that does not define its own template.
 pub const DEFAULT_PROMPT: &str = "You were dispatched to T{number} in this worktree. Run `tsk guide`, then `tsk list {number}`. Set the task to review when done, or blocked when a human is needed.";
@@ -97,16 +172,13 @@ pub struct AgentProfile {
 impl AgentProfile {
     /// Substitute this profile for one task and quote it as one login-shell command.
     pub fn render(&self, context: &RenderContext<'_>) -> RenderedLaunch {
-        let prompt = render_template(
-            self.prompt.as_deref().unwrap_or(DEFAULT_PROMPT),
-            context,
-            None,
-        );
-        let argv = self
+        let prompt = render_template(self.prompt.as_deref().unwrap_or(DEFAULT_PROMPT), context);
+        let mut argv = self
             .command
             .iter()
-            .map(|argument| render_template(argument, context, Some(&prompt)))
+            .map(|argument| render_template(argument, context))
             .collect::<Vec<_>>();
+        argv.push(prompt);
         let shell_argv = argv
             .iter()
             .map(|argument| shell_quote(argument))
@@ -259,7 +331,7 @@ fn parse_profile(name: &str, table: &dyn TableLike) -> Result<AgentProfile, Agen
     })
 }
 
-fn render_template(template: &str, context: &RenderContext<'_>, prompt: Option<&str>) -> String {
+fn render_template(template: &str, context: &RenderContext<'_>) -> String {
     let number = context.number.to_string();
     let replacements = [
         ("{number}", number.as_str()),
@@ -268,7 +340,6 @@ fn render_template(template: &str, context: &RenderContext<'_>, prompt: Option<&
         ("{steps}", context.steps),
         ("{worktree}", context.worktree),
         ("{branch}", context.branch),
-        ("{prompt}", prompt.unwrap_or("{prompt}")),
     ];
     let mut rendered = String::with_capacity(template.len());
     let mut remaining = template;
@@ -355,11 +426,11 @@ mod tests {
         dir.write(
             r#"
 [agent.implementer]
-command = ["pi", "--model", "anthropic/claude", "{prompt}"]
+command = ["pi", "--model", "anthropic/claude"]
 prompt = "Work on T{number}: {title}"
 
 [agent.reviewer]
-command = ["claude", "--print", "{prompt}"]
+command = ["claude", "--print"]
 "#,
         );
 
@@ -367,7 +438,7 @@ command = ["claude", "--print", "{prompt}"]
         assert_eq!(profiles.len(), 2);
         assert_eq!(
             profiles.get("implementer").expect("implementer").command,
-            ["pi", "--model", "anthropic/claude", "{prompt}"]
+            ["pi", "--model", "anthropic/claude"]
         );
         assert_eq!(
             profiles
@@ -379,7 +450,7 @@ command = ["claude", "--print", "{prompt}"]
         );
         assert_eq!(
             profiles.get("reviewer").expect("reviewer").command,
-            ["claude", "--print", "{prompt}"]
+            ["claude", "--print"]
         );
     }
 
@@ -399,7 +470,7 @@ command = ["claude", "--print", "{prompt}"]
         dir.write(
             r#"
 [agent.Implementer]
-command = ["pi", "{prompt}"]
+command = ["pi"]
 "#,
         );
 
@@ -457,17 +528,49 @@ command = ["pi", "{prompt}"]
                 "[ ] parse\n[x] validate",
                 "/tmp/tsk-t101",
                 "tsk/t101-load-profiles",
-                "Task T101\nFirst line\nSecond line\n[ ] parse\n[x] validate",
+                "{prompt}",
                 "{unknown}",
+                "Task T101\nFirst line\nSecond line\n[ ] parse\n[x] validate",
             ]
         );
         assert!(rendered.command.starts_with("$SHELL -lc "));
     }
 
     #[test]
+    fn rendering_appends_the_default_prompt_when_command_has_no_placeholders() {
+        let profile = AgentProfile {
+            command: vec!["fable".into()],
+            prompt: None,
+            env: Default::default(),
+        };
+
+        let rendered = profile.render(&context());
+        assert_eq!(
+            rendered.argv,
+            ["fable", DEFAULT_PROMPT.replace("{number}", "101").as_str()]
+        );
+    }
+
+    #[test]
+    fn rendering_appends_a_profile_prompt_instead_of_the_default() {
+        let profile = AgentProfile {
+            command: vec!["pi".into(), "--model".into(), "opus".into()],
+            prompt: Some("Review T{number}: {title}".into()),
+            env: Default::default(),
+        };
+
+        let rendered = profile.render(&context());
+        assert_eq!(
+            rendered.argv,
+            ["pi", "--model", "opus", "Review T101: Load profiles"]
+        );
+        assert!(!rendered.argv.last().expect("prompt").contains("tsk guide"));
+    }
+
+    #[test]
     fn rendering_shell_quotes_a_prompt_containing_a_single_quote() {
         let profile = AgentProfile {
-            command: vec!["printf".into(), "{prompt}".into()],
+            command: vec!["printf".into()],
             prompt: Some("Don't; printf hacked".into()),
             env: Default::default(),
         };
@@ -496,17 +599,18 @@ command = ["pi", "{prompt}"]
     #[test]
     fn rendering_uses_the_builtin_prompt_when_profile_omits_one() {
         let profile = AgentProfile {
-            command: vec!["pi".into(), "{prompt}".into()],
+            command: vec!["pi".into()],
             prompt: None,
             env: Default::default(),
         };
 
         let rendered = profile.render(&context());
-        assert_eq!(rendered.argv[1], DEFAULT_PROMPT.replace("{number}", "101"));
-        assert!(rendered.argv[1].contains("tsk guide"));
-        assert!(rendered.argv[1].contains("tsk list 101"));
-        assert!(rendered.argv[1].contains("review"));
-        assert!(rendered.argv[1].contains("blocked"));
+        let prompt = rendered.argv.last().expect("appended prompt");
+        assert_eq!(prompt, &DEFAULT_PROMPT.replace("{number}", "101"));
+        assert!(prompt.contains("tsk guide"));
+        assert!(prompt.contains("tsk list 101"));
+        assert!(prompt.contains("review"));
+        assert!(prompt.contains("blocked"));
     }
 
     #[test]
@@ -515,7 +619,7 @@ command = ["pi", "{prompt}"]
         dir.write(
             r#"
 [agent.implementer]
-command = ["pi", "{prompt}"]
+command = ["pi"]
 
 [agent.implementer.env]
 PI_MODEL = "anthropic/claude"
