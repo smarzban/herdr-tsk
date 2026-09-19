@@ -1475,6 +1475,12 @@ fn assigned_task_renders_on_the_row_and_before_thread_in_the_page_footer() {
         1,
         "an open peek must not repeat assigned-task metadata:\n{row_body}"
     );
+    assert!(
+        board_rows(&model, 80, 24)
+            .iter()
+            .any(|row| row.trim_end() == "    └"),
+        "an assigned task's open peek keeps its closing corner:\n{row_body}"
+    );
 
     apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
     assert_eq!(model.selected_id(), Some(id));

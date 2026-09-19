@@ -3933,7 +3933,9 @@ fn build_list_rows(
         }
         if detail_target == Some(task.id) {
             let mut details = detail_lines_for_task(task, geo.row_width);
-            if !meta.is_empty() {
+            // An unassigned task's meta row repaints the closing corner below; an assigned
+            // task already showed its meta on the row, so the corner stays here.
+            if task.assignee.is_none() && !meta.is_empty() {
                 details.pop();
             }
             for (line, content_x, content_width) in details {
