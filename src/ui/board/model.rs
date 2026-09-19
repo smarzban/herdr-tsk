@@ -363,6 +363,7 @@ impl BoardForm {
         tasks: &[Task],
         focus: CaptureField,
         archived: &BTreeSet<String>,
+        agent_names: &[String],
     ) -> Self {
         let mut form = Self::new(
             &task.title,
@@ -376,6 +377,7 @@ impl BoardForm {
         );
         form.thread = seeded_draft(task.thread.as_deref().unwrap_or_default());
         form.assignee = task.assignee.clone();
+        form.set_agent_names(agent_names);
         form.task_snapshot = Some(Box::new(task.clone()));
         form
     }
@@ -1213,6 +1215,7 @@ impl BoardModel {
         // becomes an ordinary project board: tab, dim rows and verbs all follow.
         if let BoardLocation::ArchivedProject(path) = &self.board_location {
             if !self.is_archived_project_path(path) {
+                self.pending_assignee_targets = None;
                 self.selected_project = Some(path.clone());
                 self.board_location = BoardLocation::Project(path.clone());
             }
@@ -1232,6 +1235,7 @@ impl BoardModel {
                 }
                 _ => String::new(),
             };
+            self.pending_assignee_targets = None;
             self.board_location = BoardLocation::Desk;
             self.selected_project = None;
             self.set_message(format!("project {name} is archived"));
@@ -1373,6 +1377,7 @@ impl BoardModel {
         // project's tasks again. (`2` stays put: the archived focus already occupies
         // slot 2.)
         if self.focus_is_archived() {
+            self.pending_assignee_targets = None;
             let previous_visible = self.visible_ids();
             self.search_query.clear();
             self.search_pinned = false;
@@ -1466,6 +1471,7 @@ impl BoardModel {
         // should keep the existing seat instead of paying that cost or dropping its session.
         let mut right = BoardModel::from_tasks(self.tasks.clone(), self.this_repo.clone());
         right.archived_projects = self.archived_projects.clone();
+        right.agent_names = self.agent_names.clone();
         right.board_location = BoardLocation::Project(path.clone());
         right.selected_project = Some(path);
         right.preview_seat = true;
@@ -1524,6 +1530,7 @@ impl BoardModel {
         if self.board_location == target {
             return;
         }
+        self.pending_assignee_targets = None;
         let previous_visible = self.visible_ids();
         let previous = self.selection_id;
         self.search_query.clear();
@@ -1660,6 +1667,7 @@ impl BoardModel {
 
     /// Leave the read-only archived focus for the desk (AC-45).
     pub(super) fn leave_archived_focus(&mut self) {
+        self.pending_assignee_targets = None;
         let previous_visible = self.visible_ids();
         self.clear_marks();
         self.search_query.clear();
@@ -1673,6 +1681,7 @@ impl BoardModel {
     /// Turn a read-only focus into the ordinary project focus on the same project
     /// (AC-43), keeping the selection where the user left it.
     pub(super) fn enter_project_focus(&mut self, path: PathBuf) {
+        self.pending_assignee_targets = None;
         self.selected_project = Some(path.clone());
         let previous_visible = self.visible_ids();
         let previous = self.selection_id;
@@ -1684,6 +1693,7 @@ impl BoardModel {
 
     /// Open the read-only focus on `path` (AC-41). Session-only: nothing persists.
     pub(super) fn open_archived_focus(&mut self, path: PathBuf) {
+        self.pending_assignee_targets = None;
         self.selected_project = None;
         self.close_popup();
         let previous_visible = self.visible_ids();
@@ -2306,6 +2316,7 @@ impl BoardModel {
             _ => false,
         };
         if applied {
+            self.pending_assignee_targets = None;
             self.list_picker = None;
             Some(value)
         } else {
@@ -3470,6 +3481,9 @@ impl BoardModel {
             }
             return false;
         }
+        if requested != bound {
+            self.pending_assignee_targets = None;
+        }
         if source == SelectionRetarget::Explicit
             && requested != bound
             && self.form.as_ref().is_some_and(BoardForm::is_task)
@@ -3483,6 +3497,7 @@ impl BoardModel {
                         &self.tasks,
                         CaptureField::Title,
                         &archived,
+                        &self.agent_names,
                     )
                 })
             });
@@ -4060,6 +4075,7 @@ mod tests {
             &right.tasks,
             CaptureField::Title,
             &right.archived_projects,
+            &right.agent_names,
         );
         form.editing = true;
         form.title.insert_char('!');

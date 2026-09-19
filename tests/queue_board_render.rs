@@ -1467,8 +1467,14 @@ fn assigned_task_renders_on_the_row_and_before_thread_in_the_page_footer() {
         )
         .expect("create assigned");
     let mut model = BoardModel::from_domain(&domain, None);
-    let row_body = board_rows(&model, 120, 30).join("\n");
+    apply_intent(&mut domain, &mut model, BoardIntent::PeekDetail, None).expect("open peek");
+    let row_body = board_rows(&model, 80, 24).join("\n");
     assert!(row_body.contains("@reviewer"), "{row_body}");
+    assert_eq!(
+        row_body.matches("@reviewer").count(),
+        1,
+        "an open peek must not repeat assigned-task metadata:\n{row_body}"
+    );
 
     apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
     assert_eq!(model.selected_id(), Some(id));

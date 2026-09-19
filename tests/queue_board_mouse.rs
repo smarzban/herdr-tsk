@@ -869,6 +869,25 @@ fn footer_assignee_then_thread_then_scope_each_focuses_its_field() {
     apply_intent(&mut domain, &mut model, assignee, None).expect("focus assignee");
     assert_eq!(model.form_focus(), Some(CaptureField::Assignee));
 
+    let assignee_hits = board_hit_map(STANDARD, &model);
+    let assignee_verb = |index| {
+        assignee_hits
+            .regions
+            .iter()
+            .find(|hit| hit.target == QueueHitTarget::Verb(index))
+            .unwrap_or_else(|| panic!("missing assignee verb {index}"))
+    };
+    assert_eq!(
+        click(assignee_verb(0), &model, &assignee_hits),
+        Some(BoardIntent::FormAssigneeNext),
+        "the assignee cycle verb must follow the keyboard cycle route"
+    );
+    assert_eq!(
+        click(assignee_verb(1), &model, &assignee_hits),
+        Some(BoardIntent::ConfirmFormAssignee),
+        "the assignee pick verb must consume any marked-set assignment"
+    );
+
     let thread = click(thread_hit, &model, &hits).expect("thread click intent");
     assert_eq!(thread, BoardIntent::FocusFormField(CaptureField::Thread));
     apply_intent(&mut domain, &mut model, thread, None).expect("focus thread");

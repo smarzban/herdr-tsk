@@ -23,6 +23,7 @@ pub enum AddError {
     /// The resolved scope is an archived project (cwd default or explicit `-p`).
     ProjectArchived(String),
     UnknownAgent(String),
+    AgentConfig(String),
     Store(String),
 }
 
@@ -34,6 +35,7 @@ impl AddError {
             Self::UnknownProject(_) => "unknown-project",
             Self::ProjectArchived(_) => "project-archived",
             Self::UnknownAgent(_) => "unknown-agent",
+            Self::AgentConfig(_) => "agent-config",
             Self::Store(_) => "store-error",
         }
     }
@@ -131,13 +133,18 @@ pub fn run(input: FlagAdd) -> Result<FlagAddResult, AddError> {
     }
 
     let state_dir = input.state_dir.unwrap_or_else(default_state_dir);
-    let profiles =
-        AgentProfiles::load(&state_dir).map_err(|error| AddError::Store(error.to_string()))?;
-    let assignee = input
-        .assignee
-        .as_deref()
-        .map(|name| profiles.resolve_name(name).map_err(AddError::UnknownAgent))
-        .transpose()?;
+    let assignee = match input.assignee.as_deref() {
+        Some(name) => {
+            let profiles = AgentProfiles::load(&state_dir)
+                .map_err(|error| AddError::AgentConfig(error.to_string()))?;
+            Some(
+                profiles
+                    .resolve_name(name)
+                    .map_err(AddError::UnknownAgent)?,
+            )
+        }
+        None => None,
+    };
     let store = TaskStore::new(state_dir);
     let snapshot = snapshot_from_env();
     let project = input.project;
@@ -237,8 +244,11 @@ pub fn run_plan(
     }
 
     let state_dir = state_dir.unwrap_or_else(default_state_dir);
-    let profiles =
-        AgentProfiles::load(&state_dir).map_err(|error| AddError::Store(error.to_string()))?;
+    let profiles = if valid.iter().any(|item| item.assignee.is_some()) {
+        AgentProfiles::load(&state_dir).map_err(|error| AddError::AgentConfig(error.to_string()))?
+    } else {
+        AgentProfiles::default()
+    };
     let store = TaskStore::new(state_dir);
     let snapshot = snapshot_from_env();
     store

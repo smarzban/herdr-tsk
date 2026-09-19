@@ -33,6 +33,7 @@ pub enum EditError {
     EmptyTitle,
     InvalidTitle,
     UnknownAgent(String),
+    AgentConfig(String),
     Store(String),
 }
 
@@ -44,6 +45,7 @@ impl EditError {
             Self::EmptyTitle => "empty-title",
             Self::InvalidTitle => "invalid-title",
             Self::UnknownAgent(_) => "unknown-agent",
+            Self::AgentConfig(_) => "agent-config",
             Self::Store(_) => "store-error",
         }
     }
@@ -67,14 +69,18 @@ pub fn run(
     }
 
     let state_dir = state_dir.unwrap_or_else(default_state_dir);
-    let profiles =
-        AgentProfiles::load(&state_dir).map_err(|error| EditError::Store(error.to_string()))?;
-    let assignee = fields
-        .assignee
-        .as_ref()
-        .and_then(|value| value.as_deref())
-        .map(|name| profiles.resolve_name(name).map_err(EditError::UnknownAgent))
-        .transpose()?;
+    let assignee = match fields.assignee.as_ref().and_then(|value| value.as_deref()) {
+        Some(name) => {
+            let profiles = AgentProfiles::load(&state_dir)
+                .map_err(|error| EditError::AgentConfig(error.to_string()))?;
+            Some(
+                profiles
+                    .resolve_name(name)
+                    .map_err(EditError::UnknownAgent)?,
+            )
+        }
+        None => None,
+    };
     let mut fields = fields;
     if fields.assignee.as_ref().is_some_and(Option::is_some) {
         fields.assignee = Some(assignee);

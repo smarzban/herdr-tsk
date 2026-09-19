@@ -1008,11 +1008,11 @@ fn apply_board_intent(
                         &model.tasks,
                         focus,
                         &model.archived_projects,
+                        &model.agent_names,
                     );
                     // A direct board edit is a real edit session too, so its confirmed task
                     // page keeps step interaction available after the field saves.
                     form.editing = true;
-                    form.set_agent_names(&model.agent_names);
                     model.pending_assignee_targets = assignee_targets;
                     model.input_mode = form.parent_mode();
                     model.form = Some(form);
@@ -1182,6 +1182,7 @@ fn apply_board_intent(
             return Ok(IntentOutcome::None);
         }
         BoardIntent::ConfirmEditNext => {
+            model.pending_assignee_targets = None;
             // Shift+Enter on an existing step, or on a typed new step, commits the complete
             // task edit session. Keep the active row allocated until persistence confirms.
             if model.input_mode == BoardInputMode::EditStep {
@@ -1195,6 +1196,7 @@ fn apply_board_intent(
             return apply_intent(domain, model, BoardIntent::ConfirmEdit, snapshot);
         }
         BoardIntent::ConfirmEdit => {
+            model.pending_assignee_targets = None;
             if model.input_mode == BoardInputMode::EditStep {
                 // Plain Enter parks an existing-step rename. New-step adds save and open the
                 // next empty row, including an empty draft which stays on the line as a refusal.
@@ -2243,8 +2245,8 @@ fn apply_board_intent(
                         &model.tasks,
                         CaptureField::Title,
                         &model.archived_projects,
+                        &model.agent_names,
                     );
-                    form.set_agent_names(&model.agent_names);
                     model.input_mode = BoardInputMode::TaskPage;
                     model.clear_message();
                     return Ok(IntentOutcome::None);
@@ -2794,14 +2796,14 @@ fn open_task_page_on(domain: &DomainState, model: &mut BoardModel, id: Uuid) {
     model.close_help();
     // The page replaces the peek: both would otherwise describe the same task twice.
     model.detail_open = None;
-    let mut form = BoardForm::task(
+    let form = BoardForm::task(
         task,
         model.this_repo.as_deref(),
         &model.tasks,
         CaptureField::Title,
         &model.archived_projects,
+        &model.agent_names,
     );
-    form.set_agent_names(&model.agent_names);
     model.form = Some(form);
     model.input_mode = BoardInputMode::TaskPage;
     model.clear_message();

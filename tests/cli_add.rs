@@ -152,6 +152,133 @@ fn add_does_not_seed_agent_profiles() {
 
     assert_eq!(output.code, 0);
     assert!(!dir.join("agents.toml").exists());
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn malformed_agent_profiles_are_lazy_and_assignment_is_a_usage_error() {
+    let _env = env_lock();
+    let dir = temp_state_dir("malformed-agents");
+    std::fs::write(
+        dir.join("agents.toml"),
+        "[agent.Reviewer]\ncommand = [\"true\"]\n",
+    )
+    .expect("write malformed agents");
+
+    let ordinary = add(
+        &[
+            "tsk".into(),
+            "add".into(),
+            "--state-dir".into(),
+            state_dir_arg(&dir),
+            "--title".into(),
+            "ordinary".into(),
+        ],
+        true,
+    );
+    assert_eq!(ordinary.code, 0, "{}", ordinary.stderr);
+
+    let assigned = add(
+        &[
+            "tsk".into(),
+            "add".into(),
+            "--state-dir".into(),
+            state_dir_arg(&dir),
+            "--title".into(),
+            "must refuse".into(),
+            "--assignee".into(),
+            "reviewer".into(),
+        ],
+        true,
+    );
+    assert_eq!(assigned.code, 2, "{assigned:?}");
+    assert!(assigned.stderr.contains("agents.toml"), "{assigned:?}");
+    let state = task_store(&dir).load().expect("load state");
+    assert_eq!(state.tasks().len(), 1);
+    assert_eq!(state.tasks()[0].title, "ordinary");
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn json_plan_unknown_assignee_refuses_only_that_item() {
+    let _env = env_lock();
+    let dir = temp_state_dir("plan-unknown-agent");
+    write_agents(&dir);
+    let plan = dir.join("plan.json");
+    std::fs::write(
+        &plan,
+        r#"[{"title":"valid sibling","assignee":"reviewer"},{"title":"unknown sibling","assignee":"missing"}]"#,
+    )
+    .expect("write plan");
+
+    let output = add(
+        &[
+            "tsk".into(),
+            "add".into(),
+            "--state-dir".into(),
+            state_dir_arg(&dir),
+            "--file".into(),
+            state_dir_arg(&plan),
+        ],
+        true,
+    );
+    assert_eq!(output.code, 1, "{output:?}");
+    let report: serde_json::Value = serde_json::from_str(&output.stdout).expect("plan report");
+    assert_eq!(report["created"][0]["i"], 0);
+    assert_eq!(report["failed"][0]["i"], 1);
+    assert_eq!(report["failed"][0]["code"], "unknown-agent");
+    let state = task_store(&dir).load().expect("load state");
+    assert_eq!(state.tasks().len(), 1);
+    assert_eq!(state.tasks()[0].title, "valid sibling");
+    assert_eq!(state.tasks()[0].assignee.as_deref(), Some("reviewer"));
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn add_dedupe_distinguishes_assignees_and_matches_equal_assignees() {
+    let _env = env_lock();
+    let dir = temp_state_dir("assignee-dedupe");
+    write_agents(&dir);
+    let run = |assignee: Option<&str>| {
+        let mut args = vec![
+            "tsk".into(),
+            "add".into(),
+            "--state-dir".into(),
+            state_dir_arg(&dir),
+            "--title".into(),
+            "same title".into(),
+            "--json".into(),
+        ];
+        if let Some(assignee) = assignee {
+            args.push("--assignee".into());
+            args.push(assignee.into());
+        }
+        add(&args, true)
+    };
+
+    let first = run(Some("reviewer"));
+    assert_eq!(first.code, 0, "{first:?}");
+    let different = run(None);
+    assert_eq!(different.code, 0, "{different:?}");
+    let repeat = run(Some("reviewer"));
+    assert_eq!(repeat.code, 0, "{repeat:?}");
+    let first_json: serde_json::Value = serde_json::from_str(&first.stdout).expect("first JSON");
+    let different_json: serde_json::Value =
+        serde_json::from_str(&different.stdout).expect("different JSON");
+    let repeat_json: serde_json::Value = serde_json::from_str(&repeat.stdout).expect("repeat JSON");
+    assert_eq!(first_json["outcome"], "created");
+    assert_eq!(different_json["outcome"], "created");
+    assert_eq!(repeat_json["outcome"], "existing");
+    assert_eq!(repeat_json["id"], first_json["id"]);
+    assert_ne!(different_json["id"], first_json["id"]);
+    assert_eq!(
+        task_store(&dir).load().expect("load state").tasks().len(),
+        2
+    );
+
     let _ = std::fs::remove_dir_all(dir);
 }
 

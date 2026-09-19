@@ -1356,6 +1356,7 @@ fn draw_wide_board(
                     &model.tasks,
                     CaptureField::Title,
                     &model.archived_projects,
+                    &model.agent_names,
                 )
             })
         })

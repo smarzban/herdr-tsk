@@ -346,6 +346,8 @@ fn form_verb_intent(model: &BoardModel, index: usize) -> Option<BoardIntent> {
         "shift+enter" => Some(BoardIntent::ConfirmEdit),
         "enter" if dropdown_open => Some(BoardIntent::ConfirmFormScopeDropdown),
         "enter" if focus == CaptureField::Scope => Some(BoardIntent::OpenFormScopeDropdown),
+        "space/←→" if focus == CaptureField::Assignee => Some(BoardIntent::FormAssigneeNext),
+        "enter" if focus == CaptureField::Assignee => Some(BoardIntent::ConfirmFormAssignee),
         // The Title bar paints `enter next`: the click must do what the key does.
         "enter" if focus == CaptureField::Title => Some(BoardIntent::FormFocusNext),
         "enter" => Some(BoardIntent::ConfirmEdit),

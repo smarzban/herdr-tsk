@@ -3945,7 +3945,7 @@ fn build_list_rows(
             }
             *anchor_last_idx = Some(out.len() - 1);
         }
-        if detail_target == Some(task.id) && !meta.is_empty() {
+        if detail_target == Some(task.id) && task.assignee.is_none() && !meta.is_empty() {
             let room = geo.row_width.saturating_sub(9).max(1) as usize;
             for (index, row) in crate::ui::edit::wrap_text(&meta, room)
                 .into_iter()

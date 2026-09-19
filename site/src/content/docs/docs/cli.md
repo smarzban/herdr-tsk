@@ -350,7 +350,7 @@ For data commands:
 | --- | --- | --- |
 | `0` | Success, including an already-existing task or unchanged value | Continue |
 | `1` | Refusal; a plan may have saved other items | Correct refusals; retry only failed items |
-| `2` | Invalid arguments or input; nothing saved | Fix the invocation |
+| `2` | Invalid arguments, input, or assignee profile configuration; nothing saved | Fix the invocation or `agents.toml` |
 | `3` | Storage error; a write may have committed | Read back before retrying |
 
 After an uncertain add, inspect `tsk list --all --json`. Also check `--done` and `--archived` when a duplicate could be hidden there. If you know the task number, use direct lookup.
@@ -365,7 +365,7 @@ After an uncertain add, inspect `tsk list --all --json`. Also check `--done` and
 
 A refusal prints as `tsk <command>: <code>: <message>` on stderr, for example `tsk status: unknown-task: T99 is not on the board`. Branch on the code; the message is for people and may change.
 
-Invalid thread flags fail argument parsing with exit 2; an invalid thread in a JSON plan is an item refusal with exit 1. Unknown agents and unknown or archived project refusals save nothing for that item; other valid plan items can still save.
+Invalid thread flags fail argument parsing with exit 2; an invalid thread in a JSON plan is an item refusal with exit 1. When add or edit supplies an assignee, an invalid `agents.toml` also exits 2 without saving. Unknown agents and unknown or archived project refusals save nothing for that item; other valid plan items can still save.
 
 Human-readable output escapes stored terminal control characters. JSON retains the underlying text.
 

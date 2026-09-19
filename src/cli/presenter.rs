@@ -1048,6 +1048,7 @@ pub fn edit_usage(reason: &str) -> CliOutput {
 
 pub fn edit_rejected(error: EditError, task: TaskAddress) -> CliOutput {
     let (detail, code) = match error {
+        EditError::AgentConfig(detail) => (detail, 2),
         EditError::Store(detail) => (detail, 3),
         other => (task_refusal_message(other.code(), task), 1),
     };
@@ -1297,6 +1298,7 @@ pub fn rejected(error: AddError) -> CliOutput {
             )
         }
         AddError::UnknownAgent(detail) => (format!("unknown-agent: {}", terminal_text(detail)), 1),
+        AddError::AgentConfig(detail) => (detail.clone(), 2),
         AddError::Store(detail) => (detail.clone(), 3),
         other => (other.code().into(), 1),
     };
