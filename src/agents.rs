@@ -473,9 +473,17 @@ command = ["pi", "{prompt}"]
         };
 
         let rendered = profile.render(&context());
+        // `SHELL=/bin/sh $SHELL ...` would expand `$SHELL` before the assignment applies and run
+        // the ambient shell. Pin the shell by substituting the token in the rendered line instead.
+        let pinned = rendered
+            .command
+            .strip_prefix("$SHELL ")
+            .map(|rest| format!("/bin/sh {rest}"))
+            .expect("rendered command starts with $SHELL");
         let output = Command::new("/bin/sh")
             .arg("-c")
-            .arg(format!("SHELL=/bin/sh {}", rendered.command))
+            .arg(pinned)
+            .env_remove("SHELL")
             .output()
             .expect("run rendered command");
         assert!(output.status.success());
