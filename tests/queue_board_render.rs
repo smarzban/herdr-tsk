@@ -48,6 +48,7 @@ fn task(id: u128, title: &str, status: HumanStatus, scope: TaskScope, secs_ago: 
         title: title.to_string(),
         notes: None,
         thread: None,
+        assignee: None,
         status,
         scope,
         provenance: ProvenanceOrigin::Manual,
@@ -1449,6 +1450,32 @@ fn peek_keeps_the_identifier_on_its_task_row_not_in_detail_meta() {
     assert!(
         !body.contains("12 · created"),
         "peek detail must not duplicate the identifier:\n{body}"
+    );
+}
+
+#[test]
+fn assigned_task_renders_on_the_row_and_before_thread_in_the_page_footer() {
+    let mut domain = DomainState::new();
+    let id = domain
+        .create_assigned(
+            "assigned work",
+            None,
+            TaskScope::Global,
+            ProvenanceOrigin::Manual,
+            Some("release".into()),
+            Some("reviewer".into()),
+        )
+        .expect("create assigned");
+    let mut model = BoardModel::from_domain(&domain, None);
+    let row_body = board_rows(&model, 120, 30).join("\n");
+    assert!(row_body.contains("@reviewer"), "{row_body}");
+
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
+    assert_eq!(model.selected_id(), Some(id));
+    let page_body = board_rows(&model, 80, 24).join("\n");
+    assert!(
+        page_body.contains("@reviewer · #release"),
+        "assignee must precede thread:\n{page_body}"
     );
 }
 

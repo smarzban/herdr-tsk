@@ -52,6 +52,88 @@ fn task_store(dir: &std::path::Path) -> TaskStore {
     TaskStore::new(dir)
 }
 
+fn write_agents(dir: &std::path::Path) {
+    std::fs::write(
+        dir.join("agents.toml"),
+        "[agent.reviewer]\ncommand = [\"true\"]\n",
+    )
+    .expect("write agents");
+}
+
+#[test]
+fn add_assignee_flag_and_json_plan_require_known_profiles_and_round_trip() {
+    let _env = env_lock();
+    let dir = temp_state_dir("assignee");
+    write_agents(&dir);
+    let output = add(
+        &[
+            "tsk".into(),
+            "add".into(),
+            "--state-dir".into(),
+            state_dir_arg(&dir),
+            "--title".into(),
+            "assigned task".into(),
+            "--assignee".into(),
+            "Reviewer".into(),
+            "--json".into(),
+        ],
+        true,
+    );
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    let added_json: serde_json::Value =
+        serde_json::from_str(&output.stdout).expect("add JSON result");
+    assert_eq!(added_json["assignee"], "reviewer");
+    assert_eq!(
+        task_store(&dir).load().expect("load").tasks()[0]
+            .assignee
+            .as_deref(),
+        Some("reviewer")
+    );
+
+    let plan = dir.join("plan.json");
+    std::fs::write(&plan, r#"[{"title":"planned","assignee":"reviewer"}]"#).expect("write plan");
+    let planned = add(
+        &[
+            "tsk".into(),
+            "add".into(),
+            "--state-dir".into(),
+            state_dir_arg(&dir),
+            "--file".into(),
+            state_dir_arg(&plan),
+        ],
+        true,
+    );
+    assert_eq!(planned.code, 0, "{}", planned.stderr);
+    assert_eq!(
+        task_store(&dir).load().expect("reload").tasks()[1]
+            .assignee
+            .as_deref(),
+        Some("reviewer")
+    );
+
+    let unknown = add(
+        &[
+            "tsk".into(),
+            "add".into(),
+            "--state-dir".into(),
+            state_dir_arg(&dir),
+            "--title".into(),
+            "unknown".into(),
+            "--assignee".into(),
+            "missing".into(),
+        ],
+        true,
+    );
+    assert_eq!(unknown.code, 1);
+    assert!(
+        unknown.stderr.contains("unknown-agent"),
+        "{}",
+        unknown.stderr
+    );
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 #[test]
 fn add_does_not_seed_agent_profiles() {
     let _env = env_lock();
@@ -1907,7 +1989,8 @@ fn flag_add_json_reports_created_and_existing_resolved_tasks() {
     assert_eq!(created["title"], "json task");
     assert_eq!(created["project"], project_text);
     let id = created["id"].as_str().expect("created id").to_owned();
-    assert_eq!(created.as_object().expect("created object").len(), 5);
+    assert_eq!(created["assignee"], serde_json::Value::Null);
+    assert_eq!(created.as_object().expect("created object").len(), 6);
 
     let existing = add(&args, true);
     assert_eq!(existing.code, 0);
@@ -1918,7 +2001,8 @@ fn flag_add_json_reports_created_and_existing_resolved_tasks() {
     assert_eq!(existing["id"], id);
     assert_eq!(existing["title"], "json task");
     assert_eq!(existing["project"], project.to_string_lossy().as_ref());
-    assert_eq!(existing.as_object().expect("existing object").len(), 5);
+    assert_eq!(existing["assignee"], serde_json::Value::Null);
+    assert_eq!(existing.as_object().expect("existing object").len(), 6);
 
     let global = add(
         &[

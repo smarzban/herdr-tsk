@@ -104,6 +104,8 @@ fn load_board_inner(
     let state = store.load()?;
     let snapshot = load_snapshot();
     let mut model = BoardModel::from_domain_for_snapshot(&state, &snapshot);
+    let profiles = crate::agents::AgentProfiles::load(&state_dir)?;
+    model.set_agent_profiles(&profiles);
     if full_board_open {
         model.offer_launch_card(&state, &snapshot);
     }
