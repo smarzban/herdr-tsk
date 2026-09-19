@@ -2485,7 +2485,7 @@ impl BoardModel {
         }
     }
 
-    pub(super) fn clear_marks(&mut self) -> bool {
+    pub fn clear_marks(&mut self) -> bool {
         let had_mark_state = self.mark_mode || !self.marked_ids.is_empty();
         self.mark_mode = false;
         self.marked_ids.clear();

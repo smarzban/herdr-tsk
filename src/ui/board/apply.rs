@@ -143,6 +143,7 @@ pub fn board_intent_may_persist(intent: &BoardIntent) -> bool {
             | BoardIntent::File
             | BoardIntent::LaunchUnarchive
             | BoardIntent::PrimaryVerb
+            | BoardIntent::Dispatch
             | BoardIntent::ToggleBlock
             | BoardIntent::ToggleReview
             | BoardIntent::ToggleStep
@@ -1704,6 +1705,10 @@ fn apply_board_intent(
                 return Ok(IntentOutcome::None);
             };
             domain.toggle_step(task_id, step_id)?;
+        }
+        BoardIntent::Dispatch => {
+            // Host work and its one durable save are owned by the application boundary.
+            return Ok(IntentOutcome::None);
         }
         BoardIntent::PrimaryVerb => {
             model.close_popup();

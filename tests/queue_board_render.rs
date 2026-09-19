@@ -49,6 +49,7 @@ fn task(id: u128, title: &str, status: HumanStatus, scope: TaskScope, secs_ago: 
         notes: None,
         thread: None,
         assignee: None,
+        dispatch: None,
         status,
         scope,
         provenance: ProvenanceOrigin::Manual,
@@ -271,7 +272,7 @@ fn accordion_verbs() -> Vec<VerbEntry<'static>> {
 ///
 /// Matches this file's palette scene: the fixture's selected task (1, Doing) with a "stat"
 /// query narrowed to the status tail, second row (`set status: blocked`) highlighted.
-fn palette_commands() -> Vec<PaletteCommandRow<'static>> {
+fn palette_commands() -> Vec<PaletteCommandRow> {
     let mut model = base_board_model();
     let mut domain = DomainState::new();
     apply_intent(
@@ -295,10 +296,10 @@ fn palette_commands() -> Vec<PaletteCommandRow<'static>> {
         "stat",
         "fixture query drifted from the scene's \"stat\" query"
     );
-    let labels: Vec<&str> = model
+    let labels: Vec<String> = model
         .visible_commands()
         .iter()
-        .map(|command| command.label)
+        .map(|command| command.label.clone())
         .collect();
     assert_eq!(
         labels,
@@ -328,7 +329,7 @@ fn palette_commands() -> Vec<PaletteCommandRow<'static>> {
         .iter()
         .enumerate()
         .map(|(i, command)| PaletteCommandRow {
-            label: command.label,
+            label: command.label.clone(),
             selected: Some(i) == selected,
         })
         .collect()
@@ -1092,20 +1093,21 @@ fn overlay_rows_are_padded_exact_no_base_bleed() {
 
     // --- Palette query paints on status row; must be exact padded query, no status tail ---
     {
+        let commands = [
+            PaletteCommandRow {
+                label: "reopen".into(),
+                selected: true,
+            },
+            PaletteCommandRow {
+                label: "delete".into(),
+                selected: false,
+            },
+        ];
         let mut model = fixture_model(&tasks, &view);
         model.status_message = Some(status);
         model.overlay = QueueOverlay::Palette {
             query: "re",
-            commands: &[
-                PaletteCommandRow {
-                    label: "reopen",
-                    selected: true,
-                },
-                PaletteCommandRow {
-                    label: "delete",
-                    selected: false,
-                },
-            ],
+            commands: &commands,
         };
         let (rows, geo) = paint(80, 24, &model);
         let qrow = geo.status_row.expect("status row at 80x24");
@@ -3228,7 +3230,10 @@ fn surface_goldens_board_accordion_palette_help_drawer_exist_for_reviewer_side_b
 #[test]
 fn palette_golden_scene_commands_are_bound_to_the_real_m1_catalog_and_exclude_dispatch() {
     let commands = palette_commands();
-    let labels: Vec<&str> = commands.iter().map(|command| command.label).collect();
+    let labels: Vec<String> = commands
+        .iter()
+        .map(|command| command.label.clone())
+        .collect();
     assert_eq!(
         labels,
         vec![

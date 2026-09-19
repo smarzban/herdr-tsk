@@ -194,11 +194,17 @@ impl AgentProfile {
             .map(|argument| render_template(argument, context))
             .collect::<Vec<_>>();
         argv.push(prompt);
-        let shell_argv = argv
-            .iter()
-            .map(|argument| shell_quote(argument))
-            .collect::<Vec<_>>()
-            .join(" ");
+        let mut shell_parts = Vec::new();
+        if !self.env.is_empty() {
+            shell_parts.push(shell_quote("env"));
+            shell_parts.extend(
+                self.env
+                    .iter()
+                    .map(|(key, value)| shell_quote(&format!("{key}={value}"))),
+            );
+        }
+        shell_parts.extend(argv.iter().map(|argument| shell_quote(argument)));
+        let shell_argv = shell_parts.join(" ");
         RenderedLaunch {
             command: format!("$SHELL -lc {}", shell_quote(&shell_argv)),
             argv,
@@ -649,5 +655,11 @@ LITERAL = "{branch}"
             .render(&context());
         assert_eq!(rendered.env["PI_MODEL"], "anthropic/claude");
         assert_eq!(rendered.env["LITERAL"], "{branch}");
+        assert!(rendered.command.contains("'env'"), "{}", rendered.command);
+        assert!(
+            rendered.command.contains("'PI_MODEL=anthropic/claude'"),
+            "{}",
+            rendered.command
+        );
     }
 }

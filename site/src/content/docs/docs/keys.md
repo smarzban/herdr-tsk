@@ -21,6 +21,7 @@ Press `?` on the board, task page, or another non-text surface for a searchable 
 | Add task | `+` |
 | Edit title | `ctrl+e` |
 | Start open or ready task | `ctrl+s` |
+| Dispatch assigned task to its agent | `ctrl+g` |
 | Set ready, the picked queue | `ctrl+n` |
 | Set open, the inbox | `ctrl+o` |
 | Mark done | `ctrl+d` |
@@ -48,7 +49,7 @@ Press `?` on the board, task page, or another non-text surface for a searchable 
 
 `Shift+M` enters or leaves multi-select while the board owns input. While it is active, `Space`, shifted arrows, and a plain task click change marks instead of opening a task. Removing the last mark leaves the mode active. `Shift+M` again from the board, `Esc`, a task action, or a lens change leaves it and clears the set. Text entry keeps `Shift+M` as a capital `M`; `Esc` leaves multi-select before cancelling that surface.
 
-When tasks are marked, the status, delete, and archive shortcuts act on that set; without marks they act on the cursor. `Enter` and `ctrl+e` remain cursor-only. `ctrl+s` starts each eligible open or ready task and leaves started, blocked, and review tasks unchanged. Bulk block and review toggles send every target to blocked or review unless all targets already have that status, in which case they all return to ready. `ctrl+n` and `ctrl+o` can send done tasks directly to ready or open. One `ctrl+u` reverses an entire marked completion or deletion.
+When tasks are marked, the status, delete, and archive shortcuts act on that set; without marks they act on the cursor. `Enter`, `ctrl+e`, and `ctrl+g` remain cursor-only. Dispatch clears the marks and launches only the cursored task. `ctrl+s` starts each eligible open or ready task and leaves started, blocked, and review tasks unchanged. Bulk block and review toggles send every target to blocked or review unless all targets already have that status, in which case they all return to ready. `ctrl+n` and `ctrl+o` can send done tasks directly to ready or open. One `ctrl+u` reverses an entire marked completion or deletion.
 
 ## Task page
 
@@ -62,6 +63,7 @@ These keys apply in **view mode**:
 | Add step | `ctrl+a` |
 | Edit title or selected step | `ctrl+e` |
 | Change task status | Board status shortcuts above |
+| Dispatch assigned task | `ctrl+g` |
 | Mark/remove selected step; otherwise confirm/delete task | `ctrl+x` |
 | All shortcuts | `?` |
 | Close task | `Esc` |
@@ -115,7 +117,7 @@ In Herdr quick capture, `Shift+Enter` saves and closes the popup. `Esc` closes a
 | Archived project view | `ctrl+u` restores; `Esc`, `p`, or `1`–`3` leaves |
 | Thread/view selector | Type or paste to filter; arrows or `Tab` select; `Enter` chooses; `Esc` closes |
 | Board search | Type or paste; `Backspace` edits; `Enter` pins; `Esc` clears and closes |
-| Palette | Type to filter; arrows or `Tab` select; `Enter` runs; `Esc` closes. **set assignee** offers exact agent profiles and **unassigned** |
+| Palette | Type to filter; arrows or `Tab` select; `Enter` runs; `Esc` closes. **set assignee** offers exact agent profiles and **unassigned**; assigned tasks offer **dispatch to @name** |
 | Help | Type or paste to filter by key or action; arrows, page keys, or wheel scroll; `Esc` clears the search, then closes |
 | Archived-project launch prompt | `y` restores; `n` or `Esc` keeps archived; `?` opens Help |
 | Failed save | `r` or `Enter` retries; `c` or `Esc` cancels |

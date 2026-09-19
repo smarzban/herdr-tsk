@@ -10,7 +10,9 @@ use ratatui::layout::Rect;
 use ratatui::Terminal;
 use tsk_tui::agents::AgentProfiles;
 use tsk_tui::context::InvocationSnapshot;
-use tsk_tui::domain::{DomainState, HumanStatus, ProvenanceOrigin, TaskEventKind, TaskScope};
+use tsk_tui::domain::{
+    Dispatch, DomainState, HumanStatus, ProvenanceOrigin, TaskEventKind, TaskScope,
+};
 use tsk_tui::ui::board::{
     apply_intent, board_hit_map, board_intent_may_persist, board_verb_items, draw_board,
     resolve_board_command, BoardInputMode, BoardModel, CommandSurface, IntentOutcome,
@@ -115,6 +117,78 @@ fn mark_tasks(domain: &mut DomainState, model: &mut BoardModel, ids: &[uuid::Uui
         apply_intent(domain, model, BoardIntent::SelectIndex(index), None).expect("select task");
         apply_intent(domain, model, BoardIntent::MarkToggle, None).expect("mark task");
     }
+}
+
+#[test]
+fn dispatch_key_and_palette_route_to_the_cursor_only_verb() {
+    let (mut domain, mut model, id) = board_with_task("send it", HumanStatus::Ready);
+    set_agent_profiles(&mut model, &["implementer"]);
+    domain
+        .assign(id, Some("implementer".into()))
+        .expect("assign task");
+    model.sync_from_domain(&domain);
+
+    assert_eq!(
+        map_key(BoardInputMode::Normal, ctrl(KeyCode::Char('g'))),
+        Some(BoardIntent::Dispatch)
+    );
+    assert_eq!(
+        map_key(BoardInputMode::TaskPage, ctrl(KeyCode::Char('g'))),
+        Some(BoardIntent::Dispatch)
+    );
+    let labels = model
+        .available_commands()
+        .into_iter()
+        .map(|command| command.label)
+        .collect::<Vec<_>>();
+    assert!(
+        labels
+            .iter()
+            .any(|label| label == "dispatch to @implementer"),
+        "{labels:?}"
+    );
+}
+
+#[test]
+fn dispatched_task_page_renders_the_record_and_assigned_legend() {
+    let (mut domain, mut model, id) = board_with_task("send it", HumanStatus::Ready);
+    assert!(
+        board_verb_items(&model).iter().all(|verb| verb.key != "g"),
+        "unassigned tasks do not advertise dispatch"
+    );
+    domain
+        .assign(id, Some("implementer".into()))
+        .expect("assign task");
+    model.sync_from_domain(&domain);
+    let verbs = board_verb_items(&model);
+    assert!(
+        verbs
+            .windows(2)
+            .any(|pair| pair[0].key == "s" && pair[1].key == "g"),
+        "assigned legend should pair start and dispatch: {verbs:?}"
+    );
+
+    domain
+        .record_dispatch(
+            id,
+            Dispatch {
+                argv: vec!["runner".into()],
+                worktree: "/tmp/dispatch-worktree".into(),
+                branch: "tsk/t1-send-it".into(),
+                herdr_workspace_id: "w9".into(),
+                at: SystemTime::now(),
+            },
+        )
+        .expect("record dispatch");
+    model.sync_from_domain(&domain);
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
+    let screen = rendered_board(&model, 100, 30);
+    assert!(
+        screen.contains("worktree /tmp/dispatch-worktree"),
+        "{screen}"
+    );
+    assert!(screen.contains("branch tsk/t1-send-it"), "{screen}");
+    assert!(screen.contains("when"), "{screen}");
 }
 
 #[test]
@@ -1603,7 +1677,11 @@ fn palette_lists_exactly_m1_commands_for_selection_filters_by_subsequence_and_di
     .expect("open palette");
     assert_eq!(model.command_surface(), CommandSurface::Palette);
 
-    let labels: Vec<&str> = model.visible_commands().iter().map(|c| c.label).collect();
+    let labels: Vec<String> = model
+        .visible_commands()
+        .iter()
+        .map(|c| c.label.clone())
+        .collect();
     let expected = [
         "set status: ready",
         "set status: open",
@@ -1626,7 +1704,7 @@ fn palette_lists_exactly_m1_commands_for_selection_filters_by_subsequence_and_di
          the destinations have no collapsible task groups)"
     );
     assert!(
-        labels.contains(&"set status: open"),
+        labels.iter().any(|label| label == "set status: open"),
         "a ready selection offers the absolute inbox status"
     );
 
@@ -1640,7 +1718,11 @@ fn palette_lists_exactly_m1_commands_for_selection_filters_by_subsequence_and_di
         )
         .expect("type");
     }
-    let filtered: Vec<&str> = model.visible_commands().iter().map(|c| c.label).collect();
+    let filtered: Vec<String> = model
+        .visible_commands()
+        .iter()
+        .map(|c| c.label.clone())
+        .collect();
     assert_eq!(filtered, vec!["set status: started"]);
     // Substring-only would need the contiguous run "ssg"; none of the labels contain it.
     assert!(

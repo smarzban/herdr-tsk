@@ -319,9 +319,9 @@ pub struct VerbEntry<'a> {
 }
 
 /// One palette command row for overlay paint.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PaletteCommandRow<'a> {
-    pub label: &'a str,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PaletteCommandRow {
+    pub label: String,
     pub selected: bool,
 }
 
@@ -394,7 +394,7 @@ pub enum QueueOverlay<'a> {
     /// Searchable command palette (`:`).
     Palette {
         query: &'a str,
-        commands: &'a [PaletteCommandRow<'a>],
+        commands: &'a [PaletteCommandRow],
     },
     /// Help card (`?`).
     Help {
@@ -2321,7 +2321,7 @@ fn paint_palette_overlay(
     geo: &TierGeometry,
     surface: Rect,
     query: &str,
-    commands: &[PaletteCommandRow<'_>],
+    commands: &[PaletteCommandRow],
     hits: &mut QueueHitMap,
 ) {
     let width = geo.row_width;

@@ -10,7 +10,9 @@ use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::layout::{Position, Rect};
 use ratatui::DefaultTerminal;
 
+use crate::agents::AgentProfiles;
 use crate::context::{build_snapshot, InvocationSnapshot, RawHostContext};
+use crate::dispatch::{self, DispatchError, DispatchHost, DispatchResult, SystemDispatchHost};
 use crate::domain::{DomainError, DomainState};
 use crate::save_recovery::SaveRecovery;
 use crate::store::{default_state_dir, StoreSignature, TaskStore};
@@ -1739,7 +1741,7 @@ fn board_rejection_message(error: &DomainError) -> String {
 ///
 /// [`confirm_edit_consults_the_record_without_merging_it`]: self::tests
 pub fn board_intent_needs_fresh_state(intent: &BoardIntent) -> bool {
-    matches!(intent, BoardIntent::Undo)
+    matches!(intent, BoardIntent::Undo | BoardIntent::Dispatch)
 }
 
 /// resolved decision 8: a soft-deleted task is not editable, and a stale in-memory snapshot is
@@ -1864,6 +1866,21 @@ fn dispatch_board_intent(
     Ok(quit)
 }
 
+/// Dispatch the task that was under the cursor when the verb was invoked. Marks are cleared and
+/// never become targets, even if a refresh moves the visible cursor before host work begins.
+pub fn dispatch_task_with_host(
+    domain: &mut DomainState,
+    model: &mut BoardModel,
+    id: uuid::Uuid,
+    profiles: &AgentProfiles,
+    again: bool,
+    in_herdr: bool,
+    host: &mut impl DispatchHost,
+) -> Result<DispatchResult, DispatchError> {
+    model.clear_marks();
+    dispatch::run_with_host(domain, id, profiles, again, in_herdr, host)
+}
+
 /// Apply a board intent. Returns `true` when the board loop should quit.
 ///
 /// In the quick-capture popup (`quick_capture`), the loop also quits once the capture
@@ -1878,10 +1895,18 @@ fn handle_board_intent(
     save_recovery: &mut SaveRecovery<DomainState>,
     quick_capture: bool,
 ) -> io::Result<bool> {
+    let Some(intent) = resolve_board_command(model, intent) else {
+        return Ok(false);
+    };
     if let BoardIntent::CopyTaskNumber(id) = intent {
         copy_task_number(domain, model, id);
         return Ok(false);
     }
+    let dispatch_target = if intent == BoardIntent::Dispatch {
+        model.selected_id()
+    } else {
+        None
+    };
 
     let quit_requested = intent == BoardIntent::Quit
         || (intent == BoardIntent::CloseLayer && model.root_escape_requests_quit());
@@ -1929,6 +1954,49 @@ fn handle_board_intent(
     // scope and provenance: the reducer stores it on `model.capture_snapshot` at
     // open and reads it back at ConfirmEdit, so a `None` here is what silently turned board
     // `a` into a no-op save that still reported success.
+    if intent == BoardIntent::Dispatch && !save_recovery.is_pending() {
+        let profiles = match AgentProfiles::load(store.path()) {
+            Ok(profiles) => profiles,
+            Err(error) => {
+                model.clear_marks();
+                model.set_message(error.to_string());
+                return Ok(false);
+            }
+        };
+        let mut host = SystemDispatchHost;
+        let Some(target) = dispatch_target else {
+            model.clear_marks();
+            model.set_message(DispatchError::UnknownTask.to_string());
+            return Ok(false);
+        };
+        match dispatch_task_with_host(
+            domain,
+            model,
+            target,
+            &profiles,
+            false,
+            dispatch::running_inside_herdr(),
+            &mut host,
+        ) {
+            Ok(result) => {
+                if let Err(error) = store.reload_merge_save(domain) {
+                    let working = std::mem::take(domain);
+                    save_recovery.fail(baseline, working, error.to_string());
+                    model.begin_save_recovery(save_recovery.error().unwrap_or("save failed"));
+                    return Ok(false);
+                }
+                model.sync_from_domain(domain);
+                model.set_message(format!(
+                    "dispatched T{} to @{}",
+                    result.number, result.assignee
+                ));
+                record_notice_dismissals_without_blocking_persist(store, domain);
+            }
+            Err(error) => model.set_message(error.to_string()),
+        }
+        return Ok(false);
+    }
+
     let loaded_snapshot;
     let snapshot_for_intent = if !save_recovery.is_pending() && intent == BoardIntent::OpenCapture {
         loaded_snapshot = load_snapshot();
@@ -7443,12 +7511,12 @@ mod tests {
             pasted
                 .visible_commands()
                 .iter()
-                .map(|command| command.label)
+                .map(|command| command.label.clone())
                 .collect::<Vec<_>>(),
             typed
                 .visible_commands()
                 .iter()
-                .map(|command| command.label)
+                .map(|command| command.label.clone())
                 .collect::<Vec<_>>(),
             "a paste must narrow the palette exactly as typing the same run does"
         );

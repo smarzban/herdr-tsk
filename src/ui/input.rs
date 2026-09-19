@@ -307,6 +307,8 @@ pub enum BoardIntent {
     CommandQueryBackspace,
     /// `ctrl+s` — state-mapped primary verb. Reducer lands in.
     PrimaryVerb,
+    /// `ctrl+g` — dispatch the cursor task to its assignee.
+    Dispatch,
     /// `ctrl+b` — toggle blocked ↔ ready. Reducer lands in.
     ToggleBlock,
     /// `ctrl+r` — toggle review ↔ ready. Reducer lands in.
@@ -362,7 +364,7 @@ pub enum BoardIntent {
     OpenHelp,
     /// `Esc` — layered close. Full layer order lands in.
     CloseLayer,
-    /// Toggle all group headers on the active home tab (`Ctrl+G`).
+    /// Toggle all group headers on the active home tab (bare `g`).
     ToggleAllGroups,
 }
 
@@ -485,6 +487,13 @@ const NORMAL_KEYMAP: &[NormalKeyEntry] = &[
         intent: BoardIntent::PrimaryVerb,
         help_chord: "s",
         help_label: "start",
+        modifier: NormalModifier::Ctrl,
+    },
+    NormalKeyEntry {
+        code: KeyCode::Char('g'),
+        intent: BoardIntent::Dispatch,
+        help_chord: "g",
+        help_label: "dispatch",
         modifier: NormalModifier::Ctrl,
     },
     NormalKeyEntry {
@@ -750,6 +759,7 @@ fn board_help_group(intent: &BoardIntent) -> HelpGroup {
         | BoardIntent::PeekDetail
         | BoardIntent::CollapseDetail => HelpGroup::Navigation,
         BoardIntent::PrimaryVerb
+        | BoardIntent::Dispatch
         | BoardIntent::SetStatus(_)
         | BoardIntent::Complete
         | BoardIntent::Reopen
@@ -1740,6 +1750,7 @@ pub fn intent_primary_action(intent: &BoardIntent) -> Option<PrimaryBoardAction>
         | BoardIntent::CommandQueryInsertText(_)
         | BoardIntent::CommandQueryBackspace
         | BoardIntent::PrimaryVerb
+        | BoardIntent::Dispatch
         | BoardIntent::ToggleBlock
         | BoardIntent::ToggleReview
         | BoardIntent::HelpQueryInsert(_)
@@ -1864,6 +1875,7 @@ fn map_task_page(key: KeyEvent) -> Option<BoardIntent> {
         KeyCode::Char('q') if verb => Some(BoardIntent::Quit),
         KeyCode::Enter if !extra => Some(BoardIntent::OpenTaskPage),
         KeyCode::Char('s') if verb => Some(BoardIntent::PrimaryVerb),
+        KeyCode::Char('g') if verb => Some(BoardIntent::Dispatch),
         KeyCode::Char('a') if verb => Some(BoardIntent::BeginAddStep),
         KeyCode::Char('d') if verb => Some(BoardIntent::Complete),
         KeyCode::Char('n') if verb => Some(BoardIntent::SetStatus(HumanStatus::Ready)),

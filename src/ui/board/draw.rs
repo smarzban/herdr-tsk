@@ -184,7 +184,7 @@ pub fn board_verb_items(model: &BoardModel) -> Vec<VerbEntry<'static>> {
     let mut entries = Vec::with_capacity(6);
     if let Some(task) = selected_task {
         entries.push(OPEN);
-        entries.extend(status_verbs(task.status));
+        entries.extend(task_status_verbs(task));
         // Add is useful from the backlog and inbox, but the status-heavy in-motion and
         // done legends use that seat for their truthful lifecycle actions.
         if !matches!(task.status, HumanStatus::Started | HumanStatus::Done) {
@@ -253,6 +253,24 @@ fn status_verbs(status: HumanStatus) -> Vec<VerbEntry<'static>> {
     }
 }
 
+fn task_status_verbs(task: &crate::domain::Task) -> Vec<VerbEntry<'static>> {
+    let mut verbs = status_verbs(task.status);
+    if task.assignee.is_some() && task.status != HumanStatus::Done {
+        let after_start = verbs
+            .iter()
+            .position(|verb| verb.key == "s")
+            .map_or(verbs.len(), |index| index + 1);
+        verbs.insert(
+            after_start,
+            VerbEntry {
+                key: "g",
+                label: "dispatch",
+            },
+        );
+    }
+    verbs
+}
+
 fn task_page_verb_items(model: &BoardModel, task: &crate::domain::Task) -> Vec<VerbEntry<'static>> {
     // A parked edit session (dirty draft, no editor open) is about saving or discarding.
     if model.task_editing() {
@@ -276,7 +294,7 @@ fn task_page_verb_items(model: &BoardModel, task: &crate::domain::Task) -> Vec<V
         key: "e",
         label: "edit",
     });
-    entries.extend(status_verbs(task.status));
+    entries.extend(task_status_verbs(task));
     entries.push(VerbEntry {
         key: "esc",
         label: "close",
@@ -548,7 +566,7 @@ fn build_task_page_overlay<'a>(
     let notes_width = width.saturating_sub(6);
     let want = lay.notes_rows as usize;
     let editing_notes = model.input_mode() == BoardInputMode::EditNotes;
-    let (notes_rows, notes_cursor, more_lines, notes_scroll) = if editing_notes {
+    let (mut notes_rows, notes_cursor, more_lines, notes_scroll) = if editing_notes {
         let (all_rows, cursor_row, cursor_column) = wrapped_edit_rows(&form.notes, notes_width);
         // Explicit pointer scrolling may leave the caret offscreen to reach steps.
         // Typing or moving the caret restores automatic following.
@@ -579,6 +597,24 @@ fn build_task_page_overlay<'a>(
             form.notes_scroll,
         )
     };
+    if let Some(dispatch) = bound_task.and_then(|task| task.dispatch.as_ref()) {
+        if !notes_rows.is_empty() {
+            notes_rows.push(String::new());
+        }
+        let when = render::format_age(SystemTime::now(), dispatch.at);
+        for line in [
+            "dispatch".to_string(),
+            format!("worktree {}", terminal_text(&dispatch.worktree)),
+            format!("branch {}", terminal_text(&dispatch.branch)),
+            format!("when {when} ago"),
+        ] {
+            notes_rows.extend(
+                wrap_text(&line, notes_width)
+                    .into_iter()
+                    .map(|row| row.text),
+            );
+        }
+    }
     let step_rows: usize = step_views.iter().map(|step| step.rows.len().max(1)).sum();
     // Match the painter's stream exactly: it always paints one notes row and a trailing
     // `+ step` row, even when both stored notes and stored steps are empty.
@@ -831,9 +867,9 @@ pub fn board_hit_map(area: ratatui::layout::Rect, model: &BoardModel) -> render:
 }
 
 /// Board-level surfaces whose payloads must outlive the overlay borrowing them.
-struct OverlayPayloads<'a> {
+struct OverlayPayloads {
     help_lines: Vec<String>,
-    palette_commands: Vec<PaletteCommandRow<'a>>,
+    palette_commands: Vec<PaletteCommandRow>,
     scope_options: Vec<String>,
     list_picker_options: Vec<String>,
     list_picker_query: Option<String>,
@@ -843,14 +879,14 @@ struct OverlayPayloads<'a> {
     scope_selected: usize,
 }
 
-impl<'a> OverlayPayloads<'a> {
-    fn collect(model: &'a BoardModel) -> Self {
+impl OverlayPayloads {
+    fn collect(model: &BoardModel) -> Self {
         let help_lines = if model.input_mode() == BoardInputMode::Help {
             help_card_lines_for_query(model.help_query())
         } else {
             Vec::new()
         };
-        let palette_commands: Vec<PaletteCommandRow<'_>> =
+        let palette_commands: Vec<PaletteCommandRow> =
             if model.command_surface() == CommandSurface::Palette {
                 let visible = model.visible_commands();
                 let selected = model.command_selected();
@@ -858,7 +894,7 @@ impl<'a> OverlayPayloads<'a> {
                     .iter()
                     .enumerate()
                     .map(|(i, cmd)| PaletteCommandRow {
-                        label: cmd.label,
+                        label: cmd.label.clone(),
                         selected: Some(i) == selected,
                     })
                     .collect()
@@ -938,7 +974,7 @@ impl<'a> OverlayPayloads<'a> {
     }
 
     /// The board-level modal or capture surface that outranks the list and the page, if any.
-    fn modal(
+    fn modal<'a>(
         &'a self,
         model: &'a BoardModel,
         geo: &tier::TierGeometry,
@@ -1061,7 +1097,7 @@ impl<'a> OverlayPayloads<'a> {
     }
 
     /// The open task page, painted from the retained form at `geo`.
-    fn task_page(
+    fn task_page<'a>(
         &'a self,
         model: &'a BoardModel,
         form: &'a BoardForm,
