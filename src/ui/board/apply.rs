@@ -135,6 +135,8 @@ pub fn board_intent_may_persist(intent: &BoardIntent) -> bool {
         BoardIntent::ConfirmEdit
             | BoardIntent::ConfirmEditNext
             | BoardIntent::ConfirmFormAssignee
+            | BoardIntent::ConfirmFormDropdown
+            | BoardIntent::SelectFormDropdownOption(_)
             | BoardIntent::SetStatus(_)
             | BoardIntent::Complete
             | BoardIntent::Reopen
@@ -143,6 +145,7 @@ pub fn board_intent_may_persist(intent: &BoardIntent) -> bool {
             | BoardIntent::File
             | BoardIntent::LaunchUnarchive
             | BoardIntent::PrimaryVerb
+            | BoardIntent::Dispatch
             | BoardIntent::ToggleBlock
             | BoardIntent::ToggleReview
             | BoardIntent::ToggleStep
@@ -359,7 +362,7 @@ fn apply_board_intent(
                 | BoardInputMode::EditNotes
                 | BoardInputMode::EditScope
                 | BoardInputMode::EditAssignee
-                | BoardInputMode::FormScopeDropdown
+                | BoardInputMode::FormDropdown
         )
     {
         if let Some(bound) = model
@@ -621,7 +624,7 @@ fn apply_board_intent(
                         .as_ref()
                         .is_some_and(|form| form.steps.add_selected)
                     {
-                        model.focus_form_field(CaptureField::Thread);
+                        model.focus_form_field(CaptureField::Assignee);
                     } else if !move_capture_step_with_tab(model, true) {
                         select_add_step(model);
                     }
@@ -631,7 +634,7 @@ fn apply_board_intent(
                         .as_ref()
                         .is_some_and(|form| form.steps.add_selected)
                     {
-                        model.focus_form_field(CaptureField::Thread);
+                        model.focus_form_field(CaptureField::Assignee);
                     } else if !move_step_within_edit_group(model, true) {
                         select_add_step(model);
                     }
@@ -647,19 +650,18 @@ fn apply_board_intent(
             } else if model.input_mode == BoardInputMode::EditScope
                 && model.form.as_ref().is_some_and(|form| form.is_task())
             {
-                model.focus_form_field(CaptureField::Assignee);
+                model.focus_form_field(CaptureField::Title);
             } else if model.input_mode == BoardInputMode::EditAssignee
                 && model.form.as_ref().is_some_and(|form| form.is_task())
             {
-                model.focus_form_field(CaptureField::Title);
+                model.focus_form_field(CaptureField::Thread);
             } else if matches!(
                 model.input_mode,
                 BoardInputMode::SelectThread | BoardInputMode::EditThread
             ) && model.form.as_ref().is_some_and(|form| form.is_task())
             {
                 model.focus_form_field(CaptureField::Scope);
-            } else if model.form.is_some() && model.input_mode != BoardInputMode::FormScopeDropdown
-            {
+            } else if model.form.is_some() && model.input_mode != BoardInputMode::FormDropdown {
                 model.move_form_focus(true);
             }
             return Ok(IntentOutcome::None);
@@ -707,19 +709,20 @@ fn apply_board_intent(
             if model.input_mode == BoardInputMode::EditTitle
                 && model.form.as_ref().is_some_and(|form| form.is_task())
             {
-                model.focus_form_field(CaptureField::Assignee);
+                model.focus_form_field(CaptureField::Scope);
             } else if matches!(
                 model.input_mode,
                 BoardInputMode::SelectThread | BoardInputMode::EditThread
             ) && model.form.is_some()
             {
-                select_add_step(model);
+                model.focus_form_field(CaptureField::Assignee);
             } else if model.input_mode == BoardInputMode::EditScope
                 && model.form.as_ref().is_some_and(|form| form.is_task())
             {
                 model.focus_form_field(CaptureField::Thread);
-            } else if model.form.is_some() && model.input_mode != BoardInputMode::FormScopeDropdown
-            {
+            } else if model.input_mode == BoardInputMode::EditAssignee && model.form.is_some() {
+                select_add_step(model);
+            } else if model.form.is_some() && model.input_mode != BoardInputMode::FormDropdown {
                 model.move_form_focus(false);
             }
             return Ok(IntentOutcome::None);
@@ -779,38 +782,64 @@ fn apply_board_intent(
                 .form
                 .as_ref()
                 .is_some_and(|form| form.focus == CaptureField::Scope)
-                && model.input_mode != BoardInputMode::FormScopeDropdown
+                && model.input_mode != BoardInputMode::FormDropdown
             {
                 model.cycle_form_scope();
             }
             return Ok(IntentOutcome::None);
         }
-        BoardIntent::OpenFormScopeDropdown => {
-            model.open_form_scope_dropdown();
+        BoardIntent::OpenFormDropdown(field) => {
+            model.open_form_dropdown(field);
             return Ok(IntentOutcome::None);
         }
-        BoardIntent::FormScopeNext => {
-            model.move_form_scope_dropdown(true);
+        BoardIntent::FormDropdownNext => {
+            model.move_form_dropdown(true);
             return Ok(IntentOutcome::None);
         }
-        BoardIntent::FormScopePrev => {
-            model.move_form_scope_dropdown(false);
+        BoardIntent::FormDropdownPrev => {
+            model.move_form_dropdown(false);
             return Ok(IntentOutcome::None);
         }
-        BoardIntent::ConfirmFormScopeDropdown => {
-            if model.input_mode == BoardInputMode::FormScopeDropdown {
-                model.close_form_scope_dropdown(true);
+        BoardIntent::ConfirmFormDropdown => {
+            if model.input_mode == BoardInputMode::FormDropdown {
+                model.close_form_dropdown(true);
+                if let Some(targets) = model.pending_assignee_targets.take() {
+                    let assignee = model.form.as_ref().and_then(|form| form.assignee.clone());
+                    let changed = domain.assign_batch(&targets, assignee)?;
+                    model.clear_marks();
+                    model.form = None;
+                    model.input_mode = BoardInputMode::Normal;
+                    return Ok(if changed {
+                        IntentOutcome::Persist
+                    } else {
+                        IntentOutcome::None
+                    });
+                }
             }
             return Ok(IntentOutcome::None);
         }
-        BoardIntent::CancelFormScopeDropdown => {
-            if model.input_mode == BoardInputMode::FormScopeDropdown {
-                model.close_form_scope_dropdown(false);
+        BoardIntent::CancelFormDropdown => {
+            if model.input_mode == BoardInputMode::FormDropdown {
+                model.close_form_dropdown(false);
             }
             return Ok(IntentOutcome::None);
         }
-        BoardIntent::SelectFormScopeOption(index) => {
-            model.select_form_scope_option(index);
+        BoardIntent::SelectFormDropdownOption(index) => {
+            model.select_form_dropdown_option(index);
+            if model.input_mode != BoardInputMode::FormDropdown {
+                if let Some(targets) = model.pending_assignee_targets.take() {
+                    let assignee = model.form.as_ref().and_then(|form| form.assignee.clone());
+                    let changed = domain.assign_batch(&targets, assignee)?;
+                    model.clear_marks();
+                    model.form = None;
+                    model.input_mode = BoardInputMode::Normal;
+                    return Ok(if changed {
+                        IntentOutcome::Persist
+                    } else {
+                        IntentOutcome::None
+                    });
+                }
+            }
             return Ok(IntentOutcome::None);
         }
 
@@ -1705,6 +1734,10 @@ fn apply_board_intent(
             };
             domain.toggle_step(task_id, step_id)?;
         }
+        BoardIntent::Dispatch => {
+            // Host work and its one durable save are owned by the application boundary.
+            return Ok(IntentOutcome::None);
+        }
         BoardIntent::PrimaryVerb => {
             model.close_popup();
             // Status verbs always act on tasks, even with a step selected: Enter owns steps.
@@ -2222,8 +2255,8 @@ fn apply_board_intent(
                 }
                 return Ok(IntentOutcome::None);
             }
-            if model.input_mode == BoardInputMode::FormScopeDropdown {
-                model.close_form_scope_dropdown(false);
+            if model.input_mode == BoardInputMode::FormDropdown {
+                model.close_form_dropdown(false);
                 return Ok(IntentOutcome::None);
             }
             // Split's task session is parked, not the active editor. Collapsing the
@@ -2584,7 +2617,7 @@ fn apply_board_intent(
 /// Every editing intent is inert in every other mode, exactly as the insert and backspace
 /// intents already were before the cursor arrived.
 fn edit_draft(model: &mut BoardModel, operation: impl FnOnce(&mut EditBuffer)) {
-    if model.input_mode == BoardInputMode::FormScopeDropdown {
+    if model.input_mode == BoardInputMode::FormDropdown {
         return;
     }
     // The steps step editor owns the keyboard in its mode: its draft is the page

@@ -11,12 +11,13 @@ the GitHub release notes verbatim.
 
 ### Breaking
 
-- Store format 6 adds optional task assignees. Rolling back refuses the file; restore `tsk.json.v5`.
+- Store format 6 adds optional task assignees and dispatch records. Rolling back refuses the file; restore `tsk.json.v5`.
 
 ### Added
 
-- Tasks can be assigned to exact configured agent profiles from quick-add (`!a`), the task page, the palette (including marked sets), or CLI add/edit flags. Board and CLI output show assignees, and `tsk list --assignee` filters them.
+- Tasks can be assigned to exact configured agent profiles from quick-add (`!a`), the task page, an anchored Assignee picker, the palette (including marked sets), or CLI add/edit flags. Board rows and peek footers order assignee, thread, then project; CLI output shows assignees, and `tsk list --assignee` filters them.
 - Agent launch profiles can be defined in `<state dir>/agents.toml` with a command template, an always-appended default or custom prompt, and environment values; the first full board open seeds a commented starter file when none exists.
+- Dispatch an assigned project task with `ctrl+g`, **dispatch to @name** in the palette, or `tsk dispatch T<n>`. tsk creates a Git worktree and Herdr workspace, launches the agent there, then records the dispatch and starts the task in one save; `--again` reuses that workspace, and a dispatched task still in started status shows `◉`.
 
 ### Changed
 

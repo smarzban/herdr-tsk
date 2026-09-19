@@ -10,7 +10,9 @@ use ratatui::layout::Rect;
 use ratatui::Terminal;
 use tsk_tui::agents::AgentProfiles;
 use tsk_tui::context::InvocationSnapshot;
-use tsk_tui::domain::{DomainState, HumanStatus, ProvenanceOrigin, TaskEventKind, TaskScope};
+use tsk_tui::domain::{
+    Dispatch, DomainState, HumanStatus, ProvenanceOrigin, TaskEventKind, TaskScope,
+};
 use tsk_tui::ui::board::{
     apply_intent, board_hit_map, board_intent_may_persist, board_verb_items, draw_board,
     resolve_board_command, BoardInputMode, BoardModel, CommandSurface, IntentOutcome,
@@ -118,6 +120,122 @@ fn mark_tasks(domain: &mut DomainState, model: &mut BoardModel, ids: &[uuid::Uui
 }
 
 #[test]
+fn dispatch_key_and_palette_route_to_the_cursor_only_verb() {
+    let (mut domain, mut model, id) = board_with_task("send it", HumanStatus::Ready);
+    set_agent_profiles(&mut model, &["implementer"]);
+    domain
+        .assign(id, Some("implementer".into()))
+        .expect("assign task");
+    model.sync_from_domain(&domain);
+
+    assert_eq!(
+        map_key(BoardInputMode::Normal, ctrl(KeyCode::Char('g'))),
+        Some(BoardIntent::Dispatch)
+    );
+    assert_eq!(
+        map_key(BoardInputMode::TaskPage, ctrl(KeyCode::Char('g'))),
+        Some(BoardIntent::Dispatch)
+    );
+    let labels = model
+        .available_commands()
+        .into_iter()
+        .map(|command| command.label)
+        .collect::<Vec<_>>();
+    assert!(
+        labels
+            .iter()
+            .any(|label| label == "dispatch to @implementer"),
+        "{labels:?}"
+    );
+}
+
+#[test]
+fn dispatched_task_page_renders_the_record_and_assigned_legend() {
+    let (mut domain, mut model, id) = board_with_task("send it", HumanStatus::Ready);
+    assert!(
+        board_verb_items(&model).iter().all(|verb| verb.key != "g"),
+        "unassigned tasks do not advertise dispatch"
+    );
+    domain
+        .assign(id, Some("implementer".into()))
+        .expect("assign task");
+    model.sync_from_domain(&domain);
+    let verbs = board_verb_items(&model);
+    assert!(
+        verbs
+            .windows(2)
+            .any(|pair| pair[0].key == "s" && pair[1].key == "g"),
+        "assigned legend should pair start and dispatch: {verbs:?}"
+    );
+
+    domain
+        .record_dispatch(
+            id,
+            Dispatch {
+                argv: vec!["runner".into()],
+                worktree: "/tmp/dispatch-worktree".into(),
+                branch: "tsk/t1-send-it".into(),
+                herdr_workspace_id: "w9".into(),
+                at: SystemTime::now(),
+            },
+        )
+        .expect("record dispatch");
+    model.sync_from_domain(&domain);
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
+    let screen = rendered_board(&model, 100, 30);
+    assert!(
+        screen.contains("worktree /tmp/dispatch-worktree"),
+        "{screen}"
+    );
+    assert!(screen.contains("branch tsk/t1-send-it"), "{screen}");
+    assert!(screen.contains("when"), "{screen}");
+}
+
+#[test]
+fn dispatched_task_page_hides_record_during_notes_edit_and_restores_it_in_view_mode() {
+    let (mut domain, mut model, id) = board_with_task("edit dispatched notes", HumanStatus::Ready);
+    domain
+        .assign(id, Some("implementer".into()))
+        .expect("assign task");
+    domain
+        .record_dispatch(
+            id,
+            Dispatch {
+                argv: vec!["runner".into()],
+                worktree: "/tmp/notes-edit-dispatch-worktree".into(),
+                branch: "tsk/t1-notes-edit-dispatch".into(),
+                herdr_workspace_id: "w9".into(),
+                at: SystemTime::now(),
+            },
+        )
+        .expect("record dispatch");
+    model.sync_from_domain(&domain);
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
+
+    let view = rendered_board(&model, 100, 30);
+    assert!(
+        view.contains("worktree /tmp/notes-edit-dispatch-worktree"),
+        "view mode should paint the dispatch record: {view}"
+    );
+
+    apply_intent(&mut domain, &mut model, BoardIntent::BeginEditNotes, None).expect("edit notes");
+    let editing = rendered_board(&model, 100, 30);
+    assert!(
+        !editing.contains("notes-edit-dispatch-worktree")
+            && !editing.contains("tsk/t1-notes-edit-dispatch"),
+        "notes edit must not paint uneditable dispatch rows: {editing}"
+    );
+
+    apply_intent(&mut domain, &mut model, BoardIntent::CancelEdit, None).expect("exit notes edit");
+    let restored = rendered_board(&model, 100, 30);
+    assert!(
+        restored.contains("worktree /tmp/notes-edit-dispatch-worktree")
+            && restored.contains("branch tsk/t1-notes-edit-dispatch"),
+        "view mode should restore the dispatch record: {restored}"
+    );
+}
+
+#[test]
 fn palette_assignment_applies_to_marked_tasks_as_one_undoable_batch() {
     let (mut domain, mut model, first) = board_with_task("first", HumanStatus::Started);
     let second = domain
@@ -144,14 +262,21 @@ fn palette_assignment_applies_to_marked_tasks_as_one_undoable_batch() {
     )
     .expect("open picker");
     assert_eq!(model.input_mode(), BoardInputMode::EditAssignee);
-    apply_intent(&mut domain, &mut model, BoardIntent::FormAssigneeNext, None)
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenFormDropdown(CaptureField::Assignee),
+        None,
+    )
+    .expect("open dropdown");
+    apply_intent(&mut domain, &mut model, BoardIntent::FormDropdownNext, None)
         .expect("select reviewer");
-    assert!(board_intent_may_persist(&BoardIntent::ConfirmFormAssignee));
+    assert!(board_intent_may_persist(&BoardIntent::ConfirmFormDropdown));
     assert_eq!(
         apply_intent(
             &mut domain,
             &mut model,
-            BoardIntent::ConfirmFormAssignee,
+            BoardIntent::ConfirmFormDropdown,
             None,
         )
         .expect("assign"),
@@ -185,6 +310,81 @@ fn palette_assignment_applies_to_marked_tasks_as_one_undoable_batch() {
     assert_eq!(
         domain.get(second).expect("second").status,
         HumanStatus::Review
+    );
+}
+
+#[test]
+fn assignee_enter_opens_a_keyboard_dropdown_with_none_and_profiles() {
+    let (mut domain, mut model, id) = board_with_task("assign from dropdown", HumanStatus::Open);
+    set_agent_profiles(&mut model, &["implementer", "reviewer"]);
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::FocusFormField(CaptureField::Assignee),
+        None,
+    )
+    .expect("focus assignee");
+    let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+    assert_eq!(
+        map_task_form_key(CaptureField::Assignee, false, enter),
+        Some(BoardIntent::OpenFormDropdown(CaptureField::Assignee))
+    );
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenFormDropdown(CaptureField::Assignee),
+        None,
+    )
+    .expect("open dropdown");
+    assert_eq!(model.input_mode(), BoardInputMode::FormDropdown);
+    let rendered = rendered_board(&model, 80, 24);
+    assert!(
+        rendered.contains("none")
+            && rendered.contains("implementer")
+            && rendered.contains("reviewer"),
+        "assignee options:\n{rendered}"
+    );
+    apply_intent(&mut domain, &mut model, BoardIntent::FormDropdownNext, None)
+        .expect("highlight implementer");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::CancelFormDropdown,
+        None,
+    )
+    .expect("cancel dropdown");
+    apply_intent(&mut domain, &mut model, BoardIntent::ConfirmEdit, None).expect("save cancelled");
+    assert_eq!(domain.get(id).expect("task").assignee, None);
+
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::FocusFormField(CaptureField::Assignee),
+        None,
+    )
+    .expect("focus assignee again");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenFormDropdown(CaptureField::Assignee),
+        None,
+    )
+    .expect("reopen dropdown");
+    apply_intent(&mut domain, &mut model, BoardIntent::FormDropdownNext, None)
+        .expect("highlight implementer again");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ConfirmFormDropdown,
+        None,
+    )
+    .expect("pick implementer");
+    assert_eq!(model.input_mode(), BoardInputMode::EditAssignee);
+    apply_intent(&mut domain, &mut model, BoardIntent::ConfirmEdit, None).expect("save");
+    assert_eq!(
+        domain.get(id).expect("task").assignee.as_deref(),
+        Some("implementer")
     );
 }
 
@@ -1372,7 +1572,7 @@ fn t64_ctrl_q_quits_every_non_editor_mode_and_stays_inert_in_editors_and_recover
         BoardInputMode::CapturePage,
         BoardInputMode::SelectThread,
         BoardInputMode::EditScope,
-        BoardInputMode::FormScopeDropdown,
+        BoardInputMode::FormDropdown,
         BoardInputMode::LaunchCard,
         BoardInputMode::ProjectPicker,
         BoardInputMode::ListPicker,
@@ -1603,7 +1803,11 @@ fn palette_lists_exactly_m1_commands_for_selection_filters_by_subsequence_and_di
     .expect("open palette");
     assert_eq!(model.command_surface(), CommandSurface::Palette);
 
-    let labels: Vec<&str> = model.visible_commands().iter().map(|c| c.label).collect();
+    let labels: Vec<String> = model
+        .visible_commands()
+        .iter()
+        .map(|c| c.label.clone())
+        .collect();
     let expected = [
         "set status: ready",
         "set status: open",
@@ -1626,7 +1830,7 @@ fn palette_lists_exactly_m1_commands_for_selection_filters_by_subsequence_and_di
          the destinations have no collapsible task groups)"
     );
     assert!(
-        labels.contains(&"set status: open"),
+        labels.iter().any(|label| label == "set status: open"),
         "a ready selection offers the absolute inbox status"
     );
 
@@ -1640,7 +1844,11 @@ fn palette_lists_exactly_m1_commands_for_selection_filters_by_subsequence_and_di
         )
         .expect("type");
     }
-    let filtered: Vec<&str> = model.visible_commands().iter().map(|c| c.label).collect();
+    let filtered: Vec<String> = model
+        .visible_commands()
+        .iter()
+        .map(|c| c.label.clone())
+        .collect();
     assert_eq!(filtered, vec!["set status: started"]);
     // Substring-only would need the contiguous run "ssg"; none of the labels contain it.
     assert!(
@@ -2064,7 +2272,7 @@ fn help_card_lists_every_binding_scrolls_and_closes_on_esc() {
     for mode in [
         BoardInputMode::SelectThread,
         BoardInputMode::EditScope,
-        BoardInputMode::FormScopeDropdown,
+        BoardInputMode::FormDropdown,
     ] {
         assert_eq!(
             map_key(mode, press(KeyCode::Char('?'))),
@@ -3263,7 +3471,10 @@ fn view_tab_selection_wraps_without_starting_task_edit_and_ctrl_e_opens_inline_s
         .expect("Tab reaches the trailing add target after the final step");
     assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
     apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
-        .expect("Tab leaves the add target for Thread");
+        .expect("Tab leaves the add target for Assignee");
+    assert_eq!(model.input_mode(), BoardInputMode::EditAssignee);
+    apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
+        .expect("Tab leaves Assignee for Thread");
     assert_eq!(model.input_mode(), BoardInputMode::SelectThread);
     apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
         .expect("Tab leaves Thread for Scope");
@@ -3290,7 +3501,7 @@ fn plain_enter_parks_an_existing_step_rename_without_saving_the_task_session() {
 }
 
 #[test]
-fn task_edit_tab_cycles_every_step_between_notes_and_thread_then_scope() {
+fn task_edit_tab_cycles_every_step_before_assignee_thread_and_scope() {
     let (mut domain, mut model, _) = board_with_steps("Tab fields", None, &["first", "second"]);
     assert!(rendered_board(&model, 80, 24).contains("▸ ▪ first"));
 
@@ -3302,16 +3513,16 @@ fn task_edit_tab_cycles_every_step_between_notes_and_thread_then_scope() {
         .expect("Tab reaches the add target after the final step");
     assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
     apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
-        .expect("Tab leaves the add target for Thread");
+        .expect("Tab leaves the add target for Assignee");
+    assert_eq!(model.input_mode(), BoardInputMode::EditAssignee);
+    apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
+        .expect("Tab leaves Assignee for Thread");
     assert_eq!(model.input_mode(), BoardInputMode::SelectThread);
     apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
         .expect("Tab reaches Scope");
     assert_eq!(model.input_mode(), BoardInputMode::EditScope);
     apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
-        .expect("Tab reaches Assignee after Scope");
-    assert_eq!(model.input_mode(), BoardInputMode::EditAssignee);
-    apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
-        .expect("Tab wraps Assignee to Title");
+        .expect("Tab wraps Scope to Title");
     assert_eq!(model.input_mode(), BoardInputMode::EditTitle);
     apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
         .expect("Tab advances Title to Notes");
@@ -4077,9 +4288,9 @@ fn first_step_up_deactivates_before_inactive_up_scrolls_then_down_reactivates() 
 
     apply_intent(&mut domain, &mut model, BoardIntent::BeginEditScope, None)
         .expect("enter Scope on the task edit traversal");
-    for _ in 0..4 {
+    for _ in 0..3 {
         apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
-            .expect("Tab completes Scope → Assignee → Title → Notes → first step");
+            .expect("Tab completes Scope → Title → Notes → first step");
     }
     let reactivated = rendered_board(&model, 80, 24);
     assert!(

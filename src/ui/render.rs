@@ -319,9 +319,9 @@ pub struct VerbEntry<'a> {
 }
 
 /// One palette command row for overlay paint.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PaletteCommandRow<'a> {
-    pub label: &'a str,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PaletteCommandRow {
+    pub label: String,
     pub selected: bool,
 }
 
@@ -394,7 +394,7 @@ pub enum QueueOverlay<'a> {
     /// Searchable command palette (`:`).
     Palette {
         query: &'a str,
-        commands: &'a [PaletteCommandRow<'a>],
+        commands: &'a [PaletteCommandRow],
     },
     /// Help card (`?`).
     Help {
@@ -474,9 +474,13 @@ pub enum QueueOverlay<'a> {
         inline_step_editor: Option<InlineStepEditor<'a>>,
         /// The thread field still uses the shared bottom input slot.
         bottom_input: Option<BottomInputSlot<'a>>,
-        /// Footer: thread · scope · created · updated (the task number remains in the header).
+        /// Footer: assignee · thread · scope · created · updated.
         meta: String,
-        /// Display width before the scope inside `meta`. The number is chrome, not a scope hit.
+        /// Display offset of the assignee inside `meta`.
+        meta_assignee_x: Option<u16>,
+        /// Display width of the assignee inside `meta`.
+        meta_assignee_width: u16,
+        /// Display offset of the scope inside `meta`. The number is chrome, not a scope hit.
         meta_scope_x: u16,
         /// Display width of scope inside `meta`, carried separately so mouse geometry never
         /// parses user-controlled project names from rendered text.
@@ -485,16 +489,17 @@ pub enum QueueOverlay<'a> {
         thread_slot_width: Option<u16>,
         /// Which field owns the cursor, if any (view mode: none).
         focus: Option<CaptureField>,
-        scope_dropdown: Option<FormScopeDropdown<'a>>,
+        scope_dropdown: Option<FormDropdown<'a>>,
     },
 }
 
-/// Form-scope chooser state embedded in its parent form overlay. Its options intentionally
-/// carry `TaskScope` labels only, never the board selector's session-only all-projects value.
+/// Footer chooser state embedded in its parent form overlay.
 #[derive(Debug, Clone, Copy)]
-pub struct FormScopeDropdown<'a> {
+pub struct FormDropdown<'a> {
     pub options: &'a [String],
     pub selected: usize,
+    pub field: CaptureField,
+    pub anchor_x: u16,
 }
 
 /// Pure paint input for one queue frame. No app-loop state machines.
@@ -679,9 +684,8 @@ pub enum QueueHitTarget {
     Step(usize),
     /// The dim trailing task-page control that starts a new inline step.
     StepAdd,
-    /// One painted option in a shared form's scope dropdown, indexed into that form's own
-    /// `TaskScope` choices. It cannot name the board selector's all-projects choice.
-    FormScopeOption(usize),
+    /// One painted option in a shared form footer dropdown, indexed into that field's choices.
+    FormDropdownOption(usize),
     /// One cell of the board list's overflow scrollbar (track or thumb). The usize is the
     /// content offset that cell jumps the viewport to. Does not change selection or peek.
     ListScroll(usize),
@@ -806,6 +810,15 @@ pub fn status_glyph(status: HumanStatus) -> &'static str {
         HumanStatus::Blocked => "■",
         HumanStatus::Review => "▲",
         HumanStatus::Done => "✓",
+    }
+}
+
+/// Status glyph derived only from durable task state.
+pub fn task_status_glyph(task: &Task) -> &'static str {
+    if task.status == HumanStatus::Started && task.dispatch.is_some() {
+        "◉"
+    } else {
+        status_glyph(task.status)
     }
 }
 
@@ -1103,6 +1116,8 @@ pub fn draw_task_column(
         ref inline_step_editor,
         bottom_input: _,
         ref meta,
+        meta_assignee_x,
+        meta_assignee_width,
         meta_scope_x,
         meta_scope_width,
         thread_slot_width,
@@ -1130,6 +1145,8 @@ pub fn draw_task_column(
             step_marked,
             inline_step_editor.as_ref(),
             meta,
+            meta_assignee_x,
+            meta_assignee_width,
             meta_scope_x,
             meta_scope_width,
             thread_slot_width,
@@ -1139,7 +1156,7 @@ pub fn draw_task_column(
             &mut hits,
         );
         if let Some(dropdown) = scope_dropdown {
-            paint_page_scope_dropdown(frame, geo, surface, dropdown, &mut hits);
+            paint_page_form_dropdown(frame, geo, surface, dropdown, &mut hits);
         }
     }
     if let Some(modal) = modal {
@@ -1751,6 +1768,8 @@ fn paint_overlay(
             ref inline_step_editor,
             bottom_input: _,
             ref meta,
+            meta_assignee_x,
+            meta_assignee_width,
             meta_scope_x,
             meta_scope_width,
             thread_slot_width,
@@ -1777,6 +1796,8 @@ fn paint_overlay(
                 *step_marked,
                 inline_step_editor.as_ref(),
                 meta,
+                *meta_assignee_x,
+                *meta_assignee_width,
                 *meta_scope_x,
                 *meta_scope_width,
                 *thread_slot_width,
@@ -1786,7 +1807,7 @@ fn paint_overlay(
                 hits,
             );
             if let Some(dropdown) = scope_dropdown {
-                paint_page_scope_dropdown(frame, geo, surface, *dropdown, hits);
+                paint_page_form_dropdown(frame, geo, surface, *dropdown, hits);
             }
         }
     }
@@ -2321,7 +2342,7 @@ fn paint_palette_overlay(
     geo: &TierGeometry,
     surface: Rect,
     query: &str,
-    commands: &[PaletteCommandRow<'_>],
+    commands: &[PaletteCommandRow],
     hits: &mut QueueHitMap,
 ) {
     let width = geo.row_width;
@@ -2792,6 +2813,8 @@ fn paint_task_page(
     step_marked: Option<usize>,
     inline_step_editor: Option<&InlineStepEditor<'_>>,
     meta: &str,
+    meta_assignee_x: Option<u16>,
+    meta_assignee_width: u16,
     meta_scope_x: u16,
     meta_scope_width: u16,
     thread_slot_width: Option<u16>,
@@ -3179,7 +3202,7 @@ fn paint_task_page(
         );
     }
 
-    // Meta footer: thread · scope · created · updated. Inline step drafts leave this footer
+    // Meta footer: assignee · thread · scope · created · updated. Inline step drafts leave this footer
     // visible and do not claim its input slot.
     if let Some(y) = lay.meta_y {
         put_line(
@@ -3190,37 +3213,29 @@ fn paint_task_page(
             paint_bounded_line(&format!("  {meta}"), width, style_dim()),
         );
 
-        let thread_x = 2u16;
-        let mut component_x = thread_x;
-        let mut assignee_slot = None;
+        let footer_x = 2u16;
+        let assignee_slot =
+            meta_assignee_x.map(|x| (footer_x.saturating_add(x), meta_assignee_width));
+        let mut component_x = footer_x;
         let mut thread_slot = None;
         for component in meta.split(" · ") {
-            if component_x.saturating_sub(thread_x) >= meta_scope_x {
+            if component_x.saturating_sub(footer_x) >= meta_scope_x {
                 break;
             }
             let component_width = u16::try_from(display_width(component)).unwrap_or(u16::MAX);
-            if component == "assignee" || component.starts_with('@') {
-                assignee_slot = Some((component_x, component_width));
-            } else if component == "thread" || component.starts_with('#') {
+            if component == "thread" || component.starts_with('#') {
                 thread_slot = Some((component_x, component_width));
             }
             component_x = component_x
                 .saturating_add(component_width)
                 .saturating_add(3);
         }
-        // Hand-built renderer fixtures predating the assignee field carry only the old
+        // Hand-built renderer fixtures predating explicit footer offsets carry only the old
         // aggregate thread width. Keep that seam working when no component can be identified.
         if thread_slot.is_none() {
-            thread_slot = thread_slot_width.map(|slot_width| (thread_x, slot_width));
+            thread_slot = thread_slot_width.map(|slot_width| (footer_x, slot_width));
         }
-        let scope_slot: String = meta.chars().skip(usize::from(meta_scope_x)).collect();
-        // The separator stays footer chrome. Scope begins after it, while a leading Thread
-        // slot starts at the footer inset and has no separator to exclude.
-        let scope_prefix = u16::from(scope_slot.starts_with(" · ")) * 3;
-        let scope_x = 2u16
-            .saturating_add(meta_scope_x)
-            .saturating_add(scope_prefix)
-            .min(width);
+        let scope_x = footer_x.saturating_add(meta_scope_x).min(width);
         let selected = match focus {
             Some(CaptureField::Scope) => Some((scope_x, meta_scope_width)),
             Some(CaptureField::Thread) => thread_slot,
@@ -3303,14 +3318,12 @@ fn paint_page_scrollbar(
     }
 }
 
-/// The page's scope chooser stacks its options directly above the scope footer (left,
-/// indented like the footer), never in the selector's corner: the footer is the control
-/// being answered, so the chooser sits beside it.
-fn paint_page_scope_dropdown(
+/// A page footer chooser stacks its options directly above the field being answered.
+fn paint_page_form_dropdown(
     frame: &mut Frame<'_>,
     geo: &TierGeometry,
     surface: Rect,
-    dropdown: FormScopeDropdown<'_>,
+    dropdown: FormDropdown<'_>,
     hits: &mut QueueHitMap,
 ) {
     let width = geo.row_width;
@@ -3353,18 +3366,19 @@ fn paint_page_scope_dropdown(
         } else {
             format!("{}{}", body, " ".repeat(col_w - display_width(&body)))
         };
-        put_line(
+        let x = dropdown.anchor_x.min(width);
+        let painted_width = u16::try_from(col_w)
+            .unwrap_or(u16::MAX)
+            .min(width.saturating_sub(x));
+        put_line_at(
             frame,
             surface,
-            y,
-            width,
-            paint_bounded_line(&format!("  {text}"), width, style_plain()),
+            Rect::new(x, y, painted_width, 1),
+            paint_bounded_line(&text, painted_width, style_plain()),
         );
-        hits.push(
-            QueueHitTarget::FormScopeOption(j),
-            Rect::new(0, y, width, 1),
-        );
-        hits.push_copyable(Rect::new(0, y, width, 1));
+        let area = Rect::new(x, y, painted_width, 1);
+        hits.push(QueueHitTarget::FormDropdownOption(j), area);
+        hits.push_copyable(area);
     }
 }
 
@@ -3868,6 +3882,7 @@ fn build_list_rows(
             project_attribution || model.show_project_meta,
             thread_label && model.thread_labels,
         );
+        let peek_meta = row_meta(task, model.now, true, true);
         let selected = model.selection_id == Some(task.id)
             && !matches!(model.overlay, QueueOverlay::ScopeDropdown { .. });
         let marked = model.marked_ids.contains(&task.id);
@@ -3886,7 +3901,7 @@ fn build_list_rows(
         } else {
             paint_task_row_lines(
                 &TaskRowPaint {
-                    glyph: status_glyph(task.status),
+                    glyph: task_status_glyph(task),
                     identifier: identifier.as_deref(),
                     title: &task.title,
                     selected,
@@ -3912,7 +3927,7 @@ fn build_list_rows(
             });
         }
         // Assignment is actionable row metadata, not hidden task-page detail. Keep the
-        // established project · @assignee · #thread order and wrap rather than truncate.
+        // assignee · thread · project order and wrap rather than truncate.
         if task.assignee.is_some() && !meta.is_empty() {
             let room = geo.row_width.saturating_sub(7).max(1) as usize;
             for row in crate::ui::edit::wrap_text(&meta, room) {
@@ -3933,9 +3948,7 @@ fn build_list_rows(
         }
         if detail_target == Some(task.id) {
             let mut details = detail_lines_for_task(task, geo.row_width);
-            // An unassigned task's meta row repaints the closing corner below; an assigned
-            // task already showed its meta on the row, so the corner stays here.
-            if task.assignee.is_none() && !meta.is_empty() {
+            if !peek_meta.is_empty() {
                 details.pop();
             }
             for (line, content_x, content_width) in details {
@@ -3947,9 +3960,9 @@ fn build_list_rows(
             }
             *anchor_last_idx = Some(out.len() - 1);
         }
-        if detail_target == Some(task.id) && task.assignee.is_none() && !meta.is_empty() {
+        if detail_target == Some(task.id) && !peek_meta.is_empty() {
             let room = geo.row_width.saturating_sub(9).max(1) as usize;
-            for (index, row) in crate::ui::edit::wrap_text(&meta, room)
+            for (index, row) in crate::ui::edit::wrap_text(&peek_meta, room)
                 .into_iter()
                 .enumerate()
             {
@@ -4388,7 +4401,7 @@ fn paint_rail_row_lines(
         (false, true) => "▪ ",
         (false, false) => "  ",
     };
-    let glyph = status_glyph(task.status);
+    let glyph = task_status_glyph(task);
     let prefix = format!("{}{marker}{glyph} ", " ".repeat(leading_indent));
     let identifier_width = identifier.map(display_width).unwrap_or(0);
     let identifier_gap = usize::from(identifier_width > 0);
@@ -4955,17 +4968,17 @@ fn row_meta(
     } else {
         None
     };
-    fit_row_meta(project, assignee, thread)
+    fit_row_meta(assignee, thread, project)
 }
 
 /// Keep the genuine project/thread attribution intact. Relative ages belong to task-page
 /// information, not task rows, so metadata has no fixed age reserve or artificial cap.
 fn fit_row_meta(
-    project: Option<String>,
     assignee: Option<String>,
     thread: Option<String>,
+    project: Option<String>,
 ) -> String {
-    [project, assignee, thread]
+    [assignee, thread, project]
         .into_iter()
         .flatten()
         .filter(|value| !value.is_empty())
