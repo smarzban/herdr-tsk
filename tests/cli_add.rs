@@ -238,6 +238,43 @@ fn json_plan_unknown_assignee_refuses_only_that_item() {
 }
 
 #[test]
+fn json_plan_malformed_assignee_values_refuse_per_item() {
+    let _env = env_lock();
+    let dir = temp_state_dir("plan-malformed-agent");
+    write_agents(&dir);
+    let plan = dir.join("plan.json");
+    std::fs::write(
+        &plan,
+        r#"[{"title":"bad name","assignee":"-nope"},{"title":"bad type","assignee":7},{"title":"fine","assignee":"reviewer"}]"#,
+    )
+    .expect("write plan");
+
+    let output = add(
+        &[
+            "tsk".into(),
+            "add".into(),
+            "--state-dir".into(),
+            state_dir_arg(&dir),
+            "--file".into(),
+            state_dir_arg(&plan),
+        ],
+        true,
+    );
+    assert_eq!(output.code, 1, "{output:?}");
+    let report: serde_json::Value = serde_json::from_str(&output.stdout).expect("plan report");
+    assert_eq!(report["failed"][0]["i"], 0);
+    assert_eq!(report["failed"][0]["code"], "unknown-agent");
+    assert_eq!(report["failed"][1]["i"], 1);
+    assert_eq!(report["failed"][1]["code"], "invalid-item");
+    assert_eq!(report["created"][0]["i"], 2);
+    let state = task_store(&dir).load().expect("load state");
+    assert_eq!(state.tasks().len(), 1);
+    assert_eq!(state.tasks()[0].title, "fine");
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn add_dedupe_distinguishes_assignees_and_matches_equal_assignees() {
     let _env = env_lock();
     let dir = temp_state_dir("assignee-dedupe");
