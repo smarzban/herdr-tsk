@@ -84,9 +84,8 @@ Click a step to select it. Click **+ step** to add. Field clicks become editable
 | Save new step and open next empty row | `Enter` in new step |
 | Retain existing-step rename in session | `Enter` in existing step |
 | Stage selected-step removal | `ctrl+x` in task edit |
-| Open Scope picker / confirm selection | `Enter` |
-| Cycle Scope | `Space` or `←` / `→` |
-| Cycle Assignee / confirm | `Space` or `←` / `→`; `Enter` |
+| Open Scope or Assignee picker / confirm selection | `Enter` |
+| Cycle Scope or Assignee without opening | `Space` or `←` / `→` |
 | Open / close selected Thread editor | `Enter` |
 | Line start / end | `Home` / `End` |
 | Word left / right | `ctrl+←` / `ctrl+→` |
@@ -95,7 +94,7 @@ Click a step to select it. Click **+ step** to add. Field clicks become editable
 
 `ctrl+e` moves to line end in text editors. `ctrl+a` moves to line start in quick-add; on the task page it adds a step instead. Paste preserves line breaks in Notes and converts them to spaces in single-line fields.
 
-Editing keys take precedence over view-mode status shortcuts. In the step editor, `ctrl+d` and `ctrl+o` still address the task; `ctrl+x` removes the step being edited, staged until the task edit is saved; `ctrl+a` adds another step. Notes are reached with `ctrl+e`, then `Tab`. `Alt+Enter` does not save the task edit.
+The editing ring is Title → Notes → steps → **+ step** → Assignee → Thread → Scope → Title; `Shift+Tab` reverses it. Editing keys take precedence over view-mode status shortcuts. In the step editor, `ctrl+d` and `ctrl+o` still address the task; `ctrl+x` removes the step being edited, staged until the task edit is saved; `ctrl+a` adds another step. Notes are reached with `ctrl+e`, then `Tab`. `Alt+Enter` does not save the task edit.
 
 ## Quick-add
 
@@ -117,7 +116,7 @@ In Herdr quick capture, `Shift+Enter` saves and closes the popup. `Esc` closes a
 | Archived project view | `ctrl+u` restores; `Esc`, `p`, or `1`–`3` leaves |
 | Thread/view selector | Type or paste to filter; arrows or `Tab` select; `Enter` chooses; `Esc` closes |
 | Board search | Type or paste; `Backspace` edits; `Enter` pins; `Esc` clears and closes |
-| Palette | Type to filter; arrows or `Tab` select; `Enter` runs; `Esc` closes. **set assignee** offers exact agent profiles and **unassigned**; assigned tasks offer **dispatch to @name** |
+| Palette | Type to filter; arrows or `Tab` select; `Enter` runs; `Esc` closes. **set assignee** offers exact agent profiles and **none**; assigned tasks offer **dispatch to @name** |
 | Help | Type or paste to filter by key or action; arrows, page keys, or wheel scroll; `Esc` clears the search, then closes |
 | Archived-project launch prompt | `y` restores; `n` or `Esc` keeps archived; `?` opens Help |
 | Failed save | `r` or `Enter` retries; `c` or `Esc` cancels |

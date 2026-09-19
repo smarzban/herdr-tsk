@@ -30,7 +30,7 @@ Clicking Title, Notes, Scope, Assignee, or Thread does not start an edit from vi
 
 In view mode, `Tab` selects steps and **+ step**. It does not cycle task fields. Status shortcuts remain available on the task page; use `ctrl+e`, then `Tab` to reach Notes.
 
-During task editing, the forward order is Title → Notes → steps → **+ step** → Thread → Scope → Assignee → Title. `Shift+Tab` reverses the ring. A field click moves the cursor and retains staged changes.
+During task editing, the forward order is Title → Notes → steps → **+ step** → Assignee → Thread → Scope → Title. `Shift+Tab` reverses the ring. The footer follows the same left-to-right order: Assignee, Thread, Scope. A field click moves the cursor and retains staged changes.
 
 ## Scope, thread, and assignee
 
@@ -40,9 +40,9 @@ During task editing, the forward order is Title → Notes → steps → **+ step
 | --- | --- |
 | Scope | Select it while editing, press `Enter`, choose a destination, then `Enter` again |
 | Thread | Select it, then press `Enter` or click again to edit its name |
-| Assignee | Select it, then use `Space` or arrows to cycle through exact profile names and **unassigned**; `Enter` confirms |
+| Assignee | Select it, press `Enter`, choose an exact profile name or **none**, then press `Enter` again |
 
-Scope also supports cycling with `Space`, `←`, or `→`. Archived projects are not offered.
+Scope and Assignee also support cycling without opening their lists with `Space`, `←`, or `→`. Archived projects are not offered.
 
 Thread is optional and follows the [thread name rules](/docs/capture/#thread-names).
 

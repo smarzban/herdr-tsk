@@ -262,14 +262,21 @@ fn palette_assignment_applies_to_marked_tasks_as_one_undoable_batch() {
     )
     .expect("open picker");
     assert_eq!(model.input_mode(), BoardInputMode::EditAssignee);
-    apply_intent(&mut domain, &mut model, BoardIntent::FormAssigneeNext, None)
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenFormDropdown(CaptureField::Assignee),
+        None,
+    )
+    .expect("open dropdown");
+    apply_intent(&mut domain, &mut model, BoardIntent::FormDropdownNext, None)
         .expect("select reviewer");
-    assert!(board_intent_may_persist(&BoardIntent::ConfirmFormAssignee));
+    assert!(board_intent_may_persist(&BoardIntent::ConfirmFormDropdown));
     assert_eq!(
         apply_intent(
             &mut domain,
             &mut model,
-            BoardIntent::ConfirmFormAssignee,
+            BoardIntent::ConfirmFormDropdown,
             None,
         )
         .expect("assign"),
@@ -303,6 +310,81 @@ fn palette_assignment_applies_to_marked_tasks_as_one_undoable_batch() {
     assert_eq!(
         domain.get(second).expect("second").status,
         HumanStatus::Review
+    );
+}
+
+#[test]
+fn assignee_enter_opens_a_keyboard_dropdown_with_none_and_profiles() {
+    let (mut domain, mut model, id) = board_with_task("assign from dropdown", HumanStatus::Open);
+    set_agent_profiles(&mut model, &["implementer", "reviewer"]);
+    apply_intent(&mut domain, &mut model, BoardIntent::OpenTaskPage, None).expect("open page");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::FocusFormField(CaptureField::Assignee),
+        None,
+    )
+    .expect("focus assignee");
+    let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+    assert_eq!(
+        map_task_form_key(CaptureField::Assignee, false, enter),
+        Some(BoardIntent::OpenFormDropdown(CaptureField::Assignee))
+    );
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenFormDropdown(CaptureField::Assignee),
+        None,
+    )
+    .expect("open dropdown");
+    assert_eq!(model.input_mode(), BoardInputMode::FormDropdown);
+    let rendered = rendered_board(&model, 80, 24);
+    assert!(
+        rendered.contains("none")
+            && rendered.contains("implementer")
+            && rendered.contains("reviewer"),
+        "assignee options:\n{rendered}"
+    );
+    apply_intent(&mut domain, &mut model, BoardIntent::FormDropdownNext, None)
+        .expect("highlight implementer");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::CancelFormDropdown,
+        None,
+    )
+    .expect("cancel dropdown");
+    apply_intent(&mut domain, &mut model, BoardIntent::ConfirmEdit, None).expect("save cancelled");
+    assert_eq!(domain.get(id).expect("task").assignee, None);
+
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::FocusFormField(CaptureField::Assignee),
+        None,
+    )
+    .expect("focus assignee again");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::OpenFormDropdown(CaptureField::Assignee),
+        None,
+    )
+    .expect("reopen dropdown");
+    apply_intent(&mut domain, &mut model, BoardIntent::FormDropdownNext, None)
+        .expect("highlight implementer again");
+    apply_intent(
+        &mut domain,
+        &mut model,
+        BoardIntent::ConfirmFormDropdown,
+        None,
+    )
+    .expect("pick implementer");
+    assert_eq!(model.input_mode(), BoardInputMode::EditAssignee);
+    apply_intent(&mut domain, &mut model, BoardIntent::ConfirmEdit, None).expect("save");
+    assert_eq!(
+        domain.get(id).expect("task").assignee.as_deref(),
+        Some("implementer")
     );
 }
 
@@ -1490,7 +1572,7 @@ fn t64_ctrl_q_quits_every_non_editor_mode_and_stays_inert_in_editors_and_recover
         BoardInputMode::CapturePage,
         BoardInputMode::SelectThread,
         BoardInputMode::EditScope,
-        BoardInputMode::FormScopeDropdown,
+        BoardInputMode::FormDropdown,
         BoardInputMode::LaunchCard,
         BoardInputMode::ProjectPicker,
         BoardInputMode::ListPicker,
@@ -2190,7 +2272,7 @@ fn help_card_lists_every_binding_scrolls_and_closes_on_esc() {
     for mode in [
         BoardInputMode::SelectThread,
         BoardInputMode::EditScope,
-        BoardInputMode::FormScopeDropdown,
+        BoardInputMode::FormDropdown,
     ] {
         assert_eq!(
             map_key(mode, press(KeyCode::Char('?'))),
@@ -3389,7 +3471,10 @@ fn view_tab_selection_wraps_without_starting_task_edit_and_ctrl_e_opens_inline_s
         .expect("Tab reaches the trailing add target after the final step");
     assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
     apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
-        .expect("Tab leaves the add target for Thread");
+        .expect("Tab leaves the add target for Assignee");
+    assert_eq!(model.input_mode(), BoardInputMode::EditAssignee);
+    apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
+        .expect("Tab leaves Assignee for Thread");
     assert_eq!(model.input_mode(), BoardInputMode::SelectThread);
     apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
         .expect("Tab leaves Thread for Scope");
@@ -3416,7 +3501,7 @@ fn plain_enter_parks_an_existing_step_rename_without_saving_the_task_session() {
 }
 
 #[test]
-fn task_edit_tab_cycles_every_step_between_notes_and_thread_then_scope() {
+fn task_edit_tab_cycles_every_step_before_assignee_thread_and_scope() {
     let (mut domain, mut model, _) = board_with_steps("Tab fields", None, &["first", "second"]);
     assert!(rendered_board(&model, 80, 24).contains("▸ ▪ first"));
 
@@ -3428,16 +3513,16 @@ fn task_edit_tab_cycles_every_step_between_notes_and_thread_then_scope() {
         .expect("Tab reaches the add target after the final step");
     assert_eq!(model.input_mode(), BoardInputMode::TaskPage);
     apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
-        .expect("Tab leaves the add target for Thread");
+        .expect("Tab leaves the add target for Assignee");
+    assert_eq!(model.input_mode(), BoardInputMode::EditAssignee);
+    apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
+        .expect("Tab leaves Assignee for Thread");
     assert_eq!(model.input_mode(), BoardInputMode::SelectThread);
     apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
         .expect("Tab reaches Scope");
     assert_eq!(model.input_mode(), BoardInputMode::EditScope);
     apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
-        .expect("Tab reaches Assignee after Scope");
-    assert_eq!(model.input_mode(), BoardInputMode::EditAssignee);
-    apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
-        .expect("Tab wraps Assignee to Title");
+        .expect("Tab wraps Scope to Title");
     assert_eq!(model.input_mode(), BoardInputMode::EditTitle);
     apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
         .expect("Tab advances Title to Notes");
@@ -4203,9 +4288,9 @@ fn first_step_up_deactivates_before_inactive_up_scrolls_then_down_reactivates() 
 
     apply_intent(&mut domain, &mut model, BoardIntent::BeginEditScope, None)
         .expect("enter Scope on the task edit traversal");
-    for _ in 0..4 {
+    for _ in 0..3 {
         apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
-            .expect("Tab completes Scope → Assignee → Title → Notes → first step");
+            .expect("Tab completes Scope → Title → Notes → first step");
     }
     let reactivated = rendered_board(&model, 80, 24);
     assert!(

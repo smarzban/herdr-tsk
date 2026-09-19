@@ -17,6 +17,8 @@ import { parseCapture } from "./capture.js";
     review: "▲",
     done: "✓",
   };
+  const taskGlyph = (task) =>
+    task.status === "started" && task.dispatch ? "◉" : GLYPH[task.status] || "○";
 
   const TABS = [
     ["desk", "desk"],
@@ -2301,7 +2303,7 @@ import { parseCapture } from "./capture.js";
       editing === "title"
         ? `<input class="tsk-field" id="${editId}" value="${esc(editDraft)}" />`
         : esc(task.title);
-    const glyph = GLYPH[task.status] || "○";
+    const glyph = taskGlyph(task);
     let header = `<div class="tsk-task-header ${focused ? "is-bold" : "dim"}"><span class="glyph">${glyph}</span> <span class="tsk-task-id" data-copy-task="${esc(task.id)}" title="copy T${task.number}">T${task.number}</span> <span class="sec">${headTitle}</span><span class="tsk-state-slot">${esc(stateSlot)}</span></div><div class="tsk-task-rule" aria-hidden="true"></div>`;
     if (narrow && !editing) {
       const room = terminalColumns() - 9 - stateSlot.length;
@@ -2417,7 +2419,7 @@ import { parseCapture } from "./capture.js";
             ? "▪ "
             : "  ";
         const flash = task.id === state.flashId;
-        const glyph = GLYPH[task.status] || "○";
+        const glyph = taskGlyph(task);
         const titleLines = wrapText(
           task.title,
           Math.max(8, width - 2 - 4 - `T${task.number} `.length),
@@ -2588,7 +2590,7 @@ import { parseCapture } from "./capture.js";
             ? "▪ "
             : "  ";
         const flash = task.id === state.flashId;
-        const glyph = GLYPH[task.status] || "○";
+        const glyph = taskGlyph(task);
         const indent = "  ".repeat(row.indent || 0);
         if (rail) {
           const prefix = `${rowMark}${glyph} `;

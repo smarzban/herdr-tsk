@@ -1034,7 +1034,8 @@ fn board_keyboard_intent(
             | BoardInputMode::EditNotes
             | BoardInputMode::EditThread
             | BoardInputMode::EditScope
-            | BoardInputMode::FormScopeDropdown
+            | BoardInputMode::EditAssignee
+            | BoardInputMode::FormDropdown
     );
     // A selected task-page add target has no field mapper, but its enclosing edit session
     // still owns the one Shift+Enter task-save chord.
@@ -1090,7 +1091,7 @@ fn board_keyboard_intent(
     }
 
     match model.form_focus().filter(|_| form_field_mode) {
-        Some(focus) => map_task_form_key(focus, mode == BoardInputMode::FormScopeDropdown, key),
+        Some(focus) => map_task_form_key(focus, mode == BoardInputMode::FormDropdown, key),
         None => map_key(mode, key),
     }
 }
@@ -1923,7 +1924,7 @@ fn handle_board_intent(
     // Quick capture: Esc on the expanded draft is the top-level cancel. The board's
     // collapse-to-line fallback would strand the popup on a retained one-line draft, so
     // the whole draft is discarded and the popup closes. Nested Escapes keep their own
-    // semantics: an open scope dropdown maps to CancelFormScopeDropdown, the inline step
+    // semantics: an open scope dropdown maps to CancelFormDropdown, the inline step
     // editor owns its CancelEdit, and an unresolved save routes Esc to CancelSave before
     // this dispatch.
     if quick_capture
@@ -5033,11 +5034,11 @@ mod tests {
         apply_intent(
             &mut domain,
             &mut model,
-            BoardIntent::OpenFormScopeDropdown,
+            BoardIntent::OpenFormDropdown(CaptureField::Scope),
             None,
         )
         .expect("open scope picker");
-        assert_eq!(model.input_mode(), BoardInputMode::FormScopeDropdown);
+        assert_eq!(model.input_mode(), BoardInputMode::FormDropdown);
         assert_eq!(
             board_keyboard_intent(&model, model.input_mode(), ctrl_q),
             Some(BoardIntent::Quit)
@@ -5046,7 +5047,7 @@ mod tests {
         apply_intent(
             &mut domain,
             &mut model,
-            BoardIntent::CancelFormScopeDropdown,
+            BoardIntent::CancelFormDropdown,
             None,
         )
         .expect("close scope picker");
@@ -6750,30 +6751,78 @@ mod tests {
     }
 
     #[test]
-    fn expanded_quick_add_tabs_past_the_selected_step_target() {
+    fn task_and_expanded_capture_edit_rings_follow_footer_order_in_both_directions() {
         let mut domain = DomainState::new();
-        let mut model = BoardModel::from_domain(&domain, None);
-        apply_intent(&mut domain, &mut model, BoardIntent::OpenCapture, None)
-            .expect("open quick add");
-        apply_intent(&mut domain, &mut model, BoardIntent::ExpandQuickAdd, None)
-            .expect("expand quick add");
-        apply_intent(&mut domain, &mut model, BoardIntent::FormFocusNext, None)
-            .expect("Tab from Notes selects + step");
-        assert_eq!(model.input_mode(), BoardInputMode::CapturePage);
+        domain
+            .create(
+                "ring task",
+                None,
+                TaskScope::Global,
+                ProvenanceOrigin::Manual,
+                None,
+            )
+            .expect("task");
+        let mut task = BoardModel::from_domain(&domain, None);
+        apply_intent(&mut domain, &mut task, BoardIntent::OpenTaskPage, None).expect("page");
+        apply_intent(&mut domain, &mut task, BoardIntent::BeginEditTitle, None).expect("edit");
+        assert_eq!(task.input_mode(), BoardInputMode::EditTitle);
+        for expected in [
+            BoardInputMode::EditNotes,
+            BoardInputMode::TaskPage,
+            BoardInputMode::EditAssignee,
+            BoardInputMode::SelectThread,
+            BoardInputMode::EditScope,
+            BoardInputMode::EditTitle,
+        ] {
+            apply_intent(&mut domain, &mut task, BoardIntent::FormFocusNext, None).expect("tab");
+            assert_eq!(task.input_mode(), expected);
+        }
+        for expected in [
+            BoardInputMode::EditScope,
+            BoardInputMode::SelectThread,
+            BoardInputMode::EditAssignee,
+            BoardInputMode::TaskPage,
+            BoardInputMode::EditNotes,
+            BoardInputMode::EditTitle,
+        ] {
+            apply_intent(&mut domain, &mut task, BoardIntent::FormFocusPrev, None)
+                .expect("shift tab");
+            assert_eq!(task.input_mode(), expected);
+        }
 
-        let intent = board_keyboard_intent(
-            &model,
-            model.input_mode(),
-            KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE),
-        );
-        assert_eq!(
-            intent,
-            Some(BoardIntent::FormFocusNext),
-            "Tab on expanded capture's + step must reach Thread"
-        );
-        apply_intent(&mut domain, &mut model, intent.expect("Tab intent"), None)
-            .expect("advance past + step");
-        assert_eq!(model.input_mode(), BoardInputMode::EditThread);
+        let mut capture_domain = DomainState::new();
+        let mut capture = BoardModel::from_domain(&capture_domain, None);
+        apply_intent(
+            &mut capture_domain,
+            &mut capture,
+            BoardIntent::OpenCapture,
+            None,
+        )
+        .expect("open quick add");
+        apply_intent(
+            &mut capture_domain,
+            &mut capture,
+            BoardIntent::ExpandQuickAdd,
+            None,
+        )
+        .expect("expand quick add");
+        assert_eq!(capture.input_mode(), BoardInputMode::EditNotes);
+        for expected in [
+            BoardInputMode::CapturePage,
+            BoardInputMode::EditAssignee,
+            BoardInputMode::EditThread,
+            BoardInputMode::EditScope,
+            BoardInputMode::EditTitle,
+        ] {
+            apply_intent(
+                &mut capture_domain,
+                &mut capture,
+                BoardIntent::FormFocusNext,
+                None,
+            )
+            .expect("capture tab");
+            assert_eq!(capture.input_mode(), expected);
+        }
     }
 
     #[test]
@@ -6881,10 +6930,10 @@ mod tests {
         assert_eq!(
             board_keyboard_intent(
                 &model,
-                BoardInputMode::FormScopeDropdown,
+                BoardInputMode::FormDropdown,
                 KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)
             ),
-            Some(BoardIntent::FormScopeNext),
+            Some(BoardIntent::FormDropdownNext),
             "the form scope dropdown must route through the shared form mapper"
         );
 

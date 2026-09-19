@@ -67,7 +67,7 @@ Assign threads when [capturing](/docs/capture/#title-tokens) or [editing a task]
 
 ## Assignees
 
-An optional assignee links a task to the exact name of an agent profile in [`agents.toml`](/docs/storage/#agent-profiles). Assigned rows show `@name`. Use **set assignee** in the palette, then choose a profile or **unassigned**. With marked tasks, one choice updates the whole set and one `ctrl+u` reverses it.
+An optional assignee links a task to the exact name of an agent profile in [`agents.toml`](/docs/storage/#agent-profiles). Assigned rows show `@name`; row metadata is ordered `@assignee · #thread · project`. Use **set assignee** in the palette, then choose a profile or **none**. With marked tasks, one choice updates the whole set and one `ctrl+u` reverses it.
 
 Press `ctrl+g`, or choose **dispatch to @name** from the palette, to send the cursored task to its assigned agent. Dispatch is cursor-only: it clears any marked set rather than launching several agents. tsk creates a dedicated Git worktree and Herdr workspace, renders the profile command there, starts the task, then records the worktree, branch, workspace, command argv, and time as one save. If creating or launching fails, task state does not change. Dispatch requires Herdr, a project-scoped task in a Git repository, and a non-done, non-archived task with a known assignee. A task with a dispatch record refuses another launch unless you use [`tsk dispatch T12 --again`](/docs/cli/#dispatch), which reuses its workspace and worktree.
 
@@ -80,6 +80,8 @@ Press `ctrl+g`, or choose **dispatch to @name** from the palette, to send the cu
 | **ON DECK** | `ready`, `open` |
 | ↳ **inbox** | `open` |
 | Done drawer | `done` |
+
+Status glyphs are `◌` open, `○` ready, `●` started, `■` blocked, `▲` review, and `✓` done. A started task with a dispatch record uses `◉` instead of `●`; changing its human status restores that status's normal glyph.
 
 On your desk, **ON DECK** contains only desk tasks. On a project board, it contains that project's ready and open tasks. Ready tasks are the picked queue; open tasks are the untriaged inbox below it. Ready tasks sort by oldest pick first, open tasks by oldest capture first, and notice tasks lead within each group. The **inbox** group starts expanded; press `Enter` on its heading or `g` while the done drawer is closed to fold or unfold it. With the drawer open and archived tasks available, `g` addresses its archived group; otherwise it addresses the inbox. Use the thread filter to narrow the tasks.
 
@@ -120,7 +122,7 @@ Your first board open seeds four desk tasks with `N` ids (not `T`). They teach t
 | Wheel or drag a scrollbar | Scroll |
 | Drag across text | Select and copy on release |
 
-Open peeks show notes and the task's project or thread. Below 110 columns, `→` opens a peek and `←` closes it. Peeks show up to five wrapped note lines; the [task page](/docs/task-page/) shows the rest.
+Open peeks show notes, followed by one metadata footer ordered `@assignee · #thread · project`, omitting unset parts. Below 110 columns, `→` opens a peek and `←` closes it. Peeks show up to five wrapped note lines; the [task page](/docs/task-page/) shows the rest.
 
 ## Wide stage slider
 

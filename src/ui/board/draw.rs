@@ -16,7 +16,7 @@ use crate::ui::input::help_card_lines_for_query;
 use crate::ui::mouse::BoardPopup;
 use crate::ui::queue::ThreadFilter;
 use crate::ui::render::{
-    self, BoardSurface, FormScopeDropdown, NavChipKind, NavChipPaint, NavPaint, PaletteCommandRow,
+    self, BoardSurface, FormDropdown, NavChipKind, NavChipPaint, NavPaint, PaletteCommandRow,
     QueueFrameModel, QueueOverlay, VerbEntry,
 };
 use crate::ui::tier;
@@ -308,7 +308,7 @@ fn build_task_page_overlay<'a>(
     model: &'a BoardModel,
     form: &'a BoardForm,
     geo: &tier::TierGeometry,
-    scope_dropdown: Option<FormScopeDropdown<'a>>,
+    scope_dropdown: Option<FormDropdown<'a>>,
     column: bool,
 ) -> QueueOverlay<'a> {
     let width = geo.row_width as usize;
@@ -459,7 +459,9 @@ fn build_task_page_overlay<'a>(
             HumanStatus::Done => "done",
         },
     };
-    let glyph = render::status_glyph(status);
+    let glyph = bound_task
+        .map(render::task_status_glyph)
+        .unwrap_or_else(|| render::status_glyph(status));
 
     // Header: indent + glyph + the WRAPPED title rows + right-aligned status word
     // on row 0. A long title wraps onto further bold rows indented under the
@@ -626,7 +628,7 @@ fn build_task_page_overlay<'a>(
     form.steps.content_start.set(content.steps_start);
     form.notes_width.set(notes_width);
 
-    // Meta footer: thread · scope · created · updated (ages only while the bound task is
+    // Meta footer: assignee · thread · scope · created · updated (ages only while the task is
     // present). The identifier belongs in the header, so it never competes with footer hits.
     // A wide column moves the project up into its header slot: the scope footer paints only
     // while the edit session can change it, so its control stays reachable by mouse.
@@ -642,30 +644,34 @@ fn build_task_page_overlay<'a>(
     };
     let meta_scope_width = u16::try_from(render::display_width(&meta_scope)).unwrap_or(u16::MAX);
     let mut meta = String::new();
-    let mut thread_slot = None;
     let capture_form = !form.is_task();
     let shown_assignee = if capture_form || (form.is_task() && form.editing) {
         form.assignee.as_deref()
     } else {
         bound_task.and_then(|task| task.assignee.as_deref())
     };
-    if let Some(assignee) = shown_assignee {
-        meta.push_str(&format!("@{}", terminal_text(assignee)));
-    } else if capture_form || (form.is_task() && form.editing) {
-        meta.push_str("assignee");
+    let assignee_segment = shown_assignee
+        .map(|assignee| format!("@{}", terminal_text(assignee)))
+        .or_else(|| {
+            (capture_form || (form.is_task() && form.editing)).then(|| "assignee".to_string())
+        });
+    let meta_assignee_x = assignee_segment.as_ref().map(|_| 0);
+    let meta_assignee_width = assignee_segment
+        .as_deref()
+        .map(render::display_width)
+        .and_then(|width| u16::try_from(width).ok())
+        .unwrap_or(0);
+    if let Some(segment) = assignee_segment {
+        meta.push_str(&segment);
     }
-    if !meta.is_empty() {
-        thread_slot = Some(meta.clone());
-    }
+
     let shown_thread = if capture_form || (form.is_task() && form.editing) {
         Some(form.thread.value())
     } else {
         bound_task.and_then(|task| task.thread.as_deref())
     };
-    if bound_task.is_some() || capture_form {
-        // Thread leads the footer, so its slot has no separator even when the scope is hidden
-        // in a wide read-only column. The editing placeholder keeps the same hit target.
-        thread_slot = if let Some(thread) = shown_thread.filter(|thread| !thread.is_empty()) {
+    let thread_segment = if bound_task.is_some() || capture_form {
+        if let Some(thread) = shown_thread.filter(|thread| !thread.is_empty()) {
             Some(format!("#{}", terminal_text(thread)))
         } else if capture_form
             || (form.is_task() && form.editing)
@@ -676,28 +682,33 @@ fn build_task_page_overlay<'a>(
                     | BoardInputMode::SelectThread
                     | BoardInputMode::EditThread
                     | BoardInputMode::EditScope
-                    | BoardInputMode::FormScopeDropdown
+                    | BoardInputMode::EditAssignee
+                    | BoardInputMode::FormDropdown
             )
         {
             Some("thread".to_string())
         } else {
             None
-        };
-        if let Some(slot) = &thread_slot {
-            if !meta.is_empty() && meta != *slot {
-                meta.push_str(" · ");
-            }
-            if meta != *slot {
-                meta.push_str(slot);
-            }
         }
-        thread_slot = (!meta.is_empty()).then(|| meta.clone());
-    }
-    let meta_scope_x = u16::try_from(render::display_width(&meta)).unwrap_or(u16::MAX);
-    if !meta_scope.is_empty() {
+    } else {
+        None
+    };
+    let thread_slot_width = thread_segment
+        .as_deref()
+        .map(render::display_width)
+        .map(|width| u16::try_from(width).unwrap_or(u16::MAX));
+    if let Some(segment) = thread_segment {
         if !meta.is_empty() {
             meta.push_str(" · ");
         }
+        meta.push_str(&segment);
+    }
+
+    if !meta_scope.is_empty() && !meta.is_empty() {
+        meta.push_str(" · ");
+    }
+    let meta_scope_x = u16::try_from(render::display_width(&meta)).unwrap_or(u16::MAX);
+    if !meta_scope.is_empty() {
         meta.push_str(&meta_scope);
     }
     if let Some(task) = bound_task {
@@ -714,19 +725,25 @@ fn build_task_page_overlay<'a>(
             meta.push_str(&ages);
         }
     }
-    let thread_slot_width = thread_slot
-        .as_deref()
-        .map(render::display_width)
-        .map(|width| u16::try_from(width).unwrap_or(u16::MAX));
-
     let focus = match model.input_mode() {
         BoardInputMode::EditTitle => Some(CaptureField::Title),
         BoardInputMode::EditNotes => Some(CaptureField::Notes),
         BoardInputMode::SelectThread | BoardInputMode::EditThread => Some(CaptureField::Thread),
-        BoardInputMode::EditScope | BoardInputMode::FormScopeDropdown => Some(CaptureField::Scope),
+        BoardInputMode::EditScope => Some(CaptureField::Scope),
         BoardInputMode::EditAssignee => Some(CaptureField::Assignee),
+        BoardInputMode::FormDropdown => Some(form.focus),
         _ => None,
     };
+
+    let scope_dropdown = scope_dropdown.map(|mut dropdown| {
+        let field_x = match dropdown.field {
+            CaptureField::Assignee => meta_assignee_x.unwrap_or(0),
+            CaptureField::Scope => meta_scope_x,
+            _ => 0,
+        };
+        dropdown.anchor_x = 2u16.saturating_add(field_x);
+        dropdown
+    });
 
     QueueOverlay::TaskPage {
         header_rows,
@@ -746,6 +763,8 @@ fn build_task_page_overlay<'a>(
         inline_step_editor,
         bottom_input,
         meta,
+        meta_assignee_x,
+        meta_assignee_width,
         meta_scope_x,
         meta_scope_width,
         thread_slot_width,
@@ -919,16 +938,28 @@ impl OverlayPayloads {
                     .collect(),
             };
             labels
-        } else if model.input_mode() == BoardInputMode::FormScopeDropdown {
-            // Short project names: the dropdown lists scopes, not filesystem paths.
-            model
-                .form_scope_options()
-                .iter()
-                .map(|scope| match scope {
-                    TaskScope::Global => "desk".to_string(),
-                    TaskScope::Project { path } => render::short_project(path).to_string(),
-                })
-                .collect()
+        } else if model.input_mode() == BoardInputMode::FormDropdown {
+            match model.form.as_ref().map(|form| form.focus) {
+                Some(CaptureField::Scope) => model
+                    .form_scope_options()
+                    .iter()
+                    .map(|scope| match scope {
+                        TaskScope::Global => "desk".to_string(),
+                        TaskScope::Project { path } => render::short_project(path).to_string(),
+                    })
+                    .collect(),
+                Some(CaptureField::Assignee) => model
+                    .form
+                    .as_ref()
+                    .map(|form| {
+                        form.assignee_options
+                            .iter()
+                            .map(|option| option.clone().unwrap_or_else(|| "none".to_string()))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                _ => Vec::new(),
+            }
         } else {
             Vec::new()
         };
@@ -946,9 +977,13 @@ impl OverlayPayloads {
             model.project_picker_index().unwrap_or(0)
         } else {
             model
-                .form_scope_options()
-                .iter()
-                .position(|scope| Some(scope) == model.form_scope_dropdown_choice())
+                .form
+                .as_ref()
+                .map(|form| match form.focus {
+                    CaptureField::Scope => form.scope_selected,
+                    CaptureField::Assignee => form.assignee_selected,
+                    _ => 0,
+                })
                 .unwrap_or(0)
         };
         let launch_card_name = model.launch_card.as_deref().map(|path| {
@@ -1106,12 +1141,13 @@ impl OverlayPayloads {
         geo: &tier::TierGeometry,
         column: bool,
     ) -> QueueOverlay<'a> {
-        let scope_dropdown = (model.input_mode() == BoardInputMode::FormScopeDropdown).then_some(
-            FormScopeDropdown {
+        let scope_dropdown =
+            (model.input_mode() == BoardInputMode::FormDropdown).then_some(FormDropdown {
                 options: &self.scope_options,
                 selected: self.scope_selected,
-            },
-        );
+                field: form.focus,
+                anchor_x: 0,
+            });
         build_task_page_overlay(model, form, geo, scope_dropdown, column)
     }
 }
@@ -1161,7 +1197,13 @@ fn editing_field(model: &BoardModel) -> Option<&'static str> {
         BoardInputMode::EditTitle => Some("title"),
         BoardInputMode::EditNotes => Some("notes"),
         BoardInputMode::SelectThread | BoardInputMode::EditThread => Some("thread"),
-        BoardInputMode::EditScope | BoardInputMode::FormScopeDropdown => Some("scope"),
+        BoardInputMode::EditScope => Some("scope"),
+        BoardInputMode::EditAssignee => Some("assignee"),
+        BoardInputMode::FormDropdown => match model.form_focus() {
+            Some(CaptureField::Scope) => Some("scope"),
+            Some(CaptureField::Assignee) => Some("assignee"),
+            _ => None,
+        },
         BoardInputMode::EditStep => Some("step"),
         _ => None,
     }
@@ -1212,8 +1254,8 @@ fn wide_status_hint(model: &BoardModel) -> (Option<&'static str>, &'static str) 
     }
     // Save/cancel keys apply only while a field editor is actually open or the parked draft
     // is dirty; a clean parked session shows the stage's normal keys again.
-    let field_editor = model.open_field_edit().is_some()
-        || model.input_mode() == BoardInputMode::FormScopeDropdown;
+    let field_editor =
+        model.open_field_edit().is_some() || model.input_mode() == BoardInputMode::FormDropdown;
     let editing = field_editor || model.task_session_dirty();
     // Stage navigation only: the verb row already carries the surface's keys, so the hint
     // never repeats them.
@@ -1418,7 +1460,7 @@ fn draw_wide_board(
     let header_title: Option<(String, Option<u16>)> = header_task.map(|(form, task)| {
         if editing_title {
             let width = task_geo.map(|geo| geo.row_width as usize).unwrap_or(0);
-            let glyph_w = render::display_width(render::status_glyph(task.status));
+            let glyph_w = render::display_width(render::task_status_glyph(task));
             let id_w = header_identifier
                 .as_deref()
                 .map(render::display_width)
@@ -1440,7 +1482,7 @@ fn draw_wide_board(
         .as_ref()
         .map(|(title, cursor)| render::TaskColumnHeader {
             glyph: header_task
-                .map(|(_, task)| render::status_glyph(task.status))
+                .map(|(_, task)| render::task_status_glyph(task))
                 .unwrap_or("○"),
             identifier: header_identifier.as_deref(),
             identifier_task: header_task.and_then(|(form, _)| form.task_id()),
@@ -1650,7 +1692,7 @@ fn draw_projects_wide_board(
                 if let Some(task) = right.tasks.iter().find(|task| task.id == task_id) {
                     right_header_visible = true;
                     right_header_task = Some(task.id);
-                    right_header_glyph = render::status_glyph(task.status);
+                    right_header_glyph = render::task_status_glyph(task);
                     right_header_identifier = task.board_identifier();
                     right_header_state = task_header_state(right, form, task);
                 }
